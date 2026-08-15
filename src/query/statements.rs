@@ -235,7 +235,10 @@ mod tests {
         let statements = split("SELECT 1;\nSELECT 2");
         assert_eq!(statements.len(), 2);
         assert!(statements[0].terminated);
-        assert!(!statements[1].terminated, "the buffer ended without a semicolon");
+        assert!(
+            !statements[1].terminated,
+            "the buffer ended without a semicolon"
+        );
     }
 
     #[test]
@@ -295,7 +298,10 @@ mod tests {
             texts("SELECT 1 -- trailing; comment\n;"),
             vec!["SELECT 1 -- trailing; comment".to_owned()]
         );
-        assert_eq!(texts("/* a; b */ SELECT 1;"), vec!["/* a; b */ SELECT 1".to_owned()]);
+        assert_eq!(
+            texts("/* a; b */ SELECT 1;"),
+            vec!["/* a; b */ SELECT 1".to_owned()]
+        );
         assert!(texts("-- nothing here\n").is_empty());
         assert!(texts("/* nor here */").is_empty());
         assert!(texts("   \n\t  ").is_empty());
@@ -305,7 +311,10 @@ mod tests {
     #[test]
     fn nested_block_comments_close_correctly() {
         let sql = "/* outer /* inner */ still comment; */ SELECT 1;";
-        assert_eq!(texts(sql), vec!["/* outer /* inner */ still comment; */ SELECT 1".to_owned()]);
+        assert_eq!(
+            texts(sql),
+            vec!["/* outer /* inner */ still comment; */ SELECT 1".to_owned()]
+        );
     }
 
     #[test]
@@ -324,7 +333,10 @@ mod tests {
         // Just after a semicolon, the statement just typed wins.
         assert_eq!(statement_at(sql, 9).expect("boundary").text, "SELECT 1");
         assert_eq!(statement_at(sql, sql.len()).expect("end").text, "SELECT 3");
-        assert!(statement_at("   ", 1).is_none(), "no statement in whitespace");
+        assert!(
+            statement_at("   ", 1).is_none(),
+            "no statement in whitespace"
+        );
     }
 
     #[test]

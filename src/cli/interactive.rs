@@ -375,8 +375,7 @@ pub async fn probe_target(
                 .await
             {
                 Ok(Ok(addresses)) => {
-                    let found: Vec<String> =
-                        addresses.map(|a| a.ip().to_string()).collect();
+                    let found: Vec<String> = addresses.map(|a| a.ip().to_string()).collect();
                     if found.is_empty() {
                         checks.push(Check::fail(
                             "address resolution",
@@ -408,7 +407,9 @@ pub async fn probe_target(
             )
             .await
             {
-                Ok(Ok(_)) => checks.push(Check::ok("tcp", format!("{address} accepts connections"))),
+                Ok(Ok(_)) => {
+                    checks.push(Check::ok("tcp", format!("{address} accepts connections")))
+                }
                 Ok(Err(err)) => checks.push(Check::fail(
                     "tcp",
                     format!("{address} refused the connection: {err}"),
@@ -416,7 +417,10 @@ pub async fn probe_target(
                 )),
                 Err(_) => checks.push(Check::fail(
                     "tcp",
-                    format!("{address} did not answer within {:?}", target.connect_timeout),
+                    format!(
+                        "{address} did not answer within {:?}",
+                        target.connect_timeout
+                    ),
                     "check the address and any firewall between here and the server",
                 )),
             }
@@ -469,7 +473,9 @@ pub async fn probe_target(
                 "session",
                 format!(
                     "backend pid {}, search_path {}, {}",
-                    info.backend_pid, info.search_path, info.posture()
+                    info.backend_pid,
+                    info.search_path,
+                    info.posture()
                 ),
             ));
         }
@@ -509,7 +515,10 @@ mod tests {
         assert!(!text.to_uppercase().contains("DROP"));
         assert!(!text.to_uppercase().contains("DELETE"));
         assert!(!text.to_uppercase().contains("UPDATE"));
-        assert!(crate::query::split(text).len() == 1, "one statement, not a surprise batch");
+        assert!(
+            crate::query::split(text).len() == 1,
+            "one statement, not a surprise batch"
+        );
     }
 
     #[tokio::test]
@@ -529,7 +538,10 @@ mod tests {
         assert_eq!(tcp.status, CheckStatus::Fail);
         assert!(tcp.next_action.is_some(), "a failure must say what to do");
 
-        let postgres = checks.iter().find(|c| c.name == "postgres").expect("postgres check");
+        let postgres = checks
+            .iter()
+            .find(|c| c.name == "postgres")
+            .expect("postgres check");
         assert_eq!(
             postgres.status,
             CheckStatus::Skipped,
@@ -550,7 +562,10 @@ mod tests {
 
         let checks = probe_target(target, &config).await.expect("probe");
         let target_check = &checks[0];
-        assert!(target_check.detail.contains("sslmode=require"), "{target_check:?}");
+        assert!(
+            target_check.detail.contains("sslmode=require"),
+            "{target_check:?}"
+        );
         assert!(
             target_check.detail.contains("no identity check"),
             "the report must not let require pass for verification: {target_check:?}"

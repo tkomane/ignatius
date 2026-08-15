@@ -271,7 +271,10 @@ mod tests {
             ExecutionStatus::ConnectionLost.label(),
             "Connection lost - query outcome unknown"
         );
-        assert_eq!(ExecutionStatus::Cancelled.label(), "Query cancelled by server");
+        assert_eq!(
+            ExecutionStatus::Cancelled.label(),
+            "Query cancelled by server"
+        );
         assert_ne!(
             ExecutionStatus::Failed.label(),
             ExecutionStatus::Cancelled.label()

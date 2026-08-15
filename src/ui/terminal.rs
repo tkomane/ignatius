@@ -199,7 +199,10 @@ fn detect_unicode() -> bool {
     ["LC_ALL", "LC_CTYPE", "LANG"]
         .iter()
         .filter_map(|key| std::env::var(key).ok())
-        .any(|value| value.to_ascii_uppercase().contains("UTF-8") || value.to_ascii_uppercase().contains("UTF8"))
+        .any(|value| {
+            value.to_ascii_uppercase().contains("UTF-8")
+                || value.to_ascii_uppercase().contains("UTF8")
+        })
 }
 
 /// Decides whether colour should be emitted, honouring the documented overrides.
@@ -245,7 +248,10 @@ mod tests {
         assert!(entered.contains("\x1b[?1049h"), "alternate screen entered");
         assert!(entered.contains("\x1b[?2004h"), "bracketed paste enabled");
         assert!(entered.contains("\x1b[?25l"), "cursor hidden");
-        assert!(!entered.contains("\x1b[?1000h"), "mouse not captured by default");
+        assert!(
+            !entered.contains("\x1b[?1000h"),
+            "mouse not captured by default"
+        );
 
         assert!(left.contains("\x1b[?25h"), "cursor shown again");
         assert!(left.contains("\x1b[?2004l"), "bracketed paste disabled");
@@ -318,14 +324,32 @@ mod tests {
         assert!(should_use_color(ColorMode::Always, &base));
         assert!(!should_use_color(ColorMode::Never, &base));
 
-        let no_color = TerminalFacts { no_color: true, ..base.clone() };
-        assert!(!should_use_color(ColorMode::Always, &no_color), "NO_COLOR is not negotiable");
+        let no_color = TerminalFacts {
+            no_color: true,
+            ..base.clone()
+        };
+        assert!(
+            !should_use_color(ColorMode::Always, &no_color),
+            "NO_COLOR is not negotiable"
+        );
 
-        let dumb = TerminalFacts { term: Some("dumb".into()), ..base.clone() };
+        let dumb = TerminalFacts {
+            term: Some("dumb".into()),
+            ..base.clone()
+        };
         assert!(!should_use_color(ColorMode::Always, &dumb));
 
-        let piped = TerminalFacts { is_terminal: false, ..base };
-        assert!(!should_use_color(ColorMode::Auto, &piped), "piped output stays plain");
-        assert!(should_use_color(ColorMode::Always, &piped), "explicit --color=always is honoured");
+        let piped = TerminalFacts {
+            is_terminal: false,
+            ..base
+        };
+        assert!(
+            !should_use_color(ColorMode::Auto, &piped),
+            "piped output stays plain"
+        );
+        assert!(
+            should_use_color(ColorMode::Always, &piped),
+            "explicit --color=always is honoured"
+        );
     }
 }

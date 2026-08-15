@@ -232,8 +232,16 @@ pub fn environment_report(
         format!(
             "{}, file permissions {} enforced, unix sockets {}",
             crate::platform::name(),
-            if crate::platform::enforces_file_permissions() { "are" } else { "are not" },
-            if crate::platform::supports_unix_sockets() { "supported" } else { "unsupported" },
+            if crate::platform::enforces_file_permissions() {
+                "are"
+            } else {
+                "are not"
+            },
+            if crate::platform::supports_unix_sockets() {
+                "supported"
+            } else {
+                "unsupported"
+            },
         ),
     ));
 
@@ -247,7 +255,10 @@ pub fn environment_report(
                 Some((from, to)) => Check::warn(
                     "configuration",
                     format!("{source}; schema version {from} is older than {to}"),
-                    format!("run `{} config migrate` to update it", crate::branding::BINARY_NAME),
+                    format!(
+                        "run `{} config migrate` to update it",
+                        crate::branding::BINARY_NAME
+                    ),
                 ),
                 None => Check::ok("configuration", source),
             }
@@ -255,10 +266,9 @@ pub fn environment_report(
         Err(diagnostic) => Check::fail(
             "configuration",
             diagnostic.headline.clone(),
-            diagnostic
-                .next_action
-                .clone()
-                .unwrap_or_else(|| format!("run `{} config validate`", crate::branding::BINARY_NAME)),
+            diagnostic.next_action.clone().unwrap_or_else(|| {
+                format!("run `{} config validate`", crate::branding::BINARY_NAME)
+            }),
         ),
     });
 
@@ -275,7 +285,10 @@ pub fn environment_report(
 fn directory_check(name: &str, dir: &Path) -> Check {
     if !dir.exists() {
         // Not an error: directories are created on first write.
-        return Check::ok(name, format!("{} (will be created on first write)", dir.display()));
+        return Check::ok(
+            name,
+            format!("{} (will be created on first write)", dir.display()),
+        );
     }
     match std::fs::metadata(dir) {
         Ok(meta) if meta.permissions().readonly() => Check::warn(
@@ -318,21 +331,26 @@ fn colour_check(terminal: &TerminalFacts) -> Check {
     if !terminal.is_terminal {
         return Check::ok("colour", "not a terminal, so colour is off");
     }
-    Check::ok("colour", "colour available; meaning is also carried by text labels")
+    Check::ok(
+        "colour",
+        "colour available; meaning is also carried by text labels",
+    )
 }
 
 fn size_check(terminal: &TerminalFacts) -> Check {
     match terminal.size {
         None => Check::skipped("terminal size", "size is only measurable on a terminal"),
-        Some((cols, rows)) if cols < crate::ui::MIN_COLUMNS || rows < crate::ui::MIN_ROWS => Check::warn(
-            "terminal size",
-            format!(
-                "{cols}x{rows} is below the {}x{} minimum for the full layout",
-                crate::ui::MIN_COLUMNS,
-                crate::ui::MIN_ROWS
-            ),
-            "resize the window, or use --plain",
-        ),
+        Some((cols, rows)) if cols < crate::ui::MIN_COLUMNS || rows < crate::ui::MIN_ROWS => {
+            Check::warn(
+                "terminal size",
+                format!(
+                    "{cols}x{rows} is below the {}x{} minimum for the full layout",
+                    crate::ui::MIN_COLUMNS,
+                    crate::ui::MIN_ROWS
+                ),
+                "resize the window, or use --plain",
+            )
+        }
         Some((cols, rows)) => Check::ok("terminal size", format!("{cols}x{rows}")),
     }
 }
@@ -405,9 +423,19 @@ mod tests {
             pending_migration: Some((0, 1)),
         });
         let report = environment_report(&Paths::rooted_at(dir.path()), &loaded, &facts());
-        let check = report.checks.iter().find(|c| c.name == "configuration").expect("check");
+        let check = report
+            .checks
+            .iter()
+            .find(|c| c.name == "configuration")
+            .expect("check");
         assert_eq!(check.status, CheckStatus::Warn);
-        assert!(check.next_action.as_ref().expect("action").contains("config migrate"));
+        assert!(
+            check
+                .next_action
+                .as_ref()
+                .expect("action")
+                .contains("config migrate")
+        );
     }
 
     #[test]

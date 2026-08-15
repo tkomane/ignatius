@@ -379,7 +379,10 @@ pub fn resolve(
             "Unix-domain sockets are not available on this platform",
             "resolving the connection target",
         )
-        .likely_cause(format!("a socket directory was requested on {}", crate::platform::name()))
+        .likely_cause(format!(
+            "a socket directory was requested on {}",
+            crate::platform::name()
+        ))
         .next_action("connect over TCP instead, for example --host localhost --port 5432"));
     }
 
@@ -423,15 +426,17 @@ pub fn resolve(
         .get("password")
         .cloned()
         .or_else(|| {
-            env.get("PGPASSWORD").inspect(|_| {
-                // Consumed, never displayed, and the safer route is offered once.
-                notes.push(ResolutionNote {
-                    subject: "PGPASSWORD".into(),
-                    message: "using the password from the environment; it is visible to other \
+            env.get("PGPASSWORD")
+                .inspect(|_| {
+                    // Consumed, never displayed, and the safer route is offered once.
+                    notes.push(ResolutionNote {
+                        subject: "PGPASSWORD".into(),
+                        message: "using the password from the environment; it is visible to other \
                               processes on this machine. A stored credential is safer."
-                        .into(),
-                });
-            }).map(str::to_owned)
+                            .into(),
+                    });
+                })
+                .map(str::to_owned)
         })
         .map(SecretString::from);
 
@@ -730,7 +735,10 @@ fn parse_keyword_value(input: &str) -> Result<BTreeMap<String, String>, Diagnost
                 }
             }
             if !closed {
-                return Err(malformed_connection_string(input, "unterminated quoted value"));
+                return Err(malformed_connection_string(
+                    input,
+                    "unterminated quoted value",
+                ));
             }
         } else {
             while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
@@ -789,7 +797,8 @@ fn percent_decode(input: &str) -> Result<String, Diagnostic> {
             i += 1;
         }
     }
-    String::from_utf8(out).map_err(|_| malformed_connection_string(input, "escape is not valid UTF-8"))
+    String::from_utf8(out)
+        .map_err(|_| malformed_connection_string(input, "escape is not valid UTF-8"))
 }
 
 #[cfg(test)]
@@ -805,8 +814,13 @@ mod tests {
 
     #[test]
     fn defaults_apply_when_nothing_is_given() {
-        let target = resolve(None, &ConnectionArgs::default(), &EnvSnapshot::default(), &config())
-            .expect("resolve");
+        let target = resolve(
+            None,
+            &ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &config(),
+        )
+        .expect("resolve");
         assert_eq!(target.host, Host::Tcp("localhost".into()));
         assert_eq!(target.port, DEFAULT_PORT);
         assert_eq!(target.sslmode, SslMode::Prefer, "local default");
@@ -883,9 +897,15 @@ mod tests {
         assert!(!SslMode::Require.verifies_certificate());
         assert!(SslMode::Require.requires_tls());
         assert!(!SslMode::Prefer.requires_tls());
-        assert_ne!(SslMode::Require.guarantee(), SslMode::VerifyFull.guarantee());
+        assert_ne!(
+            SslMode::Require.guarantee(),
+            SslMode::VerifyFull.guarantee()
+        );
         assert!(SslMode::parse("nonsense").is_err());
-        assert_eq!(SslMode::parse("VERIFY-FULL").expect("parse"), SslMode::VerifyFull);
+        assert_eq!(
+            SslMode::parse("VERIFY-FULL").expect("parse"),
+            SslMode::VerifyFull
+        );
     }
 
     #[test]
@@ -920,7 +940,10 @@ mod tests {
         )
         .expect("non-security parameter is a note");
         assert!(
-            target.notes.iter().any(|n| n.subject == "target_session_attrs"),
+            target
+                .notes
+                .iter()
+                .any(|n| n.subject == "target_session_attrs"),
             "{:?}",
             target.notes
         );
@@ -943,9 +966,15 @@ mod tests {
             SECRET
         );
         assert!(target.notes.iter().any(|n| n.subject == "PGPASSWORD"));
-        assert!(!format!("{target:?}").contains(SECRET), "Debug leaked the password");
+        assert!(
+            !format!("{target:?}").contains(SECRET),
+            "Debug leaked the password"
+        );
         assert!(!target.safe_display().contains(SECRET));
-        assert!(!env.names().join(",").contains(SECRET), "names must not carry values");
+        assert!(
+            !env.names().join(",").contains(SECRET),
+            "names must not carry values"
+        );
     }
 
     #[test]
@@ -1003,7 +1032,10 @@ mod tests {
         let err = parse_connection_string(&format!("host=db password='{SECRET}"))
             .expect_err("unterminated quote");
         assert!(err.next_action.is_some());
-        assert!(!err.to_json().to_string().contains(SECRET), "diagnostic leaked the secret");
+        assert!(
+            !err.to_json().to_string().contains(SECRET),
+            "diagnostic leaked the secret"
+        );
 
         assert!(parse_connection_string("postgres://h/db?x=%ZZ").is_err());
     }
@@ -1018,7 +1050,10 @@ mod tests {
         );
         if crate::platform::supports_unix_sockets() {
             let target = target.expect("resolve");
-            assert_eq!(target.host, Host::Socket(PathBuf::from("/var/run/postgresql")));
+            assert_eq!(
+                target.host,
+                Host::Socket(PathBuf::from("/var/run/postgresql"))
+            );
             assert!(target.host.is_local());
             assert_eq!(target.sslmode, SslMode::Prefer);
         } else {

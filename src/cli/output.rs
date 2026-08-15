@@ -12,7 +12,7 @@
 //!   unambiguously, refuses rather than guessing.
 
 use crate::query::result::{Execution, ResultSet};
-use crate::query::value::{Cell, pad_to_width, sanitize_for_display, display_width};
+use crate::query::value::{Cell, display_width, pad_to_width, sanitize_for_display};
 use std::io::{self, Write};
 
 /// A supported output format.
@@ -204,7 +204,10 @@ fn encode_field(value: &str, delimiter: char) -> String {
             .replace('\n', "\\n")
             .replace('\r', "\\r");
     }
-    if value.contains(delimiter) || value.contains('"') || value.contains('\n') || value.contains('\r')
+    if value.contains(delimiter)
+        || value.contains('"')
+        || value.contains('\n')
+        || value.contains('\r')
     {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
@@ -225,12 +228,20 @@ fn write_markdown(
         writeln!(
             out,
             "| {} |",
-            set.columns.iter().map(|c| escape(c)).collect::<Vec<_>>().join(" | ")
+            set.columns
+                .iter()
+                .map(|c| escape(c))
+                .collect::<Vec<_>>()
+                .join(" | ")
         )?;
         writeln!(
             out,
             "|{}|",
-            set.columns.iter().map(|_| " --- ").collect::<Vec<_>>().join("|")
+            set.columns
+                .iter()
+                .map(|_| " --- ")
+                .collect::<Vec<_>>()
+                .join("|")
         )?;
         for row in &set.rows {
             let values: Vec<String> = row
@@ -280,10 +291,8 @@ fn write_table(
                         .map(|(name, width)| pad_to_width(&sanitize_for_display(name), *width))
                         .collect();
                     writeln!(out, " {} ", header.join(&format!(" {separator} ")))?;
-                    let rules: Vec<String> = widths
-                        .iter()
-                        .map(|width| rule.repeat(*width))
-                        .collect();
+                    let rules: Vec<String> =
+                        widths.iter().map(|width| rule.repeat(*width)).collect();
                     writeln!(out, " {} ", rules.join(&format!("{rule}{separator}{rule}")))?;
                 }
 
@@ -383,7 +392,10 @@ mod tests {
         let text = render(Format::Csv, &execution(vec![sample()]));
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "id,name,note");
-        assert_eq!(lines[1], "1,Ada,", "SQL NULL is an empty CSV field by default");
+        assert_eq!(
+            lines[1], "1,Ada,",
+            "SQL NULL is an empty CSV field by default"
+        );
         assert_eq!(lines[2], "2,\"with, comma\",\"say \"\"hi\"\"\"");
     }
 
@@ -410,7 +422,11 @@ mod tests {
         set.push(vec![Cell::Text("a\tb\nc".into())]);
         let text = render(Format::Tsv, &execution(vec![set]));
         assert!(text.contains("a\\tb\\nc"), "{text:?}");
-        assert_eq!(text.lines().count(), 2, "the escaped value stays on one line");
+        assert_eq!(
+            text.lines().count(),
+            2,
+            "the escaped value stays on one line"
+        );
     }
 
     #[test]
@@ -461,8 +477,14 @@ mod tests {
         for format in [Format::Csv, Format::Tsv, Format::Json, Format::Ndjson] {
             assert!(format.is_machine_readable());
             let text = render(format, &execution(vec![sample()]));
-            assert!(!text.contains('\x1b'), "{format:?} emitted an escape sequence");
-            assert!(!text.contains("rows)"), "{format:?} emitted a row-count banner");
+            assert!(
+                !text.contains('\x1b'),
+                "{format:?} emitted an escape sequence"
+            );
+            assert!(
+                !text.contains("rows)"),
+                "{format:?} emitted a row-count banner"
+            );
             assert!(!text.contains('│'), "{format:?} emitted table drawing");
         }
     }
@@ -471,7 +493,10 @@ mod tests {
     fn the_table_format_aligns_columns_and_states_the_row_count() {
         let text = render(Format::Table, &execution(vec![sample()]));
         assert!(text.contains("id"), "{text}");
-        assert!(text.contains("[null]"), "NULL stays distinguishable on screen");
+        assert!(
+            text.contains("[null]"),
+            "NULL stays distinguishable on screen"
+        );
         assert!(text.contains("(2 rows)"), "{text}");
     }
 
@@ -498,7 +523,10 @@ mod tests {
     fn multiple_result_sets_are_separated_in_every_format_that_allows_them() {
         for format in [Format::Csv, Format::Tsv, Format::Markdown, Format::Table] {
             let text = render(format, &execution(vec![sample(), sample()]));
-            assert!(text.contains("\n\n"), "{format:?} ran two result sets together");
+            assert!(
+                text.contains("\n\n"),
+                "{format:?} ran two result sets together"
+            );
         }
         let text = render(Format::Json, &execution(vec![sample(), sample()]));
         let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid json");

@@ -133,7 +133,11 @@ mod tests {
         let root = Path::new("/tmp/ignatius-test-root");
         let paths = Paths::rooted_at(root);
         for (_, path) in paths.labelled() {
-            assert!(path.starts_with(root), "{} escaped the root", path.display());
+            assert!(
+                path.starts_with(root),
+                "{} escaped the root",
+                path.display()
+            );
         }
         assert_eq!(paths.config_file, root.join("config.toml"));
     }

@@ -33,16 +33,12 @@ pub fn from_connect_error(err: &tokio_postgres::Error, target: &ConnectionTarget
     }
 
     if let Some(tls) = find_source::<rustls::Error>(err) {
-        return Diagnostic::new(
-            DiagnosticKind::Tls,
-            "the TLS handshake failed",
-            attempted,
-        )
-        .likely_cause(tls_cause(tls, target))
-        .next_action(tls_action(target))
-        .technical("sslmode", target.sslmode.as_str())
-        .technical("Requested guarantee", target.sslmode.guarantee())
-        .technical("TLS error", tls.to_string());
+        return Diagnostic::new(DiagnosticKind::Tls, "the TLS handshake failed", attempted)
+            .likely_cause(tls_cause(tls, target))
+            .next_action(tls_action(target))
+            .technical("sslmode", target.sslmode.as_str())
+            .technical("Requested guarantee", target.sslmode.guarantee())
+            .technical("TLS error", tls.to_string());
     }
 
     let io = find_source::<std::io::Error>(err);
@@ -106,7 +102,11 @@ pub fn from_query_error(err: &tokio_postgres::Error, statement_number: usize) ->
 }
 
 /// Attaches every structured field the server supplied.
-fn decorate(diagnostic: Diagnostic, db: &DbError, advice: (Option<String>, Option<String>)) -> Diagnostic {
+fn decorate(
+    diagnostic: Diagnostic,
+    db: &DbError,
+    advice: (Option<String>, Option<String>),
+) -> Diagnostic {
     let mut out = diagnostic
         .technical("SQLSTATE", db.code().code())
         .technical("Severity", db.severity())
@@ -131,7 +131,10 @@ fn decorate(diagnostic: Diagnostic, db: &DbError, advice: (Option<String>, Optio
 fn connect_advice(code: &SqlState, target: &ConnectionTarget) -> (Option<String>, Option<String>) {
     if *code == SqlState::INVALID_PASSWORD {
         return (
-            Some(format!("the server rejected the password for role {:?}", target.user)),
+            Some(format!(
+                "the server rejected the password for role {:?}",
+                target.user
+            )),
             Some("check the role and password. Nothing is retried automatically.".to_owned()),
         );
     }
@@ -142,12 +145,17 @@ fn connect_advice(code: &SqlState, target: &ConnectionTarget) -> (Option<String>
                  no matching rule for this client address",
                 target.user
             )),
-            Some("check pg_hba.conf on the server for a rule covering this host and role".to_owned()),
+            Some(
+                "check pg_hba.conf on the server for a rule covering this host and role".to_owned(),
+            ),
         );
     }
     if *code == SqlState::INVALID_CATALOG_NAME {
         return (
-            Some(format!("database {:?} does not exist on this server", target.database)),
+            Some(format!(
+                "database {:?} does not exist on this server",
+                target.database
+            )),
             Some("check the database name, or connect to `postgres` and list databases".to_owned()),
         );
     }
@@ -176,9 +184,11 @@ fn query_advice(code: &SqlState) -> (Option<String>, Option<String>) {
     }
     if *code == SqlState::IN_FAILED_SQL_TRANSACTION {
         return (
-            Some("an earlier statement in this transaction failed, so the server is \
+            Some(
+                "an earlier statement in this transaction failed, so the server is \
                   refusing everything until the transaction ends"
-                .to_owned()),
+                    .to_owned(),
+            ),
             Some("run ROLLBACK to end the failed transaction".to_owned()),
         );
     }
@@ -269,7 +279,10 @@ mod tests {
         let target = target("postgres://app@db.example.net/orders?sslmode=verify-full");
         let action = tls_action(&target);
         assert!(action.contains("not retried without TLS"), "{action}");
-        assert!(!action.to_lowercase().contains("use sslmode=disable"), "{action}");
+        assert!(
+            !action.to_lowercase().contains("use sslmode=disable"),
+            "{action}"
+        );
     }
 
     #[test]

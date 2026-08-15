@@ -182,7 +182,9 @@ impl ConnectionOptions {
         let environment = match &self.environment {
             Some(text) => Some(Environment::parse(text).map_err(|message| {
                 Diagnostic::new(DiagnosticKind::Usage, message, "reading --environment")
-                    .next_action("use local, development, test, staging, production, or a name of your own")
+                    .next_action(
+                        "use local, development, test, staging, production, or a name of your own",
+                    )
             })?),
             None => None,
         };
@@ -324,7 +326,12 @@ fn version(verbose: bool, out: &mut impl Write) -> Result<ExitCode, Diagnostic> 
         if verbose {
             // Product version, source revision, build identity and target are
             // four separate facts. None of them is derived from another.
-            writeln!(out, "  source revision: {} ({})", branding::SOURCE_REVISION, branding::SOURCE_CLEAN)?;
+            writeln!(
+                out,
+                "  source revision: {} ({})",
+                branding::SOURCE_REVISION,
+                branding::SOURCE_CLEAN
+            )?;
             writeln!(out, "  build identity:  {}", branding::BUILD_IDENTITY)?;
             writeln!(out, "  target:          {}", branding::TARGET_TRIPLE)?;
             writeln!(out, "  compiler:        {}", branding::RUSTC_VERSION)?;
@@ -364,8 +371,12 @@ fn config_command(
             };
             writeln!(out, "# source: {source}").map_err(io_diagnostic)?;
             if let Some((from, to)) = loaded.pending_migration {
-                writeln!(out, "# schema version {from} is older than {to}; run `{} config migrate`", branding::BINARY_NAME)
-                    .map_err(io_diagnostic)?;
+                writeln!(
+                    out,
+                    "# schema version {from} is older than {to}; run `{} config migrate`",
+                    branding::BINARY_NAME
+                )
+                .map_err(io_diagnostic)?;
             }
             write!(out, "{rendered}").map_err(io_diagnostic)?;
             Ok(ExitCode::Success)
@@ -395,7 +406,11 @@ fn config_command(
             writeln!(
                 out,
                 "{} schema version {} to {}:",
-                if report.dry_run { "Would migrate" } else { "Migrated" },
+                if report.dry_run {
+                    "Would migrate"
+                } else {
+                    "Migrated"
+                },
                 report.from_version,
                 report.to_version
             )
@@ -433,7 +448,10 @@ fn doctor_command(
     });
 
     if let Some(target) = target {
-        let config = loaded.as_ref().map(|l| l.config.clone()).unwrap_or_default();
+        let config = loaded
+            .as_ref()
+            .map(|l| l.config.clone())
+            .unwrap_or_default();
         let checks = runtime()?.block_on(interactive::probe(target, &config))?;
         report.checks.extend(checks);
     } else {
@@ -484,7 +502,9 @@ fn query_command(
     }
 
     let loaded = config::load(paths)?;
-    let row_cap = request.max_rows.unwrap_or(loaded.config.query.max_buffered_rows);
+    let row_cap = request
+        .max_rows
+        .unwrap_or(loaded.config.query.max_buffered_rows);
     let args = request.connection.to_args()?;
     let target = crate::connection::resolve(
         request.target,
@@ -586,7 +606,7 @@ fn read_stdin() -> Result<String, Diagnostic> {
     stdin
         .lock()
         .read_to_string(&mut buffer)
-        .map_err(|err| io_diagnostic(err))?;
+        .map_err(io_diagnostic)?;
     Ok(buffer)
 }
 
@@ -624,17 +644,26 @@ mod tests {
     fn commands_parse_the_way_the_documentation_says() {
         let cli = Cli::try_parse_from(["ignatius", "query", "-c", "SELECT 1", "--format", "csv"])
             .expect("parse");
-        let Some(Command::Query { command, format, .. }) = cli.command else {
+        let Some(Command::Query {
+            command, format, ..
+        }) = cli.command
+        else {
             panic!("expected query");
         };
         assert_eq!(command.as_deref(), Some("SELECT 1"));
         assert_eq!(format, Format::Csv);
 
         let cli = Cli::try_parse_from(["ignatius"]).expect("parse");
-        assert!(cli.command.is_none(), "no subcommand opens the interactive client");
+        assert!(
+            cli.command.is_none(),
+            "no subcommand opens the interactive client"
+        );
 
         let cli = Cli::try_parse_from(["ignatius", "doctor", "--json"]).expect("parse");
-        assert!(matches!(cli.command, Some(Command::Doctor { json: true, .. })));
+        assert!(matches!(
+            cli.command,
+            Some(Command::Doctor { json: true, .. })
+        ));
     }
 
     #[test]
@@ -664,7 +693,13 @@ mod tests {
         };
         let args = options.to_args().expect("parse");
         assert_eq!(args.environment, Some(Environment::Production));
-        assert!(ConnectionOptions::default().to_args().expect("parse").environment.is_none());
+        assert!(
+            ConnectionOptions::default()
+                .to_args()
+                .expect("parse")
+                .environment
+                .is_none()
+        );
     }
 
     #[test]
@@ -732,8 +767,14 @@ mod tests {
             let mut out = Vec::new();
             completion(shell, &mut out).expect("generate");
             let text = String::from_utf8(out).expect("utf8");
-            assert!(text.contains("ignatius"), "{shell:?} produced nothing useful");
-            assert!(text.len() > 200, "{shell:?} produced a suspiciously short script");
+            assert!(
+                text.contains("ignatius"),
+                "{shell:?} produced nothing useful"
+            );
+            assert!(
+                text.len() > 200,
+                "{shell:?} produced a suspiciously short script"
+            );
         }
     }
 
