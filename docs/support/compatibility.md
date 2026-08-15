@@ -85,7 +85,9 @@ Deliberate differences:
 
 | Terminal | Status |
 | --- | --- |
-| Warp on macOS | Verified: full-screen, resize, key chords, restoration |
+| macOS, in a pseudo-terminal | Verified: full-screen render, F5 execution, Ctrl+Q restoration with the exact escape sequences captured |
+| Warp on macOS, interactive | **Not yet verified by hand.** The pty run above used a forced size, not Warp's own renderer |
+| Live terminal resize | **Not verified.** Covered only by a unit test on the resize message |
 | Windows Terminal with PowerShell 7 | Written, not verified |
 | Any VT-capable terminal on Linux | Written, not verified |
 | `TERM=dumb` | Full-screen client refuses and points at `query` |
