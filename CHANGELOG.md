@@ -8,6 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- A statement history, kept on this machine and nowhere else. `Ctrl+K s` searches
+  what has run and puts a statement back in the editor; `ignatius history list`
+  prints it; `ignatius history clear --yes` deletes it. A statement that mentions
+  a credential is never written to it, recording can be paused for a session with
+  `Ctrl+K v` or `--no-history` and switched off entirely with
+  `history.enabled = false`, and a session that keeps no record says so in its
+  header. Scripted `query` runs are not recorded at all.
 - Syntax colouring in the editor: keywords, string and dollar-quoted literals,
   numbers, comments, quoted identifiers and `$1` placeholders. It shares the
   statement lexer's quoting rules rather than having its own, so what is

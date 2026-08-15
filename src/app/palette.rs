@@ -41,6 +41,43 @@ pub struct Palette {
     pub entries: Vec<PaletteEntry>,
     /// Selected position within the current matches.
     pub selected: usize,
+    /// What this palette is for, shown in its title.
+    ///
+    /// The same widget searches commands, objects and past statements. Saying
+    /// which is open is the difference between one overlay and three.
+    pub purpose: Purpose,
+}
+
+/// What a palette is searching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Purpose {
+    /// Commands and database objects.
+    #[default]
+    GoTo,
+    /// Statements that have run.
+    History,
+}
+
+impl Purpose {
+    /// The title of the overlay, including how to leave it.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::GoTo => " Go to  Enter to choose, Esc to cancel ",
+            Self::History => " History  Enter puts it in the editor, Esc to cancel ",
+        }
+    }
+
+    /// What is said when nothing matches.
+    #[must_use]
+    pub const fn empty_message(self) -> &'static str {
+        match self {
+            Self::GoTo => " Nothing matches that.",
+            Self::History => {
+                " No statement matches that. Statements that mention a credential are never recorded."
+            }
+        }
+    }
 }
 
 impl Palette {
@@ -51,6 +88,16 @@ impl Palette {
             query: String::new(),
             entries,
             selected: 0,
+            purpose: Purpose::GoTo,
+        }
+    }
+
+    /// Opens a palette over past statements.
+    #[must_use]
+    pub fn over_history(entries: Vec<PaletteEntry>) -> Self {
+        Self {
+            purpose: Purpose::History,
+            ..Self::new(entries)
         }
     }
 

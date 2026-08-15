@@ -23,7 +23,7 @@ approves the migration gates and the evidence exists.
 - [x] T009 [P] Compare maintained wrappers and binding approaches for license, maintenance, authentication and platform coverage in `specs/001a-libpq-migration/research.md`
 - [ ] T010 [P] Decide whether each supported platform bundles or discovers the native dependency in `docs/architecture/decisions/0010-libpq-concurrency-model.md`
 - [ ] T011 Approve the session actor, cancellation, shutdown and back-pressure invariants in `docs/architecture/decisions/0010-libpq-concurrency-model.md`
-- [ ] T012 Update the threat model for native loading, FFI ownership and enterprise credentials in `docs/security/threat-model.md`
+- [x] T012 Update the threat model for native loading, FFI ownership and enterprise credentials in `docs/security/threat-model.md`
 
 ## Phase 3: User Story 1 - Enterprise authentication (P1)
 
@@ -108,16 +108,21 @@ before release evidence. Phase 7 follows all approved story gates.
 - This package changes only `docs/architecture/decisions/0010-*`, the new
   `specs/001a-libpq-migration/` directory and explicitly named roadmap/status/
   verification documentation at planning time.
-- Live handoff on 2026-08-16: Claude's Feature 005 SQL-editing slice is now
-  integrated in `555203f`, including `src/app/editor.rs`, the editor actions,
-  the keymap/layout changes and `specs/005-sql-editing/spec.md`. Those paths
-  are not part of this feature and must not be staged, reset, reformatted or
-  edited by 001a while Claude continues. Claude also has a new untracked
-  syntax-highlighting slice in `src/query/highlight.rs`, `src/query/mod.rs`,
-  `src/query/statements.rs`, `src/ui/layout.rs` and `src/ui/theme.rs`. The
-  completed Feature 007 T030/T031 reservation has ended. Codex separately owns
-  the new Feature 005 planning artifacts under `specs/005-sql-editing/` and
-  must not overlap Claude's source work.
+- Live handoff on 2026-08-16: the Feature 005 SQL-editing and syntax-colouring
+  slice is integrated in `060380c`, including the editor, query lexer and UI
+  paths. Claude now has an uncommitted query-history/configuration slice across
+  `src/app/`, `src/cli/`, `src/config/`, `src/ui/`, `tests/cli_contract.rs`,
+  `src/lib.rs` and untracked `src/history.rs`. Those paths must not be staged,
+  reset, reformatted or edited by 001a while Claude continues.
+- `specs/008-release-experience/` is currently untracked in the shared worktree
+  and contains Codex's new Feature 008 specification and requirements checklist.
+  Codex owns the remaining planning artifacts in that directory. Claude owns
+  the active source slice listed above and must not edit or reset the Feature
+  008 planning package without an explicit handoff.
+- Codex also owns the Feature 005 planning artifacts under
+  `specs/005-sql-editing/` and the 001a threat-model addendum in
+  `docs/security/threat-model.md`. The completed Feature 007 T030/T031
+  reservation has ended.
 - Do not create `.specify/feature.json` for this package while another feature
   is active; its explicit directory is the source of truth for this planning
   handoff.

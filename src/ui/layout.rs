@@ -437,6 +437,20 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
         ));
     }
 
+    // A session that keeps no record says so. This is the opposite of a mode
+    // that hides: the safe state is the one being announced, and someone who
+    // paused recording an hour ago should not have to remember that they did.
+    if !model.records_history() {
+        spans.push(Span::styled(
+            presentation.glyphs.separator(),
+            theme.style(Token::Border),
+        ));
+        spans.push(Span::styled(
+            format!("{}[history off]", presentation.icon(Icon::Info)),
+            theme.style(Token::Info),
+        ));
+    }
+
     if let Some(elapsed) = model.last_elapsed {
         spans.push(Span::styled(
             presentation.glyphs.separator(),
@@ -1580,14 +1594,14 @@ fn render_palette(
 
     if matches.is_empty() {
         lines.push(Line::from(Span::styled(
-            " Nothing matches that.",
+            palette.purpose.empty_message(),
             theme.style(Token::Muted),
         )));
     }
 
     Paragraph::new(lines)
         .block(pane_block(
-            " Go to  Enter to choose, Esc to cancel ".to_owned(),
+            palette.purpose.title().to_owned(),
             true,
             presentation,
         ))
@@ -1603,7 +1617,7 @@ fn render_palette(
 fn render_chords(presentation: &Presentation, area: Rect, buf: &mut Buffer) {
     let theme = &presentation.theme;
     let chords = crate::ui::keymap::CHORDS;
-    let width = area.width.saturating_sub(8).min(52);
+    let width = area.width.saturating_sub(8).min(60);
     let height = (u16::try_from(chords.len()).unwrap_or(6) + 2).min(area.height);
     let chord_area = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
@@ -2281,6 +2295,48 @@ mod tests {
             ascii.is_ascii(),
             "the ASCII tier emitted something that is not ASCII"
         );
+    }
+
+    #[test]
+    fn a_session_that_keeps_no_record_says_so_in_the_header() {
+        let mut model = connected_model(Environment::Local);
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(
+            !text.contains("history off"),
+            "an ordinary session says nothing about it"
+        );
+
+        model.history_paused = true;
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("[history off]"), "{text}");
+
+        // And in the bare tier, where there is no icon to carry it.
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            120,
+            30,
+        );
+        assert!(text.contains("[history off]"), "{text}");
+    }
+
+    #[test]
+    fn the_history_search_says_what_it_is_and_how_to_leave_it() {
+        let mut model = connected_model(Environment::Local);
+        model.palette = Some(crate::app::palette::Palette::over_history(vec![
+            crate::app::palette::PaletteEntry {
+                label: "SELECT count(*) FROM orders".to_owned(),
+                detail: "2026-08-16 09:12:03  orders  ok".to_owned(),
+                group: "History",
+                command: crate::app::palette::PaletteCommand::Insert("SELECT 1".to_owned()),
+            },
+        ]));
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("History"), "{text}");
+        assert!(text.contains("Esc to cancel"), "{text}");
+        assert!(text.contains("SELECT count(*) FROM orders"), "{text}");
+        assert!(text.contains("orders  ok"), "the outcome is shown: {text}");
     }
 
     #[test]

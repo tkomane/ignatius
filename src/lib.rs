@@ -15,6 +15,7 @@
 //! - [`query`] - statement boundaries, jobs, result model, value rendering
 //! - [`ui`] - terminal lifecycle, theme tokens, layout, keymap
 //! - [`diagnostics`] - redaction, layered diagnostics, logging, doctor
+//! - [`history`] - what was run, and the rules about keeping it
 //! - [`platform`] - narrow macOS, Windows and Linux differences
 
 pub mod app;
@@ -24,6 +25,7 @@ pub mod config;
 pub mod connection;
 pub mod diagnostics;
 pub mod exit_code;
+pub mod history;
 pub mod platform;
 pub mod postgres;
 pub mod query;

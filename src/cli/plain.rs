@@ -201,6 +201,7 @@ pub fn help_text() -> String {
 pub fn run(
     target: crate::connection::ConnectionTarget,
     config: &crate::config::Config,
+    history: &crate::history::History,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
 ) -> Result<crate::ExitCode, crate::diagnostics::Diagnostic> {
@@ -232,6 +233,11 @@ pub fn run(
     )
     .ok();
     writeln!(err, "{}", connection_summary(&info)).ok();
+    if !history.is_recording() {
+        // A session that keeps no record says so once, at the top, where it can
+        // be read rather than inferred from an empty file later.
+        writeln!(err, "Statements are not being recorded in this session.").ok();
+    }
 
     let options = OutputOptions {
         format: Format::Table,
@@ -347,6 +353,27 @@ pub fn run(
             write!(err, "{}", error.render_plain(true)).ok();
         }
         writeln!(err, "{}", outcome_line(&execution)).ok();
+
+        // Recorded after the fact, so what is kept is what really ran. A history
+        // that cannot be written is said once and never stops the session.
+        let entry = crate::history::Entry::now(
+            &info.target,
+            &info.database,
+            &info.environment.label(),
+            &sql,
+            crate::history::Outcome::from_status(&execution.status),
+            execution.elapsed,
+        );
+        match history.record(&entry) {
+            Ok(recorded) => {
+                if let Some(note) = recorded.note() {
+                    writeln!(err, "{note}").ok();
+                }
+            }
+            Err(diagnostic) => {
+                writeln!(err, "{}", diagnostic.headline).ok();
+            }
+        }
     }
 }
 

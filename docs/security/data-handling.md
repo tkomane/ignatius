@@ -8,9 +8,8 @@ What this program stores, where, for how long, and what it never stores.
   There is no cache and no crash-recovery copy of results.
 - **Passwords.** No credential is written to the configuration file. Profiles
   (Feature 002) will store a reference to a credential, never the credential.
-- **SQL text.** Not written anywhere by default. Query history does not exist yet;
-  when it does (Feature 003) it will be opt-out-able, scoped, and erasable, and
-  will still never contain result rows.
+- **Result rows in the history.** The statement history records the SQL that ran
+  and how it ended. It never records what came back.
 
 ## Exports
 
@@ -30,9 +29,42 @@ may be what the user needed.
 | Configuration | `~/.config/ignatius/config.toml` or `%APPDATA%\ignatius\config.toml` | `0600` on Unix; profile ACL on Windows | Until deleted |
 | Migration backups | Beside the configuration, timestamped | Same | Until deleted |
 | Logs | `~/.local/share/ignatius/logs/ignatius.log` | `0600` on Unix | Rotated at 5 MB, one previous file kept |
+| Statement history | `~/.local/share/ignatius/history.jsonl` | `0600` on Unix, set at creation and kept when the file is trimmed | Last 1000 entries by default; `ignatius history clear` removes it |
 
 `ignatius config paths` prints all of these. Deleting the configuration directory
 returns the program to a first-run state and loses nothing else.
+
+## The statement history
+
+Interactive sessions record what was run. Scripted `ignatius query` runs do not:
+a script's SQL is already in the script, and a CI job should not accumulate a
+file of statements nobody asked it to keep.
+
+Each entry holds the time, the redacted connection target, the database, the
+environment classification, the statement, its outcome and how long it took. It
+holds no result rows and no password: the target goes through the same single
+redaction implementation as every other output path before it is written.
+
+**A statement that mentions a credential is never written.** The check looks for
+`password`, `passwd`, `secret`, `token`, `credential`, `api_key`, `apikey` and
+`private_key` as substrings, so `password_hash` and `access_token` are caught
+too. It over-refuses on purpose: a query about a `tokens_used` column is not
+recorded either. A missing entry costs a retype; a password in a file that
+outlives the session costs more.
+
+That check is a heuristic and is not the only control. All of these are real:
+
+| Control | What it does |
+| --- | --- |
+| `history.enabled = false` in `config.toml` | Nothing is ever recorded |
+| `--no-history` | Pauses recording for one run |
+| `Ctrl+K v` in the client | Pauses recording for the session, and the header says so |
+| `ignatius history clear --yes` | Deletes the file |
+| `ignatius history list` | Shows exactly what is kept |
+
+A paused session is announced rather than hidden, in the header of the
+full-screen client and in the opening lines of plain mode. The mode that keeps
+less is the one worth stating.
 
 ## Logging
 

@@ -394,6 +394,16 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         "Expand the selected row down the screen",
     ),
     ('i', Action::ToggleInspector, "Inspect the selected cell"),
+    (
+        's',
+        Action::OpenHistory,
+        "Search the statements that have run",
+    ),
+    (
+        'v',
+        Action::ToggleHistoryRecording,
+        "Pause or resume recording statements",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -449,6 +459,8 @@ const fn short_label(action: &Action) -> &'static str {
         | Action::MoveBufferEnd
         | Action::MovePage(_) => "Move",
         Action::Undo => "Undo",
+        Action::OpenHistory => "History",
+        Action::ToggleHistoryRecording => "Private",
         Action::Redo => "Redo",
         Action::Newline => "New line",
     }

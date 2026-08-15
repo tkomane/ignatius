@@ -26,6 +26,6 @@ pub mod update;
 pub use inspect::{CellView, ExpandedField, Inspector};
 pub use message::{Action, Direction, Effect, Message};
 pub use model::{ConnectionState, Editor, Focus, Model, QueryPhase};
-pub use palette::{Palette, PaletteCommand, PaletteEntry};
+pub use palette::{Palette, PaletteCommand, PaletteEntry, Purpose};
 pub use tree::{MetadataPayload, MetadataQuery, NodePath, ObjectTree, RequestId, RowKind, TreeRow};
 pub use update::update;

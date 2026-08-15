@@ -29,6 +29,9 @@ pub struct Config {
     /// Connection defaults applied when a target does not say otherwise.
     #[serde(default)]
     pub connection: ConnectionConfig,
+    /// What is kept about statements that have run.
+    #[serde(default)]
+    pub history: HistoryConfig,
 }
 
 impl Default for Config {
@@ -38,8 +41,44 @@ impl Default for Config {
             ui: UiConfig::default(),
             query: QueryConfig::default(),
             connection: ConnectionConfig::default(),
+            history: HistoryConfig::default(),
         }
     }
+}
+
+/// What is kept about statements that have run.
+///
+/// The history is a file of SQL on a disk. It is on by default because retyping
+/// a query is the most common small misery of a terminal client, and every
+/// control over it is explicit: turn it off here, pause it for a session with
+/// `--no-history`, or clear it with `ignatius history clear`. A statement that
+/// mentions a credential is never written whatever this says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct HistoryConfig {
+    /// Whether statements are recorded at all.
+    #[serde(default = "default_history_enabled")]
+    pub enabled: bool,
+    /// How many entries to keep. The oldest are dropped first.
+    #[serde(default = "default_history_max_entries")]
+    pub max_entries: usize,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_history_enabled(),
+            max_entries: default_history_max_entries(),
+        }
+    }
+}
+
+const fn default_history_enabled() -> bool {
+    true
+}
+
+const fn default_history_max_entries() -> usize {
+    1_000
 }
 
 const fn default_schema_version() -> u32 {

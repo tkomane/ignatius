@@ -1,7 +1,10 @@
 # Threat model
 
-**Written: 2026-08-15**, covering Feature 001. Revisit before any change that
-adds a credential route, a network call, or a way to write files.
+**Written: 2026-08-15**, covering Feature 001. **Feature 001a addendum added:
+2026-08-16.** The addendum is a decision-gated design review for a possible
+native PostgreSQL adapter; it is not evidence that the adapter, its dependency
+or an enterprise route exists. Revisit before any change that adds a credential
+route, a network call, or a way to write files.
 
 ## Scope
 
@@ -61,6 +64,91 @@ other than the database connection.
   they have been told plainly what it means.
 - Guaranteeing that a secret is gone from memory. Zeroing is best-effort and no
   userspace program can promise more.
+
+## Feature 001a addendum: native adapter and enterprise credentials
+
+### Status and boundary
+
+Feature 001a remains decision-gated. The owner must first confirm that GSSAPI,
+Kerberos or Windows SSPI is still required and approve the packaging and
+serialized-session decisions in the associated ADRs. No native dependency,
+enterprise credential route or loader is implemented by this addendum.
+
+If the migration is approved, native-driver knowledge remains inside
+`src/postgres`. The reducer, query model, UI, plain mode, configuration schema
+and diagnostics contract remain outside the FFI boundary. The native library,
+the PostgreSQL server and enterprise authentication infrastructure are external
+inputs and must be treated as untrusted or semi-trusted according to the table
+below.
+
+### Additional assets
+
+| Asset | Where it lives | Why it matters |
+| --- | --- | --- |
+| Native library and its code-signing identity | Platform installation or release artefact | It executes with the client's privileges and can read credentials and query data |
+| Native connection handles and buffers | Adapter process memory | Incorrect ownership or lifetime can cause memory corruption, leaks or cross-session disclosure |
+| Enterprise tickets, tokens and delegated credentials | OS authentication subsystem, native handles and process memory | They can grant access beyond the current database session |
+| Native loading and packaging metadata | Installer paths, environment and release evidence | A wrong library, architecture or search path can execute unintended code or fail misleadingly |
+| Cancellation and worker lifecycle state | Adapter worker and session state | An incorrect outcome can replay SQL, abandon a transaction or leak a live handle |
+
+### Additional trust boundaries
+
+- **Native library boundary.** The client calls code outside the Rust safety model.
+  Its ABI, version and ownership rules are not inferred from a successful link.
+- **Platform loader boundary.** The operating system resolves a library and its
+  transitive dependencies. A writable or unbounded search path is an execution
+  path, not a convenience.
+- **Enterprise authentication boundary.** Kerberos, GSSAPI or SSPI may consult
+  tickets, agents, domain controllers or credential caches outside the client.
+- **Release artefact boundary.** A bundled library and its metadata become part
+  of the distributable trust chain and must be tied to the exact source and
+  target.
+- **Session actor boundary.** One owner must serialize operations on one native
+  connection. No other task, reducer or UI component may manipulate its handle.
+
+### Additional abuse cases and required controls
+
+| Abuse case | Required control before implementation | Residual risk until evidence exists |
+| --- | --- | --- |
+| A user-controlled or writable directory causes an unintended native library to be loaded | Define an explicit, bounded loading path per platform; reject ambiguous discovery; record the selected path and library identity in diagnostics and release evidence | The platform-specific route is not selected; T010 remains open |
+| The library has the wrong architecture, ABI or version | Validate architecture and required symbols before opening a database connection; fail with the affected platform and repair action | No clean-machine or missing-dependency evidence exists |
+| An FFI wrapper uses a handle after close, frees it twice or leaks it on an error path | Confine `unsafe` to the adapter, document ownership invariants beside every wrapper, and test success, error, cancellation, connection loss and shutdown cleanup | The wrapper and its safety review do not yet exist |
+| Two operations manipulate one native connection concurrently | Give each connection one serialized owner and reject or queue other operations according to the approved back-pressure rule | The actor design is proposed, not spiked or owner-approved; T011 remains open |
+| Cancellation returns an unknown outcome and the client replays the SQL | Request cancellation once, drain the server result state, preserve unknown outcome wording and never automatically replay | Exact wrapper cancellation semantics are unverified |
+| A ticket, token or connection string appears in logs, diagnostics or test failure text | Reuse the single redaction path, use non-printing secret types, prohibit raw native diagnostics from crossing the boundary, and include adversarial redaction tests | Enterprise routes and their provider-specific diagnostic shapes are unknown |
+| An authentication failure silently falls back to a weaker route or TLS posture | Preserve the requested authentication and TLS guarantee; fail before connection or state the server-confirmed posture; never retry with weaker settings | The approved enterprise route and compatibility mapping are unresolved |
+| A missing or incompatible native library falls back to the old driver while claiming enterprise support | Fail before an enterprise connection attempt with one repairable diagnostic, and label the existing driver as the non-enterprise baseline | Packaging and fallback policy require T008 and T010 decisions |
+| A bundled dependency is replaced or mismatched after release | Tie the dependency inventory, checksum, target, provenance and artefact to one release record; verify before publication | Signing, provenance and clean-install evidence are not yet available |
+| Shutdown leaves a worker, ticket-bearing handle or connection alive | Make shutdown ownership explicit, drain or terminate according to the approved lifecycle, and test normal exit, error, cancellation, panic and supported signals | Cross-platform native shutdown and ConPTY evidence remain open |
+
+### Required data-handling rules
+
+- Enterprise credentials, tickets, tokens and native connection strings are
+  secrets even when a provider calls them metadata. They must use the existing
+  non-printing secret boundary and never enter release evidence or support
+  bundles.
+- Native diagnostic text is untrusted input. It must pass through the existing
+  redaction and terminal-sanitisation paths before it is displayed or logged.
+- A support identity bundle may include product version, source/build identity,
+  target, native dependency identity and error category, but not a ticket,
+  token, password, SQL text or result value.
+- No loader, authentication provider or packaging step may add telemetry,
+  update checks, query upload or result upload. Any future network activity
+  beyond the chosen database connection requires a new specification and threat
+  model review.
+
+### Traceability and evidence gate
+
+| Feature 001a requirement | Threat-model control | Evidence required before the task can be closed |
+| --- | --- | --- |
+| SEC-1001 | Secret types, one redaction path and adversarial native diagnostics | Redacted provider fixtures and subprocess/log assertions with no credential material |
+| SEC-1002 | FFI confined to `src/postgres`, with per-wrapper ownership invariants | Static boundary review, safety review and success/error/cancel/shutdown lifecycle tests |
+| SEC-1003 | No authentication or TLS downgrade and no automatic replay | Server-backed refusal, cancellation and connection-loss tests with exact outcome wording |
+| SEC-1004 | Bounded loader path, architecture/symbol validation and explicit missing-dependency failure | Clean macOS, Windows and Linux installation evidence plus dependency identity and mismatch tests |
+
+These controls are prerequisites for implementation, not implementation claims.
+T008, T010 and T011 remain owner or evidence gates; no Phase 3 source task is
+authorized by this addendum.
 
 ## Verification
 

@@ -33,6 +33,8 @@ pub struct Paths {
     pub log_dir: PathBuf,
     /// Directory holding saved queries as ordinary `.sql` files.
     pub queries_dir: PathBuf,
+    /// The statement history, one JSON object per line.
+    pub history_file: PathBuf,
 }
 
 impl Paths {
@@ -45,6 +47,7 @@ impl Paths {
             config_file: config_dir.join("config.toml"),
             queries_dir: config_dir.join("queries"),
             log_dir: data_dir.join("logs"),
+            history_file: data_dir.join("history.jsonl"),
             config_dir,
             data_dir,
         }
@@ -60,6 +63,7 @@ impl Paths {
             queries_dir: root.join("queries"),
             data_dir: root.join("data"),
             log_dir: root.join("data").join("logs"),
+            history_file: root.join("data").join("history.jsonl"),
         }
     }
 
@@ -72,6 +76,7 @@ impl Paths {
             ("Saved queries", self.queries_dir.as_path()),
             ("Data directory", self.data_dir.as_path()),
             ("Logs", self.log_dir.as_path()),
+            ("Statement history", self.history_file.as_path()),
         ]
     }
 }
@@ -157,9 +162,15 @@ mod tests {
     fn every_path_carries_a_human_label() {
         let paths = Paths::rooted_at(Path::new("/tmp/x"));
         let labels = paths.labelled();
-        assert_eq!(labels.len(), 5);
-        for (label, _) in labels {
+        assert_eq!(labels.len(), 6);
+        for (label, _) in &labels {
             assert!(!label.is_empty());
         }
+        assert!(
+            labels
+                .iter()
+                .any(|(label, _)| *label == "Statement history"),
+            "a file of SQL on the disk must be listed where the user looks"
+        );
     }
 }

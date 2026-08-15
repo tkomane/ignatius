@@ -73,8 +73,19 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             // Leaving it open would show a value from one query labelled as
             // though it came from another.
             model.inspector = None;
+            let outcome = crate::history::Outcome::from_status(&execution.status);
+            let elapsed = execution.elapsed;
             model.last_execution = Some(*execution);
-            Vec::new()
+            // The statement is recorded once it has an outcome, so what the
+            // history holds is what really ran rather than what was submitted.
+            match model.running_sql.take() {
+                Some(sql) if model.records_history() => vec![Effect::RecordHistory {
+                    sql,
+                    outcome,
+                    elapsed,
+                }],
+                _ => Vec::new(),
+            }
         }
         Message::CancellationDelivered(_) => Vec::new(),
         Message::CancellationFailed(diagnostic) => {
@@ -106,6 +117,18 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     // could not be opened, rather than in a modal somewhere else.
                     model.tree.apply_failure(request, &path, &error.headline);
                 }
+            }
+            Vec::new()
+        }
+        Message::HistoryLoaded(entries) => {
+            model.history = entries;
+            Vec::new()
+        }
+        Message::HistoryRecorded(entry) => {
+            // Only what actually reached the file appears here. A statement the
+            // history refused must not be offered back as though it were kept.
+            if let Some(entry) = *entry {
+                model.history.insert(0, entry);
             }
             Vec::new()
         }
@@ -216,6 +239,20 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Activate => Vec::new(),
+        Action::OpenHistory => {
+            model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
+                model,
+            )));
+            Vec::new()
+        }
+        Action::ToggleHistoryRecording => {
+            // Configuration wins: a session cannot turn on something the user
+            // has switched off in their own file.
+            if !model.history_disabled {
+                model.history_paused = !model.history_paused;
+            }
+            Vec::new()
+        }
         Action::ToggleExpandedRow => {
             model.expanded_row = !model.expanded_row;
             Vec::new()
@@ -325,6 +362,30 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         | Action::Undo
         | Action::Redo => Vec::new(),
     }
+}
+
+/// The statements that have run, as palette entries.
+///
+/// A separate list rather than a section of the main palette: someone looking
+/// for a past statement is not looking for a command, and a hundred statements
+/// would bury the commands.
+fn history_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+    model
+        .history
+        .iter()
+        .map(|entry| PaletteEntry {
+            label: entry.one_line(),
+            detail: format!(
+                "{}  {}  {}",
+                entry.when(),
+                entry.database,
+                entry.outcome.label()
+            ),
+            group: "History",
+            command: PaletteCommand::Insert(entry.sql.clone()),
+        })
+        .collect()
 }
 
 /// Moves by a screenful in whichever pane has focus.
@@ -526,6 +587,7 @@ fn start(model: &mut Model, sql: String) -> Vec<Effect> {
         return Vec::new();
     }
     let job = model.allocate_job();
+    model.running_sql = Some(sql.clone());
     model.phase = QueryPhase::Running {
         job,
         statements: parsed.len(),
@@ -1317,6 +1379,17 @@ mod tests {
         assert_eq!(model.selected_row, 0);
     }
 
+    fn history_entry(sql: &str) -> crate::history::Entry {
+        crate::history::Entry::now(
+            "app@localhost:5432/orders",
+            "orders",
+            "local",
+            sql,
+            crate::history::Outcome::Succeeded,
+            Duration::from_millis(3),
+        )
+    }
+
     fn with_tree() -> Model {
         let mut model = connected();
         update(
@@ -1500,6 +1573,126 @@ mod tests {
 
         assert!(model.palette.is_none(), "choosing closes it");
         assert!(model.help_open, "the chosen command actually ran");
+    }
+
+    #[test]
+    fn a_finished_statement_is_offered_to_the_history_with_its_outcome() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+
+        let effects = update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Failed, &[])),
+        );
+        match effects.as_slice() {
+            [Effect::RecordHistory { sql, outcome, .. }] => {
+                assert_eq!(sql, "SELECT 1;");
+                assert_eq!(
+                    *outcome,
+                    crate::history::Outcome::Failed,
+                    "a statement is recorded with what really happened to it"
+                );
+            }
+            other => panic!("expected one record effect, got {other:?}"),
+        }
+        assert!(
+            model.running_sql.is_none(),
+            "the statement is recorded once, not on every later message"
+        );
+    }
+
+    #[test]
+    fn a_paused_or_disabled_history_asks_for_no_recording_at_all() {
+        for (paused, disabled) in [(true, false), (false, true), (true, true)] {
+            let mut model = connected();
+            model.history_paused = paused;
+            model.history_disabled = disabled;
+            model.editor.set_text("SELECT 1;");
+            let effects = update(&mut model, Message::Action(Action::RunBuffer));
+            let Effect::Execute { job, .. } = effects[0] else {
+                panic!("expected an execute effect");
+            };
+            let effects = update(
+                &mut model,
+                Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &[])),
+            );
+            assert!(
+                effects.is_empty(),
+                "paused={paused} disabled={disabled} still asked to record"
+            );
+            assert!(!model.records_history());
+        }
+    }
+
+    #[test]
+    fn a_private_session_can_be_turned_on_and_off_but_configuration_wins() {
+        let mut model = connected();
+        assert!(model.records_history());
+        update(&mut model, Message::Action(Action::ToggleHistoryRecording));
+        assert!(model.history_paused, "the session stops recording");
+        update(&mut model, Message::Action(Action::ToggleHistoryRecording));
+        assert!(!model.history_paused);
+
+        model.history_disabled = true;
+        update(&mut model, Message::Action(Action::ToggleHistoryRecording));
+        assert!(
+            !model.records_history(),
+            "a session cannot switch on what the user switched off in their own file"
+        );
+    }
+
+    #[test]
+    fn only_what_reached_the_file_comes_back_as_history() {
+        let mut model = connected();
+        update(
+            &mut model,
+            Message::HistoryLoaded(vec![history_entry("SELECT 1")]),
+        );
+        assert_eq!(model.history.len(), 1);
+
+        // A statement the history refused is reported as nothing kept.
+        update(&mut model, Message::HistoryRecorded(Box::new(None)));
+        assert_eq!(model.history.len(), 1, "nothing was added");
+
+        update(
+            &mut model,
+            Message::HistoryRecorded(Box::new(Some(history_entry("SELECT 2")))),
+        );
+        assert_eq!(model.history.len(), 2);
+        assert_eq!(model.history[0].sql, "SELECT 2", "newest first");
+    }
+
+    #[test]
+    fn the_history_search_puts_a_past_statement_in_the_editor() {
+        let mut model = connected();
+        update(
+            &mut model,
+            Message::HistoryLoaded(vec![
+                history_entry("SELECT count(*) FROM orders"),
+                history_entry("VACUUM ANALYZE orders"),
+            ]),
+        );
+        model.editor.set_text("");
+
+        update(&mut model, Message::Action(Action::OpenHistory));
+        let palette = model.palette.as_ref().expect("open");
+        assert_eq!(palette.purpose, crate::app::palette::Purpose::History);
+        assert_eq!(palette.entries.len(), 2);
+
+        for ch in "count".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.palette.is_none());
+        assert!(
+            model.editor.text().contains("count(*)"),
+            "the statement came back: {}",
+            model.editor.text()
+        );
     }
 
     #[test]

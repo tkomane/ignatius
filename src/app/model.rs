@@ -241,6 +241,19 @@ pub struct Model {
     pub expanded_row: bool,
     /// The cell inspector, when it is open.
     pub inspector: Option<crate::app::inspect::Inspector>,
+    /// The statements that have run, newest first.
+    pub history: Vec<crate::history::Entry>,
+    /// Whether recording is paused for this session.
+    ///
+    /// Session state, never written to configuration: a private session is
+    /// something you turn on for now, and it is shown in the header so it is
+    /// never a mode someone is in without knowing.
+    pub history_paused: bool,
+    /// Whether history is off in configuration, which the session cannot undo.
+    pub history_disabled: bool,
+    /// The SQL of the statement in flight, kept so it can be recorded when it
+    /// finishes with an outcome worth recording.
+    pub running_sql: Option<String>,
 }
 
 impl Model {
@@ -275,6 +288,12 @@ impl Model {
         self.connection
             .info()
             .map_or(Environment::Unclassified, |info| info.environment.clone())
+    }
+
+    /// Whether statements are being written to the history right now.
+    #[must_use]
+    pub const fn records_history(&self) -> bool {
+        !self.history_disabled && !self.history_paused
     }
 
     /// The first result set of the last execution, which the grid displays.
