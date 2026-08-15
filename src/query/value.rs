@@ -156,6 +156,41 @@ pub fn truncate_to_width(text: &str, max_width: usize, unicode: bool) -> String 
     out
 }
 
+/// Breaks text into lines that each fit a display width.
+///
+/// Breaking happens at the width, not at a word boundary. A SQL value is not
+/// prose: word wrapping would move characters onto lines they are not on, and
+/// someone counting the characters of an identifier would be misled. Existing
+/// line breaks in the text are kept, so a value's own shape survives.
+///
+/// The text is expected to have been through [`sanitize_for_display`] already,
+/// which is what makes the widths honest.
+#[must_use]
+pub fn wrap_to_width(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    for source in text.split('\n') {
+        let mut current = String::new();
+        let mut used = 0usize;
+        for ch in source.chars() {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+            // The emptiness check matters in a pane narrower than one character:
+            // without it a wide character in a one-column pane would push an
+            // empty line forever and never be shown at all.
+            if used + ch_width > width && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+                used = 0;
+            }
+            current.push(ch);
+            used += ch_width;
+        }
+        lines.push(current);
+    }
+    lines
+}
+
 /// Pads text to a fixed display width, for aligned table output.
 #[must_use]
 pub fn pad_to_width(text: &str, width: usize) -> String {
@@ -277,6 +312,48 @@ mod tests {
         // Degenerate widths must not panic.
         assert_eq!(display_width(&truncate_to_width("abcdef", 1, true)), 1);
         assert_eq!(truncate_to_width("abcdef", 0, true), "");
+    }
+
+    #[test]
+    fn wrapping_fills_each_line_to_the_width_and_never_splits_a_character() {
+        assert_eq!(wrap_to_width("abcdef", 3), vec!["abc", "def"]);
+        assert_eq!(wrap_to_width("abcdefg", 3), vec!["abc", "def", "g"]);
+        assert_eq!(wrap_to_width("ab", 10), vec!["ab"]);
+
+        // A wide character that does not fit in the remainder moves down whole.
+        let lines = wrap_to_width("a日本", 3);
+        assert_eq!(lines, vec!["a日", "本"]);
+        for line in &lines {
+            assert!(display_width(line) <= 3, "{line} overflows");
+        }
+    }
+
+    #[test]
+    fn wrapping_keeps_the_line_breaks_the_value_already_had() {
+        // The value's own shape is a fact about the data. An empty line in the
+        // middle of a JSON document is part of it.
+        assert_eq!(wrap_to_width("one\ntwo", 10), vec!["one", "two"]);
+        assert_eq!(wrap_to_width("one\n\ntwo", 10), vec!["one", "", "two"]);
+        assert_eq!(
+            wrap_to_width("", 10),
+            vec![""],
+            "an empty value is one line"
+        );
+        assert_eq!(
+            wrap_to_width("abcdef\ngh", 3),
+            vec!["abc", "def", "gh"],
+            "wrapping applies within each line"
+        );
+    }
+
+    #[test]
+    fn wrapping_to_no_width_yields_nothing_rather_than_looping() {
+        assert!(wrap_to_width("anything", 0).is_empty());
+        assert_eq!(wrap_to_width("abc", 1), vec!["a", "b", "c"]);
+        // A wide character in a one-column pane cannot fit. It goes on a line of
+        // its own and overflows by one cell rather than disappearing: a value
+        // that is not shown is worse than a value that is clipped by the frame.
+        assert_eq!(wrap_to_width("日", 1), vec!["日"]);
     }
 
     #[test]

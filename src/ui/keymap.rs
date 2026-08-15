@@ -290,6 +290,12 @@ pub const CHORDS: &[(char, Action, &str)] = &[
     ('f', Action::StartFilter, "Filter the object tree"),
     ('r', Action::ReloadObjects, "Reload the object tree"),
     ('h', Action::ToggleHelp, "Show or hide help"),
+    (
+        'x',
+        Action::ToggleExpandedRow,
+        "Expand the selected row down the screen",
+    ),
+    ('i', Action::ToggleInspector, "Inspect the selected cell"),
 ];
 
 /// Resolves the second key of a chord.
@@ -325,6 +331,8 @@ const fn short_label(action: &Action) -> &'static str {
         Action::StartFilter => "Filter",
         Action::ReloadObjects => "Reload",
         Action::Activate => "Open",
+        Action::ToggleExpandedRow => "Expand row",
+        Action::ToggleInspector => "Inspect",
         Action::RunBuffer => "Run",
         Action::RunStatement => "Run statement",
         Action::Cancel => "Cancel",

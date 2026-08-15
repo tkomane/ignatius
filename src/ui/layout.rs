@@ -100,6 +100,9 @@ pub fn render(
     if model.help_open {
         render_help(keymap, presentation, area, buf);
     }
+    if let Some(inspector) = &model.inspector {
+        render_inspector(model, *inspector, presentation, area, buf);
+    }
     if let Some(palette) = &model.palette {
         render_palette(palette, presentation, area, buf);
     }
@@ -623,7 +626,228 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
         return;
     }
 
-    render_grid(model, set, presentation, focused, inner, buf);
+    if model.expanded_row {
+        render_expanded_row(model, set, presentation, inner, buf);
+    } else {
+        render_grid(model, set, presentation, focused, inner, buf);
+    }
+}
+
+/// One row down the screen, one column per line.
+///
+/// The grid runs out of width long before a real table runs out of columns. This
+/// is the same answer `psql` gives with `\x`, for the same reason.
+fn render_expanded_row(
+    model: &Model,
+    set: &crate::query::result::ResultSet,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    if set.rows.is_empty() {
+        Paragraph::new(Line::from(Span::styled(
+            "No rows, so there is no row to expand.",
+            theme.style(Token::Muted),
+        )))
+        .render(area, buf);
+        return;
+    }
+
+    let row = model.selected_row.min(set.rows.len().saturating_sub(1));
+    let fields = crate::app::inspect::expand_row(
+        set,
+        row,
+        area.width as usize,
+        !presentation.glyphs.is_ascii(),
+    );
+
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!("Row {} of {}", row + 1, set.rows.len()),
+            theme.style(Token::Text),
+        ),
+        Span::styled(
+            format!("   {}", set.window_label()),
+            theme.style(Token::Muted),
+        ),
+    ])];
+    if fields.iter().any(|field| field.truncated) {
+        // Saying that a value was shortened, and where the whole one is, is the
+        // difference between an abbreviation and a lie.
+        if let Some(first) = lines.first_mut() {
+            first.spans.push(Span::styled(
+                "   Enter shows one in full",
+                theme.style(Token::Info),
+            ));
+        }
+    }
+
+    // The selected column is marked here for the same reason it is in the grid:
+    // Enter acts on it, so which one it is has to be visible.
+    let selected = model.selected_column.min(fields.len().saturating_sub(1));
+    let visible = (area.height as usize).saturating_sub(1);
+    let offset = selected.saturating_sub(visible.saturating_sub(1));
+    for (index, field) in fields.iter().enumerate().skip(offset).take(visible) {
+        let chosen = index == selected;
+        let mut line = Line::from(vec![
+            Span::styled(field.name.clone(), theme.style(Token::Header)),
+            Span::styled(
+                match (chosen, presentation.glyphs.is_ascii()) {
+                    (true, true) => " > ".to_owned(),
+                    (true, false) => " \u{25b8} ".to_owned(),
+                    (false, _) => "   ".to_owned(),
+                },
+                theme.style(Token::Focus),
+            ),
+            Span::styled(
+                field.value.clone(),
+                if field.is_null {
+                    theme.style(Token::NullValue)
+                } else {
+                    theme.style(Token::Text)
+                },
+            ),
+        ]);
+        if chosen {
+            line = line.style(theme.style(Token::Selection));
+        }
+        lines.push(line);
+    }
+    let below = fields.len().saturating_sub(offset + visible);
+    if below > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("{below} more column(s) below"),
+            theme.style(Token::Muted),
+        )));
+    }
+
+    Paragraph::new(lines).render(area, buf);
+}
+
+// ---------------------------------------------------------------- inspector
+
+/// Widest the inspector is ever drawn, whatever the terminal allows.
+const INSPECTOR_MAX_WIDTH: u16 = 92;
+/// Tallest the inspector is ever drawn.
+const INSPECTOR_MAX_HEIGHT: u16 = 26;
+/// Columns the frame and its padding take from the value.
+const INSPECTOR_CHROME_COLUMNS: u16 = 4;
+/// Rows the frame, the heading and the position line take from the value.
+const INSPECTOR_CHROME_ROWS: u16 = 5;
+
+/// The box the inspector occupies inside an area.
+const fn inspector_box(area: Rect) -> Rect {
+    let mut width = area.width.saturating_sub(6);
+    if width > INSPECTOR_MAX_WIDTH {
+        width = INSPECTOR_MAX_WIDTH;
+    }
+    let mut height = area.height.saturating_sub(4);
+    if height > INSPECTOR_MAX_HEIGHT {
+        height = INSPECTOR_MAX_HEIGHT;
+    }
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+/// How much of a value the inspector can show at a terminal size: width in
+/// cells, height in lines.
+///
+/// The reducer clamps scrolling with this and the renderer lays out with it, so
+/// "how much fits" has one answer rather than two that drift apart.
+#[must_use]
+pub const fn inspector_viewport(size: (u16, u16)) -> (usize, usize) {
+    let box_area = inspector_box(Rect {
+        x: 0,
+        y: 0,
+        width: size.0,
+        height: size.1,
+    });
+    (
+        box_area.width.saturating_sub(INSPECTOR_CHROME_COLUMNS) as usize,
+        box_area.height.saturating_sub(INSPECTOR_CHROME_ROWS) as usize,
+    )
+}
+
+/// Shows one value in full: what it is, and every character of it.
+fn render_inspector(
+    model: &Model,
+    inspector: crate::app::inspect::Inspector,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let box_area = inspector_box(area);
+    if box_area.width < 8 || box_area.height < 4 {
+        return;
+    }
+    let (width, height) = inspector_viewport((area.width, area.height));
+
+    let Some(set) = model.visible_result() else {
+        return;
+    };
+    let Some(view) =
+        crate::app::inspect::CellView::build(set, model.selected_row, model.selected_column, width)
+    else {
+        return;
+    };
+
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!("{}  ", view.column),
+                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(view.description.clone(), theme.style(Token::Muted)),
+        ]),
+        Line::from(Span::styled(
+            format!(
+                "row {} of {}, column {} of {}",
+                view.row.0, view.row.1, view.position.0, view.position.1
+            ),
+            theme.style(Token::Muted),
+        )),
+    ];
+
+    if view.is_null {
+        // A NULL has no characters to show. Saying so is the point: this is the
+        // one place the difference between NULL, an empty string and the text
+        // "NULL" is stated rather than encoded in a marker.
+        lines.push(Line::from(Span::styled(
+            "There is no value here. This is SQL NULL, not an empty string.",
+            theme.style(Token::NullValue),
+        )));
+    } else {
+        let (visible, _, _) = view.window(inspector.scroll(), height);
+        for line in visible {
+            lines.push(Line::from(Span::styled(
+                line.clone(),
+                theme.style(Token::Text),
+            )));
+        }
+    }
+
+    if let Some(position) = view.scroll_label(inspector.scroll(), height) {
+        lines.push(Line::from(Span::styled(position, theme.style(Token::Info))));
+    }
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            format!(
+                " {}Value  arrows move, Esc closes ",
+                presentation.icon(Icon::Rows)
+            ),
+            true,
+            presentation,
+        ))
+        .render(box_area, buf);
 }
 
 fn render_results_placeholder(
@@ -1435,8 +1659,8 @@ fn render_footer(
 fn render_help(keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
     let theme = &presentation.theme;
     let width = area.width.saturating_sub(4).min(70);
-    let height = (u16::try_from(keymap.bindings().len()).unwrap_or(20) + 4)
-        .min(area.height.saturating_sub(2));
+    let rows = keymap.bindings().len() + crate::ui::keymap::CHORDS.len() + 2;
+    let height = (u16::try_from(rows).unwrap_or(24) + 3).min(area.height.saturating_sub(2));
     let help_area = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -1456,6 +1680,22 @@ fn render_help(keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &m
                 theme.style(Token::Focus).add_modifier(Modifier::BOLD),
             ),
             Span::styled(binding.description, theme.style(Token::Text)),
+        ]));
+    }
+
+    // The chords belong here too. Reading help and still not knowing how to
+    // reach half the interface is the failure this overlay exists to prevent.
+    lines.push(Line::from(Span::styled(
+        "Ctrl+K then:",
+        theme.style(Token::Muted),
+    )));
+    for (key, _, description) in crate::ui::keymap::CHORDS {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {:<12}", format!("Ctrl+K {key}")),
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(*description, theme.style(Token::Text)),
         ]));
     }
 
@@ -1805,6 +2045,95 @@ mod tests {
             !text.contains('\x1b'),
             "an escape in a column name reached the screen"
         );
+    }
+
+    #[test]
+    fn the_expanded_view_lays_one_row_down_the_screen() {
+        let mut model = connected_model(Environment::Local);
+        let columns: Vec<String> = (0..12).map(|i| format!("column_{i}")).collect();
+        let names: Vec<&str> = columns.iter().map(String::as_str).collect();
+        let row: Vec<Cell> = (0..12).map(|i| Cell::Text(format!("value-{i}"))).collect();
+        with_rows(&mut model, &names, &[&row]);
+        model.expanded_row = true;
+
+        // Eighty columns cannot hold twelve columns across. Down the screen it
+        // fits, which is the entire point.
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 80, 30);
+        for i in 0..12 {
+            assert!(text.contains(&format!("column_{i}")), "{text}");
+            assert!(text.contains(&format!("value-{i}")), "{text}");
+        }
+        assert!(text.contains("Row 1 of 1"), "{text}");
+
+        // With no rows it says so rather than drawing an empty frame.
+        let mut empty = connected_model(Environment::Local);
+        with_rows(&mut empty, &["id"], &[]);
+        empty.expanded_row = true;
+        let text = render_to_string(&empty, &Keymap::new(), &rich(), 80, 30);
+        assert!(text.contains("no row to expand"), "{text}");
+    }
+
+    #[test]
+    fn the_inspector_shows_the_whole_value_and_says_where_it_is_in_it() {
+        let mut model = connected_model(Environment::Local);
+        let long = (0..40)
+            .map(|i| format!("line-{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        with_rows(&mut model, &["document"], &[&[Cell::Text(long)]]);
+        model.focus = Focus::Results;
+        model.inspector = Some(crate::app::inspect::Inspector::new());
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("document"), "the column is named: {text}");
+        assert!(text.contains("row 1 of 1, column 1 of 1"), "{text}");
+        assert!(text.contains("line-0"), "{text}");
+        assert!(
+            text.contains("of 40 wrapped lines"),
+            "a value that does not fit says how much is left: {text}"
+        );
+        assert!(text.contains("Esc closes"), "the way out is stated");
+    }
+
+    #[test]
+    fn the_inspector_tells_null_an_empty_string_and_the_text_null_apart() {
+        // The grid can only show a marker for two of these. This is where the
+        // difference is stated in words.
+        for (cell, expected) in [
+            (Cell::Null, "SQL NULL"),
+            (Cell::Text(String::new()), "empty string, 0 characters"),
+            (Cell::Text("NULL".into()), "text, 4 characters"),
+        ] {
+            let mut model = connected_model(Environment::Local);
+            with_rows(&mut model, &["value"], &[&[cell]]);
+            model.focus = Focus::Results;
+            model.inspector = Some(crate::app::inspect::Inspector::new());
+            let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+            assert!(text.contains(expected), "expected {expected} in {text}");
+        }
+    }
+
+    #[test]
+    fn neither_view_lets_a_hostile_value_reach_the_terminal() {
+        let hostile = Cell::Text("\x1b[2J\x1b[Hgotcha\u{202e}reversed".into());
+        let wide = Cell::Text("日本語のとても長い値です".repeat(20));
+
+        for cell in [hostile, wide] {
+            for expanded in [true, false] {
+                let mut model = connected_model(Environment::Local);
+                with_rows(
+                    &mut model,
+                    &["\x1b[31mname"],
+                    &[std::slice::from_ref(&cell)],
+                );
+                model.focus = Focus::Results;
+                model.expanded_row = expanded;
+                model.inspector = Some(crate::app::inspect::Inspector::new());
+                let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+                assert!(!text.contains('\x1b'), "an escape reached the screen");
+                assert!(!text.contains('\u{202e}'), "a bidi override survived");
+            }
+        }
     }
 
     #[test]

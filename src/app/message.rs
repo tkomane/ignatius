@@ -42,6 +42,10 @@ pub enum Action {
     ReloadObjects,
     /// Enter: a line break, opening a node, or confirming, depending on focus.
     Activate,
+    /// Show or hide the expanded view of the selected row.
+    ToggleExpandedRow,
+    /// Open the inspector on the selected cell, or close it.
+    ToggleInspector,
     /// Type a character into the editor.
     Insert(char),
     /// Delete backwards in the editor.
