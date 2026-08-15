@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- A filter over the result rows, on the same key that filters the object tree.
+  It narrows what is drawn and nothing else: the row numbers stay the rows' own,
+  the inspector and the expanded view follow the selection to the real row, and
+  the count says what was searched - `matching 3 of 10000 retained rows, of
+  200000 returned`. A filter over a truncated result never implies it searched
+  what was never received.
 - A statement history, kept on this machine and nowhere else. `Ctrl+K s` searches
   what has run and puts a statement back in the editor; `ignatius history list`
   prints it; `ignatius history clear --yes` deletes it. A statement that mentions

@@ -33,7 +33,7 @@ checked for conflicts by a test, and listed in help at runtime.
 | `Ctrl+Y` | Redo | No |
 | `Backspace` | Delete the character before the cursor | No |
 | `Enter` | Use what is selected: a line break, an object's name, or a confirmation | No |
-| `/` | Filter the object tree, when it has focus | No |
+| `/` | Filter what is in front of you: the rows when the results have focus, the object tree otherwise | No |
 | Any printable key | Type into the editor | No |
 
 ## Chords

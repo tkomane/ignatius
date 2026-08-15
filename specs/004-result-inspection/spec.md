@@ -9,12 +9,13 @@ are covered by unit and layout tests, including hostile values, wide characters
 and a selection that outlived its result.
 
 **Scope note**: the roadmap places four things under result work: an expanded
-row view, a cell inspector, result filtering, and copying to the clipboard.
-This specification covers the first two. Filtering and copying are deferred and
-recorded in `docs/status.md`. Copying is deferred deliberately rather than for
-time: putting database contents on the system clipboard, or writing them into
-the terminal with OSC 52, moves data out of this process, and that decision
-belongs in an ADR rather than in a keybinding.
+row view, a cell inspector, result filtering, and copying to the clipboard. The
+first three are here; the row view and inspector came first and filtering
+followed. Copying is deferred deliberately rather than for time: putting
+database contents on the system clipboard, or writing them into the terminal
+with OSC 52, moves data out of this process, and that decision belongs in an ADR
+rather than in a keybinding. It is recorded in `docs/status.md` as an owner
+decision.
 
 ## User Scenarios & Testing
 
@@ -73,6 +74,31 @@ the inspector, and scroll to the end of it.
    `NULL`, **When** each is inspected, **Then** the description distinguishes
    them in words.
 
+### User Story 3 - Find the row you meant among the ones you have (Priority: P2)
+
+A result of ten thousand rows holds the one someone wants. They want to type
+part of it rather than scroll.
+
+**Why this priority**: it is what makes a large result usable at all, and it is
+also the easiest place in the product to tell a quiet lie about how much was
+searched.
+
+**Independent Test**: filter a truncated result and read the count line.
+
+**Acceptance Scenarios**:
+
+1. **Given** rows, **When** the filter key is pressed with the results focused,
+   **Then** typing narrows the rows and does not reach the editor.
+2. **Given** a filter, **When** rows are narrowed, **Then** each row keeps its
+   own number, so the view still says where a row is in the result.
+3. **Given** a filter over a truncated result, **When** the count is shown,
+   **Then** it states how many match, how many are retained, and how many the
+   server returned.
+4. **Given** a filter, **When** a new result arrives, **Then** the filter is
+   cleared, because it belonged to the rows it was typed against.
+5. **Given** a filter matching nothing, **When** the pane is drawn, **Then** it
+   says so and says how to clear it.
+
 ### Edge Cases
 
 - A value containing escape sequences, which must never reach the terminal.
@@ -99,6 +125,15 @@ the inspector, and scroll to the end of it.
   without closing.
 - **FR-407**: The inspector MUST state its scroll position when the value does
   not fit.
+- **FR-408**: The result pane MUST offer a filter over its rows, on the same key
+  that filters the object tree.
+- **FR-409**: The filter MUST match case-insensitively against any column's
+  displayed value.
+- **FR-410**: The filter MUST run over retained rows only, and every count that
+  mentions it MUST say so alongside any truncation.
+- **FR-411**: Everything acting on a selection MUST resolve it to the row of the
+  result, not the row of the filtered view.
+- **FR-412**: A new result MUST clear the filter.
 
 ### User experience
 
@@ -126,6 +161,8 @@ the inspector, and scroll to the end of it.
   views.
 - **SC-404**: NULL, empty string and the text `NULL` are told apart by reading
   the inspector, not by knowing the convention.
+- **SC-405**: A filter over a result the server truncated states three numbers:
+  matching, retained, and returned.
 
 ## Assumptions
 

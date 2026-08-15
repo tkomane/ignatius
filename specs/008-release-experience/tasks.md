@@ -6,9 +6,10 @@
 [research.md](./research.md), [data-model.md](./data-model.md),
 [quickstart.md](./quickstart.md)
 
-**Status note**: T001-T006 record the planning package that already exists in
-this directory. All later tasks remain open until their evidence exists. No
-task authorizes a live publication, signing operation, push or release.
+**Status note**: T001-T008 record the planning package and foundational
+release-record contract that now exist in this directory and `release-notes/`.
+All later tasks remain open until their evidence exists. No task authorizes a
+live publication, signing operation, push or release.
 
 ## Phase 1: Setup and design package
 
@@ -24,8 +25,13 @@ task authorizes a live publication, signing operation, push or release.
 **Purpose**: Establish one identity, integrity and evidence vocabulary before
 adding packaging or remote publication.
 
-- [ ] T007 [P] Define the versioned release-record schema and state transitions in `release-notes/catalog.schema.json`
-- [ ] T008 [P] Add valid, blocked and mismatched release-record fixtures in `release-notes/fixtures/`
+- [x] T007 [P] Define the versioned release-record schema and state transitions in `release-notes/catalog.schema.json`
+- [x] T008 [P] Add valid, blocked and mismatched release-record fixtures in `release-notes/fixtures/`
+
+Evidence: `jq empty release-notes/catalog.schema.json
+release-notes/fixtures/*.json` and the one-record envelope checks pass on
+2026-08-16. Cross-record equality and readiness semantics remain validator work
+in later tasks.
 - [ ] T009 [P] Define target-specific archive names, checksum manifest fields and digest verification rules in `docs/operations/release.md`
 - [ ] T010 Partition generic release packaging from libpq-specific dependency evidence in `specs/001a-libpq-migration/tasks.md` and `docs/operations/release.md`
 
@@ -157,6 +163,10 @@ identity.
 
 - Codex owns this Feature 008 planning directory while the package is under
   active planning.
+- For the active Phase 2 slice, Codex also owns only
+  `release-notes/catalog.schema.json` and `release-notes/fixtures/`. This does
+  not authorize the catalogue validator, CI, publication workflow or shared
+  release documentation.
 - Claude owns the active source paths in `src/app/`, `src/cli/`, `src/config/`,
   `src/ui/`, `tests/cli_contract.rs`, `src/lib.rs` and `src/history.rs`; no
   task above edits them except the future T026, which is blocked until a source
