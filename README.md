@@ -4,9 +4,8 @@ A terminal-native PostgreSQL workbench: a full-screen client for exploring, and
 the same binary as a scriptable CLI for automating.
 
 > **Status: early. Not released.** Verified on macOS against PostgreSQL 18.4.
-> Windows and Linux support is written but not yet verified. `ignatius` is an
-> internal codename that has not passed a naming check. Nothing here is signed,
-> notarised, or published, and this README makes no claim that it is.
+> Windows and Linux support is written but not yet verified. Nothing here is
+> signed, notarised, or published, and this README makes no claim that it is.
 
 ## Why this exists
 
@@ -29,13 +28,14 @@ database is real:
 ## Try it
 
 ```bash
-docker compose -f docker/compose.yaml up -d
-cargo run -- connect --check "postgres://ignatius_test@127.0.0.1:55432/ignatius_demo"
-cargo run -- "postgres://ignatius_test@127.0.0.1:55432/ignatius_demo"    # full-screen
+cargo xtask db up      # disposable PostgreSQL with synthetic fixtures
+cargo xtask run        # open the client against it
+cargo xtask db down    # stop it and delete its data
 ```
 
-The container's password is synthetic and lives in `docker/compose.yaml`. Export
-it as `PGPASSWORD` for the commands above, or pass it in the URI.
+`cargo xtask install` builds a release binary and puts `ignatius` on your PATH.
+Everything the demo needs is synthetic and lives in `docker/dev.env`; no real
+database is ever required.
 
 In the client: **F5** runs the buffer, **F9** runs the statement at the cursor,
 **Ctrl+C** cancels, **F1** shows help, **Ctrl+Q** quits.

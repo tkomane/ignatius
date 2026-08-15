@@ -30,17 +30,16 @@ Never assume the repository is empty or that a summary of it is current. Check.
 ## Validating a change
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --lib
-
-docker compose -f docker/compose.yaml up -d
-export IGNATIUS_TEST_PG_URI="postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo"
-cargo test
+cargo xtask db up      # disposable server with synthetic fixtures
+cargo xtask verify     # every gate, collecting failures, with a summary
 ```
 
-Without `IGNATIUS_TEST_PG_URI` the integration tests skip and say so. A skip is
-not a pass: report it as a skip.
+`verify` runs formatting, lints, unit tests, the CLI contract and the integration
+tests, continuing past a failure so one run shows every problem. It exits
+non-zero if any gate failed.
+
+Without a running database the integration tests skip and both xtask and the
+tests say so. A skip is not a pass: report it as a skip.
 
 ## Handling secrets
 

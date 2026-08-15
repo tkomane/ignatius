@@ -16,9 +16,8 @@ See `docs/operations/local-development.md`. In short: a Rust toolchain, Docker
 for the disposable PostgreSQL server, and:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo xtask db up      # disposable PostgreSQL with synthetic fixtures
+cargo xtask verify     # every gate, with a summary
 ```
 
 ## What a good change looks like

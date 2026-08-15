@@ -9,9 +9,9 @@ before trusting anything else.
 **Current feature**: 001, foundation and proven vertical slice. Implemented and
 verified on macOS. Cross-platform verification is the main outstanding gap.
 
-**Product name**: `ignatius` is an internal codename. The naming gate in
-`docs/product/landscape.md` has not been run and must be before any public
-release. Renaming touches only `src/branding.rs`.
+**Product name**: Ignatius, confirmed by the owner on 2026-08-15. The
+availability check is recorded in `docs/product/landscape.md`. A trademark search
+and a domain remain outstanding before publishing; neither blocks development.
 
 ## Last green verification
 
@@ -60,14 +60,14 @@ These are real and none of them is hidden anywhere else:
 
 ## Decisions pending the owner
 
-1. **Product name.** Needs the naming gate before any public release. Nothing
-   else is blocked by it.
+1. **Publishing route.** Nothing has been pushed and no remote is configured.
+   See the options matrix in `docs/operations/release.md`.
 2. **libpq versus the pure-Rust driver.** ADR-0003 chose tokio-postgres and
-   accepted that service files, `.pgpass` and `verify-ca` become our work. If the
-   unsupported list in `docs/support/compatibility.md` stops shrinking, that
-   trade should be revisited before Feature 002 hardens around it.
-3. **Whether to publish at all, and where.** Nothing has been pushed. No remote
-   is configured.
+   accepted that service files, `.pgpass` and `verify-ca` become our work.
+   Revisiting it needs answers only the owner has, listed in ADR-0003 under
+   "What would change this decision". Worth settling before Feature 002 hardens
+   around the current choice.
+3. **Trademark search and domain**, before publishing only.
 
 ## Next actions, in order
 

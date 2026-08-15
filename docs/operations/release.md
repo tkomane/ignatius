@@ -4,6 +4,30 @@ Nothing has been released. This describes the intended process; every claim in i
 is a plan, not a fact, and no artefact may be described as signed, notarised or
 published until a real release proves it.
 
+## Publishing options
+
+Nothing has been published and no remote is configured. These are the routes, in
+increasing order of commitment. Each row assumes the ones above it.
+
+| Option | Effort | Ongoing cost | Reversible | Reaches | Needs first |
+| --- | --- | --- | --- | --- | --- |
+| **A. Stay local** | None | None | Fully | You | Nothing |
+| **B. Private GitHub remote** | Minutes | None | Fully | You, and anyone you invite | A repository |
+| **C. Public source, no artefacts** | Minutes | Issues arrive | Awkward: forks and clones persist | Anyone who builds it | Green CI on all three platforms |
+| **D. Tagged releases with binaries and checksums** | Hours | Every release, plus platform bug reports | Artefacts can be deleted, but people have them | Anyone who downloads | C, plus a signing decision |
+| **E. crates.io** | Under an hour | Versions are permanent and cannot be unpublished, only yanked | **No.** A published version is forever | Rust users, `cargo install` | D, plus a stable public API or a binary-only crate |
+| **F. Homebrew tap and Scoop** | Half a day each | A manifest update per release, forever | Yes: delete the tap | macOS and Windows users who expect a package manager | D, and a release cadence you can sustain |
+| **G. Homebrew core and Winget** | Days, plus review | Their standards, their timelines | Hard | Everyone | F, plus a user base that justifies it |
+
+**Recommendation: A now, B when convenient, C once CI is green on all three
+platforms.** Publishing source before Windows and Linux have ever been run would
+invite issues about platforms nobody has tested, which is the fastest way to
+spend a weekend on someone else's environment.
+
+D onwards should wait for a real 0.1.0 with the compatibility matrix filled in.
+E in particular is one-way: a published crates.io version can be yanked but never
+removed, so the name and the first public API arrive together and permanently.
+
 ## Release identity
 
 Six facts, none derived from another:
@@ -45,7 +69,8 @@ branch, or a CI run number.
 
 ## Before any public release
 
-- Run the naming gate in `docs/product/landscape.md`. `ignatius` is a codename.
+- Finish the naming work in `docs/product/landscape.md`: the name is confirmed
+  and the availability check is done, but no trademark search has been run.
 - Publish `SECURITY.md` with a working private reporting route.
 - Generate an SBOM and decide on signing and provenance. Until both are real, say
   so plainly rather than omitting the subject.

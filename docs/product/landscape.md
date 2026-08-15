@@ -148,12 +148,24 @@ you would trust next to production, and the tool you trust next to production
 
 ## Naming gate
 
-Not started. `ignatius` is an internal codename only. Before any public release,
-search GitHub, crates.io, Homebrew, Winget, Scoop, domain registrars and the
-relevant trademark databases; reject names that collide with an existing
-PostgreSQL project, are hard to type or say, or bind the product to one temporary
-feature.
+**Run on 2026-08-15. Name confirmed: Ignatius.**
 
-The rename is cheap by construction: every user-visible occurrence of the name
-resolves through `src/branding.rs`, so renaming touches no domain logic. This is
-tracked as a release-readiness item in `docs/product/roadmap.md`.
+| Check | Result |
+| --- | --- |
+| crates.io | `ignatius` unregistered |
+| Homebrew core | No formula named `ignatius` |
+| GitHub, database tooling | Zero repositories matching `ignatius postgres`. The 737 repositories with `ignatius` in the name are personal projects and unrelated products, the largest at 4 stars |
+| Domains | `ignatius.io` is registered and in use. `ignatius.sh` did not resolve; `ignatius.dev` had no address record. Registration status was not confirmed with a registrar |
+| Trademark databases | **Not checked.** No search was run against any trademark register |
+
+Against the rejection criteria: it does not collide with an existing PostgreSQL
+project, it is easy to type and to say, and it names nothing temporary about the
+product. It is a person's name, which carries no functional claim to outgrow.
+
+Residual work before publishing: confirm a domain, and run a trademark search in
+the relevant jurisdictions. Neither blocks development, and neither is something
+this project can answer from a terminal.
+
+Identity still resolves through `src/branding.rs`, now so that the binary name,
+display name, configuration directory, keyring service and `application_name`
+cannot drift apart.

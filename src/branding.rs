@@ -1,9 +1,12 @@
 //! Single source of truth for product identity.
 //!
-//! The public name has not passed the naming gate yet (see
-//! `docs/product/landscape.md`). `ignatius` is a provisional internal codename.
-//! Every user-visible occurrence of the name resolves through this module so the
-//! eventual rename touches no domain logic.
+//! The name is Ignatius, confirmed by the owner on 2026-08-15 after the
+//! availability check recorded in `docs/product/landscape.md`.
+//!
+//! Every user-visible occurrence still resolves through this module. That is not
+//! about renaming any more; it is so that the binary name, the display name, the
+//! configuration directory, the keyring service and the `application_name`
+//! reported to PostgreSQL can never drift apart.
 
 /// Name of the executable, as typed by the user.
 pub const BINARY_NAME: &str = "ignatius";
@@ -20,6 +23,7 @@ pub const CONFIG_DIR_NAME: &str = "ignatius";
 /// Service name used when a credential is stored in the OS credential store.
 ///
 /// Reserved for Feature 002; recorded here so the identifier has one owner.
+/// Changing it after release would orphan every stored credential.
 pub const KEYRING_SERVICE: &str = "ignatius";
 
 /// Default `application_name` reported to PostgreSQL, visible in `pg_stat_activity`.
