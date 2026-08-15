@@ -325,8 +325,18 @@ pub fn run(
         ));
         transaction = execution.transaction;
 
-        write_execution(out, &execution, &options).ok();
-        out.flush().ok();
+        // Stdout carries rows and nothing else, so a transcript can be piped
+        // into a file and still be data. A statement that returned no rows says
+        // what it did on stderr, in the outcome line below, rather than putting
+        // a second copy of the same sentence in with the data.
+        if execution
+            .statements
+            .iter()
+            .any(|statement| statement.result_set.is_some())
+        {
+            write_execution(out, &execution, &options).ok();
+            out.flush().ok();
+        }
 
         for statement in &execution.statements {
             for notice in &statement.notices {

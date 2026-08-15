@@ -776,6 +776,115 @@ mod with_server {
     }
 
     #[test]
+    fn plain_mode_cancels_a_running_statement_and_keeps_the_transcript_safe() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let mut child = binary()
+            .args(["--plain", "connect", &uri])
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"SELECT pg_sleep(30);\n\\q\n")
+            .expect("write");
+
+        // The plain client must ask the server to stop the statement rather
+        // than dying directly from SIGINT. The existing one-shot query test
+        // uses the same server-side timing convention.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        unsafe_free_interrupt(child.id());
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(
+            code(&output),
+            0,
+            "plain mode leaves after \\q: {}",
+            stderr(&output)
+        );
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+        assert!(data.is_empty(), "a cancelled statement wrote data: {data}");
+        assert!(messages.contains("Query cancelled by server"), "{messages}");
+        assert!(messages.contains("SQLSTATE: 57014"), "{messages}");
+        assert!(messages.contains("nothing was retried"), "{messages}");
+        assert!(!data.contains('\u{1b}'), "data contains a control sequence");
+        assert!(
+            !messages.contains('\u{1b}'),
+            "messages contain a control sequence"
+        );
+    }
+
+    #[test]
+    fn plain_mode_preserves_failed_transaction_recovery_in_the_transcript() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let mut child = binary()
+            .args(["--plain", "connect", &uri])
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"BEGIN;\nSELECT * FROM definitely_not_a_table;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(
+            code(&output),
+            0,
+            "plain mode leaves after \\q: {}",
+            stderr(&output)
+        );
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+        // Table formatting may report a no-row statement summary on stdout;
+        // the diagnostic itself must remain on the message stream.
+        assert!(
+            !data.contains("Query error"),
+            "diagnostic leaked to stdout: {data}"
+        );
+        assert!(!data.contains("42P01"), "SQLSTATE leaked to stdout: {data}");
+        for expected in [
+            "[in transaction]",
+            "Query error",
+            "SQLSTATE: 42P01",
+            "Likely cause:",
+            "Next:",
+            "[transaction failed]",
+            "ROLLBACK ends it",
+        ] {
+            assert!(
+                messages.contains(expected),
+                "{expected} missing from {messages}"
+            );
+        }
+        assert!(!data.contains('\u{1b}'), "data contains a control sequence");
+        assert!(
+            !messages.contains('\u{1b}'),
+            "messages contain a control sequence"
+        );
+    }
+
+    #[test]
     fn connect_check_reports_stages_and_succeeds_against_a_live_server() {
         let uri = uri_or_skip!();
         let output = binary()
