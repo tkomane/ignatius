@@ -6,7 +6,11 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: named connections. A `[profiles]` table says where a
+**Current feature**: a password prompt in plain mode, and named connections.
+Plain mode now asks without echoing when the server demands a password, on the
+same rule the client follows: a terminal at both ends or no question at all.
+
+**Previous**: named connections. A `[profiles]` table says where a
 database is and how it is classified, reached as `@name` or `--profile name`. The
 classification is the reason it exists: written down once, the production write
 guard applies every time. A profile that tries to hold a password is refused by
@@ -144,6 +148,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A pipe is never asked for a password | Subprocess test with stdin closed: it exits 5 rather than waiting |
 | A profile classified as production guards it | Subprocess test: the write is refused with no flag typed |
 | A profile cannot hold a password | Subprocess test: refused by name, and the value is not echoed |
 | A key binding that would do nothing is refused | Subprocess test: three broken files, each exiting 3 with what to fix |
@@ -178,11 +183,10 @@ These are real and none of them is hidden anywhere else:
 4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and are now the only
    remaining reason to adopt libpq. See the addendum in ADR-0009: the other four
    capabilities it was accepted for have been implemented natively.
-5. **No OS credential store, and no password prompt in plain mode.** The
-   full-screen client asks for a password when the server demands one. Plain
-   mode does not: it reports the refusal and relies on a password file, the
-   environment or the connection string. The credential store and connection
-   profiles do not exist at all.
+5. **No OS credential store.** Both surfaces ask for a password when the server
+   demands one, and profiles name connections, but nothing stores a credential
+   for you: the routes are a password file, the environment, the connection
+   string and the prompt.
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has

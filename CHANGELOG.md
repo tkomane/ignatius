@@ -17,7 +17,10 @@ source can generate user-facing notes.
   A profile that tries to hold a password is refused by name, with the routes
   that do exist, and the value is never repeated back.
 - When the server asks for a password and none was found, the client asks back
-  instead of only reporting it. The field shows how many characters have been
+  instead of only reporting it, in both surfaces: a masked field in the
+  full-screen client, and an unechoed line in plain mode. Neither asks a pipe:
+  the question needs a terminal at both ends, because a script that hangs
+  waiting for something nobody can type is worse than one that fails. The field shows how many characters have been
   typed and nothing else; what is typed goes into one connection attempt and is
   dropped with it, and is kept in no file, no configuration and no history. Its
   `Debug` prints `<hidden>`, so a panic or a test failure cannot spill it. A
