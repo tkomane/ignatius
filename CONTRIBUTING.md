@@ -16,9 +16,14 @@ See `docs/operations/local-development.md`. In short: a Rust toolchain, Docker
 for the disposable PostgreSQL server, and:
 
 ```bash
-cargo xtask db up      # disposable PostgreSQL with synthetic fixtures
-cargo xtask verify     # every gate, with a summary
+cargo xtask db up          # disposable PostgreSQL with synthetic fixtures
+cargo xtask verify         # every gate, with a summary
+cargo xtask install-hooks  # run those gates before every push
 ```
+
+Required status checks are not available on a private repository without a paid
+GitHub plan, so the pre-push hook is the local stand-in. CI runs on every push
+either way.
 
 ## What a good change looks like
 

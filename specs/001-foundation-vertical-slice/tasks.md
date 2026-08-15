@@ -75,11 +75,14 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T048 Threat model and data-handling documentation
 - [x] T049 Operations documentation: local development, verification, release
 - [x] T050 CI workflow for macOS, Windows and Linux
-- [ ] T051 Verify on Windows 11 in Windows Terminal with PowerShell 7
-- [ ] T052 Verify on Linux, including the Unix socket path
-- [ ] T053 Extend the CI server matrix to PostgreSQL 14 through 18
+- [ ] T051 Verify on Windows 11 in Windows Terminal with PowerShell 7 (CI builds and tests it; nobody has used it)
+- [ ] T052 Verify on Linux, including the Unix socket path (CI builds and tests it; the socket path is untested)
+- [x] T053 Extend the CI server matrix to PostgreSQL 14 through 18
 - [ ] T054 Subprocess-level evidence for exit codes 5, 6 and 8
 - [ ] T055 Automated terminal-restoration test in CI (pty on Unix, ConPTY on Windows)
+- [x] T056 Private repository with CI on three platforms and three server versions
+- [x] T057 Advertised keys that no operating system claims by default
+- [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
 
 ## Dependencies
 

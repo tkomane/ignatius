@@ -12,6 +12,7 @@
 //! cargo xtask test         Everything, including the integration tests
 //! cargo xtask verify       Every gate, collecting failures, with a summary
 //! cargo xtask install      Build a release binary and put it on PATH
+//! cargo xtask install-hooks  Run the gates before every push
 //! ```
 //!
 //! It has no dependencies on purpose: it runs before anything else is known to
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
         ["test"] => test(),
         ["verify"] => verify(),
         ["install", rest @ ..] => install(rest),
+        ["install-hooks"] => install_hooks(),
         other => Err(format!(
             "unknown task: {}\nRun `cargo xtask help` for the list.",
             other.join(" ")
@@ -66,6 +68,8 @@ fn print_help() {
   cargo xtask verify       Every gate, collecting failures, with a summary
   cargo xtask install [--dir PATH]
                            Build a release binary and put it on PATH
+  cargo xtask install-hooks
+                           Run the verification gates before every push
 
 The database credentials are synthetic and live in docker/dev.env."
     );
@@ -461,6 +465,22 @@ fn install(args: &[&str]) -> Result<(), String> {
         );
     }
     println!("\nRemove it again with:\n  rm {}", destination.display());
+    Ok(())
+}
+
+/// Points git at the version-controlled hooks directory.
+///
+/// Required status checks are not available on a private repository without a
+/// paid GitHub plan, so the same gates run locally before a push instead. Both
+/// are belt and braces: CI still runs on every push regardless.
+fn install_hooks() -> Result<(), String> {
+    run("git", &["config", "core.hooksPath", ".githooks"], &[])?;
+    println!(
+        "Installed. `cargo xtask verify` now runs before every push.
+
+Skip it deliberately with `git push --no-verify`.
+Remove it with `git config --unset core.hooksPath`."
+    );
     Ok(())
 }
 

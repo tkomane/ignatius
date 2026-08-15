@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs the same gates CI runs, before anything leaves the machine.
+#
+# Branch protection with required checks is not available on a private
+# repository without a paid GitHub plan, so this is the local stand-in. It is
+# opt-in: `cargo xtask install-hooks` points git at this directory.
+#
+# Skip it deliberately when you mean to: git push --no-verify
+set -e
+echo "pre-push: running the verification gates..."
+exec cargo xtask verify
