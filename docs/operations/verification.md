@@ -40,13 +40,21 @@ is not a pass.** Report it as a skip.
 
 macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against both the plain
 and TLS disposable services from `postgres:18.4-alpine`, at committed HEAD
-`49df20a`.
+`42aae86`.
 
-**Automated**: `cargo xtask verify` passed all five gates: formatting, lints,
-433 library tests, 33 CLI contract tests and 33 PostgreSQL integration tests.
-This run included Feature 005's editor coverage, Feature 004's expanded-row
-and cell-inspector coverage, the plain line-oriented client, plain-mode
-cancellation, and failed-transaction recovery transcript coverage.
+**Automated**: formatting clean, `cargo clippy --all-targets -- -D warnings`
+clean, 475 library tests, 38 CLI contract tests, 38 PostgreSQL integration tests
+and 3 pseudo-terminal tests, all passing. That run covers the editor and its
+undo, syntax colouring, the expanded row view and cell inspector, result
+filtering, the statement history and its refusals, object definitions and
+dependencies, the object tree's own read-only connection, connection profiles,
+the password prompt in both surfaces, and configurable key bindings.
+
+**Run directly rather than through `cargo xtask verify`.** The workspace's xtask
+crate was being edited concurrently by another tool at the time, so the five
+gates were run against the `ignatius` package individually. The gates are the
+same commands the xtask runs; what is missing is only the convenience of one
+invocation.
 
 **Terminal lifecycle, captured from a real pseudo-terminal.** The client was run
 under `script`, sent Ctrl+Q, and the byte stream captured. In order:

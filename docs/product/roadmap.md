@@ -7,15 +7,15 @@ vertical slice that leaves the product usable.
 | --- | --- | --- |
 | 001 Foundation and vertical slice | **Implemented, macOS-verified** | Architecture, terminal lifecycle, connection, execution, cancellation, CLI contract, doctor |
 | 002 Object navigation | **Implemented** | Object tree, command palette, chord popup, breadcrumbs, object symbolism. Built ahead of the libpq migration at the owner's request; it touches no credential route, so the two do not overlap |
-| 001a libpq migration | **Next**, per ADR-0009 and its decision gates | Enterprise authentication only if GSSAPI, Kerberos or Windows SSPI remains required; `.pgpass`, service files, `verify-ca` and client certificates are already implemented natively |
-| 003 Credential routes | **Password and service files done** | `.pgpass` and `pg_service.conf`, the driver-independent half of the connection experience |
-| 002 Connection experience and secrets | Mostly done | Profiles, password files, service files, TLS states, connection diagnostics and a password prompt in the client are in (`specs/009-connection-profiles/spec.md`). Remaining: an OS credential store and a first-run journey |
+| 001a libpq migration | Decision-gated, per ADR-0009 and ADR-0010 | Enterprise authentication only if GSSAPI, Kerberos or Windows SSPI remains required; `.pgpass`, service files, `verify-ca` and client certificates are already implemented natively |
+| 003 Credential routes | **Implemented** | `.pgpass` and `pg_service.conf`, the driver-independent half of the connection experience |
+| 002 Connection experience and secrets | Mostly done | Profiles, password files, service files, TLS states, connection diagnostics and a password prompt in the client are in (`specs/009-connection-profiles/spec.md`). `ignatius config init` writes a starter file. Remaining: an OS credential store, which ADR-0011 puts to the owner rather than assuming |
 | 003 Delightful query loop | **Implemented** | Query jobs, transaction state, the command palette, a real editor with undo and word movement, syntax colouring, and a statement history with privacy controls (`specs/005-sql-editing/spec.md`, `specs/006-statement-history/spec.md`) |
 | 004 Result exploration and export | Mostly done | Streaming export, the expanded row view, the cell inspector and result filtering are in. Remaining: copying a value out, which needs a decision on the clipboard route (see `specs/004-result-inspection/spec.md`) |
 | 005 PostgreSQL object explorer | **Implemented** | The tree with indexes and extensions in it, the palette, object definitions, dependency navigation, and a dedicated read-only connection for the tree (`specs/002-ide-navigation/spec.md`, `specs/007-object-definitions/spec.md`) |
 | 006 Production-aware safety | **Implemented** | Environment policy, write protection the server enforces, advisory statement classification, and a confirmation that asks for the database's own name before anything destructive. Privacy sessions are in: recording can be paused for a run or a session, and a paused session says so |
 | 007 Accessibility and terminal hardening | **Implemented** | Plain line-oriented mode, no-colour, ASCII and narrow layouts, colour and glyph choice from configuration or flags, and configurable key bindings. Remaining: hand-verification with a screen reader and on Windows Terminal, which is evidence rather than code |
-| 008 Release experience | Planned | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |
+| 008 Release experience | In planning, in `specs/008-release-experience/` | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |
 
 ## Before any public release
 
