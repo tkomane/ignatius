@@ -3,6 +3,14 @@
 ## The full command
 
 ```bash
+cargo xtask verify
+```
+
+It runs every gate below in the order that fails fastest, continues past a
+failure so one run surfaces every problem, prints a summary, and exits non-zero
+if any gate failed. Underneath it is exactly this:
+
+```bash
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --lib

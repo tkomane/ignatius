@@ -48,6 +48,35 @@ decoding to get wrong.
   connection is driven on a spawned task. Dropping that runtime closes the
   connection. This is documented on the type and enforced in the test fixture.
 
+## What would change this decision
+
+The trade is one thing against one thing: a single binary that depends on nothing
+on the user's machine, versus getting every libpq behaviour for free. Rebuilding
+libpq's surface ourselves is the price of the first.
+
+These questions decide it, and only the owner can answer them:
+
+1. **Client certificates.** Do any databases you reach require `sslcert` and
+   `sslkey`? Reimplementing certificate authentication is real work; libpq has it.
+2. **`verify-ca`.** Do you have a certificate setup where the chain is trusted but
+   the host name will not match, such as a load balancer or an internal PKI?
+3. **`.pgpass` and `pg_service.conf`.** Do you already rely on them, so that a
+   client which ignores them is a downgrade from `psql`?
+4. **Enterprise authentication.** Do you need GSSAPI, Kerberos or Windows SSPI?
+   These are substantial to implement and libpq already has them.
+5. **Cloud token authentication**, such as Entra ID for Azure Database for
+   PostgreSQL. This is additive either way and does not by itself decide the
+   question.
+6. **Distribution.** How much do you care that the binary depends on nothing? A
+   libpq dependency means either bundling it per platform or requiring the user
+   to have it, which changes what "install and run" means on Windows in
+   particular.
+
+If the answer to 1, 3 or 4 is yes for databases you use regularly, the balance
+moves towards libpq and this ADR should be superseded before Feature 002 builds
+profiles on top of the current model. If they are all no, the current choice
+stands and the remaining gaps are ordinary work.
+
 ## Reversibility
 
 Medium. Confined to `src/postgres`, which is the only module that knows the

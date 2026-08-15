@@ -1,0 +1,4 @@
+[alias]
+# Portable development tasks. `cargo xtask` works identically on macOS, Windows
+# and Linux, which is why there is no Makefile and no PowerShell twin.
+xtask = "run --quiet --package xtask --"

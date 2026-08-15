@@ -10,35 +10,57 @@
 
 Nothing else. There is no code generator, no database to install, and no account.
 
-## Getting a server
+## The short version
+
+```bash
+cargo xtask db up        # start the disposable database, wait for it, print the URI
+cargo xtask run          # open the client against it
+cargo xtask verify       # every gate, with a summary
+cargo xtask db down      # stop it and delete its data
+```
+
+`cargo xtask` is a small Rust program in `xtask/`, not a shell script, so the
+same commands work on macOS, Windows and Linux. It has no dependencies of its
+own, because it runs before anything else is known to work.
+
+## Every task
+
+| Command | What it does |
+| --- | --- |
+| `cargo xtask db up` | Starts `postgres:18.4-alpine` on port 55432, waits until it is really accepting connections, loads the synthetic fixtures, and prints the URI |
+| `cargo xtask db down` | Stops it and deletes its data |
+| `cargo xtask db status` | Whether it is running and ready |
+| `cargo xtask run [args]` | Opens the full-screen client against it |
+| `cargo xtask sql "SELECT 1"` | Runs one statement against it |
+| `cargo xtask test` | The whole suite. Says so if the database is absent and the integration tests will skip |
+| `cargo xtask verify` | Formatting, lints, unit tests, CLI contract, integration. Runs every gate even after one fails, then prints a summary and exits non-zero if any failed |
+| `cargo xtask install [--dir PATH]` | Builds a release binary and copies it to `~/.local/bin`, telling you whether that is on your PATH |
+
+## The disposable database
+
+`cargo xtask db up` starts a throwaway PostgreSQL with SCRAM-SHA-256 required and
+loads fixtures designed to exercise the parts that are easy to get wrong: an
+`orders` table, a `type_coverage` table with numerics, arrays, ranges, JSON,
+`bytea` and intervals, a `rendering_cases` table containing values built to break
+a naive renderer, and a `restricted_reader` role for permission tests.
+
+Credentials live in `docker/dev.env`. They are synthetic, deliberately committed,
+and exist only inside that container. Never point the test suite at a database
+you care about.
+
+Readiness is checked over TCP inside the container, not over the socket. During
+initialisation the entrypoint runs a temporary server with `listen_addresses`
+empty, so a socket check would report ready before the fixtures exist.
+
+## Running it by hand
+
+If you would rather not use xtask:
 
 ```bash
 docker compose -f docker/compose.yaml up -d
-docker compose -f docker/compose.yaml logs -f postgres   # wait for "ready"
-```
-
-This starts `postgres:18.4-alpine` on port 55432 with SCRAM-SHA-256 required, and
-loads synthetic fixtures: an `orders` table, a `type_coverage` table exercising
-the types the renderer has to handle, a `rendering_cases` table containing values
-designed to break a naive renderer, and a `restricted_reader` role for permission
-tests.
-
-Every credential in that file is synthetic and exists only inside the container.
-Never point the test suite at a database you care about.
-
-```bash
 export IGNATIUS_TEST_PG_URI="postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo"
-```
-
-Tear it down with `docker compose -f docker/compose.yaml down -v`.
-
-## Running it
-
-```bash
-cargo run -- doctor
-cargo run -- connect --check "$IGNATIUS_TEST_PG_URI"
-cargo run -- query "$IGNATIUS_TEST_PG_URI" -c "SELECT * FROM orders" --format csv
-cargo run -- "$IGNATIUS_TEST_PG_URI"        # the full-screen client
+cargo run -- connect "$IGNATIUS_TEST_PG_URI"
+cargo test
 ```
 
 ## Keeping your real configuration out of it
@@ -56,8 +78,7 @@ export IGNATIUS_CONFIG_DIR=$(mktemp -d)
 Off by default and writes nothing until asked:
 
 ```bash
-IGNATIUS_LOG=debug cargo run -- doctor
-cat "$(cargo run -q -- config paths | grep '^Logs:' | cut -d' ' -f2)/ignatius.log"
+IGNATIUS_LOG=debug cargo xtask sql "SELECT 1"
 ```
 
 Logs never contain SQL text or row values. If you need to see a statement while

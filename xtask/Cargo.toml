@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Development and release tasks for Ignatius"
+
+[dependencies]
+# Deliberately none. This runs before anything else is known to work, so it must
+# not be able to fail for a reason of its own.

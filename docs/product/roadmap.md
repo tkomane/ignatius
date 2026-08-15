@@ -16,7 +16,8 @@ vertical slice that leaves the product usable.
 
 ## Before any public release
 
-- **Run the naming gate.** `ignatius` is a codename. See
+- **Finish the naming work.** The availability check is done and the name is
+  confirmed; a trademark search and a domain are outstanding. See
   `docs/product/landscape.md`.
 - **Verify on Windows and Linux.** Currently authored but unverified.
 - **Run the full server matrix**, PostgreSQL 14 through 18.
