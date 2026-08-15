@@ -108,7 +108,7 @@ pub fn statement_at(sql: &str, byte_offset: usize) -> Option<Statement> {
 }
 
 /// Skips a `'...'` string, honouring the `''` escape and `E'...\'` escapes.
-fn skip_single_quoted(sql: &str, start: usize) -> usize {
+pub(crate) fn skip_single_quoted(sql: &str, start: usize) -> usize {
     let bytes = sql.as_bytes();
     // An E-prefixed string treats backslash as an escape character.
     let escaped = start > 0 && matches!(bytes[start - 1], b'e' | b'E');
@@ -125,7 +125,7 @@ fn skip_single_quoted(sql: &str, start: usize) -> usize {
 }
 
 /// Skips a `"..."` quoted identifier, honouring the `""` escape.
-fn skip_double_quoted(sql: &str, start: usize) -> usize {
+pub(crate) fn skip_double_quoted(sql: &str, start: usize) -> usize {
     let bytes = sql.as_bytes();
     let mut i = start + 1;
     while i < bytes.len() {
@@ -140,7 +140,7 @@ fn skip_double_quoted(sql: &str, start: usize) -> usize {
 
 /// Skips a `$tag$...$tag$` body. Returns `start` when this `$` is not a quote,
 /// for example the `$1` of a parameter placeholder.
-fn skip_dollar_quoted(sql: &str, start: usize) -> usize {
+pub(crate) fn skip_dollar_quoted(sql: &str, start: usize) -> usize {
     let bytes = sql.as_bytes();
     let mut i = start + 1;
     while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
@@ -159,14 +159,14 @@ fn skip_dollar_quoted(sql: &str, start: usize) -> usize {
         .map_or(bytes.len(), |rel| i + 1 + rel + tag.len())
 }
 
-fn skip_line_comment(sql: &str, start: usize) -> usize {
+pub(crate) fn skip_line_comment(sql: &str, start: usize) -> usize {
     sql[start..]
         .find('\n')
         .map_or(sql.len(), |rel| start + rel + 1)
 }
 
 /// Skips `/* ... */`, which PostgreSQL allows to nest.
-fn skip_block_comment(sql: &str, start: usize) -> usize {
+pub(crate) fn skip_block_comment(sql: &str, start: usize) -> usize {
     let bytes = sql.as_bytes();
     let mut depth = 0usize;
     let mut i = start;

@@ -552,46 +552,99 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
         .saturating_sub(1)
         .saturating_sub(height.saturating_sub(1));
 
-    let rendered: Vec<Line> = lines
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(height)
-        .map(|(index, source)| {
-            let number = index + 1;
-            let mut spans = vec![Span::styled(
+    // Colouring is decoration over the same bytes, so it is computed from the
+    // buffer here rather than stored anywhere.
+    let syntax = crate::query::highlight::tokens(text);
+    // The statement Ctrl+T would run, marked in the gutter. Knowing which one
+    // that is before pressing the key is the point.
+    let current = crate::query::statements::statement_at(text, model.editor.cursor());
+    let marker = if presentation.glyphs.is_ascii() {
+        "|"
+    } else {
+        "\u{258e}"
+    };
+
+    let mut line_start = 0usize;
+    let mut rendered: Vec<Line> = Vec::with_capacity(height);
+    for (index, source) in lines.iter().enumerate() {
+        let number = index + 1;
+        let start = line_start;
+        // Every line advances the offset, including the ones scrolled past, so
+        // the highlighting stays aligned with the text.
+        line_start += source.len() + 1;
+        if number <= offset || number > offset + height {
+            continue;
+        }
+
+        let in_statement = current
+            .as_ref()
+            .is_some_and(|s| start < s.end.max(s.start + 1) && start + source.len() >= s.start);
+        let mut spans = vec![
+            Span::styled(
                 format!("{number:>gutter$} "),
-                theme.style(Token::Muted),
-            )];
-            let safe = sanitize_for_display(source);
+                theme.style(if number == cursor_line {
+                    Token::Text
+                } else {
+                    Token::Muted
+                }),
+            ),
+            Span::styled(
+                if in_statement { marker } else { " " },
+                theme.style(Token::Focus),
+            ),
+        ];
+
+        // Styles are decided per character and then merged into runs, because a
+        // token can be split by the cursor and a character can be escaped into
+        // several. Merging keeps the buffer of spans small.
+        let mut run = String::new();
+        let mut run_style: Option<Style> = None;
+        for (column, (byte, ch)) in source.char_indices().enumerate() {
             // A block cursor drawn by the renderer, because the terminal's own
             // cursor is hidden while the alternate screen is in use. Without it
             // the editor would have no visible caret at all.
-            if focused && number == cursor_line {
-                let split = safe
-                    .char_indices()
-                    .nth(cursor_column - 1)
-                    .map_or(safe.len(), |(i, _)| i);
-                let (before, rest) = safe.split_at(split);
-                let mut chars = rest.chars();
-                let under = chars.next();
-                spans.push(Span::styled(before.to_owned(), theme.style(Token::Text)));
-                spans.push(Span::styled(
-                    under.map_or_else(|| " ".to_owned(), |c| c.to_string()),
-                    theme.style(Token::Selection),
-                ));
-                spans.push(Span::styled(
-                    chars.as_str().to_owned(),
-                    theme.style(Token::Text),
-                ));
+            let is_cursor = focused && number == cursor_line && column + 1 == cursor_column;
+            let style = if is_cursor {
+                theme.style(Token::Selection)
             } else {
-                spans.push(Span::styled(safe, theme.style(Token::Text)));
+                theme.style(syntax_token(crate::query::highlight::kind_at(
+                    &syntax,
+                    start + byte,
+                )))
+            };
+            if run_style != Some(style) {
+                if let Some(previous) = run_style {
+                    spans.push(Span::styled(std::mem::take(&mut run), previous));
+                }
+                run_style = Some(style);
             }
-            Line::from(spans)
-        })
-        .collect();
+            run.push_str(&sanitize_for_display(&ch.to_string()));
+        }
+        if let Some(previous) = run_style {
+            spans.push(Span::styled(run, previous));
+        }
+        // The cursor sitting past the last character still needs somewhere to be.
+        if focused && number == cursor_line && cursor_column > source.chars().count() {
+            spans.push(Span::styled(" ", theme.style(Token::Selection)));
+        }
+
+        rendered.push(Line::from(spans));
+    }
 
     Paragraph::new(rendered).render(inner, buf);
+}
+
+/// The theme token that draws a syntax kind.
+const fn syntax_token(kind: crate::query::highlight::TokenKind) -> Token {
+    use crate::query::highlight::TokenKind as Kind;
+    match kind {
+        Kind::Keyword => Token::SyntaxKeyword,
+        Kind::Literal => Token::SyntaxLiteral,
+        Kind::Number => Token::SyntaxNumber,
+        Kind::Comment => Token::SyntaxComment,
+        Kind::Identifier => Token::SyntaxIdentifier,
+        Kind::Plain => Token::Text,
+    }
 }
 
 // ------------------------------------------------------------------ results
@@ -2134,7 +2187,100 @@ mod tests {
         // Line numbers keep counting from the buffer, not from the window.
         model.editor.move_buffer_end();
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
-        assert!(text.contains("200 -- line 200"), "{text}");
+        assert!(text.contains("200"), "{text}");
+        assert!(text.contains("-- line 200"), "{text}");
+        assert!(
+            !text.contains("199 -- line 200"),
+            "numbers match their lines"
+        );
+    }
+
+    #[test]
+    fn sql_is_coloured_by_what_it_is_and_the_text_is_unchanged() {
+        let sql = "-- a note\nSELECT 42, 'x' FROM \"T\" WHERE id = $1;";
+        let mut model = connected_model(Environment::Local);
+        model.editor.set_text(sql);
+
+        // Whatever the colouring does, the buffer reads exactly as typed.
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        for fragment in ["-- a note", "SELECT 42, 'x' FROM \"T\" WHERE id = $1;"] {
+            assert!(text.contains(fragment), "{text}");
+        }
+
+        // And the colours are the ones the kinds ask for.
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        render(&model, &Keymap::new(), &rich(), area, &mut buf);
+        let theme = rich().theme;
+        let colour_of = |needle: &str| -> ratatui::style::Color {
+            let text = buffer_to_string(&buf);
+            let line_index = text
+                .lines()
+                .position(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} is not on screen:\n{text}"));
+            let line = text.lines().nth(line_index).expect("a line");
+            // The line holds multi-byte glyphs, so the screen column is the
+            // display width of what precedes the needle, not its byte offset.
+            let byte = line.find(needle).expect("a column");
+            let column = display_width(&line[..byte]);
+            buf[(
+                u16::try_from(column).unwrap_or(0),
+                u16::try_from(line_index).unwrap_or(0),
+            )]
+                .fg
+        };
+        assert_eq!(
+            colour_of("-- a note"),
+            theme.rgb(Token::SyntaxComment).into()
+        );
+        assert_eq!(colour_of("42"), theme.rgb(Token::SyntaxNumber).into());
+        assert_eq!(colour_of("\'x\'"), theme.rgb(Token::SyntaxLiteral).into());
+        assert_eq!(colour_of("FROM"), theme.rgb(Token::SyntaxKeyword).into());
+        assert_eq!(
+            colour_of("$1"),
+            theme.rgb(Token::SyntaxIdentifier).into(),
+            "a placeholder is not a number"
+        );
+    }
+
+    #[test]
+    fn the_statement_the_run_key_would_send_is_marked_in_the_gutter() {
+        let mut model = connected_model(Environment::Local);
+        model.editor.set_text("SELECT 1;\nSELECT 2;");
+        model.editor.move_buffer_start();
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        let marked: Vec<&str> = text
+            .lines()
+            .filter(|line| line.contains("\u{258e}SELECT"))
+            .collect();
+        assert_eq!(marked.len(), 1, "one statement is marked: {text}");
+        assert!(marked[0].contains("SELECT 1"), "{:?}", marked[0]);
+
+        // Moving the cursor moves the mark, because the mark is the answer to
+        // "what would Ctrl+T run".
+        model.editor.move_buffer_end();
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        let marked: Vec<&str> = text
+            .lines()
+            .filter(|line| line.contains("\u{258e}SELECT"))
+            .collect();
+        assert_eq!(marked.len(), 1);
+        assert!(marked[0].contains("SELECT 2"), "{:?}", marked[0]);
+
+        // In ASCII the mark is still there, in ASCII.
+        let ascii = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            100,
+            30,
+        );
+        assert!(ascii.contains("|SELECT 2"), "{ascii}");
+        assert!(
+            ascii.is_ascii(),
+            "the ASCII tier emitted something that is not ASCII"
+        );
     }
 
     #[test]

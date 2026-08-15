@@ -49,6 +49,16 @@ pub enum Token {
     Selection,
     /// Column headers.
     Header,
+    /// A SQL keyword in the editor.
+    SyntaxKeyword,
+    /// A string or dollar-quoted literal in the editor.
+    SyntaxLiteral,
+    /// A numeric literal in the editor.
+    SyntaxNumber,
+    /// A comment in the editor.
+    SyntaxComment,
+    /// A quoted identifier or parameter placeholder in the editor.
+    SyntaxIdentifier,
 }
 
 impl Token {
@@ -71,6 +81,11 @@ impl Token {
         Self::NullValue,
         Self::Selection,
         Self::Header,
+        Self::SyntaxKeyword,
+        Self::SyntaxLiteral,
+        Self::SyntaxNumber,
+        Self::SyntaxComment,
+        Self::SyntaxIdentifier,
     ];
 }
 
@@ -153,7 +168,13 @@ impl Theme {
                 Token::Danger | Token::EnvironmentProduction | Token::TransactionFailed => {
                     Style::default().add_modifier(Modifier::BOLD)
                 }
-                Token::Muted | Token::NullValue => Style::default().add_modifier(Modifier::DIM),
+                Token::Muted | Token::NullValue | Token::SyntaxComment => {
+                    Style::default().add_modifier(Modifier::DIM)
+                }
+                // Keywords stay emphasised without colour. The rest of the
+                // syntax tokens are plain text, because a buffer where every
+                // second word is bold is harder to read, not easier.
+                Token::SyntaxKeyword => Style::default().add_modifier(Modifier::BOLD),
                 _ => Style::default(),
             };
         }
@@ -165,7 +186,9 @@ impl Theme {
             Token::Header | Token::Focus | Token::EnvironmentProduction => {
                 style.add_modifier(Modifier::BOLD)
             }
-            Token::Muted | Token::NullValue => style.add_modifier(Modifier::DIM),
+            Token::Muted | Token::NullValue | Token::SyntaxComment => {
+                style.add_modifier(Modifier::DIM)
+            }
             _ => style,
         }
     }
@@ -189,6 +212,11 @@ const fn dark(token: Token) -> Rgb {
         Token::NullValue => Rgb(0x8b, 0x93, 0xa1),
         Token::Selection => Rgb(0x9a, 0xb8, 0xe8),
         Token::Header => Rgb(0xc8, 0xd3, 0xe3),
+        Token::SyntaxKeyword => Rgb(0xc9, 0x9c, 0xf0),
+        Token::SyntaxLiteral => Rgb(0x9e, 0xd6, 0x7e),
+        Token::SyntaxNumber => Rgb(0xf0, 0xc0, 0x74),
+        Token::SyntaxComment => Rgb(0x8b, 0x95, 0xa6),
+        Token::SyntaxIdentifier => Rgb(0x7d, 0xcf, 0xff),
     }
 }
 
@@ -212,6 +240,11 @@ const fn light(token: Token) -> Rgb {
         Token::NullValue => Rgb(0x60, 0x6a, 0x78),
         Token::Selection => Rgb(0x33, 0x5b, 0xa8),
         Token::Header => Rgb(0x2b, 0x32, 0x3d),
+        Token::SyntaxKeyword => Rgb(0x6b, 0x21, 0xa8),
+        Token::SyntaxLiteral => Rgb(0x0e, 0x63, 0x3e),
+        Token::SyntaxNumber => Rgb(0x7a, 0x4d, 0x00),
+        Token::SyntaxComment => Rgb(0x5d, 0x66, 0x73),
+        Token::SyntaxIdentifier => Rgb(0x0a, 0x55, 0x74),
     }
 }
 
@@ -227,6 +260,11 @@ const fn high_contrast(token: Token) -> Rgb {
         }
         Token::Info => Rgb(0x7d, 0xf0, 0xff),
         Token::Selection => Rgb(0xff, 0xff, 0xff),
+        Token::SyntaxKeyword => Rgb(0xb5, 0xd0, 0xff),
+        Token::SyntaxLiteral => Rgb(0x5c, 0xff, 0xa8),
+        Token::SyntaxNumber => Rgb(0xff, 0xff, 0x00),
+        Token::SyntaxComment => Rgb(0xd0, 0xd0, 0xd0),
+        Token::SyntaxIdentifier => Rgb(0x7d, 0xf0, 0xff),
     }
 }
 

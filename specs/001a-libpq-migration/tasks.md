@@ -105,10 +105,19 @@ before release evidence. Phase 7 follows all approved story gates.
 
 ## Shared-worktree coordination
 
-- This package changes only `docs/architecture/decisions/0010-*` and the new
-  `specs/001a-libpq-migration/` directory at planning time.
-- Claude's active Feature 004 paths and Feature 007 test reservation are not
-  part of this feature and must not be staged, reset or reformatted by 001a.
+- This package changes only `docs/architecture/decisions/0010-*`, the new
+  `specs/001a-libpq-migration/` directory and explicitly named roadmap/status/
+  verification documentation at planning time.
+- Live handoff on 2026-08-16: Claude's Feature 005 SQL-editing slice is now
+  integrated in `555203f`, including `src/app/editor.rs`, the editor actions,
+  the keymap/layout changes and `specs/005-sql-editing/spec.md`. Those paths
+  are not part of this feature and must not be staged, reset, reformatted or
+  edited by 001a while Claude continues. Claude also has a new untracked
+  syntax-highlighting slice in `src/query/highlight.rs`, `src/query/mod.rs`,
+  `src/query/statements.rs`, `src/ui/layout.rs` and `src/ui/theme.rs`. The
+  completed Feature 007 T030/T031 reservation has ended. Codex separately owns
+  the new Feature 005 planning artifacts under `specs/005-sql-editing/` and
+  must not overlap Claude's source work.
 - Do not create `.specify/feature.json` for this package while another feature
   is active; its explicit directory is the source of truth for this planning
   handoff.

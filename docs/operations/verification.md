@@ -42,10 +42,10 @@ macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against both the plain
 and TLS disposable services from `postgres:18.4-alpine`.
 
 **Automated**: `cargo xtask verify` passed all five gates: formatting, lints,
-385 library tests, 31 CLI contract tests and 33 PostgreSQL integration tests.
-This run included Feature 004's expanded-row and cell-inspector coverage, the
-plain line-oriented client, plain-mode cancellation, and failed-transaction
-recovery transcript coverage.
+402 library tests, 31 CLI contract tests and 33 PostgreSQL integration tests.
+This run included Feature 005's editor coverage, Feature 004's expanded-row
+and cell-inspector coverage, the plain line-oriented client, plain-mode
+cancellation, and failed-transaction recovery transcript coverage.
 
 **Terminal lifecycle, captured from a real pseudo-terminal.** The client was run
 under `script`, sent Ctrl+Q, and the byte stream captured. In order:
@@ -89,6 +89,11 @@ transaction recovery wording and screen-reader-safe output.
 - **Panic and signal restoration as a process-level claim.** The RAII and panic
   paths are covered in code and unit tests; only the normal Unix pty path is
   exercised end to end here.
+- **Feature 005 editor acceptance.** The editor unit tests pass, but the
+  committed key path still calls `Editor::insert('\n')` instead of the
+  indentation-preserving newline method, and cursor movement does not end an
+  undo coalescing run. The focused keymap and real eight-line terminal
+  acceptance checks remain open with Claude's source follow-up.
 
 These are tracked in `docs/status.md`.
 

@@ -10,9 +10,10 @@
 editor" half of roadmap Feature 003, *Delightful query loop*; the history half,
 with its privacy controls, is still to come.
 
-**Scope note**: this is editing and movement, not syntax highlighting. Colouring
-SQL is a separate slice with its own risks, and an editor that highlights
-beautifully but cannot move the cursor up a line is not an editor.
+**Scope note**: editing and movement came first, and syntax colouring followed in
+the same feature once they were in. An editor that colours beautifully but cannot
+move the cursor up a line is not an editor, which is why the order was that way
+round.
 
 ## User Scenarios & Testing
 
@@ -104,10 +105,23 @@ Editing `orders.customer_id` means moving over parts of it, not characters.
 - **UX-504**: Word movement MUST be bound with both `Ctrl` and `Alt`, because
   terminals disagree about which one that gesture sends.
 
+### Colouring
+
+- **FR-508**: The editor MUST colour keywords, literals, numbers, comments,
+  quoted identifiers and parameter placeholders.
+- **FR-509**: Colouring MUST use the statement lexer's quoting rules, so what is
+  shown as a string is what will be sent as one.
+- **FR-510**: The gutter MUST mark the statement the run-statement key would
+  send.
+- **UX-505**: Colouring MUST change no character of the buffer, and its absence
+  MUST cost no meaning.
+
 ### Security
 
 - **SEC-501**: No editing operation may split a character or index outside the
   buffer.
+- **SEC-502**: Colouring MUST NOT be used to decide anything. What a statement
+  does is decided by the classifier, and where it ends by the statement lexer.
 
 ## Success Criteria
 
@@ -116,6 +130,8 @@ Editing `orders.customer_id` means moving over parts of it, not characters.
 - **SC-502**: A deleted word can be recovered in one keystroke.
 - **SC-503**: A two-hundred-line buffer can be navigated end to end, and the
   line numbers are right at both ends.
+- **SC-504**: A buffer's text can be rebuilt exactly from its colour tokens.
+- **SC-505**: A keyword inside a string is coloured as part of the string.
 
 ## Assumptions
 

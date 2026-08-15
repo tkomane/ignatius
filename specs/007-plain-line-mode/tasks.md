@@ -118,7 +118,7 @@ verification gaps without claiming more than has been proven.
 
 - [x] T027 [P] Add the feature requirements-quality checklist in `specs/007-plain-line-mode/checklists/requirements.md`
 - [x] T028 [P] Record combined automated verification and its evidence boundary in `docs/operations/verification.md`
-- [x] T029 Run `cargo xtask verify` with both disposable PostgreSQL services and record 385 library, 31 CLI-contract and 33 integration tests
+- [x] T029 Run `cargo xtask verify` with both disposable PostgreSQL services and record 402 library, 31 CLI-contract and 33 integration tests
 - [x] T030 [US3] Add a plain-mode subprocess cancellation test in `tests/cli_contract.rs`
 - [x] T031 [US3] Add a plain-mode failed-transaction transcript test in `tests/cli_contract.rs`
 - [ ] T032 [P] Hand-verify plain mode with a screen reader on macOS and Windows, recording the exact environment in `docs/support/compatibility.md`
@@ -197,13 +197,17 @@ Owner: T008-T011 - integrate the line session and preserve the default route
 - Before any further edit, inspect `git status --short`; do not stage, reset,
   overwrite or reformat the other agent's paths.
 
-**Live handoff on 2026-08-16**: Claude Code is actively implementing Feature
-004 in `src/app/`, `src/query/value.rs`, `src/ui/` and
-`specs/004-result-inspection/`. Codex is not editing those paths. The CLI
-contract file is currently clean and has no active Claude process, so Codex is
-reserving only T030 and T031 there; Claude should not edit those test sections
-while this reservation stands. T032 through T034 require platform evidence
-that is not available in this macOS session. Re-check this note and
+**Live handoff on 2026-08-16**: Claude's Feature 005 SQL-editing slice is now
+integrated in `555203f`, including the editor implementation and
+`specs/005-sql-editing/spec.md`. Claude also has an active syntax-highlighting
+slice in `src/query/highlight.rs`, `src/query/mod.rs`,
+`src/query/statements.rs`, `src/ui/layout.rs` and `src/ui/theme.rs`. Codex is
+not editing those paths or any
+follow-up Feature 005 artifacts while Claude continues. T030 and T031 are
+complete and their previous test-file reservation has ended. Codex's current
+work includes the 001a and Feature 005 planning packages plus the
+roadmap/status/verification documentation corrections. T032 through T034 require platform
+evidence that is not available in this macOS session. Re-check this note and
 `git status --short` before claiming or taking any remaining task.
 
 ## Notes

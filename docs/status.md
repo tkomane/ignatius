@@ -6,7 +6,10 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: a real editor for the SQL buffer. Vertical movement with a
+**Current feature**: syntax colouring, and a real editor for the SQL buffer.
+Keywords, literals, numbers, comments, quoted identifiers and placeholders are
+coloured from the statement lexer's own rules rather than a second set, and a bar
+in the gutter marks the statement `Ctrl+T` would run. Vertical movement with a
 remembered column, line and buffer ends, word movement and deletion, movement by
 a screenful, and undo and redo a word at a time including over loaded text. The
 window follows the cursor rather than being stored, so there is one source of
@@ -63,7 +66,7 @@ against `postgres:18.4-alpine` both plain and with TLS.
 | Gate | Result |
 | --- | --- |
 | `cargo xtask verify` | All five gates pass |
-| Library tests | 385 passed |
+| Library tests | 402 passed |
 | CLI contract tests | 31 passed |
 | PostgreSQL integration tests | 33 passed |
 | Terminal restoration, in a pty | 3 passed |
@@ -90,6 +93,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| Colouring never alters the buffer | Property test rebuilding the text from its tokens |
 | A buffer of any length can be navigated | Layout test: the window follows the cursor and the line numbers stay right |
 | A deleted word comes back | Reducer test through the real key actions |
 | A value is never abbreviated without recourse | The inspector renders it whole, wrapped, with its position stated |
@@ -135,6 +139,15 @@ These are real and none of them is hidden anywhere else:
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
+11. **Feature 005 editor acceptance is not complete despite the committed
+    implementation.** A direct audit of `555203f` found that Enter routes to
+    `Editor::insert('\n')` rather than `Editor::insert_newline()`, so the
+    indentation requirement is not wired through the real key path. Cursor
+    movement also does not end an undo coalescing run, so typing on both sides
+    of a move can share one undo step. Focused keymap coverage and a real
+    eight-line terminal acceptance scenario are still absent. Claude owns the
+    source follow-up in `src/app/` and `src/ui/`; do not claim Feature 005
+    complete until those paths are corrected and reverified.
 
 ## Decisions taken
 

@@ -75,6 +75,24 @@ become an unrecorded partial migration.
 - No claim of GSSAPI, Kerberos or Windows SSPI support is valid until a real
   server-backed test proves it on the named platform.
 
+## Packaging options to validate
+
+This is an evidence matrix, not a packaging decision. The current repository
+has no native libpq dependency or clean-install result, so T010 remains open.
+
+| Platform | Host discovery to test | Bundled dependency to test | Evidence required before selection |
+| --- | --- | --- | --- |
+| macOS | `PQ_LIB_DIR`, `pkg-config` or `pg_config`, with the target architecture checked | A `pq-sys` bundled build with the selected TLS implementation | Clean Apple silicon artifact, load-path identity, TLS connection, missing-library diagnostic and notarisation implications |
+| Linux | Target-specific `PQ_LIB_DIR`, `pkg-config` or `pg_config` | A bundled build with the libc and TLS assumptions recorded | Clean glibc and any supported musl artifact, architecture identity, dependency closure and repairable missing-library diagnostic |
+| Windows MSVC | `vcpkg` and an explicitly documented `VCPKG_ROOT` or equivalent release prerequisite | Bundled libpq and TLS libraries with the MSVC runtime and DLL search path recorded | Clean Windows Terminal install, x64 or approved architecture identity, no uncontrolled DLL search, TLS connection and missing-dependency repair path |
+
+Both paths must preserve the application's explicit trust rule: the loader may
+not silently search an unbounded or user-controlled directory. The selected
+path must also identify the libpq and TLS versions in the artifact evidence and
+allow the dependency to be updated or revoked without an undocumented user
+action. These are validation criteria only; they do not approve discovery,
+bundling or a particular crate.
+
 ## Decision gates before implementation
 
 1. The owner confirms that the remaining enterprise authentication capability
