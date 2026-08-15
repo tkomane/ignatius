@@ -222,7 +222,7 @@ pub fn run(
         })?;
 
     let timeout = std::time::Duration::from_millis(config.query.statement_timeout_ms);
-    let session = runtime.block_on(crate::postgres::connect(&target, timeout))?;
+    let session = connect_or_ask(&runtime, target, timeout, err)?;
     let info = session.info().clone();
 
     writeln!(
@@ -375,6 +375,42 @@ pub fn run(
             }
         }
     }
+}
+
+/// Opens the connection, asking for a password if the server wants one.
+///
+/// The ask happens only when there is a terminal at both ends. A script must
+/// fail rather than hang waiting for something nobody can type, which is why
+/// the question is asked once, of a person, and never of a pipe.
+fn connect_or_ask(
+    runtime: &tokio::runtime::Runtime,
+    target: crate::connection::ConnectionTarget,
+    timeout: std::time::Duration,
+    err: &mut impl std::io::Write,
+) -> Result<crate::postgres::Session, crate::diagnostics::Diagnostic> {
+    let first = runtime.block_on(crate::postgres::connect(&target, timeout));
+    let diagnostic = match first {
+        Ok(session) => return Ok(session),
+        Err(diagnostic) => diagnostic,
+    };
+
+    if diagnostic.kind != crate::diagnostics::DiagnosticKind::Authentication
+        || !crate::cli::prompt::can_ask()
+    {
+        return Err(diagnostic);
+    }
+
+    writeln!(err, "{}", diagnostic.headline).ok();
+    let question = format!("Password for {}: ", target.safe_display());
+    let Some(password) = crate::cli::prompt::read_password(&question, err)? else {
+        // Choosing not to answer leaves the original refusal, which is the
+        // truthful outcome rather than a new error about the prompt.
+        return Err(diagnostic);
+    };
+
+    // The password goes into one attempt and is dropped with it.
+    let retry = target.with_password(secrecy::SecretString::from(password));
+    runtime.block_on(crate::postgres::connect(&retry, timeout))
 }
 
 /// One line describing what this session is and what protects it.

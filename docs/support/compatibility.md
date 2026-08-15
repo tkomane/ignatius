@@ -27,9 +27,10 @@ exercised, so they are expected to work rather than known to.
 
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and
-none was found, the full-screen client asks for one and tries again. Plain mode
-does not prompt, and the OS credential store does not exist yet. A connection
-profile never holds a password and says so if one is written into it.
+none was found, both the full-screen client and plain mode ask for one, without
+echoing it, and try again. Neither asks unless there is a terminal at both ends,
+so a script fails rather than hanging. The OS credential store does not exist
+yet, and a connection profile never holds a password.
 
 A password file that is readable by anyone but its owner is **not used**, and the
 client says so and gives the `chmod` that fixes it. A file that is found but

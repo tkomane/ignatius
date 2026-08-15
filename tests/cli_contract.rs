@@ -583,6 +583,45 @@ mod with_server {
     }
 
     #[test]
+    fn plain_mode_never_asks_a_pipe_for_a_password() {
+        // The rule that keeps a script from hanging: the question is asked of a
+        // person or not at all. This test would not finish if that were wrong.
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let Some((prefix, rest)) = uri.split_once("://") else {
+            panic!("expected a URI");
+        };
+        let Some((_, host_and_db)) = rest.split_once('@') else {
+            eprintln!("skipping: the test URI has no userinfo to replace");
+            return;
+        };
+        let wrong = format!("{prefix}://ignatius_test:definitely-the-wrong-password@{host_and_db}");
+
+        let child = binary()
+            .args(["--plain", "connect", &wrong])
+            .env("TERM", "dumb")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+        let output = child.wait_with_output().expect("wait");
+
+        assert_eq!(
+            code(&output),
+            5,
+            "it fails as an authentication problem rather than waiting: {}",
+            stderr(&output)
+        );
+        assert!(
+            !stderr(&output).contains("Password for"),
+            "nothing was asked of a pipe: {}",
+            stderr(&output)
+        );
+    }
+
+    #[test]
     fn a_wrong_password_exits_with_the_authentication_code() {
         let uri = uri_or_skip!();
         let Some((prefix, rest)) = uri.split_once("://") else {

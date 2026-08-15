@@ -7,6 +7,7 @@
 pub mod interactive;
 pub mod output;
 pub mod plain;
+pub mod prompt;
 
 use crate::ExitCode;
 use crate::branding;
