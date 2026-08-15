@@ -18,6 +18,13 @@ The authority is `src/ui/theme.rs`.
 | `TransactionActive`, `TransactionFailed` | Transaction state |
 | `NullValue` | SQL NULL, distinct from an empty string |
 | `Selection`, `Header` | Selected row; column headers |
+| `SyntaxKeyword`, `SyntaxLiteral`, `SyntaxNumber`, `SyntaxComment`, `SyntaxIdentifier` | SQL colouring in the editor |
+
+The syntax tokens hold to the same contrast thresholds as everything else, which
+is why they are muted rather than the saturated colours a screenshot would
+flatter. With colour off, keywords keep a bold weight and comments a dim one and
+the rest is plain text: a buffer where every second word is emphasised is harder
+to read, not easier. Nothing about the meaning of the SQL depends on any of it.
 
 ## The three palettes
 

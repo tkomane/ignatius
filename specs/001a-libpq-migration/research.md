@@ -100,6 +100,12 @@ compare a safe wrapper over libpq with the lower-level `pq-sys` bindings against
 the existing `tokio-postgres` baseline. No candidate is approved by this
 research entry.
 
+**Repository baseline**: `Cargo.toml` currently contains `tokio-postgres`
+0.7.18 and no libpq-family crate. The connection-target resolver explicitly
+rejects `gssencmode` and `krbsrvname`, so the migration cannot claim to preserve
+those options by accident; the approved route and its compatibility mapping
+must be specified before any dependency is added.
+
 | Candidate | Evidence checked | Fit for this repository | Open gate |
 | --- | --- | --- | --- |
 | `libpq` with `libpq-sys` | The published `libpq` crate describes itself as a safe binding, depends on `libpq-sys`, and is MIT licensed. The indexed 6.0.1 release had 79.34% item documentation and only two examples. PostgreSQL's libpq connection options include `gss` and `sspi`. | The smallest initial unsafe surface if its safe API exposes the required authentication, async-result and cancellation operations. | Prove that the wrapper exposes the required GSSAPI or SSPI route, notices, result draining, cancellation and shutdown on all target platforms. Treat documentation coverage as a maintenance signal, not a safety proof. |

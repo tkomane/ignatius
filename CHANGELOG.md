@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Syntax colouring in the editor: keywords, string and dollar-quoted literals,
+  numbers, comments, quoted identifiers and `$1` placeholders. It shares the
+  statement lexer's quoting rules rather than having its own, so what is
+  coloured as a string is what will be sent as one. A bar in the gutter marks
+  the statement `Ctrl+T` would run, so which one that is no longer has to be
+  guessed. All of it is decoration: with colour off, the buffer reads the same.
 - A real editor for the SQL buffer. The cursor moves up and down with a
   remembered column, to the start and end of a line or the buffer, by word, and
   by a screenful of whatever the pane can actually show. Delete works forwards,
