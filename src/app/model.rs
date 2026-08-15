@@ -330,6 +330,8 @@ pub struct Model {
     pub prefix_pending: bool,
     /// A run held back until the user confirms it.
     pub pending_run: Option<PendingRun>,
+    /// The transaction state the server last reported.
+    pub transaction: crate::query::result::TransactionState,
     /// Animation frame, advanced by each tick.
     ///
     /// Nothing derives meaning from it; it only chooses which frame of an

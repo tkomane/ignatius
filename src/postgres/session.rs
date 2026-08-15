@@ -212,6 +212,47 @@ impl Session {
         crate::postgres::metadata::extensions(&self.client).await
     }
 
+    /// Asks the server what the session's transaction state is.
+    ///
+    /// One extra round trip after an execution, which is the price of not
+    /// guessing. The driver does not expose the protocol's own transaction
+    /// status, and inferring it from the statements sent would be wrong exactly
+    /// when it matters: after a server-side rollback, or an error raised inside
+    /// a function.
+    ///
+    /// The question asked is deliberate. `pg_stat_activity` cannot answer it:
+    /// a backend asking about itself is always `active`, because it is running
+    /// this very query. Comparing the transaction's timestamp with the
+    /// statement's does answer it, since the two differ only inside an explicit
+    /// transaction block. And a transaction that has failed cannot answer at
+    /// all, which is exactly how a failed transaction is recognised.
+    async fn transaction_state(&self) -> crate::query::result::TransactionState {
+        use crate::query::result::TransactionState;
+        const PROBE: &str =
+            "SELECT (transaction_timestamp() <> statement_timestamp())::text AS in_transaction";
+
+        match self.client.simple_query(PROBE).await {
+            Ok(messages) => {
+                let answer = messages.into_iter().find_map(|message| match message {
+                    tokio_postgres::SimpleQueryMessage::Row(row) => {
+                        row.get(0).map(|value| value == "true")
+                    }
+                    _ => None,
+                });
+                TransactionState::from_probe(answer)
+            }
+            Err(err) => {
+                if err.as_db_error().is_some_and(|db| {
+                    *db.code() == tokio_postgres::error::SqlState::IN_FAILED_SQL_TRANSACTION
+                }) {
+                    TransactionState::Failed
+                } else {
+                    TransactionState::Unknown
+                }
+            }
+        }
+    }
+
     /// Streams a single statement's rows without retaining any of them.
     ///
     /// This is the path an export takes. Nothing is buffered, so the memory a
@@ -285,6 +326,7 @@ impl Session {
                 status: ExecutionStatus::Succeeded,
                 elapsed: started.elapsed(),
                 error: None,
+                transaction: self.transaction_state().await,
             };
         }
 
@@ -309,23 +351,33 @@ impl Session {
                     } else {
                         ExecutionStatus::Failed
                     };
+                    let transaction = if status == ExecutionStatus::ConnectionLost {
+                        // Asking a closed connection would only produce another
+                        // failure, and the honest answer is that we do not know.
+                        crate::query::result::TransactionState::Unknown
+                    } else {
+                        self.transaction_state().await
+                    };
                     return Execution {
                         job,
                         statements: results,
                         status,
                         elapsed: started.elapsed(),
                         error: Some(diagnostic),
+                        transaction,
                     };
                 }
             }
         }
 
+        let transaction = self.transaction_state().await;
         Execution {
             job,
             statements: results,
             status: ExecutionStatus::Succeeded,
             elapsed: started.elapsed(),
             error: None,
+            transaction,
         }
     }
 

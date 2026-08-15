@@ -107,6 +107,18 @@ Deliberate differences:
   results produced before it are still returned.
 - **No meta-commands.** No `\d`, `\dt` or `\copy` yet.
 
+## Transaction state
+
+Read from the server after each execution, at the cost of one extra round trip,
+rather than inferred from the statements sent. Inference is wrong exactly when it
+matters: after a server-side rollback, or an error raised inside a function.
+
+`pg_stat_activity` cannot answer this question about the asking backend, which is
+always `active` because it is running the question. The client compares the
+transaction's timestamp with the statement's, which differ only inside an
+explicit transaction block, and treats a probe that fails with SQLSTATE 25P02 as
+the definition of a failed transaction.
+
 ## Production safety
 
 A connection is classified only by `--environment`, never inferred from a host

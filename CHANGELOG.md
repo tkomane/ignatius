@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Transaction state, read from the server after every execution rather than
+  inferred from the statements sent. It sits in the status line, and a failed
+  transaction takes over the results pane to say that nothing else will run
+  until ROLLBACK ends it.
 - Production-aware safety. A connection classified as production holds back
   anything that is not a read until it is confirmed: `--allow-write` in a
   script, a prompt in the client, and the database's own name typed out for a
