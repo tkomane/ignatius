@@ -452,6 +452,25 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
             format!("{}[history off]", presentation.icon(Icon::Info)),
             theme.style(Token::Info),
         ));
+    } else if matches!(
+        model.metadata_link,
+        crate::app::model::MetadataLink::Unavailable(_)
+    ) {
+        // Only said when it is not what was intended. The tree opening its own
+        // connection is the normal case and needs no announcement; falling back
+        // to sharing one explains why the tree can be slow behind a long query.
+        spans.push(Span::styled(
+            presentation.glyphs.separator(),
+            theme.style(Token::Border),
+        ));
+        spans.push(Span::styled(
+            format!(
+                "{}[objects: {}]",
+                presentation.icon(Icon::Info),
+                model.metadata_link.label()
+            ),
+            theme.style(Token::Info),
+        ));
     } else if model.history_note.is_some() {
         // A statement the history refused. Saying so where the user already
         // looks is the difference between a rule and a mystery.
@@ -2588,6 +2607,27 @@ mod tests {
         assert!(text.contains("column_11"), "the window moved: {text}");
         assert!(!text.contains("column_1 "), "{text}");
         assert!(text.contains("of 80 lines"), "{text}");
+    }
+
+    #[test]
+    fn the_header_says_when_the_tree_could_not_get_its_own_connection() {
+        let mut model = connected_model(Environment::Local);
+        // The normal case needs no announcement.
+        for link in [
+            crate::app::model::MetadataLink::Dedicated,
+            crate::app::model::MetadataLink::Opening,
+        ] {
+            model.metadata_link = link;
+            let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 30);
+            assert!(!text.contains("objects:"), "{text}");
+        }
+
+        // Falling back to a shared connection explains why the tree can wait
+        // behind a long query, so it is said.
+        model.metadata_link =
+            crate::app::model::MetadataLink::Unavailable("too many connections".to_owned());
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 30);
+        assert!(text.contains("[objects: shared connection"), "{text}");
     }
 
     #[test]

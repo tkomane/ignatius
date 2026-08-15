@@ -127,6 +127,11 @@ pub enum Message {
         /// What came back.
         payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
     },
+    /// The tree's own connection is now open, or could not be opened.
+    ///
+    /// Not opening one is not a failure of the session: the tree falls back to
+    /// the connection that is already there, and says which it is using.
+    MetadataConnection(crate::app::model::MetadataLink),
     /// An object's definition finished loading.
     DefinitionLoaded {
         /// Which request this answers, so a stale answer is discarded.

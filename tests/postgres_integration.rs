@@ -790,6 +790,74 @@ fn indexes_and_extensions_are_listed() {
 }
 
 #[test]
+fn the_object_tree_can_have_its_own_read_only_connection_to_the_same_server() {
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let target = resolve(
+        Some(&uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+
+    let runtime = runtime();
+    let query_session = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("the session connects");
+
+    // The tree's connection is the same resolved target, cloned rather than
+    // derived again, so it reaches the same server the same way. Only the
+    // application name and the read-only posture differ, and both on purpose.
+    // The very same value the session connected with, moved rather than
+    // resolved again: whatever route, credential and protection it carried, the
+    // tree's connection carries too. That is the property under test.
+    let mut catalogue = target;
+    catalogue.application_name = format!("{} (objects)", catalogue.application_name);
+    catalogue.read_only = true;
+    let catalogue_session = runtime
+        .block_on(session::connect(&catalogue, Duration::ZERO))
+        .expect("the object tree connects");
+
+    assert_ne!(
+        query_session.info().backend_pid,
+        catalogue_session.info().backend_pid,
+        "two connections, not one"
+    );
+    assert!(
+        catalogue_session.info().read_only,
+        "the tree only ever reads, and the server is what enforces that"
+    );
+    assert!(!query_session.info().read_only, "the session is unaffected");
+
+    // And it can do the only job it has.
+    let schemas = runtime
+        .block_on(catalogue_session.schemas())
+        .expect("schemas");
+    assert!(schemas.iter().any(|schema| schema.name == "public"));
+
+    // A write on it is refused by PostgreSQL rather than by a guess here.
+    let execution = runtime.block_on(catalogue_session.execute(
+        "CREATE TABLE should_not_exist (id int)",
+        10,
+        JobId(1),
+    ));
+    assert_eq!(execution.status, ExecutionStatus::Failed);
+    assert_eq!(
+        execution
+            .error
+            .expect("diagnostic")
+            .technical
+            .iter()
+            .find(|field| field.label == "SQLSTATE")
+            .expect("SQLSTATE")
+            .value,
+        "25006",
+        "read_sql_transaction"
+    );
+}
+
+#[test]
 fn a_definition_comes_from_the_server_where_the_server_can_render_it() {
     use ignatius::postgres::ObjectKind;
     use ignatius::postgres::metadata::{DefinitionSource, ObjectSummary};

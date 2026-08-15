@@ -8,6 +8,14 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- The object tree gets a connection of its own, so a long query can no longer
+  delay it. It is opened from the same resolved target as the session, so it
+  reaches the same server by the same route with the same credentials and the
+  same protection; the two deliberate differences are visible on the server, in
+  `pg_stat_activity`: its `application_name` says it is the tree, and the
+  session is read-only, because reading the catalogue is all it does. If a
+  second connection cannot be opened - a connection limit, a pooler - the tree
+  shares the session's and the header says so.
 - Indexes appear under the relation they belong to, after its columns, and the
   extensions installed in the database sit at the root of the tree beside the
   schemas rather than inside one of them. Opening a relation now asks for its

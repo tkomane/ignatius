@@ -124,6 +124,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::MetadataConnection(link) => {
+            model.metadata_link = link;
+            Vec::new()
+        }
         Message::DefinitionLoaded { request, result } => {
             // A definition that is not the one being waited for is discarded,
             // exactly as a stale tree load or a stale result is.
@@ -1707,6 +1711,36 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
+    }
+
+    #[test]
+    fn where_the_tree_reads_from_is_recorded_and_said_in_words() {
+        let mut model = connected();
+        assert_eq!(model.metadata_link, crate::app::model::MetadataLink::Shared);
+
+        update(
+            &mut model,
+            Message::MetadataConnection(crate::app::model::MetadataLink::Opening),
+        );
+        assert_eq!(model.metadata_link.label(), "opening its own connection");
+
+        update(
+            &mut model,
+            Message::MetadataConnection(crate::app::model::MetadataLink::Dedicated),
+        );
+        assert_eq!(model.metadata_link.label(), "own connection");
+
+        update(
+            &mut model,
+            Message::MetadataConnection(crate::app::model::MetadataLink::Unavailable(
+                "too many connections for role".to_owned(),
+            )),
+        );
+        assert!(
+            model.metadata_link.label().contains("shared"),
+            "falling back is stated rather than hidden: {}",
+            model.metadata_link.label()
+        );
     }
 
     #[test]
