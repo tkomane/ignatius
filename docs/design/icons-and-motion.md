@@ -62,6 +62,22 @@ this, the editor had no visible caret at all.
 becomes heavier, and the border colour changes. The first two survive with colour
 off.
 
+## Object symbolism
+
+Every kind of database object has its own icon: schema, table, view, materialized
+view, sequence, function, index, extension, column, and a key for a column in the
+primary key. They exist so the tree can be read by shape rather than by reading
+every word.
+
+Two rules keep them honest:
+
+- **The kind is always in the words too.** A group is labelled `tables (18)`, not
+  just an icon and a number. An object's kind appears in the palette's detail
+  line. Drop to the ASCII tier and the tree is still completely readable.
+- **The chevron is the exception that proves the rule.** Open and closed nodes
+  must be distinguishable in every tier, so ASCII gets `v` and `>` rather than
+  nothing. A tree where open and closed look the same is not a tree.
+
 ## Motion
 
 There are exactly two moving things, and both exist to answer "is this still

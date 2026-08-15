@@ -10,6 +10,9 @@ checked for conflicts by a test, and listed in help at runtime.
 | `Ctrl+C` | Cancel the running statement | Yes |
 | `Ctrl+Q` | Quit | Yes |
 | `F1` | Show or hide help | Yes |
+| `Ctrl+P` | Open the command palette | Yes |
+| `Ctrl+B` | Show or hide the object tree | No |
+| `Ctrl+K` | Start a chord and list what follows it | No |
 | `Ctrl+Enter` | Run the whole buffer, where the terminal can distinguish it | No |
 | `F5` | Run the whole buffer | No |
 | `F9` | Run the statement at the cursor | No |
@@ -20,7 +23,40 @@ checked for conflicts by a test, and listed in help at runtime.
 | `Up` `Down` `Left` `Right` | Move within the focused pane | No |
 | `Enter` | Insert a line break in the editor | No |
 | `Backspace` | Delete the character before the cursor | No |
+| `Enter` | Use what is selected: a line break, an object's name, or a confirmation | No |
+| `/` | Filter the object tree, when it has focus | No |
 | Any printable key | Type into the editor | No |
+
+## Chords
+
+`Ctrl+K` opens a popup listing every key that can follow it. Nothing is on a
+timer: a popup that disappears while being read is worse than one that waits.
+
+| After `Ctrl+K` | Does |
+| --- | --- |
+| `b` | Show or hide the object tree |
+| `p` | Open the command palette |
+| `f` | Filter the object tree |
+| `r` | Reload the object tree |
+| `h` | Show or hide help |
+
+## What a key means depends on where you are
+
+`Enter` is the clearest case. In the editor it inserts a line break. On an object
+in the tree it puts that object's quoted name where SQL is written, because that
+is what you wanted it for. On a schema or a group it opens them, because a
+container has no name worth pasting. In the palette it confirms.
+
+The arrow keys always navigate: right opens a node, left closes it. That
+separation means `Enter` never has to guess between "use this" and "open this".
+
+## Modes
+
+Three states intercept keys before the editor sees them, peeled by `Esc` in this
+order: a pending chord, the palette, then the object filter. Help and the current
+error are peeled after those. The order is fixed and tested, because a key that
+does something different depending on invisible state is how an interface becomes
+untrustworthy.
 
 ## Why these
 

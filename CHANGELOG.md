@@ -10,6 +10,17 @@ source can generate user-facing notes.
 
 ### New
 
+- An object tree: schemas, their object groups with counts, the objects
+  themselves, and the columns of relations with type, nullability and primary key
+  membership. Children load when a node is opened, and a node waiting for an
+  answer says so.
+- A command palette over both commands and database objects, matching by
+  subsequence so three characters find what you meant. Choosing an object inserts
+  its schema-qualified, quoted name where SQL is written.
+- A chord popup: `Ctrl+K` lists every key that can follow it, and nothing is on a
+  timer.
+- Breadcrumbs to the selected object, icons for every object kind, and a filter
+  over the tree.
 - A visual system with three glyph tiers: ASCII, Unicode, and an opt-in Nerd Font
   tier with icons. Icons decorate words rather than replacing them, so `--plain`
   loses decoration and no meaning.
@@ -45,6 +56,14 @@ source can generate user-facing notes.
 
 ### Security
 
+- Catalogue queries bind every object name as a parameter rather than
+  interpolating it. An object name is attacker-controlled input the moment anyone
+  can create a table, and a fixture named to exploit that is part of the test
+  suite.
+- Object names inserted into the editor are quoted, so a hostile name cannot
+  alter the statement it is pasted into.
+- Objects the current role cannot read are listed and marked rather than hidden
+  or fatal, because the catalogue is readable when the contents are not.
 - The TLS state shown is read back from the server through `pg_stat_ssl` rather
   than assumed from the requested `sslmode`, and is reported as unknown when it
   cannot be confirmed.
