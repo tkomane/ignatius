@@ -1,0 +1,87 @@
+[package]
+name = "ignatius"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "A terminal-native PostgreSQL workbench"
+license = "Apache-2.0"
+repository = "https://github.com/tshiamo/ignatius"
+publish = false
+
+[lib]
+name = "ignatius"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ignatius"
+path = "src/main.rs"
+
+[dependencies]
+# Terminal rendering and input. One coherent terminal abstraction (ADR-0002).
+ratatui = "0.30.2"
+crossterm = "0.29.0"
+
+# CLI parsing and generated completions (ADR-0001).
+clap = { version = "4.6.6", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.6.0"
+
+# Async runtime and PostgreSQL protocol client (ADR-0003).
+tokio = { version = "1.53.1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+    "signal",
+    "io-util",
+] }
+tokio-postgres = { version = "0.7.18", features = [
+    "runtime",
+    "with-chrono-0_4",
+] }
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+
+# TLS (ADR-0004).
+rustls = { version = "0.23.35", default-features = false, features = ["std", "ring", "tls12", "logging"] }
+tokio-postgres-rustls = "0.14.0"
+rustls-platform-verifier = "0.7.0"
+rustls-pemfile = "2.2.0"
+
+# Configuration and machine-readable output (ADR-0006).
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
+toml = "1.1.4"
+
+# Secret handling (ADR-0007).
+secrecy = "0.10.3"
+zeroize = { version = "1.9.0", features = ["derive"] }
+
+# Diagnostics and errors.
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+
+# Platform-aware paths and text measurement.
+directories = "6.0.0"
+unicode-width = "0.2.2"
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
+
+[dev-dependencies]
+tempfile = "3.24.0"
+
+[profile.release]
+strip = "debuginfo"
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+todo = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
