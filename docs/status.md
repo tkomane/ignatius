@@ -26,9 +26,9 @@ against `postgres:18.4-alpine` in Docker with SCRAM-SHA-256 required.
 | --- | --- |
 | `cargo fmt --check` | Clean |
 | `cargo clippy --all-targets -- -D warnings` | Clean |
-| `cargo test --lib` | 199 passed |
+| `cargo test --lib` | 288 passed |
 | `cargo test --test cli_contract` | 20 passed |
-| `cargo test --test postgres_integration` | 16 passed |
+| `cargo test --test postgres_integration` | 22 passed |
 | Live pty run | Client rendered, the run key executed a query, Ctrl+Q restored the terminal |
 | CI, all jobs | Green on 2026-08-15: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
 | Object tree, live | Expanded schemas and groups in a pty against the demo database, including a table named to break identifier interpolation |
@@ -59,11 +59,16 @@ These are real and none of them is hidden anywhere else:
 6. **Terminal restoration is proven by unit tests and one manual pty run**, not
    yet by an automated test in CI. Warp's own renderer and a live terminal
    resize have not been exercised by hand; the pty run used a forced size.
-7. **Branch protection is unavailable.** Required status checks need a paid
+7. **The secret scan was previously scanning nothing.** It walks the commit
+   range of a push, which the default shallow checkout could not resolve, so it
+   reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
+   full history for that job. Every earlier green run of that gate should be read
+   as "did not run".
+8. **Branch protection is unavailable.** Required status checks need a paid
    GitHub plan on a private repository. `cargo xtask install-hooks` runs the same
    gates before every push as the local stand-in, and CI runs on every push
    regardless, but nothing prevents a push that skips the hook.
-8. **`rust-toolchain.toml` is inert on the development machine**, which uses a
+9. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
 
