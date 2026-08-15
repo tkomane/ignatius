@@ -7,6 +7,12 @@
 //! No binding assumes prior knowledge of a modal editor. Every action is
 //! reachable with a named key, and every default is listed in
 //! `docs/design/keymap.md`.
+//!
+//! Bindings can be replaced from configuration. Three things are errors rather
+//! than things to ignore: an action name this build does not know, a key it
+//! cannot parse, and two actions on one key. A file whose whole purpose is to
+//! say what the keyboard does must not contain a line that quietly does
+//! nothing.
 
 use crate::app::message::{Action, Direction};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -55,6 +61,111 @@ impl Binding {
         });
         parts.join("+")
     }
+}
+
+/// Actions that can be bound from configuration, by the name used there.
+///
+/// One table, used to parse the file, to report an unknown name with the list
+/// of real ones, and to generate the documentation. Movement keys are not here:
+/// they mean different things in each pane and rebinding them individually
+/// would produce an interface nobody could describe.
+pub const CONFIGURABLE: &[(&str, Action)] = &[
+    ("run-buffer", Action::RunBuffer),
+    ("run-statement", Action::RunStatement),
+    ("cancel", Action::Cancel),
+    ("quit", Action::Quit),
+    ("toggle-help", Action::ToggleHelp),
+    ("focus-next", Action::FocusNext),
+    ("toggle-error-detail", Action::ToggleErrorDetail),
+    ("dismiss", Action::Dismiss),
+    ("toggle-sidebar", Action::ToggleSidebar),
+    ("open-palette", Action::OpenPalette),
+    ("begin-prefix", Action::BeginPrefix),
+    ("start-filter", Action::StartFilter),
+    ("reload-objects", Action::ReloadObjects),
+    ("show-definition", Action::ShowDefinition),
+    ("show-dependencies", Action::ShowDependencies),
+    ("open-history", Action::OpenHistory),
+    ("toggle-history-recording", Action::ToggleHistoryRecording),
+    ("toggle-expanded-row", Action::ToggleExpandedRow),
+    ("toggle-inspector", Action::ToggleInspector),
+    ("undo", Action::Undo),
+    ("redo", Action::Redo),
+    ("delete-forward", Action::DeleteForward),
+    ("delete-word-left", Action::DeleteWordLeft),
+    ("move-line-start", Action::MoveLineStart),
+    ("move-line-end", Action::MoveLineEnd),
+    ("move-buffer-start", Action::MoveBufferStart),
+    ("move-buffer-end", Action::MoveBufferEnd),
+];
+
+/// The action a configuration name means.
+#[must_use]
+pub fn action_named(name: &str) -> Option<Action> {
+    CONFIGURABLE
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, action)| action.clone())
+}
+
+/// Parses a key as written in configuration, for example `ctrl+r` or `f5`.
+///
+/// Deliberately small and case-insensitive. Everything it accepts is listed in
+/// `docs/design/keymap.md`, and everything it does not accept is an error that
+/// names what it saw.
+pub fn parse_key(text: &str) -> Result<(KeyCode, KeyModifiers), String> {
+    let mut modifiers = KeyModifiers::NONE;
+    let mut code = None;
+    for part in text.split('+') {
+        let part = part.trim().to_ascii_lowercase();
+        match part.as_str() {
+            "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
+            "alt" | "option" | "meta" => modifiers |= KeyModifiers::ALT,
+            "shift" => modifiers |= KeyModifiers::SHIFT,
+            "" => return Err(format!("{text:?} has an empty part")),
+            other => {
+                if code.is_some() {
+                    return Err(format!("{text:?} names more than one key"));
+                }
+                code = Some(parse_code(other)?);
+            }
+        }
+    }
+    code.map(|code| (code, modifiers))
+        .ok_or_else(|| format!("{text:?} names modifiers but no key"))
+}
+
+fn parse_code(text: &str) -> Result<KeyCode, String> {
+    Ok(match text {
+        "esc" | "escape" => KeyCode::Esc,
+        "tab" => KeyCode::Tab,
+        "enter" | "return" => KeyCode::Enter,
+        "backspace" => KeyCode::Backspace,
+        "delete" | "del" => KeyCode::Delete,
+        "insert" | "ins" => KeyCode::Insert,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "pageup" | "page-up" => KeyCode::PageUp,
+        "pagedown" | "page-down" => KeyCode::PageDown,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        "space" => KeyCode::Char(' '),
+        other => {
+            if let Some(number) = other.strip_prefix('f')
+                && let Ok(n) = number.parse::<u8>()
+                && (1..=24).contains(&n)
+            {
+                return Ok(KeyCode::F(n));
+            }
+            let mut chars = other.chars();
+            match (chars.next(), chars.next()) {
+                (Some(ch), None) => KeyCode::Char(ch),
+                _ => return Err(format!("{other:?} is not a key this build knows")),
+            }
+        }
+    })
 }
 
 /// The set of active bindings.
@@ -314,6 +425,74 @@ impl Keymap {
         Self { bindings }
     }
 
+    /// The built-in bindings with the user's replacements applied.
+    ///
+    /// A named action loses its default keys entirely when the file binds it, so
+    /// what the file says is what the keyboard does. Anything wrong with the
+    /// file is an error naming the line, never a binding that quietly does
+    /// nothing.
+    pub fn from_config(
+        keys: &std::collections::BTreeMap<String, crate::config::schema::KeySpec>,
+    ) -> Result<Self, crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::{Diagnostic, DiagnosticKind};
+        let mut keymap = Self::new();
+
+        for (name, spec) in keys {
+            let Some(action) = action_named(name) else {
+                let known: Vec<&str> = CONFIGURABLE.iter().map(|(name, _)| *name).collect();
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Config,
+                    format!("keys.{name} is not an action this build knows"),
+                    "reading key bindings from the configuration file",
+                )
+                .likely_cause(format!("the actions are: {}", known.join(", ")))
+                .next_action("correct the name, or remove the line"));
+            };
+
+            // The defaults for this action go, so the file is the whole answer
+            // for it rather than an addition nobody can predict.
+            keymap.bindings.retain(|binding| binding.action != action);
+
+            for key in spec.keys() {
+                let (code, modifiers) = parse_key(key).map_err(|reason| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        format!("keys.{name} is not a key this build can read"),
+                        "reading key bindings from the configuration file",
+                    )
+                    .likely_cause(reason)
+                    .next_action(
+                        "write it as ctrl+r, alt+left, f5, esc, tab, enter, home, pageup, or a \
+                         single character",
+                    )
+                })?;
+                keymap.bindings.push(Binding {
+                    code,
+                    modifiers,
+                    action: action.clone(),
+                    description: CONFIGURABLE
+                        .iter()
+                        .find(|(known, _)| known == name)
+                        .map_or("configured binding", |_| description_of(&action)),
+                    is_hint: false,
+                });
+            }
+        }
+
+        let conflicts = keymap.conflicts();
+        if !conflicts.is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                "two actions are bound to the same key",
+                "reading key bindings from the configuration file",
+            )
+            .likely_cause(conflicts.join("; "))
+            .next_action("bind one of them to a different key, or remove it"));
+        }
+
+        Ok(keymap)
+    }
+
     /// Every binding, for help and documentation.
     #[must_use]
     pub fn bindings(&self) -> &[Binding] {
@@ -415,6 +594,24 @@ pub fn chord_action(key: char) -> Option<Action> {
         .map(|(_, action, _)| action.clone())
 }
 
+/// The built-in description of an action, so a configured binding still reads
+/// correctly in help.
+fn description_of(action: &Action) -> &'static str {
+    Keymap::new()
+        .bindings
+        .iter()
+        .find(|binding| &binding.action == action)
+        .map_or_else(
+            || {
+                CHORDS
+                    .iter()
+                    .find(|(_, chord, _)| chord == action)
+                    .map_or("configured binding", |(_, _, description)| *description)
+            },
+            |binding| binding.description,
+        )
+}
+
 fn binding(
     code: KeyCode,
     modifiers: KeyModifiers,
@@ -474,6 +671,145 @@ mod tests {
 
     fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
+    }
+
+    use crate::config::schema::KeySpec;
+    use std::collections::BTreeMap;
+
+    fn configured(pairs: &[(&str, KeySpec)]) -> BTreeMap<String, KeySpec> {
+        pairs
+            .iter()
+            .map(|(name, spec)| ((*name).to_owned(), spec.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_key_is_read_the_way_people_write_it() {
+        for (text, expected) in [
+            ("ctrl+r", (KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            ("Ctrl+R", (KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            ("alt+left", (KeyCode::Left, KeyModifiers::ALT)),
+            ("f5", (KeyCode::F(5), KeyModifiers::NONE)),
+            ("F12", (KeyCode::F(12), KeyModifiers::NONE)),
+            ("esc", (KeyCode::Esc, KeyModifiers::NONE)),
+            ("page-up", (KeyCode::PageUp, KeyModifiers::NONE)),
+            ("space", (KeyCode::Char(' '), KeyModifiers::NONE)),
+            (
+                "ctrl+shift+d",
+                (
+                    KeyCode::Char('d'),
+                    KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                ),
+            ),
+        ] {
+            assert_eq!(parse_key(text).expect(text), expected, "{text}");
+        }
+
+        // And what it cannot read, it says it cannot read.
+        for text in ["", "ctrl+", "ctrl+r+t", "hyper+r", "f99", "notakey"] {
+            assert!(parse_key(text).is_err(), "{text:?} should not parse");
+        }
+    }
+
+    #[test]
+    fn a_configured_binding_replaces_the_default_for_that_action() {
+        let keymap = Keymap::from_config(&configured(&[(
+            "run-buffer",
+            KeySpec::One("f2".to_owned()),
+        )]))
+        .expect("a valid file");
+
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::F(2), KeyModifiers::NONE)),
+            Some(Action::RunBuffer)
+        );
+        assert_ne!(
+            keymap.resolve(&press(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            Some(Action::RunBuffer),
+            "the default goes, so the file is the whole answer for that action"
+        );
+        // The other defaults are untouched.
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+            Some(Action::Quit)
+        );
+    }
+
+    #[test]
+    fn several_keys_can_be_bound_to_one_action() {
+        let keymap = Keymap::from_config(&configured(&[(
+            "quit",
+            KeySpec::Many(vec!["ctrl+x".to_owned(), "f10".to_owned()]),
+        )]))
+        .expect("a valid file");
+        for key in [
+            press(KeyCode::Char('x'), KeyModifiers::CONTROL),
+            press(KeyCode::F(10), KeyModifiers::NONE),
+        ] {
+            assert_eq!(keymap.resolve(&key), Some(Action::Quit));
+        }
+    }
+
+    #[test]
+    fn a_line_that_would_quietly_do_nothing_is_an_error_instead() {
+        // An action this build does not know. The message lists the ones it does,
+        // because a typo is the likeliest cause and guessing is not a fix.
+        let error = Keymap::from_config(&configured(&[(
+            "run-everythng",
+            KeySpec::One("f2".to_owned()),
+        )]))
+        .expect_err("must refuse");
+        assert_eq!(error.exit_code(), crate::ExitCode::Config);
+        assert!(
+            error
+                .likely_cause
+                .unwrap_or_default()
+                .contains("run-buffer"),
+            "the real names are listed"
+        );
+
+        // A key it cannot read.
+        let error =
+            Keymap::from_config(&configured(&[("quit", KeySpec::One("hyper+q".to_owned()))]))
+                .expect_err("must refuse");
+        assert!(error.next_action.unwrap_or_default().contains("ctrl+r"));
+
+        // And two actions on one key, which is the one that would be maddening
+        // rather than merely useless.
+        let error = Keymap::from_config(&configured(&[(
+            "toggle-help",
+            KeySpec::One("ctrl+q".to_owned()),
+        )]))
+        .expect_err("must refuse");
+        let cause = error.likely_cause.unwrap_or_default();
+        assert!(cause.contains("Ctrl+Q"), "{cause}");
+    }
+
+    #[test]
+    fn an_empty_keys_table_is_exactly_the_defaults() {
+        let configured = Keymap::from_config(&BTreeMap::new()).expect("valid");
+        assert_eq!(configured.bindings(), Keymap::new().bindings());
+    }
+
+    #[test]
+    fn every_configurable_name_is_unique_and_reaches_a_real_action() {
+        let mut names: Vec<&str> = CONFIGURABLE.iter().map(|(name, _)| *name).collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "a name means one thing");
+
+        for (name, action) in CONFIGURABLE {
+            assert_eq!(action_named(name).as_ref(), Some(action));
+            assert!(
+                name.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "{name} should be kebab-case"
+            );
+            // Every configurable action can be described, so help still reads
+            // correctly after the file replaces a binding.
+            assert!(!description_of(action).is_empty());
+        }
+        assert!(action_named("nonsense").is_none());
     }
 
     #[test]

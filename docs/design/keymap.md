@@ -126,7 +126,36 @@ would run twice.
 
 ## Configurable bindings
 
-Not yet. The structure is ready: bindings are data with descriptions and a
-conflict checker that returns findings rather than panicking, so configuration
-can be validated with a clear message. Wiring it to the configuration file is
-Feature 007.
+A `[keys]` table in `config.toml` replaces the built-in binding for an action:
+
+```toml
+[keys]
+run-buffer = ["f2", "ctrl+r"]   # several keys, or one
+quit = "ctrl+x"
+```
+
+Naming an action removes its defaults entirely, so what the file says is what
+the keyboard does for that action. Everything else keeps its defaults.
+
+**Three things are errors, not things to ignore**: an action name this build does
+not know, a key it cannot read, and two actions on one key. The file's whole
+purpose is to say what the keyboard does, so a line in it that quietly does
+nothing would be worse than no file. Each is reported with what to do about it,
+before the terminal is taken, and exits 3.
+
+Keys are written case-insensitively as optional `ctrl+`, `alt+` and `shift+`
+modifiers followed by one key: a single character, `f1` to `f24`, or one of
+`esc`, `tab`, `enter`, `backspace`, `delete`, `insert`, `home`, `end`, `pageup`,
+`pagedown`, `up`, `down`, `left`, `right`, `space`.
+
+The bindable action names are the authority in `src/ui/keymap.rs`:
+`run-buffer`, `run-statement`, `cancel`, `quit`, `toggle-help`, `focus-next`,
+`toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
+`begin-prefix`, `start-filter`, `reload-objects`, `show-definition`,
+`show-dependencies`, `open-history`, `toggle-history-recording`,
+`toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
+`move-buffer-end`.
+
+Movement keys are not bindable. They mean different things in each pane, and
+rebinding them one at a time would produce an interface nobody could describe.

@@ -54,6 +54,11 @@ pub fn run(
         &loaded.config.connection,
     )?;
 
+    // Key bindings are read before the terminal is taken, so a file that binds a
+    // key this build cannot read is an ordinary configuration error on an
+    // ordinary terminal rather than a failure inside a full-screen application.
+    let keymap = Keymap::from_config(&loaded.config.keys)?;
+
     let facts = crate::ui::terminal::capabilities();
     if !facts.is_terminal {
         return Err(Diagnostic::new(
@@ -98,7 +103,13 @@ pub fn run(
     })?;
 
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
-    let result = runtime.block_on(event_loop(resolved, loaded.config, presentation, history));
+    let result = runtime.block_on(event_loop(
+        resolved,
+        loaded.config,
+        keymap,
+        presentation,
+        history,
+    ));
 
     // Restore explicitly so any error below is printed on a working terminal.
     let restore = guard.restore();
@@ -119,6 +130,7 @@ pub fn run(
 async fn event_loop(
     target: ConnectionTarget,
     config: Config,
+    keymap: Keymap,
     presentation: &Presentation,
     mut history: crate::history::History,
 ) -> Result<ExitCode, Diagnostic> {
@@ -132,7 +144,6 @@ async fn event_loop(
         .likely_cause(err.to_string())
     })?;
 
-    let keymap = Keymap::new();
     // An explicit flag wins; otherwise configuration decides, and only then the
     // environment. The Nerd tier is never reached by inference.
     let tier = presentation.glyph_override.unwrap_or_else(|| {

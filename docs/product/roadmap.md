@@ -14,7 +14,7 @@ vertical slice that leaves the product usable.
 | 004 Result exploration and export | Mostly done | Streaming export, the expanded row view, the cell inspector and result filtering are in. Remaining: copying a value out, which needs a decision on the clipboard route (see `specs/004-result-inspection/spec.md`) |
 | 005 PostgreSQL object explorer | **Implemented** | The tree with indexes and extensions in it, the palette, object definitions, dependency navigation, and a dedicated read-only connection for the tree (`specs/002-ide-navigation/spec.md`, `specs/007-object-definitions/spec.md`) |
 | 006 Production-aware safety | **Implemented** | Environment policy, write protection the server enforces, advisory statement classification, and a confirmation that asks for the database's own name before anything destructive. Privacy sessions are in: recording can be paused for a run or a session, and a paused session says so |
-| 007 Accessibility and terminal hardening | Partly done | Plain line-oriented mode, no-colour, ASCII and narrow layouts are in. Remaining: configurable keymaps, colour and Unicode overrides from the config file |
+| 007 Accessibility and terminal hardening | **Implemented** | Plain line-oriented mode, no-colour, ASCII and narrow layouts, colour and glyph choice from configuration or flags, and configurable key bindings. Remaining: hand-verification with a screen reader and on Windows Terminal, which is evidence rather than code |
 | 008 Release experience | Planned | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |
 
 ## Before any public release
