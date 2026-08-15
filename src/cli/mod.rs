@@ -68,6 +68,13 @@ pub struct GlobalArgs {
     /// Show technical detail in errors.
     #[arg(short, long, global = true)]
     pub verbose: bool,
+
+    /// Do not record statements in the history for this session.
+    ///
+    /// Configuration decides whether history is kept at all; this pauses it for
+    /// one run without changing the file.
+    #[arg(long, global = true)]
+    pub no_history: bool,
 }
 
 /// Which glyphs may be drawn.
@@ -193,12 +200,40 @@ pub enum Command {
         shell: clap_complete::Shell,
     },
 
+    /// Read or clear the statements that have run.
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
+
     /// Print version and build identity.
     Version {
         /// Include build identity and source revision.
         #[arg(long)]
         verbose: bool,
     },
+}
+
+/// History sub-commands.
+#[derive(Debug, Subcommand)]
+pub enum HistoryAction {
+    /// List recent statements, newest first.
+    List {
+        /// How many to show.
+        #[arg(long, value_name = "N", default_value_t = 20)]
+        limit: usize,
+        /// Emit the entries as JSON, one object per line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete the history file.
+    Clear {
+        /// Required, because this cannot be undone.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Print where the history is kept.
+    Path,
 }
 
 /// Connection options shared by `connect` and `query`.
@@ -319,6 +354,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Completion { shell }) => completion(*shell, out),
         Some(Command::Version { verbose }) => version(*verbose || presentation.verbose, out),
         Some(Command::Config { action }) => config_command(action, &paths, out),
+        Some(Command::History { action }) => history_command(action, &paths, out, err),
         Some(Command::Doctor { json, target }) => {
             doctor_command(*json, target.as_deref(), &paths, &facts, out)
         }
@@ -363,15 +399,39 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             if *check {
                 check_command(target.as_deref(), connection, &paths, out)
             } else if cli.global.plain {
-                plain_command(target.as_deref(), connection, &paths, out, err)
+                plain_command(
+                    target.as_deref(),
+                    connection,
+                    &paths,
+                    cli.global.no_history,
+                    out,
+                    err,
+                )
             } else {
-                interactive::run(target.as_deref(), connection, &paths, &presentation)
+                interactive::run(
+                    target.as_deref(),
+                    connection,
+                    &paths,
+                    &presentation,
+                    cli.global.no_history,
+                )
             }
         }
-        None if cli.global.plain => {
-            plain_command(None, &ConnectionOptions::default(), &paths, out, err)
-        }
-        None => interactive::run(None, &ConnectionOptions::default(), &paths, &presentation),
+        None if cli.global.plain => plain_command(
+            None,
+            &ConnectionOptions::default(),
+            &paths,
+            cli.global.no_history,
+            out,
+            err,
+        ),
+        None => interactive::run(
+            None,
+            &ConnectionOptions::default(),
+            &paths,
+            &presentation,
+            cli.global.no_history,
+        ),
     };
 
     match result {
@@ -729,6 +789,7 @@ fn plain_command(
     target: Option<&str>,
     connection: &ConnectionOptions,
     paths: &Paths,
+    no_history: bool,
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> Result<ExitCode, Diagnostic> {
@@ -740,7 +801,84 @@ fn plain_command(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
-    plain::run(resolved, &loaded.config, out, err)
+    let history = crate::history::History::open(paths, &loaded.config.history, no_history);
+    plain::run(resolved, &loaded.config, &history, out, err)
+}
+
+/// Reads or clears the statements that have run.
+///
+/// The history is a file of SQL on this machine, so every command here is about
+/// seeing it or removing it. Nothing sends it anywhere.
+fn history_command(
+    action: &HistoryAction,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let history = crate::history::History::open(paths, &loaded.config.history, false);
+
+    match action {
+        HistoryAction::Path => {
+            writeln!(out, "{}", history.path().display()).ok();
+            Ok(ExitCode::Success)
+        }
+        HistoryAction::List { limit, json } => {
+            let entries = history.recent(*limit)?;
+            if entries.is_empty() {
+                let reason = if loaded.config.history.enabled {
+                    "No statements have been recorded yet."
+                } else {
+                    "History is switched off in configuration (history.enabled = false)."
+                };
+                writeln!(err, "{reason}").ok();
+                return Ok(ExitCode::Success);
+            }
+            for entry in &entries {
+                if *json {
+                    let line = serde_json::to_string(entry).unwrap_or_default();
+                    writeln!(out, "{line}").ok();
+                } else {
+                    writeln!(
+                        out,
+                        "{}  {:<9} {:<12} {}",
+                        entry.when(),
+                        entry.outcome.label(),
+                        entry.database,
+                        entry.one_line()
+                    )
+                    .ok();
+                }
+            }
+            // The rule that keeps secrets out of the file belongs where someone
+            // is looking at the file.
+            if !*json {
+                writeln!(
+                    err,
+                    "Statements that mention a credential are never recorded. \
+                     {} entries kept, at most {}.",
+                    entries.len(),
+                    loaded.config.history.max_entries
+                )
+                .ok();
+            }
+            Ok(ExitCode::Success)
+        }
+        HistoryAction::Clear { yes } => {
+            if !*yes {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "clearing the history cannot be undone",
+                    "clearing the statement history",
+                )
+                .likely_cause(format!("this would delete {}", history.path().display()))
+                .next_action("pass --yes to confirm"));
+            }
+            history.clear()?;
+            writeln!(err, "History cleared: {}", history.path().display()).ok();
+            Ok(ExitCode::Success)
+        }
+    }
 }
 
 fn check_command(

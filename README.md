@@ -103,6 +103,21 @@ makes sense to an eye, so it works in `TERM=dumb`, stays in your scrollback, and
 can be driven by a pipe. The prompt carries the database, the production marker
 and the transaction state as words.
 
+## What it remembers
+
+Interactive sessions record the statements that run, on this machine only.
+`Ctrl+K s` searches them and puts one back in the editor.
+
+```bash
+ignatius history list          # exactly what is kept
+ignatius history clear --yes   # remove it
+ignatius --no-history connect  # a session that records nothing
+```
+
+A statement that mentions a credential is never written, `history.enabled =
+false` switches recording off entirely, and a session that keeps no record says
+so in its header. Scripted `ignatius query` runs are never recorded.
+
 ## Other commands
 
 ```bash

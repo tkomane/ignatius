@@ -6,7 +6,15 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: syntax colouring, and a real editor for the SQL buffer.
+**Current feature**: the statement history. Interactive sessions record what ran,
+`Ctrl+K s` searches it and puts a statement back in the editor, and every control
+over it is explicit: a credential-bearing statement is never written, recording
+pauses for a run (`--no-history`) or a session (`Ctrl+K v`), configuration can
+switch it off entirely, and `ignatius history list` and `clear` show and remove
+what is kept. Scripted `query` runs are not recorded. Specified in
+`specs/006-statement-history/spec.md`.
+
+**Previous**: syntax colouring, and a real editor for the SQL buffer.
 Keywords, literals, numbers, comments, quoted identifiers and placeholders are
 coloured from the statement lexer's own rules rather than a second set, and a bar
 in the gutter marks the statement `Ctrl+T` would run. Vertical movement with a
@@ -93,6 +101,9 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A credential never reaches the history file | Subprocess test: the statement runs, the file does not hold it |
+| A paused session records nothing and says so | Subprocess test over a real session |
+| The history file is the owner's alone | Subprocess test asserting 0600 after writing and after trimming |
 | Colouring never alters the buffer | Property test rebuilding the text from its tokens |
 | A buffer of any length can be navigated | Layout test: the window follows the cursor and the line numbers stay right |
 | A deleted word comes back | Reducer test through the real key actions |

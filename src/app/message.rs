@@ -66,6 +66,10 @@ pub enum Action {
     MoveBufferEnd,
     /// Move by a screenful.
     MovePage(Direction),
+    /// Search the statements that have run and reuse one.
+    OpenHistory,
+    /// Stop or resume recording statements for this session.
+    ToggleHistoryRecording,
     /// Take back the last change.
     Undo,
     /// Put back what undo took away.
@@ -121,6 +125,12 @@ pub enum Message {
         /// What came back.
         payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
     },
+    /// The statement history finished loading from disk.
+    HistoryLoaded(Vec<crate::history::Entry>),
+    /// A statement was offered to the history. Carries the entry when one was
+    /// written, and nothing when it was not, so the interface never shows a
+    /// statement as recorded that is not on disk.
+    HistoryRecorded(Box<Option<crate::history::Entry>>),
     /// A frame of elapsed time.
     ///
     /// The reducer reads no clock, so the runtime measures how long the current
@@ -156,6 +166,17 @@ pub enum Effect {
     Quit,
     /// Load the schema list.
     LoadSchemas,
+    /// Read the statement history from disk.
+    LoadHistory,
+    /// Offer a statement to the history.
+    RecordHistory {
+        /// The SQL that ran.
+        sql: String,
+        /// How it ended.
+        outcome: crate::history::Outcome,
+        /// How long it took.
+        elapsed: std::time::Duration,
+    },
     /// Load a node's children.
     LoadMetadata {
         /// Identity to report back with.

@@ -50,6 +50,8 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `h` | Show or hide help |
 | `x` | Expand the selected row down the screen |
 | `i` | Inspect the selected cell |
+| `s` | Search the statements that have run |
+| `v` | Pause or resume recording statements |
 
 ## Editing keys
 

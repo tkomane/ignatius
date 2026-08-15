@@ -43,6 +43,7 @@ pub fn run(
     connection: &ConnectionOptions,
     paths: &Paths,
     presentation: &Presentation,
+    no_history: bool,
 ) -> Result<ExitCode, Diagnostic> {
     let loaded = crate::config::load(paths)?;
     let args = connection.to_args()?;
@@ -96,7 +97,8 @@ pub fn run(
         .next_action("check that the terminal supports full-screen applications, or use --plain")
     })?;
 
-    let result = runtime.block_on(event_loop(resolved, loaded.config, presentation));
+    let history = crate::history::History::open(paths, &loaded.config.history, no_history);
+    let result = runtime.block_on(event_loop(resolved, loaded.config, presentation, history));
 
     // Restore explicitly so any error below is printed on a working terminal.
     let restore = guard.restore();
@@ -118,6 +120,7 @@ async fn event_loop(
     target: ConnectionTarget,
     config: Config,
     presentation: &Presentation,
+    mut history: crate::history::History,
 ) -> Result<ExitCode, Diagnostic> {
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend).map_err(|err| {
@@ -156,6 +159,8 @@ async fn event_loop(
     let mut model = Model::new(config.query.max_buffered_rows);
     model.connection = crate::app::ConnectionState::Connecting;
     model.editor.set_text(starter_query());
+    model.history_disabled = !config.history.enabled;
+    model.history_paused = history.is_paused();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -173,6 +178,12 @@ async fn event_loop(
     let session: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
     spawn_connect(tx.clone(), Arc::clone(&session), target, config.clone());
+
+    // Reading the history is a file read, not a query, so it happens once here
+    // and the interface never waits on it.
+    let _ = tx.send(Message::HistoryLoaded(
+        history.recent(HISTORY_IN_MEMORY).unwrap_or_default(),
+    ));
 
     draw(&mut terminal, &model, &keymap, &ui)?;
 
@@ -204,8 +215,29 @@ async fn event_loop(
                 } => {
                     spawn_load_metadata(tx.clone(), Arc::clone(&session), request, path, query);
                 }
+                Effect::LoadHistory => {
+                    let _ = tx.send(Message::HistoryLoaded(
+                        history.recent(HISTORY_IN_MEMORY).unwrap_or_default(),
+                    ));
+                }
+                Effect::RecordHistory {
+                    sql,
+                    outcome,
+                    elapsed,
+                } => {
+                    let entry = record_history(&history, &model, &sql, outcome, elapsed);
+                    let _ = tx.send(Message::HistoryRecorded(Box::new(entry)));
+                }
             }
         }
+        // The session's own pause lives in the model, where the key that toggles
+        // it is handled; the writer is told about it here.
+        if model.history_paused {
+            history.pause();
+        } else {
+            history.resume();
+        }
+
         // Start and stop the ticker with the animation, so nothing spins while
         // the client is sitting idle.
         let animating = model.is_animating();
@@ -220,6 +252,39 @@ async fn event_loop(
     }
 
     Ok(ExitCode::Success)
+}
+
+/// How many past statements are held in memory for the history search.
+///
+/// The file may be far longer. Nobody scrolls a thousand statements looking for
+/// one, and the search is over what is loaded, so this is a real bound rather
+/// than a display limit.
+const HISTORY_IN_MEMORY: usize = 200;
+
+/// Offers a statement to the history and reports what was kept.
+///
+/// A history that cannot be written must not stop anyone working, so a failure
+/// here is swallowed after the fact is recorded: the statement already ran.
+fn record_history(
+    history: &crate::history::History,
+    model: &Model,
+    sql: &str,
+    outcome: crate::history::Outcome,
+    elapsed: Duration,
+) -> Option<crate::history::Entry> {
+    let info = model.connection.info()?;
+    let entry = crate::history::Entry::now(
+        &info.target,
+        &info.database,
+        &model.environment().label(),
+        sql,
+        outcome,
+        elapsed,
+    );
+    match history.record(&entry) {
+        Ok(recorded) if recorded.was_written() => Some(entry),
+        _ => None,
+    }
 }
 
 /// Emits a frame of elapsed time while there is something to animate.

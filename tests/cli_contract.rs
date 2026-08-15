@@ -13,8 +13,11 @@ use std::process::{Command, Output};
 
 fn binary() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ignatius"));
-    // Never touch the developer's real configuration while testing.
+    // Never touch the developer's real configuration or local state while
+    // testing. The history is a file of SQL, so the data directory matters as
+    // much as the configuration one.
     command.env("IGNATIUS_CONFIG_DIR", temp_config_dir());
+    command.env("IGNATIUS_DATA_DIR", temp_config_dir().join("data"));
     command.env_remove("IGNATIUS_LOG");
     for key in [
         "PGHOST",
@@ -118,6 +121,46 @@ fn an_unreachable_server_exits_with_the_connection_code() {
         message.contains("Next:"),
         "a failure must state a next action: {message}"
     );
+}
+
+#[test]
+fn the_history_can_be_found_read_and_cleared_without_a_database() {
+    // A history is a file of SQL on a disk. Every command that exists is about
+    // seeing it or removing it.
+    let dir = std::env::temp_dir().join(format!("ignatius-history-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let run = |args: &[&str]| {
+        binary()
+            .env("IGNATIUS_DATA_DIR", &dir)
+            .args(args)
+            .output()
+            .expect("run")
+    };
+
+    let output = run(&["history", "path"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let path = stdout(&output).trim().to_owned();
+    assert!(path.ends_with("history.jsonl"), "{path}");
+    assert!(path.starts_with(&dir.display().to_string()), "{path}");
+
+    // Nothing recorded yet is a fact, not an error, and it goes to the message
+    // stream so a pipe of the listing stays empty.
+    let output = run(&["history", "list"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("No statements"),
+        "{}",
+        stderr(&output)
+    );
+
+    // Clearing is irreversible, so it is refused without saying so explicitly.
+    let output = run(&["history", "clear"]);
+    assert_eq!(code(&output), 2, "a usage error: {}", stderr(&output));
+    assert!(stderr(&output).contains("--yes"), "{}", stderr(&output));
+
+    let output = run(&["history", "clear", "--yes"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
 }
 
 #[test]
@@ -822,6 +865,90 @@ mod with_server {
             !messages.contains('\u{1b}'),
             "messages contain a control sequence"
         );
+    }
+
+    #[test]
+    fn a_session_records_what_ran_and_never_records_a_credential() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let dir =
+            std::env::temp_dir().join(format!("ignatius-history-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let session = |input: &str, extra: &[&str]| {
+            let mut args = vec!["--plain"];
+            args.extend_from_slice(extra);
+            args.extend_from_slice(&["connect", &uri]);
+            let mut child = binary()
+                .env("IGNATIUS_DATA_DIR", &dir)
+                .args(&args)
+                .env("TERM", "dumb")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn");
+            child
+                .stdin
+                .as_mut()
+                .expect("stdin")
+                .write_all(input.as_bytes())
+                .expect("write");
+            child.wait_with_output().expect("wait")
+        };
+
+        let output = session("SELECT 1 AS recorded;\n\\q\n", &[]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        // A statement that mentions a credential is refused, and the session is
+        // told why rather than left to wonder where it went.
+        let output = session("SELECT 'nothing' AS password_probe;\n\\q\n", &[]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("mentions a credential"),
+            "{}",
+            stderr(&output)
+        );
+
+        // And a session told not to record does not.
+        let output = session("SELECT 2 AS not_recorded;\n\\q\n", &["--no-history"]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("not being recorded"),
+            "a session that keeps no record says so: {}",
+            stderr(&output)
+        );
+
+        let listing = binary()
+            .env("IGNATIUS_DATA_DIR", &dir)
+            .args(["history", "list"])
+            .output()
+            .expect("run");
+        let text = stdout(&listing);
+        assert!(text.contains("SELECT 1 AS recorded"), "{text}");
+        assert!(
+            !text.contains("AS password"),
+            "a statement mentioning a credential reached the file: {text}"
+        );
+        assert!(
+            !text.contains("not_recorded"),
+            "a paused session wrote to the file: {text}"
+        );
+
+        // The file itself is the owner's alone.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file = dir.join("history.jsonl");
+            let mode = std::fs::metadata(&file)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{}", file.display());
+        }
     }
 
     #[test]
