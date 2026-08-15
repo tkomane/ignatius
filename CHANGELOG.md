@@ -8,6 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- When the server asks for a password and none was found, the client asks back
+  instead of only reporting it. The field shows how many characters have been
+  typed and nothing else; what is typed goes into one connection attempt and is
+  dropped with it, and is kept in no file, no configuration and no history. Its
+  `Debug` prints `<hidden>`, so a panic or a test failure cannot spill it. A
+  connection failure that is not about credentials asks nothing, because a
+  password cannot fix a firewall.
 - Key bindings can be replaced from `config.toml`. Naming an action removes its
   defaults, so the file is the whole answer for it. An action name this build
   does not know, a key it cannot read, and two actions on one key are all errors

@@ -115,6 +115,73 @@ pub fn render(
     if let Some(pending) = &model.pending_run {
         render_confirmation(model, pending, presentation, area, buf);
     }
+    // Topmost, because nothing else can be done until the connection is open.
+    if let Some(prompt) = &model.password_prompt {
+        render_password_prompt(prompt, presentation, area, buf);
+    }
+}
+
+/// Asks for a password the server has demanded.
+///
+/// The field shows how many characters have been typed and nothing else: no
+/// characters, no last-character reveal, no strength opinion. What is typed goes
+/// into one connection attempt and is dropped with it.
+fn render_password_prompt(
+    prompt: &crate::app::model::PasswordPrompt,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(72);
+    let height = 9.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let dot = if presentation.glyphs.is_ascii() {
+        "*"
+    } else {
+        "\u{2022}"
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            sanitize_for_display(&prompt.reason),
+            theme.style(Token::Danger),
+        )),
+        Line::from(Span::styled(
+            sanitize_for_display(&prompt.target),
+            theme.style(Token::Muted),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Password: ", theme.style(Token::Text)),
+            Span::styled(dot.repeat(prompt.length()), theme.style(Token::Focus)),
+            Span::styled("\u{2588}", theme.style(Token::Focus)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "It is used for this connection and kept nowhere: not in the configuration \
+             file, not in the history, not on disk.",
+            theme.style(Token::Muted),
+        )),
+    ];
+
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .block(pane_block(
+            format!(
+                " {}Password  Enter to try again, Esc to cancel ",
+                presentation.icon(Icon::Role)
+            ),
+            true,
+            presentation,
+        ))
+        .render(box_area, buf);
 }
 
 /// Asks before a write reaches a database the user called production.
@@ -2607,6 +2674,47 @@ mod tests {
         assert!(text.contains("column_11"), "the window moved: {text}");
         assert!(!text.contains("column_1 "), "{text}");
         assert!(text.contains("of 80 lines"), "{text}");
+    }
+
+    #[test]
+    fn the_password_prompt_shows_a_count_and_never_a_character() {
+        let mut model = connected_model(Environment::Local);
+        let mut prompt = crate::app::model::PasswordPrompt::new(
+            "app@db.example.net:5432/orders",
+            "the server requires a password for role \"app\"",
+        );
+        for ch in "hunter2".chars() {
+            prompt.push(ch);
+        }
+        model.password_prompt = Some(prompt);
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("requires a password"), "{text}");
+        assert!(
+            text.contains("db.example.net"),
+            "the target is named: {text}"
+        );
+        assert!(text.contains("Enter to try again"), "{text}");
+        assert!(text.contains("kept nowhere"), "{text}");
+        assert!(
+            !text.contains("hunter"),
+            "the characters must never reach the screen: {text}"
+        );
+        assert!(
+            text.contains("\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}"),
+            "seven characters, seven dots: {text}"
+        );
+
+        // In ASCII the mask is still a mask.
+        let ascii = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            100,
+            30,
+        );
+        assert!(ascii.contains("*******"), "{ascii}");
+        assert!(!ascii.contains("hunter"));
     }
 
     #[test]

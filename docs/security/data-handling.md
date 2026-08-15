@@ -8,6 +8,14 @@ What this program stores, where, for how long, and what it never stores.
   There is no cache and no crash-recovery copy of results.
 - **Passwords.** No credential is written to the configuration file. Profiles
   (Feature 002) will store a reference to a credential, never the credential.
+- **A password typed at the prompt.** When the server asks for one, what is
+  typed lives in memory for as long as it takes to try the connection again and
+  is then dropped. It is never written to the configuration file, never recorded
+  in the history, never logged, and never passed as a process argument. The type
+  holding it prints `<hidden>` rather than its contents, so an unexpected
+  `{:?}` - in a panic, a test failure, a log line - cannot leak it. Nothing
+  offers to remember it: an OS credential store is a later feature and will
+  store a reference, not a secret.
 - **Result rows in the history.** The statement history records the SQL that ran
   and how it ended. It never records what came back.
 

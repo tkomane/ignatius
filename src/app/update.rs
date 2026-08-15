@@ -30,9 +30,21 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::ConnectionFailed(diagnostic) => {
+            model.phase = QueryPhase::Idle;
+            // The server was reached and said no about credentials. That is the
+            // one connection failure a person can answer from here, so it is
+            // asked rather than merely reported.
+            if diagnostic.kind == crate::diagnostics::DiagnosticKind::Authentication {
+                model.password_prompt = Some(crate::app::model::PasswordPrompt::new(
+                    model
+                        .connection
+                        .info()
+                        .map_or_else(|| diagnostic.attempted.clone(), |info| info.target.clone()),
+                    diagnostic.headline.clone(),
+                ));
+            }
             model.error = Some((*diagnostic).clone());
             model.connection = ConnectionState::Failed(diagnostic);
-            model.phase = QueryPhase::Idle;
             Vec::new()
         }
         Message::ConnectionLost => {
@@ -196,6 +208,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     // Modes are peeled in a fixed order, highest first. Getting this wrong is
     // how typing in the editor starts doing surprising things, so the order is
     // stated once here and tested directly.
+    // The password prompt is peeled first. Nothing else can be done until the
+    // connection is open, and a character typed into it must not reach anything
+    // that could keep it.
+    if model.password_prompt.is_some() {
+        return password_action(model, action);
+    }
     if model.prefix_pending {
         return resolve_prefix(model, action);
     }
@@ -749,6 +767,52 @@ fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
     }
     Vec::new()
+}
+
+/// Handles input while a password is being typed.
+///
+/// Every key either edits the password, sends it, or abandons it. Nothing falls
+/// through to another handler: a character typed here must not end up in the
+/// editor, in the palette, or in a filter, where it would be visible and could
+/// be run.
+fn password_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(prompt) = model.password_prompt.as_mut() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(ch) => {
+            prompt.push(ch);
+            Vec::new()
+        }
+        Action::Backspace => {
+            prompt.backspace();
+            Vec::new()
+        }
+        Action::Activate | Action::RunBuffer => {
+            if prompt.is_empty() {
+                // An empty password is not an answer. Saying nothing and
+                // retrying would produce the same refusal and look like a bug.
+                return Vec::new();
+            }
+            let password = prompt.take();
+            model.password_prompt = None;
+            model.error = None;
+            model.connection = ConnectionState::Connecting;
+            vec![Effect::Reconnect {
+                password: crate::app::message::TypedPassword::new(password),
+            }]
+        }
+        Action::Dismiss | Action::Cancel => {
+            // The error that opened the prompt is still there to read.
+            model.password_prompt = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Handles input while a run is waiting to be confirmed.
@@ -1872,6 +1936,97 @@ mod tests {
         );
         assert!(model.palette.is_none());
         assert!(model.error.is_some(), "the failure is not silent");
+    }
+
+    #[test]
+    fn a_server_asking_for_a_password_is_asked_back_rather_than_only_reported() {
+        let mut model = Model::new(100);
+        model.editor.set_text("SELECT 1;");
+        update(
+            &mut model,
+            Message::ConnectionFailed(Box::new(Diagnostic::new(
+                DiagnosticKind::Authentication,
+                "the server requires a password for role \"app\"",
+                "connecting",
+            ))),
+        );
+
+        let prompt = model.password_prompt.as_ref().expect("a prompt");
+        assert!(prompt.reason.contains("requires a password"));
+        assert!(prompt.is_empty());
+        assert!(
+            model.error.is_some(),
+            "the diagnostic is still there to read if the prompt is dismissed"
+        );
+
+        // Typing goes to the prompt and nowhere a character could be seen or run.
+        for ch in "hunter2".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(model.editor.text(), "SELECT 1;");
+        assert_eq!(model.password_prompt.as_ref().expect("open").length(), 7);
+        update(&mut model, Message::Action(Action::Backspace));
+        assert_eq!(model.password_prompt.as_ref().expect("open").length(), 6);
+
+        // Nothing about it is printable, even by accident.
+        let printed = format!("{:?}", model.password_prompt);
+        assert!(!printed.contains("hunter"), "{printed}");
+        assert!(printed.contains("<hidden>"), "{printed}");
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        match effects.as_slice() {
+            [Effect::Reconnect { password }] => {
+                assert!(!format!("{password:?}").contains("hunter"));
+                assert_eq!(password.clone().into_inner(), "hunter");
+            }
+            other => panic!("expected one reconnect, got {other:?}"),
+        }
+        assert!(
+            model.password_prompt.is_none(),
+            "the characters are gone from the model the moment they are sent"
+        );
+        assert_eq!(model.connection, ConnectionState::Connecting);
+    }
+
+    #[test]
+    fn an_empty_password_is_not_an_answer_and_the_prompt_can_be_abandoned() {
+        let mut model = Model::new(100);
+        update(
+            &mut model,
+            Message::ConnectionFailed(Box::new(Diagnostic::new(
+                DiagnosticKind::Authentication,
+                "password authentication failed",
+                "connecting",
+            ))),
+        );
+
+        assert!(
+            update(&mut model, Message::Action(Action::Activate)).is_empty(),
+            "sending nothing would earn the same refusal and look like a bug"
+        );
+        assert!(model.password_prompt.is_some());
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.password_prompt.is_none());
+        assert!(model.error.is_some(), "the reason is still readable");
+    }
+
+    #[test]
+    fn a_connection_failure_that_is_not_about_credentials_asks_nothing() {
+        let mut model = Model::new(100);
+        update(
+            &mut model,
+            Message::ConnectionFailed(Box::new(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "could not reach db.example.net",
+                "connecting",
+            ))),
+        );
+        assert!(
+            model.password_prompt.is_none(),
+            "a password cannot fix a firewall"
+        );
+        assert!(model.error.is_some());
     }
 
     #[test]

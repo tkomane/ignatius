@@ -281,6 +281,24 @@ pub struct ConnectionArgs {
     pub read_only: bool,
 }
 
+/// Copying a password on purpose.
+///
+/// `SecretString` is not `Clone`, which is the right default: a secret should
+/// not be duplicated by habit. Where a second connection genuinely needs the
+/// same credential - the object tree's - this says so at the call site.
+trait CloneSecret {
+    /// A copy of this secret, if there is one.
+    fn clone_secret(&self) -> Option<SecretString>;
+}
+
+impl CloneSecret for Option<SecretString> {
+    fn clone_secret(&self) -> Option<SecretString> {
+        self.as_ref().map(|secret| {
+            SecretString::from(secrecy::ExposeSecret::expose_secret(secret).to_owned())
+        })
+    }
+}
+
 /// A note about the resolved target that the user should see.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolutionNote {
@@ -291,6 +309,11 @@ pub struct ResolutionNote {
 }
 
 /// A fully resolved connection target.
+///
+/// Deliberately not `Clone`. A value holding a password should be moved, not
+/// copied around by habit; where a second target is genuinely needed, it is
+/// built explicitly by [`ConnectionTarget::with_password`], which says in its
+/// name what it is doing with the secret.
 #[derive(Debug)]
 pub struct ConnectionTarget {
     /// Where to connect.
@@ -327,6 +350,51 @@ pub struct ConnectionTarget {
 }
 
 impl ConnectionTarget {
+    /// The same target with a password the user has just supplied.
+    #[must_use]
+    pub fn with_password(&self, password: SecretString) -> Self {
+        self.copy_with(Some(password))
+    }
+
+    /// The same target, for the connection the object tree reads on.
+    ///
+    /// The same server, the same credentials, the same protection. Two things
+    /// differ and both are deliberate: it names itself in `application_name` so
+    /// the two connections can be told apart in `pg_stat_activity`, and it is
+    /// read-only, because reading the catalogue is all it does.
+    #[must_use]
+    pub fn for_object_tree(&self) -> Self {
+        let mut copy = self.copy_with(self.password.clone_secret());
+        copy.application_name = format!("{} (objects)", copy.application_name);
+        copy.read_only = true;
+        copy
+    }
+
+    /// Copies every field, taking the password given.
+    ///
+    /// Written out field by field rather than derived, so that adding a field
+    /// to the target forces a decision here about whether a copy should carry
+    /// it. The target itself is deliberately not `Clone`: a value holding a
+    /// password should be copied on purpose, through a method that says why.
+    fn copy_with(&self, password: Option<SecretString>) -> Self {
+        Self {
+            host: self.host.clone(),
+            port: self.port,
+            database: self.database.clone(),
+            user: self.user.clone(),
+            password,
+            sslmode: self.sslmode,
+            root_cert: self.root_cert.clone(),
+            client_cert: self.client_cert.clone(),
+            client_key: self.client_key.clone(),
+            application_name: self.application_name.clone(),
+            connect_timeout: self.connect_timeout,
+            environment: self.environment.clone(),
+            read_only: self.read_only,
+            notes: self.notes.clone(),
+        }
+    }
+
     /// A display string that is safe to log: it never contains a password.
     #[must_use]
     pub fn safe_display(&self) -> String {

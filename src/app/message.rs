@@ -82,6 +82,33 @@ pub enum Action {
     Newline,
 }
 
+/// A password on its way from the prompt to a connection attempt.
+///
+/// A newtype rather than a `String` so that `Debug` on an [`Effect`] - in a
+/// test failure, a panic, a log - cannot print it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TypedPassword(String);
+
+impl TypedPassword {
+    /// Wraps what the user typed.
+    #[must_use]
+    pub const fn new(password: String) -> Self {
+        Self(password)
+    }
+
+    /// Hands it to the connection attempt, consuming it.
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for TypedPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TypedPassword(<hidden>)")
+    }
+}
+
 /// A movement direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -180,6 +207,14 @@ pub enum Message {
 pub enum Effect {
     /// Open the connection.
     Connect,
+    /// Try the connection again with a password the user has just typed.
+    ///
+    /// The password travels no further than the connection attempt: it is not
+    /// stored in the model, in configuration, or anywhere on disk.
+    Reconnect {
+        /// What was typed. Its `Debug` never prints it.
+        password: TypedPassword,
+    },
     /// Run SQL under a job identity.
     Execute {
         /// Identity to report back with the result.

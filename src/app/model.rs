@@ -230,6 +230,72 @@ impl Definition {
     }
 }
 
+/// A password the user is typing because the server asked for one.
+///
+/// The characters live here and nowhere else, for as long as it takes to try
+/// the connection again. Nothing derived from them is stored: not a length in a
+/// log, not a hint, not a copy in the history. `Debug` is written by hand so
+/// that a stray `{:?}` on the model - in a test, a panic message, a log line -
+/// cannot print what was typed.
+#[derive(Clone, Default)]
+pub struct PasswordPrompt {
+    /// The connection being retried, already safe to display.
+    pub target: String,
+    /// What the server said, in the words it was reported in.
+    pub reason: String,
+    typed: String,
+}
+
+impl std::fmt::Debug for PasswordPrompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordPrompt")
+            .field("target", &self.target)
+            .field("reason", &self.reason)
+            .field("typed", &"<hidden>")
+            .finish()
+    }
+}
+
+impl PasswordPrompt {
+    /// Opens a prompt for a connection that was refused for want of a password.
+    #[must_use]
+    pub fn new(target: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            target: target.into(),
+            reason: reason.into(),
+            typed: String::new(),
+        }
+    }
+
+    /// Adds a character.
+    pub fn push(&mut self, ch: char) {
+        self.typed.push(ch);
+    }
+
+    /// Removes the last character.
+    pub fn backspace(&mut self) {
+        self.typed.pop();
+    }
+
+    /// How many characters have been typed, for the masked field.
+    #[must_use]
+    pub fn length(&self) -> usize {
+        self.typed.chars().count()
+    }
+
+    /// Whether anything has been typed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.typed.is_empty()
+    }
+
+    /// Takes the password out, leaving nothing behind.
+    #[must_use]
+    pub fn take(&mut self) -> String {
+        std::mem::take(&mut self.typed)
+    }
+}
+
 /// A run that is waiting for the user to confirm it.
 ///
 /// There is no session-wide unlock. A mode that quietly stays on is a mode
@@ -335,6 +401,8 @@ pub struct Model {
     /// The SQL of the statement in flight, kept so it can be recorded when it
     /// finishes with an outcome worth recording.
     pub running_sql: Option<String>,
+    /// A password being typed because the server asked for one.
+    pub password_prompt: Option<PasswordPrompt>,
     /// The dependency lookup in flight, so a late answer can be discarded.
     pub pending_dependencies: Option<crate::app::tree::RequestId>,
     /// The object definition being shown, when one is open.
