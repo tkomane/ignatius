@@ -6,8 +6,12 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: 001, foundation and proven vertical slice. Implemented and
-verified on macOS. Cross-platform verification is the main outstanding gap.
+**Current feature**: 002, object navigation. Implemented and verified on macOS
+and in CI. Feature 001 is complete apart from the hand-verification gaps below.
+
+The owner asked for navigation ahead of the libpq migration in ADR-0009. The
+reorder is safe because this feature touches no credential route: it reads the
+catalogue over an existing session.
 
 **Product name**: Ignatius, confirmed by the owner on 2026-08-15. The
 availability check is recorded in `docs/product/landscape.md`. A trademark search
@@ -27,6 +31,7 @@ against `postgres:18.4-alpine` in Docker with SCRAM-SHA-256 required.
 | `cargo test --test postgres_integration` | 16 passed |
 | Live pty run | Client rendered, the run key executed a query, Ctrl+Q restored the terminal |
 | CI, all jobs | Green on 2026-08-15: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
+| Object tree, live | Expanded schemas and groups in a pty against the demo database, including a table named to break identifier interpolation |
 
 Live evidence recorded in `docs/operations/verification.md`, including the exact
 escape sequences captured on entry and exit.
@@ -86,6 +91,9 @@ These are real and none of them is hidden anywhere else:
    tests pass; it does not prove the interface is usable there.
 2. Add subprocess evidence for exit codes 5, 6 and 8 (T054).
 3. Add an automated terminal-restoration test to CI (T055).
-7. Migrate the PostgreSQL adapter to libpq (ADR-0009), before Feature 002
-   hardens profiles on the current model.
-8. Then Feature 002: profiles, credential store, `.pgpass`, service files.
+4. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
+   on the current model.
+5. Then connection profiles, credential store, `.pgpass`, service files.
+6. Object explorer hardening: DDL inspection, dependencies, indexes and
+   extensions in the tree, and a dedicated metadata connection so a long query
+   cannot delay it.

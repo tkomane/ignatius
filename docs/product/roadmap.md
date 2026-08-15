@@ -6,11 +6,12 @@ vertical slice that leaves the product usable.
 | Feature | State | What it adds |
 | --- | --- | --- |
 | 001 Foundation and vertical slice | **Implemented, macOS-verified** | Architecture, terminal lifecycle, connection, execution, cancellation, CLI contract, doctor |
+| 002 Object navigation | **Implemented** | Object tree, command palette, chord popup, breadcrumbs, object symbolism. Built ahead of the libpq migration at the owner's request; it touches no credential route, so the two do not overlap |
 | 001a libpq migration | **Next**, per ADR-0009 | Client certificates, `.pgpass`, service files and enterprise authentication, which the pure-Rust driver cannot provide |
 | 002 Connection experience and secrets | After 001a | Profiles, first-run journey, credential store, `.pgpass`, service files, password prompting, TLS states, connection diagnostics |
-| 003 Delightful query loop | Planned | Real editor, command palette, query jobs, history with privacy controls, transaction state |
+| 003 Delightful query loop | Planned | Real editor, query jobs, history with privacy controls, transaction state. The command palette landed early in 002 |
 | 004 Result exploration and export | Planned | Virtualised grid, type-aware cells, expanded row view, cell inspector, streaming export, partial files |
-| 005 PostgreSQL object explorer | Planned | Permission-aware metadata, schemas and objects, DDL inspection, dependencies, search |
+| 005 PostgreSQL object explorer | Partly done in 002 | Remaining: DDL inspection, dependency navigation, indexes and extensions in the tree, a dedicated metadata connection |
 | 006 Production-aware safety | Planned | Environment policy, write protection, advisory statement classification, confirmation ergonomics, privacy sessions |
 | 007 Accessibility and terminal hardening | Planned | Plain line-oriented mode, configurable keymaps, colour and Unicode overrides, terminal recovery matrix |
 | 008 Release experience | Planned | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |

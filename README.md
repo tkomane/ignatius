@@ -40,6 +40,11 @@ database is ever required.
 In the client: **Ctrl+R** runs the buffer, **Ctrl+T** runs the statement at the
 cursor, **Ctrl+C** cancels, **F1** shows help, **Ctrl+Q** quits.
 
+Navigation: **Ctrl+B** shows the object tree, **Tab** moves between panes,
+**Ctrl+P** opens the palette, and **Ctrl+K** lists the chords. In the tree,
+arrows navigate, `/` filters, and **Enter** puts the selected object's quoted
+name where you are writing SQL.
+
 The run keys are chords rather than function keys, because operating systems and
 assistants routinely claim `F5` before a terminal program sees it. `F5` and `F9`
 stay bound anyway, for muscle memory from other tools.
