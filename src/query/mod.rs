@@ -3,9 +3,11 @@
 pub mod statements;
 pub mod value;
 
+pub mod classify;
 pub mod export;
 pub mod result;
 
+pub use classify::{Impact, classify, classify_all};
 pub use export::{Abandoned, Export, Finished};
 pub use result::{Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult};
 pub use statements::{Statement, split, statement_at};
