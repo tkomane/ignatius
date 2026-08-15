@@ -55,6 +55,13 @@ is assembled from columns, constraints and indexes - and the panel says so, in
 those words, because a description is not a script that recreates the object and
 someone is going to copy it.
 
+**Dependencies.** The same palette widget over what an object is used by and
+what it depends on, opened with `Ctrl+K y`, each edge carrying the reason it is
+an edge. It follows view rewrite rules and foreign keys, which are the
+dependencies PostgreSQL records, and the overlay says that a function body's
+reads are not among them. A list that hid its own limits would be worse than no
+list.
+
 **Cell inspector.** An overlay over everything else, opened with Enter on a cell.
 It is where the client stops abbreviating: the column name, what the value is in
 words, and the value itself wrapped to the pane and scrollable. A value's own

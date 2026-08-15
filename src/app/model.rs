@@ -335,6 +335,8 @@ pub struct Model {
     /// The SQL of the statement in flight, kept so it can be recorded when it
     /// finishes with an outcome worth recording.
     pub running_sql: Option<String>,
+    /// The dependency lookup in flight, so a late answer can be discarded.
+    pub pending_dependencies: Option<crate::app::tree::RequestId>,
     /// The object definition being shown, when one is open.
     pub definition: Option<Definition>,
     /// Text the result grid is filtered by. Empty means every row.

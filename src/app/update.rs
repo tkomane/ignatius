@@ -124,6 +124,26 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::DependenciesLoaded { request, result } => {
+            // The palette is only filled when it is still the answer to what was
+            // asked, so a slow lookup cannot replace a list the user has moved on
+            // to something else in.
+            if model.pending_dependencies != Some(request) {
+                return Vec::new();
+            }
+            model.pending_dependencies = None;
+            match *result {
+                Ok(dependencies) => {
+                    model.palette = Some(crate::app::palette::Palette::over_dependencies(
+                        dependency_entries(&dependencies),
+                    ));
+                }
+                Err(error) => {
+                    model.error = Some(error);
+                }
+            }
+            Vec::new()
+        }
         Message::MetadataConnection(link) => {
             model.metadata_link = link;
             Vec::new()
@@ -284,6 +304,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::Activate => Vec::new(),
         Action::ShowDefinition => show_definition(model),
+        Action::ShowDependencies => show_dependencies(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -419,16 +440,9 @@ fn show_definition(model: &mut Model) -> Vec<Effect> {
         model.definition = None;
         return Vec::new();
     }
-    let Some(row) = model.tree.selected_row() else {
+    let Some(object) = selected_object(model) else {
         return Vec::new();
     };
-    let Some(node) = model.tree.node(&row.path) else {
-        return Vec::new();
-    };
-    let crate::app::tree::NodeKind::Object(object) = &node.kind else {
-        return Vec::new();
-    };
-    let object = object.clone();
     let request = model.tree.allocate_request();
     model.definition = Some(crate::app::model::Definition {
         pending: Some(request),
@@ -445,6 +459,57 @@ fn show_definition(model: &mut Model) -> Vec<Effect> {
         request,
         object: Box::new(object),
     }]
+}
+
+/// Asks what the selected object depends on, and what depends on it.
+fn show_dependencies(model: &mut Model) -> Vec<Effect> {
+    let Some(object) = selected_object(model) else {
+        return Vec::new();
+    };
+    let request = model.tree.allocate_request();
+    model.pending_dependencies = Some(request);
+    vec![Effect::LoadDependencies {
+        request,
+        object: Box::new(object),
+    }]
+}
+
+/// The object the tree has selected, when it has one.
+fn selected_object(model: &Model) -> Option<crate::postgres::metadata::ObjectSummary> {
+    let row = model.tree.selected_row()?;
+    let node = model.tree.node(&row.path)?;
+    match &node.kind {
+        crate::app::tree::NodeKind::Object(object) => Some(object.clone()),
+        _ => None,
+    }
+}
+
+/// An object's dependencies, as palette entries in both directions.
+fn dependency_entries(
+    dependencies: &crate::postgres::metadata::Dependencies,
+) -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+    let entry = |object: &crate::postgres::metadata::ObjectSummary, group| PaletteEntry {
+        label: object.qualified_sql(),
+        detail: format!(
+            "{} {}",
+            object.kind.singular(),
+            object.detail.clone().unwrap_or_default()
+        ),
+        group,
+        command: PaletteCommand::Insert(object.qualified_sql()),
+    };
+    dependencies
+        .used_by
+        .iter()
+        .map(|object| entry(object, "Used by"))
+        .chain(
+            dependencies
+                .depends_on
+                .iter()
+                .map(|object| entry(object, "Depends on")),
+        )
+        .collect()
 }
 
 /// Handles input while a definition is on screen.
@@ -1711,6 +1776,102 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
+    }
+
+    #[test]
+    fn asking_what_depends_on_an_object_lists_both_directions() {
+        let mut model = with_selected_table();
+        let effects = update(&mut model, Message::Action(Action::ShowDependencies));
+        let Effect::LoadDependencies { request, object } = &effects[0] else {
+            panic!("expected a dependency load, got {effects:?}");
+        };
+        assert_eq!(object.name, "orders");
+        let request = *request;
+
+        let related = |name: &str, reason: &str| crate::postgres::ObjectSummary {
+            kind: crate::postgres::ObjectKind::View,
+            schema: "public".into(),
+            name: name.to_owned(),
+            readable: true,
+            detail: Some(reason.to_owned()),
+        };
+        update(
+            &mut model,
+            Message::DependenciesLoaded {
+                request,
+                result: Box::new(Ok(crate::postgres::metadata::Dependencies {
+                    used_by: vec![related("recent_orders", "reads it")],
+                    depends_on: vec![related("customers", "is referred to by it")],
+                })),
+            },
+        );
+
+        let palette = model.palette.as_ref().expect("open");
+        assert_eq!(palette.purpose, crate::app::palette::Purpose::Dependencies);
+        assert_eq!(palette.entries.len(), 2);
+        assert_eq!(palette.entries[0].group, "Used by");
+        assert_eq!(palette.entries[1].group, "Depends on");
+        assert!(palette.entries[0].label.contains("recent_orders"));
+        assert!(
+            palette
+                .purpose
+                .standing_note()
+                .is_some_and(|note| note.contains("function body")),
+            "what the answer cannot see is said where it is read"
+        );
+
+        // Choosing one puts its quoted, qualified name where SQL is written.
+        model.editor.set_text("SELECT * FROM ");
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(
+            model.editor.text(),
+            "SELECT * FROM \"public\".\"recent_orders\""
+        );
+    }
+
+    #[test]
+    fn a_dependency_answer_for_a_question_nobody_is_waiting_on_is_discarded() {
+        let mut model = with_selected_table();
+        let effects = update(&mut model, Message::Action(Action::ShowDependencies));
+        let Effect::LoadDependencies { request, .. } = &effects[0] else {
+            panic!("expected a dependency load");
+        };
+        let stale = *request;
+        model.pending_dependencies = None;
+
+        update(
+            &mut model,
+            Message::DependenciesLoaded {
+                request: stale,
+                result: Box::new(Ok(crate::postgres::metadata::Dependencies::default())),
+            },
+        );
+        assert!(
+            model.palette.is_none(),
+            "an answer to a question nobody is waiting on opens nothing"
+        );
+    }
+
+    #[test]
+    fn a_dependency_lookup_that_fails_says_so_where_errors_are_shown() {
+        let mut model = with_selected_table();
+        let effects = update(&mut model, Message::Action(Action::ShowDependencies));
+        let Effect::LoadDependencies { request, .. } = &effects[0] else {
+            panic!("expected a dependency load");
+        };
+        update(
+            &mut model,
+            Message::DependenciesLoaded {
+                request: *request,
+                result: Box::new(Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "permission denied for pg_depend",
+                    "reading dependencies",
+                ))),
+            },
+        );
+        assert!(model.palette.is_none());
+        assert!(model.error.is_some(), "the failure is not silent");
     }
 
     #[test]

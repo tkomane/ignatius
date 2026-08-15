@@ -684,6 +684,115 @@ async fn assemble_relation(
     Ok(text)
 }
 
+/// What an object needs, and what needs it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Dependencies {
+    /// Objects this one reads from or refers to.
+    pub depends_on: Vec<ObjectSummary>,
+    /// Objects that read from or refer to this one.
+    pub used_by: Vec<ObjectSummary>,
+}
+
+impl Dependencies {
+    /// Whether nothing was found in either direction.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.depends_on.is_empty() && self.used_by.is_empty()
+    }
+}
+
+/// Reads what an object depends on and what depends on it.
+///
+/// Two kinds of edge are followed, and the limits are worth stating because a
+/// dependency answer people trust must be one they can check:
+///
+/// - **Rewrite rules**, which is how a view records the relations it reads.
+/// - **Foreign keys**, which is how a table records the table it refers to.
+///
+/// Not followed: dependencies inside function bodies, which PostgreSQL does not
+/// record; anything reached only at run time, such as dynamic SQL; and
+/// dependencies on types, operators or extensions. What is shown is real. What
+/// is missing is not proof of absence, and `docs/` says so where a user reads
+/// it.
+pub async fn dependencies(
+    client: &Client,
+    object: &ObjectSummary,
+) -> Result<Dependencies, Diagnostic> {
+    const USED_BY: &str = "SELECT DISTINCT n.nspname::text AS schema, \
+         c.relname::text AS name, c.relkind::text AS relkind, \
+         'reads it'::text AS reason \
+         FROM pg_catalog.pg_depend d \
+         JOIN pg_catalog.pg_rewrite r ON r.oid = d.objid \
+         JOIN pg_catalog.pg_class c ON c.oid = r.ev_class \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_catalog.pg_class source ON source.oid = d.refobjid \
+         JOIN pg_catalog.pg_namespace sn ON sn.oid = source.relnamespace \
+         WHERE sn.nspname = $1 AND source.relname = $2 AND c.oid <> source.oid \
+         UNION \
+         SELECT DISTINCT n.nspname::text, c.relname::text, c.relkind::text, \
+         'refers to it'::text \
+         FROM pg_catalog.pg_constraint con \
+         JOIN pg_catalog.pg_class c ON c.oid = con.conrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_catalog.pg_class ref ON ref.oid = con.confrelid \
+         JOIN pg_catalog.pg_namespace rn ON rn.oid = ref.relnamespace \
+         WHERE con.contype = 'f' AND rn.nspname = $1 AND ref.relname = $2 \
+         ORDER BY 1, 2";
+
+    const DEPENDS_ON: &str = "SELECT DISTINCT n.nspname::text AS schema, \
+         c.relname::text AS name, c.relkind::text AS relkind, \
+         'is read by it'::text AS reason \
+         FROM pg_catalog.pg_depend d \
+         JOIN pg_catalog.pg_rewrite r ON r.oid = d.objid \
+         JOIN pg_catalog.pg_class source ON source.oid = r.ev_class \
+         JOIN pg_catalog.pg_namespace sn ON sn.oid = source.relnamespace \
+         JOIN pg_catalog.pg_class c ON c.oid = d.refobjid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE sn.nspname = $1 AND source.relname = $2 AND c.oid <> source.oid \
+         UNION \
+         SELECT DISTINCT rn.nspname::text, ref.relname::text, ref.relkind::text, \
+         'is referred to by it'::text \
+         FROM pg_catalog.pg_constraint con \
+         JOIN pg_catalog.pg_class c ON c.oid = con.conrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_catalog.pg_class ref ON ref.oid = con.confrelid \
+         JOIN pg_catalog.pg_namespace rn ON rn.oid = ref.relnamespace \
+         WHERE con.contype = 'f' AND n.nspname = $1 AND c.relname = $2 \
+         ORDER BY 1, 2";
+
+    let (schema, name) = (object.schema.as_str(), object.name.as_str());
+    Ok(Dependencies {
+        used_by: related(client, USED_BY, schema, name).await?,
+        depends_on: related(client, DEPENDS_ON, schema, name).await?,
+    })
+}
+
+/// Runs one dependency query and shapes its rows as objects.
+async fn related(
+    client: &Client,
+    statement: &str,
+    schema: &str,
+    name: &str,
+) -> Result<Vec<ObjectSummary>, Diagnostic> {
+    let rows = client
+        .query(statement, &[&schema, &name])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let relkind: String = row.get("relkind");
+            ObjectSummary {
+                kind: ObjectKind::from_relkind(&relkind).unwrap_or(ObjectKind::Table),
+                schema: row.get::<_, String>("schema"),
+                name: row.get::<_, String>("name"),
+                readable: true,
+                detail: Some(row.get::<_, String>("reason")),
+            }
+        })
+        .collect())
+}
+
 /// Lists installed extensions.
 pub async fn extensions(client: &Client) -> Result<Vec<ObjectSummary>, Diagnostic> {
     const EXTENSIONS: &str = "SELECT e.extname::text AS name, \

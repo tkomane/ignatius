@@ -8,6 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- `Ctrl+K y` answers "what breaks if I drop this". It lists what an object is
+  used by and what it depends on, in both directions, with the reason for each
+  edge, and choosing one puts its quoted, qualified name where SQL is written.
+  It follows the two edges PostgreSQL actually records - view rewrite rules and
+  foreign keys - and says so where the answer is read, because what a function
+  body reads is not recorded anywhere and a dependency list people trust has to
+  admit what it cannot see.
 - The object tree gets a connection of its own, so a long query can no longer
   delay it. It is opened from the same resolved target as the session, so it
   reaches the same server by the same route with the same credentials and the

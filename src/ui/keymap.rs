@@ -461,6 +461,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::Undo => "Undo",
         Action::OpenHistory => "History",
         Action::ShowDefinition => "Definition",
+        Action::ShowDependencies => "Dependencies",
         Action::ToggleHistoryRecording => "Private",
         Action::Redo => "Redo",
         Action::Newline => "New line",

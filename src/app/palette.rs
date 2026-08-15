@@ -56,6 +56,8 @@ pub enum Purpose {
     GoTo,
     /// Statements that have run.
     History,
+    /// What an object depends on and what depends on it.
+    Dependencies,
 }
 
 impl Purpose {
@@ -65,6 +67,9 @@ impl Purpose {
         match self {
             Self::GoTo => " Go to  Enter to choose, Esc to cancel ",
             Self::History => " History  Enter puts it in the editor, Esc to cancel ",
+            Self::Dependencies => {
+                " Dependencies  Enter puts the name in the editor, Esc to cancel "
+            }
         }
     }
 
@@ -74,6 +79,7 @@ impl Purpose {
         match self {
             Self::GoTo => " Nothing matches that.",
             Self::History => " No statement matches that.",
+            Self::Dependencies => " Nothing here depends on it, and it depends on nothing here.",
         }
     }
 
@@ -86,6 +92,11 @@ impl Purpose {
         match self {
             Self::GoTo => None,
             Self::History => Some(" Statements that mention a credential are never recorded."),
+            // The limit is stated where the answer is read. A dependency list
+            // people trust has to say what it cannot see.
+            Self::Dependencies => Some(
+                " Views and foreign keys only. What a function body reads is not recorded by PostgreSQL.",
+            ),
         }
     }
 }
@@ -107,6 +118,15 @@ impl Palette {
     pub fn over_history(entries: Vec<PaletteEntry>) -> Self {
         Self {
             purpose: Purpose::History,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens a palette over an object's dependencies.
+    #[must_use]
+    pub fn over_dependencies(entries: Vec<PaletteEntry>) -> Self {
+        Self {
+            purpose: Purpose::Dependencies,
             ..Self::new(entries)
         }
     }
