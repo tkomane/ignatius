@@ -500,10 +500,26 @@ fn spawn_load_metadata(
                 .objects(&schema, kind)
                 .await
                 .map(MetadataPayload::Objects),
-            MetadataQuery::Columns { schema, relation } => session
-                .columns(&schema, &relation)
-                .await
-                .map(MetadataPayload::Columns),
+            MetadataQuery::Relation { schema, relation } => {
+                // Two catalogue queries, one answer: a relation's columns and
+                // its indexes arrive together so the node fills in one step.
+                match session.columns(&schema, &relation).await {
+                    Ok(columns) => session
+                        .indexes(&schema, &relation)
+                        .await
+                        .map(|indexes| MetadataPayload::Relation { columns, indexes }),
+                    Err(error) => Err(error),
+                }
+            }
+            MetadataQuery::Extensions => {
+                session
+                    .extensions()
+                    .await
+                    .map(|extensions| MetadataPayload::Relation {
+                        columns: Vec::new(),
+                        indexes: extensions,
+                    })
+            }
         };
         let _ = tx.send(Message::MetadataLoaded {
             request,

@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Indexes appear under the relation they belong to, after its columns, and the
+  extensions installed in the database sit at the root of the tree beside the
+  schemas rather than inside one of them. Opening a relation now asks for its
+  columns and its indexes together, so the node fills in one step.
 - `Ctrl+K d` shows what an object actually is. A view, an index and a function
   are rendered by PostgreSQL itself, so what is shown is what will run; a table
   is assembled from its columns, constraints and indexes, and the panel says

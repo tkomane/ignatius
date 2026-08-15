@@ -6,7 +6,8 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: object definitions. `Ctrl+K d` on an object in the tree
+**Current feature**: indexes and extensions in the object tree, and object
+definitions. `Ctrl+K d` on an object in the tree
 shows what it is, coloured by the same lexer that colours the editor. Views,
 indexes and functions come from PostgreSQL's own renderers; a table is assembled
 from its columns, constraints and indexes and is labelled as a description rather

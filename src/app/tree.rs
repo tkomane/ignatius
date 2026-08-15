@@ -39,6 +39,9 @@ pub enum NodeKind {
     Object(ObjectSummary),
     /// A column of a relation.
     Column(ColumnInfo),
+    /// The installed extensions, which belong to the database rather than to
+    /// any one schema and so sit at the root.
+    Extensions,
     /// A statement about why there is nothing to show.
     Message(String),
 }
@@ -114,6 +117,10 @@ impl Node {
                     | ObjectKind::PartitionedTable
                     | ObjectKind::ForeignTable
             ),
+            // The extensions node is always worth opening: how many there are
+            // is not known until it is, and a database always has at least
+            // plpgsql unless someone removed it.
+            NodeKind::Extensions => true,
             NodeKind::Column(_) | NodeKind::Message(_) => false,
         }
     }
@@ -127,6 +134,7 @@ impl Node {
             NodeKind::Group { kind, count, .. } => format!("{} ({count})", kind.plural()),
             NodeKind::Object(object) => object.name.clone(),
             NodeKind::Column(column) => column.name.clone(),
+            NodeKind::Extensions => "extensions".to_owned(),
             NodeKind::Message(text) => text.clone(),
         }
     }
@@ -142,7 +150,7 @@ impl Node {
                     Some("no permission".to_owned())
                 }
             }
-            NodeKind::Group { .. } | NodeKind::Message(_) => None,
+            NodeKind::Group { .. } | NodeKind::Message(_) | NodeKind::Extensions => None,
             NodeKind::Object(object) => {
                 if object.readable {
                     object.detail.clone()
@@ -178,6 +186,7 @@ impl Node {
                 primary_key: column.primary_key,
                 nullable: column.nullable,
             },
+            NodeKind::Extensions => RowKind::Group(ObjectKind::Extension),
             NodeKind::Message(_) => RowKind::Message,
         }
     }
@@ -228,13 +237,15 @@ pub enum MetadataQuery {
         /// Kind to list.
         kind: ObjectKind,
     },
-    /// The columns of a relation.
-    Columns {
+    /// What a relation is made of: its columns and its indexes.
+    Relation {
         /// Schema the relation lives in.
         schema: String,
         /// Relation name.
         relation: String,
     },
+    /// The extensions installed in this database.
+    Extensions,
 }
 
 /// What a load returned.
@@ -244,8 +255,13 @@ pub enum MetadataPayload {
     Schemas(Vec<SchemaSummary>),
     /// Objects of one kind.
     Objects(Vec<ObjectSummary>),
-    /// Columns of a relation.
-    Columns(Vec<ColumnInfo>),
+    /// A relation's columns and the indexes on it, in that order.
+    Relation {
+        /// Its columns, in attribute order.
+        columns: Vec<ColumnInfo>,
+        /// The indexes on it.
+        indexes: Vec<ObjectSummary>,
+    },
 }
 
 /// The object tree and its selection.
@@ -285,6 +301,9 @@ impl ObjectTree {
         self.roots = schemas
             .into_iter()
             .map(|schema| Node::new(NodeKind::Schema(schema)))
+            // Extensions belong to the database, not to a schema, so they sit
+            // beside the schemas rather than inside one of them.
+            .chain(std::iter::once(Node::new(NodeKind::Extensions)))
             .collect();
         self.loading = false;
         self.error = None;
@@ -417,9 +436,17 @@ impl ObjectTree {
                 .into_iter()
                 .map(|object| Node::new(NodeKind::Object(object)))
                 .collect(),
-            MetadataPayload::Columns(columns) => columns
+            // Columns first, then indexes: what the relation holds, then what
+            // makes it findable. It is the order `psql` prints them in, and the
+            // order people read them in.
+            MetadataPayload::Relation { columns, indexes } => columns
                 .into_iter()
                 .map(|column| Node::new(NodeKind::Column(column)))
+                .chain(
+                    indexes
+                        .into_iter()
+                        .map(|index| Node::new(NodeKind::Object(index))),
+                )
                 .collect(),
         };
         if node.children.is_empty() {
@@ -452,10 +479,11 @@ impl ObjectTree {
                 schema: schema.clone(),
                 kind: *kind,
             }),
-            NodeKind::Object(object) => Some(MetadataQuery::Columns {
+            NodeKind::Object(object) => Some(MetadataQuery::Relation {
                 schema: object.schema.clone(),
                 relation: object.name.clone(),
             }),
+            NodeKind::Extensions => Some(MetadataQuery::Extensions),
             NodeKind::Column(_) | NodeKind::Message(_) => None,
         }
     }
@@ -574,10 +602,15 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_tree_shows_one_row_per_schema() {
+    fn a_fresh_tree_shows_one_row_per_schema_and_the_database_itself() {
         let tree = loaded_tree();
         let rows = tree.rows();
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 4, "three schemas and the extensions node");
+        assert_eq!(
+            rows[3].label, "extensions",
+            "extensions belong to the database, not to a schema"
+        );
+        assert!(rows[3].expandable);
         assert_eq!(rows[0].label, "public");
         assert_eq!(rows[0].depth, 0);
         assert!(rows[0].expandable);
@@ -605,7 +638,14 @@ mod tests {
         let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
         assert_eq!(
             labels,
-            vec!["public", "tables (2)", "views (1)", "reporting", "locked"]
+            vec![
+                "public",
+                "tables (2)",
+                "views (1)",
+                "reporting",
+                "locked",
+                "extensions"
+            ]
         );
         // The group label carries the kind in words, so it survives without icons.
         assert!(rows[1].label.contains("tables"));
@@ -665,7 +705,8 @@ mod tests {
                 "secrets",
                 "views (1)",
                 "reporting",
-                "locked"
+                "locked",
+                "extensions"
             ]
         );
         assert!(!rows[1].loading);
@@ -741,11 +782,102 @@ mod tests {
         for _ in 0..10 {
             tree.move_selection(1);
         }
-        assert_eq!(tree.selected, 2, "cannot move past the last row");
+        assert_eq!(tree.selected, 3, "cannot move past the last row");
         for _ in 0..10 {
             tree.move_selection(-1);
         }
         assert_eq!(tree.selected, 0);
+    }
+
+    #[test]
+    fn a_relation_shows_its_columns_and_then_its_indexes() {
+        let mut tree = loaded_tree();
+        tree.expand_schema(&[0]);
+        tree.selected = 1;
+        let (request, path, query) = tree.expand_selected().expect("a load");
+        assert!(matches!(query, MetadataQuery::Objects { .. }));
+        tree.apply(
+            request,
+            &path,
+            MetadataPayload::Objects(vec![object("public", "orders", true)]),
+        );
+
+        tree.selected = 2;
+        let (request, path, query) = tree.expand_selected().expect("a load");
+        assert!(
+            matches!(query, MetadataQuery::Relation { ref relation, .. } if relation == "orders"),
+            "a relation is asked about as a whole: {query:?}"
+        );
+        tree.apply(
+            request,
+            &path,
+            MetadataPayload::Relation {
+                columns: vec![ColumnInfo {
+                    name: "order_id".into(),
+                    data_type: "bigint".into(),
+                    nullable: false,
+                    primary_key: true,
+                    default: None,
+                }],
+                indexes: vec![ObjectSummary {
+                    kind: ObjectKind::Index,
+                    schema: "public".into(),
+                    name: "orders_pkey".into(),
+                    readable: true,
+                    detail: Some("primary key".to_owned()),
+                }],
+            },
+        );
+
+        let labels: Vec<String> = tree.rows().iter().map(|r| r.label.clone()).collect();
+        let order_id = labels.iter().position(|l| l == "order_id").expect("column");
+        let index = labels
+            .iter()
+            .position(|l| l == "orders_pkey")
+            .expect("index");
+        assert!(
+            order_id < index,
+            "columns come first, then what makes the relation findable: {labels:?}"
+        );
+
+        let rows = tree.rows();
+        assert!(matches!(
+            rows[index].row_kind,
+            RowKind::Object {
+                kind: ObjectKind::Index,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn the_extensions_node_asks_for_extensions_and_shows_them() {
+        let mut tree = loaded_tree();
+        let last = tree.rows().len() - 1;
+        tree.selected = last;
+        let (request, path, query) = tree.expand_selected().expect("a load");
+        assert_eq!(query, MetadataQuery::Extensions);
+
+        tree.apply(
+            request,
+            &path,
+            MetadataPayload::Relation {
+                columns: Vec::new(),
+                indexes: vec![ObjectSummary {
+                    kind: ObjectKind::Extension,
+                    schema: "public".into(),
+                    name: "plpgsql".into(),
+                    readable: true,
+                    detail: Some("version 1.0".to_owned()),
+                }],
+            },
+        );
+
+        let rows = tree.rows();
+        let extension = rows.last().expect("a row");
+        assert_eq!(extension.label, "plpgsql");
+        assert_eq!(extension.detail.as_deref(), Some("version 1.0"));
+        assert_eq!(extension.depth, 1);
     }
 
     #[test]
