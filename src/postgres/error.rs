@@ -232,7 +232,13 @@ fn query_advice(code: &SqlState) -> (Option<String>, Option<String>) {
     if *code == SqlState::UNDEFINED_TABLE {
         return (
             Some("the relation is not visible under the current search_path".to_owned()),
-            Some("qualify it with a schema, or check search_path in the status bar".to_owned()),
+            // Worded without naming a place on screen: the same advice has to
+            // read correctly in the full-screen client, in plain mode, and
+            // in a script's stderr.
+            Some(
+                "qualify it with a schema, or check the search path this session is using"
+                    .to_owned(),
+            ),
         );
     }
     if *code == SqlState::UNDEFINED_COLUMN {

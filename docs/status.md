@@ -6,8 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: transaction state, read from the server rather than
-inferred.
+**Current feature**: a plain, line-oriented client behind `--plain`. No
+alternate screen, no raw mode, no cursor addressing: it works in `TERM=dumb`,
+stays in the scrollback, and can be driven by a pipe. It is the accessibility
+item that had been unchecked in the Feature 001 quality checklist since it was
+written.
+
+**Previous**: transaction state, read from the server rather than inferred.
 
 **Previous**: 006, production-aware safety. A production-classified
 connection holds back writes until they are confirmed, and `--read-only` asks
@@ -43,8 +48,8 @@ against `postgres:18.4-alpine` both plain and with TLS.
 | Gate | Result |
 | --- | --- |
 | `cargo xtask verify` | All five gates pass |
-| Library tests | 348 passed |
-| CLI contract tests | 27 passed |
+| Library tests | 358 passed |
+| CLI contract tests | 29 passed |
 | PostgreSQL integration tests | 33 passed |
 | Terminal restoration, in a pty | 3 passed |
 | CI, all jobs | Green: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
@@ -68,6 +73,8 @@ Live evidence recorded in `docs/operations/verification.md`.
 | Hostile object names cannot alter SQL | A table named to break interpolation is listed and queried |
 | Passwords never leak | Subprocess tests over failing connections |
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
+| Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
+| Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
 | Every documented exit code | Produced by a real invocation |
 
 ## Known gaps
@@ -89,20 +96,24 @@ These are real and none of them is hidden anywhere else:
    capabilities it was accepted for have been implemented natively.
 5. **No OS credential store and no password prompting.** Password files and
    service files are supported; the credential store and profiles are not.
-6. **Terminal restoration is proven automatically on Unix**, by a test that runs
+6. **No screen reader has been used with this.** `--plain` is built and proven
+   to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
+   Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
+   been driven by hand.
+7. **Terminal restoration is proven automatically on Unix**, by a test that runs
    the client under a real pty and reads the bytes. The Windows equivalent needs
    ConPTY and has not been written. Warp's own renderer and a live terminal
    resize have not been exercised by hand; the pty runs use a forced size.
-7. **The secret scan was previously scanning nothing.** It walks the commit
+8. **The secret scan was previously scanning nothing.** It walks the commit
    range of a push, which the default shallow checkout could not resolve, so it
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
    full history for that job. Every earlier green run of that gate should be read
    as "did not run".
-8. **Branch protection is unavailable.** Required status checks need a paid
+9. **Branch protection is unavailable.** Required status checks need a paid
    GitHub plan on a private repository. `cargo xtask install-hooks` runs the same
    gates before every push as the local stand-in, and CI runs on every push
    regardless, but nothing prevents a push that skips the hook.
-9. **`rust-toolchain.toml` is inert on the development machine**, which uses a
+10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
 
@@ -132,9 +143,11 @@ These are real and none of them is hidden anywhere else:
    including the Unix socket path (T051, T052). CI proves it builds and its
    tests pass; it does not prove the interface is usable there.
 3. A terminal-restoration test for Windows, which needs ConPTY (T055a).
-4. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
+4. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
+   absence of escape sequences is proven; the experience is not.
+5. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
    on the current model.
-5. Then connection profiles, credential store, `.pgpass`, service files.
-6. Object explorer hardening: DDL inspection, dependencies, indexes and
+6. Then connection profiles, credential store, `.pgpass`, service files.
+7. Object explorer hardening: DDL inspection, dependencies, indexes and
    extensions in the tree, and a dedicated metadata connection so a long query
    cannot delay it.

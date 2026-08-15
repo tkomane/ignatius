@@ -690,6 +690,92 @@ mod with_server {
     }
 
     #[test]
+    fn plain_mode_is_a_line_oriented_client_that_a_screen_reader_can_follow() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let mut child = binary()
+            .args(["--plain", "connect", &uri])
+            // The mode exists for terminals that can do nothing else.
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"SELECT order_id\nFROM orders\nORDER BY order_id;\nBEGIN;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+
+        // Results are data; prompts and status are messages.
+        assert!(data.contains("order_id"), "{data}");
+        assert!(data.contains("(3 rows)"), "{data}");
+        assert!(
+            !data.contains('\u{1b}'),
+            "plain mode must emit no control sequences at all"
+        );
+        assert!(
+            !messages.contains('\u{1b}'),
+            "not on the message stream either"
+        );
+        assert!(
+            data.is_ascii(),
+            "and nothing outside ASCII: {:?}",
+            data.chars().filter(|c| !c.is_ascii()).collect::<String>()
+        );
+
+        // A multi-line statement is accumulated and shown as a continuation.
+        assert!(messages.contains("... >"), "{messages}");
+        // The transaction state reaches the prompt, in words.
+        assert!(messages.contains("[in transaction]"), "{messages}");
+        assert!(messages.contains("Connected to"), "{messages}");
+    }
+
+    #[test]
+    fn plain_mode_asks_before_writing_to_a_production_target() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let mut child = binary()
+            .args(["--plain", "connect", "--environment", "production", &uri])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        // An empty answer cancels, so nothing reaches the database.
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"DELETE FROM orders;\n\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        let messages = stderr(&output);
+        assert!(messages.contains("destroys data"), "{messages}");
+        assert!(messages.contains("classified as production"), "{messages}");
+        assert!(
+            messages.contains("Cancelled. Nothing was sent."),
+            "an empty answer must cancel: {messages}"
+        );
+    }
+
+    #[test]
     fn connect_check_reports_stages_and_succeeds_against_a_live_server() {
         let uri = uri_or_skip!();
         let output = binary()

@@ -14,7 +14,7 @@ vertical slice that leaves the product usable.
 | 004 Result exploration and export | **Export done** | Streaming export with partial files is in. Remaining: expanded row view, cell inspector, filtering, copy |
 | 005 PostgreSQL object explorer | Partly done in 002 | Remaining: DDL inspection, dependency navigation, indexes and extensions in the tree, a dedicated metadata connection |
 | 006 Production-aware safety | Planned | Environment policy, write protection, advisory statement classification, confirmation ergonomics, privacy sessions |
-| 007 Accessibility and terminal hardening | Planned | Plain line-oriented mode, configurable keymaps, colour and Unicode overrides, terminal recovery matrix |
+| 007 Accessibility and terminal hardening | Partly done | Plain line-oriented mode, no-colour, ASCII and narrow layouts are in. Remaining: configurable keymaps, colour and Unicode overrides from the config file |
 | 008 Release experience | Planned | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |
 
 ## Before any public release
@@ -35,6 +35,6 @@ vertical slice that leaves the product usable.
 | Cross-platform behaviour diverges because only macOS is exercised in practice | High | High | CI matrix on every push; treat Windows and Linux claims as unproven until it runs |
 | A single-maintainer project stalls | Medium | High | Repository is the source of truth; specs, tasks and status make resumption cheap |
 | Scope creep into a generic database client | Medium | High | Constitution principle II; non-goals are explicit in the landscape document |
-| Full-screen interface remains hard for screen readers | High | Medium | Plain line-oriented mode is a Feature 007 requirement, not a nice-to-have |
+| Full-screen interface remains hard for screen readers | High | Medium | Addressed: `--plain` is a full client with no full-screen interface. Still to do: hand-verification with VoiceOver and NVDA |
 | Terminal differences cause restoration failures in the wild | Medium | High | One abstraction, ordering test, pty evidence, automated restoration test in CI (open) |
 | A dependency or release artefact is compromised | Low | High | Committed lockfile, pinned toolchain, advisories and licence checks; no signing claim until real |

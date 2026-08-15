@@ -459,20 +459,30 @@ pub async fn execute_once(
 ) -> Result<Execution, Diagnostic> {
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
     let session = session::connect(&target, timeout).await?;
-    let cancel = session.cancel_handle();
+    Ok(execute_cancellable(&session, &sql, row_cap, JobId(1)).await)
+}
 
-    let execution = session.execute(&sql, row_cap, JobId(1));
+/// Runs a statement, letting Ctrl+C ask the server to cancel it.
+///
+/// The statement is awaited either way: whether it stopped is the server's
+/// answer to give, and reporting anything else would be a guess.
+pub async fn execute_cancellable(
+    session: &Session,
+    sql: &str,
+    row_cap: usize,
+    job: JobId,
+) -> Execution {
+    let cancel = session.cancel_handle();
+    let execution = session.execute(sql, row_cap, job);
     tokio::pin!(execution);
 
     tokio::select! {
-        result = &mut execution => Ok(result),
+        result = &mut execution => result,
         signal = tokio::signal::ctrl_c() => {
             if signal.is_ok() {
-                // Ask once. Whether it stopped is the server's answer to give,
-                // so the statement is still awaited either way.
                 let _ = cancel.cancel().await;
             }
-            Ok(execution.await)
+            execution.await
         }
     }
 }

@@ -38,12 +38,13 @@ is not a pass.** Report it as a skip.
 
 ## Evidence recorded on 2026-08-15
 
-macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against
-`postgres:18.4-alpine` with SCRAM-SHA-256 required.
+macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against both the plain
+and TLS disposable services from `postgres:18.4-alpine`.
 
-**Automated**: `cargo fmt --check` clean; `cargo clippy --all-targets -D
-warnings` clean; 199 library tests, 20 CLI contract tests and 16 PostgreSQL
-integration tests passed.
+**Automated**: `cargo xtask verify` passed all five gates: formatting, lints,
+358 library tests, 29 CLI contract tests and 33 PostgreSQL integration tests.
+This run included the plain line-oriented client and the failed-transaction
+recovery regression.
 
 **Terminal lifecycle, captured from a real pseudo-terminal.** The client was run
 under `script`, sent Ctrl+Q, and the byte stream captured. In order:
@@ -71,18 +72,21 @@ the grid. Ctrl+Q exited cleanly.
 truthfully that the connection was not encrypted. A query against a missing
 relation reported SQLSTATE 42P01 with a cause and a next action, exited 7, and
 wrote nothing to stdout. A value containing `ESC[2J` was rendered as `\x1B[2J`.
-NULL, an empty string and the text `NULL` were each displayed distinctly.
+NULL, an empty string and the text `NULL` were each displayed distinctly. The
+plain-mode subprocess checks also proved line-oriented input, production-write
+confirmation and screen-reader-safe output.
 
 ## What has not been verified
 
-- **Windows and Linux.** Nothing has run there. The development machine has only
-  the `aarch64-apple-darwin` standard library installed.
-- **PostgreSQL 14 through 17.** Only 18.4 has been exercised.
-- **Exit codes 5, 6, 8 and 9 at subprocess level.** Asserted in library tests
-  only; 9 has no producer until export exists.
-- **Terminal restoration after a panic or SIGTERM, automatically.** The escape
-  sequence balance is unit-tested and the normal exit path is proven above, but
-  the panic and signal paths have not been driven end to end in CI.
+- **Windows and Linux by hand.** CI builds and tests both platforms, but nobody
+  has opened the full-screen client there. The same is true of Warp's renderer
+  and a live terminal resize.
+- **PostgreSQL 15 and 17.** CI exercises 14, 16 and 18; the local server is 18.4.
+- **Windows terminal restoration.** The Unix pty test passes; the equivalent
+  ConPTY test remains open work.
+- **Panic and signal restoration as a process-level claim.** The RAII and panic
+  paths are covered in code and unit tests; only the normal Unix pty path is
+  exercised end to end here.
 
 These are tracked in `docs/status.md`.
 

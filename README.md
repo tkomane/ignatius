@@ -92,6 +92,17 @@ kind of failure happened: 2 usage, 3 configuration, 4 connection,
 ignatius query $env:DATABASE_URL -c "SELECT 1" --format csv | Select-Object -First 5
 ```
 
+## Without a full-screen interface
+
+```bash
+ignatius --plain connect "$DATABASE_URL"
+```
+
+One line in, one answer out. No alternate screen, no raw mode, nothing that only
+makes sense to an eye, so it works in `TERM=dumb`, stays in your scrollback, and
+can be driven by a pipe. The prompt carries the database, the production marker
+and the transaction state as words.
+
 ## Other commands
 
 ```bash

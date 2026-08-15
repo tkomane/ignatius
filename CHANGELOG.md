@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- A plain, line-oriented client behind `--plain`: no alternate screen, no raw
+  mode, no cursor addressing, and nothing that only makes sense to an eye. It
+  works in `TERM=dumb`, stays in the scrollback, and can be driven by a pipe.
+  The prompt carries the database, the production marker and the transaction
+  state as words, and a write to production is confirmed in words too.
 - Transaction state, read from the server after every execution rather than
   inferred from the statements sent. It sits in the status line, and a failed
   transaction takes over the results pane to say that nothing else will run
