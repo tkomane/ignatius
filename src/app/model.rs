@@ -283,6 +283,15 @@ pub struct Model {
     pub last_elapsed: Option<Duration>,
     /// Row cap applied to results.
     pub row_cap: usize,
+    /// Animation frame, advanced by each tick.
+    ///
+    /// Nothing derives meaning from it; it only chooses which frame of an
+    /// indicator to draw, so a paused animation never hides a real state.
+    pub frame: u64,
+    /// How long the statement in flight has been running.
+    pub running_for: Option<Duration>,
+    /// When true, indicators are drawn as static text.
+    pub reduced_motion: bool,
 }
 
 impl Model {
@@ -294,6 +303,14 @@ impl Model {
             size: (crate::ui::MIN_COLUMNS, crate::ui::MIN_ROWS),
             ..Self::default()
         }
+    }
+
+    /// Whether anything is currently worth animating.
+    ///
+    /// The runtime uses this to stop ticking, so an idle client wakes nothing.
+    #[must_use]
+    pub const fn is_animating(&self) -> bool {
+        self.phase.is_busy() || matches!(self.connection, ConnectionState::Connecting)
     }
 
     /// Hands out the next job identity.

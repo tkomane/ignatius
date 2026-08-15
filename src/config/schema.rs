@@ -109,11 +109,17 @@ pub enum GlyphMode {
     Unicode,
     /// Always use ASCII.
     Ascii,
+    /// Use a patched Nerd Font, so icons are drawn as well.
+    ///
+    /// Opt-in, because whether the terminal's font carries the icon range
+    /// cannot be detected from inside the terminal, and guessing wrong fills the
+    /// screen with replacement characters.
+    NerdFont,
 }
 
 impl GlyphMode {
     /// Accepted values, for help text and error messages.
-    pub const ACCEPTED: &'static [&'static str] = &["auto", "unicode", "ascii"];
+    pub const ACCEPTED: &'static [&'static str] = &["auto", "unicode", "ascii", "nerd-font"];
 }
 
 /// Whether to emit colour.
@@ -339,6 +345,17 @@ mod tests {
         let issues = config.validate();
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].path, "schema-version");
+    }
+
+    #[test]
+    fn the_nerd_font_tier_round_trips_and_is_opt_in() {
+        // Adding a tier must not invalidate a configuration written before it
+        // existed, so this is an additive change with no migration.
+        let config: Config = toml::from_str("[ui]\nglyphs = \"nerd-font\"\n").expect("parse");
+        assert_eq!(config.ui.glyphs, GlyphMode::NerdFont);
+        assert_eq!(UiConfig::default().glyphs, GlyphMode::Auto, "never assumed");
+        let text = toml::to_string(&config).expect("serialise");
+        assert!(text.contains("glyphs = \"nerd-font\""), "{text}");
     }
 
     #[test]

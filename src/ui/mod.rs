@@ -4,11 +4,13 @@
 //! writes a file. Widgets render state and emit intent; the application layer
 //! turns intent into effects.
 
+pub mod glyphs;
 pub mod keymap;
 pub mod layout;
 pub mod terminal;
 pub mod theme;
 
+pub use glyphs::{GlyphTier, Glyphs, Icon};
 pub use keymap::{Binding, Keymap};
 pub use layout::{LayoutMode, Presentation, layout_mode, render};
 pub use terminal::{TerminalGuard, TerminalOptions};

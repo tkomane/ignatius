@@ -230,6 +230,46 @@ const fn high_contrast(token: Token) -> Rgb {
     }
 }
 
+impl Theme {
+    /// A filled capsule: the token as a background, the surface as the text.
+    ///
+    /// Used for the markers that must be impossible to miss, such as the
+    /// environment classification. Contrast is the same pair as the token's own
+    /// foreground contrast, which the palette tests already enforce.
+    #[must_use]
+    pub fn capsule(&self, token: Token) -> Style {
+        if !self.color {
+            return Style::default().add_modifier(Modifier::REVERSED);
+        }
+        Style::default()
+            .bg(self.rgb(token).into())
+            .fg(self.rgb(Token::Surface).into())
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// The background of an alternating result row.
+    ///
+    /// Striping is a reading aid across wide rows. With colour off it is absent
+    /// rather than faked, because a modifier applied to every second row would
+    /// be noise rather than help.
+    #[must_use]
+    pub fn stripe(&self) -> Style {
+        if !self.color {
+            return Style::default();
+        }
+        Style::default().bg(self.rgb(Token::SurfaceAlt).into())
+    }
+
+    /// Text drawn on a striped row.
+    #[must_use]
+    pub fn on_stripe(&self, token: Token) -> Style {
+        if !self.color {
+            return self.style(token);
+        }
+        self.style(token).bg(self.rgb(Token::SurfaceAlt).into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +338,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn text_stays_readable_on_a_striped_row() {
+        // Striping alternates the background, so every contrast guarantee has to
+        // hold against the alternate surface as well as the main one.
+        for theme in themes() {
+            let stripe = theme.rgb(Token::SurfaceAlt);
+            assert!(
+                theme.rgb(Token::Text).contrast(stripe) >= READABLE,
+                "{:?}: text on a striped row is {:.2}",
+                theme.choice,
+                theme.rgb(Token::Text).contrast(stripe)
+            );
+            for token in [
+                Token::Muted,
+                Token::NullValue,
+                Token::Danger,
+                Token::Success,
+            ] {
+                assert!(
+                    theme.rgb(token).contrast(stripe) >= LARGE_OR_SECONDARY,
+                    "{:?}/{token:?} on a striped row is {:.2}",
+                    theme.choice,
+                    theme.rgb(token).contrast(stripe)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_capsule_is_legible_and_falls_back_to_reversed_text() {
+        for theme in themes() {
+            let style = theme.capsule(Token::EnvironmentProduction);
+            assert!(
+                style.bg.is_some(),
+                "{:?}: a capsule needs a fill",
+                theme.choice
+            );
+            assert!(style.fg.is_some());
+            // The pair is token against surface, which the palette tests already
+            // hold to a threshold; assert it here so the capsule cannot drift.
+            let ratio = theme
+                .rgb(Token::EnvironmentProduction)
+                .contrast(theme.rgb(Token::Surface));
+            assert!(
+                ratio >= LARGE_OR_SECONDARY,
+                "{:?}: capsule contrast {ratio:.2}",
+                theme.choice
+            );
+        }
+        let plain = Theme::new(ThemeChoice::Dark, false);
+        assert!(plain.capsule(Token::EnvironmentProduction).bg.is_none());
+        assert!(
+            plain
+                .capsule(Token::EnvironmentProduction)
+                .add_modifier
+                .contains(Modifier::REVERSED),
+            "without colour a capsule must still stand out"
+        );
+        assert!(
+            plain.stripe().bg.is_none(),
+            "striping is dropped, not faked"
+        );
     }
 
     #[test]

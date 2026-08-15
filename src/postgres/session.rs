@@ -365,8 +365,17 @@ fn build_config(target: &ConnectionTarget) -> tokio_postgres::Config {
         Host::Tcp(host) => {
             config.host(host);
         }
+        // `host_path` exists only where Unix sockets do. Target resolution
+        // already refuses a socket on platforms without them and says so, which
+        // makes the second arm unreachable; it is written as a total function
+        // rather than a panic so a future caller cannot turn it into a crash.
+        #[cfg(unix)]
         Host::Socket(path) => {
             config.host_path(path);
+        }
+        #[cfg(not(unix))]
+        Host::Socket(path) => {
+            config.host(&path.display().to_string());
         }
     }
     config

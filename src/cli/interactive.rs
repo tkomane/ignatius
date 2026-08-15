@@ -31,6 +31,12 @@ use tokio::sync::mpsc;
 /// How often the input thread checks whether it should stop.
 const INPUT_POLL: Duration = Duration::from_millis(100);
 
+/// How often the interface redraws while something is happening.
+///
+/// Ticks are sent only while there is something to animate, so an idle client
+/// wakes nothing and costs nothing.
+const TICK: Duration = Duration::from_millis(90);
+
 /// Opens the interactive client.
 pub fn run(
     target: Option<&str>,
@@ -124,10 +130,29 @@ async fn event_loop(
     })?;
 
     let keymap = Keymap::new();
-    let ui = layout::Presentation {
-        theme: Theme::new(config.ui.theme, presentation.color),
-        unicode: presentation.unicode,
-    };
+    // An explicit flag wins; otherwise configuration decides, and only then the
+    // environment. The Nerd tier is never reached by inference.
+    let tier = presentation.glyph_override.unwrap_or_else(|| {
+        use crate::config::GlyphMode;
+        use crate::ui::GlyphTier;
+        match config.ui.glyphs {
+            GlyphMode::Auto => {
+                if presentation.unicode_capable {
+                    GlyphTier::Unicode
+                } else {
+                    GlyphTier::Ascii
+                }
+            }
+            GlyphMode::Unicode => GlyphTier::Unicode,
+            GlyphMode::Ascii => GlyphTier::Ascii,
+            GlyphMode::NerdFont => GlyphTier::Nerd,
+        }
+    });
+    let ui = layout::Presentation::new(
+        Theme::new(config.ui.theme, presentation.color),
+        crate::ui::Glyphs::new(tier),
+        config.ui.reduced_motion,
+    );
     let mut model = Model::new(config.query.max_buffered_rows);
     model.connection = crate::app::ConnectionState::Connecting;
     model.editor.set_text(starter_query());
@@ -136,6 +161,12 @@ async fn event_loop(
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     spawn_input_thread(tx.clone(), Arc::clone(&input_stop), &keymap);
     spawn_signal_watcher(tx.clone());
+
+    // The clock lives here, not in the reducer. The ticker measures how long the
+    // current activity has been running and passes it in, which is what keeps
+    // every animated state reproducible in a test.
+    let (activity, activity_rx) = tokio::sync::watch::channel(Some(std::time::Instant::now()));
+    spawn_ticker(tx.clone(), activity_rx);
 
     // The connection is opened as an effect like any other, so the interface is
     // drawn and responsive while it happens.
@@ -165,10 +196,50 @@ async fn event_loop(
                 }
             }
         }
+        // Start and stop the ticker with the animation, so nothing spins while
+        // the client is sitting idle.
+        let animating = model.is_animating();
+        let ticking = activity.borrow().is_some();
+        if animating && !ticking {
+            let _ = activity.send(Some(std::time::Instant::now()));
+        } else if !animating && ticking {
+            let _ = activity.send(None);
+        }
+
         draw(&mut terminal, &model, &keymap, &ui)?;
     }
 
     Ok(ExitCode::Success)
+}
+
+/// Emits a frame of elapsed time while there is something to animate.
+fn spawn_ticker(
+    tx: mpsc::UnboundedSender<Message>,
+    mut activity: tokio::sync::watch::Receiver<Option<std::time::Instant>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            let started = *activity.borrow_and_update();
+            match started {
+                Some(started) => {
+                    let message = Message::Tick {
+                        running_for: Some(started.elapsed()),
+                    };
+                    if tx.send(message).is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(TICK).await;
+                }
+                // Nothing is happening: sleep until it does, rather than
+                // waking up to discover that again.
+                None => {
+                    if activity.changed().await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    });
 }
 
 fn draw(

@@ -73,6 +73,15 @@ pub enum Message {
     CancellationFailed(Box<Diagnostic>),
     /// Server messages arrived outside an execution.
     Notices(Vec<Notice>),
+    /// A frame of elapsed time.
+    ///
+    /// The reducer reads no clock, so the runtime measures how long the current
+    /// statement has been running and passes it in. That keeps every animated
+    /// state reproducible in a test.
+    Tick {
+        /// How long the statement in flight has been running, when one is.
+        running_for: Option<std::time::Duration>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.

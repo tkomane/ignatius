@@ -48,7 +48,6 @@ futures-util = { version = "0.3.31", default-features = false, features = ["std"
 rustls = { version = "0.23.35", default-features = false, features = ["std", "ring", "tls12", "logging"] }
 tokio-postgres-rustls = "0.14.0"
 rustls-platform-verifier = "0.7.0"
-rustls-pemfile = "2.2.0"
 
 # Configuration and machine-readable output (ADR-0006).
 serde = { version = "1.0.229", features = ["derive"] }
