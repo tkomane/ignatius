@@ -1,0 +1,9 @@
+# Normalise line endings in the repository so a Windows checkout cannot produce
+# phantom diffs or Windows-only test failures.
+* text=auto eol=lf
+
+# Binary and generated files must never be converted.
+*.png binary
+*.jpg binary
+*.ico binary
+Cargo.lock text eol=lf linguist-generated=true
