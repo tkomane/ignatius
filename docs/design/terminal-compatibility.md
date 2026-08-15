@@ -20,6 +20,13 @@ Mouse capture is off by default because capturing the mouse takes away the
 terminal's own text selection, which people rely on to copy a value. Turning it
 on is a configuration choice and removes no keyboard capability.
 
+**Mouse capture is the one mode that is not an escape sequence everywhere.** On
+Windows, Crossterm enables and disables it through the console API rather than by
+writing `ESC[?1000h`. The call is made and undone exactly as on Unix; only its
+observability differs, which is why the ordering test asserts the sequence order
+on Unix and the remaining modes everywhere. This was found by the Windows CI
+runner, not by reasoning about it.
+
 Restoration happens in exactly the reverse order, with the alternate screen left
 last so the restored cursor and paste state apply to the user's own screen. This
 is enforced by a test that asserts the ordering, and confirmed by a captured pty
