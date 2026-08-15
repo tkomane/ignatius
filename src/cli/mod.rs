@@ -52,6 +52,14 @@ pub struct GlobalArgs {
     #[arg(long, global = true)]
     pub ascii: bool,
 
+    /// Which glyphs to draw with.
+    ///
+    /// `nerd-font` adds icons and needs a patched font. It is never chosen
+    /// automatically, because whether the terminal's font carries the icon range
+    /// cannot be detected from inside the terminal.
+    #[arg(long, global = true, value_name = "TIER")]
+    pub glyphs: Option<GlyphChoice>,
+
     /// Plain output: no colour, no box drawing, no decoration.
     #[arg(long, global = true)]
     pub plain: bool,
@@ -59,6 +67,38 @@ pub struct GlobalArgs {
     /// Show technical detail in errors.
     #[arg(short, long, global = true)]
     pub verbose: bool,
+}
+
+/// Which glyphs may be drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum GlyphChoice {
+    /// Decide from the environment, falling back to ASCII when unsure.
+    Auto,
+    /// Box drawing and widely supported symbols.
+    Unicode,
+    /// ASCII only.
+    Ascii,
+    /// Icons from a patched Nerd Font.
+    NerdFont,
+}
+
+impl GlyphChoice {
+    const fn tier(self, unicode_capable: bool) -> crate::ui::GlyphTier {
+        use crate::ui::GlyphTier;
+        match self {
+            Self::Auto => {
+                if unicode_capable {
+                    GlyphTier::Unicode
+                } else {
+                    GlyphTier::Ascii
+                }
+            }
+            Self::Unicode => GlyphTier::Unicode,
+            Self::Ascii => GlyphTier::Ascii,
+            Self::NerdFont => GlyphTier::Nerd,
+        }
+    }
 }
 
 /// When colour may be emitted.
@@ -221,10 +261,22 @@ pub enum ConfigAction {
 pub struct Presentation {
     /// Whether colour may be emitted.
     pub color: bool,
-    /// Whether Unicode may be used.
-    pub unicode: bool,
+    /// The tier resolved from flags and the environment alone.
+    pub glyphs: crate::ui::GlyphTier,
+    /// A tier the user asked for explicitly, which overrides configuration.
+    pub glyph_override: Option<crate::ui::GlyphTier>,
+    /// Whether the environment looks able to render Unicode.
+    pub unicode_capable: bool,
     /// Whether to show technical detail in errors.
     pub verbose: bool,
+}
+
+impl Presentation {
+    /// Whether anything beyond ASCII may be drawn.
+    #[must_use]
+    pub fn unicode(&self) -> bool {
+        self.glyphs != crate::ui::GlyphTier::Ascii
+    }
 }
 
 /// Runs the command line, writing to the given streams.
@@ -265,7 +317,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
                     format: *format,
                     header: !*no_header,
                     null_encoding: null.clone(),
-                    unicode: presentation.unicode,
+                    unicode: presentation.unicode(),
                 },
                 max_rows: *max_rows,
                 connection,
@@ -307,9 +359,25 @@ fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> P
             Some(ColorChoice::Auto) | None => crate::config::ColorMode::Auto,
         }
     };
+    // Plain and --ascii are absolute: they are what a user reaches for when the
+    // terminal cannot cope, so configuration does not get to override them.
+    let forced_ascii = global.plain || global.ascii;
+    let unicode_capable = !forced_ascii && facts.unicode;
+    let glyph_override = if forced_ascii {
+        Some(crate::ui::GlyphTier::Ascii)
+    } else {
+        global.glyphs.map(|choice| choice.tier(unicode_capable))
+    };
+
     Presentation {
         color: crate::ui::terminal::should_use_color(color_mode, facts),
-        unicode: !global.ascii && !global.plain && facts.unicode,
+        glyphs: glyph_override.unwrap_or(if unicode_capable {
+            crate::ui::GlyphTier::Unicode
+        } else {
+            crate::ui::GlyphTier::Ascii
+        }),
+        glyph_override,
+        unicode_capable,
         verbose: global.verbose,
     }
 }
@@ -720,7 +788,49 @@ mod tests {
             &facts,
         );
         assert!(!presentation.color);
-        assert!(!presentation.unicode);
+        assert!(!presentation.unicode());
+        assert_eq!(presentation.glyphs, crate::ui::GlyphTier::Ascii);
+    }
+
+    #[test]
+    fn the_nerd_font_tier_is_only_ever_chosen_explicitly() {
+        let facts = doctor::TerminalFacts {
+            is_terminal: true,
+            term: Some("xterm-256color".into()),
+            term_program: Some("WarpTerminal".into()),
+            no_color: false,
+            size: Some((100, 30)),
+            unicode: true,
+        };
+
+        // Nothing about a capable terminal implies a patched font.
+        let automatic = resolve_presentation(&GlobalArgs::default(), &facts);
+        assert_eq!(automatic.glyphs, crate::ui::GlyphTier::Unicode);
+        assert!(
+            automatic.glyph_override.is_none(),
+            "configuration still decides"
+        );
+
+        let asked = resolve_presentation(
+            &GlobalArgs {
+                glyphs: Some(GlyphChoice::NerdFont),
+                ..GlobalArgs::default()
+            },
+            &facts,
+        );
+        assert_eq!(asked.glyphs, crate::ui::GlyphTier::Nerd);
+
+        // --plain wins over an explicit request, because it is what someone
+        // reaches for when the terminal cannot cope.
+        let plain = resolve_presentation(
+            &GlobalArgs {
+                glyphs: Some(GlyphChoice::NerdFont),
+                plain: true,
+                ..GlobalArgs::default()
+            },
+            &facts,
+        );
+        assert_eq!(plain.glyphs, crate::ui::GlyphTier::Ascii);
     }
 
     #[test]

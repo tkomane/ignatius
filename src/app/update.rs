@@ -50,6 +50,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 return Vec::new();
             }
             model.phase = QueryPhase::Idle;
+            model.running_for = None;
             model.last_elapsed = Some(execution.elapsed);
             model.error = execution.error.clone();
             model.error_expanded = false;
@@ -77,6 +78,11 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         }
         Message::Notices(notices) => {
             model.notices.extend(notices);
+            Vec::new()
+        }
+        Message::Tick { running_for } => {
+            model.frame = model.frame.wrapping_add(1);
+            model.running_for = running_for;
             Vec::new()
         }
     }
@@ -158,6 +164,7 @@ fn run(model: &mut Model, sql: String) -> Vec<Effect> {
         job,
         statements: parsed.len(),
     };
+    model.running_for = Some(std::time::Duration::ZERO);
     model.error = None;
     vec![Effect::Execute { job, sql }]
 }
@@ -512,6 +519,69 @@ mod tests {
         model.focus = Focus::Editor;
         update(&mut model, Message::Action(Action::Insert('x')));
         assert_eq!(model.editor.text(), "x");
+    }
+
+    #[test]
+    fn a_tick_advances_the_frame_and_records_elapsed_time_without_a_clock() {
+        let mut model = connected();
+        assert!(!model.is_animating(), "an idle client animates nothing");
+
+        model.editor.set_text("SELECT pg_sleep(5);");
+        update(&mut model, Message::Action(Action::RunBuffer));
+        assert!(
+            model.is_animating(),
+            "a running statement is worth animating"
+        );
+
+        let before = model.frame;
+        update(
+            &mut model,
+            Message::Tick {
+                running_for: Some(Duration::from_millis(1500)),
+            },
+        );
+        assert_eq!(model.frame, before + 1);
+        assert_eq!(model.running_for, Some(Duration::from_millis(1500)));
+    }
+
+    #[test]
+    fn the_live_timer_is_cleared_when_the_statement_ends() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        update(&mut model, Message::Action(Action::RunBuffer));
+        let job = model.phase.job().expect("running");
+        update(
+            &mut model,
+            Message::Tick {
+                running_for: Some(Duration::from_secs(2)),
+            },
+        );
+        assert!(model.running_for.is_some());
+
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &["x"])),
+        );
+        assert!(
+            model.running_for.is_none(),
+            "a stale timer would keep counting"
+        );
+        assert!(!model.is_animating());
+    }
+
+    #[test]
+    fn ticks_change_nothing_a_user_could_mistake_for_progress() {
+        // A frame counter must never move the query, the selection, or the state.
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        let before = model.clone();
+        for _ in 0..50 {
+            update(&mut model, Message::Tick { running_for: None });
+        }
+        assert_eq!(model.phase, before.phase);
+        assert_eq!(model.editor.text(), before.editor.text());
+        assert_eq!(model.selected_row, before.selected_row);
+        assert!(model.last_execution.is_none());
     }
 
     #[test]

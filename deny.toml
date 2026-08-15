@@ -19,6 +19,9 @@ allow = [
     "MPL-2.0",
 ]
 confidence-threshold = 0.9
+# The list above is a policy, not an inventory. A licence nobody happens to use
+# today is still a decision worth recording, so an unused entry is not a warning.
+unused-allowed-license = "allow"
 
 [bans]
 multiple-versions = "warn"
