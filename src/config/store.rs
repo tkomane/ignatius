@@ -95,10 +95,7 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
             format!("{} setting(s) are out of range", issues.len()),
             "validating configuration",
         )
-        .likely_cause(format!(
-            "{}: {}",
-            issues[0].path, issues[0].message
-        ))
+        .likely_cause(format!("{}: {}", issues[0].path, issues[0].message))
         .next_action(issues[0].suggestion.clone())
         .technical("Path", path.display().to_string());
         for issue in &issues {
@@ -176,7 +173,9 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         return Ok(MigrationReport {
             from_version,
             to_version: CURRENT_SCHEMA_VERSION,
-            steps: vec![format!("already at schema version {CURRENT_SCHEMA_VERSION}")],
+            steps: vec![format!(
+                "already at schema version {CURRENT_SCHEMA_VERSION}"
+            )],
             backup: None,
             no_op: true,
             dry_run,
@@ -288,7 +287,9 @@ fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
 
     let temp = dir.join(format!(
         ".{}.tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("config")
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("config")
     ));
     {
         let mut file = fs::File::create(&temp)?;
@@ -332,7 +333,10 @@ mod tests {
         assert_eq!(loaded.source, ConfigSource::Defaults);
         assert_eq!(loaded.config, Config::default());
         assert!(loaded.pending_migration.is_none());
-        assert!(!paths.config_file.exists(), "loading must not create a file");
+        assert!(
+            !paths.config_file.exists(),
+            "loading must not create a file"
+        );
     }
 
     #[test]
@@ -342,7 +346,10 @@ mod tests {
         fs::write(&paths.config_file, "schema_version = \n").expect("write");
         let err = load(&paths).expect_err("must fail");
         assert_eq!(err.kind, DiagnosticKind::Config);
-        assert!(err.next_action.is_some(), "a config error must say what to do next");
+        assert!(
+            err.next_action.is_some(),
+            "a config error must say what to do next"
+        );
         assert!(err.technical.iter().any(|f| f.label == "Path"));
     }
 
@@ -376,12 +383,18 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .filter(|n| n.contains(".tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "temporary files left behind: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temporary files left behind: {leftovers:?}"
+        );
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&paths.config_file).expect("meta").permissions().mode();
+            let mode = fs::metadata(&paths.config_file)
+                .expect("meta")
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600, "config must be owner-only");
         }
     }
@@ -413,7 +426,9 @@ mod tests {
         assert!(dry.backup.is_none(), "a dry run writes nothing");
         assert_eq!(dry.to_version, CURRENT_SCHEMA_VERSION);
         assert!(
-            fs::read_to_string(&paths.config_file).expect("read").starts_with("[ui]"),
+            fs::read_to_string(&paths.config_file)
+                .expect("read")
+                .starts_with("[ui]"),
             "dry run must not modify the file"
         );
 
@@ -422,11 +437,18 @@ mod tests {
         assert_eq!(first.to_version, CURRENT_SCHEMA_VERSION);
         let backup = first.backup.expect("backup written");
         assert!(backup.exists());
-        assert_eq!(fs::read_to_string(&backup).expect("read"), "[ui]\ntheme = \"light\"\n");
+        assert_eq!(
+            fs::read_to_string(&backup).expect("read"),
+            "[ui]\ntheme = \"light\"\n"
+        );
 
         let loaded = load(&paths).expect("load after migration");
         assert_eq!(loaded.config.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(loaded.config.ui.theme, ThemeChoice::Light, "settings preserved");
+        assert_eq!(
+            loaded.config.ui.theme,
+            ThemeChoice::Light,
+            "settings preserved"
+        );
         assert!(loaded.pending_migration.is_none());
 
         let second = migrate(&paths, false).expect("repeat migrate");
@@ -440,7 +462,11 @@ mod tests {
         fs::create_dir_all(&paths.config_dir).expect("mkdir");
         fs::write(&paths.config_file, "schema_version = 99\n").expect("write");
         let err = migrate(&paths, false).expect_err("must refuse");
-        assert!(err.headline.contains("newer than this build"), "{}", err.headline);
+        assert!(
+            err.headline.contains("newer than this build"),
+            "{}",
+            err.headline
+        );
         assert_eq!(
             fs::read_to_string(&paths.config_file).expect("read"),
             "schema_version = 99\n",

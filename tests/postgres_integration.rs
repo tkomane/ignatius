@@ -9,6 +9,9 @@
 //! missing container is an environment limitation, not a product regression.
 //! CI sets the variable, so there the tests must run.
 
+// Tests report skips to the developer running them; that is what stderr is for.
+#![allow(clippy::print_stderr)]
+
 use ignatius::config::Config;
 use ignatius::connection::{ConnectionArgs, EnvSnapshot, SslMode, resolve};
 use ignatius::postgres::{TlsState, session};
@@ -74,7 +77,12 @@ fn select_one_returns_one_row_with_the_expected_value() {
     let fx = fixture(&uri);
     let execution = fx.block_on(fx.session.execute("SELECT 1 AS one", 100, JobId(1)));
 
-    assert_eq!(execution.status, ExecutionStatus::Succeeded, "{:?}", execution.error);
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
     let set = execution.statements[0].result_set.as_ref().expect("rows");
     assert_eq!(set.columns, vec!["one".to_owned()]);
     assert_eq!(set.rows, vec![vec![Cell::Text("1".into())]]);
@@ -89,7 +97,10 @@ fn the_session_reports_what_the_server_says_about_itself() {
     let info = fx.session.info();
 
     assert!(!info.server_version.is_empty());
-    assert!(info.backend_pid.parse::<i32>().is_ok(), "backend pid is a number");
+    assert!(
+        info.backend_pid.parse::<i32>().is_ok(),
+        "backend pid is a number"
+    );
     assert!(!info.search_path.is_empty());
     // The container speaks plain TCP, and the client must say so rather than
     // implying the connection is protected.
@@ -116,14 +127,21 @@ fn a_server_error_carries_sqlstate_and_a_position() {
 
     assert_eq!(execution.status, ExecutionStatus::Failed);
     let error = execution.error.expect("diagnostic");
-    assert!(error.headline.contains("definitely_not_a_table"), "{}", error.headline);
+    assert!(
+        error.headline.contains("definitely_not_a_table"),
+        "{}",
+        error.headline
+    );
     let sqlstate = error
         .technical
         .iter()
         .find(|f| f.label == "SQLSTATE")
         .expect("SQLSTATE reported");
     assert_eq!(sqlstate.value, "42P01");
-    assert!(error.next_action.is_some(), "an error must say what to do next");
+    assert!(
+        error.next_action.is_some(),
+        "an error must say what to do next"
+    );
     assert!(error.position.is_some(), "the server reported a position");
 }
 
@@ -139,7 +157,10 @@ fn a_long_statement_can_be_cancelled_and_the_server_confirms_it() {
         let stopper = async {
             // Give the statement time to reach the server, then ask it to stop.
             tokio::time::sleep(Duration::from_millis(300)).await;
-            cancel.cancel().await.expect("cancellation request is delivered");
+            cancel
+                .cancel()
+                .await
+                .expect("cancellation request is delivered");
         };
         let (execution, ()) = tokio::join!(running, stopper);
         execution
@@ -158,7 +179,12 @@ fn a_long_statement_can_be_cancelled_and_the_server_confirms_it() {
     );
     let error = execution.error.expect("diagnostic");
     assert_eq!(
-        error.technical.iter().find(|f| f.label == "SQLSTATE").expect("SQLSTATE").value,
+        error
+            .technical
+            .iter()
+            .find(|f| f.label == "SQLSTATE")
+            .expect("SQLSTATE")
+            .value,
         "57014",
         "PostgreSQL reports query_canceled"
     );
@@ -179,7 +205,11 @@ fn results_are_bounded_by_the_row_cap_and_report_the_true_count() {
     assert_eq!(set.rows.len(), 10, "memory stays bounded at the cap");
     assert_eq!(set.rows_seen, 5000, "the true count is still known");
     assert!(set.is_truncated());
-    assert!(set.window_label().contains("5000"), "{}", set.window_label());
+    assert!(
+        set.window_label().contains("5000"),
+        "{}",
+        set.window_label()
+    );
 }
 
 #[test]
@@ -192,7 +222,11 @@ fn null_is_distinguishable_from_an_empty_string_over_the_wire() {
         JobId(1),
     ));
 
-    let row = &execution.statements[0].result_set.as_ref().expect("rows").rows[0];
+    let row = &execution.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows")
+        .rows[0];
     assert_eq!(row[0], Cell::Null);
     assert_eq!(row[1], Cell::Text(String::new()));
     assert_eq!(row[2], Cell::Text("NULL".into()));
@@ -213,15 +247,28 @@ fn values_keep_the_precision_and_meaning_the_server_gave_them() {
         JobId(1),
     ));
 
-    assert_eq!(execution.status, ExecutionStatus::Succeeded, "{:?}", execution.error);
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
     let set = execution
         .statements
         .iter()
         .find_map(|s| s.result_set.as_ref())
         .expect("rows");
     let row = &set.rows[0];
-    assert_eq!(row[0], Cell::Text("123456789.12345678".into()), "no float rounding");
-    assert_eq!(row[1], Cell::Text("1.100".into()), "trailing zeros are the server's");
+    assert_eq!(
+        row[0],
+        Cell::Text("123456789.12345678".into()),
+        "no float rounding"
+    );
+    assert_eq!(
+        row[1],
+        Cell::Text("1.100".into()),
+        "trailing zeros are the server's"
+    );
     let moment = row[2].raw().expect("timestamp");
     assert!(moment.contains("+02"), "the offset survives: {moment}");
 }
@@ -237,7 +284,12 @@ fn every_common_type_including_unknown_ones_renders_safely() {
         JobId(1),
     ));
 
-    assert_eq!(execution.status, ExecutionStatus::Succeeded, "{:?}", execution.error);
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
     let set = execution.statements[0].result_set.as_ref().expect("rows");
     assert_eq!(set.columns.len(), 12);
     for (column, cell) in set.columns.iter().zip(&set.rows[0]) {
@@ -246,9 +298,21 @@ fn every_common_type_including_unknown_ones_renders_safely() {
         assert!(!rendered.contains('\u{1b}'), "{column} emitted an escape");
     }
     let row = &set.rows[0];
-    assert_eq!(row[1], Cell::Text("9223372036854775807".into()), "bigint is exact");
-    assert_eq!(row[7], Cell::Text("\\xdeadbeef".into()), "bytea keeps its hex form");
-    assert_eq!(row[10], Cell::Text("[1,10)".into()), "range keeps its bounds");
+    assert_eq!(
+        row[1],
+        Cell::Text("9223372036854775807".into()),
+        "bigint is exact"
+    );
+    assert_eq!(
+        row[7],
+        Cell::Text("\\xdeadbeef".into()),
+        "bytea keeps its hex form"
+    );
+    assert_eq!(
+        row[10],
+        Cell::Text("[1,10)".into()),
+        "range keeps its bounds"
+    );
 }
 
 #[test]
@@ -261,7 +325,11 @@ fn hostile_values_from_the_database_cannot_drive_the_terminal() {
         JobId(1),
     ));
 
-    let cell = &execution.statements[0].result_set.as_ref().expect("rows").rows[0][0];
+    let cell = &execution.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows")
+        .rows[0][0];
     assert!(
         cell.raw().expect("text").contains('\u{1b}'),
         "the raw value really does contain an escape"
@@ -283,7 +351,12 @@ fn multiple_statements_produce_multiple_results_in_order() {
         JobId(1),
     ));
 
-    assert_eq!(execution.status, ExecutionStatus::Succeeded, "{:?}", execution.error);
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
     assert_eq!(execution.statements.len(), 3);
     for (index, expected) in ["first", "second", "third"].iter().enumerate() {
         let set = execution.statements[index]
@@ -323,14 +396,21 @@ fn server_notices_reach_the_client() {
         JobId(1),
     ));
 
-    assert_eq!(execution.status, ExecutionStatus::Succeeded, "{:?}", execution.error);
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
     let notices: Vec<_> = execution
         .statements
         .iter()
         .flat_map(|s| s.notices.clone())
         .collect();
     assert!(
-        notices.iter().any(|n| n.message.contains("synthetic notice")),
+        notices
+            .iter()
+            .any(|n| n.message.contains("synthetic notice")),
         "notices were dropped: {notices:?}"
     );
 }
@@ -341,7 +421,10 @@ fn a_failed_transaction_is_reported_and_rollback_recovers_it() {
     let fx = fixture(&uri);
 
     fx.block_on(fx.session.execute("BEGIN", 100, JobId(1)));
-    let failed = fx.block_on(fx.session.execute("SELECT * FROM no_such_table", 100, JobId(2)));
+    let failed = fx.block_on(
+        fx.session
+            .execute("SELECT * FROM no_such_table", 100, JobId(2)),
+    );
     assert_eq!(failed.status, ExecutionStatus::Failed);
 
     // Inside a failed transaction the server refuses everything until it ends.
@@ -349,7 +432,12 @@ fn a_failed_transaction_is_reported_and_rollback_recovers_it() {
     assert_eq!(blocked.status, ExecutionStatus::Failed);
     let error = blocked.error.expect("diagnostic");
     assert_eq!(
-        error.technical.iter().find(|f| f.label == "SQLSTATE").expect("SQLSTATE").value,
+        error
+            .technical
+            .iter()
+            .find(|f| f.label == "SQLSTATE")
+            .expect("SQLSTATE")
+            .value,
         "25P02"
     );
     assert_eq!(
@@ -407,24 +495,42 @@ fn a_restricted_role_can_still_connect_and_read_what_it_is_granted() {
         eprintln!("skipping: the test URI has no userinfo to replace");
         return;
     };
-    let restricted = format!(
-        "{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}"
-    );
+    let restricted =
+        format!("{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}");
 
     let fx = fixture(&restricted);
 
-    let allowed = fx.block_on(fx.session.execute("SELECT count(*) FROM orders", 100, JobId(1)));
-    assert_eq!(allowed.status, ExecutionStatus::Succeeded, "{:?}", allowed.error);
+    let allowed = fx.block_on(
+        fx.session
+            .execute("SELECT count(*) FROM orders", 100, JobId(1)),
+    );
+    assert_eq!(
+        allowed.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        allowed.error
+    );
 
-    let denied = fx.block_on(fx.session.execute("SELECT * FROM type_coverage", 100, JobId(2)));
+    let denied = fx.block_on(
+        fx.session
+            .execute("SELECT * FROM type_coverage", 100, JobId(2)),
+    );
     assert_eq!(denied.status, ExecutionStatus::Failed);
     let error = denied.error.expect("diagnostic");
     assert_eq!(
-        error.technical.iter().find(|f| f.label == "SQLSTATE").expect("SQLSTATE").value,
+        error
+            .technical
+            .iter()
+            .find(|f| f.label == "SQLSTATE")
+            .expect("SQLSTATE")
+            .value,
         "42501",
         "permission denied is reported as itself"
     );
-    assert!(error.likely_cause.is_some(), "a permission error explains itself");
+    assert!(
+        error.likely_cause.is_some(),
+        "a permission error explains itself"
+    );
 }
 
 #[test]
@@ -450,12 +556,13 @@ fn a_wrong_password_is_reported_as_authentication_not_as_a_generic_failure() {
 
     let error = runtime()
         .block_on(session::connect(&target, Duration::ZERO))
-        .err()
-        .expect("wrong password must fail");
+        .expect_err("wrong password must fail");
 
     assert_eq!(error.exit_code(), ignatius::ExitCode::Authentication);
     assert!(
-        !error.render_plain(true).contains("definitely-the-wrong-password"),
+        !error
+            .render_plain(true)
+            .contains("definitely-the-wrong-password"),
         "the diagnostic must never echo the password"
     );
 }

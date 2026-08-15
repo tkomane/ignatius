@@ -318,9 +318,13 @@ mod tests {
 
     #[test]
     fn technical_section_is_summarised_until_expanded() {
-        let d = Diagnostic::new(DiagnosticKind::Query, "relation does not exist", "running statement 1")
-            .technical("SQLSTATE", "42P01")
-            .technical("Detail", "no such table");
+        let d = Diagnostic::new(
+            DiagnosticKind::Query,
+            "relation does not exist",
+            "running statement 1",
+        )
+        .technical("SQLSTATE", "42P01")
+        .technical("Detail", "no such table");
         let brief = d.render_plain(false);
         assert!(brief.contains("2 field(s) available, re-run with --verbose"));
         assert!(!brief.contains("42P01"));
@@ -337,15 +341,20 @@ mod tests {
         let lines: Vec<&str> = marker.lines().collect();
         assert_eq!(lines[0], "   2 | FROM no_such_table");
         let caret_column = lines[1].find('^').expect("caret rendered");
-        assert_eq!(caret_column, "   2 | ".len() + 5, "caret under `no_such_table`");
+        assert_eq!(
+            caret_column,
+            "   2 | ".len() + 5,
+            "caret under `no_such_table`"
+        );
     }
 
     #[test]
     fn position_marker_handles_out_of_range_and_multibyte() {
         assert!(render_position_marker("SELECT 1", SqlPosition { character: 0 }).is_none());
         assert!(render_position_marker("SELECT 1", SqlPosition { character: 999 }).is_none());
-        let marker = render_position_marker("SELECT 'héllo wörld', oops", SqlPosition { character: 23 })
-            .expect("multibyte position resolves");
+        let marker =
+            render_position_marker("SELECT 'héllo wörld', oops", SqlPosition { character: 23 })
+                .expect("multibyte position resolves");
         // The caret is placed by character count, so multibyte text does not shift it.
         assert!(marker.contains('^'));
     }

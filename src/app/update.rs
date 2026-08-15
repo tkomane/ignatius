@@ -172,9 +172,9 @@ fn move_selection(model: &mut Model, direction: Direction) {
             Direction::Up | Direction::Down => {}
         },
         Focus::Results => {
-            let (rows, columns) = model.visible_result().map_or((0, 0), |set| {
-                (set.rows.len(), set.columns.len())
-            });
+            let (rows, columns) = model
+                .visible_result()
+                .map_or((0, 0), |set| (set.rows.len(), set.columns.len()));
             match direction {
                 Direction::Up => model.selected_row = model.selected_row.saturating_sub(1),
                 Direction::Down => {
@@ -252,7 +252,13 @@ mod tests {
             panic!("expected an execute effect, got {effects:?}");
         };
         assert_eq!(sql, "SELECT 1;");
-        assert_eq!(model.phase, QueryPhase::Running { job: *job, statements: 1 });
+        assert_eq!(
+            model.phase,
+            QueryPhase::Running {
+                job: *job,
+                statements: 1
+            }
+        );
         assert!(model.phase.is_busy());
     }
 
@@ -300,19 +306,43 @@ mod tests {
         let first_job = model.phase.job().expect("running");
 
         // The first query finishes and a second is started.
-        update(&mut model, Message::ExecutionFinished(execution(first_job, ExecutionStatus::Succeeded, &["first"])));
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(
+                first_job,
+                ExecutionStatus::Succeeded,
+                &["first"],
+            )),
+        );
         model.editor.set_text("SELECT 2;");
         update(&mut model, Message::Action(Action::RunBuffer));
         let second_job = model.phase.job().expect("running");
         assert_ne!(first_job, second_job);
 
         // A late result from the first query arrives.
-        update(&mut model, Message::ExecutionFinished(execution(first_job, ExecutionStatus::Succeeded, &["stale"])));
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(
+                first_job,
+                ExecutionStatus::Succeeded,
+                &["stale"],
+            )),
+        );
 
-        assert_eq!(model.phase, QueryPhase::Running { job: second_job, statements: 1 },
-            "the in-flight job must still be running");
+        assert_eq!(
+            model.phase,
+            QueryPhase::Running {
+                job: second_job,
+                statements: 1
+            },
+            "the in-flight job must still be running"
+        );
         let shown = model.visible_result().expect("result").rows[0][0].clone();
-        assert_eq!(shown, Cell::Text("first".into()), "stale rows must not be displayed");
+        assert_eq!(
+            shown,
+            Cell::Text("first".into()),
+            "stale rows must not be displayed"
+        );
     }
 
     #[test]
@@ -328,16 +358,24 @@ mod tests {
         assert_eq!(model.phase.label(), "Cancellation requested");
 
         // Only the server's answer produces the cancelled wording.
-        update(&mut model, Message::ExecutionFinished(Box::new(Execution {
-            job,
-            statements: Vec::new(),
-            status: ExecutionStatus::Cancelled,
-            elapsed: Duration::from_millis(20),
-            error: None,
-        })));
+        update(
+            &mut model,
+            Message::ExecutionFinished(Box::new(Execution {
+                job,
+                statements: Vec::new(),
+                status: ExecutionStatus::Cancelled,
+                elapsed: Duration::from_millis(20),
+                error: None,
+            })),
+        );
         assert_eq!(model.phase, QueryPhase::Idle);
         assert_eq!(
-            model.last_execution.as_ref().expect("execution").status.label(),
+            model
+                .last_execution
+                .as_ref()
+                .expect("execution")
+                .status
+                .label(),
             "Query cancelled by server"
         );
     }
@@ -364,13 +402,16 @@ mod tests {
         model.editor.set_text("SELECT 1;");
         update(&mut model, Message::Action(Action::RunBuffer));
         let job = model.phase.job().expect("running");
-        update(&mut model, Message::ExecutionFinished(Box::new(Execution {
-            job,
-            statements: Vec::new(),
-            status: ExecutionStatus::ConnectionLost,
-            elapsed: Duration::from_millis(1),
-            error: None,
-        })));
+        update(
+            &mut model,
+            Message::ExecutionFinished(Box::new(Execution {
+                job,
+                statements: Vec::new(),
+                status: ExecutionStatus::ConnectionLost,
+                elapsed: Duration::from_millis(1),
+                error: None,
+            })),
+        );
         assert!(matches!(model.connection, ConnectionState::Lost { .. }));
         assert!(!model.connection.is_usable());
     }
@@ -393,15 +434,22 @@ mod tests {
         model.editor.set_text("SELECT * FROM nope;");
         update(&mut model, Message::Action(Action::RunBuffer));
         let job = model.phase.job().expect("running");
-        let diagnostic = Diagnostic::new(DiagnosticKind::Query, "relation does not exist", "running statement 1")
-            .technical("SQLSTATE", "42P01");
-        update(&mut model, Message::ExecutionFinished(Box::new(Execution {
-            job,
-            statements: Vec::new(),
-            status: ExecutionStatus::Failed,
-            elapsed: Duration::from_millis(3),
-            error: Some(diagnostic),
-        })));
+        let diagnostic = Diagnostic::new(
+            DiagnosticKind::Query,
+            "relation does not exist",
+            "running statement 1",
+        )
+        .technical("SQLSTATE", "42P01");
+        update(
+            &mut model,
+            Message::ExecutionFinished(Box::new(Execution {
+                job,
+                statements: Vec::new(),
+                status: ExecutionStatus::Failed,
+                elapsed: Duration::from_millis(3),
+                error: Some(diagnostic),
+            })),
+        );
 
         assert!(model.error.is_some());
         assert!(!model.error_expanded, "detail starts collapsed");
@@ -430,7 +478,11 @@ mod tests {
     fn result_selection_stays_inside_the_grid() {
         let mut model = connected();
         model.focus = Focus::Results;
-        model.last_execution = Some(*execution(JobId(1), ExecutionStatus::Succeeded, &["a", "b"]));
+        model.last_execution = Some(*execution(
+            JobId(1),
+            ExecutionStatus::Succeeded,
+            &["a", "b"],
+        ));
 
         for _ in 0..10 {
             update(&mut model, Message::Action(Action::Move(Direction::Down)));
@@ -451,7 +503,11 @@ mod tests {
         let mut model = connected();
         model.focus = Focus::Results;
         update(&mut model, Message::Action(Action::Insert('x')));
-        assert_eq!(model.editor.text(), "", "results pane must not swallow text into the editor");
+        assert_eq!(
+            model.editor.text(),
+            "",
+            "results pane must not swallow text into the editor"
+        );
 
         model.focus = Focus::Editor;
         update(&mut model, Message::Action(Action::Insert('x')));

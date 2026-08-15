@@ -78,7 +78,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&file).expect("metadata").permissions().mode();
+            let mode = std::fs::metadata(&file)
+                .expect("metadata")
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600, "owner-only file permissions");
             assert!(enforces_file_permissions());
         }

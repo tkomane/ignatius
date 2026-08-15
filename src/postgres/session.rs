@@ -17,9 +17,7 @@ use crate::connection::{ConnectionTarget, Host, SslMode};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::{from_connect_error, from_query_error};
 use crate::postgres::tls::{TlsState, client_config};
-use crate::query::result::{
-    Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult,
-};
+use crate::query::result::{Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult};
 use crate::query::statements;
 use crate::query::value::Cell;
 use futures_util::StreamExt;
@@ -57,7 +55,11 @@ impl SessionInfo {
     /// Read/write posture as words, for the status bar.
     #[must_use]
     pub const fn posture(&self) -> &'static str {
-        if self.read_only { "read-only" } else { "read-write" }
+        if self.read_only {
+            "read-only"
+        } else {
+            "read-write"
+        }
     }
 }
 
@@ -230,8 +232,7 @@ impl Session {
                     result_set = Some(ResultSet::new(names, row_cap));
                 }
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
-                    let set = result_set
-                        .get_or_insert_with(|| ResultSet::new(Vec::new(), row_cap));
+                    let set = result_set.get_or_insert_with(|| ResultSet::new(Vec::new(), row_cap));
                     let cells = (0..row.len())
                         .map(|i| Cell::from_option(row.get(i)))
                         .collect();
@@ -335,8 +336,7 @@ where
     tokio::spawn(async move {
         // Polling the connection directly, rather than awaiting it as a future,
         // is what makes server notices visible to the interface.
-        let mut stream =
-            futures_util::stream::poll_fn(move |cx| connection.poll_message(cx));
+        let mut stream = futures_util::stream::poll_fn(move |cx| connection.poll_message(cx));
         while let Some(message) = stream.next().await {
             match message {
                 Ok(AsyncMessage::Notice(notice)) => {
@@ -393,10 +393,7 @@ fn build_config(target: &ConnectionTarget) -> tokio_postgres::Config {
 }
 
 /// Reads back the facts about the session from the server itself.
-async fn bootstrap(
-    client: &Client,
-    target: &ConnectionTarget,
-) -> Result<SessionInfo, Diagnostic> {
+async fn bootstrap(client: &Client, target: &ConnectionTarget) -> Result<SessionInfo, Diagnostic> {
     const FULL: &str = "SELECT current_setting('server_version') AS server_version, \
          pg_backend_pid()::text AS backend_pid, \
          current_setting('search_path') AS search_path, \
@@ -431,9 +428,7 @@ async fn bootstrap(
         ),
     };
 
-    let get = |name: &str| -> String {
-        row.get(name).unwrap_or_default().to_owned()
-    };
+    let get = |name: &str| -> String { row.get(name).unwrap_or_default().to_owned() };
 
     let tls = if target.sslmode == SslMode::Disable {
         TlsState::Disabled
@@ -519,7 +514,10 @@ mod tests {
             "postgres://app@db.example.net/orders?sslmode=verify-full",
             "postgres://app@db.example.net/orders?sslmode=require",
         ] {
-            assert_eq!(build_config(&target(uri)).get_ssl_mode(), PgSslMode::Require);
+            assert_eq!(
+                build_config(&target(uri)).get_ssl_mode(),
+                PgSslMode::Require
+            );
         }
         assert_eq!(
             build_config(&target("postgres://app@localhost/orders?sslmode=disable")).get_ssl_mode(),

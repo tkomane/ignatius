@@ -71,7 +71,10 @@ fn start(path: &Path, filter: &str) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     rotate_if_needed(path)?;
-    let file = fs::OpenOptions::new().create(true).append(true).open(path)?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
     crate::platform::restrict_to_owner(path)?;
 
     let env_filter = EnvFilter::try_new(filter)
@@ -131,10 +134,17 @@ mod tests {
         assert!(path.exists());
         assert!(!path.with_extension("log.1").exists());
 
-        fs::write(&path, vec![b'x'; usize::try_from(MAX_LOG_BYTES).unwrap() + 1]).expect("write");
+        fs::write(
+            &path,
+            vec![b'x'; usize::try_from(MAX_LOG_BYTES).unwrap() + 1],
+        )
+        .expect("write");
         rotate_if_needed(&path).expect("rotation");
         assert!(!path.exists(), "active log moved aside");
-        assert!(path.with_extension("log.1").exists(), "one previous file kept");
+        assert!(
+            path.with_extension("log.1").exists(),
+            "one previous file kept"
+        );
     }
 
     #[test]

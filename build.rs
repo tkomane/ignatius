@@ -14,7 +14,8 @@ fn main() {
         Some(_) => "modified",
         None => "unknown",
     };
-    let build_identity = std::env::var("IGNATIUS_BUILD_IDENTITY").unwrap_or_else(|_| "local".into());
+    let build_identity =
+        std::env::var("IGNATIUS_BUILD_IDENTITY").unwrap_or_else(|_| "local".into());
     let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown".into());
     let rustc = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
         .arg("--version")

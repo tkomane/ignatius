@@ -219,9 +219,7 @@ const fn high_contrast(token: Token) -> Rgb {
     match token {
         Token::Surface | Token::SurfaceAlt => Rgb(0x00, 0x00, 0x00),
         Token::Text | Token::Border | Token::Header => Rgb(0xff, 0xff, 0xff),
-        Token::Muted | Token::NullValue | Token::EnvironmentNonProduction => {
-            Rgb(0xd0, 0xd0, 0xd0)
-        }
+        Token::Muted | Token::NullValue | Token::EnvironmentNonProduction => Rgb(0xd0, 0xd0, 0xd0),
         Token::Focus | Token::Warning | Token::TransactionActive => Rgb(0xff, 0xff, 0x00),
         Token::Success => Rgb(0x5c, 0xff, 0xa8),
         Token::Danger | Token::TransactionFailed | Token::EnvironmentProduction => {
@@ -319,7 +317,12 @@ mod tests {
 
     #[test]
     fn the_light_theme_is_light_and_the_dark_theme_is_dark() {
-        assert!(Theme::new(ThemeChoice::Light, true).background().luminance() > 0.7);
+        assert!(
+            Theme::new(ThemeChoice::Light, true)
+                .background()
+                .luminance()
+                > 0.7
+        );
         assert!(Theme::new(ThemeChoice::Dark, true).background().luminance() < 0.05);
     }
 
@@ -332,11 +335,17 @@ mod tests {
             assert!(style.bg.is_none(), "{token:?} emitted a background colour");
         }
         assert!(
-            theme.style(Token::Focus).add_modifier.contains(Modifier::BOLD),
+            theme
+                .style(Token::Focus)
+                .add_modifier
+                .contains(Modifier::BOLD),
             "focus must stay visible without colour"
         );
         assert!(
-            theme.style(Token::Selection).add_modifier.contains(Modifier::REVERSED),
+            theme
+                .style(Token::Selection)
+                .add_modifier
+                .contains(Modifier::REVERSED),
             "selection must stay visible without colour"
         );
     }

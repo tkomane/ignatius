@@ -79,7 +79,13 @@ pub const fn layout_mode(area: Rect) -> LayoutMode {
 }
 
 /// Draws the whole interface.
-pub fn render(model: &Model, keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+pub fn render(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     Block::new()
         .style(presentation.theme.style(Token::Text))
         .render(area, buf);
@@ -193,11 +199,20 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
         ));
     }
 
-    spans.push(Span::styled(presentation.separator(), theme.style(Token::Border)));
-    spans.push(Span::styled(model.connection.label(), theme.style(Token::Text)));
+    spans.push(Span::styled(
+        presentation.separator(),
+        theme.style(Token::Border),
+    ));
+    spans.push(Span::styled(
+        model.connection.label(),
+        theme.style(Token::Text),
+    ));
 
     if let Some(info) = model.connection.info() {
-        spans.push(Span::styled(presentation.separator(), theme.style(Token::Border)));
+        spans.push(Span::styled(
+            presentation.separator(),
+            theme.style(Token::Border),
+        ));
         spans.push(Span::styled(
             info.tls.label(),
             theme.style(if info.tls.is_encrypted() {
@@ -209,7 +224,10 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
     }
 
     if let Some(elapsed) = model.last_elapsed {
-        spans.push(Span::styled(presentation.separator(), theme.style(Token::Border)));
+        spans.push(Span::styled(
+            presentation.separator(),
+            theme.style(Token::Border),
+        ));
         spans.push(Span::styled(
             format!("{} ms", elapsed.as_millis()),
             theme.style(Token::Muted),
@@ -298,11 +316,7 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
         .statements
         .first()
         .map_or_else(|| execution.status.label().to_owned(), |s| s.summary());
-    let mut title = format!(
-        " Results  {}  {} ",
-        execution.status.label(),
-        summary
-    );
+    let mut title = format!(" Results  {}  {} ", execution.status.label(), summary);
     if focused {
         title.push_str("[focused] ");
     }
@@ -321,8 +335,7 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
                 .collect::<Vec<_>>()
                 .join("; ")
         };
-        Paragraph::new(Line::from(Span::styled(text, theme.style(Token::Text))))
-            .render(inner, buf);
+        Paragraph::new(Line::from(Span::styled(text, theme.style(Token::Text)))).render(inner, buf);
         return;
     };
 
@@ -339,7 +352,17 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
             .zip(&widths)
             .map(|(name, width)| {
                 Span::styled(
-                    format!("{} ", pad_to_width(&truncate_to_width(&sanitize_for_display(name), *width, presentation.unicode), *width)),
+                    format!(
+                        "{} ",
+                        pad_to_width(
+                            &truncate_to_width(
+                                &sanitize_for_display(name),
+                                *width,
+                                presentation.unicode
+                            ),
+                            *width
+                        )
+                    ),
                     theme.style(Token::Header),
                 )
             })
@@ -361,7 +384,10 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
                     Token::Text
                 };
                 let rendered = truncate_to_width(&cell.display(), *width, presentation.unicode);
-                Span::styled(format!("{} ", pad_to_width(&rendered, *width)), theme.style(token))
+                Span::styled(
+                    format!("{} ", pad_to_width(&rendered, *width)),
+                    theme.style(token),
+                )
             })
             .collect::<Vec<_>>();
         lines.push(Line::from(spans));
@@ -401,7 +427,9 @@ fn column_widths(set: &crate::query::result::ResultSet, available: usize) -> Vec
                 .map(|cell| display_width(&cell.display()))
                 .max()
                 .unwrap_or(0);
-            display_width(&sanitize_for_display(name)).max(widest_value).max(3)
+            display_width(&sanitize_for_display(name))
+                .max(widest_value)
+                .max(3)
         })
         .collect();
 
@@ -432,7 +460,10 @@ fn render_error(
     );
 
     let mut lines = vec![
-        Line::from(Span::styled(error.headline.clone(), theme.style(Token::Danger))),
+        Line::from(Span::styled(
+            error.headline.clone(),
+            theme.style(Token::Danger),
+        )),
         Line::from(Span::styled(
             format!("While: {}", error.attempted),
             theme.style(Token::Muted),
@@ -448,7 +479,8 @@ fn render_error(
         )));
     }
     if let Some(position) = error.position
-        && let Some(marker) = crate::diagnostics::render_position_marker(model.editor.text(), position)
+        && let Some(marker) =
+            crate::diagnostics::render_position_marker(model.editor.text(), position)
     {
         for line in marker.lines() {
             lines.push(Line::from(Span::styled(
@@ -538,7 +570,11 @@ fn render_help(keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &m
     }
 
     Paragraph::new(lines)
-        .block(pane_block(" Help  Esc to close ".to_owned(), true, presentation))
+        .block(pane_block(
+            " Help  Esc to close ".to_owned(),
+            true,
+            presentation,
+        ))
         .style(presentation.theme.style(Token::Text))
         .render(help_area, buf);
 }
@@ -546,14 +582,16 @@ fn render_help(keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &m
 fn pane_block(title: String, focused: bool, presentation: &Presentation) -> Block<'static> {
     Block::bordered()
         .border_set(presentation.borders())
-        .border_style(presentation.theme.style(if focused {
-            Token::Focus
-        } else {
-            Token::Border
-        }))
+        .border_style(
+            presentation
+                .theme
+                .style(if focused { Token::Focus } else { Token::Border }),
+        )
         .title(Span::styled(
             title,
-            presentation.theme.style(if focused { Token::Focus } else { Token::Muted }),
+            presentation
+                .theme
+                .style(if focused { Token::Focus } else { Token::Muted }),
         ))
 }
 
@@ -597,10 +635,10 @@ mod tests {
     use super::*;
     use crate::app::model::{ConnectionState, Model};
     use crate::config::ThemeChoice;
-    use crate::query::value::Cell;
     use crate::connection::Environment;
     use crate::postgres::{SessionInfo, TlsState};
     use crate::query::result::{Execution, ExecutionStatus, JobId, ResultSet, StatementResult};
+    use crate::query::value::Cell;
     use std::time::Duration;
 
     fn presentation(theme: ThemeChoice, color: bool, unicode: bool) -> Presentation {
@@ -653,10 +691,19 @@ mod tests {
     #[test]
     fn the_full_layout_shows_connection_environment_tls_and_hints() {
         let model = connected_model(Environment::Local);
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
 
         assert!(text.contains("Ignatius"), "{text}");
-        assert!(text.contains("[LOCAL]"), "environment must be a visible word");
+        assert!(
+            text.contains("[LOCAL]"),
+            "environment must be a visible word"
+        );
         assert!(text.contains("[read-write]"), "posture must be visible");
         assert!(text.contains("app@localhost:5432/orders"));
         assert!(text.contains("TLS off"), "protection state must be stated");
@@ -693,14 +740,23 @@ mod tests {
                 &[Cell::Text("10483".into()), Cell::Null],
             ],
         );
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
 
         assert!(text.contains("customer_id"), "{text}");
         assert!(text.contains("10482"));
         assert!(text.contains("1245.00"));
         assert!(text.contains("2 rows"), "the row count must be visible");
         assert!(text.contains("87 ms"), "elapsed time must be visible");
-        assert!(text.contains("[null]"), "NULL must be distinguishable: {text}");
+        assert!(
+            text.contains("[null]"),
+            "NULL must be distinguishable: {text}"
+        );
     }
 
     #[test]
@@ -711,22 +767,46 @@ mod tests {
             &["note"],
             &[&[Cell::Text("\x1b[2Jgotcha".into())]],
         );
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
         assert!(!text.contains('\x1b'), "an escape reached the screen");
 
         // The same applies to a hostile column name.
         let mut model = connected_model(Environment::Local);
         with_rows(&mut model, &["\x1b[31mname"], &[&[Cell::Text("x".into())]]);
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
-        assert!(!text.contains('\x1b'), "an escape in a column name reached the screen");
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
+        assert!(
+            !text.contains('\x1b'),
+            "an escape in a column name reached the screen"
+        );
     }
 
     #[test]
     fn an_empty_state_says_what_to_do_next() {
         let model = connected_model(Environment::Local);
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
         assert!(text.contains("No query has run yet"), "{text}");
-        assert!(text.contains("F5"), "the empty state names the key to press");
+        assert!(
+            text.contains("F5"),
+            "the empty state names the key to press"
+        );
     }
 
     #[test]
@@ -742,7 +822,13 @@ mod tests {
             .next_action("qualify it with a schema")
             .technical("SQLSTATE", "42P01"),
         );
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
 
         assert!(text.contains("Query error"), "{text}");
         assert!(text.contains("does not exist"));
@@ -752,7 +838,13 @@ mod tests {
         assert!(text.contains("Ctrl+D to expand"));
 
         model.error_expanded = true;
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
         assert!(text.contains("42P01"), "expanding reveals SQLSTATE");
     }
 
@@ -760,7 +852,13 @@ mod tests {
     fn cancellation_is_worded_as_requested_until_the_server_answers() {
         let mut model = connected_model(Environment::Local);
         model.phase = QueryPhase::CancellationRequested { job: JobId(1) };
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
         assert!(text.contains("Cancellation requested"), "{text}");
         assert!(!text.contains("Query cancelled by server"));
     }
@@ -778,30 +876,60 @@ mod tests {
     fn a_narrow_terminal_gets_one_pane_not_a_clipped_layout() {
         let mut model = connected_model(Environment::Production);
         model.focus = Focus::Editor;
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 60, 20);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            60,
+            20,
+        );
 
         assert!(text.contains("Editor"), "{text}");
-        assert!(!text.contains("Results"), "the unfocused pane is dropped, not squeezed");
-        assert!(text.contains("[PROD]"), "the production marker survives the narrow layout");
+        assert!(
+            !text.contains("Results"),
+            "the unfocused pane is dropped, not squeezed"
+        );
+        assert!(
+            text.contains("[PROD]"),
+            "the production marker survives the narrow layout"
+        );
         for line in text.lines() {
-            assert!(display_width(line.trim_end()) <= 60, "line overflowed: {line:?}");
+            assert!(
+                display_width(line.trim_end()) <= 60,
+                "line overflowed: {line:?}"
+            );
         }
     }
 
     #[test]
     fn a_tiny_terminal_explains_itself_and_offers_a_way_out() {
         let model = connected_model(Environment::Local);
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 30, 6);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            30,
+            6,
+        );
         assert!(text.contains("Terminal too small"), "{text}");
         assert!(text.contains("80x24"), "the minimum is stated");
         assert!(text.contains("30x6"), "the current size is stated");
-        assert!(text.contains("ignatius query"), "a line-oriented route is offered");
+        assert!(
+            text.contains("ignatius query"),
+            "a line-oriented route is offered"
+        );
     }
 
     #[test]
     fn ascii_mode_draws_no_unicode_box_characters() {
         let model = connected_model(Environment::Local);
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, false), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, false),
+            100,
+            30,
+        );
         for ch in ['┌', '┐', '└', '┘', '─', '│'] {
             assert!(!text.contains(ch), "ASCII mode emitted {ch}");
         }
@@ -812,7 +940,11 @@ mod tests {
     fn every_theme_and_colour_mode_renders_the_same_meaning() {
         let mut model = connected_model(Environment::Production);
         with_rows(&mut model, &["n"], &[&[Cell::Null]]);
-        for theme in [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::HighContrast] {
+        for theme in [
+            ThemeChoice::Dark,
+            ThemeChoice::Light,
+            ThemeChoice::HighContrast,
+        ] {
             for color in [true, false] {
                 for unicode in [true, false] {
                     let text = render_to_string(
@@ -834,7 +966,13 @@ mod tests {
     fn help_lists_every_binding_and_how_to_close_it() {
         let mut model = connected_model(Environment::Local);
         model.help_open = true;
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
         assert!(text.contains("Help"), "{text}");
         assert!(text.contains("Esc to close"));
         assert!(text.contains("Run the whole buffer"));
@@ -849,7 +987,13 @@ mod tests {
             &["名前"],
             &[&[Cell::Text("日本語のテキストです".into())]],
         );
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 80, 24);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            80,
+            24,
+        );
         for line in text.lines() {
             assert!(
                 display_width(line.trim_end()) <= 80,
@@ -862,7 +1006,13 @@ mod tests {
     #[test]
     fn a_disconnected_model_still_renders_without_panicking() {
         let model = Model::new(100);
-        let text = render_to_string(&model, &Keymap::new(), &presentation(ThemeChoice::Dark, true, true), 100, 30);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, true, true),
+            100,
+            30,
+        );
         assert!(text.contains("Not connected"), "{text}");
         assert!(text.contains("[UNCLASSIFIED]"));
     }

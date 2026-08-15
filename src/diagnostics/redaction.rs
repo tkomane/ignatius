@@ -100,10 +100,7 @@ fn collect_keyword_value_spans(input: &str, spans: &mut Vec<(usize, usize)>) {
         let Some(key) = keyword_before(input, idx) else {
             continue;
         };
-        if !SECRET_KEYWORDS
-            .iter()
-            .any(|k| k.eq_ignore_ascii_case(&key))
-        {
+        if !SECRET_KEYWORDS.iter().any(|k| k.eq_ignore_ascii_case(&key)) {
             continue;
         }
         let mut value_start = idx + 1;
@@ -180,7 +177,8 @@ mod tests {
 
     #[test]
     fn redacts_uri_password_and_keeps_everything_else() {
-        let input = format!("postgres://app_user:{SECRET}@db.example.net:5432/orders?sslmode=verify-full");
+        let input =
+            format!("postgres://app_user:{SECRET}@db.example.net:5432/orders?sslmode=verify-full");
         let out = redact_text(&input);
         assert!(!out.contains(SECRET), "secret survived: {out}");
         assert!(out.contains("app_user"), "user should stay visible: {out}");
@@ -210,7 +208,10 @@ mod tests {
         let input = r"host=db password='pa ss\'word here' dbname=orders";
         let out = redact_text(input);
         assert!(!out.contains("pa ss"), "{out}");
-        assert!(out.contains("dbname=orders"), "trailing keywords kept: {out}");
+        assert!(
+            out.contains("dbname=orders"),
+            "trailing keywords kept: {out}"
+        );
     }
 
     #[test]

@@ -77,20 +77,86 @@ impl Keymap {
         let ctrl = KeyModifiers::CONTROL;
         let none = KeyModifiers::NONE;
         let bindings = vec![
-            binding(K::F(5), none, Action::RunBuffer, "Run the whole buffer", true),
-            binding(K::F(9), none, Action::RunStatement, "Run the statement at the cursor", true),
-            binding(K::Char('c'), ctrl, Action::Cancel, "Cancel the running statement", true),
+            binding(
+                K::F(5),
+                none,
+                Action::RunBuffer,
+                "Run the whole buffer",
+                true,
+            ),
+            binding(
+                K::F(9),
+                none,
+                Action::RunStatement,
+                "Run the statement at the cursor",
+                true,
+            ),
+            binding(
+                K::Char('c'),
+                ctrl,
+                Action::Cancel,
+                "Cancel the running statement",
+                true,
+            ),
             binding(K::Char('q'), ctrl, Action::Quit, "Quit", true),
             binding(K::F(1), none, Action::ToggleHelp, "Show or hide help", true),
-            binding(K::Tab, none, Action::FocusNext, "Move focus between panes", false),
-            binding(K::Esc, none, Action::Dismiss, "Dismiss help or the current error", false),
-            binding(K::Char('d'), ctrl, Action::ToggleErrorDetail, "Expand or collapse error detail", false),
+            binding(
+                K::Tab,
+                none,
+                Action::FocusNext,
+                "Move focus between panes",
+                false,
+            ),
+            binding(
+                K::Esc,
+                none,
+                Action::Dismiss,
+                "Dismiss help or the current error",
+                false,
+            ),
+            binding(
+                K::Char('d'),
+                ctrl,
+                Action::ToggleErrorDetail,
+                "Expand or collapse error detail",
+                false,
+            ),
             binding(K::Up, none, Action::Move(Direction::Up), "Move up", false),
-            binding(K::Down, none, Action::Move(Direction::Down), "Move down", false),
-            binding(K::Left, none, Action::Move(Direction::Left), "Move left", false),
-            binding(K::Right, none, Action::Move(Direction::Right), "Move right", false),
-            binding(K::Backspace, none, Action::Backspace, "Delete the character before the cursor", false),
-            binding(K::Enter, none, Action::Newline, "Insert a line break", false),
+            binding(
+                K::Down,
+                none,
+                Action::Move(Direction::Down),
+                "Move down",
+                false,
+            ),
+            binding(
+                K::Left,
+                none,
+                Action::Move(Direction::Left),
+                "Move left",
+                false,
+            ),
+            binding(
+                K::Right,
+                none,
+                Action::Move(Direction::Right),
+                "Move right",
+                false,
+            ),
+            binding(
+                K::Backspace,
+                none,
+                Action::Backspace,
+                "Delete the character before the cursor",
+                false,
+            ),
+            binding(
+                K::Enter,
+                none,
+                Action::Newline,
+                "Insert a line break",
+                false,
+            ),
         ];
         Self { bindings }
     }
@@ -220,7 +286,11 @@ mod tests {
         let conflicts = keymap.conflicts();
         assert_eq!(conflicts.len(), 1);
         assert!(conflicts[0].contains("F5"), "{}", conflicts[0]);
-        assert!(conflicts[0].contains("Run the whole buffer"), "{}", conflicts[0]);
+        assert!(
+            conflicts[0].contains("Run the whole buffer"),
+            "{}",
+            conflicts[0]
+        );
     }
 
     #[test]

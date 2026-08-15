@@ -357,7 +357,10 @@ mod tests {
         });
         let lost = ConnectionState::Lost { info };
         assert!(lost.label().contains("connection lost"));
-        assert!(!lost.is_usable(), "statements must not be sent on a lost connection");
+        assert!(
+            !lost.is_usable(),
+            "statements must not be sent on a lost connection"
+        );
         assert!(lost.info().is_some());
     }
 
@@ -384,7 +387,11 @@ mod tests {
         for _ in 0..20 {
             editor.move_right();
         }
-        assert_eq!(editor.cursor(), editor.text().len(), "cursor stops at the end");
+        assert_eq!(
+            editor.cursor(),
+            editor.text().len(),
+            "cursor stops at the end"
+        );
         for _ in 0..40 {
             editor.move_left();
         }

@@ -227,7 +227,10 @@ impl Config {
             issues.push(ValidationIssue {
                 path: "query.max-buffered-rows".into(),
                 message: "zero would leave the result grid permanently empty".into(),
-                suggestion: format!("use a positive value, for example {}", default_max_buffered_rows()),
+                suggestion: format!(
+                    "use a positive value, for example {}",
+                    default_max_buffered_rows()
+                ),
             });
         } else if self.query.max_buffered_rows > 5_000_000 {
             issues.push(ValidationIssue {
@@ -241,7 +244,10 @@ impl Config {
             issues.push(ValidationIssue {
                 path: "connection.connect-timeout-seconds".into(),
                 message: "zero would wait forever on an unreachable host".into(),
-                suggestion: format!("use a positive value, for example {}", default_connect_timeout()),
+                suggestion: format!(
+                    "use a positive value, for example {}",
+                    default_connect_timeout()
+                ),
             });
         }
 
@@ -249,7 +255,10 @@ impl Config {
             issues.push(ValidationIssue {
                 path: "connection.application-name".into(),
                 message: "an empty application name hides this session in pg_stat_activity".into(),
-                suggestion: format!("use a non-empty name, for example {}", default_application_name()),
+                suggestion: format!(
+                    "use a non-empty name, for example {}",
+                    default_application_name()
+                ),
             });
         }
 
@@ -284,8 +293,9 @@ mod tests {
             .expect_err("unknown key must fail");
         assert!(err.to_string().contains("themes"), "{err}");
 
-        let err = toml::from_str::<Config>("schema_version = 1\n[ui]\ntheme = \"dark\"\nunknown = 1\n")
-            .expect_err("unknown nested key must fail");
+        let err =
+            toml::from_str::<Config>("schema_version = 1\n[ui]\ntheme = \"dark\"\nunknown = 1\n")
+                .expect_err("unknown nested key must fail");
         assert!(err.to_string().contains("unknown"), "{err}");
     }
 
@@ -313,7 +323,10 @@ mod tests {
         let issues = config.validate();
         assert_eq!(issues.len(), 3, "{issues:#?}");
         for issue in &issues {
-            assert!(!issue.suggestion.is_empty(), "every issue needs a next action");
+            assert!(
+                !issue.suggestion.is_empty(),
+                "every issue needs a next action"
+            );
         }
     }
 

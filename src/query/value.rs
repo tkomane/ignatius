@@ -238,7 +238,11 @@ mod tests {
     #[test]
     fn export_preserves_the_server_value_exactly() {
         let cell = Cell::Text("1.100".into());
-        assert_eq!(cell.export(""), "1.100", "numeric text must not be reformatted");
+        assert_eq!(
+            cell.export(""),
+            "1.100",
+            "numeric text must not be reformatted"
+        );
         assert_eq!(Cell::Null.export(""), "");
         assert_eq!(Cell::Null.export("\\N"), "\\N");
         // Export is not display: escaping here would corrupt the exported data.
@@ -249,7 +253,11 @@ mod tests {
     fn width_counts_terminal_cells_not_characters() {
         assert_eq!(display_width("abc"), 3);
         assert_eq!(display_width("日本語"), 6, "wide characters take two cells");
-        assert_eq!(display_width("e\u{301}"), 1, "combining accents add no width");
+        assert_eq!(
+            display_width("e\u{301}"),
+            1,
+            "combining accents add no width"
+        );
     }
 
     #[test]
@@ -259,7 +267,11 @@ mod tests {
         assert_eq!(truncate_to_width("abcdef", 4, false), "a...");
 
         let wide = truncate_to_width("日本語です", 5, true);
-        assert!(display_width(&wide) <= 5, "{wide} was {} cells", display_width(&wide));
+        assert!(
+            display_width(&wide) <= 5,
+            "{wide} was {} cells",
+            display_width(&wide)
+        );
         assert!(wide.ends_with('\u{2026}'));
 
         // Degenerate widths must not panic.
@@ -271,7 +283,11 @@ mod tests {
     fn padding_aligns_by_display_width() {
         assert_eq!(pad_to_width("ab", 5), "ab   ");
         assert_eq!(display_width(&pad_to_width("日本", 6)), 6);
-        assert_eq!(pad_to_width("toolong", 3), "toolong", "padding never truncates");
+        assert_eq!(
+            pad_to_width("toolong", 3),
+            "toolong",
+            "padding never truncates"
+        );
     }
 
     #[test]

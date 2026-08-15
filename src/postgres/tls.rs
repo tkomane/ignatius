@@ -245,7 +245,11 @@ mod tests {
     fn an_unencrypted_session_says_so_rather_than_staying_silent() {
         assert!(!TlsState::NotNegotiated.is_encrypted());
         assert_eq!(TlsState::NotNegotiated.label(), "TLS not negotiated");
-        assert!(TlsState::NotNegotiated.description().contains("not encrypted"));
+        assert!(
+            TlsState::NotNegotiated
+                .description()
+                .contains("not encrypted")
+        );
         assert!(TlsState::Disabled.description().contains("not encrypted"));
     }
 
@@ -253,7 +257,11 @@ mod tests {
     fn an_unconfirmable_tls_state_is_reported_as_unknown_not_as_encrypted() {
         assert!(!TlsState::Unknown.is_encrypted());
         assert_eq!(TlsState::Unknown.label(), "TLS state unknown");
-        assert!(TlsState::Unknown.description().contains("cannot be confirmed"));
+        assert!(
+            TlsState::Unknown
+                .description()
+                .contains("cannot be confirmed")
+        );
     }
 
     #[test]
