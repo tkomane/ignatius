@@ -185,6 +185,82 @@ fn a_broken_configuration_file_exits_with_the_config_code() {
 }
 
 #[test]
+fn a_profile_names_a_connection_and_never_holds_a_password() {
+    let dir = std::env::temp_dir().join(format!("ignatius-profiles-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create dir");
+
+    let run = |toml: &str, args: &[&str]| {
+        std::fs::write(dir.join("config.toml"), toml).expect("write");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ignatius"));
+        command
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", dir.join("data"))
+            .env_remove("PGHOST")
+            .env_remove("PGPASSWORD");
+        command.args(args).output().expect("run")
+    };
+
+    const PROFILES: &str = "[profiles.orders-prod]\n\
+         host = \"127.0.0.1\"\n\
+         port = 1\n\
+         dbname = \"orders\"\n\
+         environment = \"production\"\n\
+         \n\
+         [profiles.orders-dev]\n\
+         host = \"127.0.0.1\"\n\
+         port = 1\n";
+
+    // The profile decides where to connect: this fails on the connection, not
+    // on the name, and the failure names the host the profile gave.
+    let output = run(PROFILES, &["connect", "--check", "@orders-prod"]);
+    assert_ne!(code(&output), 3, "{}", stderr(&output));
+    let report = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(report.contains("127.0.0.1"), "{report}");
+
+    // An unknown one lists the ones that exist.
+    let output = run(PROFILES, &["connect", "--check", "@orders-stage"]);
+    assert_eq!(code(&output), 3, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("orders-prod"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("orders-dev"),
+        "{}",
+        stderr(&output)
+    );
+
+    // A profile and a target together are a usage error, not a guess.
+    let output = run(
+        PROFILES,
+        &[
+            "connect",
+            "--check",
+            "@orders-prod",
+            "--profile",
+            "orders-dev",
+        ],
+    );
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+
+    // A password in a profile is refused by name, with the routes that exist.
+    let output = run(
+        "[profiles.p]\nhost = \"127.0.0.1\"\npassword = \"hunter2\"\n",
+        &["connect", "--check", "@p"],
+    );
+    assert_eq!(code(&output), 3, "{}", stderr(&output));
+    let message = stderr(&output);
+    assert!(message.contains(".pgpass"), "{message}");
+    assert!(
+        !message.contains("hunter2"),
+        "the value is never repeated back: {message}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_key_binding_that_would_quietly_do_nothing_stops_the_client() {
     // A file whose whole purpose is to say what the keyboard does must not
     // contain a line that does nothing. Each of these is refused before the
@@ -222,6 +298,27 @@ fn a_key_binding_that_would_quietly_do_nothing_stops_the_client() {
     // connection, which is a different exit code entirely.
     let output = run("[keys]\nrun-buffer = [\"f2\", \"ctrl+r\"]\n");
     assert_ne!(code(&output), 3, "{}", stderr(&output));
+
+    // And `config validate` answers the same way the client would, rather than
+    // blessing a file the client then refuses to start with.
+    let validate = |toml: &str| {
+        std::fs::write(dir.join("config.toml"), toml).expect("write");
+        Command::new(env!("CARGO_BIN_EXE_ignatius"))
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .args(["config", "validate"])
+            .output()
+            .expect("run")
+    };
+    let output = validate("[keys]\nquit = \"hyper+q\"\n");
+    assert_eq!(
+        code(&output),
+        3,
+        "validate must refuse what connect refuses: {}",
+        stdout(&output)
+    );
+    let output = validate("[keys]\nquit = \"ctrl+x\"\n");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stdout(&output).contains("valid"));
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -683,6 +780,61 @@ mod with_server {
             std::fs::metadata(&partial).expect("metadata").len() > 0,
             "something was actually written before the interrupt"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_profile_that_says_production_guards_the_database_without_being_asked_twice() {
+        // This is what profiles are for. The classification is written down
+        // once and cannot be forgotten on the day it matters.
+        let uri = uri_or_skip!();
+        let dir =
+            std::env::temp_dir().join(format!("ignatius-profile-prod-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let (_, rest) = uri.split_once("://").expect("a URI");
+        let (userinfo, host_and_db) = rest.split_once('@').expect("userinfo");
+        let (user, password) = userinfo.split_once(':').expect("a password");
+        let (host_port, database) = host_and_db.split_once('/').expect("a database");
+        let (host, port) = host_port.split_once(':').expect("a port");
+        std::fs::write(
+            dir.join("config.toml"),
+            format!(
+                "[profiles.demo-prod]\nhost = \"{host}\"\nport = {port}\n\
+                 dbname = \"{database}\"\nuser = \"{user}\"\nenvironment = \"production\"\n"
+            ),
+        )
+        .expect("write");
+
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_ignatius"))
+                .env("IGNATIUS_CONFIG_DIR", &dir)
+                .env("IGNATIUS_DATA_DIR", dir.join("data"))
+                // The password comes from the environment, never from the
+                // profile: that is the whole point of the refusal above.
+                .env("PGPASSWORD", password)
+                .args(args)
+                .output()
+                .expect("run")
+        };
+
+        let refused = run(&[
+            "query",
+            "@demo-prod",
+            "-c",
+            "UPDATE orders SET total = total",
+        ]);
+        assert_eq!(code(&refused), 2, "{}", stderr(&refused));
+        assert!(
+            stderr(&refused).contains("classified as production"),
+            "{}",
+            stderr(&refused)
+        );
+
+        // A read is never in the way, and the profile still decided where.
+        let read = run(&["query", "@demo-prod", "-c", "SELECT 1 AS ok"]);
+        assert_eq!(code(&read), 0, "{}", stderr(&read));
+        assert!(stdout(&read).contains("ok"), "{}", stdout(&read));
+
         std::fs::remove_dir_all(&dir).ok();
     }
 

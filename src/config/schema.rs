@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 /// Non-secret user configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Version of this file's schema. Written by the product, migrated on upgrade.
@@ -32,6 +32,13 @@ pub struct Config {
     /// What is kept about statements that have run.
     #[serde(default)]
     pub history: HistoryConfig,
+    /// Named connections, by profile name.
+    ///
+    /// A profile holds where a database is and how it is classified. It never
+    /// holds a password: the routes for those are a password file, the
+    /// environment, the connection string, and the prompt.
+    #[serde(default)]
+    pub profiles: std::collections::BTreeMap<String, Profile>,
     /// Key bindings that replace the built-in ones, by action name.
     ///
     /// A name this build does not know, a key it cannot parse, or a binding
@@ -72,7 +79,122 @@ impl Default for Config {
             connection: ConnectionConfig::default(),
             history: HistoryConfig::default(),
             keys: std::collections::BTreeMap::new(),
+            profiles: std::collections::BTreeMap::new(),
         }
+    }
+}
+
+/// A named connection.
+///
+/// Unknown fields are kept rather than rejected by serde, so that the ones
+/// people will actually try - `password` above all - can be refused by name with
+/// an answer, instead of with "unknown field".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Profile {
+    /// Server host name, address, or socket directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Server port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Database name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dbname: Option<String>,
+    /// Role name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// Transport protection: disable, prefer, require, verify-ca, verify-full.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sslmode: Option<String>,
+    /// How this database is classified, for example production.
+    ///
+    /// This is the reason profiles exist: a classification that is remembered
+    /// cannot be forgotten, and forgetting it is what puts a write on the wrong
+    /// database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// Ask the server to refuse writes for sessions on this profile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
+    /// A short line describing what this connection is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Anything else the file said, kept so it can be refused by name.
+    #[serde(flatten)]
+    pub other: std::collections::BTreeMap<String, toml::Value>,
+}
+
+/// The fields a profile understands, for error messages and documentation.
+pub const PROFILE_FIELDS: &[&str] = &[
+    "host",
+    "port",
+    "dbname",
+    "user",
+    "sslmode",
+    "environment",
+    "read-only",
+    "description",
+];
+
+impl Profile {
+    /// Refuses a profile that names something this build will not do.
+    ///
+    /// Two kinds of refusal, because they deserve different answers: a field
+    /// that would hold a secret is refused with the routes that exist, and
+    /// anything else unknown is refused with the fields that do.
+    pub fn validate(&self, name: &str) -> Result<(), crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::{Diagnostic, DiagnosticKind};
+        // A field that would hold a secret is looked for across the whole
+        // profile before anything else. Reporting whichever unknown field
+        // happened to sort first would bury the one that matters.
+        let secret = |key: &String| {
+            matches!(
+                key.to_ascii_lowercase().as_str(),
+                "password" | "pgpassword" | "sslpassword" | "secret"
+            )
+        };
+        if self.other.keys().any(secret) {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} tries to hold a password"),
+                "reading connection profiles",
+            )
+            .likely_cause("a profile says where a database is, never how to prove who you are")
+            .next_action(
+                "put the password in a password file (~/.pgpass), in the environment, or \
+                 type it when the client asks",
+            ));
+        }
+
+        if self
+            .other
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("passfile"))
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} names a password file"),
+                "reading connection profiles",
+            )
+            .likely_cause("this release chooses the password file in one place, not per profile")
+            .next_action("set PGPASSFILE, or use the default ~/.pgpass"));
+        }
+
+        if let Some(key) = self.other.keys().next() {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} has a field this build does not know: {key}"),
+                "reading connection profiles",
+            )
+            .likely_cause(format!(
+                "a profile understands: {}",
+                PROFILE_FIELDS.join(", ")
+            ))
+            .next_action("correct the field name, or remove it"));
+        }
+
+        Ok(())
     }
 }
 

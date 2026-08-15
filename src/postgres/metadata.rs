@@ -703,6 +703,11 @@ impl Dependencies {
 
 /// Reads what an object depends on and what depends on it.
 ///
+/// Each edge is labelled with the kind of edge it is rather than with a
+/// direction: the list the entry appears in already says which way it points,
+/// and "reads it" in a list of two directions is a sentence that has to be read
+/// twice.
+///
 /// Two kinds of edge are followed, and the limits are worth stating because a
 /// dependency answer people trust must be one they can check:
 ///
@@ -720,7 +725,7 @@ pub async fn dependencies(
 ) -> Result<Dependencies, Diagnostic> {
     const USED_BY: &str = "SELECT DISTINCT n.nspname::text AS schema, \
          c.relname::text AS name, c.relkind::text AS relkind, \
-         'reads it'::text AS reason \
+         'view rule'::text AS reason \
          FROM pg_catalog.pg_depend d \
          JOIN pg_catalog.pg_rewrite r ON r.oid = d.objid \
          JOIN pg_catalog.pg_class c ON c.oid = r.ev_class \
@@ -730,7 +735,7 @@ pub async fn dependencies(
          WHERE sn.nspname = $1 AND source.relname = $2 AND c.oid <> source.oid \
          UNION \
          SELECT DISTINCT n.nspname::text, c.relname::text, c.relkind::text, \
-         'refers to it'::text \
+         'foreign key'::text \
          FROM pg_catalog.pg_constraint con \
          JOIN pg_catalog.pg_class c ON c.oid = con.conrelid \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
@@ -741,7 +746,7 @@ pub async fn dependencies(
 
     const DEPENDS_ON: &str = "SELECT DISTINCT n.nspname::text AS schema, \
          c.relname::text AS name, c.relkind::text AS relkind, \
-         'is read by it'::text AS reason \
+         'view rule'::text AS reason \
          FROM pg_catalog.pg_depend d \
          JOIN pg_catalog.pg_rewrite r ON r.oid = d.objid \
          JOIN pg_catalog.pg_class source ON source.oid = r.ev_class \
@@ -751,7 +756,7 @@ pub async fn dependencies(
          WHERE sn.nspname = $1 AND source.relname = $2 AND c.oid <> source.oid \
          UNION \
          SELECT DISTINCT rn.nspname::text, ref.relname::text, ref.relkind::text, \
-         'is referred to by it'::text \
+         'foreign key'::text \
          FROM pg_catalog.pg_constraint con \
          JOIN pg_catalog.pg_class c ON c.oid = con.conrelid \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \

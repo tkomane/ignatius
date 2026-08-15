@@ -46,9 +46,10 @@ pub fn run(
     no_history: bool,
 ) -> Result<ExitCode, Diagnostic> {
     let loaded = crate::config::load(paths)?;
-    let args = connection.to_args()?;
+    let (requested, args) =
+        crate::cli::resolve_target_and_profile(target, connection, &loaded.config)?;
     let resolved = crate::connection::resolve(
-        target,
+        requested,
         &args,
         &EnvSnapshot::from_process(),
         &loaded.config.connection,

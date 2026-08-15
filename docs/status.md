@@ -6,7 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: a password prompt. When the server refuses for want of a
+**Current feature**: named connections. A `[profiles]` table says where a
+database is and how it is classified, reached as `@name` or `--profile name`. The
+classification is the reason it exists: written down once, the production write
+guard applies every time. A profile that tries to hold a password is refused by
+name. Specified in `specs/009-connection-profiles/spec.md`.
+
+**Previous**: a password prompt. When the server refuses for want of a
 password, the client asks for one and retries; the characters are masked, held
 only until the attempt is made, and printed by nothing. That closes half of the
 "no password prompting" gap - the full-screen client. Plain mode still relies on
@@ -138,6 +144,8 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A profile classified as production guards it | Subprocess test: the write is refused with no flag typed |
+| A profile cannot hold a password | Subprocess test: refused by name, and the value is not echoed |
 | A key binding that would do nothing is refused | Subprocess test: three broken files, each exiting 3 with what to fix |
 | Dependencies are read in both directions | Integration test over a view and the table it reads |
 | The tree's connection is separate and read-only | Integration test: two backend pids, and a write refused with SQLSTATE 25006 |
