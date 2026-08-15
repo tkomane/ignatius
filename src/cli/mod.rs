@@ -428,6 +428,12 @@ pub enum ConfigAction {
     Paths,
     /// Show the effective configuration.
     Show,
+    /// Write a starter configuration file.
+    Init {
+        /// Replace an existing file.
+        #[arg(long)]
+        force: bool,
+    },
     /// Check the configuration file.
     Validate,
     /// Update the configuration file to the current schema.
@@ -666,6 +672,25 @@ fn config_command(
                 .map_err(io_diagnostic)?;
             }
             write!(out, "{rendered}").map_err(io_diagnostic)?;
+            Ok(ExitCode::Success)
+        }
+        ConfigAction::Init { force } => {
+            if paths.config_file.exists() && !*force {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("{} already exists", paths.config_file.display()),
+                    "writing a starter configuration file",
+                )
+                .likely_cause("writing over it would lose whatever it says now")
+                .next_action("edit it, or pass --force to replace it"));
+            }
+            config::write_template(paths)?;
+            writeln!(out, "Wrote {}", paths.config_file.display()).map_err(io_diagnostic)?;
+            writeln!(
+                out,
+                "Every value in it is this build's default. No password belongs in it."
+            )
+            .map_err(io_diagnostic)?;
             Ok(ExitCode::Success)
         }
         ConfigAction::Validate => {

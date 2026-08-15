@@ -8,6 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- `ignatius config init` writes a starter configuration file: every default,
+  written out with the parts worth knowing about as comments, an example profile
+  and an example key binding, both commented so a first run connects to nothing
+  by surprise. It refuses to replace a file that already exists without
+  `--force`. A test parses the template and compares it with this build's
+  defaults, so the file handed to someone is always one this build accepts and
+  always describes what it actually does.
 - Named connections. A `[profiles]` table in `config.toml` says where a database
   is and how it is classified; `connect @orders-prod` or `--profile orders-prod`
   uses it. The point is not the typing saved but the classification remembered:

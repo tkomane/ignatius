@@ -6,7 +6,10 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: a password prompt in plain mode, and named connections.
+**Current feature**: `config init`, a password prompt in plain mode, and named
+connections. ADR-0011 proposes where a stored credential would live and is
+waiting on the owner: `.pgpass` already exists and is shared with `psql`, so
+whether to carry a keyring dependency at all is a decision, not a default.
 Plain mode now asks without echoing when the server demands a password, on the
 same rule the client follows: a terminal at both ends or no question at all.
 
@@ -240,23 +243,24 @@ These are real and none of them is hidden anywhere else:
 
 ## Next actions, in order
 
-1. **Decision needed**: ADR-0009 adopted libpq for five capabilities; four are
+1. **Decision needed**: whether a credential store is wanted at all, and if so
+   whether the `keyring` dependency and its Linux caveat are acceptable. See
+   ADR-0011. Nothing is implemented until that answer exists.
+2. **Decision needed**: ADR-0009 adopted libpq for five capabilities; four are
    now implemented without it. The remaining one is GSSAPI and Windows SSPI.
    Whether the migration is still worth its cost is the owner's call.
-2. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
+3. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
    including the Unix socket path (T051, T052). CI proves it builds and its
    tests pass; it does not prove the interface is usable there.
-3. A terminal-restoration test for Windows, which needs ConPTY (T055a).
-4. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
+4. A terminal-restoration test for Windows, which needs ConPTY (T055a).
+5. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-5. **Decision needed**: how a value gets copied out. The system clipboard needs a
+6. **Decision needed**: how a value gets copied out. The system clipboard needs a
    crate and platform support; OSC 52 writes the value into the terminal, where
    it may be logged by the emulator. Neither is obviously right for a tool that
    handles other people's data, so it is the owner's call. It is the only unbuilt
    part of Feature 004.
-6. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
-   on the current model.
-7. Then connection profiles and an OS credential store. Password files and
-   service files are already done.
+7. Migrate the PostgreSQL adapter to libpq (ADR-0009), if it is still wanted.
+   Connection profiles are already built and do not depend on it.
 8. Release packaging: checksums, SBOM, man pages and install docs (Feature 008,
    whose planning package is already in `specs/008-release-experience/`).

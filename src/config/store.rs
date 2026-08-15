@@ -199,7 +199,7 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
     // future migrations possible without guessing.
     if config.schema_version == 0 {
         config.schema_version = 1;
-        steps.push("stamped schema-version = 1 on a file that had none".into());
+        steps.push("stamped schema_version = 1 on a file that had none".into());
     }
 
     if dry_run {
@@ -255,6 +255,90 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         backup: Some(backup),
         no_op: false,
         dry_run,
+    })
+}
+
+/// A starter configuration file: every default, written out, with the parts
+/// that are worth knowing about shown as comments rather than hidden in a
+/// manual.
+///
+/// A test parses this and compares it with [`Config::default`], so the file the
+/// product hands someone is always one this build accepts and always says what
+/// this build actually does.
+pub const TEMPLATE: &str = r#"# Ignatius configuration.
+#
+# Every value here is this build's default, written out so it can be changed.
+# `ignatius config paths` says where this file and the local state live, and
+# `ignatius config validate` checks it.
+#
+# No password belongs in this file. Passwords come from a password file
+# (~/.pgpass), the environment, a connection string, or the prompt.
+
+schema_version = 1
+
+[ui]
+# dark, light, high-contrast
+theme = "dark"
+# auto, unicode, ascii, nerd-font. nerd-font is never chosen automatically:
+# whether your font carries the icons cannot be detected from in here.
+glyphs = "auto"
+# auto, always, never
+color = "auto"
+# Mouse reporting is off so the terminal's own text selection keeps working.
+mouse = false
+# Replaces animated feedback with static text.
+reduced-motion = false
+
+[query]
+# Rows the interactive grid keeps in memory. Reaching this is always reported,
+# never hidden. Export streams to disk and is not affected by it.
+max-buffered-rows = 10000
+# statement_timeout for the session, in milliseconds. 0 leaves the server's own.
+statement-timeout-ms = 0
+
+[connection]
+connect-timeout-seconds = 10
+application-name = "ignatius"
+
+[history]
+# Statements that have run, kept on this machine only. A statement mentioning a
+# credential is never recorded whatever this says.
+enabled = true
+max-entries = 1000
+
+# Named connections. `ignatius connect @orders-prod` uses one.
+#
+# The classification is the point: written down once, the production write guard
+# applies every time.
+#
+# [profiles.orders-prod]
+# host = "db.example.net"
+# port = 6432
+# dbname = "orders"
+# user = "app"
+# sslmode = "verify-full"
+# environment = "production"
+# read-only = false
+# description = "the one to be careful with"
+
+# Key bindings, by action name. Naming an action replaces its defaults.
+# `docs/design/keymap.md` lists every action and how keys are written.
+#
+# [keys]
+# run-buffer = ["f2", "ctrl+r"]
+"#;
+
+/// Writes the starter file, atomically and with the same permissions as any
+/// other configuration write.
+pub fn write_template(paths: &Paths) -> Result<(), Diagnostic> {
+    write_atomic(&paths.config_file, TEMPLATE).map_err(|err| {
+        Diagnostic::new(
+            DiagnosticKind::Config,
+            format!("could not write {}", paths.config_file.display()),
+            "writing a starter configuration file",
+        )
+        .likely_cause(err.to_string())
+        .next_action("check permissions and free space in the configuration directory")
     })
 }
 
@@ -324,6 +408,35 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let paths = Paths::rooted_at(dir.path());
         (dir, paths)
+    }
+
+    #[test]
+    fn the_starter_file_is_one_this_build_accepts_and_agrees_with_its_defaults() {
+        // The file handed to someone on their first day must be valid for the
+        // build that handed it over, and must not describe behaviour the build
+        // does not have.
+        let parsed: Config = toml::from_str(TEMPLATE).expect("the template parses");
+        assert_eq!(
+            parsed,
+            Config::default(),
+            "every value in the starter file is this build's own default"
+        );
+        assert!(
+            parsed.profiles.is_empty() && parsed.keys.is_empty(),
+            "the examples are commented out, so a first run connects to nothing by surprise"
+        );
+        assert!(
+            TEMPLATE.contains("No password belongs in this file"),
+            "the one rule that matters is in the file itself"
+        );
+    }
+
+    #[test]
+    fn writing_the_starter_file_puts_it_where_config_paths_says() {
+        let (_dir, paths) = temp_paths();
+        write_template(&paths).expect("write");
+        assert!(paths.config_file.exists());
+        assert_eq!(load(&paths).expect("load").config, Config::default());
     }
 
     #[test]
