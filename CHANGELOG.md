@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Key bindings can be replaced from `config.toml`. Naming an action removes its
+  defaults, so the file is the whole answer for it. An action name this build
+  does not know, a key it cannot read, and two actions on one key are all errors
+  with what to do about them, reported before the terminal is taken: a file whose
+  purpose is to say what the keyboard does must not hold a line that quietly does
+  nothing.
 - `Ctrl+K y` answers "what breaks if I drop this". It lists what an object is
   used by and what it depends on, in both directions, with the reason for each
   edge, and choosing one puts its quoted, qualified name where SQL is written.

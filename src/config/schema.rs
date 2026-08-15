@@ -32,6 +32,35 @@ pub struct Config {
     /// What is kept about statements that have run.
     #[serde(default)]
     pub history: HistoryConfig,
+    /// Key bindings that replace the built-in ones, by action name.
+    ///
+    /// A name this build does not know, a key it cannot parse, or a binding
+    /// that collides with another is an error rather than something to ignore.
+    /// A key that silently does nothing is the worst outcome for a file whose
+    /// whole purpose is to say what the keyboard does.
+    #[serde(default)]
+    pub keys: std::collections::BTreeMap<String, KeySpec>,
+}
+
+/// One or several keys bound to the same action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum KeySpec {
+    /// A single key, as in `quit = "ctrl+q"`.
+    One(String),
+    /// Several, as in `run-buffer = ["ctrl+r", "f5"]`.
+    Many(Vec<String>),
+}
+
+impl KeySpec {
+    /// The keys, however they were written.
+    #[must_use]
+    pub fn keys(&self) -> Vec<&str> {
+        match self {
+            Self::One(key) => vec![key.as_str()],
+            Self::Many(keys) => keys.iter().map(String::as_str).collect(),
+        }
+    }
 }
 
 impl Default for Config {
@@ -42,6 +71,7 @@ impl Default for Config {
             query: QueryConfig::default(),
             connection: ConnectionConfig::default(),
             history: HistoryConfig::default(),
+            keys: std::collections::BTreeMap::new(),
         }
     }
 }

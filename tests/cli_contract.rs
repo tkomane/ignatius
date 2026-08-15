@@ -185,6 +185,48 @@ fn a_broken_configuration_file_exits_with_the_config_code() {
 }
 
 #[test]
+fn a_key_binding_that_would_quietly_do_nothing_stops_the_client() {
+    // A file whose whole purpose is to say what the keyboard does must not
+    // contain a line that does nothing. Each of these is refused before the
+    // terminal is touched, so the message lands on an ordinary terminal.
+    let dir = std::env::temp_dir().join(format!("ignatius-badkeys-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create dir");
+
+    let run = |toml: &str| {
+        std::fs::write(dir.join("config.toml"), toml).expect("write");
+        Command::new(env!("CARGO_BIN_EXE_ignatius"))
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", dir.join("data"))
+            .args(["connect", "postgres://user@127.0.0.1:1/db"])
+            .output()
+            .expect("run")
+    };
+
+    let output = run("[keys]\nrun-everythng = \"f2\"\n");
+    assert_eq!(code(&output), 3, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("run-buffer"),
+        "the real names are listed: {}",
+        stderr(&output)
+    );
+
+    let output = run("[keys]\nquit = \"hyper+q\"\n");
+    assert_eq!(code(&output), 3, "{}", stderr(&output));
+    assert!(stderr(&output).contains("ctrl+r"), "{}", stderr(&output));
+
+    let output = run("[keys]\ntoggle-help = \"ctrl+q\"\n");
+    assert_eq!(code(&output), 3, "{}", stderr(&output));
+    assert!(stderr(&output).contains("same key"), "{}", stderr(&output));
+
+    // A file that is right is not refused: this one fails later, on the
+    // connection, which is a different exit code entirely.
+    let output = run("[keys]\nrun-buffer = [\"f2\", \"ctrl+r\"]\n");
+    assert_ne!(code(&output), 3, "{}", stderr(&output));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn secrets_never_appear_in_output_even_when_the_connection_fails() {
     const FAKE: &str = "hunter2-not-a-real-password";
     let output = binary()

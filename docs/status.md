@@ -6,7 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: dependency navigation. `Ctrl+K y` lists what an object is
+**Current feature**: configurable key bindings. A `[keys]` table in
+`config.toml` replaces the built-in binding for an action; an unknown action
+name, an unreadable key and two actions on one key are all errors reported before
+the terminal is taken. That completes roadmap Feature 007 apart from
+hand-verification, which is evidence rather than code.
+
+**Previous**: dependency navigation. `Ctrl+K y` lists what an object is
 used by and what it depends on, with the reason for each edge, following the two
 edges PostgreSQL records - view rewrite rules and foreign keys - and saying that
 a function body's reads are not among them. That completes roadmap Feature 005.
@@ -126,6 +132,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A key binding that would do nothing is refused | Subprocess test: three broken files, each exiting 3 with what to fix |
 | Dependencies are read in both directions | Integration test over a view and the table it reads |
 | The tree's connection is separate and read-only | Integration test: two backend pids, and a write refused with SQLSTATE 25006 |
 | An object's definition is what the server renders | Integration tests over a view, a function and a table |
@@ -230,5 +237,5 @@ These are real and none of them is hidden anywhere else:
    on the current model.
 7. Then connection profiles and an OS credential store. Password files and
    service files are already done.
-8. Configurable keymaps and colour overrides from the configuration file, which
-   is the rest of Feature 007.
+8. Release packaging: checksums, SBOM, man pages and install docs (Feature 008,
+   whose planning package is already in `specs/008-release-experience/`).
