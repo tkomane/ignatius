@@ -25,9 +25,14 @@ exercised, so they are expected to work rather than known to.
 | GSSAPI, Kerberos, SSPI | Not supported |
 | Cloud token authentication (for example Entra ID) | Not supported |
 
-Credentials may come from a connection URI, a libpq keyword string, or
-`PGPASSWORD`. The OS credential store, `.pgpass` and password prompting arrive in
-Feature 002.
+Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
+or a `.pgpass` password file. The OS credential store and password prompting are
+not implemented yet.
+
+A password file that is readable by anyone but its owner is **not used**, and the
+client says so and gives the `chmod` that fixes it. A file that is found but
+matches nothing is also reported, because a password file that is quietly not
+helping looks exactly like one that is.
 
 ## Transport security
 
@@ -46,23 +51,29 @@ is shown as unknown when that view is not readable.
 
 ## Connection parameters
 
-**Applied**: `host`, `port`, `dbname`, `user`, `password`, `sslmode`,
-`application_name`, `connect_timeout`.
+**Applied**: `service`, `passfile`, `host`, `port`, `dbname`, `user`, `password`,
+`sslmode`, `application_name`, `connect_timeout`.
 
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
-`PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGCONNECT_TIMEOUT`.
+`PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGCONNECT_TIMEOUT`, `PGSERVICE`,
+`PGSERVICEFILE`, `PGPASSFILE`, `PGSYSCONFDIR`.
+
+**Files read**: `pg_service.conf`, from `PGSERVICEFILE`, then
+`~/.pg_service.conf`, then `$PGSYSCONFDIR/pg_service.conf`. `.pgpass`, from
+`PGPASSFILE`, then `~/.pgpass` on Unix or `%APPDATA%\postgresql\pgpass.conf` on
+Windows.
 
 **Refused, because ignoring them would weaken security**: `sslcert`, `sslkey`,
 `sslrootcert`, `sslcrl`, `sslcrldir`, `sslpassword`, `requiressl`,
 `channel_binding`, `gssencmode`, `krbsrvname`, `requirepeer`, `sslsni`, and the
 `PG*` equivalents of those.
 
-**Reported as unread rather than ignored**: `PGSERVICE`, `PGSERVICEFILE`,
-`PGPASSFILE`, and any other keyword in a connection string that this build does
-not apply.
+**Reported rather than ignored**: any other keyword in a connection string or a
+service file that this build does not apply.
 
-Precedence, highest first: command-line arguments, then the connection string,
-then environment variables, then built-in defaults.
+Precedence, highest first: command-line arguments, the connection string, the
+named service, environment variables, then built-in defaults. The password has
+its own order: the connection string, then `PGPASSWORD`, then the password file.
 
 ## Differences from `psql`
 

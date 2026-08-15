@@ -10,6 +10,12 @@ source can generate user-facing notes.
 
 ### New
 
+- Password files in PostgreSQL's `.pgpass` format, including wildcards, escapes
+  and first-match-wins ordering, so a password need never appear on a command
+  line. A file that others can read is refused, with the `chmod` that fixes it.
+- Service files in `pg_service.conf` format, selected by `service=` or
+  `PGSERVICE`, so an existing shared setup works here unchanged. An unknown
+  service name lists the ones that exist.
 - An object tree: schemas, their object groups with counts, the objects
   themselves, and the columns of relations with type, nullability and primary key
   membership. Children load when a node is opened, and a node waiting for an
@@ -49,6 +55,13 @@ source can generate user-facing notes.
 
 ### Improved
 
+- A server that refuses TLS now exits with the TLS code rather than the
+  connection code. The network worked; the answer was no.
+- A server that requires a password when none was supplied now exits with the
+  authentication code rather than the connection code, and points at the
+  password file as the safer route.
+- Ctrl+C during a non-interactive query asks the server to cancel and returns the
+  cancellation exit code, instead of killing the process mid-statement.
 - The advertised run keys are `Ctrl+R` and `Ctrl+T` rather than `F5` and `F9`.
   Function keys are routinely claimed by the operating system or an assistant
   before a terminal program sees them. `F5` and `F9` remain bound, `Ctrl+Enter`

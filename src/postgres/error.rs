@@ -18,6 +18,13 @@ use tokio_postgres::error::{DbError, ErrorPosition, SqlState};
 /// every TLS problem as a network one.
 const TLS_KIND_MESSAGE: &str = "error performing TLS handshake";
 
+/// How the driver reports that it had no password to offer.
+///
+/// Matched by text for the same reason as the TLS wording, and pinned by a live
+/// test so an upstream change cannot silently turn an authentication problem
+/// back into a reported network problem.
+const MISSING_PASSWORD: &str = "password missing";
+
 /// Builds a diagnostic for a failure while connecting.
 #[must_use]
 pub fn from_connect_error(err: &tokio_postgres::Error, target: &ConnectionTarget) -> Diagnostic {
@@ -69,6 +76,28 @@ pub fn from_connect_error(err: &tokio_postgres::Error, target: &ConnectionTarget
         .technical("sslmode", target.sslmode.as_str())
         .technical("Requested guarantee", target.sslmode.guarantee())
         .technical("TLS error", detail);
+    }
+
+    // The server asked for a password and the client had none. That is an
+    // authentication problem, not a network one: the server was reached and it
+    // said no. Classifying it as a connection failure would send a script
+    // looking for a firewall.
+    if std::error::Error::source(err)
+        .map(std::string::ToString::to_string)
+        .is_some_and(|source| source == MISSING_PASSWORD)
+    {
+        return Diagnostic::new(
+            DiagnosticKind::Authentication,
+            format!("the server requires a password for role {:?}", target.user),
+            attempted,
+        )
+        .likely_cause("no password was supplied by the target, the environment, or a password file")
+        .next_action(
+            "put the password in a password file, or supply it in the connection string. \
+             See docs/support/compatibility.md for the routes this build reads.",
+        )
+        .technical("Role", target.user.clone())
+        .technical("Database", target.database.clone());
     }
 
     let io = find_source::<std::io::Error>(err);

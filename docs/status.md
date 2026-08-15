@@ -6,7 +6,10 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: 002, object navigation. Implemented and verified on macOS
+**Current feature**: 003, credential routes. Password files and service files
+are implemented and verified against a real server.
+
+**Previous**: 002, object navigation. Implemented and verified on macOS
 and in CI. Feature 001 is complete apart from the hand-verification gaps below.
 
 The owner asked for navigation ahead of the libpq migration in ADR-0009. The
@@ -52,9 +55,8 @@ These are real and none of them is hidden anywhere else:
    and 8 now have subprocess-level evidence.
 4. **`sslmode=verify-ca` is deliberately unimplemented** and refuses with an
    explanation. See ADR-0004.
-5. **No credential store, `.pgpass`, or service file support.** `PGSERVICE`,
-   `PGSERVICEFILE` and `PGPASSFILE` are reported as unread rather than ignored.
-   Feature 002.
+5. **No OS credential store and no password prompting.** Password files and
+   service files are supported; the credential store and profiles are not.
 6. **Terminal restoration is proven automatically on Unix**, by a test that runs
    the client under a real pty and reads the bytes. The Windows equivalent needs
    ConPTY and has not been written. Warp's own renderer and a live terminal
@@ -91,8 +93,8 @@ These are real and none of them is hidden anywhere else:
 
 ## Next actions, in order
 
-1. Password files and service files, which are needed whichever driver is used
-   and which ADR-0009 sequences first.
+1. Migrate the PostgreSQL adapter to libpq (ADR-0009). The driver-independent
+   credential routes are now done, which is what that ADR sequenced first.
 2. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
    including the Unix socket path (T051, T052). CI proves it builds and its
    tests pass; it does not prove the interface is usable there.

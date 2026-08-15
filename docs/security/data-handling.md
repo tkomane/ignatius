@@ -45,8 +45,9 @@ Off unless `IGNATIUS_LOG` is set. When on:
 
 - **Process arguments.** A password in a connection string on the command line is
   visible to every other process on the machine and is written to shell history.
-  Use `PGPASSWORD`, or wait for the credential store in Feature 002; better
-  still, use a `.pgpass` file once supported.
+  Use a `.pgpass` file, which this client reads: it keeps the password out of the
+  command line, out of the environment, and out of shell history. A file others
+  can read is refused rather than used.
 - **Terminal scrollback.** Results shown on screen are in the terminal's buffer
   and, depending on the emulator, in its saved sessions.
 - **The clipboard.** Anything copied is readable by other applications. Timed
