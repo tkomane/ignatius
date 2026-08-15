@@ -10,9 +10,9 @@ Supported window follows upstream: **14 through 18**, per
 <https://www.postgresql.org/support/versioning/> as read on 2026-08-15, where 18.6
 was current and 13 had already reached end of life.
 
-**Tested so far: 18.4 only.** The CI matrix covering the full window is written
-but has not run. Until it does, the only version-specific claim this project
-makes is about 18.4.
+**Tested: 14, 16 and 18**, by the integration suite in CI on Linux, and 18.4
+locally on macOS. Versions 15 and 17 are within the supported window but are not
+exercised, so they are expected to work rather than known to.
 
 ## Authentication
 
@@ -101,10 +101,11 @@ line-oriented alternative.
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | Verified |
-| macOS on Intel | Written, not verified |
-| Windows 11 x86_64 and ARM64 | Written, not verified |
-| Linux x86_64 and ARM64 | Written, not verified |
+| macOS on Apple silicon | Verified by hand and in CI |
+| macOS x86_64 | Builds and passes tests in CI |
+| Windows x86_64 | Builds and passes tests in CI. Nobody has used the full-screen client on it |
+| Linux x86_64 | Builds and passes tests in CI, including the PostgreSQL integration suite |
+| Windows and Linux on ARM64 | Not built anywhere yet |
 
 Unix-domain sockets are supported on Unix only; requesting one elsewhere fails
 with an explanation. Owner-only file permissions are enforced on Unix; on Windows

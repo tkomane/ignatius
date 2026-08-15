@@ -25,7 +25,8 @@ against `postgres:18.4-alpine` in Docker with SCRAM-SHA-256 required.
 | `cargo test --lib` | 199 passed |
 | `cargo test --test cli_contract` | 20 passed |
 | `cargo test --test postgres_integration` | 16 passed |
-| Live pty run | Client rendered, F5 executed a query, Ctrl+Q restored the terminal |
+| Live pty run | Client rendered, the run key executed a query, Ctrl+Q restored the terminal |
+| CI, all jobs | Green on 2026-08-15: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
 
 Live evidence recorded in `docs/operations/verification.md`, including the exact
 escape sequences captured on entry and exit.
@@ -34,12 +35,14 @@ escape sequences captured on entry and exit.
 
 These are real and none of them is hidden anywhere else:
 
-1. **Only macOS has been verified.** Windows and Linux builds are authored but
-   unverified: this machine has only the `aarch64-apple-darwin` standard library
-   installed and no rustup to add targets. Everything about those platforms is a
-   CI claim until CI runs.
-2. **Only PostgreSQL 18.4 has been tested.** The supported window is 14 to 18.
-   The CI matrix is written but has not run.
+1. **Windows and Linux are CI-verified, not hand-verified.** CI builds them and
+   runs the unit, layout and CLI contract tests plus a startup smoke test on
+   both. Nobody has yet opened the full-screen client on either platform and
+   used it. Warp's own renderer and a live terminal resize are likewise
+   unverified anywhere.
+2. **Database integration runs on Linux only.** PostgreSQL 14, 16 and 18 all
+   pass there. The macOS and Windows jobs do not connect to a server, so the
+   protocol claims rest on the Linux matrix and the local macOS runs.
 3. **Exit codes 5, 6, 8 and 9 lack subprocess-level evidence.** They are produced
    and asserted at library level. Code 9 has no producer until export lands in
    Feature 004.
@@ -51,9 +54,10 @@ These are real and none of them is hidden anywhere else:
 6. **Terminal restoration is proven by unit tests and one manual pty run**, not
    yet by an automated test in CI. Warp's own renderer and a live terminal
    resize have not been exercised by hand; the pty run used a forced size.
-7. **The CI workflow has never run**, and `cargo-deny` has never been executed
-   locally, so the licence allowlist in `deny.toml` is untested policy that may
-   need adjusting on its first run.
+7. **Branch protection is unavailable.** Required status checks need a paid
+   GitHub plan on a private repository. `cargo xtask install-hooks` runs the same
+   gates before every push as the local stand-in, and CI runs on every push
+   regardless, but nothing prevents a push that skips the hook.
 8. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
@@ -77,12 +81,11 @@ These are real and none of them is hidden anywhere else:
 
 ## Next actions, in order
 
-1. Run the CI workflow and fix what it finds (T050 is written but unproven).
-2. Verify on Windows 11 in Windows Terminal with PowerShell 7 (T051).
-3. Verify on Linux, including the Unix socket path (T052).
-4. Extend the server matrix to PostgreSQL 14 through 18 (T053).
-5. Add subprocess evidence for exit codes 5, 6 and 8 (T054).
-6. Add an automated terminal-restoration test to CI (T055).
+1. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
+   including the Unix socket path (T051, T052). CI proves it builds and its
+   tests pass; it does not prove the interface is usable there.
+2. Add subprocess evidence for exit codes 5, 6 and 8 (T054).
+3. Add an automated terminal-restoration test to CI (T055).
 7. Migrate the PostgreSQL adapter to libpq (ADR-0009), before Feature 002
    hardens profiles on the current model.
 8. Then Feature 002: profiles, credential store, `.pgpass`, service files.
