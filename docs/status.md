@@ -38,21 +38,37 @@ and a domain remain outstanding before publishing; neither blocks development.
 ## Last green verification
 
 Run on 2026-08-15, macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew),
-against `postgres:18.4-alpine` in Docker with SCRAM-SHA-256 required.
+against `postgres:18.4-alpine` both plain and with TLS.
 
 | Gate | Result |
 | --- | --- |
-| `cargo fmt --check` | Clean |
-| `cargo clippy --all-targets -- -D warnings` | Clean |
-| `cargo test --lib` | 288 passed |
-| `cargo test --test cli_contract` | 20 passed |
-| `cargo test --test postgres_integration` | 22 passed |
-| Live pty run | Client rendered, the run key executed a query, Ctrl+Q restored the terminal |
-| CI, all jobs | Green on 2026-08-15: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
-| Object tree, live | Expanded schemas and groups in a pty against the demo database, including a table named to break identifier interpolation |
+| `cargo xtask verify` | All five gates pass |
+| Library tests | 348 passed |
+| CLI contract tests | 27 passed |
+| PostgreSQL integration tests | 33 passed |
+| Terminal restoration, in a pty | 3 passed |
+| CI, all jobs | Green: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
 
-Live evidence recorded in `docs/operations/verification.md`, including the exact
-escape sequences captured on entry and exit.
+Live evidence recorded in `docs/operations/verification.md`.
+
+## What is proven, and by what
+
+| Claim | Evidence |
+| --- | --- |
+| A query runs and renders | Integration tests, plus a pty capture of the client |
+| A long statement is cancelled | Server confirms SQLSTATE 57014, in under a second |
+| Results stay bounded | 5000 rows capped at 10 with the true count kept |
+| An export stays bounded | 200,000 rows exported in 13 MB resident memory |
+| An interrupted export keeps its rows | Subprocess test: exit 9, `.partial` file, count reported |
+| verify-full checks the name | Refuses a certificate that does not cover the address used |
+| verify-ca does not | Accepts that same certificate, against the same server |
+| A client certificate authenticates | Connects as `cert_user` with no password at all |
+| TLS is never silently dropped | A server refusing TLS exits 6, not 4 |
+| Hostile values cannot drive the terminal | Escapes rendered as text, in values and object names |
+| Hostile object names cannot alter SQL | A table named to break interpolation is listed and queried |
+| Passwords never leak | Subprocess tests over failing connections |
+| A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
+| Every documented exit code | Produced by a real invocation |
 
 ## Known gaps
 
