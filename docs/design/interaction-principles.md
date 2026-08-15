@@ -7,7 +7,7 @@ control, and slightly delighted. Nothing here is decoration for its own sake.
 
 **One obvious primary action.** At any moment there is one thing the interface is
 inviting you to do, and it says what key does it. The empty results pane says
-"Press F5 to run the buffer" rather than sitting blank.
+"Press Ctrl+R to run the buffer" rather than sitting blank.
 
 **Every state is a word.** Colour reinforces; it never carries meaning alone. The
 production marker is `[PROD]`. Read-only posture is `[read-only]`. A NULL is

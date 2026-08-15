@@ -77,19 +77,46 @@ impl Keymap {
         let ctrl = KeyModifiers::CONTROL;
         let none = KeyModifiers::NONE;
         let bindings = vec![
+            // Run is bound three ways on purpose. Ctrl+R is the one advertised,
+            // because function keys are routinely claimed by the operating
+            // system or another application before a terminal program ever sees
+            // them. Ctrl+Enter is only distinguishable in terminals that speak
+            // the Kitty keyboard protocol; elsewhere it arrives as plain Enter
+            // and this binding simply never fires. F5 stays for muscle memory.
+            binding(
+                K::Char('r'),
+                ctrl,
+                Action::RunBuffer,
+                "Run the whole buffer",
+                true,
+            ),
+            binding(
+                K::Enter,
+                ctrl,
+                Action::RunBuffer,
+                "Run the whole buffer (terminals with the Kitty keyboard protocol)",
+                false,
+            ),
             binding(
                 K::F(5),
                 none,
                 Action::RunBuffer,
-                "Run the whole buffer",
+                "Run the whole buffer (if your system has not claimed F5)",
+                false,
+            ),
+            binding(
+                K::Char('t'),
+                ctrl,
+                Action::RunStatement,
+                "Run the statement at the cursor",
                 true,
             ),
             binding(
                 K::F(9),
                 none,
                 Action::RunStatement,
-                "Run the statement at the cursor",
-                true,
+                "Run the statement at the cursor (if your system has not claimed F9)",
+                false,
             ),
             binding(
                 K::Char('c'),
@@ -100,6 +127,13 @@ impl Keymap {
             ),
             binding(K::Char('q'), ctrl, Action::Quit, "Quit", true),
             binding(K::F(1), none, Action::ToggleHelp, "Show or hide help", true),
+            binding(
+                K::Char('g'),
+                ctrl,
+                Action::ToggleHelp,
+                "Show or hide help, when F1 is unavailable",
+                false,
+            ),
             binding(
                 K::Tab,
                 none,
@@ -297,6 +331,12 @@ mod tests {
     fn core_actions_are_reachable_with_named_keys() {
         let keymap = Keymap::new();
         for (code, modifiers, expected) in [
+            (KeyCode::Char('r'), KeyModifiers::CONTROL, Action::RunBuffer),
+            (
+                KeyCode::Char('t'),
+                KeyModifiers::CONTROL,
+                Action::RunStatement,
+            ),
             (KeyCode::F(5), KeyModifiers::NONE, Action::RunBuffer),
             (KeyCode::F(9), KeyModifiers::NONE, Action::RunStatement),
             (KeyCode::Char('c'), KeyModifiers::CONTROL, Action::Cancel),
@@ -334,7 +374,7 @@ mod tests {
     #[test]
     fn key_release_events_are_ignored_so_actions_do_not_fire_twice() {
         let keymap = Keymap::new();
-        let mut event = press(KeyCode::F(5), KeyModifiers::NONE);
+        let mut event = press(KeyCode::Char('r'), KeyModifiers::CONTROL);
         event.kind = KeyEventKind::Release;
         assert_eq!(keymap.resolve(&event), None);
 
@@ -346,6 +386,7 @@ mod tests {
     fn key_labels_read_the_way_people_write_them() {
         let keymap = Keymap::new();
         let labels: Vec<String> = keymap.bindings().iter().map(Binding::key_label).collect();
+        assert!(labels.contains(&"Ctrl+R".to_owned()), "{labels:?}");
         assert!(labels.contains(&"F5".to_owned()), "{labels:?}");
         assert!(labels.contains(&"Ctrl+C".to_owned()), "{labels:?}");
         assert!(labels.contains(&"Esc".to_owned()), "{labels:?}");
@@ -359,6 +400,45 @@ mod tests {
             assert!(text.contains(&needed), "{needed} missing from {text:?}");
         }
         assert!(hints.len() <= 6, "the hint line must not become clutter");
+    }
+
+    #[test]
+    fn running_is_reachable_without_a_function_key() {
+        // Function keys are routinely claimed by the operating system before a
+        // terminal program sees them, so every run action has a chord as well.
+        let keymap = Keymap::new();
+        for (code, modifiers) in [
+            (KeyCode::Char('r'), KeyModifiers::CONTROL),
+            (KeyCode::Enter, KeyModifiers::CONTROL),
+            (KeyCode::F(5), KeyModifiers::NONE),
+        ] {
+            assert_eq!(
+                keymap.resolve(&press(code, modifiers)),
+                Some(Action::RunBuffer),
+                "{code:?} should run the buffer"
+            );
+        }
+        // A plain Enter still inserts a line break rather than running anything.
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(Action::Newline)
+        );
+        // Help has a chord too, for systems that claim F1.
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('g'), KeyModifiers::CONTROL)),
+            Some(Action::ToggleHelp)
+        );
+    }
+
+    #[test]
+    fn the_advertised_keys_are_chords_not_function_keys() {
+        let hints = Keymap::new().hints();
+        for (key, label) in &hints {
+            assert!(
+                !key.starts_with('F') || key == "F1",
+                "{label} is advertised as {key}, a function key the system may claim"
+            );
+        }
     }
 
     #[test]

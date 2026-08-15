@@ -282,7 +282,7 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
         .collect();
     let text = if text.is_empty() {
         vec![Line::from(Span::styled(
-            "Type SQL here, then press F5 to run it.",
+            "Type SQL here, then press Ctrl+R to run it.",
             presentation.theme.style(Token::Muted),
         ))]
     } else {
@@ -302,7 +302,7 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
     let Some(execution) = &model.last_execution else {
         let block = pane_block(" Results ".to_owned(), focused, presentation);
         let hint = if model.connection.is_usable() {
-            "No query has run yet. Press F5 to run the buffer."
+            "No query has run yet. Press Ctrl+R to run the buffer."
         } else {
             "Not connected. Results appear here once a query runs."
         };
@@ -710,7 +710,7 @@ mod tests {
         assert!(text.contains("Editor"));
         assert!(text.contains("Results"));
         assert!(text.contains("Ready"));
-        assert!(text.contains("F5"), "the run key must be discoverable");
+        assert!(text.contains("Ctrl+R"), "the run key must be discoverable");
         assert!(text.contains("Ctrl+Q"), "quitting must be discoverable");
     }
 
@@ -804,7 +804,7 @@ mod tests {
         );
         assert!(text.contains("No query has run yet"), "{text}");
         assert!(
-            text.contains("F5"),
+            text.contains("Ctrl+R"),
             "the empty state names the key to press"
         );
     }
