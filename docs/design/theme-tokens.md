@@ -38,6 +38,19 @@ formula is checked against the known value of black on white, 21:1.
 A token that resolves to its own background colour also fails, because that is an
 invisible element.
 
+## Fills
+
+Two styles use a token as a background rather than a foreground:
+
+- **Capsules**, for the production marker. The token becomes the background and
+  the surface becomes the text. Contrast is the same pair the palette tests
+  already hold to a threshold, so a capsule cannot drift into illegibility.
+- **Stripes**, for alternating result rows. Text on a striped row is held to the
+  same contrast thresholds as text on the main surface, by its own test.
+
+With colour off, a capsule becomes reversed text and striping is dropped rather
+than faked. A modifier applied to every second row would be noise, not help.
+
 ## No colour at all
 
 With colour disabled, tokens resolve to modifiers only: focus and headers become

@@ -6,7 +6,8 @@ vertical slice that leaves the product usable.
 | Feature | State | What it adds |
 | --- | --- | --- |
 | 001 Foundation and vertical slice | **Implemented, macOS-verified** | Architecture, terminal lifecycle, connection, execution, cancellation, CLI contract, doctor |
-| 002 Connection experience and secrets | Next | Profiles, first-run journey, credential store, `.pgpass`, service files, password prompting, TLS states, connection diagnostics |
+| 001a libpq migration | **Next**, per ADR-0009 | Client certificates, `.pgpass`, service files and enterprise authentication, which the pure-Rust driver cannot provide |
+| 002 Connection experience and secrets | After 001a | Profiles, first-run journey, credential store, `.pgpass`, service files, password prompting, TLS states, connection diagnostics |
 | 003 Delightful query loop | Planned | Real editor, command palette, query jobs, history with privacy controls, transaction state |
 | 004 Result exploration and export | Planned | Virtualised grid, type-aware cells, expanded row view, cell inspector, streaming export, partial files |
 | 005 PostgreSQL object explorer | Planned | Permission-aware metadata, schemas and objects, DDL inspection, dependencies, search |
@@ -27,7 +28,8 @@ vertical slice that leaves the product usable.
 
 | Risk | Likelihood | Impact | Response |
 | --- | --- | --- | --- |
-| The pure-Rust driver's missing libpq surface (`verify-ca`, service files, client certificates) keeps growing | Medium | High | Refuse loudly rather than approximate; revisit libpq in ADR-0003 if the list stops shrinking |
+| The libpq migration weakens the single-binary distribution story, especially on Windows | High | Medium | ADR-0009 requires the packaging answer before the migration ships, not after |
+| FFI introduces memory-safety defects the rest of the codebase is designed to exclude | Medium | High | `unsafe` confined to the adapter behind safe wrappers, each with a stated invariant; prefer a vetted wrapper crate |
 | Cross-platform behaviour diverges because only macOS is exercised in practice | High | High | CI matrix on every push; treat Windows and Linux claims as unproven until it runs |
 | A single-maintainer project stalls | Medium | High | Repository is the source of truth; specs, tasks and status make resumption cheap |
 | Scope creep into a generic database client | Medium | High | Constitution principle II; non-goals are explicit in the landscape document |

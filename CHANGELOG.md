@@ -10,6 +10,17 @@ source can generate user-facing notes.
 
 ### New
 
+- A visual system with three glyph tiers: ASCII, Unicode, and an opt-in Nerd Font
+  tier with icons. Icons decorate words rather than replacing them, so `--plain`
+  loses decoration and no meaning.
+- Result grid with row numbers, alternating row backgrounds, a scroll indicator,
+  and right alignment for values that read as numbers.
+- A visible editor caret and line numbers.
+- A live activity indicator while a statement runs: a spinner, the elapsed time,
+  and a heartbeat meter that shows time passing rather than progress, because
+  PostgreSQL reports no progress for a running statement.
+- `ui.reduced-motion` and `--glyphs`, so both decoration and motion are the
+  user's choice.
 - Full-screen PostgreSQL client with a SQL buffer and a result grid, opening on a
   useful starter query rather than a blank screen.
 - Scriptable `query` command with table, CSV, TSV, JSON, NDJSON and Markdown
@@ -24,6 +35,13 @@ source can generate user-facing notes.
 - Dark, light and high-contrast themes, plus `NO_COLOR`, `--plain` and ASCII
   presentations.
 - Statement cancellation through PostgreSQL's own cancellation request.
+
+### Improved
+
+- The advertised run keys are `Ctrl+R` and `Ctrl+T` rather than `F5` and `F9`.
+  Function keys are routinely claimed by the operating system or an assistant
+  before a terminal program sees them. `F5` and `F9` remain bound, `Ctrl+Enter`
+  is bound where the terminal can distinguish it, and help gains `Ctrl+G`.
 
 ### Security
 
@@ -41,7 +59,11 @@ source can generate user-facing notes.
 
 ### Known limitations
 
-- Verified on macOS only. Windows and Linux are written but unverified.
+- Verified on macOS only. Windows and Linux are exercised in CI but have not been
+  used by hand.
+- The PostgreSQL adapter is being moved to libpq (ADR-0009) for client
+  certificates, password files, service files and enterprise authentication.
+  Until then those are unsupported and say so at the point of use.
 - Tested against PostgreSQL 18.4 only; the supported window is 14 to 18.
 - `sslmode=verify-ca` is not implemented and refuses with an explanation.
 - No connection profiles, OS credential store, `.pgpass` or service file support.
