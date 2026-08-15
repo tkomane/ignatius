@@ -194,11 +194,14 @@ async fn event_loop(
     // only differences are deliberate and visible on the server.
     let metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
+    // Held so a retry with a password the user types can be made from exactly
+    // the target that was resolved, rather than resolved again.
+    let target = Arc::new(target);
     spawn_connect(
         tx.clone(),
         Arc::clone(&session),
         Arc::clone(&metadata),
-        target,
+        Arc::clone(&target),
         config.clone(),
     );
 
@@ -221,8 +224,23 @@ async fn event_loop(
                     return Ok(ExitCode::Success);
                 }
                 Effect::Connect => {
-                    // Reconnection arrives with Feature 002; the initial connect
-                    // is started above.
+                    // Reconnection on a dropped connection arrives with Feature
+                    // 002; the initial connect is started above.
+                }
+                Effect::Reconnect { password } => {
+                    // The password goes straight into a connection attempt and
+                    // is dropped with it. Nothing keeps it: not the model, not
+                    // configuration, not the history.
+                    let retry = Arc::new(
+                        target.with_password(secrecy::SecretString::from(password.into_inner())),
+                    );
+                    spawn_connect(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        Arc::clone(&metadata),
+                        retry,
+                        config.clone(),
+                    );
                 }
                 Effect::Execute { job, sql } => {
                     spawn_execute(tx.clone(), Arc::clone(&session), job, sql, model.row_cap);
@@ -447,7 +465,7 @@ fn spawn_connect(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
-    target: ConnectionTarget,
+    target: Arc<ConnectionTarget>,
     config: Config,
 ) {
     tokio::spawn(async move {
@@ -487,16 +505,14 @@ fn spawn_connect(
 fn spawn_metadata_connect(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
-    target: ConnectionTarget,
+    target: Arc<ConnectionTarget>,
     timeout: Duration,
 ) {
     let _ = tx.send(Message::MetadataConnection(
         crate::app::model::MetadataLink::Opening,
     ));
     tokio::spawn(async move {
-        let mut target = target;
-        target.application_name = format!("{} (objects)", target.application_name);
-        target.read_only = true;
+        let target = target.for_object_tree();
         let link = match session::connect(&target, timeout).await {
             Ok(opened) => {
                 *slot.write().await = Some(Arc::new(opened));

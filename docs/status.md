@@ -6,7 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: configurable key bindings. A `[keys]` table in
+**Current feature**: a password prompt. When the server refuses for want of a
+password, the client asks for one and retries; the characters are masked, held
+only until the attempt is made, and printed by nothing. That closes half of the
+"no password prompting" gap - the full-screen client. Plain mode still relies on
+the other password routes.
+
+**Previous**: configurable key bindings. A `[keys]` table in
 `config.toml` replaces the built-in binding for an action; an unknown action
 name, an unreadable key and two actions on one key are all errors reported before
 the terminal is taken. That completes roadmap Feature 007 apart from
@@ -164,8 +170,11 @@ These are real and none of them is hidden anywhere else:
 4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and are now the only
    remaining reason to adopt libpq. See the addendum in ADR-0009: the other four
    capabilities it was accepted for have been implemented natively.
-5. **No OS credential store and no password prompting.** Password files and
-   service files are supported; the credential store and profiles are not.
+5. **No OS credential store, and no password prompt in plain mode.** The
+   full-screen client asks for a password when the server demands one. Plain
+   mode does not: it reports the refusal and relies on a password file, the
+   environment or the connection string. The credential store and connection
+   profiles do not exist at all.
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
