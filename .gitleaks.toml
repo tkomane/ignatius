@@ -1,0 +1,31 @@
+# Secret scanning policy.
+#
+# The repository deliberately contains synthetic credentials for the disposable
+# development database. They are fake, they only work against a throwaway
+# container on localhost, and they are committed so that `cargo xtask db up`
+# needs no setup. Allowlisting them keeps the scanner useful: a scanner that
+# always fails is a scanner people learn to ignore.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ignatius-synthetic-credentials"
+description = "Synthetic development and test credentials, allowlisted deliberately"
+regex = '''not-a-real-password[a-z-]*'''
+keywords = ["not-a-real-password"]
+
+[rules.allowlist]
+description = "These strings are fake by construction and named to say so"
+regexes = ['''not-a-real-password[a-z-]*''']
+
+[allowlist]
+description = "Fixtures and documentation that deliberately show fake credentials"
+regexes = [
+    '''not-a-real-password[a-z-]*''',
+    '''hunter2-not-a-real-password''',
+    '''definitely-the-wrong-password''',
+]
+paths = [
+    '''docker/dev\.env''',
+    '''docker/init/.*\.sql''',
+]
