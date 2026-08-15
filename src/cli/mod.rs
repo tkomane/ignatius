@@ -149,6 +149,16 @@ pub enum Command {
         /// Maximum rows to hold in memory. Truncation is always reported.
         #[arg(long, value_name = "N")]
         max_rows: Option<usize>,
+        /// Stream the result into a file instead of standard output.
+        ///
+        /// The rows never pass through memory, so the size of the result does
+        /// not matter. An interrupted export leaves a `.partial` file and says
+        /// how many rows reached it.
+        #[arg(short = 'o', long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        /// Replace the output file if it already exists.
+        #[arg(long)]
+        force: bool,
         #[command(flatten)]
         connection: ConnectionOptions,
     },
@@ -307,6 +317,8 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             no_header,
             null,
             max_rows,
+            output,
+            force,
             connection,
         }) => query_command(
             QueryRequest {
@@ -320,10 +332,13 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
                     unicode: presentation.unicode(),
                 },
                 max_rows: *max_rows,
+                output: output.as_deref(),
+                force: *force,
                 connection,
             },
             &paths,
             out,
+            err,
         ),
         Some(Command::Connect {
             target,
@@ -548,6 +563,8 @@ struct QueryRequest<'a> {
     file: Option<&'a std::path::Path>,
     options: OutputOptions,
     max_rows: Option<usize>,
+    output: Option<&'a std::path::Path>,
+    force: bool,
     connection: &'a ConnectionOptions,
 }
 
@@ -555,6 +572,7 @@ fn query_command(
     request: QueryRequest<'_>,
     paths: &Paths,
     out: &mut impl Write,
+    err: &mut impl Write,
 ) -> Result<ExitCode, Diagnostic> {
     let sql = read_sql(request.command, request.file)?;
     if sql.trim().is_empty() {
@@ -580,6 +598,52 @@ fn query_command(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
+
+    // An export streams rows straight to a file and never holds the result.
+    if let Some(destination) = request.output {
+        let writer = output::StreamWriter::new(request.options.clone())?;
+        let export = crate::query::export::Export::create(destination, request.force)?;
+        let outcome = runtime()?.block_on(interactive::export_once(
+            target,
+            &loaded.config,
+            sql,
+            export,
+            writer,
+        ))?;
+
+        return match outcome {
+            interactive::ExportOutcome::Completed(finished) => {
+                // The summary is a diagnostic, not data, so it goes to stderr
+                // even though stdout is empty for an export.
+                writeln!(
+                    err,
+                    "Exported {} row(s) to {}",
+                    finished.rows,
+                    finished.path.display()
+                )
+                .map_err(io_diagnostic)?;
+                Ok(ExitCode::Success)
+            }
+            interactive::ExportOutcome::Interrupted { abandoned, reason } => {
+                writeln!(err, "{}", abandoned.message()).map_err(io_diagnostic)?;
+                Err(Diagnostic::new(
+                    DiagnosticKind::ExportInterrupted,
+                    reason.headline.clone(),
+                    "exporting rows to a file",
+                )
+                .likely_cause(
+                    reason
+                        .likely_cause
+                        .clone()
+                        .unwrap_or_else(|| "the stream ended early".to_owned()),
+                )
+                .next_action(format!(
+                    "the rows written are in {}",
+                    abandoned.partial.display()
+                )))
+            }
+        };
+    }
 
     let execution = runtime()?.block_on(interactive::execute_once(
         target,

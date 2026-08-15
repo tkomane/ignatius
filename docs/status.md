@@ -6,7 +6,10 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: 003, credential routes. Password files and service files
+**Current feature**: 004, result export. Streaming export is implemented and
+verified with a 200,000-row result in 13 MB of resident memory.
+
+**Previous**: 003, credential routes. Password files and service files
 are implemented and verified against a real server.
 
 **Previous**: 002, object navigation. Implemented and verified on macOS
@@ -51,8 +54,8 @@ These are real and none of them is hidden anywhere else:
 2. **Database integration runs on Linux only.** PostgreSQL 14, 16 and 18 all
    pass there. The macOS and Windows jobs do not connect to a server, so the
    protocol claims rest on the Linux matrix and the local macOS runs.
-3. **Exit code 9 has no producer** until export lands in Feature 004. Codes 5, 6
-   and 8 now have subprocess-level evidence.
+3. Every documented exit code now has a real producer with subprocess-level
+   evidence, including 9 from an interrupted export.
 4. **`sslmode=verify-ca` is deliberately unimplemented** and refuses with an
    explanation. See ADR-0004.
 5. **No OS credential store and no password prompting.** Password files and

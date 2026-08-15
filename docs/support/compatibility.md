@@ -92,6 +92,21 @@ Deliberate differences:
   results produced before it are still returned.
 - **No meta-commands.** No `\d`, `\dt` or `\copy` yet.
 
+## Export
+
+`--output` streams a result into a file. Supported formats: **csv, tsv,
+ndjson**. json, markdown and the aligned table are refused, because each needs
+the whole result before its first byte is correct and buffering it would give up
+the bounded memory that makes an export worth having.
+
+The destination is never written directly. Rows go to `<path>.partial`, which is
+flushed, synced and renamed only when the export completes, so a file at the
+destination is always a complete file. An existing destination stops the export
+unless `--force` is given.
+
+An interrupted export exits 9, leaves the partial file, and reports how many rows
+reached it.
+
 ## Terminals
 
 | Terminal | Status |

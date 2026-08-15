@@ -477,6 +477,89 @@ pub async fn execute_once(
     }
 }
 
+/// How an export ended.
+#[derive(Debug)]
+pub enum ExportOutcome {
+    /// Every row was written and the file is in place.
+    Completed(crate::query::export::Finished),
+    /// It stopped early. The partial file holds what was written.
+    Interrupted {
+        /// What was left behind.
+        abandoned: crate::query::export::Abandoned,
+        /// Why it stopped.
+        reason: Box<Diagnostic>,
+    },
+}
+
+/// Connects, streams one statement into a file, and closes.
+///
+/// Nothing is buffered: rows go from the wire to the file. Ctrl+C asks the
+/// server to cancel and leaves the partial file behind, because rows that were
+/// written are worth keeping and a truncated file at the destination would look
+/// complete.
+pub async fn export_once(
+    target: ConnectionTarget,
+    config: &Config,
+    sql: String,
+    mut export: crate::query::export::Export,
+    mut writer: crate::cli::output::StreamWriter,
+) -> Result<ExportOutcome, Diagnostic> {
+    let timeout = Duration::from_millis(config.query.statement_timeout_ms);
+    let session = session::connect(&target, timeout).await?;
+    let cancel = session.cancel_handle();
+
+    let outcome = {
+        let mut sink = |event: crate::postgres::StreamEvent| -> std::io::Result<()> {
+            match event {
+                crate::postgres::StreamEvent::Columns(columns) => {
+                    let destination = export.writer();
+                    writer.columns(destination, columns)
+                }
+                crate::postgres::StreamEvent::Row(row) => {
+                    let result = {
+                        let destination = export.writer();
+                        writer.row(destination, &row)
+                    };
+                    export.count_row();
+                    result
+                }
+            }
+        };
+
+        let stream = session.stream(&sql, &mut sink);
+        tokio::pin!(stream);
+        tokio::select! {
+            result = &mut stream => result,
+            signal = tokio::signal::ctrl_c() => {
+                if signal.is_ok() {
+                    let _ = cancel.cancel().await;
+                }
+                stream.await
+            }
+        }
+    };
+
+    match outcome {
+        Ok(_) => Ok(ExportOutcome::Completed(export.finish()?)),
+        Err(crate::postgres::StreamStop::Server(reason)) => Ok(ExportOutcome::Interrupted {
+            abandoned: export.abandon(),
+            reason,
+        }),
+        Err(crate::postgres::StreamStop::Sink(err)) => Ok(ExportOutcome::Interrupted {
+            abandoned: export.abandon(),
+            reason: Box::new(
+                Diagnostic::new(
+                    DiagnosticKind::ExportInterrupted,
+                    "the export destination could not be written",
+                    "writing rows to a file",
+                )
+                .likely_cause(err.to_string())
+                .next_action("check free space and permissions"),
+            ),
+        }),
+    }
+}
+
 /// Tests a connection target, reporting each stage that can be told apart.
 pub async fn probe(target: &str, config: &Config) -> Result<Vec<Check>, Diagnostic> {
     let resolved = crate::connection::resolve(

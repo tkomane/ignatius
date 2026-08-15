@@ -9,5 +9,5 @@ pub mod session;
 pub mod tls;
 
 pub use metadata::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary, quote_identifier};
-pub use session::{CancelHandle, Session, SessionInfo, connect};
+pub use session::{CancelHandle, Session, SessionInfo, StreamEvent, StreamStop, connect};
 pub use tls::TlsState;

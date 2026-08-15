@@ -73,7 +73,16 @@ replacement characters. Every icon decorates a word rather than replacing it, so
 ignatius query "$DATABASE_URL" -c "SELECT count(*) FROM orders" --format csv
 ignatius query "$DATABASE_URL" -f report.sql --format json | jq '.[0].rows'
 echo "SELECT 1" | ignatius query "$DATABASE_URL" --format ndjson
+
+# Stream a large result straight to a file. The rows never pass through memory,
+# so the size of the result does not matter.
+ignatius query "$DATABASE_URL" -c "SELECT * FROM orders" --format csv -o orders.csv
 ```
+
+An export never replaces an existing file unless you pass `--force`, and it
+writes to `orders.csv.partial` until it is complete. Interrupt it and the rows
+already written stay in the partial file, with the count on stderr and exit
+code 9 - rather than a truncated file at the destination that looks finished.
 
 Data goes to stdout, diagnostics to stderr, and the exit code tells you which
 kind of failure happened: 2 usage, 3 configuration, 4 connection,
