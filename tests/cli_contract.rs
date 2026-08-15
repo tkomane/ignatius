@@ -185,6 +185,53 @@ fn a_broken_configuration_file_exits_with_the_config_code() {
 }
 
 #[test]
+fn config_init_writes_a_file_this_build_accepts_and_refuses_to_overwrite() {
+    let dir = std::env::temp_dir().join(format!("ignatius-init-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create dir");
+
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ignatius"))
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", dir.join("data"))
+            .args(args)
+            .output()
+            .expect("run")
+    };
+
+    let output = run(&["config", "init"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stdout(&output).contains("Wrote"), "{}", stdout(&output));
+
+    let written = std::fs::read_to_string(dir.join("config.toml")).expect("read");
+    assert!(
+        written.contains("No password belongs in this file"),
+        "the one rule that matters is in the file itself"
+    );
+
+    // What it wrote, it accepts.
+    let output = run(&["config", "validate"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+    // And it will not quietly replace what someone has written since.
+    std::fs::write(dir.join("config.toml"), "[ui]\ntheme = \"light\"\n").expect("write");
+    let output = run(&["config", "init"]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(stderr(&output).contains("--force"), "{}", stderr(&output));
+    assert!(
+        std::fs::read_to_string(dir.join("config.toml"))
+            .expect("read")
+            .contains("light"),
+        "the existing file is untouched"
+    );
+
+    let output = run(&["config", "init", "--force"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_profile_names_a_connection_and_never_holds_a_password() {
     let dir = std::env::temp_dir().join(format!("ignatius-profiles-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create dir");

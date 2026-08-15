@@ -105,6 +105,10 @@ and the transaction state as words.
 
 ## Named connections
 
+```bash
+ignatius config init      # a starter file, every default written out
+```
+
 ```toml
 # ~/.config/ignatius/config.toml
 [profiles.orders-prod]

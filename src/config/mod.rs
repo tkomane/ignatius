@@ -9,4 +9,6 @@ pub use schema::{
     CURRENT_SCHEMA_VERSION, ColorMode, Config, ConnectionConfig, GlyphMode, QueryConfig,
     ThemeChoice, UiConfig, ValidationIssue,
 };
-pub use store::{ConfigSource, Loaded, MigrationReport, load, migrate, save};
+pub use store::{
+    ConfigSource, Loaded, MigrationReport, TEMPLATE, load, migrate, save, write_template,
+};
