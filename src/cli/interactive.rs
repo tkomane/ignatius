@@ -309,7 +309,7 @@ fn spawn_cancel(
 
 /// The buffer the client opens with: something useful, not a blank screen.
 fn starter_query() -> &'static str {
-    "-- F5 runs the whole buffer. F9 runs the statement at the cursor.\n\
+    "-- Ctrl+R runs the whole buffer. Ctrl+T runs the statement at the cursor.\n\
      SELECT current_database(), current_user, version();"
 }
 
@@ -509,7 +509,7 @@ mod tests {
     #[test]
     fn the_starter_buffer_is_useful_and_names_the_run_key() {
         let text = starter_query();
-        assert!(text.contains("F5"), "{text}");
+        assert!(text.contains("Ctrl+R"), "{text}");
         assert!(text.contains("SELECT"), "{text}");
         // It must be safe to run against anything, including production.
         assert!(!text.to_uppercase().contains("DROP"));

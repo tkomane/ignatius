@@ -9,7 +9,7 @@
    and the transport state the server reported.
 4. The editor already contains a safe starter query and a comment naming the run
    key. There is nothing to type to see something happen.
-5. F5 runs it. The results pane shows columns, values, row count and elapsed time,
+5. Ctrl+R runs it. The results pane shows columns, values, row count and elapsed time,
    and the status reads `Completed`.
 6. Ctrl+Q. The terminal is exactly as it was.
 

@@ -3,13 +3,17 @@
 The authority is `src/ui/keymap.rs`; this document mirrors it. Bindings are data,
 checked for conflicts by a test, and listed in help at runtime.
 
-| Key | Action | In footer |
+| Key | Action | Advertised |
 | --- | --- | --- |
-| `F5` | Run the whole buffer | Yes |
-| `F9` | Run the statement at the cursor | Yes |
+| `Ctrl+R` | Run the whole buffer | Yes |
+| `Ctrl+T` | Run the statement at the cursor | Yes |
 | `Ctrl+C` | Cancel the running statement | Yes |
 | `Ctrl+Q` | Quit | Yes |
 | `F1` | Show or hide help | Yes |
+| `Ctrl+Enter` | Run the whole buffer, where the terminal can distinguish it | No |
+| `F5` | Run the whole buffer | No |
+| `F9` | Run the statement at the cursor | No |
+| `Ctrl+G` | Show or hide help, when F1 is unavailable | No |
 | `Tab` | Move focus between panes | No |
 | `Esc` | Dismiss help, then the current error | No |
 | `Ctrl+D` | Expand or collapse error detail | No |
@@ -24,9 +28,20 @@ checked for conflicts by a test, and listed in help at runtime.
 thing you urgently need to stop, and `Ctrl+C` is the reflex for that everywhere
 else. Quitting is `Ctrl+Q`, which is deliberate rather than reflexive.
 
-**Function keys for execution.** They do not collide with typing SQL, they need
-no chord, and they work identically in Warp and Windows Terminal. `F5` matching
-other database tools is a bonus, not the reason.
+**Chords for execution, not function keys.** Function keys are routinely claimed
+before a terminal program ever sees them: an operating system shortcut, an
+assistant, a screen-recording tool. When that happens the user gets someone
+else's feature instead of theirs, and there is nothing this program can do about
+it from inside the terminal. So the advertised keys are `Ctrl+R` and `Ctrl+T`,
+which no platform claims by default.
+
+`F5` and `F9` remain bound for muscle memory from other database tools, and
+`Ctrl+Enter` is bound for terminals that can distinguish it. Where a terminal
+cannot, `Ctrl+Enter` arrives as a plain `Enter` and the binding simply never
+fires, which is why plain `Enter` still inserts a line break.
+
+**Help has two keys** for the same reason: `F1`, and `Ctrl+G` when something has
+taken `F1`.
 
 **`Esc` peels one layer at a time.** Help closes first, and the error stays,
 because dismissing an error you have not read is the more expensive mistake.

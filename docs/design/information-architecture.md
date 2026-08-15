@@ -15,7 +15,7 @@
 │ 10482        1245.00     2026-08-15 08:14:22+02                                      │
 │ 10483        [null]      2026-08-15 09:02:11+02                                      │
 └──────────────────────────────────────────────────────────────────────────────────────┘
- Ready  Search path: "$user", public   F5 Run  F9 Run statement  Ctrl+C Cancel  Ctrl+Q Quit  F1 Help
+ Ready  Search path: "$user", public   Ctrl+R Run  Ctrl+T Statement  Ctrl+C Cancel  Ctrl+Q Quit  F1 Help
 ```
 
 Row 1 is the header: who you are connected to and how. Rows 2 to n are the two

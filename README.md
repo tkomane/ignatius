@@ -37,8 +37,12 @@ cargo xtask db down    # stop it and delete its data
 Everything the demo needs is synthetic and lives in `docker/dev.env`; no real
 database is ever required.
 
-In the client: **F5** runs the buffer, **F9** runs the statement at the cursor,
-**Ctrl+C** cancels, **F1** shows help, **Ctrl+Q** quits.
+In the client: **Ctrl+R** runs the buffer, **Ctrl+T** runs the statement at the
+cursor, **Ctrl+C** cancels, **F1** shows help, **Ctrl+Q** quits.
+
+The run keys are chords rather than function keys, because operating systems and
+assistants routinely claim `F5` before a terminal program sees it. `F5` and `F9`
+stay bound anyway, for muscle memory from other tools.
 
 ## From a script
 
