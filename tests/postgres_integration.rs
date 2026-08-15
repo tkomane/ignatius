@@ -1176,3 +1176,46 @@ fn a_certificate_without_its_key_is_refused_before_connecting() {
         error.headline
     );
 }
+
+#[test]
+fn the_transaction_state_is_read_from_the_server_at_each_step() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    use ignatius::query::result::TransactionState;
+
+    let start = fx.block_on(fx.session.execute("SELECT 1", 10, JobId(1)));
+    assert_eq!(start.transaction, TransactionState::Autocommit);
+
+    let begun = fx.block_on(fx.session.execute("BEGIN", 10, JobId(2)));
+    assert_eq!(begun.transaction, TransactionState::Open);
+    assert!(
+        begun
+            .transaction
+            .recovery()
+            .expect("advice")
+            .contains("COMMIT")
+    );
+
+    // A failure inside the transaction is what the client must not get wrong:
+    // nothing else will run until it ends, and the server is the one that knows.
+    let failed = fx.block_on(
+        fx.session
+            .execute("SELECT * FROM no_such_table", 10, JobId(3)),
+    );
+    assert_eq!(
+        failed.transaction,
+        TransactionState::Failed,
+        "a failed transaction must be reported as failed"
+    );
+    assert!(
+        failed
+            .transaction
+            .recovery()
+            .expect("advice")
+            .contains("ROLLBACK"),
+        "and must name the way out"
+    );
+
+    let recovered = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(4)));
+    assert_eq!(recovered.transaction, TransactionState::Autocommit);
+}

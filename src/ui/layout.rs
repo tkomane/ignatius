@@ -533,6 +533,35 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
         return;
     };
 
+    // A failed transaction is not an ordinary error: nothing else will run until
+    // it ends, so the way out is shown rather than left to be remembered.
+    if model.transaction == crate::query::result::TransactionState::Failed && model.error.is_none()
+    {
+        let block = pane_block(
+            format!(" {}Transaction failed ", presentation.icon(Icon::Warning)),
+            focused,
+            presentation,
+        );
+        let inner = block.inner(area);
+        block.render(area, buf);
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                "This transaction has failed.",
+                theme.style(Token::TransactionFailed),
+            )),
+            Line::from(Span::styled(
+                model
+                    .transaction
+                    .recovery()
+                    .unwrap_or("Run ROLLBACK to end it."),
+                theme.style(Token::Info),
+            )),
+        ])
+        .wrap(Wrap { trim: true })
+        .render(inner, buf);
+        return;
+    }
+
     let summary = execution
         .statements
         .first()
@@ -1347,6 +1376,18 @@ fn render_footer(
         theme.style(status_token),
     )];
 
+    // The transaction state is the one thing a user can be wrong about at real
+    // cost, so it sits next to the status rather than behind a panel.
+    let transaction_token = match model.transaction {
+        crate::query::result::TransactionState::Failed => Token::TransactionFailed,
+        crate::query::result::TransactionState::Open => Token::TransactionActive,
+        _ => Token::Muted,
+    };
+    spans.push(Span::styled(
+        format!("{} ", model.transaction.label()),
+        theme.style(transaction_token),
+    ));
+
     if let Some(info) = model.connection.info() {
         spans.push(Span::styled(
             format!(
@@ -1518,6 +1559,8 @@ mod tests {
             status: ExecutionStatus::Succeeded,
             elapsed: Duration::from_millis(90),
             error: None,
+
+            transaction: crate::query::result::TransactionState::Autocommit,
         });
     }
 
@@ -1708,6 +1751,8 @@ mod tests {
             status: ExecutionStatus::Succeeded,
             elapsed: Duration::from_millis(6),
             error: None,
+
+            transaction: crate::query::result::TransactionState::Autocommit,
         });
 
         let top = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
@@ -2114,6 +2159,47 @@ mod tests {
         );
         for (key, _, description) in crate::ui::keymap::CHORDS {
             assert!(text.contains(*description), "{key} is missing from {text}");
+        }
+    }
+
+    #[test]
+    fn a_failed_transaction_takes_over_the_results_and_names_the_way_out() {
+        let mut model = connected_model(Environment::Local);
+        with_rows(&mut model, &["n"], &[&[Cell::Text("1".into())]]);
+        model.transaction = crate::query::result::TransactionState::Failed;
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("Transaction failed"), "{text}");
+        assert!(text.contains("ROLLBACK"), "the way out is named: {text}");
+    }
+
+    #[test]
+    fn the_transaction_state_is_always_in_the_status_line() {
+        let mut model = connected_model(Environment::Local);
+        for (state, expected) in [
+            (
+                crate::query::result::TransactionState::Autocommit,
+                "Autocommit",
+            ),
+            (
+                crate::query::result::TransactionState::Open,
+                "In transaction",
+            ),
+            (
+                crate::query::result::TransactionState::Failed,
+                "Transaction failed",
+            ),
+            (
+                crate::query::result::TransactionState::Unknown,
+                "Transaction state unknown",
+            ),
+        ] {
+            model.transaction = state;
+            let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+            assert!(
+                text.contains(expected),
+                "{state:?} missing from the status line"
+            );
         }
     }
 

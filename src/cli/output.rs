@@ -448,6 +448,7 @@ mod tests {
             status: ExecutionStatus::Succeeded,
             elapsed: Duration::from_millis(2),
             error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
         }
     }
 
@@ -728,6 +729,7 @@ mod tests {
                 "relation does not exist",
                 "running statement 1",
             )),
+            transaction: crate::query::result::TransactionState::Autocommit,
         };
         for format in [Format::Table, Format::Csv, Format::Json, Format::Ndjson] {
             let text = render(format, &execution);
@@ -751,6 +753,7 @@ mod tests {
             status: ExecutionStatus::Succeeded,
             elapsed: Duration::from_millis(5),
             error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
         };
         let text = render(Format::Table, &execution);
         assert!(text.contains("3 rows affected"), "{text}");

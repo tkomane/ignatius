@@ -10,7 +10,7 @@ vertical slice that leaves the product usable.
 | 001a libpq migration | **Next**, per ADR-0009 | Client certificates, `.pgpass`, service files and enterprise authentication, which the pure-Rust driver cannot provide |
 | 003 Credential routes | **Password and service files done** | `.pgpass` and `pg_service.conf`, the driver-independent half of the connection experience |
 | 002 Connection experience and secrets | After 001a | Profiles, first-run journey, credential store, `.pgpass`, service files, password prompting, TLS states, connection diagnostics |
-| 003 Delightful query loop | Planned | Real editor, query jobs, history with privacy controls, transaction state. The command palette landed early in 002 |
+| 003 Delightful query loop | Partly done | Query jobs and transaction state are in, and the command palette landed early in 002. Remaining: a real editor and history with privacy controls |
 | 004 Result exploration and export | **Export done** | Streaming export with partial files is in. Remaining: expanded row view, cell inspector, filtering, copy |
 | 005 PostgreSQL object explorer | Partly done in 002 | Remaining: DDL inspection, dependency navigation, indexes and extensions in the tree, a dedicated metadata connection |
 | 006 Production-aware safety | Planned | Environment policy, write protection, advisory statement classification, confirmation ergonomics, privacy sessions |

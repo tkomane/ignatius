@@ -125,6 +125,68 @@ impl StatementResult {
     }
 }
 
+/// Whether the session is inside a transaction, and whether it is usable.
+///
+/// Read from the server after each execution rather than inferred from the
+/// statements sent. Inference would be wrong exactly when it matters most: a
+/// server-side rollback, a statement inside a function, or an error that ends a
+/// transaction without the client seeing a ROLLBACK.
+///
+/// The protocol carries this on every ReadyForQuery message, but the driver does
+/// not expose it, so it is asked for instead. See
+/// [`crate::postgres::session`] for how, and why that question is the one that
+/// actually answers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransactionState {
+    /// Not in a transaction. Each statement commits on its own.
+    #[default]
+    Autocommit,
+    /// Inside a transaction that is still usable.
+    Open,
+    /// Inside a transaction that has failed. Nothing will run until it ends.
+    Failed,
+    /// The state could not be read.
+    Unknown,
+}
+
+impl TransactionState {
+    /// The label shown in the status bar. Always words.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Autocommit => "Autocommit",
+            Self::Open => "In transaction",
+            Self::Failed => "Transaction failed",
+            Self::Unknown => "Transaction state unknown",
+        }
+    }
+
+    /// What the user should do next, when there is something to do.
+    #[must_use]
+    pub const fn recovery(self) -> Option<&'static str> {
+        match self {
+            Self::Failed => Some("ROLLBACK ends it. Nothing else will run until you do."),
+            Self::Open => Some("COMMIT or ROLLBACK when you are done."),
+            Self::Autocommit | Self::Unknown => None,
+        }
+    }
+
+    /// Builds a state from the server's answer to the transaction probe.
+    ///
+    /// `in_transaction` is the server comparing the transaction's own timestamp
+    /// with this statement's: they differ only inside an explicit transaction
+    /// block. A failed transaction cannot answer at all, which is how it is
+    /// recognised.
+    #[must_use]
+    pub const fn from_probe(in_transaction: Option<bool>) -> Self {
+        match in_transaction {
+            Some(true) => Self::Open,
+            Some(false) => Self::Autocommit,
+            None => Self::Unknown,
+        }
+    }
+}
+
 /// How a whole execution ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionStatus {
@@ -175,6 +237,8 @@ pub struct Execution {
     /// The failure, when one ended the execution. Results produced before it are
     /// still present in `statements`, because they really happened.
     pub error: Option<crate::diagnostics::Diagnostic>,
+    /// The transaction state the server reported afterwards.
+    pub transaction: TransactionState,
 }
 
 impl Execution {
@@ -309,10 +373,45 @@ mod tests {
             status: ExecutionStatus::Succeeded,
             elapsed: Duration::from_millis(7),
             error: None,
+            transaction: TransactionState::Autocommit,
         };
         assert_eq!(execution.retained_rows(), 3);
         assert!(execution.any_truncated());
         assert_eq!(execution.job.to_string(), "job-1");
+    }
+
+    #[test]
+    fn transaction_states_come_from_the_server_and_each_says_what_to_do() {
+        assert_eq!(
+            TransactionState::from_probe(Some(true)),
+            TransactionState::Open
+        );
+        assert_eq!(
+            TransactionState::from_probe(Some(false)),
+            TransactionState::Autocommit
+        );
+        assert_eq!(
+            TransactionState::from_probe(None),
+            TransactionState::Unknown,
+            "an unreadable state is unknown, not assumed to be fine"
+        );
+
+        // The failed state is the one people need a way out of, and it names it.
+        assert!(
+            TransactionState::Failed
+                .recovery()
+                .expect("a way out")
+                .contains("ROLLBACK")
+        );
+        assert!(TransactionState::Autocommit.recovery().is_none());
+        for state in [
+            TransactionState::Autocommit,
+            TransactionState::Open,
+            TransactionState::Failed,
+            TransactionState::Unknown,
+        ] {
+            assert!(!state.label().is_empty());
+        }
     }
 
     #[test]

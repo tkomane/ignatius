@@ -51,6 +51,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             model.phase = QueryPhase::Idle;
             model.running_for = None;
+            model.transaction = execution.transaction;
             model.last_elapsed = Some(execution.elapsed);
             model.error = execution.error.clone();
             model.error_expanded = false;
@@ -620,6 +621,8 @@ mod tests {
             status,
             elapsed: Duration::from_millis(6),
             error: None,
+
+            transaction: crate::query::result::TransactionState::Autocommit,
         })
     }
 
@@ -748,6 +751,8 @@ mod tests {
                 status: ExecutionStatus::Cancelled,
                 elapsed: Duration::from_millis(20),
                 error: None,
+
+                transaction: crate::query::result::TransactionState::Autocommit,
             })),
         );
         assert_eq!(model.phase, QueryPhase::Idle);
@@ -792,6 +797,8 @@ mod tests {
                 status: ExecutionStatus::ConnectionLost,
                 elapsed: Duration::from_millis(1),
                 error: None,
+
+                transaction: crate::query::result::TransactionState::Autocommit,
             })),
         );
         assert!(matches!(model.connection, ConnectionState::Lost { .. }));
@@ -830,6 +837,8 @@ mod tests {
                 status: ExecutionStatus::Failed,
                 elapsed: Duration::from_millis(3),
                 error: Some(diagnostic),
+
+                transaction: crate::query::result::TransactionState::Autocommit,
             })),
         );
 
@@ -1301,6 +1310,30 @@ mod tests {
         );
         assert!(model.tree.error.is_some());
         assert!(!model.tree.loading);
+    }
+
+    #[test]
+    fn the_transaction_state_comes_from_the_execution_that_reported_it() {
+        let mut model = connected();
+        model.editor.set_text("BEGIN;");
+        update(&mut model, Message::Action(Action::RunBuffer));
+        let job = model.phase.job().expect("running");
+
+        let mut execution = execution(job, ExecutionStatus::Succeeded, &["x"]);
+        execution.transaction = crate::query::result::TransactionState::Failed;
+        update(&mut model, Message::ExecutionFinished(execution));
+
+        assert_eq!(
+            model.transaction,
+            crate::query::result::TransactionState::Failed
+        );
+        assert!(
+            model
+                .transaction
+                .recovery()
+                .expect("a way out")
+                .contains("ROLLBACK")
+        );
     }
 
     #[test]

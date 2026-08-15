@@ -6,7 +6,10 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: 006, production-aware safety. A production-classified
+**Current feature**: transaction state, read from the server rather than
+inferred.
+
+**Previous**: 006, production-aware safety. A production-classified
 connection holds back writes until they are confirmed, and `--read-only` asks
 the server to enforce it.
 
