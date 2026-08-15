@@ -69,6 +69,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             model.selected_row = 0;
             model.selected_column = 0;
+            // The cell it was showing belongs to a result that no longer exists.
+            // Leaving it open would show a value from one query labelled as
+            // though it came from another.
+            model.inspector = None;
             model.last_execution = Some(*execution);
             Vec::new()
         }
@@ -128,6 +132,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.tree.filtering {
         return filter_action(model, action);
+    }
+    if model.inspector.is_some() {
+        return inspector_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -202,7 +209,21 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.editor.insert('\n');
             Vec::new()
         }
+        // In the results pane, Enter means "show me this value in full", which
+        // is the only thing there is to do to a cell.
+        Action::Activate if model.focus == Focus::Results => {
+            toggle_inspector(model);
+            Vec::new()
+        }
         Action::Activate => Vec::new(),
+        Action::ToggleExpandedRow => {
+            model.expanded_row = !model.expanded_row;
+            Vec::new()
+        }
+        Action::ToggleInspector => {
+            toggle_inspector(model);
+            Vec::new()
+        }
         Action::RunBuffer => run(model, model.editor.text().to_owned()),
         Action::RunStatement => {
             let sql = statements::statement_at(model.editor.text(), model.editor.cursor())
@@ -236,6 +257,96 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
     }
+}
+
+/// Opens the inspector on the selected cell, or closes it.
+///
+/// It opens only when there is a cell to show. An inspector over a result with
+/// no rows would be a window onto nothing, and the selection can outlive the
+/// result it was made in, so the cell is looked up rather than assumed.
+fn toggle_inspector(model: &mut Model) {
+    if model.inspector.is_some() {
+        model.inspector = None;
+        return;
+    }
+    let (width, _) = crate::ui::layout::inspector_viewport(model.size);
+    let exists = model.visible_result().is_some_and(|set| {
+        crate::app::inspect::CellView::build(set, model.selected_row, model.selected_column, width)
+            .is_some()
+    });
+    if exists {
+        model.inspector = Some(crate::app::inspect::Inspector::new());
+    }
+}
+
+/// How many lines the selected value wraps to, and how many fit at once.
+fn inspected_extent(model: &Model) -> (usize, usize) {
+    let (width, height) = crate::ui::layout::inspector_viewport(model.size);
+    let lines = model
+        .visible_result()
+        .and_then(|set| {
+            crate::app::inspect::CellView::build(
+                set,
+                model.selected_row,
+                model.selected_column,
+                width,
+            )
+        })
+        .map_or(0, |view| view.lines.len());
+    (lines, height)
+}
+
+/// Handles input while the inspector is open.
+///
+/// Left and right move to the neighbouring column and keep it open, which is how
+/// a wide row is read one value at a time. Up and down scroll the value. Nothing
+/// else reaches the pane underneath.
+fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Move(Direction::Up) => {
+            if let Some(inspector) = model.inspector.as_mut() {
+                inspector.scroll_up();
+            }
+        }
+        Action::Move(Direction::Down) => {
+            let (total, height) = inspected_extent(model);
+            if let Some(inspector) = model.inspector.as_mut() {
+                inspector.scroll_down(total, height);
+            }
+        }
+        Action::Move(direction @ (Direction::Left | Direction::Right)) => {
+            let previous = model.focus;
+            model.focus = Focus::Results;
+            move_selection(model, direction);
+            model.focus = previous;
+            // A different value starts at its beginning, not where the last one
+            // happened to be scrolled to.
+            if let Some(inspector) = model.inspector.as_mut() {
+                inspector.reset();
+            }
+        }
+        Action::Dismiss | Action::ToggleInspector | Action::Activate => {
+            model.inspector = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::ToggleHelp => {
+            model.help_open = !model.help_open;
+        }
+        // Typing is swallowed: the editor is underneath, and a keystroke that
+        // silently edits SQL the user cannot see is the worst outcome here.
+        Action::Insert(_) | Action::Backspace | Action::Newline => {}
+        // Anything else is a key that already means something. It closes the
+        // inspector and does that thing, so Ctrl+R still runs and the palette
+        // still opens rather than the interface feeling stuck behind a modal.
+        other => {
+            model.inspector = None;
+            return apply_action(model, other);
+        }
+    }
+    Vec::new()
 }
 
 /// Handles input while a run is waiting to be confirmed.
@@ -557,6 +668,23 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         })
         .collect();
     entries.dedup_by(|a, b| a.label == b.label);
+
+    // Chords are commands too. Someone who cannot remember the second key should
+    // still be able to reach the thing by typing its name.
+    for (key, action, description) in crate::ui::keymap::CHORDS {
+        if entries
+            .iter()
+            .any(|entry| entry.command == PaletteCommand::Run(action.clone()))
+        {
+            continue;
+        }
+        entries.push(PaletteEntry {
+            label: (*description).to_owned(),
+            detail: format!("Ctrl+K {key}"),
+            group: "Command",
+            command: PaletteCommand::Run(action.clone()),
+        });
+    }
 
     // Objects already in the tree, so the palette costs no round trip.
     for row in model.tree.rows() {
@@ -1166,6 +1294,29 @@ mod tests {
     }
 
     #[test]
+    fn every_chord_is_reachable_by_name_from_the_palette() {
+        // A two-key chord is fast once you know it and invisible until then.
+        // The palette is how it is found the first time.
+        let model = with_tree();
+        let entries = palette_entries(&model);
+        for (_, action, description) in crate::ui::keymap::CHORDS {
+            assert!(
+                entries.iter().any(|entry| entry.command
+                    == crate::app::palette::PaletteCommand::Run(action.clone())),
+                "{description} cannot be found by name"
+            );
+        }
+
+        let mut model = with_long_value();
+        update(&mut model, Message::Action(Action::OpenPalette));
+        for ch in "expandrow".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.expanded_row, "the chosen command actually ran");
+    }
+
+    #[test]
     fn a_chord_shows_its_continuations_and_the_next_key_ends_it() {
         let mut model = with_tree();
         model.sidebar_visible = true;
@@ -1219,6 +1370,200 @@ mod tests {
 
         update(&mut model, Message::Action(Action::Dismiss));
         assert!(model.error.is_none(), "and only then the error");
+    }
+
+    /// A model holding a result whose one row is wider than any pane.
+    fn with_long_value() -> Model {
+        let mut model = connected();
+        model.size = (120, 40);
+        model.editor.set_text("SELECT 1;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+
+        let mut set = ResultSet::new(vec!["id".into(), "document".into()], 100);
+        set.push(vec![Cell::Text("1".into()), Cell::Text("x".repeat(5000))]);
+        let mut execution = execution(job, ExecutionStatus::Succeeded, &[]);
+        execution.statements[0].result_set = Some(set);
+        update(&mut model, Message::ExecutionFinished(execution));
+        model.focus = Focus::Results;
+        model
+    }
+
+    #[test]
+    fn enter_on_a_result_opens_the_inspector_and_closes_it_again() {
+        let mut model = with_long_value();
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.inspector.is_some(), "Enter on a cell inspects it");
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.inspector.is_none());
+
+        // The chord reaches it from anywhere, not only from the results pane.
+        model.focus = Focus::Editor;
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_some());
+    }
+
+    #[test]
+    fn the_inspector_does_not_open_onto_a_result_with_no_rows() {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        // No execution at all.
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_none());
+
+        // An execution that returned no rows.
+        model.editor.set_text("SELECT 1;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &[])),
+        );
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(
+            model.inspector.is_none(),
+            "a window onto nothing is worse than no window"
+        );
+    }
+
+    #[test]
+    fn the_inspector_scrolls_within_the_value_and_stops_at_both_ends() {
+        let mut model = with_long_value();
+        model.selected_column = 1;
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        let inspector = model.inspector.expect("open");
+        assert_eq!(inspector.scroll(), 0);
+
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        assert_eq!(model.inspector.expect("open").scroll(), 1);
+
+        for _ in 0..500 {
+            update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        }
+        let bottom = model.inspector.expect("open").scroll();
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        assert_eq!(
+            model.inspector.expect("open").scroll(),
+            bottom,
+            "scrolling stops with the last line on screen"
+        );
+
+        for _ in 0..1000 {
+            update(&mut model, Message::Action(Action::Move(Direction::Up)));
+        }
+        assert_eq!(model.inspector.expect("open").scroll(), 0);
+    }
+
+    #[test]
+    fn moving_sideways_in_the_inspector_reads_the_next_column_of_the_same_row() {
+        let mut model = with_long_value();
+        model.selected_column = 1;
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        assert_eq!(model.inspector.expect("open").scroll(), 1);
+
+        update(&mut model, Message::Action(Action::Move(Direction::Left)));
+        assert!(model.inspector.is_some(), "it stays open");
+        assert_eq!(model.selected_column, 0);
+        assert_eq!(
+            model.inspector.expect("open").scroll(),
+            0,
+            "a different value starts at its beginning"
+        );
+
+        // The row does not move, and the last column is the last column.
+        update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        assert_eq!(model.selected_column, 1);
+        assert_eq!(model.selected_row, 0);
+        assert_eq!(model.focus, Focus::Results);
+    }
+
+    #[test]
+    fn the_inspector_closes_when_the_result_it_was_reading_is_replaced() {
+        let mut model = with_long_value();
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_some());
+
+        model.editor.set_text("SELECT 2;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &["a"])),
+        );
+        assert!(
+            model.inspector.is_none(),
+            "showing a cell from a result that no longer exists would be a lie"
+        );
+    }
+
+    #[test]
+    fn typing_while_the_inspector_is_open_never_reaches_the_editor() {
+        let mut model = with_long_value();
+        model.editor.set_text("SELECT 1;");
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        for ch in "DROP".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        update(&mut model, Message::Action(Action::Backspace));
+        assert_eq!(model.editor.text(), "SELECT 1;");
+        assert!(model.inspector.is_some());
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.inspector.is_none(), "Esc closes it");
+    }
+
+    #[test]
+    fn a_key_that_means_something_else_closes_the_inspector_and_does_it() {
+        // A modal that swallows every other key is a modal people get stuck
+        // behind. Typing is swallowed; a bound action is not.
+        let mut model = with_long_value();
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        update(&mut model, Message::Action(Action::OpenPalette));
+        assert!(model.inspector.is_none(), "one overlay at a time");
+        update(&mut model, Message::Action(Action::Insert('o')));
+        assert_eq!(model.palette.expect("open").query, "o");
+        assert_eq!(model.editor.text(), "SELECT 1;", "and not into the editor");
+
+        let mut model = with_long_value();
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        assert!(model.inspector.is_none());
+        assert!(
+            matches!(effects.as_slice(), [Effect::Execute { .. }]),
+            "Ctrl+R still runs: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn the_expanded_row_view_is_a_preference_that_survives_the_next_query() {
+        let mut model = with_long_value();
+        update(&mut model, Message::Action(Action::ToggleExpandedRow));
+        assert!(model.expanded_row);
+
+        model.editor.set_text("SELECT 2;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &["a"])),
+        );
+        assert!(
+            model.expanded_row,
+            "someone who turned it on wants it on for the next result too"
+        );
+
+        update(&mut model, Message::Action(Action::ToggleExpandedRow));
+        assert!(!model.expanded_row);
     }
 
     #[test]

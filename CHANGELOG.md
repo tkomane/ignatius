@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Two ways to read a value the grid can only abbreviate. `Ctrl+K x` lays the
+  selected row down the screen, one column per line, the way `psql`'s `\x`
+  does, so a thirty-column row is readable on an eighty-column terminal. Enter,
+  or `Ctrl+K i`, opens the selected cell in full: what the value is in words,
+  every character of it wrapped and scrollable, and the line breaks the value
+  actually has. It is the one place SQL NULL, an empty string and the text
+  `NULL` are told apart by reading rather than by knowing the convention.
+- The help overlay now lists the chords as well as the direct keys, and every
+  chord is reachable by name from the command palette.
 - A plain, line-oriented client behind `--plain`: no alternate screen, no raw
   mode, no cursor addressing, and nothing that only makes sense to an eye. It
   works in `TERM=dumb`, stays in the scrollback, and can be driven by a pipe.

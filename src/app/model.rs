@@ -341,6 +341,13 @@ pub struct Model {
     pub running_for: Option<Duration>,
     /// When true, indicators are drawn as static text.
     pub reduced_motion: bool,
+    /// Whether the result pane shows one row down the screen instead of a grid.
+    ///
+    /// A preference, not a property of a result: it survives a new query,
+    /// because someone who turned it on wants it on for the next one too.
+    pub expanded_row: bool,
+    /// The cell inspector, when it is open.
+    pub inspector: Option<crate::app::inspect::Inspector>,
 }
 
 impl Model {

@@ -15,12 +15,14 @@
 //! [`update::update`] is pure, so every rule it enforces is provable in a unit
 //! test rather than by running a database.
 
+pub mod inspect;
 pub mod message;
 pub mod model;
 pub mod palette;
 pub mod tree;
 pub mod update;
 
+pub use inspect::{CellView, ExpandedField, Inspector};
 pub use message::{Action, Direction, Effect, Message};
 pub use model::{ConnectionState, Editor, Focus, Model, QueryPhase};
 pub use palette::{Palette, PaletteCommand, PaletteEntry};

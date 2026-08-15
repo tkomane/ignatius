@@ -43,6 +43,19 @@ only ever SQL.
 summary. Truncation is stated in the summary, never implied by an absence. When
 an error is present it replaces this pane, because an error is the result.
 
+The same pane has a second shape, reached with `Ctrl+K x`: one row down the
+screen, one column per line, with the names aligned. It exists because a grid
+runs out of width long before a real table runs out of columns. The selected
+column is marked there too, since Enter acts on it.
+
+**Cell inspector.** An overlay over everything else, opened with Enter on a cell.
+It is where the client stops abbreviating: the column name, what the value is in
+words, and the value itself wrapped to the pane and scrollable. A value's own
+line breaks are kept; how many lines the pane made of it is stated as wrapped
+lines, so a pane fact is never read as a value fact. This is the one place SQL
+NULL, an empty string and the text `NULL` are distinguished by reading rather
+than by knowing what the marker means.
+
 **Footer.** What the client is doing right now (`Ready`, `Running`,
 `Cancellation requested`), the session's search path, and up to five key hints.
 

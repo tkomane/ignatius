@@ -6,7 +6,15 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: a plain, line-oriented client behind `--plain`. No
+**Current feature**: reading a result. `Ctrl+K x` lays one row down the screen,
+one column per line; Enter on a cell opens it in full, wrapped, scrollable, with
+what the value is stated in words. Specified in
+`specs/004-result-inspection/spec.md`. That is two of the four items Feature 004
+had left. Result filtering and copying a value out remain; copying waits on a
+decision about the clipboard route, not on time, because it moves data out of
+this process.
+
+**Previous**: a plain, line-oriented client behind `--plain`. No
 alternate screen, no raw mode, no cursor addressing: it works in `TERM=dumb`,
 stays in the scrollback, and can be driven by a pipe. It is the accessibility
 item that had been unchecked in the Feature 001 quality checklist since it was
@@ -75,6 +83,8 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A value is never abbreviated without recourse | The inspector renders it whole, wrapped, with its position stated |
+| NULL, empty and the text NULL are distinguishable | Layout test asserting the words for each |
 | Every documented exit code | Produced by a real invocation |
 
 ## Known gaps
@@ -145,9 +155,15 @@ These are real and none of them is hidden anywhere else:
 3. A terminal-restoration test for Windows, which needs ConPTY (T055a).
 4. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-5. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
+5. **Decision needed**: how a value gets copied out. The system clipboard needs a
+   crate and platform support; OSC 52 writes the value into the terminal, where
+   it may be logged by the emulator. Neither is obviously right for a tool that
+   handles other people's data, so it is the owner's call. Result filtering does
+   not depend on it and can go first.
+6. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
    on the current model.
-6. Then connection profiles, credential store, `.pgpass`, service files.
-7. Object explorer hardening: DDL inspection, dependencies, indexes and
+7. Then connection profiles and an OS credential store. Password files and
+   service files are already done.
+8. Object explorer hardening: DDL inspection, dependencies, indexes and
    extensions in the tree, and a dedicated metadata connection so a long query
    cannot delay it.

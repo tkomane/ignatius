@@ -39,12 +39,15 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `f` | Filter the object tree |
 | `r` | Reload the object tree |
 | `h` | Show or hide help |
+| `x` | Expand the selected row down the screen |
+| `i` | Inspect the selected cell |
 
 ## What a key means depends on where you are
 
 `Enter` is the clearest case. In the editor it inserts a line break. On an object
 in the tree it puts that object's quoted name where SQL is written, because that
-is what you wanted it for. On a schema or a group it opens them, because a
+is what you wanted it for. On a cell in the results it opens the inspector, which
+is the only thing there is to do to a value. On a schema or a group it opens them, because a
 container has no name worth pasting. In the palette it confirms.
 
 The arrow keys always navigate: right opens a node, left closes it. That
@@ -52,9 +55,11 @@ separation means `Enter` never has to guess between "use this" and "open this".
 
 ## Modes
 
-Three states intercept keys before the editor sees them, peeled by `Esc` in this
-order: a pending chord, the palette, then the object filter. Help and the current
-error are peeled after those. The order is fixed and tested, because a key that
+Four states intercept keys before the editor sees them, peeled by `Esc` in this
+order: a pending chord, the palette, the object filter, then the cell inspector.
+Help and the current error are peeled after those. The inspector is the one that
+does not swallow everything: typing goes nowhere, but a key that already means
+something closes it and does that thing, so `Ctrl+R` still runs. The order is fixed and tested, because a key that
 does something different depending on invisible state is how an interface becomes
 untrustworthy.
 
