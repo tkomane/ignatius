@@ -78,8 +78,9 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [ ] T051 Verify on Windows 11 in Windows Terminal with PowerShell 7 (CI builds and tests it; nobody has used it)
 - [ ] T052 Verify on Linux, including the Unix socket path (CI builds and tests it; the socket path is untested)
 - [x] T053 Extend the CI server matrix to PostgreSQL 14 through 18
-- [ ] T054 Subprocess-level evidence for exit codes 5, 6 and 8
-- [ ] T055 Automated terminal-restoration test in CI (pty on Unix, ConPTY on Windows)
+- [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8
+- [x] T055 Automated terminal-restoration test in CI (pty on Unix)
+- [ ] T055a The same on Windows, which needs ConPTY
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion

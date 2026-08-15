@@ -451,6 +451,32 @@ fn a_failed_transaction_is_reported_and_rollback_recovers_it() {
 }
 
 #[test]
+fn the_drivers_tls_error_wording_is_still_what_the_mapping_expects() {
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let target = resolve(
+        Some(&format!("{uri}?sslmode=require")),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+
+    // The demo server speaks no TLS, so this is a real TLS-class failure from
+    // the driver. If the driver ever rewords it, the mapping in
+    // `postgres::error` would silently start calling TLS failures network
+    // failures, so the string is pinned here against the live driver.
+    let error = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect_err("a server without TLS must refuse sslmode=require");
+    assert_eq!(
+        error.exit_code(),
+        ignatius::ExitCode::Tls,
+        "a refusal to encrypt is not a network problem: {error:?}"
+    );
+}
+
+#[test]
 fn requiring_tls_against_a_server_without_it_fails_rather_than_downgrading() {
     let uri = target_or_skip!();
     let config = Config::default();
