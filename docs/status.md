@@ -6,7 +6,12 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: 004, result export. Streaming export is implemented and
+**Current feature**: transport hardening. `verify-ca` and client certificates
+are implemented natively and tested against a TLS server, which closes the
+largest honesty gap the project had: the headline differentiator had never been
+exercised against a server that speaks TLS.
+
+**Previous**: 004, result export. Streaming export is implemented and
 verified with a 200,000-row result in 13 MB of resident memory.
 
 **Previous**: 003, credential routes. Password files and service files
@@ -56,8 +61,9 @@ These are real and none of them is hidden anywhere else:
    protocol claims rest on the Linux matrix and the local macOS runs.
 3. Every documented exit code now has a real producer with subprocess-level
    evidence, including 9 from an interrupted export.
-4. **`sslmode=verify-ca` is deliberately unimplemented** and refuses with an
-   explanation. See ADR-0004.
+4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and are now the only
+   remaining reason to adopt libpq. See the addendum in ADR-0009: the other four
+   capabilities it was accepted for have been implemented natively.
 5. **No OS credential store and no password prompting.** Password files and
    service files are supported; the credential store and profiles are not.
 6. **Terminal restoration is proven automatically on Unix**, by a test that runs
@@ -96,8 +102,9 @@ These are real and none of them is hidden anywhere else:
 
 ## Next actions, in order
 
-1. Migrate the PostgreSQL adapter to libpq (ADR-0009). The driver-independent
-   credential routes are now done, which is what that ADR sequenced first.
+1. **Decision needed**: ADR-0009 adopted libpq for five capabilities; four are
+   now implemented without it. The remaining one is GSSAPI and Windows SSPI.
+   Whether the migration is still worth its cost is the owner's call.
 2. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
    including the Unix socket path (T051, T052). CI proves it builds and its
    tests pass; it does not prove the interface is usable there.

@@ -110,6 +110,9 @@ fn dev_env() -> Result<BTreeMap<String, String>, String> {
 /// Port the development database is published on. Mirrors `docker/compose.yaml`.
 const DEV_PORT: u16 = 55432;
 
+/// Port of the second server, which speaks TLS.
+const TLS_PORT: u16 = 55433;
+
 /// The connection URI, including the synthetic password.
 fn dev_uri() -> Result<String, String> {
     let env = dev_env()?;
@@ -119,6 +122,21 @@ fn dev_uri() -> Result<String, String> {
     };
     Ok(format!(
         "postgres://{}:{}@127.0.0.1:{DEV_PORT}/{}",
+        get("POSTGRES_USER")?,
+        get("POSTGRES_PASSWORD")?,
+        get("POSTGRES_DB")?
+    ))
+}
+
+/// The URI of the TLS server. Uses the name the certificate covers.
+fn tls_uri() -> Result<String, String> {
+    let env = dev_env()?;
+    let get = |key: &str| -> Result<&String, String> {
+        env.get(key)
+            .ok_or_else(|| format!("{key} is missing from docker/dev.env"))
+    };
+    Ok(format!(
+        "postgres://{}:{}@localhost:{TLS_PORT}/{}",
         get("POSTGRES_USER")?,
         get("POSTGRES_PASSWORD")?,
         get("POSTGRES_DB")?
@@ -175,13 +193,27 @@ fn run_quiet(program: &str, args: &[&str]) -> bool {
 fn db_up() -> Result<(), String> {
     let compose = compose_file();
     let compose = compose.to_string_lossy().into_owned();
-    println!("Starting the disposable database...");
+
+    // The TLS server needs certificates before it can start. They are throwaway
+    // and regenerated on demand, never committed.
+    println!("Generating throwaway certificates...");
+    run(
+        "sh",
+        &[&repo_root()
+            .join("docker")
+            .join("tls")
+            .join("generate.sh")
+            .to_string_lossy()],
+        &[],
+    )?;
+
+    println!("Starting the disposable databases...");
     run("docker", &["compose", "-f", &compose, "up", "-d"], &[])?;
 
     print!("Waiting for it to accept connections");
     flush();
     for attempt in 0..60 {
-        if postgres_ready() {
+        if postgres_ready() && postgres_tls_ready() {
             println!(" ready after {attempt}s.");
             print_connection_details()?;
             return Ok(());
@@ -195,7 +227,16 @@ fn db_up() -> Result<(), String> {
         .to_owned())
 }
 
+/// Whether the TLS server is accepting connections.
+fn postgres_tls_ready() -> bool {
+    ready_on("postgres-tls")
+}
+
 fn postgres_ready() -> bool {
+    ready_on("postgres")
+}
+
+fn ready_on(service: &str) -> bool {
     let Ok(env) = dev_env() else { return false };
     let (Some(user), Some(db)) = (env.get("POSTGRES_USER"), env.get("POSTGRES_DB")) else {
         return false;
@@ -212,7 +253,7 @@ fn postgres_ready() -> bool {
             &compose.to_string_lossy(),
             "exec",
             "-T",
-            "postgres",
+            service,
             "pg_isready",
             "-h",
             "127.0.0.1",
@@ -227,10 +268,12 @@ fn postgres_ready() -> bool {
 fn print_connection_details() -> Result<(), String> {
     println!(
         "
-The database is ready.
+Both databases are ready.
 
-  Connection   {}
+  Plain        {}
+  TLS          postgres://{}@localhost:{TLS_PORT}/{}
   Password     synthetic, in docker/dev.env
+  Certificates docker/tls/generated, regenerated on demand
 
 Try it:
 
@@ -239,7 +282,9 @@ Try it:
   cargo xtask test                      run everything, including integration tests
 
 Stop it with `cargo xtask db down`, which also deletes its data.",
-        dev_uri_safe()?
+        dev_uri_safe()?,
+        dev_env()?.get("POSTGRES_USER").map_or("?", String::as_str),
+        dev_env()?.get("POSTGRES_DB").map_or("?", String::as_str)
     );
     Ok(())
 }
@@ -322,9 +367,17 @@ fn require_database() -> Result<(), String> {
 /// Runs the whole test suite, including the tests that need a real server.
 fn test() -> Result<(), String> {
     let uri = dev_uri()?;
+    let tls_uri = tls_uri()?;
     if postgres_ready() {
         println!("Running everything, including the integration tests.\n");
-        run("cargo", &["test"], &[("IGNATIUS_TEST_PG_URI", &uri)])
+        run(
+            "cargo",
+            &["test"],
+            &[
+                ("IGNATIUS_TEST_PG_URI", &uri),
+                ("IGNATIUS_TEST_PG_TLS_URI", &tls_uri),
+            ],
+        )
     } else {
         println!(
             "The development database is not running, so the integration tests will skip.
@@ -340,6 +393,7 @@ Start it with `cargo xtask db up` to run them.\n"
 /// even when an earlier one failed, and the summary at the end is the answer.
 fn verify() -> Result<(), String> {
     let uri = dev_uri()?;
+    let tls_uri = tls_uri()?;
     let database_available = postgres_ready();
 
     let mut results: Vec<(&str, Result<(), String>)> = Vec::new();
@@ -362,7 +416,10 @@ fn verify() -> Result<(), String> {
 
     println!("\n== command-line contract ==");
     let env: Vec<(&str, &str)> = if database_available {
-        vec![("IGNATIUS_TEST_PG_URI", uri.as_str())]
+        vec![
+            ("IGNATIUS_TEST_PG_URI", uri.as_str()),
+            ("IGNATIUS_TEST_PG_TLS_URI", tls_uri.as_str()),
+        ]
     } else {
         Vec::new()
     };
@@ -378,7 +435,10 @@ fn verify() -> Result<(), String> {
             run(
                 "cargo",
                 &["test", "--test", "postgres_integration"],
-                &[("IGNATIUS_TEST_PG_URI", &uri)],
+                &[
+                    ("IGNATIUS_TEST_PG_URI", &uri),
+                    ("IGNATIUS_TEST_PG_TLS_URI", &tls_uri),
+                ],
             ),
         ));
     } else {

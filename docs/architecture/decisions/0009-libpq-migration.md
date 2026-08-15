@@ -61,6 +61,30 @@ exists, so the migration is contained: the reducer, the result model, the value
 rendering, the diagnostics and the interface are untouched. That containment was
 the point of the boundary, and this is the first time it is being cashed in.
 
+## What has changed since this was accepted
+
+**2026-08-15, same day.** Four of the five capabilities this ADR was accepted for
+have since been implemented without libpq, and tested against a real server:
+
+| Capability | State |
+| --- | --- |
+| `.pgpass` password files | Implemented natively |
+| `pg_service.conf` service files | Implemented natively |
+| `sslmode=verify-ca` | Implemented natively with rustls |
+| Client certificates | Implemented natively with rustls, tested against a TLS server |
+| GSSAPI, Kerberos, Windows SSPI | **Not implemented, and the only remaining reason to adopt libpq** |
+
+This is reported rather than acted on. The decision to adopt libpq stands until
+the owner revisits it; what has changed is the price and the prize. The price is
+unchanged: an `unsafe` exception, a changed Windows distribution story, and a
+concurrency model that needs its own ADR. The prize is now GSSAPI and SSPI alone.
+
+The question worth putting to the owner is narrower than it was: do you need to
+reach a PostgreSQL server that authenticates with Kerberos or Windows integrated
+authentication? If yes, the migration is still worth its cost. If no, this ADR
+should be superseded in turn, and the remaining gaps closed natively as these
+four were.
+
 ## Reversibility
 
 Low once shipped. A released client that reads `.pgpass` and presents client

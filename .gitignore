@@ -2,3 +2,6 @@
 Cargo.lock.bak
 .DS_Store
 *.partial
+
+# Throwaway certificates for the TLS development database, generated on demand.
+docker/tls/generated/

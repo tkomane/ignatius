@@ -273,10 +273,12 @@ fn the_interactive_client_refuses_to_start_without_a_terminal() {
 
 #[test]
 fn a_security_relevant_parameter_is_refused_rather_than_ignored() {
+    // gssencmode is genuinely unimplemented. Ignoring it would give weaker
+    // protection than was asked for, so the connection is refused instead.
     let output = binary()
         .args([
             "query",
-            "postgres://x@db.example.net/y?sslrootcert=/tmp/ca.pem",
+            "postgres://x@db.example.net/y?gssencmode=require",
             "-c",
             "SELECT 1",
         ])
@@ -284,7 +286,7 @@ fn a_security_relevant_parameter_is_refused_rather_than_ignored() {
         .expect("run");
     assert_eq!(code(&output), 3, "{}", stderr(&output));
     assert!(
-        stderr(&output).contains("sslrootcert"),
+        stderr(&output).contains("gssencmode"),
         "{}",
         stderr(&output)
     );

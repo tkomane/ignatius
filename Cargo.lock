@@ -892,6 +892,7 @@ dependencies = [
  "futures-util",
  "ratatui",
  "rustls",
+ "rustls-pki-types",
  "rustls-platform-verifier",
  "secrecy",
  "serde",

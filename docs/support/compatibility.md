@@ -21,7 +21,7 @@ exercised, so they are expected to work rather than known to.
 | SCRAM-SHA-256 | Supported and tested |
 | `password` (cleartext over the connection) | Supported by the driver, untested here |
 | `trust` | Supported |
-| Certificate | Not supported. `sslcert` and `sslkey` fail the connection |
+| Certificate | Supported and tested, with `sslcert` and `sslkey` |
 | GSSAPI, Kerberos, SSPI | Not supported |
 | Cloud token authentication (for example Entra ID) | Not supported |
 
@@ -41,8 +41,21 @@ helping looks exactly like one that is.
 | `disable` | Supported |
 | `allow`, `prefer` | Supported, treated as `prefer`. No identity guarantee |
 | `require` | Supported. Encryption only, no certificate verification |
-| `verify-ca` | **Not implemented.** Refused with an explanation |
-| `verify-full` | Supported, using the operating system's trust store |
+| `verify-ca` | Supported. Chain checked, host name deliberately not |
+| `verify-full` | Supported. Chain and host name both checked |
+
+Trust roots come from the operating system unless `sslrootcert` is given, in
+which case that root **replaces** the system store rather than adding to it,
+which is what libpq does and what pinning an internal authority means.
+
+Client certificates are supported through `sslcert` and `sslkey`. Both must be
+given together; one without the other is refused rather than half-applied.
+Encrypted private keys are not supported yet and say so.
+
+Every one of these is tested against a server that really speaks TLS: verify-full
+succeeding on a matching name, verify-full refusing a name mismatch, verify-ca
+accepting that same mismatch, an untrusted chain being refused, and a client
+certificate authenticating with no password at all.
 
 Defaults: remote hosts get `verify-full`; loopback and Unix sockets get `prefer`,
 decided from the literal address and never guessed from a name. A TLS failure is
@@ -63,10 +76,12 @@ is shown as unknown when that view is not readable.
 `PGPASSFILE`, then `~/.pgpass` on Unix or `%APPDATA%\postgresql\pgpass.conf` on
 Windows.
 
-**Refused, because ignoring them would weaken security**: `sslcert`, `sslkey`,
-`sslrootcert`, `sslcrl`, `sslcrldir`, `sslpassword`, `requiressl`,
-`channel_binding`, `gssencmode`, `krbsrvname`, `requirepeer`, `sslsni`, and the
-`PG*` equivalents of those.
+**Applied for TLS**: `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, and their
+`PGSSLMODE`, `PGSSLROOTCERT`, `PGSSLCERT`, `PGSSLKEY` equivalents.
+
+**Refused, because ignoring them would weaken security**: `sslcrl`, `sslcrldir`,
+`sslpassword`, `requiressl`, `channel_binding`, `gssencmode`, `krbsrvname`,
+`requirepeer`, `sslsni`, and the `PG*` equivalents of those.
 
 **Reported rather than ignored**: any other keyword in a connection string or a
 service file that this build does not apply.

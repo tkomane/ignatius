@@ -62,8 +62,9 @@ jobs:
           cargo run --quiet -- query "postgres://x@127.0.0.1:1/y?connect_timeout=2" -c "SELECT 1" >/dev/null 2>&1
           test $? -eq 4 || { echo "expected connection exit code 4"; exit 1; }
 
-  # Protocol claims need a real server. The window is PostgreSQL 14 to 18; the
-  # oldest and newest run on every push, with a middle version for coverage.
+  # Protocol claims need a real server, including the transport claims, which
+  # need a server that actually speaks TLS. Both come from the same compose file
+  # the developer uses, so there is one definition rather than two that drift.
   integration:
     name: PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
@@ -71,35 +72,31 @@ jobs:
       fail-fast: false
       matrix:
         postgres: ["14", "16", "18"]
-    services:
-      postgres:
-        image: postgres:${{ matrix.postgres }}-alpine
-        env:
-          POSTGRES_USER: ignatius_test
-          POSTGRES_PASSWORD: not-a-real-password-disposable-container
-          POSTGRES_DB: ignatius_demo
-          POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
-        ports:
-          - 55432:5432
-        options: >-
-          --health-cmd "pg_isready -U ignatius_test -d ignatius_demo"
-          --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Load synthetic fixtures
+      - name: Start both databases
         env:
-          PGPASSWORD: not-a-real-password-disposable-container
+          IGNATIUS_PG_VERSION: ${{ matrix.postgres }}
         run: |
-          for file in docker/init/*.sql; do
-            psql -h 127.0.0.1 -p 55432 -U ignatius_test -d ignatius_demo -v ON_ERROR_STOP=1 -f "$file"
+          sh docker/tls/generate.sh
+          docker compose -f docker/compose.yaml up -d
+          for i in $(seq 1 60); do
+            plain=$(docker compose -f docker/compose.yaml exec -T postgres \
+              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1 && echo ok || echo no)
+            tls=$(docker compose -f docker/compose.yaml exec -T postgres-tls \
+              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1 && echo ok || echo no)
+            if [ "$plain" = ok ] && [ "$tls" = ok ]; then echo "ready after ${i}s"; break; fi
+            sleep 1
           done
+          docker compose -f docker/compose.yaml ps
       - name: Integration tests
         env:
           IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo
+          IGNATIUS_TEST_PG_TLS_URI: postgres://ignatius_test:not-a-real-password-disposable-container@localhost:55433/ignatius_demo
         run: cargo test --test postgres_integration --test cli_contract
 
   supply-chain:
