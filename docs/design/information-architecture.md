@@ -48,6 +48,13 @@ screen, one column per line, with the names aligned. It exists because a grid
 runs out of width long before a real table runs out of columns. The selected
 column is marked there too, since Enter acts on it.
 
+**Definition panel.** What an object is, in SQL, opened from the tree with
+`Ctrl+K d`. Views, indexes and functions come from PostgreSQL's own renderers, so
+what is shown is what will run. A table has no such renderer, so its description
+is assembled from columns, constraints and indexes - and the panel says so, in
+those words, because a description is not a script that recreates the object and
+someone is going to copy it.
+
 **Cell inspector.** An overlay over everything else, opened with Enter on a cell.
 It is where the client stops abbreviating: the column name, what the value is in
 words, and the value itself wrapped to the pane and scrollable. A value's own

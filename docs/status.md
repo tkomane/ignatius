@@ -6,7 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: a filter over the result rows, on the same key that filters
+**Current feature**: object definitions. `Ctrl+K d` on an object in the tree
+shows what it is, coloured by the same lexer that colours the editor. Views,
+indexes and functions come from PostgreSQL's own renderers; a table is assembled
+from its columns, constraints and indexes and is labelled as a description rather
+than a script. Specified in `specs/007-object-definitions/spec.md`.
+
+**Previous**: a filter over the result rows, on the same key that filters
 the object tree. It searches retained rows, which is all there is to search, and
 the count line says so: `matching 3 of 10000 retained rows, of 200000 returned`.
 Row numbers stay the rows' own, and the inspector and expanded view follow the
@@ -108,6 +114,8 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| An object's definition is what the server renders | Integration tests over a view, a function and a table |
+| A hostile object name is safe to describe | Integration test: the definition is read, `orders` still exists |
 | A credential never reaches the history file | Subprocess test: the statement runs, the file does not hold it |
 | A paused session records nothing and says so | Subprocess test over a real session |
 | The history file is the owner's alone | Subprocess test asserting 0600 after writing and after trimming |

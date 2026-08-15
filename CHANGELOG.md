@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- `Ctrl+K d` shows what an object actually is. A view, an index and a function
+  are rendered by PostgreSQL itself, so what is shown is what will run; a table
+  is assembled from its columns, constraints and indexes, and the panel says
+  which of the two you are reading rather than passing a description off as a
+  script. It is coloured by the same lexer that colours the editor, scrolls, and
+  is safe for an object named to break a client that interpolates identifiers.
 - A filter over the result rows, on the same key that filters the object tree.
   It narrows what is drawn and nothing else: the row numbers stay the rows' own,
   the inspector and the expanded view follow the selection to the real row, and

@@ -124,6 +124,25 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::DefinitionLoaded { request, result } => {
+            // A definition that is not the one being waited for is discarded,
+            // exactly as a stale tree load or a stale result is.
+            let Some(open) = model.definition.as_mut() else {
+                return Vec::new();
+            };
+            if open.pending != Some(request) {
+                return Vec::new();
+            }
+            open.pending = None;
+            match *result {
+                Ok(definition) => {
+                    open.heading = definition.heading();
+                    open.definition = Some(definition);
+                }
+                Err(error) => open.error = Some(error.headline),
+            }
+            Vec::new()
+        }
         Message::HistoryLoaded(mut entries) => {
             entries.truncate(crate::history::IN_MEMORY_LIMIT);
             model.history = entries;
@@ -170,6 +189,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.inspector.is_some() {
         return inspector_action(model, action);
+    }
+    if model.definition.is_some() {
+        return definition_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -257,6 +279,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Activate => Vec::new(),
+        Action::ShowDefinition => show_definition(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -380,6 +403,88 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         | Action::Undo
         | Action::Redo => Vec::new(),
     }
+}
+
+/// Opens the definition of whatever object is selected.
+///
+/// Only an object has a definition. On anything else this does nothing rather
+/// than opening an empty panel, and the tree is where the user can see what is
+/// selected.
+fn show_definition(model: &mut Model) -> Vec<Effect> {
+    if model.definition.is_some() {
+        model.definition = None;
+        return Vec::new();
+    }
+    let Some(row) = model.tree.selected_row() else {
+        return Vec::new();
+    };
+    let Some(node) = model.tree.node(&row.path) else {
+        return Vec::new();
+    };
+    let crate::app::tree::NodeKind::Object(object) = &node.kind else {
+        return Vec::new();
+    };
+    let object = object.clone();
+    let request = model.tree.allocate_request();
+    model.definition = Some(crate::app::model::Definition {
+        pending: Some(request),
+        heading: format!(
+            "{} {}",
+            object.kind.singular(),
+            crate::postgres::metadata::quote_identifier(&object.name)
+        ),
+        definition: None,
+        error: None,
+        scroll: 0,
+    });
+    vec![Effect::LoadDefinition {
+        request,
+        object: Box::new(object),
+    }]
+}
+
+/// Handles input while a definition is on screen.
+fn definition_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let height = crate::ui::layout::definition_viewport(model.size).1;
+    match action {
+        Action::Move(Direction::Down) | Action::MovePage(Direction::Down) => {
+            let step = if matches!(action, Action::MovePage(_)) {
+                height.max(1)
+            } else {
+                1
+            };
+            if let Some(open) = model.definition.as_mut() {
+                for _ in 0..step {
+                    open.scroll_down(height);
+                }
+            }
+        }
+        Action::Move(Direction::Up) | Action::MovePage(Direction::Up) => {
+            let step = if matches!(action, Action::MovePage(_)) {
+                height.max(1)
+            } else {
+                1
+            };
+            if let Some(open) = model.definition.as_mut() {
+                for _ in 0..step {
+                    open.scroll_up();
+                }
+            }
+        }
+        Action::Dismiss | Action::ShowDefinition => {
+            model.definition = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Insert(_) | Action::Backspace | Action::Newline => {}
+        other => {
+            model.definition = None;
+            return apply_action(model, other);
+        }
+    }
+    Vec::new()
 }
 
 /// The statements that have run, as palette entries.
@@ -1559,6 +1664,167 @@ mod tests {
             "the name is quoted so a hostile one cannot change the statement"
         );
         assert_eq!(model.focus, Focus::Editor, "focus follows the insertion");
+    }
+
+    /// A tree with one table selected, ready to be asked about.
+    fn with_selected_table() -> Model {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+        update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        let effects = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        let Effect::LoadMetadata { request, path, .. } = &effects[0] else {
+            panic!("expected a load");
+        };
+        update(
+            &mut model,
+            Message::MetadataLoaded {
+                request: *request,
+                path: path.clone(),
+                payload: Box::new(Ok(crate::app::tree::MetadataPayload::Objects(vec![
+                    crate::postgres::ObjectSummary {
+                        kind: crate::postgres::ObjectKind::Table,
+                        schema: "public".into(),
+                        name: "orders".into(),
+                        readable: true,
+                        detail: None,
+                    },
+                ]))),
+            },
+        );
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        model
+    }
+
+    fn definition_of(name: &str) -> crate::postgres::metadata::Definition {
+        crate::postgres::metadata::Definition {
+            kind: crate::postgres::ObjectKind::Table,
+            schema: "public".into(),
+            name: name.to_owned(),
+            source: crate::postgres::metadata::DefinitionSource::Assembled,
+            text: (1..=40)
+                .map(|n| format!("    column_{n} text"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    #[test]
+    fn asking_what_an_object_is_loads_its_definition_and_shows_where_it_came_from() {
+        let mut model = with_selected_table();
+        model.size = (120, 40);
+
+        let effects = update(&mut model, Message::Action(Action::ShowDefinition));
+        let Effect::LoadDefinition { request, object } = &effects[0] else {
+            panic!("expected a definition load, got {effects:?}");
+        };
+        assert_eq!(object.name, "orders");
+        let request = *request;
+        assert!(
+            model
+                .definition
+                .as_ref()
+                .is_some_and(|d| d.pending.is_some()),
+            "the panel opens while it waits, rather than after"
+        );
+
+        update(
+            &mut model,
+            Message::DefinitionLoaded {
+                request,
+                result: Box::new(Ok(definition_of("orders"))),
+            },
+        );
+        let open = model.definition.as_ref().expect("open");
+        assert!(open.pending.is_none());
+        assert!(open.heading.contains("orders"), "{}", open.heading);
+        assert_eq!(open.lines().len(), 40);
+
+        // Scrolling stops with the last line on screen, both ways.
+        let height = crate::ui::layout::definition_viewport(model.size).1;
+        for _ in 0..200 {
+            update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        }
+        assert_eq!(
+            model.definition.as_ref().expect("open").scroll,
+            40usize.saturating_sub(height)
+        );
+        for _ in 0..200 {
+            update(&mut model, Message::Action(Action::Move(Direction::Up)));
+        }
+        assert_eq!(model.definition.as_ref().expect("open").scroll, 0);
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.definition.is_none(), "Esc closes it");
+    }
+
+    #[test]
+    fn a_definition_that_arrives_late_for_a_closed_panel_is_discarded() {
+        let mut model = with_selected_table();
+        let effects = update(&mut model, Message::Action(Action::ShowDefinition));
+        let Effect::LoadDefinition { request, .. } = &effects[0] else {
+            panic!("expected a definition load");
+        };
+        let stale = *request;
+
+        // Closed, then asked again: the first answer belongs to nothing.
+        update(&mut model, Message::Action(Action::Dismiss));
+        let effects = update(&mut model, Message::Action(Action::ShowDefinition));
+        let Effect::LoadDefinition { request, .. } = &effects[0] else {
+            panic!("expected a definition load");
+        };
+        assert_ne!(*request, stale);
+
+        update(
+            &mut model,
+            Message::DefinitionLoaded {
+                request: stale,
+                result: Box::new(Ok(definition_of("stale"))),
+            },
+        );
+        let open = model.definition.as_ref().expect("open");
+        assert!(
+            open.definition.is_none(),
+            "a stale answer must not fill a panel that asked something else"
+        );
+        assert!(open.pending.is_some(), "it is still waiting for its own");
+    }
+
+    #[test]
+    fn a_definition_that_cannot_be_read_says_so_rather_than_showing_nothing() {
+        let mut model = with_selected_table();
+        let effects = update(&mut model, Message::Action(Action::ShowDefinition));
+        let Effect::LoadDefinition { request, .. } = &effects[0] else {
+            panic!("expected a definition load");
+        };
+        update(
+            &mut model,
+            Message::DefinitionLoaded {
+                request: *request,
+                result: Box::new(Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "permission denied for table orders",
+                    "reading an object definition",
+                ))),
+            },
+        );
+        let open = model.definition.as_ref().expect("open");
+        assert!(
+            open.error
+                .as_deref()
+                .is_some_and(|e| e.contains("permission")),
+            "the reason belongs where the answer would have been"
+        );
+    }
+
+    #[test]
+    fn asking_for_a_definition_of_something_that_has_none_does_nothing() {
+        // A schema and a group are not objects. Opening an empty panel over them
+        // would be worse than not opening one.
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+        assert!(update(&mut model, Message::Action(Action::ShowDefinition)).is_empty());
+        assert!(model.definition.is_none());
     }
 
     #[test]

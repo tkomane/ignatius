@@ -154,6 +154,49 @@ impl QueryPhase {
     }
 }
 
+/// An object definition on screen.
+///
+/// Holds the text and where the view is, and nothing derived: the definition is
+/// a snapshot of what the catalogue said when it was asked, and it says when it
+/// was asked rather than pretending to be live.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Definition {
+    /// The load this is waiting for, when it is still loading.
+    pub pending: Option<crate::app::tree::RequestId>,
+    /// What is being described, for the title while it loads.
+    pub heading: String,
+    /// The definition itself, once it arrives.
+    pub definition: Option<crate::postgres::metadata::Definition>,
+    /// Why it could not be read.
+    pub error: Option<String>,
+    /// First visible line.
+    pub scroll: usize,
+}
+
+impl Definition {
+    /// The lines of the definition, empty while it is loading.
+    #[must_use]
+    pub fn lines(&self) -> Vec<&str> {
+        self.definition
+            .as_ref()
+            .map(|definition| definition.text.lines().collect())
+            .unwrap_or_default()
+    }
+
+    /// Scrolls down, stopping with the last line on screen.
+    pub fn scroll_down(&mut self, height: usize) {
+        let max = self.lines().len().saturating_sub(height);
+        if self.scroll < max {
+            self.scroll += 1;
+        }
+    }
+
+    /// Scrolls up.
+    pub const fn scroll_up(&mut self) {
+        self.scroll = self.scroll.saturating_sub(1);
+    }
+}
+
 /// A run that is waiting for the user to confirm it.
 ///
 /// There is no session-wide unlock. A mode that quietly stays on is a mode
@@ -257,6 +300,8 @@ pub struct Model {
     /// The SQL of the statement in flight, kept so it can be recorded when it
     /// finishes with an outcome worth recording.
     pub running_sql: Option<String>,
+    /// The object definition being shown, when one is open.
+    pub definition: Option<Definition>,
     /// Text the result grid is filtered by. Empty means every row.
     pub result_filter: String,
     /// Whether the filter is being typed into.

@@ -205,6 +205,14 @@ impl Session {
         crate::postgres::metadata::indexes(&self.client, schema, relation).await
     }
 
+    /// The definition of one object, as text.
+    pub async fn definition(
+        &self,
+        object: &crate::postgres::metadata::ObjectSummary,
+    ) -> Result<crate::postgres::metadata::Definition, Diagnostic> {
+        crate::postgres::metadata::definition(&self.client, object).await
+    }
+
     /// Extensions installed in this database.
     pub async fn extensions(
         &self,

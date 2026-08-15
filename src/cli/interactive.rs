@@ -217,6 +217,9 @@ async fn event_loop(
                 } => {
                     spawn_load_metadata(tx.clone(), Arc::clone(&session), request, path, query);
                 }
+                Effect::LoadDefinition { request, object } => {
+                    spawn_load_definition(tx.clone(), Arc::clone(&session), request, *object);
+                }
                 Effect::LoadHistory => {
                     let _ = tx.send(Message::HistoryLoaded(
                         history
@@ -506,6 +509,25 @@ fn spawn_load_metadata(
             request,
             path,
             payload: Box::new(payload),
+        });
+    });
+}
+
+/// Reads an object's definition on the shared session.
+fn spawn_load_definition(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    request: crate::app::tree::RequestId,
+    object: crate::postgres::metadata::ObjectSummary,
+) {
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            return;
+        };
+        let result = session.definition(&object).await;
+        let _ = tx.send(Message::DefinitionLoaded {
+            request,
+            result: Box::new(result),
         });
     });
 }

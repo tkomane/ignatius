@@ -18,7 +18,7 @@
 //! per schema, so opening the tree on a database with hundreds of schemas is a
 //! constant number of round trips.
 
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::from_query_error;
 use std::collections::BTreeMap;
 use tokio_postgres::Client;
@@ -419,6 +419,269 @@ pub async fn indexes(
             }
         })
         .collect())
+}
+
+/// Where the text of a definition came from.
+///
+/// The distinction is the honest part: PostgreSQL can render a view, an index
+/// and a function exactly as it will execute them, and cannot do that for a
+/// table. A table's structure is therefore assembled from the catalogue and
+/// labelled as such, so nobody mistakes a description for a `pg_dump` script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefinitionSource {
+    /// The server rendered it, through `pg_get_viewdef` and friends.
+    Server,
+    /// Assembled here from catalogue rows.
+    Assembled,
+}
+
+impl DefinitionSource {
+    /// The sentence shown above the text.
+    #[must_use]
+    pub const fn note(self) -> &'static str {
+        match self {
+            Self::Server => "As PostgreSQL renders it.",
+            Self::Assembled => {
+                "Assembled from the catalogue. A description of the object, not a \
+                 script that recreates it."
+            }
+        }
+    }
+}
+
+/// An object's definition, as text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Definition {
+    /// What the object is.
+    pub kind: ObjectKind,
+    /// Schema it lives in.
+    pub schema: String,
+    /// Its name.
+    pub name: String,
+    /// Where the text came from.
+    pub source: DefinitionSource,
+    /// The definition itself.
+    pub text: String,
+}
+
+impl Definition {
+    /// A one-line heading: what this is and what it is called.
+    #[must_use]
+    pub fn heading(&self) -> String {
+        format!(
+            "{} {}.{}",
+            self.kind.singular(),
+            quote_identifier(&self.schema),
+            quote_identifier(&self.name)
+        )
+    }
+}
+
+/// Reads an object's definition.
+///
+/// Every catalogue lookup binds the schema and the name as parameters, exactly
+/// as everywhere else in this module: an object named to break a client that
+/// interpolates identifiers must be as safe to inspect as it is to list.
+pub async fn definition(client: &Client, object: &ObjectSummary) -> Result<Definition, Diagnostic> {
+    let (schema, name) = (object.schema.as_str(), object.name.as_str());
+    let (source, text) = match object.kind {
+        ObjectKind::View | ObjectKind::MaterializedView => {
+            let rendered = one_text(
+                client,
+                "SELECT pg_catalog.pg_get_viewdef(c.oid, true)::text AS definition \
+                 FROM pg_catalog.pg_class c \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2",
+                schema,
+                name,
+            )
+            .await?;
+            let keyword = if object.kind == ObjectKind::MaterializedView {
+                "CREATE MATERIALIZED VIEW"
+            } else {
+                "CREATE OR REPLACE VIEW"
+            };
+            (
+                DefinitionSource::Server,
+                format!(
+                    "{keyword} {}.{} AS\n{}",
+                    quote_identifier(schema),
+                    quote_identifier(name),
+                    rendered.trim_end()
+                ),
+            )
+        }
+        ObjectKind::Index => (
+            DefinitionSource::Server,
+            one_text(
+                client,
+                "SELECT pg_catalog.pg_get_indexdef(c.oid)::text AS definition \
+                 FROM pg_catalog.pg_class c \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2",
+                schema,
+                name,
+            )
+            .await?,
+        ),
+        ObjectKind::Function => (
+            DefinitionSource::Server,
+            one_text(
+                client,
+                "SELECT pg_catalog.pg_get_functiondef(p.oid)::text AS definition \
+                 FROM pg_catalog.pg_proc p \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE n.nspname = $1 AND p.proname = $2 \
+                 ORDER BY p.oid \
+                 LIMIT 1",
+                schema,
+                name,
+            )
+            .await?,
+        ),
+        _ => (
+            DefinitionSource::Assembled,
+            assemble_relation(client, schema, name).await?,
+        ),
+    };
+
+    Ok(Definition {
+        kind: object.kind,
+        schema: object.schema.clone(),
+        name: object.name.clone(),
+        source,
+        text,
+    })
+}
+
+/// Runs a definition query that returns one text column.
+async fn one_text(
+    client: &Client,
+    statement: &str,
+    schema: &str,
+    name: &str,
+) -> Result<String, Diagnostic> {
+    let rows = client
+        .query(statement, &[&schema, &name])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    rows.first()
+        .and_then(|row| row.get::<_, Option<String>>("definition"))
+        .ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                format!(
+                    "no definition for {}.{}",
+                    quote_identifier(schema),
+                    quote_identifier(name)
+                ),
+                "reading an object definition",
+            )
+            .likely_cause("the object is gone, or the role may not see it")
+            .next_action("reload the object tree")
+        })
+}
+
+/// Describes a relation from its columns, constraints and indexes.
+///
+/// PostgreSQL renders views, indexes and functions itself and does not render
+/// tables. Rather than pretend otherwise, this assembles a description in the
+/// shape of the statement that would create it, and the panel says where it
+/// came from.
+async fn assemble_relation(
+    client: &Client,
+    schema: &str,
+    relation: &str,
+) -> Result<String, Diagnostic> {
+    let columns = columns(client, schema, relation).await?;
+    if columns.is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Query,
+            format!(
+                "no columns for {}.{}",
+                quote_identifier(schema),
+                quote_identifier(relation)
+            ),
+            "reading an object definition",
+        )
+        .likely_cause("the object is gone, or the role may not see its columns")
+        .next_action("reload the object tree"));
+    }
+
+    let mut text = format!(
+        "CREATE TABLE {}.{} (\n",
+        quote_identifier(schema),
+        quote_identifier(relation)
+    );
+    let width = columns
+        .iter()
+        .map(|column| quote_identifier(&column.name).chars().count())
+        .max()
+        .unwrap_or(0);
+    for (index, column) in columns.iter().enumerate() {
+        let quoted = quote_identifier(&column.name);
+        text.push_str(&format!("    {quoted:width$} {}", column.data_type));
+        if let Some(default) = &column.default {
+            text.push_str(&format!(" DEFAULT {default}"));
+        }
+        if !column.nullable {
+            text.push_str(" NOT NULL");
+        }
+        if index + 1 < columns.len() {
+            text.push(',');
+        }
+        text.push('\n');
+    }
+    text.push_str(");\n");
+
+    let constraints = client
+        .query(
+            "SELECT pg_catalog.pg_get_constraintdef(t.oid)::text AS definition, \
+                    t.conname::text AS name \
+             FROM pg_catalog.pg_constraint t \
+             JOIN pg_catalog.pg_class c ON c.oid = t.conrelid \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 \
+             ORDER BY t.conname",
+            &[&schema, &relation],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    if !constraints.is_empty() {
+        text.push('\n');
+        for row in &constraints {
+            let name: String = row.get("name");
+            let definition: String = row.get("definition");
+            text.push_str(&format!(
+                "ALTER TABLE {}.{} ADD CONSTRAINT {} {definition};\n",
+                quote_identifier(schema),
+                quote_identifier(relation),
+                quote_identifier(&name)
+            ));
+        }
+    }
+
+    let indexes = client
+        .query(
+            "SELECT pg_catalog.pg_get_indexdef(i.indexrelid)::text AS definition \
+             FROM pg_catalog.pg_index i \
+             JOIN pg_catalog.pg_class c ON c.oid = i.indrelid \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 AND NOT i.indisprimary \
+             ORDER BY i.indexrelid",
+            &[&schema, &relation],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    if !indexes.is_empty() {
+        text.push('\n');
+        for row in &indexes {
+            let definition: String = row.get("definition");
+            text.push_str(&format!("{definition};\n"));
+        }
+    }
+
+    Ok(text)
 }
 
 /// Lists installed extensions.
