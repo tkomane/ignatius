@@ -1350,6 +1350,23 @@ mod tests {
     }
 
     #[test]
+    fn an_unfocused_editor_still_shows_its_text() {
+        // The pane loses its focus styling, not its contents. A differential
+        // redraw can make this look otherwise on screen, so it is pinned here.
+        let mut model = connected_model(Environment::Local);
+        model
+            .editor
+            .set_text("-- a comment\nSELECT current_database(), current_user;");
+        model.focus = Focus::Results;
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(
+            text.contains("SELECT current_database"),
+            "an unfocused editor lost its text:\n{text}"
+        );
+        assert!(text.contains("-- a comment"));
+    }
+
+    #[test]
     fn an_empty_state_says_what_to_do_next() {
         let model = connected_model(Environment::Local);
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);

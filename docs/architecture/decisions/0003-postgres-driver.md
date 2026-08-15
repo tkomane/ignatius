@@ -1,6 +1,9 @@
 # ADR-0003: tokio-postgres rather than a libpq binding
 
-- Status: Accepted
+- Status: **Superseded by ADR-0009** on 2026-08-15, when the owner confirmed
+  that client certificates, password files, service files and enterprise
+  authentication are required. The text-format decision below still stands and
+  is not affected by the driver change.
 - Date: 2026-08-15
 
 ## Context

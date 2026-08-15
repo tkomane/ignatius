@@ -44,6 +44,24 @@ The run keys are chords rather than function keys, because operating systems and
 assistants routinely claim `F5` before a terminal program sees it. `F5` and `F9`
 stay bound anyway, for muscle memory from other tools.
 
+If you use a Nerd Font, turn the icons on:
+
+```bash
+ignatius --glyphs nerd-font connect "$DATABASE_URL"
+```
+
+or permanently, in `config.toml`:
+
+```toml
+[ui]
+glyphs = "nerd-font"
+```
+
+It is never chosen automatically: whether your font carries the icon range cannot
+be detected from inside a terminal, and guessing wrong fills the screen with
+replacement characters. Every icon decorates a word rather than replacing it, so
+`--plain` loses decoration and no meaning. See `docs/design/icons-and-motion.md`.
+
 ## From a script
 
 ```bash

@@ -58,16 +58,22 @@ These are real and none of them is hidden anywhere else:
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
 
-## Decisions pending the owner
+## Decisions taken
 
-1. **Publishing route.** Nothing has been pushed and no remote is configured.
-   See the options matrix in `docs/operations/release.md`.
-2. **libpq versus the pure-Rust driver.** ADR-0003 chose tokio-postgres and
-   accepted that service files, `.pgpass` and `verify-ca` become our work.
-   Revisiting it needs answers only the owner has, listed in ADR-0003 under
-   "What would change this decision". Worth settling before Feature 002 hardens
-   around the current choice.
-3. **Trademark search and domain**, before publishing only.
+- **Name**: Ignatius, confirmed 2026-08-15.
+- **Driver**: moving to libpq, confirmed 2026-08-15. See ADR-0009, which
+  supersedes ADR-0003 and records the costs: an `unsafe` exception scoped to the
+  adapter, a changed Windows distribution story, and a concurrency model that
+  needs its own ADR.
+- **Repository**: private, at `tkomane/ignatius`. Publishing beyond that is
+  deferred; the options are in `docs/operations/release.md`.
+
+## Decisions still pending
+
+1. **Trademark search and a domain**, before publishing only. Neither blocks
+   development.
+2. **How libpq is bundled on Windows**, which ADR-0009 leaves open until the
+   migration is scoped.
 
 ## Next actions, in order
 
@@ -77,4 +83,6 @@ These are real and none of them is hidden anywhere else:
 4. Extend the server matrix to PostgreSQL 14 through 18 (T053).
 5. Add subprocess evidence for exit codes 5, 6 and 8 (T054).
 6. Add an automated terminal-restoration test to CI (T055).
-7. Then start Feature 002: profiles, credential store, `.pgpass`, service files.
+7. Migrate the PostgreSQL adapter to libpq (ADR-0009), before Feature 002
+   hardens profiles on the current model.
+8. Then Feature 002: profiles, credential store, `.pgpass`, service files.
