@@ -1,0 +1,26 @@
+# Disposable PostgreSQL for local development and integration tests.
+#
+# The credentials here are synthetic and exist only inside this throwaway
+# container. Nothing in this file is a real secret, and no real database is ever
+# required to develop or test this project.
+name: ignatius-dev
+
+services:
+  postgres:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_USER: ignatius_test
+      POSTGRES_PASSWORD: not-a-real-password-disposable-container
+      POSTGRES_DB: ignatius_demo
+      # PostgreSQL 14 and later default to SCRAM-SHA-256; state it so the
+      # integration tests are provably exercising SCRAM.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports:
+      - "55432:5432"
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ignatius_test -d ignatius_demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
