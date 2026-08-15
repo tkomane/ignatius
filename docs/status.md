@@ -49,8 +49,12 @@ These are real and none of them is hidden anywhere else:
    `PGSERVICEFILE` and `PGPASSFILE` are reported as unread rather than ignored.
    Feature 002.
 6. **Terminal restoration is proven by unit tests and one manual pty run**, not
-   yet by an automated test in CI.
-7. **`rust-toolchain.toml` is inert on the development machine**, which uses a
+   yet by an automated test in CI. Warp's own renderer and a live terminal
+   resize have not been exercised by hand; the pty run used a forced size.
+7. **The CI workflow has never run**, and `cargo-deny` has never been executed
+   locally, so the licence allowlist in `deny.toml` is untested policy that may
+   need adjusting on its first run.
+8. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
 
