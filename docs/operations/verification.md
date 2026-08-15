@@ -39,10 +39,11 @@ is not a pass.** Report it as a skip.
 ## Evidence recorded on 2026-08-16
 
 macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against both the plain
-and TLS disposable services from `postgres:18.4-alpine`.
+and TLS disposable services from `postgres:18.4-alpine`, at committed HEAD
+`49df20a`.
 
 **Automated**: `cargo xtask verify` passed all five gates: formatting, lints,
-402 library tests, 31 CLI contract tests and 33 PostgreSQL integration tests.
+433 library tests, 33 CLI contract tests and 33 PostgreSQL integration tests.
 This run included Feature 005's editor coverage, Feature 004's expanded-row
 and cell-inspector coverage, the plain line-oriented client, plain-mode
 cancellation, and failed-transaction recovery transcript coverage.

@@ -155,7 +155,8 @@ identity.
 
 ## Shared-worktree coordination
 
-- Codex owns this Feature 008 planning directory while it is untracked.
+- Codex owns this Feature 008 planning directory while the package is under
+  active planning.
 - Claude owns the active source paths in `src/app/`, `src/cli/`, `src/config/`,
   `src/ui/`, `tests/cli_contract.rs`, `src/lib.rs` and `src/history.rs`; no
   task above edits them except the future T026, which is blocked until a source

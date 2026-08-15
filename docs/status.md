@@ -68,14 +68,14 @@ and a domain remain outstanding before publishing; neither blocks development.
 
 ## Last green verification
 
-Run on 2026-08-16, macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew),
-against `postgres:18.4-alpine` both plain and with TLS.
+Run on 2026-08-16 at committed HEAD `49df20a`, macOS 26.6.1 on Apple silicon,
+rustc 1.97.1 (Homebrew), against `postgres:18.4-alpine` both plain and with TLS.
 
 | Gate | Result |
 | --- | --- |
 | `cargo xtask verify` | All five gates pass |
-| Library tests | 402 passed |
-| CLI contract tests | 31 passed |
+| Library tests | 433 passed |
+| CLI contract tests | 33 passed |
 | PostgreSQL integration tests | 33 passed |
 | Terminal restoration, in a pty | 3 passed |
 | CI, all jobs | Green: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |

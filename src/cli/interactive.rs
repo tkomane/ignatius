@@ -182,7 +182,9 @@ async fn event_loop(
     // Reading the history is a file read, not a query, so it happens once here
     // and the interface never waits on it.
     let _ = tx.send(Message::HistoryLoaded(
-        history.recent(HISTORY_IN_MEMORY).unwrap_or_default(),
+        history
+            .recent(crate::history::IN_MEMORY_LIMIT)
+            .unwrap_or_default(),
     ));
 
     draw(&mut terminal, &model, &keymap, &ui)?;
@@ -217,7 +219,9 @@ async fn event_loop(
                 }
                 Effect::LoadHistory => {
                     let _ = tx.send(Message::HistoryLoaded(
-                        history.recent(HISTORY_IN_MEMORY).unwrap_or_default(),
+                        history
+                            .recent(crate::history::IN_MEMORY_LIMIT)
+                            .unwrap_or_default(),
                     ));
                 }
                 Effect::RecordHistory {
@@ -225,8 +229,12 @@ async fn event_loop(
                     outcome,
                     elapsed,
                 } => {
-                    let entry = record_history(&history, &model, &sql, outcome, elapsed);
-                    let _ = tx.send(Message::HistoryRecorded(Box::new(entry)));
+                    let (entry, recorded) =
+                        record_history(&history, &model, &sql, outcome, elapsed);
+                    let _ = tx.send(Message::HistoryRecorded {
+                        entry: Box::new(entry),
+                        recorded,
+                    });
                 }
             }
         }
@@ -254,13 +262,6 @@ async fn event_loop(
     Ok(ExitCode::Success)
 }
 
-/// How many past statements are held in memory for the history search.
-///
-/// The file may be far longer. Nobody scrolls a thousand statements looking for
-/// one, and the search is over what is loaded, so this is a real bound rather
-/// than a display limit.
-const HISTORY_IN_MEMORY: usize = 200;
-
 /// Offers a statement to the history and reports what was kept.
 ///
 /// A history that cannot be written must not stop anyone working, so a failure
@@ -271,8 +272,10 @@ fn record_history(
     sql: &str,
     outcome: crate::history::Outcome,
     elapsed: Duration,
-) -> Option<crate::history::Entry> {
-    let info = model.connection.info()?;
+) -> (Option<crate::history::Entry>, crate::history::Recorded) {
+    let Some(info) = model.connection.info() else {
+        return (None, crate::history::Recorded::Empty);
+    };
     let entry = crate::history::Entry::now(
         &info.target,
         &info.database,
@@ -282,8 +285,11 @@ fn record_history(
         elapsed,
     );
     match history.record(&entry) {
-        Ok(recorded) if recorded.was_written() => Some(entry),
-        _ => None,
+        Ok(recorded) if recorded.was_written() => (Some(entry), recorded),
+        Ok(recorded) => (None, recorded),
+        // A history that cannot be written must not stop anyone working. The
+        // statement already ran; what is lost is the record of it.
+        Err(_) => (None, crate::history::Recorded::Empty),
     }
 }
 

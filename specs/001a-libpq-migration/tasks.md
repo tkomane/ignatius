@@ -110,15 +110,14 @@ before release evidence. Phase 7 follows all approved story gates.
   verification documentation at planning time.
 - Live handoff on 2026-08-16: the Feature 005 SQL-editing and syntax-colouring
   slice is integrated in `060380c`, including the editor, query lexer and UI
-  paths. Claude now has an uncommitted query-history/configuration slice across
-  `src/app/`, `src/cli/`, `src/config/`, `src/ui/`, `tests/cli_contract.rs`,
-  `src/lib.rs` and untracked `src/history.rs`. Those paths must not be staged,
-  reset, reformatted or edited by 001a while Claude continues.
-- `specs/008-release-experience/` is currently untracked in the shared worktree
-  and contains Codex's new Feature 008 specification and requirements checklist.
-  Codex owns the remaining planning artifacts in that directory. Claude owns
-  the active source slice listed above and must not edit or reset the Feature
-  008 planning package without an explicit handoff.
+  paths. Claude has since resumed an uncommitted statement-history/UI slice
+  across `src/app/`, `src/cli/`, `src/history.rs` and `src/ui/`. Those paths
+  must not be staged, reset, reformatted or edited by 001a while Claude
+  continues.
+- The Feature 008 release-experience planning package is committed in
+  `specs/008-release-experience/`. Codex owns its remaining planning artifacts.
+  Claude owns the active source slice listed above and must not edit or reset
+  the Feature 008 planning package without an explicit handoff.
 - Codex also owns the Feature 005 planning artifacts under
   `specs/005-sql-editing/` and the 001a threat-model addendum in
   `docs/security/threat-model.md`. The completed Feature 007 T030/T031
