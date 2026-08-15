@@ -71,3 +71,25 @@ CREATE ROLE restricted_reader LOGIN PASSWORD 'not-a-real-password-restricted';
 GRANT CONNECT ON DATABASE ignatius_demo TO restricted_reader;
 GRANT USAGE ON SCHEMA public TO restricted_reader;
 GRANT SELECT ON orders TO restricted_reader;
+
+-- A relation whose name would break any client that interpolates identifiers
+-- instead of binding them. It exists so the object tree and the SQL-quoting
+-- helper are tested against the shape an attacker would actually use.
+CREATE TABLE "we""ird ""; DROP TABLE orders; --" (
+    id integer PRIMARY KEY,
+    note text
+);
+
+INSERT INTO "we""ird ""; DROP TABLE orders; --" VALUES (1, 'still here');
+
+CREATE SCHEMA reporting;
+CREATE VIEW reporting.order_totals AS
+    SELECT customer_id, sum(total) AS lifetime_total
+    FROM orders GROUP BY customer_id;
+
+CREATE FUNCTION reporting.order_count() RETURNS bigint
+    LANGUAGE sql STABLE AS $$ SELECT count(*) FROM orders $$;
+
+-- A table the restricted role can see in the catalogue but not read, so the
+-- tree can be tested showing an object it must mark as unreadable.
+CREATE TABLE secrets_of_the_realm (id integer PRIMARY KEY, value text);

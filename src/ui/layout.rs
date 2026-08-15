@@ -95,8 +95,29 @@ pub fn render(
         LayoutMode::Full => render_full(model, keymap, presentation, area, buf),
     }
 
+    // Overlays are drawn in the order Esc peels them, so the topmost one is
+    // always the one a keypress will act on.
     if model.help_open {
         render_help(keymap, presentation, area, buf);
+    }
+    if let Some(palette) = &model.palette {
+        render_palette(palette, presentation, area, buf);
+    }
+    if model.prefix_pending {
+        render_chords(presentation, area, buf);
+    }
+}
+
+/// How wide the object tree should be.
+#[must_use]
+pub const fn sidebar_width(available: u16) -> u16 {
+    let proportional = available * 2 / 5;
+    if proportional < 24 {
+        24
+    } else if proportional > 34 {
+        34
+    } else {
+        proportional
     }
 }
 
@@ -107,13 +128,27 @@ fn render_full(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let [header, editor, results, footer] = Layout::vertical([
+    let [header, body, footer] = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Percentage(40),
-        Constraint::Min(3),
+        Constraint::Min(4),
         Constraint::Length(1),
     ])
     .areas(area);
+
+    // The tree takes a fixed share of the width rather than a proportional one,
+    // because object names are the same length whatever the window is.
+    let main = if model.sidebar_visible {
+        let width = sidebar_width(body.width);
+        let [sidebar, main] =
+            Layout::horizontal([Constraint::Length(width), Constraint::Min(30)]).areas(body);
+        render_objects(model, presentation, sidebar, buf);
+        main
+    } else {
+        body
+    };
+
+    let [editor, results] =
+        Layout::vertical([Constraint::Percentage(40), Constraint::Min(3)]).areas(main);
 
     render_header(model, presentation, header, buf);
     render_editor(model, presentation, editor, buf);
@@ -143,10 +178,12 @@ fn render_compact(
     render_compact_header(model, presentation, header, buf);
     if let Some(error) = &model.error {
         render_error(model, error, presentation, body, buf);
-    } else if model.focus == Focus::Editor {
-        render_editor(model, presentation, body, buf);
     } else {
-        render_results(model, presentation, body, buf);
+        match model.focus {
+            Focus::Editor => render_editor(model, presentation, body, buf),
+            Focus::Results => render_results(model, presentation, body, buf),
+            Focus::Objects => render_objects(model, presentation, body, buf),
+        }
     }
     render_footer(model, keymap, presentation, footer, buf);
 }
@@ -767,6 +804,343 @@ fn column_widths(set: &crate::query::result::ResultSet, available: usize) -> Vec
         }
     }
     widths
+}
+
+// ------------------------------------------------------------------ objects
+
+fn render_objects(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+    let theme = &presentation.theme;
+    let focused = model.focus == Focus::Objects;
+
+    // The title doubles as a breadcrumb, so the path to the selected object is
+    // visible without a second row of interface.
+    let mut title = format!(" {}Objects ", presentation.icon(Icon::Database));
+    if let Some(row) = model.tree.selected_row() {
+        let separator = if presentation.glyphs.is_ascii() {
+            " > "
+        } else {
+            " \u{203a} "
+        };
+        let mut trail = Vec::new();
+        for depth in 0..=row.depth {
+            let ancestor = &row.path[..=depth];
+            if let Some(node) = model.tree.node(ancestor) {
+                trail.push(node.label());
+            }
+        }
+        title = format!(
+            " {}{} ",
+            presentation.icon(Icon::Database),
+            trail.join(separator)
+        );
+    }
+    if focused {
+        title.push_str("[focused] ");
+    }
+
+    let block = pane_block(title, focused, presentation);
+    let inner = block.inner(area);
+    block.render(area, buf);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    if let Some(error) = &model.tree.error {
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                error.headline.clone(),
+                theme.style(Token::Danger),
+            )),
+            Line::from(Span::styled(
+                error
+                    .next_action
+                    .clone()
+                    .unwrap_or_else(|| "Ctrl+K r reloads the tree.".to_owned()),
+                theme.style(Token::Muted),
+            )),
+        ])
+        .wrap(Wrap { trim: true })
+        .render(inner, buf);
+        return;
+    }
+
+    if model.tree.loading && model.tree.roots.is_empty() {
+        let leader = if presentation.reduced_motion {
+            String::new()
+        } else {
+            format!("{} ", presentation.glyphs.spinner(model.frame))
+        };
+        Paragraph::new(Line::from(vec![
+            Span::styled(leader, theme.style(Token::Info)),
+            Span::styled("Reading the catalogue", theme.style(Token::Text)),
+        ]))
+        .render(inner, buf);
+        return;
+    }
+
+    let rows = model.tree.rows();
+    let mut lines: Vec<Line> = Vec::new();
+
+    // The filter is shown as a line of its own so it is never mistaken for a row.
+    let mut body = inner;
+    if model.tree.filtering || !model.tree.filter.is_empty() {
+        let prompt = format!(
+            " {}{}{}",
+            if presentation.glyphs.is_ascii() {
+                "/"
+            } else {
+                "\u{2315}"
+            },
+            model.tree.filter,
+            if model.tree.filtering { "\u{2588}" } else { "" }
+        );
+        let [filter_area, rest] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+        Paragraph::new(Line::from(Span::styled(
+            prompt,
+            theme.style(if model.tree.filtering {
+                Token::Focus
+            } else {
+                Token::Muted
+            }),
+        )))
+        .render(filter_area, buf);
+        body = rest;
+    }
+
+    if rows.is_empty() {
+        let message = if model.tree.filter.is_empty() {
+            "Nothing here yet. Ctrl+K r reloads."
+        } else {
+            "No object matches this filter."
+        };
+        Paragraph::new(Line::from(Span::styled(message, theme.style(Token::Muted))))
+            .render(body, buf);
+        return;
+    }
+
+    let visible = body.height as usize;
+    let offset = model
+        .tree
+        .selected
+        .saturating_sub(visible.saturating_sub(1))
+        .min(rows.len().saturating_sub(1));
+
+    for (index, row) in rows.iter().enumerate().skip(offset).take(visible) {
+        let selected = focused && index == model.tree.selected;
+        let mut spans = Vec::new();
+
+        // Indent guides, the way a file tree draws them.
+        for _ in 0..row.depth {
+            spans.push(Span::styled(
+                presentation.glyphs.indent_guide(),
+                theme.style(Token::Border),
+            ));
+        }
+
+        if row.expandable {
+            spans.push(Span::styled(
+                format!("{} ", presentation.glyphs.chevron(row.expanded)),
+                theme.style(Token::Muted),
+            ));
+        } else {
+            spans.push(Span::raw("  "));
+        }
+
+        let icon = presentation.icon(row_icon(&row.row_kind));
+        if !icon.is_empty() {
+            spans.push(Span::styled(icon, theme.style(row_token(&row.row_kind))));
+        }
+
+        spans.push(Span::styled(
+            sanitize_for_display(&row.label),
+            if selected {
+                theme.style(Token::Selection)
+            } else {
+                theme.style(row_token(&row.row_kind))
+            },
+        ));
+
+        if row.loading && !presentation.reduced_motion {
+            spans.push(Span::styled(
+                format!(" {}", presentation.glyphs.spinner(model.frame)),
+                theme.style(Token::Info),
+            ));
+        } else if row.loading {
+            spans.push(Span::styled(" loading", theme.style(Token::Muted)));
+        } else if let Some(detail) = &row.detail {
+            spans.push(Span::styled(
+                format!("  {}", sanitize_for_display(detail)),
+                theme.style(Token::Muted),
+            ));
+        }
+
+        let mut line = Line::from(spans);
+        if selected {
+            line = line.style(theme.style(Token::Selection));
+        }
+        lines.push(line);
+    }
+
+    Paragraph::new(lines).render(body, buf);
+}
+
+/// The icon for a tree row. Icons are supplementary: the label already carries
+/// the kind for groups, and the detail carries it for objects.
+const fn row_icon(kind: &crate::app::tree::RowKind) -> Icon {
+    use crate::app::tree::RowKind;
+    use crate::postgres::ObjectKind;
+    match kind {
+        RowKind::Schema { .. } => Icon::Schema,
+        RowKind::Group(object) | RowKind::Object { kind: object, .. } => match object {
+            ObjectKind::Table | ObjectKind::PartitionedTable | ObjectKind::ForeignTable => {
+                Icon::Table
+            }
+            ObjectKind::View => Icon::View,
+            ObjectKind::MaterializedView => Icon::MaterializedView,
+            ObjectKind::Sequence => Icon::Sequence,
+            ObjectKind::Function => Icon::Function,
+            ObjectKind::Index => Icon::Index,
+            ObjectKind::Extension => Icon::Extension,
+            ObjectKind::Column => Icon::Column,
+        },
+        RowKind::Column {
+            primary_key: true, ..
+        } => Icon::KeyColumn,
+        RowKind::Column { .. } => Icon::Column,
+        RowKind::Message => Icon::Info,
+    }
+}
+
+const fn row_token(kind: &crate::app::tree::RowKind) -> Token {
+    use crate::app::tree::RowKind;
+    match kind {
+        RowKind::Schema { usable: false } => Token::Muted,
+        RowKind::Schema { .. } => Token::Header,
+        RowKind::Group(_) => Token::Muted,
+        RowKind::Object {
+            readable: false, ..
+        } => Token::Warning,
+        RowKind::Object { .. } | RowKind::Column { .. } => Token::Text,
+        RowKind::Message => Token::Muted,
+    }
+}
+
+// ------------------------------------------------------------------ palette
+
+fn render_palette(
+    palette: &crate::app::palette::Palette,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(8).min(76);
+    let height = area.height.saturating_sub(6).min(18);
+    let palette_area = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(palette_area, buf);
+
+    let matches = palette.matches();
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!(" {}", presentation.icon(Icon::Focus)),
+            theme.style(Token::Focus),
+        ),
+        Span::styled(
+            sanitize_for_display(&palette.query),
+            theme.style(Token::Text),
+        ),
+        Span::styled("\u{2588}", theme.style(Token::Focus)),
+        Span::styled(
+            format!("   {} match(es)", matches.len()),
+            theme.style(Token::Muted),
+        ),
+    ])];
+
+    let visible = (height as usize).saturating_sub(3);
+    let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
+    for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
+        let selected = index == palette.selected;
+        let mut spans = vec![
+            Span::styled(format!(" {:<8}", entry.group), theme.style(Token::Muted)),
+            Span::styled(
+                sanitize_for_display(&entry.label),
+                if selected {
+                    theme.style(Token::Selection)
+                } else {
+                    theme.style(Token::Text)
+                },
+            ),
+        ];
+        if !entry.detail.is_empty() {
+            spans.push(Span::styled(
+                format!("  {}", sanitize_for_display(&entry.detail)),
+                theme.style(Token::Muted),
+            ));
+        }
+        let mut line = Line::from(spans);
+        if selected {
+            line = line.style(theme.style(Token::Selection));
+        }
+        lines.push(line);
+    }
+
+    if matches.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " Nothing matches that.",
+            theme.style(Token::Muted),
+        )));
+    }
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            " Go to  Enter to choose, Esc to cancel ".to_owned(),
+            true,
+            presentation,
+        ))
+        .render(palette_area, buf);
+}
+
+// ------------------------------------------------------------------- chords
+
+/// The popup that appears while a chord is waiting for its second key.
+///
+/// Nothing here is on a timer: the reducer reads no clock, and a popup that
+/// vanishes on its own is a popup that vanishes while being read.
+fn render_chords(presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+    let theme = &presentation.theme;
+    let chords = crate::ui::keymap::CHORDS;
+    let width = area.width.saturating_sub(8).min(52);
+    let height = (u16::try_from(chords.len()).unwrap_or(6) + 2).min(area.height);
+    let chord_area = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + area.height.saturating_sub(height + 1),
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(chord_area, buf);
+
+    let lines: Vec<Line> = chords
+        .iter()
+        .map(|(key, _, description)| {
+            Line::from(vec![
+                Span::styled(
+                    format!(" {key}  "),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(*description, theme.style(Token::Text)),
+            ])
+        })
+        .collect();
+
+    Paragraph::new(lines)
+        .block(pane_block(" Ctrl+K  then ".to_owned(), true, presentation))
+        .render(chord_area, buf);
 }
 
 // -------------------------------------------------------------------- error
@@ -1402,6 +1776,248 @@ mod tests {
         model.error_expanded = true;
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
         assert!(text.contains("42P01"), "expanding reveals SQLSTATE");
+    }
+
+    // -------------------------------------------------------- object tree
+
+    fn with_tree(model: &mut Model) {
+        use crate::postgres::{ObjectKind, SchemaSummary};
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert(ObjectKind::Table, 2);
+        counts.insert(ObjectKind::View, 1);
+        model.tree.set_schemas(vec![
+            SchemaSummary {
+                name: "public".into(),
+                usable: true,
+                counts,
+            },
+            SchemaSummary {
+                name: "locked".into(),
+                usable: false,
+                counts: std::collections::BTreeMap::new(),
+            },
+        ]);
+        model.tree.expand_schema(&[0]);
+    }
+
+    #[test]
+    fn the_object_tree_shows_schemas_groups_and_their_counts() {
+        let mut model = connected_model(Environment::Local);
+        with_tree(&mut model);
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+
+        assert!(text.contains("public"), "{text}");
+        assert!(
+            text.contains("locked"),
+            "a schema without permission is still listed"
+        );
+        assert!(
+            text.contains("no permission"),
+            "and says why it cannot be opened"
+        );
+        // The group label carries the kind and the count in words, so the tree
+        // is readable with no icons at all.
+        assert!(text.contains("tables (2)"), "{text}");
+        assert!(text.contains("views (1)"), "{text}");
+    }
+
+    #[test]
+    fn the_tree_reads_correctly_in_every_glyph_tier() {
+        let mut model = connected_model(Environment::Local);
+        with_tree(&mut model);
+        for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+            for color in [true, false] {
+                let text = render_to_string(
+                    &model,
+                    &Keymap::new(),
+                    &presentation(ThemeChoice::Dark, color, tier),
+                    120,
+                    30,
+                );
+                let context = format!("{tier:?}/colour={color}");
+                assert!(text.contains("public"), "{context}");
+                assert!(text.contains("tables (2)"), "{context}");
+                assert!(text.contains("no permission"), "{context}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_open_node_is_distinguishable_from_a_closed_one_without_colour() {
+        let mut model = connected_model(Environment::Local);
+        with_tree(&mut model);
+        let plain = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii);
+
+        let opened = render_to_string(&model, &Keymap::new(), &plain, 120, 30);
+        model.tree.roots[0].expanded = false;
+        let closed = render_to_string(&model, &Keymap::new(), &plain, 120, 30);
+        assert_ne!(opened, closed, "the chevron must change with the state");
+        assert!(opened.contains('v'), "an open node is marked");
+        assert!(closed.contains('>'), "a closed node is marked");
+    }
+
+    #[test]
+    fn the_tree_title_is_a_breadcrumb_to_the_selected_object() {
+        let mut model = connected_model(Environment::Local);
+        with_tree(&mut model);
+        model.tree.selected = 1; // tables (2)
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(
+            text.contains("public") && text.contains("tables (2)"),
+            "the path to the selection is in the title: {text}"
+        );
+    }
+
+    #[test]
+    fn hiding_the_tree_gives_its_width_back_to_the_editor() {
+        let mut model = connected_model(Environment::Local);
+        with_tree(&mut model);
+        let shown = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(shown.contains("tables (2)"));
+
+        model.sidebar_visible = false;
+        let hidden = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(!hidden.contains("tables (2)"), "the tree is gone");
+        assert!(hidden.contains("Editor"), "and the editor is still there");
+    }
+
+    #[test]
+    fn a_filtered_tree_shows_the_filter_and_says_when_nothing_matches() {
+        let mut model = connected_model(Environment::Local);
+        with_tree(&mut model);
+        model.tree.filtering = true;
+        model.tree.filter = "zzz".into();
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("zzz"), "the filter text is visible: {text}");
+        assert!(text.contains("No object matches this filter."), "{text}");
+    }
+
+    #[test]
+    fn the_tree_says_it_is_reading_the_catalogue_while_it_loads() {
+        let mut model = connected_model(Environment::Local);
+        model.tree.begin_loading();
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("Reading the catalogue"), "{text}");
+    }
+
+    #[test]
+    fn a_tree_that_cannot_load_explains_itself_and_offers_a_way_forward() {
+        let mut model = connected_model(Environment::Local);
+        model.tree.set_error(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Connection,
+                "the connection closed",
+                "reading the catalogue",
+            )
+            .next_action("reconnect and try again"),
+        );
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("the connection closed"), "{text}");
+        assert!(text.contains("reconnect and try again"), "{text}");
+    }
+
+    #[test]
+    fn hostile_object_names_cannot_emit_escape_sequences_from_the_tree() {
+        use crate::postgres::{ObjectKind, ObjectSummary, SchemaSummary};
+        let mut model = connected_model(Environment::Local);
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert(ObjectKind::Table, 1);
+        model.tree.set_schemas(vec![SchemaSummary {
+            name: "\x1b[2Jpublic".into(),
+            usable: true,
+            counts,
+        }]);
+        model.tree.expand_schema(&[0]);
+        model.tree.selected = 1;
+        let (request, path, _) = model.tree.expand_selected().expect("load");
+        model.tree.apply(
+            request,
+            &path,
+            crate::app::tree::MetadataPayload::Objects(vec![ObjectSummary {
+                kind: ObjectKind::Table,
+                schema: "public".into(),
+                name: "\x1b[31mgotcha".into(),
+                readable: true,
+                detail: None,
+            }]),
+        );
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(
+            !text.contains('\x1b'),
+            "an escape in an object name reached the screen"
+        );
+    }
+
+    // ----------------------------------------------------------- palette
+
+    #[test]
+    fn the_palette_shows_the_query_the_matches_and_how_to_leave() {
+        let mut model = connected_model(Environment::Local);
+        model.palette = Some(crate::app::palette::Palette::new(vec![
+            crate::app::palette::PaletteEntry {
+                label: "Run the whole buffer".into(),
+                detail: "Ctrl+R".into(),
+                group: "Command",
+                command: crate::app::palette::PaletteCommand::Run(
+                    crate::app::message::Action::RunBuffer,
+                ),
+            },
+            crate::app::palette::PaletteEntry {
+                label: "orders".into(),
+                detail: "table \"public\".\"orders\"".into(),
+                group: "Object",
+                command: crate::app::palette::PaletteCommand::Insert(
+                    "\"public\".\"orders\"".into(),
+                ),
+            },
+        ]));
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("Go to"), "{text}");
+        assert!(text.contains("Esc to cancel"), "{text}");
+        assert!(text.contains("Run the whole buffer"), "{text}");
+        assert!(text.contains("orders"), "{text}");
+        assert!(
+            text.contains("Command"),
+            "entries say which group they are in"
+        );
+        assert!(text.contains("2 match(es)"), "the count is visible: {text}");
+    }
+
+    #[test]
+    fn the_palette_says_when_nothing_matches_rather_than_going_blank() {
+        let mut model = connected_model(Environment::Local);
+        let mut palette =
+            crate::app::palette::Palette::new(vec![crate::app::palette::PaletteEntry {
+                label: "orders".into(),
+                detail: String::new(),
+                group: "Object",
+                command: crate::app::palette::PaletteCommand::Insert("orders".into()),
+            }]);
+        palette.query = "zzzz".into();
+        model.palette = Some(palette);
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("Nothing matches that."), "{text}");
+        assert!(text.contains("0 match(es)"), "{text}");
+    }
+
+    // ------------------------------------------------------------ chords
+
+    #[test]
+    fn a_pending_chord_lists_every_key_that_could_follow_it() {
+        let mut model = connected_model(Environment::Local);
+        model.prefix_pending = true;
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+
+        assert!(
+            text.contains("Ctrl+K"),
+            "the popup names the prefix: {text}"
+        );
+        for (key, _, description) in crate::ui::keymap::CHORDS {
+            assert!(text.contains(*description), "{key} is missing from {text}");
+        }
     }
 
     #[test]

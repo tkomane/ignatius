@@ -194,6 +194,16 @@ async fn event_loop(
                 Effect::Cancel { job } => {
                     spawn_cancel(tx.clone(), Arc::clone(&session), job);
                 }
+                Effect::LoadSchemas => {
+                    spawn_load_schemas(tx.clone(), Arc::clone(&session));
+                }
+                Effect::LoadMetadata {
+                    request,
+                    path,
+                    query,
+                } => {
+                    spawn_load_metadata(tx.clone(), Arc::clone(&session), request, path, query);
+                }
             }
         }
         // Start and stop the ticker with the animation, so nothing spins while
@@ -330,6 +340,9 @@ fn spawn_connect(
                 let info = opened.info().clone();
                 *slot.write().await = Some(Arc::new(opened));
                 let _ = tx.send(Message::Connected(Box::new(info)));
+                // The tree is populated as soon as there is something to read it
+                // from, so the sidebar is useful the moment it appears.
+                let _ = tx.send(Message::Action(crate::app::Action::ReloadObjects));
             }
             Err(diagnostic) => {
                 let _ = tx.send(Message::ConnectionFailed(Box::new(diagnostic)));
@@ -375,6 +388,54 @@ fn spawn_cancel(
                 let _ = tx.send(Message::CancellationFailed(Box::new(diagnostic)));
             }
         }
+    });
+}
+
+fn spawn_load_schemas(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+) {
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            return;
+        };
+        let result = session.schemas().await;
+        let _ = tx.send(Message::SchemasLoaded(Box::new(result)));
+    });
+}
+
+fn spawn_load_metadata(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    request: crate::app::tree::RequestId,
+    path: crate::app::tree::NodePath,
+    query: crate::app::tree::MetadataQuery,
+) {
+    use crate::app::tree::{MetadataPayload, MetadataQuery};
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            return;
+        };
+        // Metadata shares the session's connection, so a load issued while a
+        // long statement runs waits behind it on the server. The interface stays
+        // responsive and the node shows that it is waiting; a dedicated
+        // metadata connection is Feature 005 hardening.
+        let payload = match query {
+            MetadataQuery::Schemas => session.schemas().await.map(MetadataPayload::Schemas),
+            MetadataQuery::Objects { schema, kind } => session
+                .objects(&schema, kind)
+                .await
+                .map(MetadataPayload::Objects),
+            MetadataQuery::Columns { schema, relation } => session
+                .columns(&schema, &relation)
+                .await
+                .map(MetadataPayload::Columns),
+        };
+        let _ = tx.send(Message::MetadataLoaded {
+            request,
+            path,
+            payload: Box::new(payload),
+        });
     });
 }
 

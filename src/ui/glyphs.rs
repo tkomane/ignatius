@@ -71,6 +71,30 @@ pub enum Icon {
     ReadWrite,
     /// A key hint.
     Key,
+    /// A schema.
+    Schema,
+    /// A table.
+    Table,
+    /// A view.
+    View,
+    /// A materialized view.
+    MaterializedView,
+    /// A sequence.
+    Sequence,
+    /// A function.
+    Function,
+    /// A column.
+    Column,
+    /// A column that is part of the primary key.
+    KeyColumn,
+    /// An index.
+    Index,
+    /// An installed extension.
+    Extension,
+    /// A closed tree node.
+    ChevronClosed,
+    /// An open tree node.
+    ChevronOpen,
 }
 
 /// The icon set for a tier.
@@ -108,42 +132,66 @@ impl Glyphs {
                 Icon::Rows => "\u{2261}",         // ≡
                 Icon::Editor => "\u{270e}",       // ✎
                 Icon::Help => "?",
-                Icon::Success => "\u{2713}",    // ✓
-                Icon::Warning => "\u{25b3}",    // △
-                Icon::Error => "\u{2717}",      // ✗
-                Icon::Info => "\u{2022}",       // •
-                Icon::Null => "\u{2205}",       // ∅
-                Icon::Focus => "\u{258e}",      // ▎
-                Icon::SearchPath => "\u{203a}", // ›
-                Icon::Truncated => "\u{2026}",  // …
-                Icon::ReadOnly => "\u{25d0}",   // ◐
-                Icon::ReadWrite => "\u{25cf}",  // ●
-                Icon::Key => "\u{2219}",        // ∙
+                Icon::Success => "\u{2713}",          // ✓
+                Icon::Warning => "\u{25b3}",          // △
+                Icon::Error => "\u{2717}",            // ✗
+                Icon::Info => "\u{2022}",             // •
+                Icon::Null => "\u{2205}",             // ∅
+                Icon::Focus => "\u{258e}",            // ▎
+                Icon::SearchPath => "\u{203a}",       // ›
+                Icon::Truncated => "\u{2026}",        // …
+                Icon::ReadOnly => "\u{25d0}",         // ◐
+                Icon::ReadWrite => "\u{25cf}",        // ●
+                Icon::Key => "\u{2219}",              // ∙
+                Icon::Schema => "\u{25a3}",           // ▣
+                Icon::Table => "\u{25a6}",            // ▦
+                Icon::View => "\u{25eb}",             // ◫
+                Icon::MaterializedView => "\u{25a9}", // ▩
+                Icon::Sequence => "\u{21c5}",         // ⇅
+                Icon::Function => "\u{0192}",         // ƒ
+                Icon::Column => "\u{25aa}",           // ▪
+                Icon::KeyColumn => "\u{25c6}",        // ◆
+                Icon::Index => "\u{2315}",            // ⌕
+                Icon::Extension => "\u{271a}",        // ✚
+                Icon::ChevronClosed => "\u{25b8}",    // ▸
+                Icon::ChevronOpen => "\u{25be}",      // ▾
             },
             GlyphTier::Nerd => match icon {
-                Icon::Brand => "\u{f1c0}",        // database
-                Icon::Database => "\u{f1c0}",     // database
-                Icon::Role => "\u{f007}",         // user
-                Icon::LockVerified => "\u{f023}", // lock
-                Icon::LockPlain => "\u{f023}",    // lock
-                Icon::LockOpen => "\u{f09c}",     // unlock
-                Icon::Production => "\u{f071}",   // exclamation-triangle
-                Icon::Environment => "\u{f233}",  // server
-                Icon::Clock => "\u{f017}",        // clock
-                Icon::Rows => "\u{f0ce}",         // table
-                Icon::Editor => "\u{f040}",       // pencil
-                Icon::Help => "\u{f059}",         // question-circle
-                Icon::Success => "\u{f00c}",      // check
-                Icon::Warning => "\u{f071}",      // exclamation-triangle
-                Icon::Error => "\u{f00d}",        // times
-                Icon::Info => "\u{f05a}",         // info-circle
-                Icon::Null => "\u{f05e}",         // ban
-                Icon::Focus => "\u{258e}",        // ▎ block, not an icon
-                Icon::SearchPath => "\u{f07c}",   // folder-open
-                Icon::Truncated => "\u{f141}",    // ellipsis-h
-                Icon::ReadOnly => "\u{f06e}",     // eye
-                Icon::ReadWrite => "\u{f044}",    // pencil-square
-                Icon::Key => "\u{f11c}",          // keyboard
+                Icon::Brand => "\u{f1c0}",            // database
+                Icon::Database => "\u{f1c0}",         // database
+                Icon::Role => "\u{f007}",             // user
+                Icon::LockVerified => "\u{f023}",     // lock
+                Icon::LockPlain => "\u{f023}",        // lock
+                Icon::LockOpen => "\u{f09c}",         // unlock
+                Icon::Production => "\u{f071}",       // exclamation-triangle
+                Icon::Environment => "\u{f233}",      // server
+                Icon::Clock => "\u{f017}",            // clock
+                Icon::Rows => "\u{f0ce}",             // table
+                Icon::Editor => "\u{f040}",           // pencil
+                Icon::Help => "\u{f059}",             // question-circle
+                Icon::Success => "\u{f00c}",          // check
+                Icon::Warning => "\u{f071}",          // exclamation-triangle
+                Icon::Error => "\u{f00d}",            // times
+                Icon::Info => "\u{f05a}",             // info-circle
+                Icon::Null => "\u{f05e}",             // ban
+                Icon::Focus => "\u{258e}",            // ▎ block, not an icon
+                Icon::SearchPath => "\u{f07c}",       // folder-open
+                Icon::Truncated => "\u{f141}",        // ellipsis-h
+                Icon::ReadOnly => "\u{f06e}",         // eye
+                Icon::ReadWrite => "\u{f044}",        // pencil-square
+                Icon::Key => "\u{f11c}",              // keyboard
+                Icon::Schema => "\u{f07b}",           // folder
+                Icon::Table => "\u{f0ce}",            // table
+                Icon::View => "\u{f06e}",             // eye
+                Icon::MaterializedView => "\u{f0c5}", // files
+                Icon::Sequence => "\u{f0cb}",         // list-ol
+                Icon::Function => "\u{f085}",         // cogs
+                Icon::Column => "\u{f0db}",           // columns
+                Icon::KeyColumn => "\u{f084}",        // key
+                Icon::Index => "\u{f002}",            // search
+                Icon::Extension => "\u{f12e}",        // puzzle-piece
+                Icon::ChevronClosed => "\u{f054}",    // chevron-right
+                Icon::ChevronOpen => "\u{f078}",      // chevron-down
             },
         }
     }
@@ -196,6 +244,39 @@ impl Glyphs {
                     "\u{2591}".repeat(width - filled)
                 )
             }
+        }
+    }
+
+    /// The marker showing whether a tree node is open.
+    ///
+    /// Unlike the other icons this is never empty, including in ASCII: a tree
+    /// where open and closed look identical is not a tree.
+    #[must_use]
+    pub const fn chevron(&self, expanded: bool) -> &'static str {
+        match self.tier {
+            GlyphTier::Ascii => {
+                if expanded {
+                    "v"
+                } else {
+                    ">"
+                }
+            }
+            GlyphTier::Unicode | GlyphTier::Nerd => {
+                if expanded {
+                    self.icon(Icon::ChevronOpen)
+                } else {
+                    self.icon(Icon::ChevronClosed)
+                }
+            }
+        }
+    }
+
+    /// The indent guide drawn to the left of nested rows.
+    #[must_use]
+    pub const fn indent_guide(&self) -> &'static str {
+        match self.tier {
+            GlyphTier::Ascii => "  ",
+            GlyphTier::Unicode | GlyphTier::Nerd => "\u{2502} ",
         }
     }
 
@@ -277,6 +358,18 @@ mod tests {
         Icon::ReadOnly,
         Icon::ReadWrite,
         Icon::Key,
+        Icon::Schema,
+        Icon::Table,
+        Icon::View,
+        Icon::MaterializedView,
+        Icon::Sequence,
+        Icon::Function,
+        Icon::Column,
+        Icon::KeyColumn,
+        Icon::Index,
+        Icon::Extension,
+        Icon::ChevronClosed,
+        Icon::ChevronOpen,
     ];
 
     #[test]
@@ -328,6 +421,47 @@ mod tests {
                     1,
                     "{icon:?} in {tier:?} is more than one character"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn a_chevron_shows_whether_a_node_is_open_even_in_ascii() {
+        // The tree is unusable if open and closed look the same, so this is the
+        // one place ASCII gets a substitute rather than nothing.
+        for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+            let glyphs = Glyphs::new(tier);
+            assert_ne!(
+                glyphs.chevron(true),
+                glyphs.chevron(false),
+                "{tier:?} draws open and closed nodes identically"
+            );
+            assert!(!glyphs.chevron(true).is_empty());
+        }
+    }
+
+    #[test]
+    fn object_kinds_are_visually_distinct_where_icons_exist() {
+        for tier in [GlyphTier::Unicode, GlyphTier::Nerd] {
+            let glyphs = Glyphs::new(tier);
+            let kinds = [
+                Icon::Schema,
+                Icon::Table,
+                Icon::View,
+                Icon::MaterializedView,
+                Icon::Sequence,
+                Icon::Function,
+                Icon::Index,
+                Icon::Extension,
+            ];
+            for (i, a) in kinds.iter().enumerate() {
+                for b in kinds.iter().skip(i + 1) {
+                    assert_ne!(
+                        glyphs.icon(*a),
+                        glyphs.icon(*b),
+                        "{tier:?}: {a:?} and {b:?} look the same"
+                    );
+                }
             }
         }
     }

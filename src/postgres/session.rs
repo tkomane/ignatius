@@ -153,6 +153,47 @@ impl Session {
             .unwrap_or_default()
     }
 
+    /// Schemas visible to this session, with counts by object kind.
+    pub async fn schemas(
+        &self,
+    ) -> Result<Vec<crate::postgres::metadata::SchemaSummary>, Diagnostic> {
+        crate::postgres::metadata::schemas(&self.client).await
+    }
+
+    /// Objects of one kind inside one schema.
+    pub async fn objects(
+        &self,
+        schema: &str,
+        kind: crate::postgres::metadata::ObjectKind,
+    ) -> Result<Vec<crate::postgres::metadata::ObjectSummary>, Diagnostic> {
+        crate::postgres::metadata::objects(&self.client, schema, kind).await
+    }
+
+    /// Columns of a relation.
+    pub async fn columns(
+        &self,
+        schema: &str,
+        relation: &str,
+    ) -> Result<Vec<crate::postgres::metadata::ColumnInfo>, Diagnostic> {
+        crate::postgres::metadata::columns(&self.client, schema, relation).await
+    }
+
+    /// Indexes on a relation.
+    pub async fn indexes(
+        &self,
+        schema: &str,
+        relation: &str,
+    ) -> Result<Vec<crate::postgres::metadata::ObjectSummary>, Diagnostic> {
+        crate::postgres::metadata::indexes(&self.client, schema, relation).await
+    }
+
+    /// Extensions installed in this database.
+    pub async fn extensions(
+        &self,
+    ) -> Result<Vec<crate::postgres::metadata::ObjectSummary>, Diagnostic> {
+        crate::postgres::metadata::extensions(&self.client).await
+    }
+
     /// Executes every statement in a buffer, in order.
     ///
     /// Statements after a failure do not run. Results produced before the failure

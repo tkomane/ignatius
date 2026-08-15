@@ -20,15 +20,27 @@ pub enum Focus {
     Editor,
     /// The result grid.
     Results,
+    /// The object tree.
+    Objects,
 }
 
 impl Focus {
     /// The next pane in the cycle.
+    ///
+    /// The object tree is only in the cycle when it is on screen, so Tab never
+    /// moves focus somewhere invisible.
     #[must_use]
-    pub const fn next(self) -> Self {
+    pub const fn next(self, sidebar_visible: bool) -> Self {
         match self {
             Self::Editor => Self::Results,
-            Self::Results => Self::Editor,
+            Self::Results => {
+                if sidebar_visible {
+                    Self::Objects
+                } else {
+                    Self::Editor
+                }
+            }
+            Self::Objects => Self::Editor,
         }
     }
 
@@ -38,6 +50,7 @@ impl Focus {
         match self {
             Self::Editor => "Editor",
             Self::Results => "Results",
+            Self::Objects => "Objects",
         }
     }
 }
@@ -283,6 +296,14 @@ pub struct Model {
     pub last_elapsed: Option<Duration>,
     /// Row cap applied to results.
     pub row_cap: usize,
+    /// The object tree.
+    pub tree: crate::app::tree::ObjectTree,
+    /// Whether the object tree is on screen.
+    pub sidebar_visible: bool,
+    /// The command palette, when it is open.
+    pub palette: Option<crate::app::palette::Palette>,
+    /// Whether a two-key chord is waiting for its second key.
+    pub prefix_pending: bool,
     /// Animation frame, advanced by each tick.
     ///
     /// Nothing derives meaning from it; it only chooses which frame of an
@@ -301,6 +322,7 @@ impl Model {
         Self {
             row_cap,
             size: (crate::ui::MIN_COLUMNS, crate::ui::MIN_ROWS),
+            sidebar_visible: true,
             ..Self::default()
         }
     }
@@ -343,11 +365,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn focus_cycles_and_every_pane_has_a_name() {
-        assert_eq!(Focus::Editor.next(), Focus::Results);
-        assert_eq!(Focus::Results.next(), Focus::Editor);
-        assert!(!Focus::Editor.label().is_empty());
-        assert!(!Focus::Results.label().is_empty());
+    fn focus_cycles_through_the_panes_that_are_on_screen() {
+        assert_eq!(Focus::Editor.next(true), Focus::Results);
+        assert_eq!(Focus::Results.next(true), Focus::Objects);
+        assert_eq!(Focus::Objects.next(true), Focus::Editor);
+
+        // With the tree hidden, Tab never lands on it.
+        assert_eq!(Focus::Results.next(false), Focus::Editor);
+
+        for focus in [Focus::Editor, Focus::Results, Focus::Objects] {
+            assert!(!focus.label().is_empty());
+        }
     }
 
     #[test]
