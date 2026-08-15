@@ -602,6 +602,94 @@ mod with_server {
     }
 
     #[test]
+    fn a_write_to_a_production_target_is_refused_until_it_is_asked_for() {
+        let uri = uri_or_skip!();
+
+        let refused = binary()
+            .args([
+                "query",
+                &uri,
+                "--environment",
+                "production",
+                "-c",
+                "UPDATE orders SET total = total",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&refused), 2, "{}", stderr(&refused));
+        let message = stderr(&refused);
+        assert!(message.contains("classified as production"), "{message}");
+        assert!(
+            message.contains("--allow-write"),
+            "it names the way through: {message}"
+        );
+        assert!(
+            message.contains("not a security boundary"),
+            "it must not overstate itself: {message}"
+        );
+
+        // Reads are never in the way.
+        let read = binary()
+            .args([
+                "query",
+                &uri,
+                "--environment",
+                "production",
+                "-c",
+                "SELECT 1",
+                "--format",
+                "csv",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&read), 0, "{}", stderr(&read));
+
+        // And a deliberate write goes through.
+        let allowed = binary()
+            .args([
+                "query",
+                &uri,
+                "--environment",
+                "production",
+                "--allow-write",
+                "-c",
+                "UPDATE orders SET total = total",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&allowed), 0, "{}", stderr(&allowed));
+    }
+
+    #[test]
+    fn a_read_only_session_is_refused_by_the_server_not_by_a_guess() {
+        let uri = uri_or_skip!();
+        let output = binary()
+            .args([
+                "query",
+                &uri,
+                "--read-only",
+                "-c",
+                "INSERT INTO orders (customer_id, total) VALUES (1, 1)",
+                "--verbose",
+            ])
+            .output()
+            .expect("run");
+
+        assert_eq!(
+            code(&output),
+            7,
+            "the server rejected it: {}",
+            stderr(&output)
+        );
+        let message = stderr(&output);
+        assert!(message.contains("read-only transaction"), "{message}");
+        assert!(
+            message.contains("25006"),
+            "PostgreSQL's own error, not ours: {message}"
+        );
+    }
+
+    #[test]
     fn connect_check_reports_stages_and_succeeds_against_a_live_server() {
         let uri = uri_or_skip!();
         let output = binary()

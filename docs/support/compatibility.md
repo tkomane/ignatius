@@ -107,6 +107,22 @@ Deliberate differences:
   results produced before it are still returned.
 - **No meta-commands.** No `\d`, `\dt` or `\copy` yet.
 
+## Production safety
+
+A connection is classified only by `--environment`, never inferred from a host
+name. When it is classified as production, anything that is not a read is held
+back: refused in `query` unless `--allow-write` is given, and held for
+confirmation in the client, where a statement that destroys data also needs the
+database's own name typed.
+
+The classification reads leading keywords. It handles comments and writes hidden
+in a common table expression, and it treats anything it does not recognise as a
+write. It cannot see inside a function, so `SELECT wipe_all()` is a read as far
+as it can tell. **It is advisory and is described that way wherever it appears.**
+
+`--read-only` is the real control: it asks the server to refuse writes for the
+session, and PostgreSQL enforces it.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv,

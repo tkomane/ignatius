@@ -106,6 +106,103 @@ pub fn render(
     if model.prefix_pending {
         render_chords(presentation, area, buf);
     }
+    if let Some(pending) = &model.pending_run {
+        render_confirmation(model, pending, presentation, area, buf);
+    }
+}
+
+/// Asks before a write reaches a database the user called production.
+///
+/// It states what will run, what it appears to do, and that the judgement is
+/// advisory. A prompt that overstates its own certainty teaches people to
+/// distrust it, which costs more than it saves.
+fn render_confirmation(
+    model: &Model,
+    pending: &crate::app::model::PendingRun,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(78);
+    let height = 12.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let target = model
+        .connection
+        .info()
+        .map_or_else(|| "this database".to_owned(), |info| info.target.clone());
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!(
+                    " {}[{}] ",
+                    presentation.icon(Icon::Production),
+                    model.environment().label()
+                ),
+                theme.capsule(Token::EnvironmentProduction),
+            ),
+            Span::styled(format!(" {target}"), theme.style(Token::Text)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("This statement {}.", pending.impact.label()),
+            theme.style(Token::Danger),
+        )),
+    ];
+
+    for line in pending.sql.lines().take(4) {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", sanitize_for_display(line)),
+            theme.style(Token::Muted),
+        )));
+    }
+
+    lines.push(Line::from(""));
+    if pending.impact.needs_typed_confirmation() {
+        lines.push(Line::from(Span::styled(
+            format!("Type the database name to continue: {}", pending.required),
+            theme.style(Token::Warning),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled("  ", theme.style(Token::Text)),
+            Span::styled(
+                sanitize_for_display(&pending.typed),
+                theme.style(if pending.is_satisfied() {
+                    Token::Success
+                } else {
+                    Token::Text
+                }),
+            ),
+            Span::styled("\u{2588}", theme.style(Token::Focus)),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Enter to run it, Esc to cancel.",
+            theme.style(Token::Info),
+        )));
+    }
+
+    lines.push(Line::from(Span::styled(
+        "This reads leading keywords only. Database permissions are the real control.",
+        theme.style(Token::Muted),
+    )));
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            " Confirm  Esc to cancel ".to_owned(),
+            true,
+            presentation,
+        ))
+        .wrap(Wrap { trim: true })
+        .render(box_area, buf);
 }
 
 /// How wide the object tree should be.
@@ -2018,6 +2115,57 @@ mod tests {
         for (key, _, description) in crate::ui::keymap::CHORDS {
             assert!(text.contains(*description), "{key} is missing from {text}");
         }
+    }
+
+    #[test]
+    fn a_write_to_production_asks_before_it_runs() {
+        let mut model = connected_model(Environment::Production);
+        model.pending_run = Some(crate::app::model::PendingRun {
+            sql: "DELETE FROM orders WHERE created_at < now()".into(),
+            impact: crate::query::Impact::Destructive,
+            typed: String::new(),
+            required: "orders".into(),
+        });
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("Confirm"), "{text}");
+        assert!(
+            text.contains("[PROD]"),
+            "the classification is on the prompt"
+        );
+        assert!(
+            text.contains("destroys data"),
+            "it says what the statement does"
+        );
+        assert!(
+            text.contains("DELETE FROM orders"),
+            "and shows the statement"
+        );
+        assert!(
+            text.contains("Type the database name"),
+            "a destructive statement is worth typing for: {text}"
+        );
+        assert!(
+            text.contains("Database permissions are the real control"),
+            "the prompt must not overstate its own certainty"
+        );
+    }
+
+    #[test]
+    fn a_lesser_change_asks_without_making_anyone_type() {
+        let mut model = connected_model(Environment::Production);
+        model.pending_run = Some(crate::app::model::PendingRun {
+            sql: "UPDATE orders SET total = 0".into(),
+            impact: crate::query::Impact::Write,
+            typed: String::new(),
+            required: "orders".into(),
+        });
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("Enter to run it"), "{text}");
+        assert!(
+            !text.contains("Type the database name"),
+            "typing a word for every write would train people to type it"
+        );
     }
 
     #[test]

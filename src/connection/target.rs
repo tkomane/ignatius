@@ -277,6 +277,8 @@ pub struct ConnectionArgs {
     pub sslmode: Option<SslMode>,
     /// `--environment`
     pub environment: Option<Environment>,
+    /// `--read-only`
+    pub read_only: bool,
 }
 
 /// A note about the resolved target that the user should see.
@@ -315,6 +317,11 @@ pub struct ConnectionTarget {
     pub connect_timeout: Duration,
     /// User-declared classification of this database.
     pub environment: Environment,
+    /// Whether the session should be made read-only at the server.
+    ///
+    /// This is a real control, unlike the advisory statement classification:
+    /// the server refuses writes itself.
+    pub read_only: bool,
     /// Notes worth showing, such as unsupported non-security parameters.
     pub notes: Vec<ResolutionNote>,
 }
@@ -566,6 +573,7 @@ pub fn resolve(
         application_name,
         connect_timeout,
         environment: args.environment.clone().unwrap_or_default(),
+        read_only: args.read_only,
         notes,
     })
 }

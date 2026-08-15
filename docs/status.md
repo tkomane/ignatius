@@ -6,7 +6,11 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: transport hardening. `verify-ca` and client certificates
+**Current feature**: 006, production-aware safety. A production-classified
+connection holds back writes until they are confirmed, and `--read-only` asks
+the server to enforce it.
+
+**Previous**: transport hardening. `verify-ca` and client certificates
 are implemented natively and tested against a TLS server, which closes the
 largest honesty gap the project had: the headline differentiator had never been
 exercised against a server that speaks TLS.

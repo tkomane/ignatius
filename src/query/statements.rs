@@ -187,8 +187,11 @@ fn skip_block_comment(sql: &str, start: usize) -> usize {
     bytes.len()
 }
 
-/// Removes comments, used only to decide whether a fragment is empty.
-fn strip_comments(sql: &str) -> String {
+/// Removes comments, so what is left is the statement itself.
+///
+/// Used to decide whether a fragment is empty, and by the classifier, which must
+/// never be fooled by a comment in front of a destructive statement.
+pub(crate) fn strip_comments(sql: &str) -> String {
     let bytes = sql.as_bytes();
     let mut out = String::with_capacity(sql.len());
     let mut i = 0usize;

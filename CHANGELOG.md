@@ -8,8 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
-### New
-
+- Production-aware safety. A connection classified as production holds back
+  anything that is not a read until it is confirmed: `--allow-write` in a
+  script, a prompt in the client, and the database's own name typed out for a
+  statement that destroys data. The prompt states that the judgement is advisory
+  and that database permissions are the real control.
+- `--read-only`, which asks PostgreSQL to refuse writes for the session. That is
+  enforced by the server rather than guessed at from the SQL.
 - Streaming export with `--output`. Rows go from the wire to the file without
   passing through memory: 200,000 rows exported in 13 MB of resident memory.
   An export writes to a `.partial` file and only moves it into place when it is
@@ -107,6 +112,10 @@ source can generate user-facing notes.
   text passes through one redaction implementation.
 
 ### Known limitations
+
+- Statement classification reads leading keywords only. `SELECT wipe_all()` is
+  classified as a read, because it is a `SELECT`. It is a usability feature, not
+  a security boundary, and every place it appears says so.
 
 - Verified on macOS only. Windows and Linux are exercised in CI but have not been
   used by hand.

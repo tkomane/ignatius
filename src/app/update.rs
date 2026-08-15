@@ -119,6 +119,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.prefix_pending {
         return resolve_prefix(model, action);
     }
+    if model.pending_run.is_some() {
+        return confirmation_action(model, action);
+    }
     if model.palette.is_some() {
         return palette_action(model, action);
     }
@@ -234,11 +237,75 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
-/// Starts an execution, refusing when there is nothing to run or nowhere to run it.
+/// Handles input while a run is waiting to be confirmed.
+fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(pending) = model.pending_run.as_mut() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(ch) => {
+            pending.typed.push(ch);
+            Vec::new()
+        }
+        Action::Backspace => {
+            pending.typed.pop();
+            Vec::new()
+        }
+        Action::Activate | Action::RunBuffer => {
+            if !pending.is_satisfied() {
+                // Nothing happens until the word is typed. Saying so is the
+                // prompt's job; silently refusing would be worse than a modal.
+                return Vec::new();
+            }
+            let sql = pending.sql.clone();
+            model.pending_run = None;
+            start(model, sql)
+        }
+        Action::Dismiss | Action::Cancel => {
+            model.pending_run = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Starts an execution, refusing when there is nothing to run or nowhere to run
+/// it, and holding it back when the target is production and it is not a read.
 fn run(model: &mut Model, sql: String) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
     }
+    let parsed = statements::split(&sql);
+    if parsed.is_empty() {
+        return Vec::new();
+    }
+
+    // The classification is advisory and the interface says so. What it buys is
+    // that nobody writes to production without a deliberate second action.
+    let impact = crate::query::classify_all(&parsed);
+    if model.environment().is_production() && impact.needs_confirmation() {
+        let required = model
+            .connection
+            .info()
+            .map_or_else(String::new, |info| info.database.clone());
+        model.pending_run = Some(crate::app::model::PendingRun {
+            sql,
+            impact,
+            typed: String::new(),
+            required,
+        });
+        return Vec::new();
+    }
+
+    start(model, sql)
+}
+
+/// Begins an execution that has already been allowed.
+fn start(model: &mut Model, sql: String) -> Vec<Effect> {
     let parsed = statements::split(&sql);
     if parsed.is_empty() {
         return Vec::new();
@@ -1234,6 +1301,118 @@ mod tests {
         );
         assert!(model.tree.error.is_some());
         assert!(!model.tree.loading);
+    }
+
+    #[test]
+    fn a_write_to_production_is_held_back_until_it_is_confirmed() {
+        let mut model = connected();
+        // Reclassify the session as production.
+        let mut info = session();
+        info.environment = Environment::Production;
+        update(&mut model, Message::Connected(info));
+
+        model.editor.set_text("UPDATE orders SET total = 0;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        assert!(effects.is_empty(), "nothing runs yet");
+        let pending = model
+            .pending_run
+            .as_ref()
+            .expect("a confirmation is waiting");
+        assert_eq!(pending.impact, crate::query::Impact::Write);
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(
+            matches!(effects.as_slice(), [Effect::Execute { .. }]),
+            "confirming runs it: {effects:?}"
+        );
+        assert!(model.pending_run.is_none());
+    }
+
+    #[test]
+    fn a_destructive_statement_needs_the_database_name_typed() {
+        let mut model = connected();
+        let mut info = session();
+        info.environment = Environment::Production;
+        update(&mut model, Message::Connected(info));
+
+        model.editor.set_text("DROP TABLE orders;");
+        update(&mut model, Message::Action(Action::RunBuffer));
+
+        // Confirming without typing does nothing at all.
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(model.pending_run.is_some(), "still waiting");
+
+        for ch in "orders".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(
+            matches!(effects.as_slice(), [Effect::Execute { .. }]),
+            "typing the name allows it: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_confirmation_runs_nothing_and_leaves_the_buffer_alone() {
+        let mut model = connected();
+        let mut info = session();
+        info.environment = Environment::Production;
+        update(&mut model, Message::Connected(info));
+
+        model.editor.set_text("DELETE FROM orders;");
+        update(&mut model, Message::Action(Action::RunBuffer));
+        update(&mut model, Message::Action(Action::Dismiss));
+
+        assert!(model.pending_run.is_none());
+        assert_eq!(model.phase, QueryPhase::Idle, "nothing was sent");
+        assert_eq!(
+            model.editor.text(),
+            "DELETE FROM orders;",
+            "the SQL is still there"
+        );
+    }
+
+    #[test]
+    fn a_read_against_production_runs_without_asking() {
+        let mut model = connected();
+        let mut info = session();
+        info.environment = Environment::Production;
+        update(&mut model, Message::Connected(info));
+
+        model.editor.set_text("SELECT count(*) FROM orders;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        assert!(
+            matches!(effects.as_slice(), [Effect::Execute { .. }]),
+            "a prompt on every read would be noise: {effects:?}"
+        );
+        assert!(model.pending_run.is_none());
+    }
+
+    #[test]
+    fn a_write_to_anything_else_runs_without_asking() {
+        // The guardrail follows the classification the user gave, never a guess
+        // from a host name.
+        let mut model = connected();
+        model.editor.set_text("UPDATE orders SET total = 0;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        assert!(matches!(effects.as_slice(), [Effect::Execute { .. }]));
+        assert!(model.pending_run.is_none());
+    }
+
+    #[test]
+    fn typing_while_confirming_never_reaches_the_editor() {
+        let mut model = connected();
+        let mut info = session();
+        info.environment = Environment::Production;
+        update(&mut model, Message::Connected(info));
+
+        model.editor.set_text("DROP TABLE orders;");
+        update(&mut model, Message::Action(Action::RunBuffer));
+        for ch in "xyz".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(model.editor.text(), "DROP TABLE orders;");
+        assert_eq!(model.pending_run.as_ref().expect("pending").typed, "xyz");
     }
 
     #[test]

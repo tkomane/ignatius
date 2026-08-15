@@ -261,6 +261,30 @@ impl Editor {
     }
 }
 
+/// A run that is waiting for the user to confirm it.
+///
+/// There is no session-wide unlock. A mode that quietly stays on is a mode
+/// people forget they are in, which is the failure this exists to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRun {
+    /// The SQL that will run if it is confirmed.
+    pub sql: String,
+    /// What it appears to do.
+    pub impact: crate::query::Impact,
+    /// What the user has typed, when a typed confirmation is required.
+    pub typed: String,
+    /// The word that must be typed, which is the database's own name.
+    pub required: String,
+}
+
+impl PendingRun {
+    /// Whether the confirmation is satisfied.
+    #[must_use]
+    pub fn is_satisfied(&self) -> bool {
+        !self.impact.needs_typed_confirmation() || self.typed == self.required
+    }
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
@@ -304,6 +328,8 @@ pub struct Model {
     pub palette: Option<crate::app::palette::Palette>,
     /// Whether a two-key chord is waiting for its second key.
     pub prefix_pending: bool,
+    /// A run held back until the user confirms it.
+    pub pending_run: Option<PendingRun>,
     /// Animation frame, advanced by each tick.
     ///
     /// Nothing derives meaning from it; it only chooses which frame of an

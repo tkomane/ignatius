@@ -393,6 +393,15 @@ pub async fn connect(
         }
     };
 
+    // Asked for before anything else runs, and enforced by the server rather
+    // than by this client guessing at what a statement does.
+    if target.read_only {
+        client
+            .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+            .await
+            .map_err(|err| from_query_error(&err, 0))?;
+    }
+
     if statement_timeout > Duration::ZERO {
         let millis = statement_timeout.as_millis();
         client

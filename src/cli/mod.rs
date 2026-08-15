@@ -159,6 +159,12 @@ pub enum Command {
         /// Replace the output file if it already exists.
         #[arg(long)]
         force: bool,
+        /// Allow a statement that writes when the target is classified as
+        /// production.
+        ///
+        /// Without it, a production target refuses anything that is not a read.
+        #[arg(long)]
+        allow_write: bool,
         #[command(flatten)]
         connection: ConnectionOptions,
     },
@@ -217,6 +223,11 @@ pub struct ConnectionOptions {
     /// Classification is never inferred from a host name.
     #[arg(long, value_name = "NAME")]
     pub environment: Option<String>,
+    /// Ask the server to refuse writes for this session.
+    ///
+    /// Enforced by PostgreSQL itself, not by guessing at what a statement does.
+    #[arg(long)]
+    pub read_only: bool,
 }
 
 impl ConnectionOptions {
@@ -239,6 +250,7 @@ impl ConnectionOptions {
             None => None,
         };
         Ok(ConnectionArgs {
+            read_only: self.read_only,
             host: self.host.clone(),
             port: self.port,
             dbname: self.dbname.clone(),
@@ -319,6 +331,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             max_rows,
             output,
             force,
+            allow_write,
             connection,
         }) => query_command(
             QueryRequest {
@@ -334,6 +347,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
                 max_rows: *max_rows,
                 output: output.as_deref(),
                 force: *force,
+                allow_write: *allow_write,
                 connection,
             },
             &paths,
@@ -565,6 +579,7 @@ struct QueryRequest<'a> {
     max_rows: Option<usize>,
     output: Option<&'a std::path::Path>,
     force: bool,
+    allow_write: bool,
     connection: &'a ConnectionOptions,
 }
 
@@ -598,6 +613,35 @@ fn query_command(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
+
+    // A production target refuses anything that is not a read unless the caller
+    // said otherwise. The classification is advisory and says so; what it buys
+    // is that a script cannot write to production by accident on the strength of
+    // a copied command line.
+    if target.environment.is_production() && !request.allow_write {
+        let impact = crate::query::classify_all(&crate::query::split(&sql));
+        if impact.needs_confirmation() {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!(
+                    "this statement {} and the target is classified as production",
+                    impact.label()
+                ),
+                "checking a statement against the target's classification",
+            )
+            .likely_cause(
+                "the connection was given --environment production, which refuses anything \
+                 that is not a read",
+            )
+            .next_action(
+                "pass --allow-write if that is what you meant, or --read-only to have the \
+                 server refuse writes itself. This check reads leading keywords only and is \
+                 not a security boundary: database permissions are.",
+            )
+            .technical("Impact", impact.label())
+            .technical("Environment", target.environment.label()));
+        }
+    }
 
     // An export streams rows straight to a file and never holds the result.
     if let Some(destination) = request.output {
