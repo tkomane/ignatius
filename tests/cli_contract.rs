@@ -399,6 +399,99 @@ mod with_server {
     }
 
     #[test]
+    fn a_wrong_password_exits_with_the_authentication_code() {
+        let uri = uri_or_skip!();
+        let Some((prefix, rest)) = uri.split_once("://") else {
+            panic!("expected a URI");
+        };
+        let Some((_, host_and_db)) = rest.split_once('@') else {
+            eprintln!("skipping: the test URI has no userinfo to replace");
+            return;
+        };
+        let wrong = format!("{prefix}://ignatius_test:definitely-the-wrong-password@{host_and_db}");
+
+        let output = binary()
+            .args(["query", &wrong, "-c", "SELECT 1"])
+            .output()
+            .expect("run");
+        assert_eq!(
+            code(&output),
+            5,
+            "authentication failures exit 5, distinctly from connection failures: {}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains("Authentication failed"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            !stderr(&output).contains("definitely-the-wrong-password"),
+            "the password was echoed"
+        );
+    }
+
+    #[test]
+    fn requiring_tls_from_a_server_without_it_exits_with_the_tls_code() {
+        let uri = uri_or_skip!();
+        let output = binary()
+            .args(["query", &format!("{uri}?sslmode=require"), "-c", "SELECT 1"])
+            .output()
+            .expect("run");
+        assert_eq!(
+            code(&output),
+            6,
+            "a refusal to encrypt exits 6, not 4: {}",
+            stderr(&output)
+        );
+        let message = stderr(&output);
+        assert!(message.contains("TLS failed"), "{message}");
+        assert!(
+            message.contains("not retried without"),
+            "it must say it did not fall back: {message}"
+        );
+    }
+
+    #[test]
+    fn interrupting_a_long_query_exits_with_the_cancellation_code() {
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let child = binary()
+            .args(["query", &uri, "-c", "SELECT pg_sleep(30)"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        // Give it time to reach the server, then interrupt it the way a person
+        // at a terminal would.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        unsafe_free_interrupt(child.id());
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(
+            code(&output),
+            8,
+            "an interrupted statement exits 8 rather than dying on a signal: {}",
+            stderr(&output)
+        );
+        assert!(stderr(&output).contains("Cancelled"), "{}", stderr(&output));
+    }
+
+    /// Sends SIGINT without linking libc, by asking the system `kill` to do it.
+    ///
+    /// The crate denies `unsafe`, and this is a test helper, so shelling out is
+    /// both simpler and honest about what it does.
+    fn unsafe_free_interrupt(pid: u32) {
+        let status = Command::new("kill")
+            .args(["-INT", &pid.to_string()])
+            .status()
+            .expect("send SIGINT");
+        assert!(status.success(), "could not interrupt the child");
+    }
+
+    #[test]
     fn connect_check_reports_stages_and_succeeds_against_a_live_server() {
         let uri = uri_or_skip!();
         let output = binary()

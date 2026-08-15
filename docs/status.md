@@ -48,17 +48,17 @@ These are real and none of them is hidden anywhere else:
 2. **Database integration runs on Linux only.** PostgreSQL 14, 16 and 18 all
    pass there. The macOS and Windows jobs do not connect to a server, so the
    protocol claims rest on the Linux matrix and the local macOS runs.
-3. **Exit codes 5, 6, 8 and 9 lack subprocess-level evidence.** They are produced
-   and asserted at library level. Code 9 has no producer until export lands in
-   Feature 004.
+3. **Exit code 9 has no producer** until export lands in Feature 004. Codes 5, 6
+   and 8 now have subprocess-level evidence.
 4. **`sslmode=verify-ca` is deliberately unimplemented** and refuses with an
    explanation. See ADR-0004.
 5. **No credential store, `.pgpass`, or service file support.** `PGSERVICE`,
    `PGSERVICEFILE` and `PGPASSFILE` are reported as unread rather than ignored.
    Feature 002.
-6. **Terminal restoration is proven by unit tests and one manual pty run**, not
-   yet by an automated test in CI. Warp's own renderer and a live terminal
-   resize have not been exercised by hand; the pty run used a forced size.
+6. **Terminal restoration is proven automatically on Unix**, by a test that runs
+   the client under a real pty and reads the bytes. The Windows equivalent needs
+   ConPTY and has not been written. Warp's own renderer and a live terminal
+   resize have not been exercised by hand; the pty runs use a forced size.
 7. **The secret scan was previously scanning nothing.** It walks the commit
    range of a push, which the default shallow checkout could not resolve, so it
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
@@ -91,11 +91,12 @@ These are real and none of them is hidden anywhere else:
 
 ## Next actions, in order
 
-1. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
+1. Password files and service files, which are needed whichever driver is used
+   and which ADR-0009 sequences first.
+2. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
    including the Unix socket path (T051, T052). CI proves it builds and its
    tests pass; it does not prove the interface is usable there.
-2. Add subprocess evidence for exit codes 5, 6 and 8 (T054).
-3. Add an automated terminal-restoration test to CI (T055).
+3. A terminal-restoration test for Windows, which needs ConPTY (T055a).
 4. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
    on the current model.
 5. Then connection profiles, credential store, `.pgpass`, service files.

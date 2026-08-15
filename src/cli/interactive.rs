@@ -446,6 +446,11 @@ fn starter_query() -> &'static str {
 }
 
 /// Connects, runs SQL once, and closes. Used by `query`.
+///
+/// Ctrl+C asks the server to cancel rather than killing the process. A script
+/// that interrupts a long statement gets the documented cancellation exit code
+/// and a statement that is actually stopped, instead of a half-run statement and
+/// a signal death.
 pub async fn execute_once(
     target: ConnectionTarget,
     config: &Config,
@@ -454,7 +459,22 @@ pub async fn execute_once(
 ) -> Result<Execution, Diagnostic> {
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
     let session = session::connect(&target, timeout).await?;
-    Ok(session.execute(&sql, row_cap, JobId(1)).await)
+    let cancel = session.cancel_handle();
+
+    let execution = session.execute(&sql, row_cap, JobId(1));
+    tokio::pin!(execution);
+
+    tokio::select! {
+        result = &mut execution => Ok(result),
+        signal = tokio::signal::ctrl_c() => {
+            if signal.is_ok() {
+                // Ask once. Whether it stopped is the server's answer to give,
+                // so the statement is still awaited either way.
+                let _ = cancel.cancel().await;
+            }
+            Ok(execution.await)
+        }
+    }
 }
 
 /// Tests a connection target, reporting each stage that can be told apart.

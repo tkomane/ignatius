@@ -10,6 +10,14 @@ use crate::connection::ConnectionTarget;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use tokio_postgres::error::{DbError, ErrorPosition, SqlState};
 
+/// How the driver renders any TLS-class failure.
+///
+/// Matched by text because the driver's error kind is private. The string is
+/// pinned by a test that asks the driver for a real TLS failure, so an upstream
+/// change to the wording fails the build rather than silently reclassifying
+/// every TLS problem as a network one.
+const TLS_KIND_MESSAGE: &str = "error performing TLS handshake";
+
 /// Builds a diagnostic for a failure while connecting.
 #[must_use]
 pub fn from_connect_error(err: &tokio_postgres::Error, target: &ConnectionTarget) -> Diagnostic {
@@ -39,6 +47,28 @@ pub fn from_connect_error(err: &tokio_postgres::Error, target: &ConnectionTarget
             .technical("sslmode", target.sslmode.as_str())
             .technical("Requested guarantee", target.sslmode.guarantee())
             .technical("TLS error", tls.to_string());
+    }
+
+    // A server that refuses TLS outright never reaches the rustls layer, so
+    // there is no rustls error to find. The driver still classifies it as a TLS
+    // failure, and its own wording for that class is what is matched here. A
+    // refusal to encrypt must not be reported as a network problem: the network
+    // worked, and the answer was no.
+    if err.to_string() == TLS_KIND_MESSAGE {
+        let detail = std::error::Error::source(err).map_or_else(
+            || "the server would not establish TLS".to_owned(),
+            std::string::ToString::to_string,
+        );
+        return Diagnostic::new(
+            DiagnosticKind::Tls,
+            "TLS could not be established",
+            attempted,
+        )
+        .likely_cause(detail.clone())
+        .next_action(tls_action(target))
+        .technical("sslmode", target.sslmode.as_str())
+        .technical("Requested guarantee", target.sslmode.guarantee())
+        .technical("TLS error", detail);
     }
 
     let io = find_source::<std::io::Error>(err);

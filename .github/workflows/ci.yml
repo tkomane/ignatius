@@ -45,8 +45,10 @@ jobs:
           toolchain: "1.97.1"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo build --all-targets
-      - name: Unit, layout and CLI contract tests
-        run: cargo test --lib --test cli_contract
+      - name: Unit, layout, CLI contract and terminal restoration tests
+        # The restoration test allocates a real pty. It compiles to nothing on
+        # Windows, where the equivalent needs ConPTY and is still open work.
+        run: cargo test --lib --test cli_contract --test terminal_restore
       - name: Terminal restoration and startup smoke test
         shell: bash
         run: |
