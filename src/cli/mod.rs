@@ -264,6 +264,15 @@ pub struct ConnectionOptions {
     /// Enforced by PostgreSQL itself, not by guessing at what a statement does.
     #[arg(long)]
     pub read_only: bool,
+
+    /// Use a named connection from the configuration file.
+    ///
+    /// `--profile orders-prod` and the shorthand `@orders-prod` are the same
+    /// thing. A profile cannot be combined with a connection target: both are
+    /// ways of saying where to connect, and choosing between them silently
+    /// would be worse than asking.
+    #[arg(long, value_name = "NAME")]
+    pub profile: Option<String>,
 }
 
 impl ConnectionOptions {
@@ -295,6 +304,120 @@ impl ConnectionOptions {
             environment,
         })
     }
+
+    /// Applies a named connection to these arguments.
+    ///
+    /// A flag the user typed always wins: the profile fills in what was not
+    /// said, which is what makes `connect @orders-prod --read-only` mean the
+    /// obvious thing.
+    fn apply_profile(
+        &self,
+        args: &mut ConnectionArgs,
+        profile: &crate::config::schema::Profile,
+        name: &str,
+    ) -> Result<(), Diagnostic> {
+        profile.validate(name)?;
+        if args.host.is_none() {
+            args.host.clone_from(&profile.host);
+        }
+        if args.port.is_none() {
+            args.port = profile.port;
+        }
+        if args.dbname.is_none() {
+            args.dbname.clone_from(&profile.dbname);
+        }
+        if args.username.is_none() {
+            args.username.clone_from(&profile.user);
+        }
+        if args.sslmode.is_none()
+            && let Some(text) = &profile.sslmode
+        {
+            args.sslmode = Some(SslMode::parse(text).map_err(|message| {
+                Diagnostic::new(
+                    DiagnosticKind::Config,
+                    format!("profile {name:?} has an sslmode this build does not know"),
+                    "reading connection profiles",
+                )
+                .likely_cause(message)
+                .next_action("use verify-full for remote databases")
+            })?);
+        }
+        if args.environment.is_none()
+            && let Some(text) = &profile.environment
+        {
+            args.environment = Some(Environment::parse(text).map_err(|message| {
+                Diagnostic::new(
+                    DiagnosticKind::Config,
+                    format!("profile {name:?} has an environment this build does not know"),
+                    "reading connection profiles",
+                )
+                .likely_cause(message)
+                .next_action(
+                    "use local, development, test, staging, production, or a name of your own",
+                )
+            })?);
+        }
+        // A profile can only add read-only, never take it away: a flag that
+        // makes a session safer must not be undone by a file.
+        args.read_only = args.read_only || profile.read_only;
+        Ok(())
+    }
+}
+
+/// The connection target and arguments after a profile has been applied.
+///
+/// Returns the target to connect to, which is `None` when a profile said
+/// everything. A profile and a target together are refused rather than merged:
+/// both say where to connect, and choosing between them quietly would be worse
+/// than asking.
+pub(crate) fn resolve_target_and_profile<'a>(
+    target: Option<&'a str>,
+    options: &ConnectionOptions,
+    config: &crate::config::Config,
+) -> Result<(Option<&'a str>, ConnectionArgs), Diagnostic> {
+    let mut args = options.to_args()?;
+
+    // `@name` is a profile reference. A database really named `@x` is still
+    // reachable, through a full connection string, and that is the trade: the
+    // shorthand is worth more than the name nobody has.
+    let (target, named) = match (target, options.profile.as_deref()) {
+        (Some(text), Some(flag)) if text.strip_prefix('@') == Some(flag) => (None, Some(flag)),
+        (Some(_), Some(_)) => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "a connection target and --profile were both given",
+                "choosing where to connect",
+            )
+            .likely_cause("both say where to connect, and they may not agree")
+            .next_action("give one of them"));
+        }
+        (Some(text), None) => match text.strip_prefix('@') {
+            Some(name) => (None, Some(name)),
+            None => (Some(text), None),
+        },
+        (None, flag) => (None, flag),
+    };
+
+    if let Some(name) = named {
+        let Some(profile) = config.profiles.get(name) else {
+            let known: Vec<&str> = config.profiles.keys().map(String::as_str).collect();
+            let listing = if known.is_empty() {
+                "no profiles are defined in the configuration file".to_owned()
+            } else {
+                format!("it defines: {}", known.join(", "))
+            };
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} is not in the configuration file"),
+                "reading connection profiles",
+            )
+            .likely_cause(listing)
+            .next_action("check the spelling, or add the profile"));
+        };
+        options.apply_profile(&mut args, profile, name)?;
+    }
+
+    Ok((target, args))
 }
 
 /// Configuration sub-commands.
@@ -546,6 +669,10 @@ fn config_command(
         }
         ConfigAction::Validate => {
             let loaded = config::load(paths)?;
+            // Everything the client would refuse at startup is checked here, or
+            // the command would bless a file that then fails to open. The key
+            // bindings are the part whose validity is more than TOML shape.
+            crate::ui::keymap::Keymap::from_config(&loaded.config.keys)?;
             writeln!(out, "Configuration is valid.").map_err(io_diagnostic)?;
             if let Some((from, to)) = loaded.pending_migration {
                 writeln!(
@@ -672,9 +799,10 @@ fn query_command(
     let row_cap = request
         .max_rows
         .unwrap_or(loaded.config.query.max_buffered_rows);
-    let args = request.connection.to_args()?;
+    let (requested, args) =
+        resolve_target_and_profile(request.target, request.connection, &loaded.config)?;
     let target = crate::connection::resolve(
-        request.target,
+        requested,
         &args,
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
@@ -794,9 +922,9 @@ fn plain_command(
     err: &mut impl Write,
 ) -> Result<ExitCode, Diagnostic> {
     let loaded = config::load(paths)?;
-    let args = connection.to_args()?;
+    let (requested, args) = resolve_target_and_profile(target, connection, &loaded.config)?;
     let resolved = crate::connection::resolve(
-        target,
+        requested,
         &args,
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
@@ -888,9 +1016,9 @@ fn check_command(
     out: &mut impl Write,
 ) -> Result<ExitCode, Diagnostic> {
     let loaded = config::load(paths)?;
-    let args = connection.to_args()?;
+    let (requested, args) = resolve_target_and_profile(target, connection, &loaded.config)?;
     let resolved = crate::connection::resolve(
-        target,
+        requested,
         &args,
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
@@ -1135,6 +1263,184 @@ mod tests {
         let code = config_command(&ConfigAction::Validate, &paths, &mut out).expect("run");
         assert_eq!(code, ExitCode::Success);
         assert!(String::from_utf8(out).expect("utf8").contains("valid"));
+    }
+
+    fn with_profiles(toml: &str) -> crate::config::Config {
+        toml::from_str(toml).expect("a valid configuration")
+    }
+
+    fn options(profile: Option<&str>) -> ConnectionOptions {
+        ConnectionOptions {
+            profile: profile.map(str::to_owned),
+            ..ConnectionOptions::default()
+        }
+    }
+
+    #[test]
+    fn a_profile_fills_in_what_was_not_said_and_pins_the_environment() {
+        // The classification is the reason profiles exist: it cannot be
+        // forgotten once it is written down, and forgetting it is what puts a
+        // write on the wrong database.
+        let config = with_profiles(
+            "[profiles.orders-prod]\n\
+             host = \"db.example.net\"\n\
+             port = 6432\n\
+             dbname = \"orders\"\n\
+             user = \"app\"\n\
+             sslmode = \"verify-full\"\n\
+             environment = \"production\"\n",
+        );
+
+        let (target, args) =
+            resolve_target_and_profile(Some("@orders-prod"), &options(None), &config)
+                .expect("resolves");
+        assert!(target.is_none(), "the profile is the target");
+        assert_eq!(args.host.as_deref(), Some("db.example.net"));
+        assert_eq!(args.port, Some(6432));
+        assert_eq!(args.dbname.as_deref(), Some("orders"));
+        assert_eq!(args.username.as_deref(), Some("app"));
+        assert_eq!(args.sslmode, Some(SslMode::VerifyFull));
+        assert_eq!(args.environment, Some(Environment::Production));
+        assert!(args.environment.expect("set").is_production());
+
+        // The flag and the shorthand are the same thing.
+        let (_, from_flag) =
+            resolve_target_and_profile(None, &options(Some("orders-prod")), &config)
+                .expect("resolves");
+        assert_eq!(from_flag.host, args.host);
+    }
+
+    #[test]
+    fn a_flag_the_user_typed_beats_the_profile_and_safety_only_adds() {
+        let config = with_profiles(
+            "[profiles.p]\nhost = \"from-profile\"\ndbname = \"orders\"\nread-only = true\n",
+        );
+        let typed = ConnectionOptions {
+            host: Some("from-the-flag".to_owned()),
+            ..options(Some("p"))
+        };
+        let (_, args) = resolve_target_and_profile(None, &typed, &config).expect("resolves");
+        assert_eq!(args.host.as_deref(), Some("from-the-flag"));
+        assert_eq!(
+            args.dbname.as_deref(),
+            Some("orders"),
+            "the rest is filled in"
+        );
+        assert!(
+            args.read_only,
+            "a profile can make a session safer; nothing here can make it less safe"
+        );
+
+        // And --read-only on a profile that does not ask for it still applies.
+        let config = with_profiles("[profiles.p]\nhost = \"h\"\n");
+        let read_only = ConnectionOptions {
+            read_only: true,
+            ..options(Some("p"))
+        };
+        let (_, args) = resolve_target_and_profile(None, &read_only, &config).expect("resolves");
+        assert!(args.read_only);
+    }
+
+    #[test]
+    fn a_profile_and_a_target_together_are_refused_rather_than_merged() {
+        let config = with_profiles("[profiles.p]\nhost = \"h\"\n");
+        let error = resolve_target_and_profile(
+            Some("postgres://elsewhere/db"),
+            &options(Some("p")),
+            &config,
+        )
+        .expect_err("must refuse");
+        assert_eq!(error.exit_code(), crate::ExitCode::Usage);
+        assert!(
+            error
+                .next_action
+                .unwrap_or_default()
+                .contains("one of them")
+        );
+
+        // Naming the same profile twice is not a disagreement, so it is allowed.
+        let (target, args) =
+            resolve_target_and_profile(Some("@p"), &options(Some("p")), &config).expect("resolves");
+        assert!(target.is_none());
+        assert_eq!(args.host.as_deref(), Some("h"));
+    }
+
+    #[test]
+    fn an_unknown_profile_lists_the_ones_that_exist() {
+        let config = with_profiles(
+            "[profiles.orders-prod]\nhost = \"a\"\n\n[profiles.orders-dev]\nhost = \"b\"\n",
+        );
+        let error = resolve_target_and_profile(Some("@orders-stage"), &options(None), &config)
+            .expect_err("must refuse");
+        let cause = error.likely_cause.unwrap_or_default();
+        assert!(cause.contains("orders-prod"), "{cause}");
+        assert!(cause.contains("orders-dev"), "{cause}");
+
+        let empty = crate::config::Config::default();
+        let error = resolve_target_and_profile(Some("@anything"), &options(None), &empty)
+            .expect_err("must refuse");
+        assert!(
+            error
+                .likely_cause
+                .unwrap_or_default()
+                .contains("no profiles"),
+            "an empty file says so rather than listing nothing"
+        );
+    }
+
+    #[test]
+    fn a_profile_that_tries_to_hold_a_password_is_refused_by_name() {
+        for field in ["password", "pgpassword", "sslpassword"] {
+            let config = with_profiles(&format!(
+                "[profiles.p]\nhost = \"h\"\n{field} = \"hunter2\"\n"
+            ));
+            let error = resolve_target_and_profile(Some("@p"), &options(None), &config)
+                .expect_err("refuse");
+            assert_eq!(error.exit_code(), crate::ExitCode::Config);
+            assert!(
+                error.headline.contains("password"),
+                "the refusal names what it is about: {}",
+                error.headline
+            );
+            assert!(
+                !format!("{error:?}").contains("hunter2"),
+                "and never repeats the value back"
+            );
+            let action = error.next_action.clone().unwrap_or_default();
+            assert!(action.contains(".pgpass"), "{action}");
+        }
+
+        // A password file is a path rather than a secret, and is still refused
+        // here, with the reason and the route that does work.
+        let config = with_profiles("[profiles.p]\npassfile = \"/tmp/x\"\n");
+        let error =
+            resolve_target_and_profile(Some("@p"), &options(None), &config).expect_err("refuse");
+        assert!(error.next_action.unwrap_or_default().contains("PGPASSFILE"));
+
+        // Anything else unknown is refused with the fields that exist.
+        let config = with_profiles("[profiles.p]\nhosst = \"h\"\n");
+        let error =
+            resolve_target_and_profile(Some("@p"), &options(None), &config).expect_err("refuse");
+        assert!(error.likely_cause.unwrap_or_default().contains("dbname"));
+    }
+
+    #[test]
+    fn a_profile_with_a_value_this_build_cannot_read_says_which_one() {
+        let config = with_profiles("[profiles.p]\nsslmode = \"maybe\"\n");
+        let error =
+            resolve_target_and_profile(Some("@p"), &options(None), &config).expect_err("refuse");
+        assert!(error.headline.contains("sslmode"), "{}", error.headline);
+        assert!(
+            error
+                .next_action
+                .unwrap_or_default()
+                .contains("verify-full")
+        );
+
+        let config = with_profiles("[profiles.p]\nenvironment = \"\"\n");
+        let error =
+            resolve_target_and_profile(Some("@p"), &options(None), &config).expect_err("refuse");
+        assert!(error.headline.contains("environment"), "{}", error.headline);
     }
 
     #[test]

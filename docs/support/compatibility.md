@@ -26,8 +26,10 @@ exercised, so they are expected to work rather than known to.
 | Cloud token authentication (for example Entra ID) | Not supported |
 
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
-or a `.pgpass` password file. The OS credential store and password prompting are
-not implemented yet.
+a `.pgpass` password file, or the prompt: when the server asks for a password and
+none was found, the full-screen client asks for one and tries again. Plain mode
+does not prompt, and the OS credential store does not exist yet. A connection
+profile never holds a password and says so if one is written into it.
 
 A password file that is readable by anyone but its owner is **not used**, and the
 client says so and gives the `chmod` that fixes it. A file that is found but
@@ -86,9 +88,17 @@ Windows.
 **Reported rather than ignored**: any other keyword in a connection string or a
 service file that this build does not apply.
 
-Precedence, highest first: command-line arguments, the connection string, the
-named service, environment variables, then built-in defaults. The password has
-its own order: the connection string, then `PGPASSWORD`, then the password file.
+Precedence, highest first: command-line arguments, then a named profile or a
+connection string, then the named service, then environment variables, then
+built-in defaults. A profile and a connection target may not both be given: both
+say where to connect, and choosing between them quietly would be worse than
+asking. The password has its own order: the connection string, then `PGPASSWORD`,
+then the password file, then the prompt.
+
+**Profiles**: a `[profiles]` table in `config.toml` names a connection, reached
+as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
+`user`, `sslmode`, `environment`, `read-only` and `description`, and nothing
+else. It never carries a password.
 
 ## Differences from `psql`
 

@@ -103,6 +103,29 @@ makes sense to an eye, so it works in `TERM=dumb`, stays in your scrollback, and
 can be driven by a pipe. The prompt carries the database, the production marker
 and the transaction state as words.
 
+## Named connections
+
+```toml
+# ~/.config/ignatius/config.toml
+[profiles.orders-prod]
+host = "db.example.net"
+port = 6432
+dbname = "orders"
+user = "app"
+sslmode = "verify-full"
+environment = "production"
+```
+
+```bash
+ignatius connect @orders-prod        # or --profile orders-prod
+```
+
+The classification is the point. Written down once, the production write guard
+applies every time, without anyone having to remember a flag on the day it
+matters. Flags still win over the profile, and a profile can only make a session
+safer. A profile never holds a password: use a password file, the environment, or
+type it when the client asks.
+
 ## What it remembers
 
 Interactive sessions record the statements that run, on this machine only.
@@ -130,10 +153,10 @@ ignatius version --verbose      # version, revision, build identity, target
 
 ## What it does not do yet
 
-Connection profiles, the OS credential store, `.pgpass`, service files,
-`sslmode=verify-ca`, client certificates, an object explorer, query history and
-export. `docs/support/compatibility.md` is the authoritative list, and the client
-tells you at the point of use rather than failing quietly.
+An OS credential store, GSSAPI and Windows integrated authentication, copying a
+value to the clipboard, and a password prompt in plain mode.
+`docs/support/compatibility.md` is the authoritative list, and the client tells
+you at the point of use rather than failing quietly.
 
 ## Documentation
 

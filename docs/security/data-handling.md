@@ -6,8 +6,11 @@ What this program stores, where, for how long, and what it never stores.
 
 - **Result rows.** Nothing is written to disk unless the user explicitly exports.
   There is no cache and no crash-recovery copy of results.
-- **Passwords.** No credential is written to the configuration file. Profiles
-  (Feature 002) will store a reference to a credential, never the credential.
+- **Passwords.** No credential is written to the configuration file. A connection
+  profile that names `password`, `pgpassword` or `sslpassword` is refused, by
+  name, with the routes that do exist; the refusal never repeats the value back.
+  A profile that references a credential held elsewhere is a later feature, and
+  a reference is not a secret.
 - **A password typed at the prompt.** When the server asks for one, what is
   typed lives in memory for as long as it takes to try the connection again and
   is then dropped. It is never written to the configuration file, never recorded

@@ -8,6 +8,14 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Named connections. A `[profiles]` table in `config.toml` says where a database
+  is and how it is classified; `connect @orders-prod` or `--profile orders-prod`
+  uses it. The point is not the typing saved but the classification remembered:
+  `environment = "production"` written down once means the write guard applies
+  every time, without anyone having to remember the flag on the day it matters.
+  Flags still win over the profile, and a profile can only make a session safer.
+  A profile that tries to hold a password is refused by name, with the routes
+  that do exist, and the value is never repeated back.
 - When the server asks for a password and none was found, the client asks back
   instead of only reporting it. The field shows how many characters have been
   typed and nothing else; what is typed goes into one connection attempt and is

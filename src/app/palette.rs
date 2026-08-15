@@ -41,6 +41,12 @@ pub struct Palette {
     pub entries: Vec<PaletteEntry>,
     /// Selected position within the current matches.
     pub selected: usize,
+    /// Whether what it lists is still being read.
+    ///
+    /// The definition panel opens while it waits rather than after; so does
+    /// this, for the same reason: a key that appears to do nothing is a key
+    /// people press again.
+    pub loading: bool,
     /// What this palette is for, shown in its title.
     ///
     /// The same widget searches commands, objects and past statements. Saying
@@ -109,6 +115,7 @@ impl Palette {
             query: String::new(),
             entries,
             selected: 0,
+            loading: false,
             purpose: Purpose::GoTo,
         }
     }
@@ -128,6 +135,15 @@ impl Palette {
         Self {
             purpose: Purpose::Dependencies,
             ..Self::new(entries)
+        }
+    }
+
+    /// Opens the dependency palette before the answer has arrived.
+    #[must_use]
+    pub fn awaiting_dependencies() -> Self {
+        Self {
+            loading: true,
+            ..Self::over_dependencies(Vec::new())
         }
     }
 

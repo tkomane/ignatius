@@ -26,7 +26,7 @@ pub enum ConfigSource {
 }
 
 /// A successfully loaded configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
     /// The effective configuration.
     pub config: Config,

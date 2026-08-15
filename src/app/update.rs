@@ -151,6 +151,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     ));
                 }
                 Err(error) => {
+                    // The waiting palette goes with the answer that never came.
+                    model.palette = None;
                     model.error = Some(error);
                 }
             }
@@ -486,6 +488,9 @@ fn show_dependencies(model: &mut Model) -> Vec<Effect> {
     };
     let request = model.tree.allocate_request();
     model.pending_dependencies = Some(request);
+    // Opened now, filled when the answer arrives. A key that appears to do
+    // nothing for a second is a key people press twice.
+    model.palette = Some(crate::app::palette::Palette::awaiting_dependencies());
     vec![Effect::LoadDependencies {
         request,
         object: Box::new(object),
@@ -987,6 +992,10 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::Dismiss => {
             model.palette = None;
+            // Whatever it was waiting for is no longer wanted, so its answer
+            // will be discarded rather than reopening a palette nobody asked
+            // for a second time.
+            model.pending_dependencies = None;
             Vec::new()
         }
         Action::Quit => {
@@ -1901,7 +1910,16 @@ mod tests {
             panic!("expected a dependency load");
         };
         let stale = *request;
-        model.pending_dependencies = None;
+        assert!(
+            model.palette.as_ref().is_some_and(|p| p.loading),
+            "the palette opens while it waits, as the definition panel does"
+        );
+
+        // Esc gives up on it, and the answer that arrives afterwards belongs to
+        // nothing.
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.palette.is_none());
+        assert!(model.pending_dependencies.is_none());
 
         update(
             &mut model,

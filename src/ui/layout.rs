@@ -1863,7 +1863,12 @@ fn render_palette(
         lines.push(line);
     }
 
-    if matches.is_empty() {
+    if palette.loading {
+        lines.push(Line::from(Span::styled(
+            " Reading the catalogue...",
+            theme.style(Token::Muted),
+        )));
+    } else if matches.is_empty() {
         lines.push(Line::from(Span::styled(
             palette.purpose.empty_message(),
             theme.style(Token::Muted),
