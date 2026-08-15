@@ -58,6 +58,28 @@ stateDiagram-v2
 version, backend pid, search path, read-only posture and transport state. Those
 facts come from the server, not from what was requested.
 
+### The object tree's connection
+
+Once the session is up, a second connection is opened for the object tree. It is
+made from the same resolved target - the same host, the same credential route,
+the same TLS outcome - moved rather than derived again, so there is no way for
+the two to disagree about how they reached the server.
+
+Two things differ, on purpose, and both are visible in `pg_stat_activity`:
+
+| Difference | Why |
+| --- | --- |
+| `application_name` gains ` (objects)` | So someone reading the server's activity can tell the tree from the query |
+| The session is read-only | Reading the catalogue is all it ever does, and the server is what enforces that rather than a guess here |
+
+Failing to open it is not a failure of the session. The tree falls back to the
+connection that is already there, and the header says `[objects: shared
+connection]`, because a connection limit or a pooler is a real place to be and
+the reason the tree can be slow behind a long query is worth knowing.
+
+`ignatius connect --check` states that the interactive client opens this second
+connection, since a second connection is a real cost on a constrained server.
+
 ## Terminal lifecycle
 
 Acquisition happens once, guarded by RAII, after a panic hook is installed.

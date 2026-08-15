@@ -177,7 +177,19 @@ async fn event_loop(
     // drawn and responsive while it happens.
     let session: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
-    spawn_connect(tx.clone(), Arc::clone(&session), target, config.clone());
+    // The tree gets a connection of its own so a long statement cannot delay it.
+    // It is opened from the same resolved target, so it reaches the same server
+    // by the same route with the same credentials and the same protection; the
+    // only differences are deliberate and visible on the server.
+    let metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
+        Arc::new(tokio::sync::RwLock::new(None));
+    spawn_connect(
+        tx.clone(),
+        Arc::clone(&session),
+        Arc::clone(&metadata),
+        target,
+        config.clone(),
+    );
 
     // Reading the history is a file read, not a query, so it happens once here
     // and the interface never waits on it.
@@ -208,17 +220,28 @@ async fn event_loop(
                     spawn_cancel(tx.clone(), Arc::clone(&session), job);
                 }
                 Effect::LoadSchemas => {
-                    spawn_load_schemas(tx.clone(), Arc::clone(&session));
+                    spawn_load_schemas(tx.clone(), reader(&session, &metadata));
                 }
                 Effect::LoadMetadata {
                     request,
                     path,
                     query,
                 } => {
-                    spawn_load_metadata(tx.clone(), Arc::clone(&session), request, path, query);
+                    spawn_load_metadata(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        path,
+                        query,
+                    );
                 }
                 Effect::LoadDefinition { request, object } => {
-                    spawn_load_definition(tx.clone(), Arc::clone(&session), request, *object);
+                    spawn_load_definition(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        *object,
+                    );
                 }
                 Effect::LoadHistory => {
                     let _ = tx.send(Message::HistoryLoaded(
@@ -404,6 +427,7 @@ fn spawn_signal_watcher(tx: mpsc::UnboundedSender<Message>) {
 fn spawn_connect(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     target: ConnectionTarget,
     config: Config,
 ) {
@@ -417,11 +441,51 @@ fn spawn_connect(
                 // The tree is populated as soon as there is something to read it
                 // from, so the sidebar is useful the moment it appears.
                 let _ = tx.send(Message::Action(crate::app::Action::ReloadObjects));
+                spawn_metadata_connect(tx, metadata, target, timeout);
             }
             Err(diagnostic) => {
                 let _ = tx.send(Message::ConnectionFailed(Box::new(diagnostic)));
             }
         }
+    });
+}
+
+/// Opens the connection the object tree reads on.
+///
+/// The target is the one that was already resolved, cloned rather than derived
+/// again: the same host, the same credential route, the same TLS outcome. Two
+/// things are changed on purpose, and both are visible on the server:
+///
+/// - the `application_name` says which connection this is, so someone reading
+///   `pg_stat_activity` can tell the tree from the query;
+/// - the session is asked to be read-only, because reading the catalogue is all
+///   it ever does.
+///
+/// Failing to open it is not a failure of the session. The tree falls back to
+/// the connection that is already there and says which one it is using, because
+/// a server with a connection limit is a real place and this is a second
+/// connection to it.
+fn spawn_metadata_connect(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    target: ConnectionTarget,
+    timeout: Duration,
+) {
+    let _ = tx.send(Message::MetadataConnection(
+        crate::app::model::MetadataLink::Opening,
+    ));
+    tokio::spawn(async move {
+        let mut target = target;
+        target.application_name = format!("{} (objects)", target.application_name);
+        target.read_only = true;
+        let link = match session::connect(&target, timeout).await {
+            Ok(opened) => {
+                *slot.write().await = Some(Arc::new(opened));
+                crate::app::model::MetadataLink::Dedicated
+            }
+            Err(diagnostic) => crate::app::model::MetadataLink::Unavailable(diagnostic.headline),
+        };
+        let _ = tx.send(Message::MetadataConnection(link));
     });
 }
 
@@ -490,10 +554,10 @@ fn spawn_load_metadata(
         let Some(session) = slot.read().await.clone() else {
             return;
         };
-        // Metadata shares the session's connection, so a load issued while a
-        // long statement runs waits behind it on the server. The interface stays
-        // responsive and the node shows that it is waiting; a dedicated
-        // metadata connection is Feature 005 hardening.
+        // This runs on the tree's own connection where there is one, so a long
+        // statement on the session cannot delay it. Where there is not, it
+        // shares and waits behind that statement on the server; the interface
+        // stays responsive either way and the node shows that it is waiting.
         let payload = match query {
             MetadataQuery::Schemas => session.schemas().await.map(MetadataPayload::Schemas),
             MetadataQuery::Objects { schema, kind } => session
@@ -529,7 +593,23 @@ fn spawn_load_metadata(
     });
 }
 
-/// Reads an object's definition on the shared session.
+/// The connection the catalogue is read on: its own where there is one.
+///
+/// Falling back to the session's connection rather than failing is the point.
+/// A tree that waits behind a long query is worse than one that does not, and
+/// both are better than no tree.
+fn reader(
+    session: &Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    metadata: &Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+) -> Arc<tokio::sync::RwLock<Option<Arc<Session>>>> {
+    if metadata.try_read().is_ok_and(|held| held.is_some()) {
+        Arc::clone(metadata)
+    } else {
+        Arc::clone(session)
+    }
+}
+
+/// Reads an object's definition.
 fn spawn_load_definition(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
@@ -852,6 +932,16 @@ pub async fn probe_target(
             "see docs/support/compatibility.md for what this release supports",
         ));
     }
+
+    // A second connection is a real cost on a server with a connection limit or
+    // behind a pooler, so the command that explains what connecting does says
+    // that the interactive client opens one.
+    checks.push(Check::ok(
+        "object tree connection",
+        "the interactive client opens a second, read-only connection for the \
+         object tree, so a long query cannot delay it. If that connection \
+         cannot be opened, the tree shares this one and says so.",
+    ));
 
     Ok(checks)
 }

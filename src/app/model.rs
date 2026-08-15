@@ -104,6 +104,39 @@ impl ConnectionState {
     }
 }
 
+/// Where the object tree reads from.
+///
+/// A second connection to the same server is a real fact about resource use, so
+/// which one is in use is shown rather than assumed. On a server with a
+/// connection limit, or behind a pooler, someone is entitled to know that this
+/// client opened two.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MetadataLink {
+    /// The tree shares the session's connection, so a load waits behind a long
+    /// statement on the server.
+    #[default]
+    Shared,
+    /// A second connection is being opened for it.
+    Opening,
+    /// The tree has its own connection and cannot be delayed by a query.
+    Dedicated,
+    /// A second connection could not be opened, and why.
+    Unavailable(String),
+}
+
+impl MetadataLink {
+    /// A short label for the object pane's title. Always words.
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Shared => "shared connection",
+            Self::Opening => "opening its own connection",
+            Self::Dedicated => "own connection",
+            Self::Unavailable(_) => "shared connection, its own was refused",
+        }
+    }
+}
+
 /// What the query engine is doing.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum QueryPhase {
@@ -230,6 +263,8 @@ pub struct Model {
     pub editor: Editor,
     /// Connection state.
     pub connection: ConnectionState,
+    /// Where the object tree reads from.
+    pub metadata_link: MetadataLink,
     /// What the query engine is doing.
     pub phase: QueryPhase,
     /// The most recent completed execution.

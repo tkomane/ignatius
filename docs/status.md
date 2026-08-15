@@ -6,7 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: indexes and extensions in the object tree, and object
+**Current feature**: the object tree has a connection of its own, so a long
+query cannot delay it. Same resolved target, moved rather than re-derived, with
+two deliberate differences the server can see: an `application_name` saying it is
+the tree, and a read-only session. If it cannot be opened the tree shares the
+session's connection and the header says so.
+
+**Previous**: indexes and extensions in the object tree, and object
 definitions. `Ctrl+K d` on an object in the tree
 shows what it is, coloured by the same lexer that colours the editor. Views,
 indexes and functions come from PostgreSQL's own renderers; a table is assembled
@@ -115,6 +121,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| The tree's connection is separate and read-only | Integration test: two backend pids, and a write refused with SQLSTATE 25006 |
 | An object's definition is what the server renders | Integration tests over a view, a function and a table |
 | A hostile object name is safe to describe | Integration test: the definition is read, `orders` still exists |
 | A credential never reaches the history file | Subprocess test: the statement runs, the file does not hold it |
@@ -211,12 +218,12 @@ These are real and none of them is hidden anywhere else:
 5. **Decision needed**: how a value gets copied out. The system clipboard needs a
    crate and platform support; OSC 52 writes the value into the terminal, where
    it may be logged by the emulator. Neither is obviously right for a tool that
-   handles other people's data, so it is the owner's call. Result filtering does
-   not depend on it and can go first.
+   handles other people's data, so it is the owner's call. It is the only unbuilt
+   part of Feature 004.
 6. Migrate the PostgreSQL adapter to libpq (ADR-0009), before profiles harden
    on the current model.
 7. Then connection profiles and an OS credential store. Password files and
    service files are already done.
-8. Object explorer hardening: DDL inspection, dependencies, indexes and
-   extensions in the tree, and a dedicated metadata connection so a long query
-   cannot delay it.
+8. Dependency navigation: what an object depends on and what depends on it. The
+   rest of the object explorer - definitions, indexes and extensions in the tree,
+   and the tree's own connection - is done.
