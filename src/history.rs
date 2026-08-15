@@ -27,6 +27,12 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// How many past statements a session keeps in memory for its search.
+///
+/// The file may be far longer. This is a real bound, enforced when the history
+/// is read and again as statements are added, not a limit on what is drawn.
+pub const IN_MEMORY_LIMIT: usize = 200;
+
 /// How a recorded statement ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

@@ -73,9 +73,19 @@ impl Purpose {
     pub const fn empty_message(self) -> &'static str {
         match self {
             Self::GoTo => " Nothing matches that.",
-            Self::History => {
-                " No statement matches that. Statements that mention a credential are never recorded."
-            }
+            Self::History => " No statement matches that.",
+        }
+    }
+
+    /// A rule worth stating whenever this palette is open.
+    ///
+    /// The history's is here rather than in a message after each statement: this
+    /// is where someone goes looking for one that is not there.
+    #[must_use]
+    pub const fn standing_note(self) -> Option<&'static str> {
+        match self {
+            Self::GoTo => None,
+            Self::History => Some(" Statements that mention a credential are never recorded."),
         }
     }
 }

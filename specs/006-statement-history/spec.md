@@ -58,7 +58,9 @@ the file.
 **Acceptance Scenarios**:
 
 1. **Given** a statement that mentions a credential, **When** it runs, **Then**
-   it is not written, and the session is told why.
+   it is not written, and the session is told: a sentence on the message stream
+   in plain mode, and a marker in the header of the full-screen client that
+   lasts until the next statement is kept.
 2. **Given** `--no-history` or the in-client pause, **When** statements run,
    **Then** nothing is written and the interface says the session is not
    recording.
@@ -121,10 +123,14 @@ Someone wants to know what is on their disk.
 ### User experience
 
 - **UX-601**: Only what reached the file may appear in the interface as history.
-- **UX-602**: A statement refused for mentioning a credential MUST be reported,
-  because a silently missing entry is a mystery.
+- **UX-602**: A statement refused for mentioning a credential MUST be reported
+  where the user is already looking, because a silently missing entry is a
+  mystery. The rule itself MUST also be stated in the history search, which is
+  where someone goes looking for a statement that is not there.
 - **UX-603**: The reason nothing is listed MUST distinguish "nothing recorded
   yet" from "history is switched off".
+- **UX-604**: The number of statements a session holds in memory MUST be bounded
+  whether they arrive at load or one at a time.
 
 ## Success Criteria
 

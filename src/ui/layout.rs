@@ -449,6 +449,17 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
             format!("{}[history off]", presentation.icon(Icon::Info)),
             theme.style(Token::Info),
         ));
+    } else if model.history_note.is_some() {
+        // A statement the history refused. Saying so where the user already
+        // looks is the difference between a rule and a mystery.
+        spans.push(Span::styled(
+            presentation.glyphs.separator(),
+            theme.style(Token::Border),
+        ));
+        spans.push(Span::styled(
+            format!("{}[not in history]", presentation.icon(Icon::Info)),
+            theme.style(Token::Info),
+        ));
     }
 
     if let Some(elapsed) = model.last_elapsed {
@@ -1598,6 +1609,14 @@ fn render_palette(
             theme.style(Token::Muted),
         )));
     }
+    // The history's rule is stated where someone would go looking for a
+    // statement that is not there, whether or not anything matched.
+    if let Some(standing) = palette.purpose.standing_note() {
+        lines.push(Line::from(Span::styled(
+            standing,
+            theme.style(Token::Muted),
+        )));
+    }
 
     Paragraph::new(lines)
         .block(pane_block(
@@ -2306,6 +2325,13 @@ mod tests {
             "an ordinary session says nothing about it"
         );
 
+        // A statement the history refused is said out loud too, in the same
+        // place, and only until the next one is kept.
+        model.history_note = Some("Not added to history: this statement mentions a credential.");
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("[not in history]"), "{text}");
+        model.history_note = None;
+
         model.history_paused = true;
         let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
         assert!(text.contains("[history off]"), "{text}");
@@ -2337,6 +2363,10 @@ mod tests {
         assert!(text.contains("Esc to cancel"), "{text}");
         assert!(text.contains("SELECT count(*) FROM orders"), "{text}");
         assert!(text.contains("orders  ok"), "the outcome is shown: {text}");
+        assert!(
+            text.contains("mention a credential are never recorded"),
+            "the rule is stated where someone looks for a missing statement: {text}"
+        );
     }
 
     #[test]

@@ -120,15 +120,20 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
-        Message::HistoryLoaded(entries) => {
+        Message::HistoryLoaded(mut entries) => {
+            entries.truncate(crate::history::IN_MEMORY_LIMIT);
             model.history = entries;
             Vec::new()
         }
-        Message::HistoryRecorded(entry) => {
+        Message::HistoryRecorded { entry, recorded } => {
             // Only what actually reached the file appears here. A statement the
             // history refused must not be offered back as though it were kept.
+            model.history_note = recorded.note();
             if let Some(entry) = *entry {
                 model.history.insert(0, entry);
+                // The bound is enforced here as well as at load, so a long
+                // session cannot walk past it one statement at a time.
+                model.history.truncate(crate::history::IN_MEMORY_LIMIT);
             }
             Vec::new()
         }
@@ -1654,16 +1659,46 @@ mod tests {
         );
         assert_eq!(model.history.len(), 1);
 
-        // A statement the history refused is reported as nothing kept.
-        update(&mut model, Message::HistoryRecorded(Box::new(None)));
+        // A statement the history refused is reported as nothing kept, and the
+        // reason is carried so the interface can say it.
+        update(
+            &mut model,
+            Message::HistoryRecorded {
+                entry: Box::new(None),
+                recorded: crate::history::Recorded::LooksLikeACredential,
+            },
+        );
         assert_eq!(model.history.len(), 1, "nothing was added");
+        assert!(
+            model
+                .history_note
+                .is_some_and(|note| note.contains("credential")),
+            "a silently missing entry would be a mystery"
+        );
 
         update(
             &mut model,
-            Message::HistoryRecorded(Box::new(Some(history_entry("SELECT 2")))),
+            Message::HistoryRecorded {
+                entry: Box::new(Some(history_entry("SELECT 2"))),
+                recorded: crate::history::Recorded::Written,
+            },
         );
         assert_eq!(model.history.len(), 2);
         assert_eq!(model.history[0].sql, "SELECT 2", "newest first");
+        assert!(model.history_note.is_none(), "the note is not sticky");
+
+        // The in-memory list is bounded whether entries arrive at load or one
+        // at a time, so a long session cannot walk past the limit.
+        for index in 0..crate::history::IN_MEMORY_LIMIT * 2 {
+            update(
+                &mut model,
+                Message::HistoryRecorded {
+                    entry: Box::new(Some(history_entry(&format!("SELECT {index}")))),
+                    recorded: crate::history::Recorded::Written,
+                },
+            );
+        }
+        assert_eq!(model.history.len(), crate::history::IN_MEMORY_LIMIT);
     }
 
     #[test]

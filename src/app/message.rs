@@ -127,10 +127,17 @@ pub enum Message {
     },
     /// The statement history finished loading from disk.
     HistoryLoaded(Vec<crate::history::Entry>),
-    /// A statement was offered to the history. Carries the entry when one was
-    /// written, and nothing when it was not, so the interface never shows a
-    /// statement as recorded that is not on disk.
-    HistoryRecorded(Box<Option<crate::history::Entry>>),
+    /// A statement was offered to the history.
+    ///
+    /// Carries the entry when one was written, and nothing when it was not, so
+    /// the interface never shows a statement as recorded that is not on disk.
+    /// It also carries why, because a silently missing entry is a mystery.
+    HistoryRecorded {
+        /// The entry, when one reached the file.
+        entry: Box<Option<crate::history::Entry>>,
+        /// What happened to it.
+        recorded: crate::history::Recorded,
+    },
     /// A frame of elapsed time.
     ///
     /// The reducer reads no clock, so the runtime measures how long the current

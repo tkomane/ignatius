@@ -251,6 +251,9 @@ pub struct Model {
     pub history_paused: bool,
     /// Whether history is off in configuration, which the session cannot undo.
     pub history_disabled: bool,
+    /// Why the last statement was not recorded, when there is a reason worth
+    /// saying. Cleared by the next statement that is recorded.
+    pub history_note: Option<&'static str>,
     /// The SQL of the statement in flight, kept so it can be recorded when it
     /// finishes with an outcome worth recording.
     pub running_sql: Option<String>,
