@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "schema_version": 1,
+      "product_version": "0.1.0-preview.1",
+      "source_revision": "1111111111111111111111111111111111111111",
+      "source_state": "clean",
+      "build_identity": "ci-rehearsal-2026-08-16",
+      "target_rows": [
+        {
+          "target": "aarch64-apple-darwin",
+          "platform": "macos",
+          "architecture": "aarch64",
+          "coverage": "covered",
+          "artefact_name": "ignatius-0.1.0-preview.1-aarch64-apple-darwin.tar.gz"
+        }
+      ],
+      "artefacts": [
+        {
+          "name": "ignatius-0.1.0-preview.1-aarch64-apple-darwin.tar.gz",
+          "target": "aarch64-apple-darwin",
+          "format": "tar.gz",
+          "size_bytes": 1048576,
+          "checksum_algorithm": "sha256",
+          "checksum_status": "present",
+          "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_revision": "1111111111111111111111111111111111111111",
+          "build_identity": "ci-rehearsal-2026-08-16",
+          "signature_status": "not-configured",
+          "provenance_status": "not-configured"
+        }
+      ],
+      "notes_reference": {
+        "path": "CHANGELOG.md",
+        "entry": "[0.1.0-preview.1]"
+      },
+      "evidence_reference": {
+        "path": "release-evidence/0.1.0-preview.1/index.json",
+        "product_version": "0.1.0-preview.1",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "status": "incomplete"
+      },
+      "status": "candidate",
+      "state_history": [
+        {
+          "from": "draft",
+          "to": "candidate"
+        }
+      ]
+    }
+  ]
+}

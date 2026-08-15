@@ -6,7 +6,14 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: the statement history. Interactive sessions record what ran,
+**Current feature**: a filter over the result rows, on the same key that filters
+the object tree. It searches retained rows, which is all there is to search, and
+the count line says so: `matching 3 of 10000 retained rows, of 200000 returned`.
+Row numbers stay the rows' own, and the inspector and expanded view follow the
+selection to the real row. That leaves copying a value out as the only unbuilt
+part of Feature 004, and it is waiting on the clipboard decision.
+
+**Previous**: the statement history. Interactive sessions record what ran,
 `Ctrl+K s` searches it and puts a statement back in the editor, and every control
 over it is explicit: a credential-bearing statement is never written, recording
 pauses for a run (`--no-history`) or a session (`Ctrl+K v`), configuration can

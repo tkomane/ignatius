@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "schema_version": 1,
+      "product_version": "0.1.0-preview.1",
+      "source_revision": "3333333333333333333333333333333333333333",
+      "source_state": "clean",
+      "build_identity": "ci-rehearsal-2026-08-16",
+      "target_rows": [
+        {
+          "target": "x86_64-pc-windows-msvc",
+          "platform": "windows",
+          "architecture": "x86_64",
+          "coverage": "covered",
+          "artefact_name": "ignatius-0.1.0-preview.1-x86_64-pc-windows-msvc.zip"
+        }
+      ],
+      "artefacts": [
+        {
+          "name": "ignatius-0.1.0-preview.1-x86_64-pc-windows-msvc.zip",
+          "target": "x86_64-pc-windows-msvc",
+          "format": "zip",
+          "size_bytes": 1048576,
+          "checksum_algorithm": "sha256",
+          "checksum_status": "present",
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "source_revision": "4444444444444444444444444444444444444444",
+          "build_identity": "ci-rehearsal-2026-08-16",
+          "signature_status": "not-configured",
+          "provenance_status": "mismatch"
+        }
+      ],
+      "notes_reference": {
+        "path": "CHANGELOG.md",
+        "entry": "[0.1.0-preview.1]"
+      },
+      "evidence_reference": {
+        "path": "release-evidence/0.1.0-preview.1/index.json",
+        "product_version": "0.1.0-preview.1",
+        "source_revision": "5555555555555555555555555555555555555555",
+        "status": "mismatch"
+      },
+      "status": "blocked",
+      "blockers": [
+        "artefact and evidence source revisions do not match the release record"
+      ],
+      "state_history": [
+        {
+          "from": "draft",
+          "to": "candidate"
+        },
+        {
+          "from": "candidate",
+          "to": "blocked"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,543 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ignatius:release-notes:catalog:v1",
+  "title": "Ignatius release catalogue",
+  "description": "A source-controlled index of release records. It describes evidence and does not publish anything.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the catalogue envelope. Readers reject newer versions rather than guessing."
+    },
+    "records": {
+      "type": "array",
+      "description": "One immutable release record per product version.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/release_record"
+      }
+    }
+  },
+  "$comment": "The JSON Schema validates record shape. Cross-entity equality rules, such as matching source revisions and unique product versions, are semantic validator responsibilities.",
+  "x-state-transitions": {
+    "draft": [
+      "candidate"
+    ],
+    "candidate": [
+      "blocked",
+      "ready",
+      "withdrawn"
+    ],
+    "blocked": [],
+    "ready": [
+      "published",
+      "withdrawn"
+    ],
+    "published": [
+      "withdrawn"
+    ],
+    "withdrawn": []
+  },
+  "$defs": {
+    "release_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "candidate",
+        "blocked",
+        "ready",
+        "published",
+        "withdrawn"
+      ]
+    },
+    "source_state": {
+      "type": "string",
+      "enum": [
+        "clean",
+        "modified",
+        "detached",
+        "unknown"
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lower-case SHA-256 digest of exactly one artefact."
+    },
+    "target_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "platform",
+        "architecture",
+        "coverage"
+      ],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "macos",
+            "windows",
+            "linux"
+          ]
+        },
+        "architecture": {
+          "type": "string",
+          "minLength": 1
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "covered",
+            "blocked",
+            "out-of-scope"
+          ]
+        },
+        "artefact_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blocked_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "coverage": {
+                "const": "covered"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "artefact_name"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "coverage": {
+                "enum": [
+                  "blocked",
+                  "out-of-scope"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "blocked_reason"
+            ]
+          }
+        }
+      ]
+    },
+    "artefact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "target",
+        "format",
+        "size_bytes",
+        "checksum_algorithm",
+        "checksum_status",
+        "checksum",
+        "source_revision",
+        "build_identity",
+        "signature_status",
+        "provenance_status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "tar.gz",
+            "zip",
+            "binary"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "checksum_algorithm": {
+          "type": "string",
+          "enum": [
+            "sha256"
+          ]
+        },
+        "checksum_status": {
+          "type": "string",
+          "enum": [
+            "present",
+            "missing",
+            "mismatch"
+          ]
+        },
+        "checksum": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observed_checksum": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "build_identity": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$"
+        },
+        "signature_status": {
+          "type": "string",
+          "enum": [
+            "not-configured",
+            "unsigned",
+            "verified",
+            "invalid",
+            "expired"
+          ]
+        },
+        "provenance_status": {
+          "type": "string",
+          "enum": [
+            "not-configured",
+            "missing",
+            "verified",
+            "mismatch",
+            "invalid"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "checksum_status": {
+                "const": "present"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "checksum": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "checksum_status": {
+                "const": "missing"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "checksum": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "checksum_status": {
+                "const": "mismatch"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "observed_checksum"
+            ],
+            "properties": {
+              "checksum": {
+                "$ref": "#/$defs/sha256"
+              },
+              "observed_checksum": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "notes_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "entry"
+      ],
+      "properties": {
+        "path": {
+          "const": "CHANGELOG.md"
+        },
+        "entry": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "evidence_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "product_version",
+        "source_revision",
+        "status"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "product_version": {
+          "$ref": "#/$defs/product_version"
+        },
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete",
+            "mismatch"
+          ]
+        }
+      }
+    },
+    "state_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/release_status"
+        },
+        "to": {
+          "$ref": "#/$defs/release_status"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "from": {
+              "const": "draft"
+            },
+            "to": {
+              "const": "candidate"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from": {
+              "const": "candidate"
+            },
+            "to": {
+              "enum": [
+                "blocked",
+                "ready",
+                "withdrawn"
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "from": {
+              "const": "ready"
+            },
+            "to": {
+              "enum": [
+                "published",
+                "withdrawn"
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "from": {
+              "const": "published"
+            },
+            "to": {
+              "const": "withdrawn"
+            }
+          }
+        }
+      ]
+    },
+    "product_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "release_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "product_version",
+        "source_revision",
+        "source_state",
+        "build_identity",
+        "target_rows",
+        "artefacts",
+        "notes_reference",
+        "evidence_reference",
+        "status",
+        "state_history"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "product_version": {
+          "$ref": "#/$defs/product_version"
+        },
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "source_state": {
+          "$ref": "#/$defs/source_state"
+        },
+        "build_identity": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$"
+        },
+        "target_rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/target_row"
+          }
+        },
+        "artefacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artefact"
+          }
+        },
+        "notes_reference": {
+          "$ref": "#/$defs/notes_reference"
+        },
+        "evidence_reference": {
+          "$ref": "#/$defs/evidence_reference"
+        },
+        "status": {
+          "$ref": "#/$defs/release_status"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "authorization_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "state_history": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/state_transition"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "blocked"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "blockers"
+            ],
+            "properties": {
+              "blockers": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "published"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "authorization_reference"
+            ],
+            "properties": {
+              "source_state": {
+                "const": "clean"
+              },
+              "authorization_reference": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

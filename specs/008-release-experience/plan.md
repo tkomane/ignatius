@@ -129,6 +129,12 @@ release-notes/                        # future release catalogue, if approved
 artifacts/                            # future local/CI packaging workspace only
 ```
 
+The active Phase 2 handoff is deliberately narrower: Codex owns
+`release-notes/catalog.schema.json` and `release-notes/fixtures/` for T007 and
+T008. It does not own `release-notes/catalog.json`, the semantic validator,
+shared release documentation, CI or publication workflow until those tasks are
+selected and ownership is rechecked.
+
 The current implementation work in `src/app/`, `src/cli/`, `src/config/`,
 `src/ui/`, `tests/cli_contract.rs`, `src/lib.rs` and `src/history.rs` is
 explicitly excluded from this package.

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "schema_version": 1,
+      "product_version": "0.1.0-preview.1",
+      "source_revision": "2222222222222222222222222222222222222222",
+      "source_state": "clean",
+      "build_identity": "ci-rehearsal-2026-08-16",
+      "target_rows": [
+        {
+          "target": "x86_64-unknown-linux-gnu",
+          "platform": "linux",
+          "architecture": "x86_64",
+          "coverage": "covered",
+          "artefact_name": "ignatius-0.1.0-preview.1-x86_64-unknown-linux-gnu.tar.gz"
+        }
+      ],
+      "artefacts": [
+        {
+          "name": "ignatius-0.1.0-preview.1-x86_64-unknown-linux-gnu.tar.gz",
+          "target": "x86_64-unknown-linux-gnu",
+          "format": "tar.gz",
+          "size_bytes": 1048576,
+          "checksum_algorithm": "sha256",
+          "checksum_status": "missing",
+          "checksum": null,
+          "source_revision": "2222222222222222222222222222222222222222",
+          "build_identity": "ci-rehearsal-2026-08-16",
+          "signature_status": "not-configured",
+          "provenance_status": "not-configured"
+        }
+      ],
+      "notes_reference": {
+        "path": "CHANGELOG.md",
+        "entry": "[0.1.0-preview.1]"
+      },
+      "evidence_reference": {
+        "path": "release-evidence/0.1.0-preview.1/index.json",
+        "product_version": "0.1.0-preview.1",
+        "source_revision": "2222222222222222222222222222222222222222",
+        "status": "incomplete"
+      },
+      "status": "blocked",
+      "blockers": [
+        "checksum is missing for ignatius-0.1.0-preview.1-x86_64-unknown-linux-gnu.tar.gz"
+      ],
+      "state_history": [
+        {
+          "from": "draft",
+          "to": "candidate"
+        },
+        {
+          "from": "candidate",
+          "to": "blocked"
+        }
+      ]
+    }
+  ]
+}

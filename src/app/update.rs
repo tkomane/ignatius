@@ -69,6 +69,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             model.selected_row = 0;
             model.selected_column = 0;
+            // A filter belongs to the rows it was typed against. Carrying it
+            // into a different result would hide rows the user never filtered.
+            model.result_filter.clear();
+            model.result_filtering = false;
             // The cell it was showing belongs to a result that no longer exists.
             // Leaving it open would show a value from one query labelled as
             // though it came from another.
@@ -161,6 +165,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.tree.filtering {
         return filter_action(model, action);
     }
+    if model.result_filtering {
+        return result_filter_action(model, action);
+    }
     if model.inspector.is_some() {
         return inspector_action(model, action);
     }
@@ -221,6 +228,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::BeginPrefix => {
             model.prefix_pending = true;
+            Vec::new()
+        }
+        // The filter key belongs to whatever is being looked at. In the results
+        // that means the rows; anywhere else it means the object tree.
+        Action::StartFilter if model.focus == Focus::Results => {
+            model.result_filtering = true;
             Vec::new()
         }
         Action::StartFilter => {
@@ -439,9 +452,11 @@ fn toggle_inspector(model: &mut Model) {
         return;
     }
     let (width, _) = crate::ui::layout::inspector_viewport(model.size);
-    let exists = model.visible_result().is_some_and(|set| {
-        crate::app::inspect::CellView::build(set, model.selected_row, model.selected_column, width)
-            .is_some()
+    let row = model.selected_source_row();
+    let exists = row.is_some_and(|row| {
+        model.visible_result().is_some_and(|set| {
+            crate::app::inspect::CellView::build(set, row, model.selected_column, width).is_some()
+        })
     });
     if exists {
         model.inspector = Some(crate::app::inspect::Inspector::new());
@@ -451,18 +466,62 @@ fn toggle_inspector(model: &mut Model) {
 /// How many lines the selected value wraps to, and how many fit at once.
 fn inspected_extent(model: &Model) -> (usize, usize) {
     let (width, height) = crate::ui::layout::inspector_viewport(model.size);
-    let lines = model
-        .visible_result()
-        .and_then(|set| {
-            crate::app::inspect::CellView::build(
-                set,
-                model.selected_row,
-                model.selected_column,
-                width,
-            )
+    let row = model.selected_source_row();
+    let lines = row
+        .and_then(|row| {
+            model.visible_result().and_then(|set| {
+                crate::app::inspect::CellView::build(set, row, model.selected_column, width)
+            })
         })
         .map_or(0, |view| view.lines.len());
     (lines, height)
+}
+
+/// Handles input while the result filter is being typed.
+///
+/// The filter narrows what is shown; it never re-runs anything and never asks
+/// the server for more. What it searches is what is already here, which is why
+/// the count line says so.
+fn result_filter_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Insert(ch) => {
+            model.result_filter.push(ch);
+            model.selected_row = 0;
+        }
+        Action::Backspace => {
+            model.result_filter.pop();
+            model.selected_row = 0;
+        }
+        Action::Move(Direction::Up) => {
+            model.selected_row = model.selected_row.saturating_sub(1);
+        }
+        Action::Move(Direction::Down) => {
+            let rows = model.filtered_rows().len();
+            model.selected_row = (model.selected_row + 1).min(rows.saturating_sub(1));
+        }
+        // Enter keeps the filter and returns to the rows; Esc clears it.
+        Action::Activate => {
+            model.result_filtering = false;
+        }
+        Action::Dismiss => {
+            model.result_filtering = false;
+            model.result_filter.clear();
+            model.selected_row = 0;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        // Same rule as everywhere else that takes typing: characters go to the
+        // filter, and a key that already means something ends the typing, keeps
+        // the filter, and does what it means.
+        Action::Newline => {}
+        other => {
+            model.result_filtering = false;
+            return apply_action(model, other);
+        }
+    }
+    Vec::new()
 }
 
 /// Handles input while the inspector is open.
@@ -617,9 +676,8 @@ fn move_selection(model: &mut Model, direction: Direction) {
             Direction::Down => model.editor.move_down(),
         },
         Focus::Results => {
-            let (rows, columns) = model
-                .visible_result()
-                .map_or((0, 0), |set| (set.rows.len(), set.columns.len()));
+            let rows = model.filtered_rows().len();
+            let columns = model.visible_result().map_or(0, |set| set.columns.len());
             match direction {
                 Direction::Up => model.selected_row = model.selected_row.saturating_sub(1),
                 Direction::Down => {
@@ -708,37 +766,39 @@ fn filter_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Insert(ch) => {
             model.tree.filter.push(ch);
             model.tree.selected = 0;
-            Vec::new()
         }
         Action::Backspace => {
             model.tree.filter.pop();
             model.tree.selected = 0;
-            Vec::new()
         }
         Action::Move(Direction::Up) => {
             model.tree.move_selection(-1);
-            Vec::new()
         }
         Action::Move(Direction::Down) => {
             model.tree.move_selection(1);
-            Vec::new()
         }
         // Enter keeps the filter and returns to navigating; Esc clears it.
         Action::Activate => {
             model.tree.filtering = false;
-            Vec::new()
         }
         Action::Dismiss => {
             model.tree.filtering = false;
             model.tree.filter.clear();
-            Vec::new()
         }
         Action::Quit => {
             model.should_quit = true;
-            vec![Effect::Quit]
+            return vec![Effect::Quit];
         }
-        _ => Vec::new(),
+        // Typing goes to the filter and nowhere else. A key that already means
+        // something ends the typing, keeps the filter, and does that thing, so
+        // Ctrl+R still runs rather than the interface feeling stuck in a box.
+        Action::Newline => {}
+        other => {
+            model.tree.filtering = false;
+            return apply_action(model, other);
+        }
     }
+    Vec::new()
 }
 
 /// Handles the actions that mean something different in the object tree.
@@ -1578,6 +1638,143 @@ mod tests {
 
         assert!(model.palette.is_none(), "choosing closes it");
         assert!(model.help_open, "the chosen command actually ran");
+    }
+
+    /// A model holding a result of several rows, focused on it.
+    fn with_rows(rows: &[&str]) -> Model {
+        let mut model = connected();
+        model.size = (120, 40);
+        model.editor.set_text("SELECT 1;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, rows)),
+        );
+        model.focus = Focus::Results;
+        model
+    }
+
+    #[test]
+    fn the_filter_narrows_the_rows_and_the_selection_follows_the_real_row() {
+        let mut model = with_rows(&["alpha", "beta", "gamma", "delta"]);
+        update(&mut model, Message::Action(Action::StartFilter));
+        assert!(model.result_filtering, "the filter key belongs to the pane");
+        assert_eq!(model.focus, Focus::Results, "and does not move focus");
+
+        for ch in "ta".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(
+            model.filtered_rows(),
+            vec![1, 3],
+            "beta and delta, by their own positions in the result"
+        );
+        assert_eq!(model.selected_source_row(), Some(1));
+
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        assert_eq!(model.selected_row, 1, "the second match");
+        assert_eq!(
+            model.selected_source_row(),
+            Some(3),
+            "which is the fourth row of the result"
+        );
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        assert_eq!(model.selected_row, 1, "and there is no third match");
+
+        // Enter keeps the filter and returns to the rows; Esc clears it.
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(!model.result_filtering);
+        assert_eq!(model.result_filter, "ta");
+        update(&mut model, Message::Action(Action::StartFilter));
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.result_filter.is_empty());
+        assert_eq!(model.filtered_rows().len(), 4);
+    }
+
+    #[test]
+    fn the_filter_is_typed_into_and_never_into_the_editor() {
+        let mut model = with_rows(&["alpha", "beta"]);
+        model.editor.set_text("SELECT 1;");
+        update(&mut model, Message::Action(Action::StartFilter));
+        for ch in "beta".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(model.result_filter, "beta");
+        assert_eq!(model.editor.text(), "SELECT 1;");
+        update(&mut model, Message::Action(Action::Backspace));
+        assert_eq!(model.result_filter, "bet");
+    }
+
+    #[test]
+    fn the_filter_matches_any_column_and_ignores_case() {
+        let mut model = with_rows(&["Alpha", "beta"]);
+        model.result_filter = "ALP".into();
+        assert_eq!(model.filtered_rows(), vec![0]);
+        model.result_filter = "nothing here".into();
+        assert!(model.filtered_rows().is_empty());
+    }
+
+    #[test]
+    fn a_filter_belongs_to_the_result_it_was_typed_against() {
+        let mut model = with_rows(&["alpha", "beta"]);
+        model.result_filter = "alpha".into();
+        model.result_filtering = true;
+
+        model.editor.set_text("SELECT 2;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &["gamma"])),
+        );
+        assert!(
+            model.result_filter.is_empty(),
+            "carrying it over would hide rows nobody filtered"
+        );
+        assert!(!model.result_filtering);
+        assert_eq!(model.filtered_rows(), vec![0]);
+    }
+
+    #[test]
+    fn the_count_says_what_was_searched_and_what_was_never_received() {
+        // The filter can only ever search what is here. Saying "3 rows" when a
+        // result was truncated is three numbers collapsed into the wrong one.
+        let mut model = with_rows(&["alpha", "beta", "gamma"]);
+        assert_eq!(model.result_window_label(), "3 rows");
+
+        model.result_filter = "a".into();
+        assert_eq!(model.result_window_label(), "matching 3 of 3 rows");
+
+        if let Some(execution) = model.last_execution.as_mut()
+            && let Some(set) = execution.statements[0].result_set.as_mut()
+        {
+            set.rows_seen = 5000;
+            set.cap = 3;
+        }
+        let label = model.result_window_label();
+        assert!(label.contains("matching 3 of 3 retained rows"), "{label}");
+        assert!(label.contains("5000 returned"), "{label}");
+        assert!(label.contains("limit 3 reached"), "{label}");
+    }
+
+    #[test]
+    fn the_inspector_opens_on_the_row_the_filter_is_pointing_at() {
+        let mut model = with_rows(&["alpha", "beta", "gamma"]);
+        model.result_filter = "gamma".into();
+        assert_eq!(model.selected_source_row(), Some(2));
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_some());
+
+        // A filter matching nothing has nothing to inspect.
+        model.inspector = None;
+        model.result_filter = "nothing".into();
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_none());
     }
 
     #[test]

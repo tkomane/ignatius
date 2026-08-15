@@ -257,6 +257,10 @@ pub struct Model {
     /// The SQL of the statement in flight, kept so it can be recorded when it
     /// finishes with an outcome worth recording.
     pub running_sql: Option<String>,
+    /// Text the result grid is filtered by. Empty means every row.
+    pub result_filter: String,
+    /// Whether the filter is being typed into.
+    pub result_filtering: bool,
 }
 
 impl Model {
@@ -297,6 +301,67 @@ impl Model {
     #[must_use]
     pub const fn records_history(&self) -> bool {
         !self.history_disabled && !self.history_paused
+    }
+
+    /// Which retained rows the filter admits, as indices into the result.
+    ///
+    /// Indices rather than rows, because everything that acts on a selection -
+    /// the inspector, the expanded view, an export of what is on screen - needs
+    /// to know which row of the result it is looking at, not which row of the
+    /// filtered view.
+    ///
+    /// **The filter runs over retained rows only.** Rows beyond the cap were
+    /// never received, so they cannot be searched, and every count that mentions
+    /// the filter says so.
+    #[must_use]
+    pub fn filtered_rows(&self) -> Vec<usize> {
+        let Some(set) = self.visible_result() else {
+            return Vec::new();
+        };
+        if self.result_filter.trim().is_empty() {
+            return (0..set.rows.len()).collect();
+        }
+        let needle = self.result_filter.to_lowercase();
+        set.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row.iter()
+                    .any(|cell| cell.display().to_lowercase().contains(&needle))
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// The row of the result the selection points at, after filtering.
+    #[must_use]
+    pub fn selected_source_row(&self) -> Option<usize> {
+        self.filtered_rows().get(self.selected_row).copied()
+    }
+
+    /// What the result pane says about how much is being shown.
+    ///
+    /// Always states the filter and the cap together, because "12 rows" when a
+    /// filter is on and a result was truncated is three different numbers
+    /// collapsed into one, and the wrong one.
+    #[must_use]
+    pub fn result_window_label(&self) -> String {
+        let Some(set) = self.visible_result() else {
+            return String::new();
+        };
+        if self.result_filter.trim().is_empty() {
+            return set.window_label();
+        }
+        let matching = self.filtered_rows().len();
+        let retained = set.retained();
+        if set.is_truncated() {
+            format!(
+                "matching {matching} of {retained} retained rows, of {} returned (limit {} reached)",
+                set.rows_seen, set.cap
+            )
+        } else {
+            format!("matching {matching} of {retained} rows")
+        }
     }
 
     /// The first result set of the last execution, which the grid displays.

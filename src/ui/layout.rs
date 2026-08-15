@@ -738,6 +738,18 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
         execution.status.label(),
         summary
     );
+    // What the filter admits is stated in full: how many match, of how many are
+    // held, of how many the server sent. Collapsing those into one number is
+    // the lie this pane exists not to tell.
+    if !model.result_filter.trim().is_empty() {
+        title.push_str(&format!("[{}] ", model.result_window_label()));
+    }
+    if model.result_filtering {
+        title.push_str(&format!(
+            "[filter: {}\u{2588}] ",
+            sanitize_for_display(&model.result_filter)
+        ));
+    }
     if focused {
         title.push_str("[focused] ");
     }
@@ -797,7 +809,9 @@ fn render_expanded_row(
         return;
     }
 
-    let row = model.selected_row.min(set.rows.len().saturating_sub(1));
+    let row = model
+        .selected_source_row()
+        .unwrap_or_else(|| model.selected_row.min(set.rows.len().saturating_sub(1)));
     let fields = crate::app::inspect::expand_row(
         set,
         row,
@@ -934,8 +948,10 @@ fn render_inspector(
     let Some(set) = model.visible_result() else {
         return;
     };
-    let Some(view) =
-        crate::app::inspect::CellView::build(set, model.selected_row, model.selected_column, width)
+    let Some(row) = model.selected_source_row() else {
+        return;
+    };
+    let Some(view) = crate::app::inspect::CellView::build(set, row, model.selected_column, width)
     else {
         return;
     };
@@ -1089,8 +1105,12 @@ fn render_grid(
     let theme = &presentation.theme;
     let rule = presentation.glyphs.column_rule();
 
+    // The filter narrows which rows are drawn and nothing else: the numbers in
+    // the gutter stay the row's own, so a filtered view still says where each
+    // row is in the result.
+    let rows = model.filtered_rows();
     let visible_rows = (area.height as usize).saturating_sub(2).max(1);
-    let needs_scrollbar = set.rows.len() > visible_rows;
+    let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (area.width as usize).saturating_sub(usize::from(needs_scrollbar));
 
     // Keep the selection on screen. The window moves; rows never reorder.
@@ -1134,13 +1154,16 @@ fn render_grid(
         theme.style(Token::Border),
     )));
 
-    for (offset_index, row) in set.rows.iter().skip(offset).take(visible_rows).enumerate() {
-        let row_index = offset + offset_index;
-        let selected = focused && row_index == model.selected_row;
-        let striped = row_index % 2 == 1;
+    for (offset_index, source) in rows.iter().skip(offset).take(visible_rows).enumerate() {
+        let position = offset + offset_index;
+        let Some(row) = set.rows.get(*source) else {
+            continue;
+        };
+        let selected = focused && position == model.selected_row;
+        let striped = position % 2 == 1;
 
         let mut spans = vec![Span::styled(
-            format!("{:>gutter$} ", row_index + 1),
+            format!("{:>gutter$} ", source + 1),
             cell_style(theme, Token::Muted, selected, striped),
         )];
 
@@ -1182,11 +1205,21 @@ fn render_grid(
         lines.push(line);
     }
 
+    if rows.is_empty() && !model.result_filter.trim().is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "No retained row contains {:?}. Esc clears the filter.",
+                sanitize_for_display(&model.result_filter)
+            ),
+            theme.style(Token::Muted),
+        )));
+    }
+
     Paragraph::new(lines).render(area, buf);
 
     if needs_scrollbar {
         render_scrollbar(
-            set.rows.len(),
+            rows.len(),
             visible_rows,
             offset,
             presentation,
@@ -2389,6 +2422,58 @@ mod tests {
             assert!(editor_page(size) >= 1, "{size:?}");
             assert!(results_page(size) >= 1, "{size:?}");
         }
+    }
+
+    #[test]
+    fn a_filtered_grid_shows_the_matches_and_says_what_it_searched() {
+        let mut model = connected_model(Environment::Local);
+        with_rows(
+            &mut model,
+            &["name"],
+            &[
+                &[Cell::Text("alpha".into())],
+                &[Cell::Text("beta".into())],
+                &[Cell::Text("gamma".into())],
+            ],
+        );
+        model.focus = Focus::Results;
+        model.result_filter = "ta".into();
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("beta"), "{text}");
+        assert!(!text.contains("alpha"), "a row that does not match is gone");
+        assert!(text.contains("matching 1 of 3 rows"), "{text}");
+        assert!(
+            text.contains(" 2 ") || text.contains("2 beta"),
+            "the gutter keeps the row's own number: {text}"
+        );
+
+        // A filter matching nothing says so and says how to leave.
+        model.result_filter = "nothing".into();
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("No retained row contains"), "{text}");
+        assert!(text.contains("Esc clears the filter"), "{text}");
+    }
+
+    #[test]
+    fn a_filter_over_a_truncated_result_never_implies_it_searched_everything() {
+        let mut model = connected_model(Environment::Local);
+        with_rows(
+            &mut model,
+            &["name"],
+            &[&[Cell::Text("alpha".into())], &[Cell::Text("beta".into())]],
+        );
+        if let Some(execution) = model.last_execution.as_mut()
+            && let Some(set) = execution.statements[0].result_set.as_mut()
+        {
+            set.rows_seen = 200_000;
+            set.cap = 2;
+        }
+        model.result_filter = "a".into();
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 160, 30);
+        assert!(text.contains("retained rows"), "{text}");
+        assert!(text.contains("200000 returned"), "{text}");
     }
 
     #[test]
