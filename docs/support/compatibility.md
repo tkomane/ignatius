@@ -85,11 +85,11 @@ Deliberate differences:
 
 | Terminal | Status |
 | --- | --- |
-| macOS, in a pseudo-terminal | Verified: full-screen render, F5 execution, Ctrl+Q restoration with the exact escape sequences captured |
+| macOS, in a pseudo-terminal | Verified: full-screen render, Ctrl+R executed a query, Ctrl+Q restored the terminal, with the exact escape sequences captured |
 | Warp on macOS, interactive | **Not yet verified by hand.** The pty run above used a forced size, not Warp's own renderer |
 | Live terminal resize | **Not verified.** Covered only by a unit test on the resize message |
-| Windows Terminal with PowerShell 7 | Written, not verified |
-| Any VT-capable terminal on Linux | Written, not verified |
+| Windows Terminal with PowerShell 7 | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
+| Any VT-capable terminal on Linux | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
 | `TERM=dumb` | Full-screen client refuses and points at `query` |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
 
@@ -101,11 +101,14 @@ line-oriented alternative.
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | Verified by hand and in CI |
-| macOS x86_64 | Builds and passes tests in CI |
-| Windows x86_64 | Builds and passes tests in CI. Nobody has used the full-screen client on it |
-| Linux x86_64 | Builds and passes tests in CI, including the PostgreSQL integration suite |
-| Windows and Linux on ARM64 | Not built anywhere yet |
+| macOS on Apple silicon | Verified by hand, and by the CI macOS runner |
+| Windows, GitHub `windows-latest` runner | Builds and passes unit, layout and CLI contract tests, plus a startup smoke test |
+| Linux, GitHub `ubuntu-latest` runner | The same, plus the full PostgreSQL integration suite against 14, 16 and 18 |
+| Any other architecture | Not built anywhere yet |
+
+Claims are stated by runner rather than by target triple, because the runner is
+what was actually exercised. Cross-architecture builds are release work and
+nothing has been released.
 
 Unix-domain sockets are supported on Unix only; requesting one elsewhere fails
 with an explanation. Owner-only file permissions are enforced on Unix; on Windows
