@@ -126,6 +126,27 @@ impl Keymap {
                 true,
             ),
             binding(K::Char('q'), ctrl, Action::Quit, "Quit", true),
+            binding(
+                K::Char('p'),
+                ctrl,
+                Action::OpenPalette,
+                "Open the command palette",
+                true,
+            ),
+            binding(
+                K::Char('b'),
+                ctrl,
+                Action::ToggleSidebar,
+                "Show or hide the object tree",
+                false,
+            ),
+            binding(
+                K::Char('k'),
+                ctrl,
+                Action::BeginPrefix,
+                "Start a chord and list what follows it",
+                false,
+            ),
             binding(K::F(1), none, Action::ToggleHelp, "Show or hide help", true),
             binding(
                 K::Char('g'),
@@ -187,8 +208,8 @@ impl Keymap {
             binding(
                 K::Enter,
                 none,
-                Action::Newline,
-                "Insert a line break",
+                Action::Activate,
+                "Insert a line break, open a node, or confirm",
                 false,
             ),
         ];
@@ -260,6 +281,26 @@ impl Keymap {
     }
 }
 
+/// The second key of a chord, and what it does.
+///
+/// Kept as data so the popup that lists them cannot drift from what they do.
+pub const CHORDS: &[(char, Action, &str)] = &[
+    ('b', Action::ToggleSidebar, "Show or hide the object tree"),
+    ('p', Action::OpenPalette, "Open the command palette"),
+    ('f', Action::StartFilter, "Filter the object tree"),
+    ('r', Action::ReloadObjects, "Reload the object tree"),
+    ('h', Action::ToggleHelp, "Show or hide help"),
+];
+
+/// Resolves the second key of a chord.
+#[must_use]
+pub fn chord_action(key: char) -> Option<Action> {
+    CHORDS
+        .iter()
+        .find(|(candidate, _, _)| *candidate == key.to_ascii_lowercase())
+        .map(|(_, action, _)| action.clone())
+}
+
 fn binding(
     code: KeyCode,
     modifiers: KeyModifiers,
@@ -278,6 +319,12 @@ fn binding(
 
 const fn short_label(action: &Action) -> &'static str {
     match action {
+        Action::ToggleSidebar => "Objects",
+        Action::OpenPalette => "Palette",
+        Action::BeginPrefix => "Chord",
+        Action::StartFilter => "Filter",
+        Action::ReloadObjects => "Reload",
+        Action::Activate => "Open",
         Action::RunBuffer => "Run",
         Action::RunStatement => "Run statement",
         Action::Cancel => "Cancel",
@@ -418,10 +465,12 @@ mod tests {
                 "{code:?} should run the buffer"
             );
         }
-        // A plain Enter still inserts a line break rather than running anything.
+        // A plain Enter is context-dependent: the reducer turns it into a line
+        // break in the editor, opening a node in the tree, or confirming in the
+        // palette. What matters here is that it never runs the buffer.
         assert_eq!(
             keymap.resolve(&press(KeyCode::Enter, KeyModifiers::NONE)),
-            Some(Action::Newline)
+            Some(Action::Activate)
         );
         // Help has a chord too, for systems that claim F1.
         assert_eq!(
@@ -438,6 +487,57 @@ mod tests {
                 !key.starts_with('F') || key == "F1",
                 "{label} is advertised as {key}, a function key the system may claim"
             );
+        }
+    }
+
+    #[test]
+    fn navigation_commands_have_chords_of_their_own() {
+        let keymap = Keymap::new();
+        for (code, modifiers, expected) in [
+            (
+                KeyCode::Char('p'),
+                KeyModifiers::CONTROL,
+                Action::OpenPalette,
+            ),
+            (
+                KeyCode::Char('b'),
+                KeyModifiers::CONTROL,
+                Action::ToggleSidebar,
+            ),
+            (
+                KeyCode::Char('k'),
+                KeyModifiers::CONTROL,
+                Action::BeginPrefix,
+            ),
+        ] {
+            assert_eq!(keymap.resolve(&press(code, modifiers)), Some(expected));
+        }
+    }
+
+    #[test]
+    fn every_chord_is_listed_and_resolves_to_what_it_says() {
+        for (key, action, description) in CHORDS {
+            assert!(!description.is_empty(), "{key} has no description");
+            assert_eq!(
+                chord_action(*key).as_ref(),
+                Some(action),
+                "{key} resolves to something other than its description"
+            );
+            // The popup lists these, so an uppercase press must work too.
+            assert_eq!(
+                chord_action(key.to_ascii_uppercase()).as_ref(),
+                Some(action)
+            );
+        }
+        assert!(chord_action('z').is_none(), "an unbound key ends the chord");
+    }
+
+    #[test]
+    fn chord_keys_do_not_collide_with_each_other() {
+        for (index, (key, _, _)) in CHORDS.iter().enumerate() {
+            for (other, _, _) in CHORDS.iter().skip(index + 1) {
+                assert_ne!(key, other, "chord key {key} is bound twice");
+            }
         }
     }
 

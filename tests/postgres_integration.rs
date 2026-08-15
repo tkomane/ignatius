@@ -566,3 +566,234 @@ fn a_wrong_password_is_reported_as_authentication_not_as_a_generic_failure() {
         "the diagnostic must never echo the password"
     );
 }
+
+// ---------------------------------------------------------------- catalogue
+
+#[test]
+fn schemas_are_listed_with_counts_in_a_constant_number_of_round_trips() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let schemas = fx.block_on(fx.session.schemas()).expect("schemas");
+
+    let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"public"), "{names:?}");
+    assert!(names.contains(&"reporting"), "{names:?}");
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.starts_with("pg_") || *n == "information_schema"),
+        "system schemas are noise and are excluded: {names:?}"
+    );
+
+    let public = schemas.iter().find(|s| s.name == "public").expect("public");
+    assert!(public.usable);
+    assert!(
+        public.count(ignatius::postgres::ObjectKind::Table) >= 4,
+        "counts are populated: {:?}",
+        public.counts
+    );
+
+    let reporting = schemas
+        .iter()
+        .find(|s| s.name == "reporting")
+        .expect("reporting");
+    assert_eq!(reporting.count(ignatius::postgres::ObjectKind::View), 1);
+    assert_eq!(reporting.count(ignatius::postgres::ObjectKind::Function), 1);
+    assert_eq!(
+        reporting.count(ignatius::postgres::ObjectKind::Table),
+        0,
+        "a kind with none present reports zero rather than being absent"
+    );
+}
+
+#[test]
+fn objects_are_listed_by_kind_within_a_schema() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    use ignatius::postgres::ObjectKind;
+
+    let tables = fx
+        .block_on(fx.session.objects("public", ObjectKind::Table))
+        .expect("tables");
+    let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"orders"), "{names:?}");
+    assert!(names.contains(&"type_coverage"), "{names:?}");
+    for table in &tables {
+        assert_eq!(table.kind, ObjectKind::Table);
+        assert_eq!(table.schema, "public");
+    }
+
+    let views = fx
+        .block_on(fx.session.objects("reporting", ObjectKind::View))
+        .expect("views");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].name, "order_totals");
+
+    let functions = fx
+        .block_on(fx.session.objects("reporting", ObjectKind::Function))
+        .expect("functions");
+    assert_eq!(functions.len(), 1);
+    assert!(
+        functions[0]
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("bigint"),
+        "a function shows what it returns: {:?}",
+        functions[0].detail
+    );
+}
+
+#[test]
+fn a_hostile_object_name_is_listed_and_quoted_rather_than_executed() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    use ignatius::postgres::ObjectKind;
+
+    let tables = fx
+        .block_on(fx.session.objects("public", ObjectKind::Table))
+        .expect("tables");
+    let hostile = tables
+        .iter()
+        .find(|t| t.name.contains("DROP TABLE"))
+        .expect("the hostile fixture is listed like any other table");
+
+    // The name round-trips into SQL that selects from it, rather than running it.
+    let sql = format!("SELECT note FROM {} WHERE id = 1", hostile.qualified_sql());
+    let execution = fx.block_on(fx.session.execute(&sql, 10, JobId(1)));
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "quoting failed: {:?}",
+        execution.error
+    );
+    let row = &execution.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows")
+        .rows[0];
+    assert_eq!(row[0], Cell::Text("still here".into()));
+
+    // And the table it tried to name in its own text is untouched.
+    let orders = fx.block_on(
+        fx.session
+            .execute("SELECT count(*) FROM orders", 10, JobId(2)),
+    );
+    assert_eq!(orders.status, ExecutionStatus::Succeeded);
+}
+
+#[test]
+fn columns_carry_type_nullability_and_key_membership() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let columns = fx
+        .block_on(fx.session.columns("public", "orders"))
+        .expect("columns");
+
+    let names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec![
+            "order_id",
+            "customer_id",
+            "total",
+            "currency",
+            "note",
+            "created_at"
+        ],
+        "columns come back in catalogue order"
+    );
+
+    let id = &columns[0];
+    assert!(id.primary_key, "order_id is the primary key");
+    assert!(!id.nullable);
+
+    let note = columns.iter().find(|c| c.name == "note").expect("note");
+    assert!(note.nullable, "note has no NOT NULL constraint");
+    assert!(!note.primary_key);
+
+    let total = columns.iter().find(|c| c.name == "total").expect("total");
+    assert_eq!(
+        total.data_type, "numeric(12,2)",
+        "the declared type is preserved"
+    );
+
+    let currency = columns
+        .iter()
+        .find(|c| c.name == "currency")
+        .expect("currency");
+    assert!(
+        currency
+            .default
+            .as_deref()
+            .unwrap_or_default()
+            .contains("ZAR"),
+        "a default is reported: {:?}",
+        currency.default
+    );
+}
+
+#[test]
+fn indexes_and_extensions_are_listed() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let indexes = fx
+        .block_on(fx.session.indexes("public", "orders"))
+        .expect("indexes");
+    assert!(!indexes.is_empty(), "the primary key has an index");
+    assert!(
+        indexes
+            .iter()
+            .any(|i| i.detail.as_deref() == Some("primary key")),
+        "{indexes:?}"
+    );
+
+    let extensions = fx.block_on(fx.session.extensions()).expect("extensions");
+    assert!(
+        extensions.iter().any(|e| e.name == "plpgsql"),
+        "plpgsql is installed by default: {extensions:?}"
+    );
+    assert!(
+        extensions[0]
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("version ")
+    );
+}
+
+#[test]
+fn a_restricted_role_sees_objects_it_cannot_read_and_they_are_marked_as_such() {
+    let uri = target_or_skip!();
+    let Some((prefix, rest)) = uri.split_once("://") else {
+        panic!("expected a URI");
+    };
+    let Some((_, host_and_db)) = rest.split_once('@') else {
+        eprintln!("skipping: the test URI has no userinfo to replace");
+        return;
+    };
+    let restricted =
+        format!("{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}");
+    let fx = fixture(&restricted);
+    use ignatius::postgres::ObjectKind;
+
+    // The catalogue is readable by everyone, so the tree can still be drawn.
+    let schemas = fx.block_on(fx.session.schemas()).expect("schemas");
+    assert!(schemas.iter().any(|s| s.name == "public"));
+
+    let tables = fx
+        .block_on(fx.session.objects("public", ObjectKind::Table))
+        .expect("tables");
+    let granted = tables.iter().find(|t| t.name == "orders").expect("orders");
+    assert!(granted.readable, "the role was granted SELECT on orders");
+
+    let denied = tables
+        .iter()
+        .find(|t| t.name == "secrets_of_the_realm")
+        .expect("listed even though it cannot be read");
+    assert!(
+        !denied.readable,
+        "an object the role cannot read must be marked, not hidden or fatal"
+    );
+}

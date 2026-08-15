@@ -30,6 +30,18 @@ pub enum Action {
     Dismiss,
     /// Move the selection or cursor.
     Move(Direction),
+    /// Show or hide the object tree.
+    ToggleSidebar,
+    /// Open the command palette.
+    OpenPalette,
+    /// Begin a two-key chord and show the continuations.
+    BeginPrefix,
+    /// Filter the object tree.
+    StartFilter,
+    /// Reload the object tree from the server.
+    ReloadObjects,
+    /// Enter: a line break, opening a node, or confirming, depending on focus.
+    Activate,
     /// Type a character into the editor.
     Insert(char),
     /// Delete backwards in the editor.
@@ -73,6 +85,18 @@ pub enum Message {
     CancellationFailed(Box<Diagnostic>),
     /// Server messages arrived outside an execution.
     Notices(Vec<Notice>),
+    /// The schema list finished loading.
+    SchemasLoaded(Box<Result<Vec<crate::postgres::metadata::SchemaSummary>, Diagnostic>>),
+    /// A node's children finished loading. Carries the request identity so a
+    /// stale answer can be discarded.
+    MetadataLoaded {
+        /// Which load this answers.
+        request: crate::app::tree::RequestId,
+        /// The node that asked.
+        path: crate::app::tree::NodePath,
+        /// What came back.
+        payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
+    },
     /// A frame of elapsed time.
     ///
     /// The reducer reads no clock, so the runtime measures how long the current
@@ -106,4 +130,15 @@ pub enum Effect {
     },
     /// Leave the application.
     Quit,
+    /// Load the schema list.
+    LoadSchemas,
+    /// Load a node's children.
+    LoadMetadata {
+        /// Identity to report back with.
+        request: crate::app::tree::RequestId,
+        /// The node that asked.
+        path: crate::app::tree::NodePath,
+        /// What to fetch.
+        query: crate::app::tree::MetadataQuery,
+    },
 }

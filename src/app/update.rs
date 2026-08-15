@@ -80,6 +80,30 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.notices.extend(notices);
             Vec::new()
         }
+        Message::SchemasLoaded(result) => {
+            match *result {
+                Ok(schemas) => model.tree.set_schemas(schemas),
+                Err(error) => model.tree.set_error(error),
+            }
+            Vec::new()
+        }
+        Message::MetadataLoaded {
+            request,
+            path,
+            payload,
+        } => {
+            match *payload {
+                Ok(loaded) => {
+                    model.tree.apply(request, &path, loaded);
+                }
+                Err(error) => {
+                    // The reason belongs in the tree, next to the node that
+                    // could not be opened, rather than in a modal somewhere else.
+                    model.tree.apply_failure(request, &path, &error.headline);
+                }
+            }
+            Vec::new()
+        }
         Message::Tick { running_for } => {
             model.frame = model.frame.wrapping_add(1);
             model.running_for = running_for;
@@ -89,6 +113,25 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
 }
 
 fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    // Modes are peeled in a fixed order, highest first. Getting this wrong is
+    // how typing in the editor starts doing surprising things, so the order is
+    // stated once here and tested directly.
+    if model.prefix_pending {
+        return resolve_prefix(model, action);
+    }
+    if model.palette.is_some() {
+        return palette_action(model, action);
+    }
+    if model.tree.filtering {
+        return filter_action(model, action);
+    }
+    if model.focus == Focus::Objects
+        && !matches!(action, Action::Quit | Action::ToggleHelp)
+        && let Some(effects) = objects_action(model, &action)
+    {
+        return effects;
+    }
+
     match action {
         Action::Quit => {
             model.should_quit = true;
@@ -99,8 +142,13 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Dismiss => {
+            // One layer at a time, in the order they were opened. Dismissing an
+            // error the user has not read is the more expensive mistake, so it
+            // goes last.
             if model.help_open {
                 model.help_open = false;
+            } else if !model.tree.filter.is_empty() {
+                model.tree.filter.clear();
             } else {
                 model.error = None;
                 model.error_expanded = false;
@@ -112,9 +160,45 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::FocusNext => {
-            model.focus = model.focus.next();
+            model.focus = model.focus.next(model.sidebar_visible);
             Vec::new()
         }
+        Action::ToggleSidebar => {
+            model.sidebar_visible = !model.sidebar_visible;
+            if !model.sidebar_visible && model.focus == Focus::Objects {
+                model.focus = Focus::Editor;
+            }
+            // The tree loads the first time it is shown, not at startup, so a
+            // user who never opens it never pays for it.
+            if model.sidebar_visible && model.tree.roots.is_empty() && !model.tree.loading {
+                model.tree.begin_loading();
+                return vec![Effect::LoadSchemas];
+            }
+            Vec::new()
+        }
+        Action::OpenPalette => {
+            model.palette = Some(crate::app::palette::Palette::new(palette_entries(model)));
+            Vec::new()
+        }
+        Action::BeginPrefix => {
+            model.prefix_pending = true;
+            Vec::new()
+        }
+        Action::StartFilter => {
+            model.focus = Focus::Objects;
+            model.sidebar_visible = true;
+            model.tree.filtering = true;
+            Vec::new()
+        }
+        Action::ReloadObjects => {
+            model.tree.begin_loading();
+            vec![Effect::LoadSchemas]
+        }
+        Action::Activate if model.focus == Focus::Editor => {
+            model.editor.insert('\n');
+            Vec::new()
+        }
+        Action::Activate => Vec::new(),
         Action::RunBuffer => run(model, model.editor.text().to_owned()),
         Action::RunStatement => {
             let sql = statements::statement_at(model.editor.text(), model.editor.cursor())
@@ -171,6 +255,12 @@ fn run(model: &mut Model, sql: String) -> Vec<Effect> {
 
 fn move_selection(model: &mut Model, direction: Direction) {
     match model.focus {
+        Focus::Objects => match direction {
+            Direction::Up => model.tree.move_selection(-1),
+            Direction::Down => model.tree.move_selection(1),
+            Direction::Left => model.tree.collapse_selected(),
+            Direction::Right => {}
+        },
         Focus::Editor => match direction {
             Direction::Left => model.editor.move_left(),
             Direction::Right => model.editor.move_right(),
@@ -197,6 +287,224 @@ fn move_selection(model: &mut Model, direction: Direction) {
             }
         }
     }
+}
+
+/// Resolves the second key of a chord.
+///
+/// Whatever it is, the chord ends here: an unrecognised key cancels rather than
+/// leaving the interface waiting in a state the user cannot see out of.
+fn resolve_prefix(model: &mut Model, action: Action) -> Vec<Effect> {
+    model.prefix_pending = false;
+    match action {
+        Action::Insert(ch) => match crate::ui::keymap::chord_action(ch) {
+            Some(chord) => apply_action(model, chord),
+            None => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// Handles input while the palette is open.
+fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(palette) = model.palette.as_mut() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(ch) => {
+            palette.push(ch);
+            Vec::new()
+        }
+        Action::Backspace => {
+            palette.backspace();
+            Vec::new()
+        }
+        Action::Move(Direction::Up) => {
+            palette.move_selection(-1);
+            Vec::new()
+        }
+        Action::Move(Direction::Down) => {
+            palette.move_selection(1);
+            Vec::new()
+        }
+        Action::Activate => {
+            let chosen = palette.selected_entry();
+            model.palette = None;
+            match chosen.map(|entry| entry.command) {
+                Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::Insert(text)) => {
+                    model.focus = Focus::Editor;
+                    for ch in text.chars() {
+                        model.editor.insert(ch);
+                    }
+                    Vec::new()
+                }
+                None => Vec::new(),
+            }
+        }
+        Action::Dismiss => {
+            model.palette = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.palette = None;
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Handles input while the object filter is being typed.
+fn filter_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Insert(ch) => {
+            model.tree.filter.push(ch);
+            model.tree.selected = 0;
+            Vec::new()
+        }
+        Action::Backspace => {
+            model.tree.filter.pop();
+            model.tree.selected = 0;
+            Vec::new()
+        }
+        Action::Move(Direction::Up) => {
+            model.tree.move_selection(-1);
+            Vec::new()
+        }
+        Action::Move(Direction::Down) => {
+            model.tree.move_selection(1);
+            Vec::new()
+        }
+        // Enter keeps the filter and returns to navigating; Esc clears it.
+        Action::Activate => {
+            model.tree.filtering = false;
+            Vec::new()
+        }
+        Action::Dismiss => {
+            model.tree.filtering = false;
+            model.tree.filter.clear();
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Handles the actions that mean something different in the object tree.
+///
+/// Returns `None` for anything the tree does not claim, which then falls through
+/// to the ordinary handling.
+fn objects_action(model: &mut Model, action: &Action) -> Option<Vec<Effect>> {
+    match action {
+        // The arrows navigate: right opens, left closes.
+        Action::Move(Direction::Right) => Some(expand_selected(model)),
+        // Enter uses the thing under the cursor. For something with a name that
+        // means putting the name where SQL is written; for a container it means
+        // opening it, because a container has no name worth pasting.
+        Action::Activate => {
+            let row = model.tree.selected_row()?;
+            let node = model.tree.node(&row.path)?;
+            let insertable = match &node.kind {
+                crate::app::tree::NodeKind::Object(object) => Some(object.qualified_sql()),
+                crate::app::tree::NodeKind::Column(column) => {
+                    Some(crate::postgres::metadata::quote_identifier(&column.name))
+                }
+                _ => None,
+            };
+            match insertable {
+                Some(name) => {
+                    model.focus = Focus::Editor;
+                    for ch in name.chars() {
+                        model.editor.insert(ch);
+                    }
+                    Some(Vec::new())
+                }
+                None => Some(expand_selected(model)),
+            }
+        }
+        // `/` starts a filter, the way it does in every tree people already use.
+        Action::Insert('/') => {
+            model.tree.filtering = true;
+            Some(Vec::new())
+        }
+        // Ordinary typing must not leak into the editor from here.
+        Action::Insert(_) | Action::Backspace => Some(Vec::new()),
+        _ => None,
+    }
+}
+
+/// Opens the selected node, asking for a load only when one is needed.
+fn expand_selected(model: &mut Model) -> Vec<Effect> {
+    let Some(row) = model.tree.selected_row() else {
+        return Vec::new();
+    };
+    if !row.expandable {
+        return Vec::new();
+    }
+    if matches!(row.row_kind, crate::app::tree::RowKind::Schema { .. }) {
+        if row.expanded {
+            model.tree.collapse_selected();
+        } else {
+            // Counts arrived with the schema list, so this needs no round trip.
+            model.tree.expand_schema(&row.path);
+        }
+        return Vec::new();
+    }
+    if row.expanded {
+        model.tree.collapse_selected();
+        return Vec::new();
+    }
+    match model.tree.expand_selected() {
+        Some((request, path, query)) => vec![Effect::LoadMetadata {
+            request,
+            path,
+            query,
+        }],
+        None => Vec::new(),
+    }
+}
+
+/// The entries the palette offers: every command, then every loaded object.
+fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+    let keymap = crate::ui::keymap::Keymap::new();
+    let mut entries: Vec<PaletteEntry> = keymap
+        .bindings()
+        .iter()
+        .filter(|binding| {
+            // Movement and typing are not commands anyone looks up in a palette.
+            !matches!(
+                binding.action,
+                Action::Move(_) | Action::Insert(_) | Action::Backspace | Action::Activate
+            )
+        })
+        .map(|binding| PaletteEntry {
+            label: binding.description.to_owned(),
+            detail: binding.key_label(),
+            group: "Command",
+            command: PaletteCommand::Run(binding.action.clone()),
+        })
+        .collect();
+    entries.dedup_by(|a, b| a.label == b.label);
+
+    // Objects already in the tree, so the palette costs no round trip.
+    for row in model.tree.rows() {
+        if let crate::app::tree::RowKind::Object { kind, .. } = row.row_kind
+            && let Some(node) = model.tree.node(&row.path)
+            && let Some(sql) = node.qualified_sql()
+        {
+            entries.push(PaletteEntry {
+                label: row.label.clone(),
+                detail: format!("{} {}", kind.singular(), sql),
+                group: "Object",
+                command: PaletteCommand::Insert(sql),
+            });
+        }
+    }
+    entries
 }
 
 #[cfg(test)]
@@ -582,6 +890,350 @@ mod tests {
         assert_eq!(model.editor.text(), before.editor.text());
         assert_eq!(model.selected_row, before.selected_row);
         assert!(model.last_execution.is_none());
+    }
+
+    // ------------------------------------------------- navigation and modes
+
+    fn schema_summary(name: &str, tables: i64) -> crate::postgres::SchemaSummary {
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert(crate::postgres::ObjectKind::Table, tables);
+        crate::postgres::SchemaSummary {
+            name: name.to_owned(),
+            usable: true,
+            counts,
+        }
+    }
+
+    fn with_tree() -> Model {
+        let mut model = connected();
+        update(
+            &mut model,
+            Message::SchemasLoaded(Box::new(Ok(vec![
+                schema_summary("public", 2),
+                schema_summary("reporting", 1),
+            ]))),
+        );
+        model
+    }
+
+    #[test]
+    fn the_tree_loads_the_first_time_the_sidebar_is_shown_and_not_again() {
+        let mut model = connected();
+        model.sidebar_visible = false;
+
+        let effects = update(&mut model, Message::Action(Action::ToggleSidebar));
+        assert_eq!(effects, vec![Effect::LoadSchemas], "showing it loads it");
+        assert!(model.sidebar_visible);
+
+        update(
+            &mut model,
+            Message::SchemasLoaded(Box::new(Ok(vec![schema_summary("public", 1)]))),
+        );
+        update(&mut model, Message::Action(Action::ToggleSidebar));
+        let effects = update(&mut model, Message::Action(Action::ToggleSidebar));
+        assert!(
+            effects.is_empty(),
+            "an already-loaded tree is not fetched again"
+        );
+    }
+
+    #[test]
+    fn hiding_the_sidebar_moves_focus_off_it() {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+        update(&mut model, Message::Action(Action::ToggleSidebar));
+        assert!(!model.sidebar_visible);
+        assert_eq!(
+            model.focus,
+            Focus::Editor,
+            "focus cannot stay on a hidden pane"
+        );
+    }
+
+    #[test]
+    fn opening_a_schema_costs_no_round_trip_but_opening_a_group_does() {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+
+        let effects = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        assert!(
+            effects.is_empty(),
+            "counts already arrived with the schema list"
+        );
+        assert_eq!(model.tree.rows()[1].label, "tables (2)");
+
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        let effects = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        assert!(
+            matches!(effects.as_slice(), [Effect::LoadMetadata { .. }]),
+            "opening a group asks the server: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn choosing_an_object_puts_its_quoted_name_in_the_editor() {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+        model.editor.set_text("SELECT * FROM ");
+        update(&mut model, Message::Action(Action::Move(Direction::Right))); // open public
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        let effects = update(&mut model, Message::Action(Action::Move(Direction::Right))); // tables
+        let Effect::LoadMetadata { request, path, .. } = &effects[0] else {
+            panic!("expected a load");
+        };
+        update(
+            &mut model,
+            Message::MetadataLoaded {
+                request: *request,
+                path: path.clone(),
+                payload: Box::new(Ok(crate::app::tree::MetadataPayload::Objects(vec![
+                    crate::postgres::ObjectSummary {
+                        kind: crate::postgres::ObjectKind::Table,
+                        schema: "public".into(),
+                        name: "we\"ird".into(),
+                        readable: true,
+                        detail: None,
+                    },
+                ]))),
+            },
+        );
+
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        // Enter uses the object: its quoted name goes where SQL is written.
+        update(&mut model, Message::Action(Action::Activate));
+
+        assert_eq!(
+            model.editor.text(),
+            "SELECT * FROM \"public\".\"we\"\"ird\"",
+            "the name is quoted so a hostile one cannot change the statement"
+        );
+        assert_eq!(model.focus, Focus::Editor, "focus follows the insertion");
+    }
+
+    #[test]
+    fn typing_in_the_object_tree_never_leaks_into_the_editor() {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+        model.editor.set_text("SELECT 1");
+
+        for ch in "drop".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        update(&mut model, Message::Action(Action::Backspace));
+        assert_eq!(
+            model.editor.text(),
+            "SELECT 1",
+            "the editor was not touched"
+        );
+    }
+
+    #[test]
+    fn slash_starts_a_filter_and_escape_clears_it() {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+
+        update(&mut model, Message::Action(Action::Insert('/')));
+        assert!(model.tree.filtering);
+
+        for ch in "rep".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(model.tree.filter, "rep");
+        let labels: Vec<String> = model.tree.rows().iter().map(|r| r.label.clone()).collect();
+        assert_eq!(labels, vec!["reporting".to_owned()]);
+
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(
+            !model.tree.filtering,
+            "Enter keeps the filter and stops typing"
+        );
+        assert_eq!(model.tree.filter, "rep");
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.tree.filter.is_empty(), "Esc clears it");
+    }
+
+    #[test]
+    fn the_palette_intercepts_typing_and_leaves_the_editor_alone() {
+        let mut model = with_tree();
+        model.editor.set_text("SELECT 1");
+
+        update(&mut model, Message::Action(Action::OpenPalette));
+        assert!(model.palette.is_some());
+
+        for ch in "quit".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(
+            model.editor.text(),
+            "SELECT 1",
+            "the editor was not typed into"
+        );
+        assert_eq!(model.palette.as_ref().expect("open").query, "quit");
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.palette.is_none());
+        assert_eq!(model.editor.text(), "SELECT 1");
+    }
+
+    #[test]
+    fn the_palette_runs_the_command_it_shows() {
+        let mut model = with_tree();
+        update(&mut model, Message::Action(Action::OpenPalette));
+        for ch in "help".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        update(&mut model, Message::Action(Action::Activate));
+
+        assert!(model.palette.is_none(), "choosing closes it");
+        assert!(model.help_open, "the chosen command actually ran");
+    }
+
+    #[test]
+    fn a_chord_shows_its_continuations_and_the_next_key_ends_it() {
+        let mut model = with_tree();
+        model.sidebar_visible = true;
+
+        update(&mut model, Message::Action(Action::BeginPrefix));
+        assert!(model.prefix_pending, "the popup is open");
+
+        update(&mut model, Message::Action(Action::Insert('b')));
+        assert!(!model.prefix_pending, "the chord ended");
+        assert!(!model.sidebar_visible, "and it did what it said");
+
+        // An unrecognised second key cancels rather than leaving it hanging.
+        update(&mut model, Message::Action(Action::BeginPrefix));
+        update(&mut model, Message::Action(Action::Insert('z')));
+        assert!(!model.prefix_pending);
+    }
+
+    #[test]
+    fn a_pending_chord_swallows_the_next_key_instead_of_typing_it() {
+        let mut model = with_tree();
+        model.focus = Focus::Editor;
+        model.editor.set_text("SELECT ");
+        update(&mut model, Message::Action(Action::BeginPrefix));
+        update(&mut model, Message::Action(Action::Insert('z')));
+        assert_eq!(
+            model.editor.text(),
+            "SELECT ",
+            "the chord key did not become text"
+        );
+    }
+
+    #[test]
+    fn escape_peels_one_layer_at_a_time_in_a_fixed_order() {
+        let mut model = with_tree();
+        model.error = Some(Diagnostic::new(DiagnosticKind::Query, "boom", "running"));
+        model.tree.filter = "orders".into();
+        update(&mut model, Message::Action(Action::ToggleHelp));
+        update(&mut model, Message::Action(Action::OpenPalette));
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.palette.is_none(), "the palette goes first");
+        assert!(model.help_open);
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(!model.help_open, "then help");
+        assert_eq!(model.tree.filter, "orders");
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.tree.filter.is_empty(), "then the filter");
+        assert!(model.error.is_some(), "the unread error is still there");
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.error.is_none(), "and only then the error");
+    }
+
+    #[test]
+    fn a_pending_chord_is_dismissed_before_anything_else() {
+        let mut model = with_tree();
+        update(&mut model, Message::Action(Action::ToggleHelp));
+        update(&mut model, Message::Action(Action::BeginPrefix));
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(!model.prefix_pending, "the chord goes first");
+        assert!(model.help_open, "and nothing beneath it was touched");
+    }
+
+    #[test]
+    fn an_open_palette_swallows_a_chord_rather_than_stacking_two_popups() {
+        let mut model = with_tree();
+        update(&mut model, Message::Action(Action::OpenPalette));
+        update(&mut model, Message::Action(Action::BeginPrefix));
+        assert!(
+            !model.prefix_pending,
+            "two overlays at once would leave the user unsure which key applies"
+        );
+        assert!(model.palette.is_some());
+    }
+
+    #[test]
+    fn enter_means_something_different_in_each_pane() {
+        let mut model = with_tree();
+
+        model.focus = Focus::Editor;
+        model.editor.set_text("SELECT 1");
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(
+            model.editor.text(),
+            "SELECT 1\n",
+            "a line break in the editor"
+        );
+
+        model.focus = Focus::Objects;
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.tree.rows()[0].expanded, "opens a node in the tree");
+    }
+
+    #[test]
+    fn a_failed_metadata_load_explains_itself_inside_the_tree() {
+        let mut model = with_tree();
+        model.focus = Focus::Objects;
+        update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        let effects = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+        let Effect::LoadMetadata { request, path, .. } = &effects[0] else {
+            panic!("expected a load");
+        };
+
+        update(
+            &mut model,
+            Message::MetadataLoaded {
+                request: *request,
+                path: path.clone(),
+                payload: Box::new(Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "permission denied for schema public",
+                    "listing tables",
+                ))),
+            },
+        );
+
+        let labels: Vec<String> = model.tree.rows().iter().map(|r| r.label.clone()).collect();
+        assert!(
+            labels.contains(&"permission denied for schema public".to_owned()),
+            "the reason appears where the user was looking: {labels:?}"
+        );
+        assert!(
+            model.error.is_none(),
+            "a tree failure is not a query failure"
+        );
+    }
+
+    #[test]
+    fn a_failure_to_load_the_tree_at_all_is_shown_in_the_tree() {
+        let mut model = connected();
+        update(
+            &mut model,
+            Message::SchemasLoaded(Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "the connection closed",
+                "reading the catalogue",
+            )))),
+        );
+        assert!(model.tree.error.is_some());
+        assert!(!model.tree.loading);
     }
 
     #[test]
