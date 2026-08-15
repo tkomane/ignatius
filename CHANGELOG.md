@@ -10,6 +10,11 @@ source can generate user-facing notes.
 
 ### New
 
+- Streaming export with `--output`. Rows go from the wire to the file without
+  passing through memory: 200,000 rows exported in 13 MB of resident memory.
+  An export writes to a `.partial` file and only moves it into place when it is
+  complete, never replaces an existing file without `--force`, and on
+  interruption keeps what it wrote and says how many rows that was.
 - Password files in PostgreSQL's `.pgpass` format, including wildcards, escapes
   and first-match-wins ordering, so a password need never appear on a command
   line. A file that others can read is refused, with the `chmod` that fixes it.
@@ -103,4 +108,7 @@ source can generate user-facing notes.
 - No object explorer, query history or export.
 - The driver reports a row count rather than the full command tag, so the
   interface says "3 rows affected" rather than "INSERT 0 3".
+- Export supports csv, tsv and ndjson. json, markdown and table need the whole
+  result before the first byte is correct, so they are refused for export rather
+  than quietly buffering the result they were meant to avoid holding.
 - Nothing is signed, notarised or published.

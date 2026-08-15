@@ -492,6 +492,114 @@ mod with_server {
     }
 
     #[test]
+    fn an_export_writes_the_file_and_reports_the_count_on_stderr() {
+        let uri = uri_or_skip!();
+        let dir = std::env::temp_dir().join(format!("ignatius-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let destination = dir.join("orders.csv");
+        let _ = std::fs::remove_file(&destination);
+
+        let output = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT order_id, total FROM orders ORDER BY order_id",
+                "--format",
+                "csv",
+                "-o",
+                &destination.display().to_string(),
+            ])
+            .output()
+            .expect("run");
+
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert!(
+            stdout(&output).is_empty(),
+            "an export writes no data to stdout"
+        );
+        assert!(
+            stderr(&output).contains("Exported 3 row(s)"),
+            "{}",
+            stderr(&output)
+        );
+
+        let written = std::fs::read_to_string(&destination).expect("read");
+        assert!(
+            written.starts_with("order_id,total\n1,1245.00\n"),
+            "{written}"
+        );
+        assert!(
+            !destination.with_extension("csv.partial").exists(),
+            "the partial file is gone once the export is complete"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_interrupted_export_keeps_its_rows_and_exits_with_the_export_code() {
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let dir = std::env::temp_dir().join(format!("ignatius-partial-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let destination = dir.join("big.csv");
+        let _ = std::fs::remove_file(&destination);
+
+        // A result large enough that it is certainly still streaming when the
+        // interrupt arrives.
+        let child = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT generate_series(1, 4000000) AS n, repeat('x', 200) AS pad",
+                "--format",
+                "csv",
+                "-o",
+                &destination.display().to_string(),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        let status = Command::new("kill")
+            .args(["-INT", &child.id().to_string()])
+            .status()
+            .expect("send SIGINT");
+        assert!(status.success());
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(
+            code(&output),
+            9,
+            "an interrupted export exits 9: {}",
+            stderr(&output)
+        );
+
+        let message = stderr(&output);
+        assert!(message.contains("Export incomplete"), "{message}");
+        assert!(
+            message.contains(".partial"),
+            "it names the partial file: {message}"
+        );
+
+        let partial = std::path::PathBuf::from(format!("{}.partial", destination.display()));
+        assert!(partial.exists(), "the rows already written are kept");
+        assert!(
+            !destination.exists(),
+            "an incomplete export never occupies the destination, where it would look finished"
+        );
+        assert!(
+            std::fs::metadata(&partial).expect("metadata").len() > 0,
+            "something was actually written before the interrupt"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn connect_check_reports_stages_and_succeeds_against_a_live_server() {
         let uri = uri_or_skip!();
         let output = binary()

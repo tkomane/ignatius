@@ -334,6 +334,99 @@ fn table_widths(set: &ResultSet) -> Vec<usize> {
         .collect()
 }
 
+/// Writes rows one at a time, for export.
+///
+/// Only the formats that need no wrapper can stream: CSV, TSV and NDJSON. JSON,
+/// Markdown and the aligned table all need the whole result before the first
+/// byte is correct, and buffering it would quietly give up the memory guarantee
+/// an export exists to keep. They are refused rather than silently downgraded.
+#[derive(Debug)]
+pub struct StreamWriter {
+    format: Format,
+    options: OutputOptions,
+    columns: Vec<String>,
+    rows: u64,
+}
+
+impl StreamWriter {
+    /// Creates a writer, or explains why this format cannot stream.
+    pub fn new(options: OutputOptions) -> Result<Self, crate::diagnostics::Diagnostic> {
+        if !matches!(options.format, Format::Csv | Format::Tsv | Format::Ndjson) {
+            return Err(crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Usage,
+                format!("{:?} cannot be written as a stream", options.format).to_lowercase(),
+                "preparing an export",
+            )
+            .likely_cause(
+                "json, markdown and table need the whole result before the first byte is \
+                 correct, and holding a large result in memory is exactly what an export \
+                 avoids",
+            )
+            .next_action("export as csv, tsv or ndjson"));
+        }
+        Ok(Self {
+            format: options.format,
+            options,
+            columns: Vec::new(),
+            rows: 0,
+        })
+    }
+
+    /// Records the column names and writes a header where the format has one.
+    pub fn columns(&mut self, out: &mut impl Write, columns: Vec<String>) -> io::Result<()> {
+        self.columns = columns;
+        if !self.options.header || self.format == Format::Ndjson {
+            return Ok(());
+        }
+        let delimiter = self.delimiter();
+        let header: Vec<String> = self
+            .columns
+            .iter()
+            .map(|name| encode_field(name, delimiter))
+            .collect();
+        writeln!(out, "{}", header.join(&delimiter.to_string()))
+    }
+
+    /// Writes one row.
+    pub fn row(&mut self, out: &mut impl Write, row: &[Cell]) -> io::Result<()> {
+        self.rows += 1;
+        if self.format == Format::Ndjson {
+            let object: serde_json::Map<String, serde_json::Value> = self
+                .columns
+                .iter()
+                .zip(row)
+                .map(|(name, cell)| {
+                    let value = match cell {
+                        Cell::Null => serde_json::Value::Null,
+                        Cell::Text(text) => serde_json::Value::String(text.clone()),
+                    };
+                    (name.clone(), value)
+                })
+                .collect();
+            return writeln!(out, "{}", serde_json::Value::Object(object));
+        }
+        let delimiter = self.delimiter();
+        let values: Vec<String> = row
+            .iter()
+            .map(|cell| encode_field(&cell.export(&self.options.null_encoding), delimiter))
+            .collect();
+        writeln!(out, "{}", values.join(&delimiter.to_string()))
+    }
+
+    /// How many rows have been written.
+    #[must_use]
+    pub const fn rows(&self) -> u64 {
+        self.rows
+    }
+
+    const fn delimiter(&self) -> char {
+        match self.format {
+            Format::Tsv => '\t',
+            _ => ',',
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -549,6 +642,76 @@ mod tests {
         let text = String::from_utf8(out).expect("utf8");
         assert!(!text.starts_with("id,name"), "{text}");
         assert_eq!(text.lines().count(), 2);
+    }
+
+    #[test]
+    fn a_streamed_export_matches_what_the_buffered_writer_produces() {
+        // The two paths must not drift: a script cannot care whether the rows
+        // went through a file or through a pipe.
+        for format in [Format::Csv, Format::Tsv, Format::Ndjson] {
+            let options = OutputOptions {
+                format,
+                ..OutputOptions::default()
+            };
+            let buffered = {
+                let mut out = Vec::new();
+                write_execution(&mut out, &execution(vec![sample()]), &options).expect("write");
+                String::from_utf8(out).expect("utf8")
+            };
+
+            let streamed = {
+                let mut out = Vec::new();
+                let mut writer = StreamWriter::new(options.clone()).expect("streamable");
+                let set = sample();
+                writer
+                    .columns(&mut out, set.columns.clone())
+                    .expect("columns");
+                for row in &set.rows {
+                    writer.row(&mut out, row).expect("row");
+                }
+                assert_eq!(writer.rows(), 2);
+                String::from_utf8(out).expect("utf8")
+            };
+
+            assert_eq!(
+                buffered, streamed,
+                "{format:?} differs between the two paths"
+            );
+        }
+    }
+
+    #[test]
+    fn formats_that_cannot_stream_are_refused_rather_than_buffered() {
+        for format in [Format::Json, Format::Markdown, Format::Table] {
+            let error = StreamWriter::new(OutputOptions {
+                format,
+                ..OutputOptions::default()
+            })
+            .expect_err("must refuse");
+            assert_eq!(error.exit_code(), crate::ExitCode::Usage);
+            assert!(
+                error.next_action.expect("action").contains("ndjson"),
+                "it should name a format that works"
+            );
+        }
+    }
+
+    #[test]
+    fn a_streamed_export_can_omit_its_header() {
+        let mut out = Vec::new();
+        let mut writer = StreamWriter::new(OutputOptions {
+            format: Format::Csv,
+            header: false,
+            ..OutputOptions::default()
+        })
+        .expect("streamable");
+        writer
+            .columns(&mut out, vec!["id".into()])
+            .expect("columns");
+        writer
+            .row(&mut out, &[Cell::Text("1".into())])
+            .expect("row");
+        assert_eq!(String::from_utf8(out).expect("utf8"), "1\n");
     }
 
     #[test]

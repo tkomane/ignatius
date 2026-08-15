@@ -12,6 +12,17 @@ What this program stores, where, for how long, and what it never stores.
   when it does (Feature 003) it will be opt-out-able, scoped, and erasable, and
   will still never contain result rows.
 
+## Exports
+
+An export is the one route by which result data is written to disk, and it only
+happens when the user asks for it by naming a file. Nothing is cached, and no
+result is ever written anywhere else.
+
+An export never overwrites an existing file without `--force`, and never leaves
+a truncated file at the destination: incomplete work stays under a `.partial`
+name, which is reported rather than cleaned up silently, because the rows in it
+may be what the user needed.
+
 ## Written to disk
 
 | What | Where | Permissions | Lifetime |

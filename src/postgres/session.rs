@@ -73,6 +73,24 @@ pub struct Session {
     connection_lost: Arc<AtomicBool>,
 }
 
+/// One thing that happened while streaming.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamEvent {
+    /// The column names, once, before any row.
+    Columns(Vec<String>),
+    /// One row.
+    Row(Vec<Cell>),
+}
+
+/// Why a stream stopped early.
+#[derive(Debug)]
+pub enum StreamStop {
+    /// The server, or the shape of the result, ended it.
+    Server(Box<Diagnostic>),
+    /// The destination could not be written.
+    Sink(std::io::Error),
+}
+
 /// A handle that can cancel the session's running statement from elsewhere.
 ///
 /// Cancellation opens its own connection, which is why it can work while the
@@ -192,6 +210,63 @@ impl Session {
         &self,
     ) -> Result<Vec<crate::postgres::metadata::ObjectSummary>, Diagnostic> {
         crate::postgres::metadata::extensions(&self.client).await
+    }
+
+    /// Streams a single statement's rows without retaining any of them.
+    ///
+    /// This is the path an export takes. Nothing is buffered, so the memory a
+    /// hundred-million-row export uses is the memory one row uses. The sink is
+    /// called for each event in order and may fail, which stops the stream.
+    pub async fn stream(
+        &self,
+        sql: &str,
+        sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
+    ) -> Result<u64, StreamStop> {
+        let stream = self
+            .client
+            .simple_query_raw(sql)
+            .await
+            .map_err(|err| StreamStop::Server(Box::new(from_query_error(&err, 1))))?;
+        tokio::pin!(stream);
+
+        let mut rows = 0u64;
+        let mut seen_columns = false;
+
+        while let Some(message) = stream.next().await {
+            let message =
+                message.map_err(|err| StreamStop::Server(Box::new(from_query_error(&err, 1))))?;
+            match message {
+                tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
+                    if seen_columns {
+                        // A second result set cannot be appended to the first
+                        // without inventing a meaning for the join.
+                        return Err(StreamStop::Server(Box::new(
+                            Diagnostic::new(
+                                DiagnosticKind::Usage,
+                                "an export needs a single result set",
+                                "streaming rows to a file",
+                            )
+                            .likely_cause("the statement produced more than one set of rows")
+                            .next_action("export one statement at a time"),
+                        )));
+                    }
+                    seen_columns = true;
+                    let names = columns.iter().map(|c| c.name().to_owned()).collect();
+                    sink(StreamEvent::Columns(names)).map_err(StreamStop::Sink)?;
+                }
+                tokio_postgres::SimpleQueryMessage::Row(row) => {
+                    let cells = (0..row.len())
+                        .map(|i| Cell::from_option(row.get(i)))
+                        .collect();
+                    sink(StreamEvent::Row(cells)).map_err(StreamStop::Sink)?;
+                    rows += 1;
+                }
+                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                _ => {}
+            }
+        }
+
+        Ok(rows)
     }
 
     /// Executes every statement in a buffer, in order.
