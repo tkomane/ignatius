@@ -935,6 +935,74 @@ fn a_definition_comes_from_the_server_where_the_server_can_render_it() {
 }
 
 #[test]
+fn dependencies_are_read_in_both_directions_and_say_what_they_cannot_see() {
+    use ignatius::postgres::ObjectKind;
+    use ignatius::postgres::metadata::ObjectSummary;
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let orders = ObjectSummary {
+        kind: ObjectKind::Table,
+        schema: "public".into(),
+        name: "orders".into(),
+        readable: true,
+        detail: None,
+    };
+    let found = fx
+        .block_on(fx.session.dependencies(&orders))
+        .expect("dependencies");
+
+    // A view over the table is recorded by PostgreSQL as a rewrite rule, which
+    // is the edge this follows.
+    assert!(
+        found
+            .used_by
+            .iter()
+            .any(|object| object.name == "recent_orders"),
+        "the view that reads it: {:?}",
+        found.used_by
+    );
+    assert!(
+        found.used_by.iter().all(|object| object.detail.is_some()),
+        "every edge says why it is an edge"
+    );
+
+    // And the other direction: the view depends on the table.
+    let view = ObjectSummary {
+        kind: ObjectKind::View,
+        schema: "public".into(),
+        name: "recent_orders".into(),
+        readable: true,
+        detail: None,
+    };
+    let found = fx
+        .block_on(fx.session.dependencies(&view))
+        .expect("dependencies");
+    assert!(
+        found
+            .depends_on
+            .iter()
+            .any(|object| object.name == "orders"),
+        "{:?}",
+        found.depends_on
+    );
+
+    // An object with no edges is empty rather than an error.
+    let alone = ObjectSummary {
+        kind: ObjectKind::Table,
+        schema: "public".into(),
+        name: "no_such_table".into(),
+        readable: true,
+        detail: None,
+    };
+    let found = fx
+        .block_on(fx.session.dependencies(&alone))
+        .expect("dependencies");
+    assert!(found.is_empty());
+}
+
+#[test]
 fn an_object_named_to_break_a_client_can_still_be_described() {
     use ignatius::postgres::ObjectKind;
     use ignatius::postgres::metadata::ObjectSummary;

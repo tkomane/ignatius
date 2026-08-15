@@ -6,7 +6,12 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: the object tree has a connection of its own, so a long
+**Current feature**: dependency navigation. `Ctrl+K y` lists what an object is
+used by and what it depends on, with the reason for each edge, following the two
+edges PostgreSQL records - view rewrite rules and foreign keys - and saying that
+a function body's reads are not among them. That completes roadmap Feature 005.
+
+**Previous**: the object tree has a connection of its own, so a long
 query cannot delay it. Same resolved target, moved rather than re-derived, with
 two deliberate differences the server can see: an `application_name` saying it is
 the tree, and a read-only session. If it cannot be opened the tree shares the
@@ -121,6 +126,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| Dependencies are read in both directions | Integration test over a view and the table it reads |
 | The tree's connection is separate and read-only | Integration test: two backend pids, and a write refused with SQLSTATE 25006 |
 | An object's definition is what the server renders | Integration tests over a view, a function and a table |
 | A hostile object name is safe to describe | Integration test: the definition is read, `orders` still exists |
@@ -224,6 +230,5 @@ These are real and none of them is hidden anywhere else:
    on the current model.
 7. Then connection profiles and an OS credential store. Password files and
    service files are already done.
-8. Dependency navigation: what an object depends on and what depends on it. The
-   rest of the object explorer - definitions, indexes and extensions in the tree,
-   and the tree's own connection - is done.
+8. Configurable keymaps and colour overrides from the configuration file, which
+   is the rest of Feature 007.

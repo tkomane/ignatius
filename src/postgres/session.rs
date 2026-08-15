@@ -213,6 +213,14 @@ impl Session {
         crate::postgres::metadata::definition(&self.client, object).await
     }
 
+    /// What an object depends on, and what depends on it.
+    pub async fn dependencies(
+        &self,
+        object: &crate::postgres::metadata::ObjectSummary,
+    ) -> Result<crate::postgres::metadata::Dependencies, Diagnostic> {
+        crate::postgres::metadata::dependencies(&self.client, object).await
+    }
+
     /// Extensions installed in this database.
     pub async fn extensions(
         &self,

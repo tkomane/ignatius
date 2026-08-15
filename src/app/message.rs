@@ -68,6 +68,8 @@ pub enum Action {
     MovePage(Direction),
     /// Show the definition of the selected object.
     ShowDefinition,
+    /// Show what the selected object depends on, and what depends on it.
+    ShowDependencies,
     /// Search the statements that have run and reuse one.
     OpenHistory,
     /// Stop or resume recording statements for this session.
@@ -126,6 +128,13 @@ pub enum Message {
         path: crate::app::tree::NodePath,
         /// What came back.
         payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
+    },
+    /// An object's dependencies finished loading.
+    DependenciesLoaded {
+        /// Which request this answers.
+        request: crate::app::tree::RequestId,
+        /// What was found, or why it could not be.
+        result: Box<Result<crate::postgres::metadata::Dependencies, Diagnostic>>,
     },
     /// The tree's own connection is now open, or could not be opened.
     ///
@@ -192,6 +201,13 @@ pub enum Effect {
         /// Identity to report back with.
         request: crate::app::tree::RequestId,
         /// The object to describe.
+        object: Box<crate::postgres::metadata::ObjectSummary>,
+    },
+    /// Read what an object depends on and what depends on it.
+    LoadDependencies {
+        /// Identity to report back with.
+        request: crate::app::tree::RequestId,
+        /// The object to ask about.
         object: Box<crate::postgres::metadata::ObjectSummary>,
     },
     /// Read the statement history from disk.

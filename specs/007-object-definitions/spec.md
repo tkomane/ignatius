@@ -1,4 +1,4 @@
-# Feature Specification: What an object is
+# Feature Specification: What an object is, and what it is connected to
 
 **Feature Branch**: `007-object-definitions`
 
@@ -7,10 +7,10 @@
 **Status**: Implemented, verified on macOS against PostgreSQL 18.4, including a
 table named to break a client that interpolates identifiers.
 
-**Numbering note**: files are numbered in build order. This is the DDL half of
-roadmap Feature 005, *PostgreSQL object explorer*. Dependency navigation,
-indexes and extensions as tree nodes, and a dedicated metadata connection are
-still to come.
+**Numbering note**: files are numbered in build order. This began as the DDL
+half of roadmap Feature 005, *PostgreSQL object explorer*, and now covers the
+rest of it too: indexes and extensions as tree nodes, the tree's own read-only
+connection, and dependency navigation.
 
 ## User Scenarios & Testing
 
@@ -52,6 +52,19 @@ The catalogue can refuse, and objects disappear between one query and the next.
 3. **Given** a schema or a group rather than an object, **When** the definition
    key is pressed, **Then** nothing opens, because there is nothing to show.
 
+### User Story 3 - What breaks if I drop this? (Priority: P2)
+
+Someone is about to change a table and wants to know what reads it.
+
+**Acceptance Scenarios**:
+
+1. **Given** an object, **When** its dependencies are shown, **Then** both
+   directions are listed and each edge says why it is an edge.
+2. **Given** the list, **When** one is chosen, **Then** its quoted, qualified
+   name is put where SQL is written.
+3. **Given** the list, **When** it is read, **Then** it states which edges it
+   follows and which it cannot see.
+
 ### Edge Cases
 
 - An object named `we"ird "; DROP TABLE orders; --`.
@@ -90,6 +103,21 @@ The catalogue can refuse, and objects disappear between one query and the next.
   it is waiting.
 - **UX-702**: An assembled description MUST NOT be presented as a script that
   recreates the object.
+- **UX-703**: The dependency list MUST state its own limits where it is read:
+  view rewrite rules and foreign keys are followed, and what a function body
+  reads is not recorded by PostgreSQL at all.
+
+### The tree's connection
+
+- **FR-707**: The object tree MUST use a connection of its own where one can be
+  opened, and MUST fall back to the session's connection where one cannot.
+- **FR-708**: That connection MUST be made from the same resolved target as the
+  session, so the route, the credential and the transport protection cannot
+  differ.
+- **FR-709**: It MUST be read-only at the server and MUST identify itself in
+  `application_name`.
+- **SEC-704**: Falling back to a shared connection MUST be visible, because it
+  is why the tree can wait behind a long query.
 
 ## Success Criteria
 
@@ -97,6 +125,9 @@ The catalogue can refuse, and objects disappear between one query and the next.
 - **SC-702**: A table's description names its constraints.
 - **SC-703**: An object named to break an interpolating client is described, and
   the table that name was written to destroy still exists afterwards.
+- **SC-704**: A view that reads a table appears in that table's dependency list,
+  and the table appears in the view's.
+- **SC-705**: A long query on the session does not delay the object tree.
 
 ## Assumptions
 

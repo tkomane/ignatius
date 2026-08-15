@@ -243,6 +243,14 @@ async fn event_loop(
                         *object,
                     );
                 }
+                Effect::LoadDependencies { request, object } => {
+                    spawn_load_dependencies(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        *object,
+                    );
+                }
                 Effect::LoadHistory => {
                     let _ = tx.send(Message::HistoryLoaded(
                         history
@@ -622,6 +630,25 @@ fn spawn_load_definition(
         };
         let result = session.definition(&object).await;
         let _ = tx.send(Message::DefinitionLoaded {
+            request,
+            result: Box::new(result),
+        });
+    });
+}
+
+/// Reads what an object depends on and what depends on it.
+fn spawn_load_dependencies(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    request: crate::app::tree::RequestId,
+    object: crate::postgres::metadata::ObjectSummary,
+) {
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            return;
+        };
+        let result = session.dependencies(&object).await;
+        let _ = tx.send(Message::DependenciesLoaded {
             request,
             result: Box::new(result),
         });
