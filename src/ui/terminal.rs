@@ -266,12 +266,19 @@ mod tests {
             bracketed_paste: true,
         };
         let (entered, left) = sequences(options);
-        for (on, off, what) in [
+        let mut modes = vec![
             ("\x1b[?1049h", "\x1b[?1049l", "alternate screen"),
             ("\x1b[?2004h", "\x1b[?2004l", "bracketed paste"),
-            ("\x1b[?1000h", "\x1b[?1000l", "mouse capture"),
             ("\x1b[?25l", "\x1b[?25h", "cursor visibility"),
-        ] {
+        ];
+        // Mouse capture is the one mode Crossterm does not express as an escape
+        // sequence on Windows: it goes through the console API instead, so no
+        // bytes reach this writer. The call is still made and still undone,
+        // which is what matters; only its observability differs.
+        if cfg!(unix) {
+            modes.push(("\x1b[?1000h", "\x1b[?1000l", "mouse capture"));
+        }
+        for (on, off, what) in modes {
             assert!(entered.contains(on), "{what} was never enabled");
             assert!(left.contains(off), "{what} was left enabled");
         }
@@ -285,11 +292,20 @@ mod tests {
         };
         let (_, left) = sequences(options);
         let cursor = left.find("\x1b[?25h").expect("cursor restored");
-        let mouse = left.find("\x1b[?1000l").expect("mouse released");
         let paste = left.find("\x1b[?2004l").expect("paste restored");
         let screen = left.find("\x1b[?1049l").expect("screen left");
+
+        // Mouse capture is released through the console API on Windows and so
+        // has no sequence to order; where it does emit one, it belongs between
+        // the cursor and the paste mode.
+        #[cfg(unix)]
+        {
+            let mouse = left.find("\x1b[?1000l").expect("mouse released");
+            assert!(cursor < mouse && mouse < paste, "mouse released in order");
+        }
+
         assert!(
-            cursor < mouse && mouse < paste && paste < screen,
+            cursor < paste && paste < screen,
             "the alternate screen must be left last so the restored state applies to the user's screen"
         );
     }
