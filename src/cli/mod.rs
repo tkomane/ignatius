@@ -6,6 +6,7 @@
 
 pub mod interactive;
 pub mod output;
+pub mod plain;
 
 use crate::ExitCode;
 use crate::branding;
@@ -361,9 +362,14 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         }) => {
             if *check {
                 check_command(target.as_deref(), connection, &paths, out)
+            } else if cli.global.plain {
+                plain_command(target.as_deref(), connection, &paths, out, err)
             } else {
                 interactive::run(target.as_deref(), connection, &paths, &presentation)
             }
+        }
+        None if cli.global.plain => {
+            plain_command(None, &ConnectionOptions::default(), &paths, out, err)
         }
         None => interactive::run(None, &ConnectionOptions::default(), &paths, &presentation),
     };
@@ -716,6 +722,25 @@ fn query_command(
         return Err(error.clone());
     }
     Ok(ExitCode::Success)
+}
+
+/// Opens the plain, line-oriented client.
+fn plain_command(
+    target: Option<&str>,
+    connection: &ConnectionOptions,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let args = connection.to_args()?;
+    let resolved = crate::connection::resolve(
+        target,
+        &args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    plain::run(resolved, &loaded.config, out, err)
 }
 
 fn check_command(

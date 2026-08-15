@@ -159,7 +159,7 @@ reached it.
 | Live terminal resize | **Not verified.** Covered only by a unit test on the resize message |
 | Windows Terminal with PowerShell 7 | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
 | Any VT-capable terminal on Linux | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
-| `TERM=dumb` | Full-screen client refuses and points at `query` |
+| `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
 
 Minimum size for the full layout is 80x24. Below that a single-pane layout is

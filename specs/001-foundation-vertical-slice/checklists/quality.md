@@ -30,7 +30,7 @@ reviewed and satisfied. It does not mean the implementation is complete.
 - [x] CHK012 No requirement depends on mouse input
 - [x] CHK013 Palettes have a stated contrast threshold that tests enforce
 - [x] CHK014 An ASCII presentation is required, not optional
-- [ ] CHK015 A plain line-oriented mode for screen readers is specified (Feature 007)
+- [x] CHK015 A plain line-oriented mode for screen readers is specified and built
 
 ## Security
 

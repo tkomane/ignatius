@@ -249,7 +249,9 @@ fn render_full(
 
     render_header(model, presentation, header, buf);
     render_editor(model, presentation, editor, buf);
-    if let Some(error) = &model.error {
+    if model.transaction == crate::query::result::TransactionState::Failed {
+        render_results(model, presentation, results, buf);
+    } else if let Some(error) = &model.error {
         render_error(model, error, presentation, results, buf);
     } else {
         render_results(model, presentation, results, buf);
@@ -273,7 +275,9 @@ fn render_compact(
     .areas(area);
 
     render_compact_header(model, presentation, header, buf);
-    if let Some(error) = &model.error {
+    if model.transaction == crate::query::result::TransactionState::Failed {
+        render_results(model, presentation, body, buf);
+    } else if let Some(error) = &model.error {
         render_error(model, error, presentation, body, buf);
     } else {
         match model.focus {
@@ -535,8 +539,7 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
 
     // A failed transaction is not an ordinary error: nothing else will run until
     // it ends, so the way out is shown rather than left to be remembered.
-    if model.transaction == crate::query::result::TransactionState::Failed && model.error.is_none()
-    {
+    if model.transaction == crate::query::result::TransactionState::Failed {
         let block = pane_block(
             format!(" {}Transaction failed ", presentation.icon(Icon::Warning)),
             focused,
@@ -544,21 +547,38 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
         );
         let inner = block.inner(area);
         block.render(area, buf);
-        Paragraph::new(vec![
-            Line::from(Span::styled(
-                "This transaction has failed.",
-                theme.style(Token::TransactionFailed),
-            )),
-            Line::from(Span::styled(
-                model
-                    .transaction
-                    .recovery()
-                    .unwrap_or("Run ROLLBACK to end it."),
-                theme.style(Token::Info),
-            )),
-        ])
-        .wrap(Wrap { trim: true })
-        .render(inner, buf);
+        let mut lines = vec![Line::from(Span::styled(
+            "This transaction has failed.",
+            theme.style(Token::TransactionFailed),
+        ))];
+        if let Some(error) = &model.error {
+            lines.push(Line::from(Span::styled(
+                error.headline.clone(),
+                theme.style(Token::Danger),
+            )));
+            if let Some(cause) = &error.likely_cause {
+                lines.push(Line::from(Span::styled(
+                    format!("Likely cause: {cause}"),
+                    theme.style(Token::Text),
+                )));
+            }
+            if let Some(action) = &error.next_action {
+                lines.push(Line::from(Span::styled(
+                    format!("Next: {action}"),
+                    theme.style(Token::Info),
+                )));
+            }
+        }
+        lines.push(Line::from(Span::styled(
+            model
+                .transaction
+                .recovery()
+                .unwrap_or("Run ROLLBACK to end it."),
+            theme.style(Token::Info),
+        )));
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .render(inner, buf);
         return;
     }
 
@@ -2171,6 +2191,38 @@ mod tests {
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
         assert!(text.contains("Transaction failed"), "{text}");
         assert!(text.contains("ROLLBACK"), "the way out is named: {text}");
+    }
+
+    #[test]
+    fn a_failed_transaction_with_an_error_still_shows_recovery_in_the_results() {
+        let mut model = connected_model(Environment::Local);
+        with_rows(&mut model, &["n"], &[&[Cell::Text("1".into())]]);
+        model.transaction = crate::query::result::TransactionState::Failed;
+        model.error = Some(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Query,
+                "current transaction is aborted",
+                "running statement 1",
+            )
+            .likely_cause("an earlier statement failed")
+            .next_action("roll back the transaction"),
+        );
+
+        for (width, height) in [(100, 30), (60, 20)] {
+            let text = render_to_string(&model, &Keymap::new(), &rich(), width, height);
+            assert!(
+                text.contains("Transaction failed"),
+                "{width}x{height}: {text}"
+            );
+            assert!(
+                text.contains("current transaction is aborted"),
+                "the original diagnostic remains visible at {width}x{height}: {text}"
+            );
+            assert!(
+                text.contains("ROLLBACK"),
+                "the recovery instruction is visible at {width}x{height}: {text}"
+            );
+        }
     }
 
     #[test]
