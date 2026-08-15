@@ -8,6 +8,7 @@ vertical slice that leaves the product usable.
 | 001 Foundation and vertical slice | **Implemented, macOS-verified** | Architecture, terminal lifecycle, connection, execution, cancellation, CLI contract, doctor |
 | 002 Object navigation | **Implemented** | Object tree, command palette, chord popup, breadcrumbs, object symbolism. Built ahead of the libpq migration at the owner's request; it touches no credential route, so the two do not overlap |
 | 001a libpq migration | **Next**, per ADR-0009 | Client certificates, `.pgpass`, service files and enterprise authentication, which the pure-Rust driver cannot provide |
+| 003 Credential routes | **Password and service files done** | `.pgpass` and `pg_service.conf`, the driver-independent half of the connection experience |
 | 002 Connection experience and secrets | After 001a | Profiles, first-run journey, credential store, `.pgpass`, service files, password prompting, TLS states, connection diagnostics |
 | 003 Delightful query loop | Planned | Real editor, query jobs, history with privacy controls, transaction state. The command palette landed early in 002 |
 | 004 Result exploration and export | Planned | Virtualised grid, type-aware cells, expanded row view, cell inspector, streaming export, partial files |

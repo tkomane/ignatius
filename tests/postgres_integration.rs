@@ -823,3 +823,164 @@ fn a_restricted_role_sees_objects_it_cannot_read_and_they_are_marked_as_such() {
         "an object the role cannot read must be marked, not hidden or fatal"
     );
 }
+
+// ------------------------------------------------- service and password files
+
+/// Writes a service file and a password file describing the demo database, and
+/// returns the directory holding them.
+fn credential_files(uri: &str) -> (tempfile::TempDir, String, String) {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    // Pull the pieces out of the test URI rather than hard-coding them twice.
+    let rest = uri.split_once("://").expect("a URI").1;
+    let (userinfo, host_and_db) = rest.split_once('@').expect("userinfo");
+    let (user, password) = userinfo.split_once(':').expect("a password");
+    let (host_port, database) = host_and_db.split_once('/').expect("a database");
+    let (host, port) = host_port.split_once(':').expect("a port");
+
+    let service = dir.path().join("pg_service.conf");
+    std::fs::write(
+        &service,
+        format!("[demo]\nhost={host}\nport={port}\ndbname={database}\nuser={user}\n"),
+    )
+    .expect("write service file");
+
+    let passfile = dir.path().join("pgpass");
+    std::fs::write(
+        &passfile,
+        format!("{host}:{port}:{database}:{user}:{password}\n"),
+    )
+    .expect("write password file");
+    ignatius::platform::restrict_to_owner(&passfile).expect("restrict");
+
+    (
+        dir,
+        service.display().to_string(),
+        passfile.display().to_string(),
+    )
+}
+
+#[test]
+fn a_service_file_and_a_password_file_are_enough_to_connect() {
+    let uri = target_or_skip!();
+    let (_dir, service, passfile) = credential_files(&uri);
+
+    // Nothing here names a host, a user, or a password: the two files carry
+    // everything, which is the point of supporting them.
+    let env = EnvSnapshot::from_pairs(&[
+        ("PGSERVICEFILE", service.as_str()),
+        ("PGPASSFILE", passfile.as_str()),
+    ]);
+    let config = Config::default();
+    let target = resolve(
+        Some("service=demo"),
+        &ConnectionArgs::default(),
+        &env,
+        &config.connection,
+    )
+    .expect("target resolves from the files alone");
+
+    let runtime = runtime();
+    let session = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("connects using only the service and password files");
+
+    let execution = runtime.block_on(session.execute("SELECT 1 AS one", 10, JobId(1)));
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
+}
+
+#[test]
+fn connecting_with_no_password_at_all_is_an_authentication_failure() {
+    let uri = target_or_skip!();
+    let Some((prefix, rest)) = uri.split_once("://") else {
+        panic!("expected a URI");
+    };
+    let Some((_, host_and_db)) = rest.split_once('@') else {
+        eprintln!("skipping: the test URI has no userinfo to replace");
+        return;
+    };
+
+    // The server requires SCRAM, so offering nothing is a refusal by the server
+    // rather than a network problem. This also pins the driver's wording for
+    // that case, which the classification depends on.
+    let config = Config::default();
+    let target = resolve(
+        Some(&format!("{prefix}://ignatius_test@{host_and_db}")),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config.connection,
+    )
+    .expect("target resolves");
+
+    let error = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect_err("no password means no connection");
+    assert_eq!(
+        error.exit_code(),
+        ignatius::ExitCode::Authentication,
+        "the server was reached and said no: {error:?}"
+    );
+    assert!(
+        error
+            .next_action
+            .expect("an action")
+            .contains("password file"),
+        "it should point at the safer route"
+    );
+}
+
+#[test]
+fn a_world_readable_password_file_is_refused_and_the_connection_fails_honestly() {
+    let uri = target_or_skip!();
+    let (_dir, service, passfile) = credential_files(&uri);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&passfile, std::fs::Permissions::from_mode(0o644))
+            .expect("loosen the permissions");
+
+        let env = EnvSnapshot::from_pairs(&[
+            ("PGSERVICEFILE", service.as_str()),
+            ("PGPASSFILE", passfile.as_str()),
+        ]);
+        let config = Config::default();
+        let target = resolve(
+            Some("service=demo"),
+            &ConnectionArgs::default(),
+            &env,
+            &config.connection,
+        )
+        .expect("resolve");
+
+        assert!(
+            target.password.is_none(),
+            "a password file others can read must not be used"
+        );
+        assert!(
+            target
+                .notes
+                .iter()
+                .any(|n| n.message.contains("readable by others")),
+            "and the user must be told why: {:?}",
+            target.notes
+        );
+
+        // The connection then fails on authentication, not silently as something
+        // else, because the server is reached and no password is offered.
+        let error = runtime()
+            .block_on(session::connect(&target, Duration::ZERO))
+            .expect_err("no password means no connection");
+        assert_eq!(error.exit_code(), ignatius::ExitCode::Authentication);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (service, passfile);
+        eprintln!("skipping: no permission bits to loosen on this platform");
+    }
+}

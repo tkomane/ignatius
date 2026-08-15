@@ -5,8 +5,13 @@
 //!
 //! 1. Explicit command-line arguments (`--host`, `--port`, ...)
 //! 2. A connection string given as the target (URI or keyword/value)
-//! 3. PostgreSQL environment variables (`PGHOST`, `PGPORT`, ...)
-//! 4. Built-in defaults
+//! 3. A named service from `pg_service.conf`
+//! 4. PostgreSQL environment variables (`PGHOST`, `PGPORT`, ...)
+//! 5. Built-in defaults
+//!
+//! The password has its own order, because it comes from different places:
+//! the connection string, then `PGPASSWORD`, then `.pgpass`. A password file is
+//! consulted only when nothing else supplied one.
 //!
 //! Parameters that libpq defines but this build does not implement are never
 //! ignored in silence. Security-relevant ones fail the connection; the rest are
@@ -188,6 +193,11 @@ impl Environment {
 pub struct EnvSnapshot {
     /// Variables that were set, keyed by name.
     pub values: BTreeMap<String, String>,
+    /// Whether this came from the real process environment.
+    ///
+    /// A synthetic snapshot never falls back to files in a real home directory,
+    /// so a test cannot accidentally read the developer's own `.pgpass`.
+    pub from_process: bool,
 }
 
 impl EnvSnapshot {
@@ -221,7 +231,10 @@ impl EnvSnapshot {
                 values.insert((*key).to_owned(), value);
             }
         }
-        Self { values }
+        Self {
+            values,
+            from_process: true,
+        }
     }
 
     /// Builds a snapshot from pairs, for tests and for `doctor`.
@@ -232,6 +245,7 @@ impl EnvSnapshot {
                 .iter()
                 .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
                 .collect(),
+            from_process: false,
         }
     }
 
@@ -317,6 +331,8 @@ pub const DEFAULT_PORT: u16 = 5432;
 
 /// Parameters that are understood and applied.
 const SUPPORTED_KEYS: &[&str] = &[
+    "service",
+    "passfile",
     "host",
     "port",
     "dbname",
@@ -357,15 +373,48 @@ pub fn resolve(
         None => BTreeMap::new(),
     };
 
-    reject_unsupported_security_parameters(&parsed, env)?;
-    collect_unsupported_notes(&parsed, env, &mut notes);
+    // A named service contributes parameters below the connection string and
+    // above the environment. It is resolved first so its values can be checked
+    // for the same unsupported parameters as anything else.
+    let service_name = parsed
+        .get("service")
+        .cloned()
+        .or_else(|| env.get("PGSERVICE").map(str::to_owned));
+    let service_values = match &service_name {
+        Some(name) => {
+            let path = env
+                .get("PGSERVICEFILE")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    env.from_process
+                        .then(crate::connection::service::default_path)
+                        .flatten()
+                });
+            let values = crate::connection::service::resolve(name, path.as_deref())?;
+            notes.push(ResolutionNote {
+                subject: "service".into(),
+                message: format!("using service {name:?} ({} parameter(s))", values.len()),
+            });
+            values
+        }
+        None => BTreeMap::new(),
+    };
 
-    // Precedence: argument, then connection string, then environment, then default.
-    let host_value = args
-        .host
-        .clone()
-        .or_else(|| parsed.get("host").cloned())
-        .or_else(|| env.get("PGHOST").map(str::to_owned));
+    reject_unsupported_security_parameters(&parsed, env)?;
+    reject_unsupported_security_parameters(&service_values, &EnvSnapshot::default())?;
+    collect_unsupported_notes(&parsed, &mut notes);
+    collect_unsupported_notes(&service_values, &mut notes);
+
+    // Looks a parameter up through the layers below the command line.
+    let layered = |key: &str, variable: &str| -> Option<String> {
+        parsed
+            .get(key)
+            .cloned()
+            .or_else(|| service_values.get(key).cloned())
+            .or_else(|| env.get(variable).map(str::to_owned))
+    };
+
+    let host_value = args.host.clone().or_else(|| layered("host", "PGHOST"));
 
     let host = match host_value {
         Some(value) if value.starts_with('/') => Host::Socket(PathBuf::from(value)),
@@ -389,10 +438,7 @@ pub fn resolve(
     let port = match args.port {
         Some(port) => port,
         None => {
-            let text = parsed
-                .get("port")
-                .cloned()
-                .or_else(|| env.get("PGPORT").map(str::to_owned));
+            let text = layered("port", "PGPORT");
             match text {
                 Some(value) => value.trim().parse::<u16>().map_err(|_| {
                     Diagnostic::new(
@@ -410,29 +456,28 @@ pub fn resolve(
     let user = args
         .username
         .clone()
-        .or_else(|| parsed.get("user").cloned())
-        .or_else(|| env.get("PGUSER").map(str::to_owned))
+        .or_else(|| layered("user", "PGUSER"))
         .or_else(default_user)
         .unwrap_or_else(|| "postgres".to_owned());
 
     let database = args
         .dbname
         .clone()
-        .or_else(|| parsed.get("dbname").cloned())
-        .or_else(|| env.get("PGDATABASE").map(str::to_owned))
+        .or_else(|| layered("dbname", "PGDATABASE"))
         .unwrap_or_else(|| user.clone());
 
-    let password = parsed
+    let mut password = parsed
         .get("password")
         .cloned()
+        .or_else(|| service_values.get("password").cloned())
         .or_else(|| {
             env.get("PGPASSWORD")
                 .inspect(|_| {
                     // Consumed, never displayed, and the safer route is offered once.
                     notes.push(ResolutionNote {
                         subject: "PGPASSWORD".into(),
-                        message: "using the password from the environment; it is visible to other \
-                              processes on this machine. A stored credential is safer."
+                        message: "using the password from the environment; it is visible to \
+                              other processes on this machine. A password file is safer."
                             .into(),
                     });
                 })
@@ -443,10 +488,7 @@ pub fn resolve(
     let sslmode = match args.sslmode {
         Some(mode) => mode,
         None => {
-            let text = parsed
-                .get("sslmode")
-                .cloned()
-                .or_else(|| env.get("PGSSLMODE").map(str::to_owned));
+            let text = layered("sslmode", "PGSSLMODE");
             match text {
                 Some(value) => SslMode::parse(&value).map_err(|message| {
                     Diagnostic::new(
@@ -477,21 +519,41 @@ pub fn resolve(
         ));
     }
 
-    let application_name = parsed
-        .get("application_name")
-        .cloned()
-        .or_else(|| env.get("PGAPPNAME").map(str::to_owned))
-        .unwrap_or_else(|| config.application_name.clone());
+    let application_name =
+        layered("application_name", "PGAPPNAME").unwrap_or_else(|| config.application_name.clone());
 
-    let connect_timeout = parsed
-        .get("connect_timeout")
-        .cloned()
-        .or_else(|| env.get("PGCONNECT_TIMEOUT").map(str::to_owned))
+    let connect_timeout = layered("connect_timeout", "PGCONNECT_TIMEOUT")
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map_or_else(
             || Duration::from_secs(config.connect_timeout_seconds),
             Duration::from_secs,
         );
+
+    // A password file is the last resort and the safest of the routes: it keeps
+    // the password off the command line, out of the environment, and out of
+    // shell history. It is only read when nothing else supplied one.
+    if password.is_none() {
+        let path = parsed
+            .get("passfile")
+            .map(std::path::PathBuf::from)
+            .or_else(|| env.get("PGPASSFILE").map(std::path::PathBuf::from))
+            .or_else(|| {
+                env.from_process
+                    .then(crate::connection::passfile::default_path)
+                    .flatten()
+            });
+        if let Some(path) = path {
+            let lookup =
+                crate::connection::passfile::lookup(&path, &host.display(), port, &database, &user);
+            if let Some(note) = lookup.note() {
+                notes.push(ResolutionNote {
+                    subject: "password file".into(),
+                    message: note,
+                });
+            }
+            password = lookup.password().cloned();
+        }
+    }
 
     Ok(ConnectionTarget {
         host,
@@ -573,28 +635,12 @@ fn reject_unsupported_security_parameters(
     ))
 }
 
-fn collect_unsupported_notes(
-    parsed: &BTreeMap<String, String>,
-    env: &EnvSnapshot,
-    notes: &mut Vec<ResolutionNote>,
-) {
+fn collect_unsupported_notes(parsed: &BTreeMap<String, String>, notes: &mut Vec<ResolutionNote>) {
     for key in parsed.keys() {
         if !SUPPORTED_KEYS.contains(&key.as_str()) && !SECURITY_KEYS.contains(&key.as_str()) {
             notes.push(ResolutionNote {
                 subject: key.clone(),
                 message: "parameter is not applied by this release".into(),
-            });
-        }
-    }
-    for (key, what) in [
-        ("PGSERVICE", "service files"),
-        ("PGSERVICEFILE", "service files"),
-        ("PGPASSFILE", "password files"),
-    ] {
-        if env.get(key).is_some() {
-            notes.push(ResolutionNote {
-                subject: key.into(),
-                message: format!("{what} are not read by this release; the variable was ignored"),
             });
         }
     }
@@ -949,12 +995,195 @@ mod tests {
         );
     }
 
+    /// Writes a service file and returns its directory and path.
+    fn service_file(contents: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("pg_service.conf");
+        std::fs::write(&path, contents).expect("write");
+        (dir, path.display().to_string())
+    }
+
+    /// Writes an owner-only password file and returns its directory and path.
+    fn password_file(contents: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("pgpass");
+        std::fs::write(&path, contents).expect("write");
+        crate::platform::restrict_to_owner(&path).expect("restrict");
+        (dir, path.display().to_string())
+    }
+
     #[test]
-    fn service_and_password_files_are_reported_as_unread_rather_than_ignored() {
-        let env = EnvSnapshot::from_pairs(&[("PGSERVICE", "prod"), ("PGPASSFILE", "/tmp/pgpass")]);
+    fn a_named_service_supplies_the_connection_parameters() {
+        let (_dir, path) = service_file(
+            "[orders-prod]\nhost=db.example.net\nport=6432\ndbname=orders\nuser=app\n",
+        );
+        let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &path)]);
+
+        let target = resolve(
+            Some("service=orders-prod"),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect("resolve");
+        assert_eq!(target.host, Host::Tcp("db.example.net".into()));
+        assert_eq!(target.port, 6432);
+        assert_eq!(target.database, "orders");
+        assert_eq!(target.user, "app");
+        assert!(
+            target.notes.iter().any(|n| n.subject == "service"),
+            "using a service is worth saying: {:?}",
+            target.notes
+        );
+    }
+
+    #[test]
+    fn pgservice_selects_a_service_just_as_the_parameter_does() {
+        let (_dir, path) = service_file("[dev]\nhost=localhost\ndbname=orders_dev\n");
+        let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &path), ("PGSERVICE", "dev")]);
+
         let target = resolve(None, &ConnectionArgs::default(), &env, &config()).expect("resolve");
-        assert!(target.notes.iter().any(|n| n.subject == "PGSERVICE"));
-        assert!(target.notes.iter().any(|n| n.subject == "PGPASSFILE"));
+        assert_eq!(target.database, "orders_dev");
+    }
+
+    #[test]
+    fn a_service_sits_below_the_connection_string_and_above_the_environment() {
+        let (_dir, path) = service_file("[s]\nhost=service-host\nport=6432\ndbname=service-db\n");
+        let env = EnvSnapshot::from_pairs(&[
+            ("PGSERVICEFILE", &path),
+            ("PGHOST", "env-host"),
+            ("PGPORT", "1111"),
+            ("PGDATABASE", "env-db"),
+        ]);
+
+        // The connection string wins over the service.
+        let target = resolve(
+            Some("service=s host=string-host"),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect("resolve");
+        assert_eq!(target.host, Host::Tcp("string-host".into()));
+        // The service wins over the environment.
+        assert_eq!(target.port, 6432, "the service beat PGPORT");
+        assert_eq!(target.database, "service-db", "the service beat PGDATABASE");
+
+        // And an explicit argument still wins over everything.
+        let args = ConnectionArgs {
+            host: Some("arg-host".into()),
+            ..ConnectionArgs::default()
+        };
+        let target = resolve(Some("service=s"), &args, &env, &config()).expect("resolve");
+        assert_eq!(target.host, Host::Tcp("arg-host".into()));
+    }
+
+    #[test]
+    fn an_unknown_service_names_the_ones_that_exist() {
+        let (_dir, path) = service_file("[prod]\nhost=db\n\n[dev]\nhost=localhost\n");
+        let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &path)]);
+        let error = resolve(
+            Some("service=stage"),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect_err("must fail");
+        let cause = error.likely_cause.expect("a cause");
+        assert!(cause.contains("prod") && cause.contains("dev"), "{cause}");
+    }
+
+    #[test]
+    fn a_service_carrying_an_unsupported_security_parameter_is_refused() {
+        // A service file is shared across a team, so a parameter that would
+        // weaken protection must fail here exactly as it does in a URI.
+        let (_dir, path) = service_file("[s]\nhost=db\nsslcert=/tmp/client.crt\n");
+        let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &path)]);
+        let error = resolve(
+            Some("service=s"),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect_err("must refuse");
+        assert!(error.headline.contains("sslcert"), "{}", error.headline);
+    }
+
+    #[test]
+    fn a_password_file_supplies_the_password_when_nothing_else_does() {
+        let (_dir, path) = password_file("db.example.net:5432:orders:app:from-the-file\n");
+        let env = EnvSnapshot::from_pairs(&[("PGPASSFILE", &path)]);
+
+        let target = resolve(
+            Some("postgres://app@db.example.net:5432/orders"),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect("resolve");
+        assert_eq!(
+            target.password.as_ref().expect("password").expose_secret(),
+            "from-the-file"
+        );
+        assert!(
+            !format!("{target:?}").contains("from-the-file"),
+            "Debug leaked the password"
+        );
+    }
+
+    #[test]
+    fn an_explicit_password_beats_the_password_file() {
+        let (_dir, path) = password_file("*:*:*:*:from-the-file\n");
+        let env = EnvSnapshot::from_pairs(&[("PGPASSFILE", &path)]);
+        let target = resolve(
+            Some(&format!("postgres://app:{SECRET}@db/orders")),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect("resolve");
+        assert_eq!(
+            target.password.as_ref().expect("password").expose_secret(),
+            SECRET
+        );
+    }
+
+    #[test]
+    fn a_password_file_that_matches_nothing_says_so() {
+        let (_dir, path) = password_file("other:5432:other:other:nope\n");
+        let env = EnvSnapshot::from_pairs(&[("PGPASSFILE", &path)]);
+        let target = resolve(
+            Some("postgres://app@db.example.net:5432/orders"),
+            &ConnectionArgs::default(),
+            &env,
+            &config(),
+        )
+        .expect("resolve");
+        assert!(target.password.is_none());
+        assert!(
+            target.notes.iter().any(|n| n.subject == "password file"),
+            "a file that did not help must say so: {:?}",
+            target.notes
+        );
+    }
+
+    #[test]
+    fn a_synthetic_environment_never_reads_a_real_home_directory() {
+        // Tests must not depend on, or be broken by, the developer's own
+        // ~/.pgpass or ~/.pg_service.conf.
+        let target = resolve(
+            Some("postgres://app@db.example.net/orders"),
+            &ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &config(),
+        )
+        .expect("resolve");
+        assert!(target.password.is_none());
+        assert!(
+            !target.notes.iter().any(|n| n.subject == "password file"),
+            "no real file should have been consulted: {:?}",
+            target.notes
+        );
     }
 
     #[test]
