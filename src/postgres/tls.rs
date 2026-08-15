@@ -16,13 +16,27 @@ use crate::connection::SslMode;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Builds the rustls configuration for a mode, or `None` when TLS is disabled.
-pub fn client_config(mode: SslMode) -> Result<Option<rustls::ClientConfig>, Diagnostic> {
-    if mode == SslMode::Disable {
+/// Everything the transport policy needs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TlsOptions {
+    /// What protection was asked for.
+    pub mode: SslMode,
+    /// An explicit trust root, instead of the operating system's.
+    pub root_cert: Option<PathBuf>,
+    /// A client certificate to present.
+    pub client_cert: Option<PathBuf>,
+    /// The key for that certificate.
+    pub client_key: Option<PathBuf>,
+}
+
+/// Builds the rustls configuration for a policy, or `None` when TLS is disabled.
+pub fn client_config(options: &TlsOptions) -> Result<Option<rustls::ClientConfig>, Diagnostic> {
+    if options.mode == SslMode::Disable {
         return Ok(None);
     }
 
@@ -39,35 +53,197 @@ pub fn client_config(mode: SslMode) -> Result<Option<rustls::ClientConfig>, Diag
             .next_action("report this: the built-in TLS provider should always initialise")
         })?;
 
-    let config = if mode.verifies_certificate() {
-        let verifier = rustls_platform_verifier::Verifier::new(provider).map_err(|err| {
-            Diagnostic::new(
-                DiagnosticKind::Tls,
-                "could not read this machine's certificate trust store",
-                "preparing certificate verification",
-            )
-            .likely_cause(err.to_string())
-            .next_action(
-                "check the system trust store, or connect with sslmode=require to accept \
-                 encryption without an identity check",
-            )
-        })?;
-        builder
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(verifier))
-            .with_no_client_auth()
+    let verifier: Arc<dyn ServerCertVerifier> = if options.mode.verifies_certificate() {
+        let base = base_verifier(options, &provider)?;
+        if options.mode == SslMode::VerifyCa {
+            // verify-ca checks the chain and deliberately does not check the
+            // host name. That is a weaker guarantee than verify-full and is
+            // described that way everywhere it is shown.
+            Arc::new(NameAgnostic { inner: base })
+        } else {
+            base
+        }
     } else {
-        // sslmode=require: encrypt, verify nothing. This is what libpq's `require`
-        // means, and the interface labels it as encryption without identity.
-        builder
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoIdentityCheck::new(
-                rustls::crypto::ring::default_provider(),
-            )))
-            .with_no_client_auth()
+        // require and prefer: encrypt, verify nothing, and say so.
+        Arc::new(NoIdentityCheck::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+    };
+
+    let builder = builder
+        .dangerous()
+        .with_custom_certificate_verifier(verifier);
+
+    let config = match (&options.client_cert, &options.client_key) {
+        (Some(cert), Some(key)) => {
+            let chain = load_certificates(cert)?;
+            let key = load_private_key(key)?;
+            builder.with_client_auth_cert(chain, key).map_err(|err| {
+                Diagnostic::new(
+                    DiagnosticKind::Tls,
+                    "the client certificate and key could not be used together",
+                    "preparing the TLS configuration",
+                )
+                .likely_cause(err.to_string())
+                .next_action("check that the key belongs to the certificate")
+            })?
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Tls,
+                "a client certificate needs both a certificate and a key",
+                "preparing the TLS configuration",
+            )
+            .likely_cause("only one of sslcert and sslkey was given")
+            .next_action("supply both, or neither"));
+        }
+        (None, None) => builder.with_no_client_auth(),
     };
 
     Ok(Some(config))
+}
+
+/// The verifier that checks the chain: explicit roots when given, otherwise the
+/// operating system's own trust store.
+fn base_verifier(
+    options: &TlsOptions,
+    provider: &Arc<rustls::crypto::CryptoProvider>,
+) -> Result<Arc<dyn ServerCertVerifier>, Diagnostic> {
+    let Some(path) = &options.root_cert else {
+        let verifier =
+            rustls_platform_verifier::Verifier::new(provider.clone()).map_err(|err| {
+                Diagnostic::new(
+                    DiagnosticKind::Tls,
+                    "could not read this machine's certificate trust store",
+                    "preparing certificate verification",
+                )
+                .likely_cause(err.to_string())
+                .next_action(
+                    "check the system trust store, supply sslrootcert, or connect with \
+                 sslmode=require to accept encryption without an identity check",
+                )
+            })?;
+        return Ok(Arc::new(verifier));
+    };
+
+    // An explicit root replaces the system store rather than adding to it,
+    // which is what libpq's sslrootcert does and what someone pinning an
+    // internal authority expects.
+    let mut roots = rustls::RootCertStore::empty();
+    for certificate in load_certificates(path)? {
+        roots.add(certificate).map_err(|err| {
+            Diagnostic::new(
+                DiagnosticKind::Tls,
+                format!("{} is not a usable trust root", path.display()),
+                "preparing certificate verification",
+            )
+            .likely_cause(err.to_string())
+            .next_action("check that the file holds a certificate authority in PEM form")
+        })?;
+    }
+
+    rustls::client::WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+        .build()
+        .map(|verifier| verifier as Arc<dyn ServerCertVerifier>)
+        .map_err(|err| {
+            Diagnostic::new(
+                DiagnosticKind::Tls,
+                "the trust root could not be used",
+                "preparing certificate verification",
+            )
+            .likely_cause(err.to_string())
+            .next_action("check the certificate in sslrootcert")
+        })
+}
+
+fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, Diagnostic> {
+    use rustls::pki_types::pem::PemObject;
+    CertificateDer::pem_file_iter(path)
+        .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+        .map_err(|err| {
+            Diagnostic::new(
+                DiagnosticKind::Tls,
+                format!("could not read certificates from {}", path.display()),
+                "preparing the TLS configuration",
+            )
+            .likely_cause(err.to_string())
+            .next_action("check the path, and that the file is PEM-encoded")
+        })
+}
+
+fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Diagnostic> {
+    use rustls::pki_types::pem::PemObject;
+    PrivateKeyDer::from_pem_file(path).map_err(|err| {
+        Diagnostic::new(
+            DiagnosticKind::Tls,
+            format!("could not read a private key from {}", path.display()),
+            "preparing the TLS configuration",
+        )
+        .likely_cause(err.to_string())
+        .next_action(
+            "check the path, and that the key is PEM-encoded and not encrypted: \
+             encrypted keys are not supported yet",
+        )
+    })
+}
+
+/// Verifies the chain but not the host name, which is what `verify-ca` means.
+///
+/// It exists for the setup where a certificate is trusted but presented under a
+/// name that does not match, such as a load balancer or an internal address. It
+/// is a real, weaker guarantee, and the interface never shows it as verify-full.
+#[derive(Debug)]
+struct NameAgnostic {
+    inner: Arc<dyn ServerCertVerifier>,
+}
+
+impl ServerCertVerifier for NameAgnostic {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        match self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        ) {
+            // The one error this mode forgives, and only this one. Every other
+            // failure, including an untrusted or expired chain, still fails.
+            Err(rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidForName))
+            | Err(rustls::Error::InvalidCertificate(
+                rustls::CertificateError::NotValidForNameContext { .. },
+            )) => Ok(ServerCertVerified::assertion()),
+            other => other,
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
 }
 
 /// A verifier that accepts any certificate.
@@ -210,14 +386,31 @@ mod tests {
 
     #[test]
     fn disable_produces_no_tls_configuration() {
-        assert!(client_config(SslMode::Disable).expect("build").is_none());
+        assert!(
+            client_config(&TlsOptions {
+                mode: SslMode::Disable,
+                ..TlsOptions::default()
+            })
+            .expect("build")
+            .is_none()
+        );
     }
 
     #[test]
     fn every_other_mode_produces_a_configuration() {
-        for mode in [SslMode::Prefer, SslMode::Require, SslMode::VerifyFull] {
+        for mode in [
+            SslMode::Prefer,
+            SslMode::Require,
+            SslMode::VerifyCa,
+            SslMode::VerifyFull,
+        ] {
             assert!(
-                client_config(mode).expect("build").is_some(),
+                client_config(&TlsOptions {
+                    mode,
+                    ..TlsOptions::default()
+                })
+                .expect("build")
+                .is_some(),
                 "{mode:?} should produce a TLS configuration"
             );
         }

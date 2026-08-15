@@ -984,3 +984,195 @@ fn a_world_readable_password_file_is_refused_and_the_connection_fails_honestly()
         eprintln!("skipping: no permission bits to loosen on this platform");
     }
 }
+
+// -------------------------------------------------------------- transport
+
+/// The TLS development database, or a skip. Started by `cargo xtask db up`.
+macro_rules! tls_target_or_skip {
+    () => {
+        match std::env::var("IGNATIUS_TEST_PG_TLS_URI") {
+            Ok(uri) if !uri.is_empty() => uri,
+            _ => {
+                eprintln!(
+                    "skipping: IGNATIUS_TEST_PG_TLS_URI is not set. \
+                     `cargo xtask db up` starts a TLS server and prints it."
+                );
+                return;
+            }
+        }
+    };
+}
+
+/// Where the throwaway certificates live, relative to the repository root.
+fn certificate(name: &str) -> String {
+    format!("{}/docker/tls/generated/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
+fn tls_target(uri: &str, extra: &str) -> ignatius::connection::ConnectionTarget {
+    let config = Config::default();
+    resolve(
+        Some(&format!("{uri}?{extra}")),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config.connection,
+    )
+    .expect("target resolves")
+}
+
+#[test]
+fn verify_full_succeeds_against_a_trusted_certificate_with_a_matching_name() {
+    let uri = tls_target_or_skip!();
+    let target = tls_target(
+        &uri,
+        &format!("sslmode=verify-full&sslrootcert={}", certificate("ca.crt")),
+    );
+
+    let session = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("verify-full should succeed against its own certificate");
+
+    let tls = &session.info().tls;
+    assert!(tls.is_encrypted(), "{tls:?}");
+    let description = tls.description();
+    assert!(
+        description.contains("matching host name"),
+        "verify-full must state the guarantee it gave: {description}"
+    );
+    assert!(tls.label().contains("verify-full"), "{}", tls.label());
+}
+
+#[test]
+fn verify_full_refuses_a_certificate_that_does_not_cover_the_name_used() {
+    let uri = tls_target_or_skip!();
+    // The certificate covers "localhost" and not "127.0.0.1". Connecting by
+    // address is therefore a genuine name mismatch against a trusted chain.
+    let by_address = uri.replace("localhost", "127.0.0.1");
+    let target = tls_target(
+        &by_address,
+        &format!("sslmode=verify-full&sslrootcert={}", certificate("ca.crt")),
+    );
+
+    let error = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect_err("a name mismatch must not be accepted");
+
+    assert_eq!(error.exit_code(), ignatius::ExitCode::Tls);
+    assert!(
+        error
+            .likely_cause
+            .as_deref()
+            .unwrap_or_default()
+            .contains("127.0.0.1"),
+        "the message should name what did not match: {error:?}"
+    );
+    assert!(
+        error
+            .next_action
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not retried without TLS"),
+        "and must never suggest dropping TLS: {error:?}"
+    );
+}
+
+#[test]
+fn verify_ca_accepts_the_same_certificate_that_verify_full_rejects() {
+    let uri = tls_target_or_skip!();
+    let by_address = uri.replace("localhost", "127.0.0.1");
+
+    // This is the whole difference between the two modes, on one server: the
+    // chain is trusted either way, and only verify-full checks the name.
+    let target = tls_target(
+        &by_address,
+        &format!("sslmode=verify-ca&sslrootcert={}", certificate("ca.crt")),
+    );
+    let session = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("verify-ca ignores the name mismatch");
+
+    let tls = &session.info().tls;
+    assert!(tls.is_encrypted());
+    let description = tls.description();
+    assert!(
+        description.contains("host name not checked"),
+        "verify-ca must say what it did not check: {description}"
+    );
+}
+
+#[test]
+fn an_untrusted_chain_is_refused_even_when_the_name_matches() {
+    let uri = tls_target_or_skip!();
+    // The client certificate is a perfectly valid certificate and a completely
+    // wrong trust root, so this proves the chain is really being checked.
+    let target = tls_target(
+        &uri,
+        &format!(
+            "sslmode=verify-full&sslrootcert={}",
+            certificate("client.crt")
+        ),
+    );
+
+    let error = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect_err("an untrusted chain must be refused");
+    assert_eq!(error.exit_code(), ignatius::ExitCode::Tls);
+}
+
+#[test]
+fn a_client_certificate_authenticates_without_a_password() {
+    let uri = tls_target_or_skip!();
+    // cert_user has no password at all: pg_hba requires a certificate for it.
+    let as_cert_user = {
+        let (prefix, rest) = uri.split_once("://").expect("a URI");
+        let (_, host_and_db) = rest.split_once('@').expect("userinfo");
+        format!("{prefix}://cert_user@{host_and_db}")
+    };
+    let target = tls_target(
+        &as_cert_user,
+        &format!(
+            "sslmode=verify-full&sslrootcert={}&sslcert={}&sslkey={}",
+            certificate("ca.crt"),
+            certificate("client.crt"),
+            certificate("client.key")
+        ),
+    );
+
+    let runtime = runtime();
+    let session = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("a client certificate should authenticate");
+
+    assert_eq!(session.info().user, "cert_user");
+    assert!(session.info().tls.is_encrypted());
+
+    let execution = runtime.block_on(session.execute("SELECT count(*) FROM orders", 10, JobId(1)));
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        execution.error
+    );
+}
+
+#[test]
+fn a_certificate_without_its_key_is_refused_before_connecting() {
+    let uri = tls_target_or_skip!();
+    let target = tls_target(
+        &uri,
+        &format!(
+            "sslmode=verify-full&sslrootcert={}&sslcert={}",
+            certificate("ca.crt"),
+            certificate("client.crt")
+        ),
+    );
+
+    let error = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect_err("half a client certificate is not usable");
+    assert_eq!(error.exit_code(), ignatius::ExitCode::Tls);
+    assert!(
+        error.headline.contains("both a certificate and a key"),
+        "{}",
+        error.headline
+    );
+}

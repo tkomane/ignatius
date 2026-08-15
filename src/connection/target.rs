@@ -30,7 +30,7 @@ use std::time::Duration;
 /// These follow libpq's names. `Require` encrypts but does not check identity,
 /// which is a different guarantee from `VerifyFull`, and the interface never
 /// presents them as equivalent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SslMode {
     /// Never use TLS.
     Disable,
@@ -41,6 +41,7 @@ pub enum SslMode {
     /// Require TLS and verify the certificate chain, but not the host name.
     VerifyCa,
     /// Require TLS, verify the chain and the host name.
+    #[default]
     VerifyFull,
 }
 
@@ -302,6 +303,12 @@ pub struct ConnectionTarget {
     pub password: Option<SecretString>,
     /// Requested transport protection.
     pub sslmode: SslMode,
+    /// An explicit trust root, replacing the operating system's.
+    pub root_cert: Option<std::path::PathBuf>,
+    /// A client certificate to present.
+    pub client_cert: Option<std::path::PathBuf>,
+    /// The key for that certificate.
+    pub client_key: Option<std::path::PathBuf>,
     /// `application_name` reported to the server.
     pub application_name: String,
     /// How long to wait for the connection.
@@ -339,6 +346,9 @@ const SUPPORTED_KEYS: &[&str] = &[
     "user",
     "password",
     "sslmode",
+    "sslrootcert",
+    "sslcert",
+    "sslkey",
     "application_name",
     "connect_timeout",
 ];
@@ -346,9 +356,6 @@ const SUPPORTED_KEYS: &[&str] = &[
 /// Parameters whose silent omission could weaken confidentiality or identity
 /// checking. Supplying one fails rather than proceeding with weaker protection.
 const SECURITY_KEYS: &[&str] = &[
-    "sslcert",
-    "sslkey",
-    "sslrootcert",
     "sslcrl",
     "sslcrldir",
     "sslpassword",
@@ -503,21 +510,12 @@ pub fn resolve(
         }
     };
 
-    if sslmode == SslMode::VerifyCa {
-        return Err(Diagnostic::new(
-            DiagnosticKind::Config,
-            "sslmode=verify-ca is not implemented in this release",
-            "resolving the connection target",
-        )
-        .likely_cause(
-            "verifying a chain without checking the host name needs a certificate policy that \
-             this build does not carry yet",
-        )
-        .next_action(
-            "use sslmode=verify-full for a full identity check, or sslmode=require to accept \
-             encryption without one",
-        ));
-    }
+    let certificate_path = |key: &str, variable: &str| -> Option<std::path::PathBuf> {
+        layered(key, variable).map(std::path::PathBuf::from)
+    };
+    let root_cert = certificate_path("sslrootcert", "PGSSLROOTCERT");
+    let client_cert = certificate_path("sslcert", "PGSSLCERT");
+    let client_key = certificate_path("sslkey", "PGSSLKEY");
 
     let application_name =
         layered("application_name", "PGAPPNAME").unwrap_or_else(|| config.application_name.clone());
@@ -562,6 +560,9 @@ pub fn resolve(
         user,
         password,
         sslmode,
+        root_cert,
+        client_cert,
+        client_key,
         application_name,
         connect_timeout,
         environment: args.environment.clone().unwrap_or_default(),
@@ -603,9 +604,6 @@ fn reject_unsupported_security_parameters(
         .cloned()
         .collect();
     for (key, name) in [
-        ("PGSSLROOTCERT", "sslrootcert"),
-        ("PGSSLCERT", "sslcert"),
-        ("PGSSLKEY", "sslkey"),
         ("PGREQUIRESSL", "requiressl"),
         ("PGCHANNELBINDING", "channel_binding"),
         ("PGGSSENCMODE", "gssencmode"),
@@ -955,28 +953,64 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_verify_ca_fails_rather_than_pretending() {
-        let err = resolve(
+    fn verify_ca_is_accepted_and_stays_weaker_than_verify_full() {
+        let target = resolve(
             Some("postgres://app@db.example.net/orders?sslmode=verify-ca"),
             &ConnectionArgs::default(),
             &EnvSnapshot::default(),
             &config(),
         )
-        .expect_err("must refuse");
-        assert!(err.headline.contains("verify-ca"), "{}", err.headline);
-        assert!(err.next_action.is_some());
+        .expect("verify-ca is implemented now");
+        assert_eq!(target.sslmode, SslMode::VerifyCa);
+        assert!(target.sslmode.verifies_certificate());
+        assert_ne!(
+            SslMode::VerifyCa.guarantee(),
+            SslMode::VerifyFull.guarantee(),
+            "the two must never be described the same way"
+        );
+    }
+
+    #[test]
+    fn certificate_paths_are_carried_through_from_every_layer() {
+        let target = resolve(
+            Some("host=db sslrootcert=/tmp/ca.pem sslcert=/tmp/client.crt sslkey=/tmp/client.key"),
+            &ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &config(),
+        )
+        .expect("resolve");
+        assert_eq!(
+            target.root_cert,
+            Some(std::path::PathBuf::from("/tmp/ca.pem"))
+        );
+        assert_eq!(
+            target.client_cert,
+            Some(std::path::PathBuf::from("/tmp/client.crt"))
+        );
+        assert_eq!(
+            target.client_key,
+            Some(std::path::PathBuf::from("/tmp/client.key"))
+        );
+
+        let env = EnvSnapshot::from_pairs(&[("PGSSLROOTCERT", "/env/ca.pem")]);
+        let target =
+            resolve(Some("host=db"), &ConnectionArgs::default(), &env, &config()).expect("resolve");
+        assert_eq!(
+            target.root_cert,
+            Some(std::path::PathBuf::from("/env/ca.pem"))
+        );
     }
 
     #[test]
     fn security_parameters_fail_and_other_unknowns_only_warn() {
         let err = resolve(
-            Some("postgres://app@db.example.net/orders?sslrootcert=/tmp/ca.pem"),
+            Some("postgres://app@db.example.net/orders?gssencmode=require"),
             &ConnectionArgs::default(),
             &EnvSnapshot::default(),
             &config(),
         )
         .expect_err("security parameter must not be ignored");
-        assert!(err.headline.contains("sslrootcert"), "{}", err.headline);
+        assert!(err.headline.contains("gssencmode"), "{}", err.headline);
 
         let target = resolve(
             Some("postgres://app@db.example.net/orders?target_session_attrs=read-write"),
@@ -1097,7 +1131,7 @@ mod tests {
     fn a_service_carrying_an_unsupported_security_parameter_is_refused() {
         // A service file is shared across a team, so a parameter that would
         // weaken protection must fail here exactly as it does in a URI.
-        let (_dir, path) = service_file("[s]\nhost=db\nsslcert=/tmp/client.crt\n");
+        let (_dir, path) = service_file("[s]\nhost=db\ngssencmode=require\n");
         let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &path)]);
         let error = resolve(
             Some("service=s"),
@@ -1106,7 +1140,7 @@ mod tests {
             &config(),
         )
         .expect_err("must refuse");
-        assert!(error.headline.contains("sslcert"), "{}", error.headline);
+        assert!(error.headline.contains("gssencmode"), "{}", error.headline);
     }
 
     #[test]

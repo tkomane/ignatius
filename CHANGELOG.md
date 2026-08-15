@@ -74,6 +74,18 @@ source can generate user-facing notes.
 
 ### Security
 
+- `sslmode=verify-ca` is implemented: the certificate chain is checked and the
+  host name deliberately is not, for the setups where a trusted certificate is
+  presented under a name that will not match. It is never described as
+  verify-full.
+- Client certificates are supported through `sslcert` and `sslkey`. Half a
+  client certificate is refused rather than silently ignored.
+- An explicit `sslrootcert` replaces the system trust store rather than adding
+  to it, which is what pinning an internal authority is supposed to mean.
+- Every transport claim is now tested against a server that really speaks TLS,
+  rather than asserted: verify-full succeeding on a matching name, refusing a
+  mismatch, verify-ca accepting that same mismatch, an untrusted chain being
+  refused, and a client certificate authenticating without a password.
 - Catalogue queries bind every object name as a parameter rather than
   interpolating it. An object name is attacker-controlled input the moment anyone
   can create a table, and a fixture named to exploit that is part of the test

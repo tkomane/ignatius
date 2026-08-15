@@ -68,7 +68,7 @@ impl SessionInfo {
 pub struct Session {
     client: Client,
     info: SessionInfo,
-    sslmode: SslMode,
+    tls: crate::postgres::tls::TlsOptions,
     notices: Arc<Mutex<Vec<Notice>>>,
     connection_lost: Arc<AtomicBool>,
 }
@@ -98,7 +98,7 @@ pub enum StreamStop {
 #[derive(Clone)]
 pub struct CancelHandle {
     token: tokio_postgres::CancelToken,
-    sslmode: SslMode,
+    tls: crate::postgres::tls::TlsOptions,
 }
 
 impl std::fmt::Debug for CancelHandle {
@@ -106,7 +106,7 @@ impl std::fmt::Debug for CancelHandle {
         // The driver's token is not Debug, and it holds connection details that
         // have no business appearing in a log line.
         f.debug_struct("CancelHandle")
-            .field("sslmode", &self.sslmode)
+            .field("sslmode", &self.tls.mode)
             .finish_non_exhaustive()
     }
 }
@@ -118,7 +118,7 @@ impl CancelHandle {
     /// stopped. The interface says "Cancellation requested" until the server
     /// confirms with SQLSTATE 57014.
     pub async fn cancel(&self) -> Result<(), Diagnostic> {
-        let result = match client_config(self.sslmode)? {
+        let result = match client_config(&self.tls)? {
             None => self.token.cancel_query(tokio_postgres::NoTls).await,
             Some(config) => {
                 self.token
@@ -153,7 +153,7 @@ impl Session {
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle {
             token: self.client.cancel_token(),
-            sslmode: self.sslmode,
+            tls: self.tls.clone(),
         }
     }
 
@@ -373,7 +373,13 @@ pub async fn connect(
     statement_timeout: Duration,
 ) -> Result<Session, Diagnostic> {
     let config = build_config(target);
-    let tls_config = client_config(target.sslmode)?;
+    let tls = crate::postgres::tls::TlsOptions {
+        mode: target.sslmode,
+        root_cert: target.root_cert.clone(),
+        client_cert: target.client_cert.clone(),
+        client_key: target.client_key.clone(),
+    };
+    let tls_config = client_config(&tls)?;
 
     let (client, notices, connection_lost) = match tls_config {
         None => establish(&config, tokio_postgres::NoTls, target).await?,
@@ -399,7 +405,7 @@ pub async fn connect(
     Ok(Session {
         client,
         info,
-        sslmode: target.sslmode,
+        tls,
         notices,
         connection_lost,
     })
