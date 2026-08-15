@@ -66,6 +66,8 @@ pub enum Action {
     MoveBufferEnd,
     /// Move by a screenful.
     MovePage(Direction),
+    /// Show the definition of the selected object.
+    ShowDefinition,
     /// Search the statements that have run and reuse one.
     OpenHistory,
     /// Stop or resume recording statements for this session.
@@ -125,6 +127,13 @@ pub enum Message {
         /// What came back.
         payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
     },
+    /// An object's definition finished loading.
+    DefinitionLoaded {
+        /// Which request this answers, so a stale answer is discarded.
+        request: crate::app::tree::RequestId,
+        /// The definition, or why there is not one.
+        result: Box<Result<crate::postgres::metadata::Definition, Diagnostic>>,
+    },
     /// The statement history finished loading from disk.
     HistoryLoaded(Vec<crate::history::Entry>),
     /// A statement was offered to the history.
@@ -173,6 +182,13 @@ pub enum Effect {
     Quit,
     /// Load the schema list.
     LoadSchemas,
+    /// Read an object's definition.
+    LoadDefinition {
+        /// Identity to report back with.
+        request: crate::app::tree::RequestId,
+        /// The object to describe.
+        object: Box<crate::postgres::metadata::ObjectSummary>,
+    },
     /// Read the statement history from disk.
     LoadHistory,
     /// Offer a statement to the history.

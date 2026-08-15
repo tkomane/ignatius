@@ -51,6 +51,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `x` | Expand the selected row down the screen |
 | `i` | Inspect the selected cell |
 | `s` | Search the statements that have run |
+| `d` | Show the selected object's definition |
 | `v` | Pause or resume recording statements |
 
 ## Editing keys

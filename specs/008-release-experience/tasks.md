@@ -6,10 +6,11 @@
 [research.md](./research.md), [data-model.md](./data-model.md),
 [quickstart.md](./quickstart.md)
 
-**Status note**: T001-T008 record the planning package and foundational
-release-record contract that now exist in this directory and `release-notes/`.
-All later tasks remain open until their evidence exists. No task authorizes a
-live publication, signing operation, push or release.
+**Status note**: T001-T008 and T017-T018 record the planning package, foundational
+release-record contract and dependency-inventory contract that now exist in
+this directory, `release-notes/` and `release-evidence/`. All later tasks
+remain open until their evidence exists. No task authorizes a live publication,
+signing operation, push or release.
 
 ## Phase 1: Setup and design package
 
@@ -65,8 +66,16 @@ visible without selecting an unapproved provider or overstating evidence.
 **Independent Test**: Review complete evidence and then remove or mismatch one
 inventory, signature or provenance item; readiness must become blocked.
 
-- [ ] T017 [P] [US2] Define the dependency-inventory input, retention and verification contract in `release-evidence/inventory.md`
-- [ ] T018 [P] [US2] Define provider-neutral signature and provenance evidence fields and failure states in `release-evidence/README.md`
+- [x] T017 [P] [US2] Define the dependency-inventory input, retention and verification contract in `release-evidence/inventory.md`
+
+Evidence: the provider-neutral inventory contract defines direct and
+transitive inputs, build identity, retention, verification and fail-closed
+privacy rules. It explicitly does not claim that executable generation exists.
+- [x] T018 [P] [US2] Define provider-neutral signature and provenance evidence fields and failure states in `release-evidence/README.md`
+
+Evidence: the contract separates checksum, signature and provenance facts,
+defines explicit missing and invalid states, binds evidence to the exact
+artefact identity, and sets the provider/authorization decision gate.
 - [ ] T019 [US2] Add the publication-readiness gate for missing or mismatched evidence in `xtask/src/release.rs`
 - [ ] T020 [P] [US2] Add checksum, target, source, inventory and evidence mismatch cases in `tests/release_contract.rs`
 - [ ] T021 [US2] Add release-evidence secret and artifact-scope checks to `.github/workflows/ci.yml` without uploading user data
@@ -167,6 +176,11 @@ identity.
   `release-notes/catalog.schema.json` and `release-notes/fixtures/`. This does
   not authorize the catalogue validator, CI, publication workflow or shared
   release documentation.
+- Codex owns `release-evidence/inventory.md` for T017. The file is a provider-
+  neutral contract only; executable inventory generation and shared CI remain
+  separately owned tasks.
+- Codex owns `release-evidence/README.md` for T018. Provider selection, signing
+  operations and CI enforcement remain outside this handoff.
 - Claude owns the active source paths in `src/app/`, `src/cli/`, `src/config/`,
   `src/ui/`, `tests/cli_contract.rs`, `src/lib.rs` and `src/history.rs`; no
   task above edits them except the future T026, which is blocked until a source

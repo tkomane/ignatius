@@ -790,6 +790,137 @@ fn indexes_and_extensions_are_listed() {
 }
 
 #[test]
+fn a_definition_comes_from_the_server_where_the_server_can_render_it() {
+    use ignatius::postgres::ObjectKind;
+    use ignatius::postgres::metadata::{DefinitionSource, ObjectSummary};
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let object = |kind: ObjectKind, schema: &str, name: &str| ObjectSummary {
+        kind,
+        schema: schema.to_owned(),
+        name: name.to_owned(),
+        readable: true,
+        detail: None,
+    };
+
+    // A view is rendered by PostgreSQL itself, so what is shown is what will run.
+    let view = fx
+        .block_on(
+            fx.session
+                .definition(&object(ObjectKind::View, "public", "recent_orders")),
+        )
+        .expect("view definition");
+    assert_eq!(view.source, DefinitionSource::Server);
+    assert!(
+        view.text.starts_with("CREATE OR REPLACE VIEW"),
+        "{}",
+        view.text
+    );
+    assert!(view.text.contains("orders"), "{}", view.text);
+    assert!(
+        view.heading().contains("\"recent_orders\""),
+        "{}",
+        view.heading()
+    );
+
+    // So is a function.
+    let function = fx
+        .block_on(
+            fx.session
+                .definition(&object(ObjectKind::Function, "reporting", "order_count")),
+        )
+        .expect("function definition");
+    assert_eq!(function.source, DefinitionSource::Server);
+    assert!(
+        function.text.contains("CREATE OR REPLACE FUNCTION"),
+        "{}",
+        function.text
+    );
+
+    // A table is not: it is assembled here, and says so.
+    let table = fx
+        .block_on(
+            fx.session
+                .definition(&object(ObjectKind::Table, "public", "orders")),
+        )
+        .expect("table definition");
+    assert_eq!(table.source, DefinitionSource::Assembled);
+    assert!(
+        table
+            .text
+            .starts_with("CREATE TABLE \"public\".\"orders\" ("),
+        "{}",
+        table.text
+    );
+    assert!(table.text.contains("NOT NULL"), "{}", table.text);
+    assert!(
+        table.text.contains("ADD CONSTRAINT"),
+        "constraints are part of what a table is: {}",
+        table.text
+    );
+    assert!(
+        DefinitionSource::Assembled.note().contains("not a"),
+        "the difference is stated"
+    );
+}
+
+#[test]
+fn an_object_named_to_break_a_client_can_still_be_described() {
+    use ignatius::postgres::ObjectKind;
+    use ignatius::postgres::metadata::ObjectSummary;
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    // Every catalogue lookup binds the name as a parameter, so a name written to
+    // break an interpolating client is as safe to describe as it is to list.
+    let hostile = ObjectSummary {
+        kind: ObjectKind::Table,
+        schema: "public".into(),
+        name: r#"we"ird "; DROP TABLE orders; --"#.into(),
+        readable: true,
+        detail: None,
+    };
+    let definition = fx
+        .block_on(fx.session.definition(&hostile))
+        .expect("definition");
+    assert!(
+        definition.text.contains(r#"we""ird"#),
+        "the name is quoted in what is shown: {}",
+        definition.text
+    );
+
+    // And the table it was written to destroy is still there.
+    let orders = fx
+        .block_on(fx.session.objects("public", ObjectKind::Table))
+        .expect("tables");
+    assert!(orders.iter().any(|table| table.name == "orders"));
+}
+
+#[test]
+fn a_definition_that_is_not_there_fails_with_something_to_do() {
+    use ignatius::postgres::ObjectKind;
+    use ignatius::postgres::metadata::ObjectSummary;
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let missing = ObjectSummary {
+        kind: ObjectKind::View,
+        schema: "public".into(),
+        name: "no_such_view".into(),
+        readable: true,
+        detail: None,
+    };
+    let error = fx
+        .block_on(fx.session.definition(&missing))
+        .expect_err("must fail");
+    assert!(error.next_action.is_some(), "a failure must say what to do");
+}
+
+#[test]
 fn a_restricted_role_sees_objects_it_cannot_read_and_they_are_marked_as_such() {
     let uri = target_or_skip!();
     let Some((prefix, rest)) = uri.split_once("://") else {

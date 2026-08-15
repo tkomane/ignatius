@@ -103,6 +103,9 @@ pub fn render(
     if let Some(inspector) = &model.inspector {
         render_inspector(model, *inspector, presentation, area, buf);
     }
+    if let Some(definition) = &model.definition {
+        render_definition(definition, presentation, area, buf);
+    }
     if let Some(palette) = &model.palette {
         render_palette(palette, presentation, area, buf);
     }
@@ -928,6 +931,144 @@ pub const fn inspector_viewport(size: (u16, u16)) -> (usize, usize) {
         box_area.width.saturating_sub(INSPECTOR_CHROME_COLUMNS) as usize,
         box_area.height.saturating_sub(INSPECTOR_CHROME_ROWS) as usize,
     )
+}
+
+// --------------------------------------------------------------- definition
+
+/// Rows the frame, the heading and the note take from a definition.
+const DEFINITION_CHROME_ROWS: u16 = 5;
+
+/// The box a definition occupies inside an area.
+///
+/// Wider and taller than the value inspector, because a table definition is
+/// read as a whole rather than scanned for one value.
+const fn definition_box(area: Rect) -> Rect {
+    let mut width = area.width.saturating_sub(4);
+    if width > 100 {
+        width = 100;
+    }
+    let mut height = area.height.saturating_sub(2);
+    if height > 34 {
+        height = 34;
+    }
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+/// How much of a definition is on screen: width in cells, height in lines.
+///
+/// One function for the renderer and for the reducer that clamps scrolling.
+#[must_use]
+pub const fn definition_viewport(size: (u16, u16)) -> (usize, usize) {
+    let box_area = definition_box(Rect {
+        x: 0,
+        y: 0,
+        width: size.0,
+        height: size.1,
+    });
+    (
+        box_area.width.saturating_sub(4) as usize,
+        box_area.height.saturating_sub(DEFINITION_CHROME_ROWS) as usize,
+    )
+}
+
+/// Shows what an object is, in SQL, coloured the way the editor colours it.
+fn render_definition(
+    open: &crate::app::model::Definition,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let box_area = definition_box(area);
+    if box_area.width < 12 || box_area.height < 5 {
+        return;
+    }
+    let (_, height) = definition_viewport((area.width, area.height));
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let mut lines = vec![Line::from(Span::styled(
+        sanitize_for_display(&open.heading),
+        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+    ))];
+
+    if let Some(error) = &open.error {
+        lines.push(Line::from(Span::styled(
+            sanitize_for_display(error),
+            theme.style(Token::Danger),
+        )));
+    } else if let Some(definition) = &open.definition {
+        // Where the text came from is stated every time. A description of a
+        // table is not a script that recreates it, and the difference matters
+        // to anyone about to copy it.
+        lines.push(Line::from(Span::styled(
+            definition.source.note(),
+            theme.style(Token::Muted),
+        )));
+
+        let text = &definition.text;
+        let syntax = crate::query::highlight::tokens(text);
+        let mut start = 0usize;
+        for (index, source) in text.lines().enumerate() {
+            let line_start = start;
+            start += source.len() + 1;
+            if index < open.scroll || index >= open.scroll + height {
+                continue;
+            }
+            let mut spans = Vec::new();
+            let mut run = String::new();
+            let mut run_style: Option<Style> = None;
+            for (byte, ch) in source.char_indices() {
+                let style = theme.style(syntax_token(crate::query::highlight::kind_at(
+                    &syntax,
+                    line_start + byte,
+                )));
+                if run_style != Some(style) {
+                    if let Some(previous) = run_style {
+                        spans.push(Span::styled(std::mem::take(&mut run), previous));
+                    }
+                    run_style = Some(style);
+                }
+                run.push_str(&sanitize_for_display(&ch.to_string()));
+            }
+            if let Some(previous) = run_style {
+                spans.push(Span::styled(run, previous));
+            }
+            lines.push(Line::from(spans));
+        }
+
+        let total = text.lines().count();
+        if total > height {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "showing {}-{} of {total} lines",
+                    open.scroll + 1,
+                    (open.scroll + height).min(total)
+                ),
+                theme.style(Token::Info),
+            )));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Reading the catalogue...",
+            theme.style(Token::Muted),
+        )));
+    }
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            format!(
+                " {}Definition  arrows scroll, Esc closes ",
+                presentation.icon(Icon::Schema)
+            ),
+            true,
+            presentation,
+        ))
+        .render(box_area, buf);
 }
 
 /// Shows one value in full: what it is, and every character of it.
@@ -2347,6 +2488,106 @@ mod tests {
             ascii.is_ascii(),
             "the ASCII tier emitted something that is not ASCII"
         );
+    }
+
+    #[test]
+    fn a_definition_is_shown_as_sql_with_where_it_came_from() {
+        let mut model = connected_model(Environment::Local);
+        model.definition = Some(crate::app::model::Definition {
+            pending: None,
+            heading: "table \"public\".\"orders\"".to_owned(),
+            definition: Some(crate::postgres::metadata::Definition {
+                kind: crate::postgres::ObjectKind::Table,
+                schema: "public".into(),
+                name: "orders".into(),
+                source: crate::postgres::metadata::DefinitionSource::Assembled,
+                text: "CREATE TABLE \"public\".\"orders\" (\n    \"id\" bigint NOT NULL\n);"
+                    .to_owned(),
+            }),
+            error: None,
+            scroll: 0,
+        });
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("CREATE TABLE"), "{text}");
+        assert!(text.contains("bigint NOT NULL"), "{text}");
+        assert!(
+            text.contains("not a script that recreates it")
+                || text.contains("Assembled from the catalogue"),
+            "where the text came from must be stated: {text}"
+        );
+        assert!(text.contains("Esc closes"), "{text}");
+
+        // It is coloured the way the editor colours SQL, from the same lexer.
+        let area = Rect::new(0, 0, 120, 34);
+        let mut buf = Buffer::empty(area);
+        render(&model, &Keymap::new(), &rich(), area, &mut buf);
+        let screen = buffer_to_string(&buf);
+        let row = screen
+            .lines()
+            .position(|line| line.contains("CREATE TABLE"))
+            .expect("a line");
+        let line = screen.lines().nth(row).expect("a line");
+        let column = display_width(&line[..line.find("CREATE").expect("a column")]);
+        assert_eq!(
+            buf[(
+                u16::try_from(column).unwrap_or(0),
+                u16::try_from(row).unwrap_or(0)
+            )]
+                .fg,
+            rich().theme.rgb(Token::SyntaxKeyword).into()
+        );
+    }
+
+    #[test]
+    fn a_definition_says_it_is_loading_and_says_when_it_failed() {
+        let mut model = connected_model(Environment::Local);
+        model.definition = Some(crate::app::model::Definition {
+            pending: Some(crate::app::tree::RequestId(1)),
+            heading: "view \"public\".\"recent_orders\"".to_owned(),
+            definition: None,
+            error: None,
+            scroll: 0,
+        });
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("Reading the catalogue"), "{text}");
+        assert!(text.contains("recent_orders"), "the title names it: {text}");
+
+        model.definition = Some(crate::app::model::Definition {
+            pending: None,
+            heading: "table \"public\".\"orders\"".to_owned(),
+            definition: None,
+            error: Some("permission denied for table orders".to_owned()),
+            scroll: 0,
+        });
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("permission denied"), "{text}");
+    }
+
+    #[test]
+    fn a_long_definition_scrolls_and_says_where_it_is() {
+        let mut model = connected_model(Environment::Local);
+        let body = (1..=80)
+            .map(|n| format!("    \"column_{n}\" text"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        model.definition = Some(crate::app::model::Definition {
+            pending: None,
+            heading: "table \"public\".\"wide\"".to_owned(),
+            definition: Some(crate::postgres::metadata::Definition {
+                kind: crate::postgres::ObjectKind::Table,
+                schema: "public".into(),
+                name: "wide".into(),
+                source: crate::postgres::metadata::DefinitionSource::Assembled,
+                text: body,
+            }),
+            error: None,
+            scroll: 10,
+        });
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("column_11"), "the window moved: {text}");
+        assert!(!text.contains("column_1 "), "{text}");
+        assert!(text.contains("of 80 lines"), "{text}");
     }
 
     #[test]
