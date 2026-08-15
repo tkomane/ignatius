@@ -307,9 +307,14 @@ mod tests {
 
     #[test]
     fn an_unwritable_destination_fails_with_an_action() {
-        let error = Export::create(Path::new("/proc/definitely-not-writable/report.csv"), false)
-            .expect_err("must fail");
-        assert!(error.next_action.is_some());
+        // A path whose parent is a file, not a directory. Every platform
+        // refuses that, which is what makes it a portable test.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let blocker = dir.path().join("not-a-directory");
+        std::fs::write(&blocker, "in the way").expect("write");
+
+        let error = Export::create(&blocker.join("report.csv"), false).expect_err("must fail");
+        assert!(error.next_action.is_some(), "a failure must say what to do");
         assert_eq!(error.exit_code(), crate::ExitCode::Usage);
     }
 }
