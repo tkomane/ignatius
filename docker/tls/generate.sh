@@ -36,9 +36,17 @@ openssl x509 -req -in "$dir/server.csr" -days 365 -sha256 \
 openssl req -new -nodes -sha256 \
     -subj "/CN=cert_user" \
     -keyout "$dir/client.key" -out "$dir/client.csr" 2>/dev/null
+# The extensions are not optional. Signing without any of them produces an
+# X.509 v1 certificate on some OpenSSL versions, which rustls rejects outright
+# as UnsupportedCertVersion. Naming them forces v3 everywhere.
+cat > "$dir/client.ext" <<'EXT'
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+EXT
 openssl x509 -req -in "$dir/client.csr" -days 365 -sha256 \
     -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial \
-    -out "$dir/client.crt" 2>/dev/null
+    -extfile "$dir/client.ext" -out "$dir/client.crt" 2>/dev/null
 
 # PostgreSQL refuses to start if its key is readable by anyone else, and the
 # container runs as uid 70 in the alpine image.
