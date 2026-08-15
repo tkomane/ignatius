@@ -221,6 +221,66 @@ pub const fn sidebar_width(available: u16) -> u16 {
     }
 }
 
+/// Where the editor and the results sit inside the body of the full layout.
+///
+/// One function, used by the renderer and by the reducer that needs to know how
+/// big a screenful is, so a page key moves by what the user can actually see.
+fn main_panes(body: Rect, sidebar_visible: bool) -> (Rect, Rect) {
+    let main = if sidebar_visible {
+        let width = sidebar_width(body.width);
+        let [_, main] =
+            Layout::horizontal([Constraint::Length(width), Constraint::Min(30)]).areas(body);
+        main
+    } else {
+        body
+    };
+    let [editor, results] =
+        Layout::vertical([Constraint::Percentage(40), Constraint::Min(3)]).areas(main);
+    (editor, results)
+}
+
+/// The body of the layout: everything between the header and the footer.
+fn body_area(area: Rect) -> Rect {
+    let [_, body, _] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(4),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    body
+}
+
+/// How many lines of SQL are on screen at a terminal size.
+#[must_use]
+pub fn editor_page(size: (u16, u16)) -> usize {
+    let area = Rect::new(0, 0, size.0, size.1);
+    match layout_mode(area) {
+        // Compact shows one pane at a time, so a page is the whole body.
+        LayoutMode::Compact => (body_area(area).height as usize).saturating_sub(2).max(1),
+        LayoutMode::TooSmall => 1,
+        LayoutMode::Full => {
+            let (editor, _) = main_panes(body_area(area), false);
+            (editor.height as usize).saturating_sub(2).max(1)
+        }
+    }
+}
+
+/// How many result rows are on screen at a terminal size.
+#[must_use]
+pub fn results_page(size: (u16, u16)) -> usize {
+    let area = Rect::new(0, 0, size.0, size.1);
+    match layout_mode(area) {
+        LayoutMode::Compact => (body_area(area).height as usize).saturating_sub(4).max(1),
+        LayoutMode::TooSmall => 1,
+        LayoutMode::Full => {
+            let (_, results) = main_panes(body_area(area), false);
+            // Two rows of the pane are the border, two more the header and its
+            // rule, which is what the grid itself reserves.
+            (results.height as usize).saturating_sub(4).max(1)
+        }
+    }
+}
+
 fn render_full(
     model: &Model,
     keymap: &Keymap,
@@ -237,18 +297,14 @@ fn render_full(
 
     // The tree takes a fixed share of the width rather than a proportional one,
     // because object names are the same length whatever the window is.
-    let main = if model.sidebar_visible {
+    if model.sidebar_visible {
         let width = sidebar_width(body.width);
-        let [sidebar, main] =
+        let [sidebar, _] =
             Layout::horizontal([Constraint::Length(width), Constraint::Min(30)]).areas(body);
         render_objects(model, presentation, sidebar, buf);
-        main
-    } else {
-        body
-    };
+    }
 
-    let [editor, results] =
-        Layout::vertical([Constraint::Percentage(40), Constraint::Min(3)]).areas(main);
+    let (editor, results) = main_panes(body, model.sidebar_visible);
 
     render_header(model, presentation, header, buf);
     render_editor(model, presentation, editor, buf);
@@ -488,10 +544,19 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
     let gutter = lines.len().to_string().len().max(2);
     let (cursor_line, cursor_column) = model.editor.position();
 
+    // The window follows the cursor rather than being stored, exactly as the
+    // result grid's does. A scroll offset in the model would be a second source
+    // of truth for where the cursor is.
+    let height = inner.height as usize;
+    let offset = cursor_line
+        .saturating_sub(1)
+        .saturating_sub(height.saturating_sub(1));
+
     let rendered: Vec<Line> = lines
         .iter()
         .enumerate()
-        .take(inner.height as usize)
+        .skip(offset)
+        .take(height)
         .map(|(index, source)| {
             let number = index + 1;
             let mut spans = vec![Span::styled(
@@ -2045,6 +2110,53 @@ mod tests {
             !text.contains('\x1b'),
             "an escape in a column name reached the screen"
         );
+    }
+
+    #[test]
+    fn the_editor_window_follows_the_cursor_through_a_long_buffer() {
+        let mut model = connected_model(Environment::Local);
+        let text = (1..=200)
+            .map(|n| format!("-- line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        model.editor.set_text(text);
+
+        // The cursor is at the end after loading, so the end is what is shown.
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("-- line 200"), "{text}");
+        assert!(!text.contains("-- line 1\n"), "the top scrolled away");
+
+        model.editor.move_buffer_start();
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("-- line 1"), "{text}");
+        assert!(!text.contains("-- line 200"), "the window came back");
+
+        // Line numbers keep counting from the buffer, not from the window.
+        model.editor.move_buffer_end();
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("200 -- line 200"), "{text}");
+    }
+
+    #[test]
+    fn a_screenful_is_what_the_pane_can_actually_show() {
+        // The reducer moves by these numbers, so they have to match the panes
+        // the renderer draws rather than being a guess.
+        let (editor, results) = (editor_page((100, 30)), results_page((100, 30)));
+        assert!(
+            editor >= 8,
+            "an 30-row terminal shows a real page: {editor}"
+        );
+        assert!(results >= 8, "{results}");
+        assert!(
+            editor_page((100, 40)) > editor,
+            "a taller terminal pages further"
+        );
+
+        // Degenerate sizes must still yield a usable step rather than zero.
+        for size in [(0, 0), (1, 1), (40, 8), (80, 24)] {
+            assert!(editor_page(size) >= 1, "{size:?}");
+            assert!(results_page(size) >= 1, "{size:?}");
+        }
     }
 
     #[test]

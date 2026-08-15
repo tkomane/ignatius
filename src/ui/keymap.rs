@@ -76,6 +76,7 @@ impl Keymap {
         use KeyCode as K;
         let ctrl = KeyModifiers::CONTROL;
         let none = KeyModifiers::NONE;
+        let alt = KeyModifiers::ALT;
         let bindings = vec![
             // Run is bound three ways on purpose. Ctrl+R is the one advertised,
             // because function keys are routinely claimed by the operating
@@ -212,6 +213,103 @@ impl Keymap {
                 "Insert a line break, open a node, or confirm",
                 false,
             ),
+            // Editing keys. Two modifiers are bound for word movement because
+            // terminals disagree: Windows Terminal and most Linux emulators send
+            // Ctrl, while macOS terminals conventionally send Alt for the same
+            // gesture. Binding both means the key works where the user is.
+            binding(
+                K::Left,
+                ctrl,
+                Action::MoveWord(Direction::Left),
+                "Move a word left",
+                false,
+            ),
+            binding(
+                K::Right,
+                ctrl,
+                Action::MoveWord(Direction::Right),
+                "Move a word right",
+                false,
+            ),
+            binding(
+                K::Left,
+                alt,
+                Action::MoveWord(Direction::Left),
+                "Move a word left (macOS terminals)",
+                false,
+            ),
+            binding(
+                K::Right,
+                alt,
+                Action::MoveWord(Direction::Right),
+                "Move a word right (macOS terminals)",
+                false,
+            ),
+            binding(
+                K::Home,
+                none,
+                Action::MoveLineStart,
+                "Move to the start of the line",
+                false,
+            ),
+            binding(
+                K::End,
+                none,
+                Action::MoveLineEnd,
+                "Move to the end of the line",
+                false,
+            ),
+            binding(
+                K::Home,
+                ctrl,
+                Action::MoveBufferStart,
+                "Move to the start of the buffer",
+                false,
+            ),
+            binding(
+                K::End,
+                ctrl,
+                Action::MoveBufferEnd,
+                "Move to the end of the buffer",
+                false,
+            ),
+            binding(
+                K::PageUp,
+                none,
+                Action::MovePage(Direction::Up),
+                "Move up a screenful",
+                false,
+            ),
+            binding(
+                K::PageDown,
+                none,
+                Action::MovePage(Direction::Down),
+                "Move down a screenful",
+                false,
+            ),
+            binding(
+                K::Delete,
+                none,
+                Action::DeleteForward,
+                "Delete the character after the cursor",
+                false,
+            ),
+            binding(
+                K::Backspace,
+                alt,
+                Action::DeleteWordLeft,
+                "Delete the word before the cursor",
+                false,
+            ),
+            binding(
+                K::Char('w'),
+                ctrl,
+                Action::DeleteWordLeft,
+                "Delete the word before the cursor",
+                false,
+            ),
+            binding(K::Char('z'), ctrl, Action::Undo, "Undo", false),
+            binding(K::Char('y'), ctrl, Action::Redo, "Redo", false),
         ];
         Self { bindings }
     }
@@ -343,7 +441,15 @@ const fn short_label(action: &Action) -> &'static str {
         Action::ToggleErrorDetail => "Detail",
         Action::Move(_) => "Move",
         Action::Insert(_) => "Type",
-        Action::Backspace => "Delete",
+        Action::Backspace | Action::DeleteForward | Action::DeleteWordLeft => "Delete",
+        Action::MoveWord(_)
+        | Action::MoveLineStart
+        | Action::MoveLineEnd
+        | Action::MoveBufferStart
+        | Action::MoveBufferEnd
+        | Action::MovePage(_) => "Move",
+        Action::Undo => "Undo",
+        Action::Redo => "Redo",
         Action::Newline => "New line",
     }
 }

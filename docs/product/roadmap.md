@@ -7,13 +7,13 @@ vertical slice that leaves the product usable.
 | --- | --- | --- |
 | 001 Foundation and vertical slice | **Implemented, macOS-verified** | Architecture, terminal lifecycle, connection, execution, cancellation, CLI contract, doctor |
 | 002 Object navigation | **Implemented** | Object tree, command palette, chord popup, breadcrumbs, object symbolism. Built ahead of the libpq migration at the owner's request; it touches no credential route, so the two do not overlap |
-| 001a libpq migration | **Next**, per ADR-0009 | Client certificates, `.pgpass`, service files and enterprise authentication, which the pure-Rust driver cannot provide |
+| 001a libpq migration | **Next**, per ADR-0009 and its decision gates | Enterprise authentication only if GSSAPI, Kerberos or Windows SSPI remains required; `.pgpass`, service files, `verify-ca` and client certificates are already implemented natively |
 | 003 Credential routes | **Password and service files done** | `.pgpass` and `pg_service.conf`, the driver-independent half of the connection experience |
 | 002 Connection experience and secrets | After 001a | Profiles, first-run journey, credential store, `.pgpass`, service files, password prompting, TLS states, connection diagnostics |
-| 003 Delightful query loop | Partly done | Query jobs and transaction state are in, and the command palette landed early in 002. Remaining: a real editor and history with privacy controls |
+| 003 Delightful query loop | Mostly done | Query jobs, transaction state, the command palette and a real editor with undo, word movement and vertical navigation (`specs/005-sql-editing/spec.md`). Remaining: query history with privacy controls, and syntax highlighting |
 | 004 Result exploration and export | Mostly done | Streaming export, the expanded row view and the cell inspector are in. Remaining: result filtering, and copying a value out, which needs a decision on the clipboard route (see `specs/004-result-inspection/spec.md`) |
 | 005 PostgreSQL object explorer | Partly done in 002 | Remaining: DDL inspection, dependency navigation, indexes and extensions in the tree, a dedicated metadata connection |
-| 006 Production-aware safety | Planned | Environment policy, write protection, advisory statement classification, confirmation ergonomics, privacy sessions |
+| 006 Production-aware safety | **Implemented** | Environment policy, write protection the server enforces, advisory statement classification, and a confirmation that asks for the database's own name before anything destructive. Privacy sessions arrive with query history, which does not exist yet |
 | 007 Accessibility and terminal hardening | Partly done | Plain line-oriented mode, no-colour, ASCII and narrow layouts are in. Remaining: configurable keymaps, colour and Unicode overrides from the config file |
 | 008 Release experience | Planned | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |
 

@@ -3,6 +3,10 @@
 **Status**: Repository-grounded planning research. Vendor, wrapper and
 platform validation remain Phase 0 gates and are not represented as completed.
 
+**External evidence checked**: 2026-08-16 against PostgreSQL 18.6
+documentation and the current published metadata for the candidate Rust
+crates. This comparison is research evidence, not a dependency selection.
+
 ## Decision 1: Reconfirm the reason to migrate
 
 **Decision**: Keep the package decision-gated until the owner confirms that
@@ -88,3 +92,47 @@ silent-downgrade rules remain unchanged.
 - Native library loading path, architecture matching and update ownership.
 - Cancellation API semantics and connection lifecycle under shutdown.
 - Clean-machine packaging and CI service availability.
+
+## Decision 6: Compare native binding candidates before the spike
+
+**Decision**: Keep the candidate set open. The first implementation spike should
+compare a safe wrapper over libpq with the lower-level `pq-sys` bindings against
+the existing `tokio-postgres` baseline. No candidate is approved by this
+research entry.
+
+| Candidate | Evidence checked | Fit for this repository | Open gate |
+| --- | --- | --- | --- |
+| `libpq` with `libpq-sys` | The published `libpq` crate describes itself as a safe binding, depends on `libpq-sys`, and is MIT licensed. The indexed 6.0.1 release had 79.34% item documentation and only two examples. PostgreSQL's libpq connection options include `gss` and `sspi`. | The smallest initial unsafe surface if its safe API exposes the required authentication, async-result and cancellation operations. | Prove that the wrapper exposes the required GSSAPI or SSPI route, notices, result draining, cancellation and shutdown on all target platforms. Treat documentation coverage as a maintenance signal, not a safety proof. |
+| `pq-sys` with a repository-owned adapter | The published crate is direct one-to-one bindings to `libpq-fe.h` and `postgres_ext.h`, Apache-2.0 or MIT licensed. It supports target-specific `PQ_LIB_DIR`, `pkg-config`, `pg_config`, MSVC `vcpkg`, and optional bundled builds. | Covers the native surface, including whatever authentication the linked libpq provides, and makes packaging options visible, but leaves ownership, lifetimes, error mapping and thread confinement to our adapter. | Write and review the smallest safe wrapper, prove the bundled TLS choice, and test every handle cleanup path. The bindings alone do not prove a server-backed GSSAPI or SSPI route. |
+| Keep `tokio-postgres` | The current `Cargo.toml` uses `tokio-postgres` 0.7.18 and no native libpq dependency. | Preserves the current async and packaging model and remains the correct baseline for parity. It does not by itself provide the libpq enterprise authentication routes named by ADR-0009. | Owner must confirm that the remaining enterprise route justifies the native cost before this baseline is replaced. |
+| Bespoke bindings | No repository or upstream comparison found that justifies owning a third binding generator before the two existing options are spiked. | Avoid as the default because it expands the unsafe and maintenance surface without a demonstrated capability gap. | Consider only if the selected wrapper and `pq-sys` cannot expose an approved route on a supported platform. |
+
+The metadata checked lists `libpq` 6.0.1 (2025-10-29) and `pq-sys` 0.7.5
+(2025-10-15) as their indexed releases. Both have an active source repository
+and recent published history, but neither metadata page supplies a maintenance
+SLA or a guarantee that every libpq function needed by this client is wrapped.
+Maintenance is therefore a selection input, not a completed finding.
+
+The PostgreSQL API surface makes the concurrency choice material. The current
+documentation describes nonblocking connection through
+`PQconnectStartParams` and `PQconnectPoll`, asynchronous execution through
+`PQsendQuery`, `PQconsumeInput` and `PQgetResult`, and cancellation followed by
+normal result draining until `PQgetResult` returns null. It also prohibits
+concurrent manipulation of one `PGconn`; PostgreSQL 17 and later document
+libpq as reentrant and thread-safe subject to that per-connection restriction.
+The adapter spike must therefore exercise the exact calls exposed by the chosen
+Rust candidate rather than infer compatibility from its name.
+
+### Evidence links and follow-up
+
+- [PostgreSQL 18 connection control](https://www.postgresql.org/docs/current/libpq-connect.html)
+- [PostgreSQL 18 asynchronous command processing](https://www.postgresql.org/docs/current/libpq-async.html)
+- [PostgreSQL 18 threaded-program behaviour](https://www.postgresql.org/docs/current/libpq-threading.html)
+- [`libpq` crate metadata and source](https://docs.rs/crate/libpq/latest)
+- [`pq-sys` crate metadata and build options](https://docs.rs/crate/pq-sys/latest)
+- [`pq-sys` upstream repository](https://github.com/sgrif/pq-sys)
+
+This completes the research comparison requested by T009. T010 and T011 remain
+open because packaging and the session actor require an owner-approved spike;
+T008 remains an explicit owner confirmation rather than an inference from this
+research.

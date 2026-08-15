@@ -118,7 +118,7 @@ verification gaps without claiming more than has been proven.
 
 - [x] T027 [P] Add the feature requirements-quality checklist in `specs/007-plain-line-mode/checklists/requirements.md`
 - [x] T028 [P] Record combined automated verification and its evidence boundary in `docs/operations/verification.md`
-- [x] T029 Run `cargo xtask verify` with both disposable PostgreSQL services and record 358 library, 29 CLI-contract and 33 integration tests
+- [x] T029 Run `cargo xtask verify` with both disposable PostgreSQL services and record 385 library, 31 CLI-contract and 33 integration tests
 - [x] T030 [US3] Add a plain-mode subprocess cancellation test in `tests/cli_contract.rs`
 - [x] T031 [US3] Add a plain-mode failed-transaction transcript test in `tests/cli_contract.rs`
 - [ ] T032 [P] Hand-verify plain mode with a screen reader on macOS and Windows, recording the exact environment in `docs/support/compatibility.md`

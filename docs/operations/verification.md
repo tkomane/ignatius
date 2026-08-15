@@ -36,15 +36,16 @@ is not a pass.** Report it as a skip.
 | Secret scan | gitleaks in CI | Yes |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
-## Evidence recorded on 2026-08-15
+## Evidence recorded on 2026-08-16
 
 macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against both the plain
 and TLS disposable services from `postgres:18.4-alpine`.
 
 **Automated**: `cargo xtask verify` passed all five gates: formatting, lints,
-358 library tests, 29 CLI contract tests and 33 PostgreSQL integration tests.
-This run included the plain line-oriented client and the failed-transaction
-recovery regression.
+385 library tests, 31 CLI contract tests and 33 PostgreSQL integration tests.
+This run included Feature 004's expanded-row and cell-inspector coverage, the
+plain line-oriented client, plain-mode cancellation, and failed-transaction
+recovery transcript coverage.
 
 **Terminal lifecycle, captured from a real pseudo-terminal.** The client was run
 under `script`, sent Ctrl+Q, and the byte stream captured. In order:
@@ -73,8 +74,9 @@ truthfully that the connection was not encrypted. A query against a missing
 relation reported SQLSTATE 42P01 with a cause and a next action, exited 7, and
 wrote nothing to stdout. A value containing `ESC[2J` was rendered as `\x1B[2J`.
 NULL, an empty string and the text `NULL` were each displayed distinctly. The
-plain-mode subprocess checks also proved line-oriented input, production-write
-confirmation and screen-reader-safe output.
+plain-mode subprocess checks also proved line-oriented input,
+production-write confirmation, server-confirmed cancellation, failed-
+transaction recovery wording and screen-reader-safe output.
 
 ## What has not been verified
 

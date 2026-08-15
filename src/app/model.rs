@@ -6,6 +6,7 @@
 //! like "cancellation requested but not yet confirmed" testable without a
 //! database, a terminal, or a clock.
 
+pub use crate::app::editor::Editor;
 use crate::connection::Environment;
 use crate::diagnostics::Diagnostic;
 use crate::postgres::SessionInfo;
@@ -150,114 +151,6 @@ impl QueryPhase {
     #[must_use]
     pub const fn is_busy(&self) -> bool {
         !matches!(self, Self::Idle)
-    }
-}
-
-/// A minimal multi-line SQL buffer.
-///
-/// Feature 003 replaces this with a full editor. What it must already do is hold
-/// text, track a cursor in byte offsets so statement selection is exact, and
-/// never panic on multi-byte input.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Editor {
-    text: String,
-    cursor: usize,
-    modified: bool,
-}
-
-impl Editor {
-    /// Creates an editor holding the given text, cursor at the end.
-    #[must_use]
-    pub fn with_text(text: impl Into<String>) -> Self {
-        let text = text.into();
-        let cursor = text.len();
-        Self {
-            text,
-            cursor,
-            modified: false,
-        }
-    }
-
-    /// The whole buffer.
-    #[must_use]
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    /// Cursor position as a byte offset, always on a character boundary.
-    #[must_use]
-    pub const fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    /// Whether the buffer has unsaved edits.
-    #[must_use]
-    pub const fn is_modified(&self) -> bool {
-        self.modified
-    }
-
-    /// Inserts a character at the cursor.
-    pub fn insert(&mut self, ch: char) {
-        self.text.insert(self.cursor, ch);
-        self.cursor += ch.len_utf8();
-        self.modified = true;
-    }
-
-    /// Deletes the character before the cursor.
-    pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let mut previous = self.cursor - 1;
-        while previous > 0 && !self.text.is_char_boundary(previous) {
-            previous -= 1;
-        }
-        self.text.replace_range(previous..self.cursor, "");
-        self.cursor = previous;
-        self.modified = true;
-    }
-
-    /// Moves the cursor one character left.
-    pub fn move_left(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let mut previous = self.cursor - 1;
-        while previous > 0 && !self.text.is_char_boundary(previous) {
-            previous -= 1;
-        }
-        self.cursor = previous;
-    }
-
-    /// Moves the cursor one character right.
-    pub fn move_right(&mut self) {
-        if self.cursor >= self.text.len() {
-            return;
-        }
-        let mut next = self.cursor + 1;
-        while next < self.text.len() && !self.text.is_char_boundary(next) {
-            next += 1;
-        }
-        self.cursor = next;
-    }
-
-    /// Replaces the whole buffer, for example when loading a file.
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        self.text = text.into();
-        self.cursor = self.text.len();
-        self.modified = false;
-    }
-
-    /// The line and column of the cursor, both one-based, for the status bar.
-    #[must_use]
-    pub fn position(&self) -> (usize, usize) {
-        let before = &self.text[..self.cursor];
-        let line = before.matches('\n').count() + 1;
-        let column = before
-            .rsplit_once('\n')
-            .map_or(before.chars().count(), |(_, last)| last.chars().count())
-            + 1;
-        (line, column)
     }
 }
 
@@ -442,51 +335,6 @@ mod tests {
             "statements must not be sent on a lost connection"
         );
         assert!(lost.info().is_some());
-    }
-
-    #[test]
-    fn editor_handles_multibyte_text_without_splitting_characters() {
-        let mut editor = Editor::default();
-        for ch in "SELECT 'héllo 日本';".chars() {
-            editor.insert(ch);
-        }
-        assert_eq!(editor.text(), "SELECT 'héllo 日本';");
-        assert!(editor.is_modified());
-        assert!(editor.text().is_char_boundary(editor.cursor()));
-
-        for _ in 0..5 {
-            editor.backspace();
-        }
-        // Removed, in order: ';' '\'' '本' '日' ' '
-        assert_eq!(editor.text(), "SELECT 'héllo");
-        assert!(editor.text().is_char_boundary(editor.cursor()));
-
-        editor.move_left();
-        editor.move_left();
-        assert!(editor.text().is_char_boundary(editor.cursor()));
-        for _ in 0..20 {
-            editor.move_right();
-        }
-        assert_eq!(
-            editor.cursor(),
-            editor.text().len(),
-            "cursor stops at the end"
-        );
-        for _ in 0..40 {
-            editor.move_left();
-        }
-        assert_eq!(editor.cursor(), 0, "cursor stops at the start");
-        editor.backspace();
-        assert_eq!(editor.cursor(), 0, "backspace at the start is a no-op");
-    }
-
-    #[test]
-    fn editor_reports_a_one_based_line_and_column() {
-        let mut editor = Editor::with_text("SELECT 1\nFROM t");
-        assert_eq!(editor.position(), (2, 7));
-        editor.set_text("SELECT 1");
-        assert_eq!(editor.position(), (1, 9));
-        assert!(!editor.is_modified(), "loading text is not an edit");
     }
 
     #[test]

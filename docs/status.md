@@ -1,12 +1,19 @@
 # Status
 
-**Updated: 2026-08-15.** This file is the resumption point. Read it, then check
+**Updated: 2026-08-16.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: reading a result. `Ctrl+K x` lays one row down the screen,
+**Current feature**: a real editor for the SQL buffer. Vertical movement with a
+remembered column, line and buffer ends, word movement and deletion, movement by
+a screenful, and undo and redo a word at a time including over loaded text. The
+window follows the cursor rather than being stored, so there is one source of
+truth for where the cursor is. Specified in `specs/005-sql-editing/spec.md`.
+Syntax highlighting and query history are the rest of roadmap Feature 003.
+
+**Previous**: reading a result. `Ctrl+K x` lays one row down the screen,
 one column per line; Enter on a cell opens it in full, wrapped, scrollable, with
 what the value is stated in words. Specified in
 `specs/004-result-inspection/spec.md`. That is two of the four items Feature 004
@@ -50,14 +57,14 @@ and a domain remain outstanding before publishing; neither blocks development.
 
 ## Last green verification
 
-Run on 2026-08-15, macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew),
+Run on 2026-08-16, macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew),
 against `postgres:18.4-alpine` both plain and with TLS.
 
 | Gate | Result |
 | --- | --- |
 | `cargo xtask verify` | All five gates pass |
-| Library tests | 358 passed |
-| CLI contract tests | 29 passed |
+| Library tests | 385 passed |
+| CLI contract tests | 31 passed |
 | PostgreSQL integration tests | 33 passed |
 | Terminal restoration, in a pty | 3 passed |
 | CI, all jobs | Green: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
@@ -83,6 +90,8 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A buffer of any length can be navigated | Layout test: the window follows the cursor and the line numbers stay right |
+| A deleted word comes back | Reducer test through the real key actions |
 | A value is never abbreviated without recourse | The inspector renders it whole, wrapped, with its position stated |
 | NULL, empty and the text NULL are distinguishable | Layout test asserting the words for each |
 | Every documented exit code | Produced by a real invocation |
@@ -130,10 +139,13 @@ These are real and none of them is hidden anywhere else:
 ## Decisions taken
 
 - **Name**: Ignatius, confirmed 2026-08-15.
-- **Driver**: moving to libpq, confirmed 2026-08-15. See ADR-0009, which
-  supersedes ADR-0003 and records the costs: an `unsafe` exception scoped to the
-  adapter, a changed Windows distribution story, and a concurrency model that
-  needs its own ADR.
+- **Driver**: ADR-0009 accepted the move to libpq on 2026-08-15. The
+  implementation remains decision-gated in Feature 001a because four of the
+  five original capability gaps are now implemented natively; the remaining
+  GSSAPI, Kerberos or Windows SSPI requirement must still justify the cost.
+  ADR-0009 supersedes ADR-0003 and records the costs: an `unsafe` exception
+  scoped to the adapter, a changed Windows distribution story, and a
+  concurrency model that needs its own ADR.
 - **Repository**: private, at `tkomane/ignatius`. Publishing beyond that is
   deferred; the options are in `docs/operations/release.md`.
 
@@ -141,8 +153,9 @@ These are real and none of them is hidden anywhere else:
 
 1. **Trademark search and a domain**, before publishing only. Neither blocks
    development.
-2. **How libpq is bundled on Windows**, which ADR-0009 leaves open until the
-   migration is scoped.
+2. **Whether the remaining enterprise authentication route justifies libpq**,
+   after the T009 wrapper comparison in Feature 001a. If approved, decide how
+   libpq is bundled on Windows before implementation.
 
 ## Next actions, in order
 

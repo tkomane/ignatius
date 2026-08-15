@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- A real editor for the SQL buffer. The cursor moves up and down with a
+  remembered column, to the start and end of a line or the buffer, by word, and
+  by a screenful of whatever the pane can actually show. Delete works forwards,
+  backwards and by word. There is undo and redo, one word at a time, including
+  for text loaded over the buffer. A new line keeps the indentation of the one
+  it left, and the window follows the cursor through a buffer of any length.
 - Two ways to read a value the grid can only abbreviate. `Ctrl+K x` lays the
   selected row down the screen, one column per line, the way `psql`'s `\x`
   does, so a thirty-column row is readable on an eighty-column terminal. Enter,

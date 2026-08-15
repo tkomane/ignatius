@@ -256,6 +256,109 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             move_selection(model, direction);
             Vec::new()
         }
+        // Editing keys belong to the editor. Elsewhere they do nothing rather
+        // than doing something that looks like an edit somewhere else.
+        Action::DeleteForward if model.focus == Focus::Editor => {
+            model.editor.delete_forward();
+            Vec::new()
+        }
+        Action::DeleteWordLeft if model.focus == Focus::Editor => {
+            model.editor.delete_word_left();
+            Vec::new()
+        }
+        Action::MoveWord(direction) if model.focus == Focus::Editor => {
+            match direction {
+                Direction::Left => model.editor.move_word_left(),
+                Direction::Right => model.editor.move_word_right(),
+                Direction::Up | Direction::Down => {}
+            }
+            Vec::new()
+        }
+        Action::MoveLineStart if model.focus == Focus::Editor => {
+            model.editor.move_line_start();
+            Vec::new()
+        }
+        Action::MoveLineEnd if model.focus == Focus::Editor => {
+            model.editor.move_line_end();
+            Vec::new()
+        }
+        Action::Undo if model.focus == Focus::Editor => {
+            model.editor.undo();
+            Vec::new()
+        }
+        Action::Redo if model.focus == Focus::Editor => {
+            model.editor.redo();
+            Vec::new()
+        }
+        // These two are useful in every pane, so they are not editor-only.
+        Action::MoveBufferStart => {
+            match model.focus {
+                Focus::Editor => model.editor.move_buffer_start(),
+                Focus::Results => {
+                    model.selected_row = 0;
+                }
+                Focus::Objects => model.tree.move_selection(isize::MIN / 2),
+            }
+            Vec::new()
+        }
+        Action::MoveBufferEnd => {
+            match model.focus {
+                Focus::Editor => model.editor.move_buffer_end(),
+                Focus::Results => {
+                    model.selected_row = model
+                        .visible_result()
+                        .map_or(0, |set| set.rows.len().saturating_sub(1));
+                }
+                Focus::Objects => model.tree.move_selection(isize::MAX / 2),
+            }
+            Vec::new()
+        }
+        Action::MovePage(direction) => {
+            page(model, direction);
+            Vec::new()
+        }
+        Action::DeleteForward
+        | Action::DeleteWordLeft
+        | Action::MoveWord(_)
+        | Action::MoveLineStart
+        | Action::MoveLineEnd
+        | Action::Undo
+        | Action::Redo => Vec::new(),
+    }
+}
+
+/// Moves by a screenful in whichever pane has focus.
+///
+/// The height comes from the terminal size the model already knows, through the
+/// same layout functions the renderer uses, so a page here is the page the user
+/// can see rather than a number chosen in advance.
+fn page(model: &mut Model, direction: Direction) {
+    let lines = crate::ui::layout::editor_page(model.size);
+    match model.focus {
+        Focus::Editor => match direction {
+            Direction::Up => model.editor.move_page_up(lines),
+            Direction::Down => model.editor.move_page_down(lines),
+            Direction::Left | Direction::Right => {}
+        },
+        Focus::Results => {
+            let rows = model.visible_result().map_or(0, |set| set.rows.len());
+            let step = crate::ui::layout::results_page(model.size);
+            match direction {
+                Direction::Up => model.selected_row = model.selected_row.saturating_sub(step),
+                Direction::Down => {
+                    model.selected_row = (model.selected_row + step).min(rows.saturating_sub(1));
+                }
+                Direction::Left | Direction::Right => {}
+            }
+        }
+        Focus::Objects => {
+            let step = isize::try_from(crate::ui::layout::results_page(model.size)).unwrap_or(10);
+            match direction {
+                Direction::Up => model.tree.move_selection(-step),
+                Direction::Down => model.tree.move_selection(step),
+                Direction::Left | Direction::Right => {}
+            }
+        }
     }
 }
 
@@ -443,9 +546,8 @@ fn move_selection(model: &mut Model, direction: Direction) {
         Focus::Editor => match direction {
             Direction::Left => model.editor.move_left(),
             Direction::Right => model.editor.move_right(),
-            // Vertical movement in the editor arrives with Feature 003; until
-            // then it does nothing rather than doing something surprising.
-            Direction::Up | Direction::Down => {}
+            Direction::Up => model.editor.move_up(),
+            Direction::Down => model.editor.move_down(),
         },
         Focus::Results => {
             let (rows, columns) = model
@@ -1106,6 +1208,113 @@ mod tests {
             usable: true,
             counts,
         }
+    }
+
+    #[test]
+    fn editing_keys_reach_the_editor_and_nothing_else() {
+        let mut model = connected();
+        model.editor.set_text("SELECT customer_id\nFROM orders");
+
+        update(&mut model, Message::Action(Action::MoveBufferStart));
+        assert_eq!(model.editor.position(), (1, 1));
+        update(&mut model, Message::Action(Action::MoveLineEnd));
+        assert_eq!(model.editor.position(), (1, 19));
+        update(
+            &mut model,
+            Message::Action(Action::MoveWord(Direction::Left)),
+        );
+        assert_eq!(model.editor.position(), (1, 8));
+        update(&mut model, Message::Action(Action::DeleteWordLeft));
+        assert_eq!(model.editor.text(), "customer_id\nFROM orders");
+        update(&mut model, Message::Action(Action::Undo));
+        assert_eq!(model.editor.text(), "SELECT customer_id\nFROM orders");
+        update(&mut model, Message::Action(Action::Redo));
+        assert_eq!(model.editor.text(), "customer_id\nFROM orders");
+
+        update(&mut model, Message::Action(Action::MoveBufferStart));
+        update(&mut model, Message::Action(Action::DeleteForward));
+        assert_eq!(model.editor.text(), "ustomer_id\nFROM orders");
+
+        // The same keys in another pane leave the buffer alone.
+        let before = model.editor.text().to_owned();
+        model.focus = Focus::Results;
+        for action in [
+            Action::DeleteForward,
+            Action::DeleteWordLeft,
+            Action::MoveWord(Direction::Left),
+            Action::MoveLineStart,
+            Action::MoveLineEnd,
+            Action::Undo,
+            Action::Redo,
+        ] {
+            update(&mut model, Message::Action(action));
+        }
+        assert_eq!(model.editor.text(), before);
+    }
+
+    #[test]
+    fn vertical_movement_works_in_the_editor_where_it_used_to_do_nothing() {
+        let mut model = connected();
+        model
+            .editor
+            .set_text("SELECT customer_id\nFROM orders\nWHERE total > 100");
+        update(&mut model, Message::Action(Action::MoveBufferStart));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        assert_eq!(model.editor.position(), (2, 1));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        update(&mut model, Message::Action(Action::Move(Direction::Up)));
+        assert_eq!(model.editor.position(), (2, 1));
+    }
+
+    #[test]
+    fn a_page_key_moves_by_what_is_on_screen_in_whichever_pane_has_focus() {
+        let mut model = connected();
+        model.size = (120, 40);
+        let text = (1..=200)
+            .map(|n| format!("-- line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        model.editor.set_text(text);
+        update(&mut model, Message::Action(Action::MoveBufferStart));
+
+        let page = crate::ui::layout::editor_page(model.size);
+        assert!(page > 1, "a full-size terminal shows more than one line");
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(model.editor.position().0, page + 1);
+        update(&mut model, Message::Action(Action::MovePage(Direction::Up)));
+        assert_eq!(model.editor.position().0, 1);
+
+        // In the results it moves the selection, and stops at the last row.
+        model.editor.set_text("SELECT 1;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected an execute effect");
+        };
+        let rows: Vec<String> = (0..500).map(|n| n.to_string()).collect();
+        let borrowed: Vec<&str> = rows.iter().map(String::as_str).collect();
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &borrowed)),
+        );
+        model.focus = Focus::Results;
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(
+            model.selected_row,
+            crate::ui::layout::results_page(model.size)
+        );
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert_eq!(
+            model.selected_row, 99,
+            "the last row is the last retained row, not the last row the server sent"
+        );
+        update(&mut model, Message::Action(Action::MoveBufferStart));
+        assert_eq!(model.selected_row, 0);
     }
 
     fn with_tree() -> Model {

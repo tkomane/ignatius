@@ -21,7 +21,16 @@ checked for conflicts by a test, and listed in help at runtime.
 | `Esc` | Dismiss help, then the current error | No |
 | `Ctrl+D` | Expand or collapse error detail | No |
 | `Up` `Down` `Left` `Right` | Move within the focused pane | No |
-| `Enter` | Insert a line break in the editor | No |
+| `Enter` | Insert a line break in the editor, keeping its indentation | No |
+| `Home` `End` | Start and end of the line | No |
+| `Ctrl+Home` `Ctrl+End` | Start and end of the buffer, or the first and last row | No |
+| `Ctrl+Left` `Ctrl+Right` | Move a word | No |
+| `Alt+Left` `Alt+Right` | Move a word, where the terminal sends Alt for it | No |
+| `PageUp` `PageDown` | Move by what the pane can show | No |
+| `Delete` | Delete the character after the cursor | No |
+| `Ctrl+W` `Alt+Backspace` | Delete the word before the cursor | No |
+| `Ctrl+Z` | Undo | No |
+| `Ctrl+Y` | Redo | No |
 | `Backspace` | Delete the character before the cursor | No |
 | `Enter` | Use what is selected: a line break, an object's name, or a confirmation | No |
 | `/` | Filter the object tree, when it has focus | No |
@@ -41,6 +50,21 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `h` | Show or hide help |
 | `x` | Expand the selected row down the screen |
 | `i` | Inspect the selected cell |
+
+## Editing keys
+
+Word movement is bound twice, with `Ctrl` and with `Alt`, because terminals do
+not agree: Windows Terminal and most Linux emulators send `Ctrl` for that
+gesture and macOS terminals conventionally send `Alt`. Binding both means the
+key works where the user is rather than where the author was.
+
+`Ctrl+Z` is undo rather than suspend. Raw mode turns off the terminal's own
+signal handling, so the key arrives here as a key; a database client in the
+middle of a statement is not something to suspend by reflex anyway.
+
+One undo step is a word and the space after it. Character-at-a-time undo is
+tedious and whole-buffer undo is frightening, and the word is the unit people
+actually think in.
 
 ## What a key means depends on where you are
 
