@@ -1,0 +1,132 @@
+name: CI
+
+# Actions are pinned to immutable commit SHAs rather than tags, so a moved tag
+# cannot change what runs. The comment beside each one records the version the
+# SHA corresponded to when it was pinned, on 2026-08-15.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # Fast gates first, so a formatting mistake does not wait behind a build.
+  lint:
+    name: Format and lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # Cross-platform behaviour is a release criterion, not a follow-up task.
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build --all-targets
+      - name: Unit, layout and CLI contract tests
+        run: cargo test --lib --test cli_contract
+      - name: Terminal restoration and startup smoke test
+        shell: bash
+        run: |
+          # Proves the binary starts, refuses the full-screen client without a
+          # terminal, and returns the documented exit codes.
+          cargo run --quiet -- version --verbose
+          cargo run --quiet -- doctor
+          set +e
+          cargo run --quiet -- connect "postgres://x@127.0.0.1:1/y?connect_timeout=2" >/dev/null 2>&1
+          test $? -eq 2 || { echo "expected usage exit code 2 without a terminal"; exit 1; }
+          cargo run --quiet -- query "postgres://x@127.0.0.1:1/y?connect_timeout=2" -c "SELECT 1" >/dev/null 2>&1
+          test $? -eq 4 || { echo "expected connection exit code 4"; exit 1; }
+
+  # Protocol claims need a real server. The window is PostgreSQL 14 to 18; the
+  # oldest and newest run on every push, with a middle version for coverage.
+  integration:
+    name: PostgreSQL ${{ matrix.postgres }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "16", "18"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: ignatius_test
+          POSTGRES_PASSWORD: not-a-real-password-disposable-container
+          POSTGRES_DB: ignatius_demo
+          POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U ignatius_test -d ignatius_demo"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Load synthetic fixtures
+        env:
+          PGPASSWORD: not-a-real-password-disposable-container
+        run: |
+          for file in docker/init/*.sql; do
+            psql -h 127.0.0.1 -p 55432 -U ignatius_test -d ignatius_demo -v ON_ERROR_STOP=1 -f "$file"
+          done
+      - name: Integration tests
+        env:
+          IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo
+        run: cargo test --test postgres_integration --test cli_contract
+
+  supply-chain:
+    name: Advisories, licences and secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories licenses bans sources
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Generated artefacts must be reproducible and must not drift from the source.
+  drift:
+    name: Generated artefact drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Completions regenerate identically
+        run: |
+          for shell in zsh bash fish powershell; do
+            cargo run --quiet -- completion "$shell" > "/tmp/$shell.completion"
+            test -s "/tmp/$shell.completion" || { echo "$shell completion was empty"; exit 1; }
+          done
+      - name: Lockfile is committed and current
+        run: cargo metadata --locked --format-version 1 > /dev/null

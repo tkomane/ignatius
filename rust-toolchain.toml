@@ -1,0 +1,8 @@
+# Pins the toolchain for reproducible builds and identical lint behaviour.
+#
+# Honoured by rustup. A rustc installed by a package manager ignores this file,
+# so check `rustc --version` before treating a build difference as real.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
