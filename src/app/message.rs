@@ -50,6 +50,26 @@ pub enum Action {
     Insert(char),
     /// Delete backwards in the editor.
     Backspace,
+    /// Delete the character after the cursor.
+    DeleteForward,
+    /// Delete back to the start of the previous word.
+    DeleteWordLeft,
+    /// Move by a word.
+    MoveWord(Direction),
+    /// Move to the start of the line.
+    MoveLineStart,
+    /// Move past the end of the line.
+    MoveLineEnd,
+    /// Move to the start of the buffer.
+    MoveBufferStart,
+    /// Move to the end of the buffer.
+    MoveBufferEnd,
+    /// Move by a screenful.
+    MovePage(Direction),
+    /// Take back the last change.
+    Undo,
+    /// Put back what undo took away.
+    Redo,
     /// Insert a line break in the editor.
     Newline,
 }

@@ -20,7 +20,7 @@ approves the migration gates and the evidence exists.
 ## Phase 2: Decision gates
 
 - [ ] T008 Record the owner's confirmation that GSSAPI, Kerberos or Windows SSPI is required in `docs/architecture/decisions/0009-libpq-migration.md`
-- [ ] T009 [P] Compare maintained wrappers and binding approaches for license, maintenance, authentication and platform coverage in `specs/001a-libpq-migration/research.md`
+- [x] T009 [P] Compare maintained wrappers and binding approaches for license, maintenance, authentication and platform coverage in `specs/001a-libpq-migration/research.md`
 - [ ] T010 [P] Decide whether each supported platform bundles or discovers the native dependency in `docs/architecture/decisions/0010-libpq-concurrency-model.md`
 - [ ] T011 Approve the session actor, cancellation, shutdown and back-pressure invariants in `docs/architecture/decisions/0010-libpq-concurrency-model.md`
 - [ ] T012 Update the threat model for native loading, FFI ownership and enterprise credentials in `docs/security/threat-model.md`

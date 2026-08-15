@@ -15,6 +15,7 @@
 //! [`update::update`] is pure, so every rule it enforces is provable in a unit
 //! test rather than by running a database.
 
+pub mod editor;
 pub mod inspect;
 pub mod message;
 pub mod model;
