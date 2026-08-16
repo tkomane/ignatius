@@ -161,6 +161,13 @@ unless `--force` is given.
 An interrupted export exits 9, leaves the partial file, and reports how many rows
 reached it.
 
+`Ctrl+K e` in the client writes **what is on screen** to a comma-separated file:
+the rows the result kept, narrowed by the filter if one is on. That is smaller
+than what the query returned whenever the result was truncated, so the prompt
+says how many rows will be written and what the file will not contain before it
+writes anything. To write the whole result, run the statement with `--output`,
+which streams from the server and never holds it in memory.
+
 ## Terminals
 
 | Terminal | Status |

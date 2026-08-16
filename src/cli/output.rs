@@ -194,7 +194,7 @@ fn write_separated(
 }
 
 /// Quotes or escapes one field for the delimiter in use.
-fn encode_field(value: &str, delimiter: char) -> String {
+pub(crate) fn encode_field(value: &str, delimiter: char) -> String {
     if delimiter == '\t' {
         // Tab-separated data cannot quote, so control characters are escaped the
         // way PostgreSQL's own COPY TEXT format escapes them.

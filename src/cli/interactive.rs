@@ -284,6 +284,11 @@ async fn event_loop(
                         *object,
                     );
                 }
+                Effect::ExportRows { path } => {
+                    let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
+                        &model, &path,
+                    ))));
+                }
                 Effect::ListQueries => {
                     let _ = tx.send(Message::QueriesListed(library.list().unwrap_or_default()));
                 }
@@ -674,6 +679,66 @@ fn spawn_load_definition(
             result: Box::new(result),
         });
     });
+}
+
+/// Writes the rows on screen to a file.
+///
+/// What is written is what the pane shows: the rows the result kept, narrowed by
+/// the filter if one is on. That is smaller than what the query returned
+/// whenever the result was truncated, which is why the prompt says so before
+/// this runs and why the message afterwards says how many rows there were.
+///
+/// The file is written through the same export machinery a scripted export
+/// uses, so it lands complete or not at all, and never replaces a file that is
+/// already there.
+fn export_visible_rows(model: &Model, path: &str) -> Result<String, Diagnostic> {
+    use std::io::Write as _;
+
+    let Some(set) = model.visible_result() else {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "there are no rows on screen to write",
+            "writing the rows on screen",
+        )
+        .next_action("run a statement that returns rows first"));
+    };
+    let rows = model.filtered_rows();
+
+    let mut export = crate::query::Export::create(std::path::Path::new(path), false)?;
+    let header: Vec<String> = set
+        .columns
+        .iter()
+        .map(|name| crate::cli::output::encode_field(name, ','))
+        .collect();
+    writeln!(export.writer(), "{}", header.join(",")).map_err(|err| write_failure(path, &err))?;
+    for index in &rows {
+        let Some(row) = set.rows.get(*index) else {
+            continue;
+        };
+        let values: Vec<String> = row
+            .iter()
+            .map(|cell| crate::cli::output::encode_field(&cell.export(""), ','))
+            .collect();
+        writeln!(export.writer(), "{}", values.join(","))
+            .map_err(|err| write_failure(path, &err))?;
+        export.count_row();
+    }
+    let finished = export.finish()?;
+    Ok(format!(
+        "{} row(s) written to {}",
+        finished.rows,
+        finished.path.display()
+    ))
+}
+
+fn write_failure(path: &str, error: &std::io::Error) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::ExportInterrupted,
+        format!("could not write {path}"),
+        "writing the rows on screen",
+    )
+    .likely_cause(error.to_string())
+    .next_action("check the directory's permissions and free space")
 }
 
 /// Reads what an object depends on and what depends on it.

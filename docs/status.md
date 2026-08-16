@@ -6,7 +6,12 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: saved queries. `Ctrl+K w` and `Ctrl+K o` write and open
+**Current feature**: writing the rows on screen to a file, and saved queries.
+The export from the client says how many rows it will write and what it will not
+contain before it writes anything, because what is on screen is not what the
+query returned whenever the result was truncated.
+
+**Previous**: saved queries. `Ctrl+K w` and `Ctrl+K o` write and open
 ordinary `.sql` files in the directory `config paths` has advertised since the
 first release and nothing had ever used. A name is checked before it reaches the
 filesystem, and that check is tested as the security boundary it is.
@@ -156,6 +161,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| An export from the client says what it leaves out | Reducer test over a truncated and filtered result |
 | A saved query's name can never escape its directory | Unit tests over separators, `..`, drive letters and control characters |
 | A pipe is never asked for a password | Subprocess test with stdin closed: it exits 5 rather than waiting |
 | A profile classified as production guards it | Subprocess test: the write is refused with no flag typed |

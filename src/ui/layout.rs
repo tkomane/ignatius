@@ -162,7 +162,7 @@ fn render_name_prompt(
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "It is saved as an ordinary .sql file you can open in anything.",
+            sanitize_for_display(&prompt.note),
             theme.style(Token::Muted),
         )),
     ];
@@ -2743,10 +2743,7 @@ mod tests {
     #[test]
     fn the_save_prompt_shows_the_name_and_says_what_the_file_will_be() {
         let mut model = connected_model(Environment::Local);
-        model.name_prompt = Some(crate::app::model::NamePrompt::new(
-            "Save the buffer as",
-            "monthly-revenue",
-        ));
+        model.name_prompt = Some(crate::app::model::NamePrompt::for_query("monthly-revenue"));
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
         assert!(text.contains("monthly-revenue"), "{text}");
         assert!(text.contains("Enter to save"), "{text}");

@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- `Ctrl+K e` writes the rows on screen to a file. Before it does, it says how
+  many rows that is and, when the result was truncated or a filter is on, what
+  the file will not contain and how to get all of it. It writes through the same
+  machinery a scripted export uses, so the file lands complete or not at all and
+  never replaces one that is already there.
 - Saved queries. `Ctrl+K w` writes the buffer to a named file and `Ctrl+K o`
   finds one by name and opens it. They are ordinary `.sql` files in the
   directory `config paths` has advertised since the first release and nothing

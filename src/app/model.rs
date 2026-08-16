@@ -230,25 +230,55 @@ impl Definition {
     }
 }
 
-/// A name being typed, for the one thing in this client that needs one.
+/// What a typed name is for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NamePurpose {
+    /// Saving the buffer as a query.
+    #[default]
+    SaveQuery,
+    /// Writing the rows on screen to a file.
+    ExportRows,
+}
+
+/// A name being typed, for the two things in this client that need one.
 ///
 /// Visible, unlike the password prompt: there is nothing here worth hiding, and
-/// seeing what a query will be called is the point of asking.
+/// seeing what a file will be called is the point of asking.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamePrompt {
     /// What has been typed so far.
     pub typed: String,
     /// What is being named, for the title.
     pub subject: String,
+    /// What the name is for.
+    pub purpose: NamePurpose,
+    /// A sentence about what will happen, shown under the field.
+    pub note: String,
 }
 
 impl NamePrompt {
-    /// Opens a prompt for a name.
+    /// Opens a prompt for the name of a saved query.
     #[must_use]
-    pub fn new(subject: impl Into<String>, suggestion: impl Into<String>) -> Self {
+    pub fn for_query(suggestion: impl Into<String>) -> Self {
         Self {
             typed: suggestion.into(),
-            subject: subject.into(),
+            subject: "Save the buffer as".to_owned(),
+            purpose: NamePurpose::SaveQuery,
+            note: "It is saved as an ordinary .sql file you can open in anything.".to_owned(),
+        }
+    }
+
+    /// Opens a prompt for the file rows will be written to.
+    ///
+    /// The note is the honest part: this writes what is on screen, which is not
+    /// the same as what the query returned when it was truncated or filtered.
+    #[must_use]
+    pub fn for_export(note: impl Into<String>) -> Self {
+        Self {
+            typed: String::new(),
+            subject: "Write the rows on screen to".to_owned(),
+            purpose: NamePurpose::ExportRows,
+            note: note.into(),
         }
     }
 }

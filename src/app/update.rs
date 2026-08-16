@@ -150,6 +150,17 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             ));
             Vec::new()
         }
+        Message::RowsExported(result) => {
+            match *result {
+                Ok(message) => model.notices.push(crate::query::result::Notice {
+                    severity: "WROTE".to_owned(),
+                    message,
+                    code: None,
+                }),
+                Err(error) => model.error = Some(error),
+            }
+            Vec::new()
+        }
         Message::QuerySaved(result) => {
             match *result {
                 Ok(path) => {
@@ -374,10 +385,34 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             if model.editor.text().trim().is_empty() {
                 return Vec::new();
             }
-            model.name_prompt = Some(crate::app::model::NamePrompt::new(
-                "Save the buffer as",
+            model.name_prompt = Some(crate::app::model::NamePrompt::for_query(
                 model.loaded_query.clone().unwrap_or_default(),
             ));
+            Vec::new()
+        }
+        Action::ExportRows => {
+            // Only what is on screen can be written, so there has to be
+            // something on screen.
+            let Some(set) = model.visible_result() else {
+                return Vec::new();
+            };
+            let matching = model.filtered_rows().len();
+            if matching == 0 {
+                return Vec::new();
+            }
+            // The note is the whole honesty of this feature: a truncated result
+            // and a filtered view are both smaller than what the query returned,
+            // and the file will be smaller with them.
+            let note = if set.is_truncated() || !model.result_filter.trim().is_empty() {
+                format!(
+                    "{matching} row(s) will be written: what is on screen, not the {} the \
+                     server returned. Run the statement with --output to write all of it.",
+                    set.rows_seen
+                )
+            } else {
+                format!("{matching} row(s) will be written, as comma-separated values.")
+            };
+            model.name_prompt = Some(crate::app::model::NamePrompt::for_export(note));
             Vec::new()
         }
         Action::OpenQuery => vec![Effect::ListQueries],
@@ -897,12 +932,20 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 return Vec::new();
             }
             let name = prompt.typed.trim().to_owned();
+            let purpose = prompt.purpose;
             model.name_prompt = None;
-            model.loaded_query = Some(name.clone());
-            vec![Effect::SaveQuery {
-                name,
-                sql: model.editor.text().to_owned(),
-            }]
+            match purpose {
+                crate::app::model::NamePurpose::SaveQuery => {
+                    model.loaded_query = Some(name.clone());
+                    vec![Effect::SaveQuery {
+                        name,
+                        sql: model.editor.text().to_owned(),
+                    }]
+                }
+                crate::app::model::NamePurpose::ExportRows => {
+                    vec![Effect::ExportRows { path: name }]
+                }
+            }
         }
         Action::Dismiss | Action::Cancel => {
             model.name_prompt = None;
@@ -2054,6 +2097,88 @@ mod tests {
         );
         assert!(model.palette.is_none());
         assert!(model.error.is_some(), "the failure is not silent");
+    }
+
+    #[test]
+    fn writing_the_rows_on_screen_says_how_many_that_is_and_what_it_is_not() {
+        let mut model = with_rows(&["alpha", "beta", "gamma"]);
+        update(&mut model, Message::Action(Action::ExportRows));
+        let prompt = model.name_prompt.as_ref().expect("a prompt");
+        assert_eq!(prompt.purpose, crate::app::model::NamePurpose::ExportRows);
+        assert!(prompt.note.contains("3 row(s)"), "{}", prompt.note);
+        assert!(
+            !prompt.note.contains("not the"),
+            "nothing was hidden, so nothing needs explaining: {}",
+            prompt.note
+        );
+
+        // With a filter on, or a truncated result, the note says what the file
+        // will not contain. That is the whole honesty of the feature.
+        model.name_prompt = None;
+        model.result_filter = "a".into();
+        if let Some(execution) = model.last_execution.as_mut()
+            && let Some(set) = execution.statements[0].result_set.as_mut()
+        {
+            set.rows_seen = 500;
+            set.cap = 3;
+        }
+        update(&mut model, Message::Action(Action::ExportRows));
+        let note = &model.name_prompt.as_ref().expect("a prompt").note;
+        assert!(note.contains("what is on screen"), "{note}");
+        assert!(note.contains("500"), "{note}");
+        assert!(
+            note.contains("--output"),
+            "the way to get all of it: {note}"
+        );
+
+        for ch in "rows.csv".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        match effects.as_slice() {
+            [Effect::ExportRows { path }] => assert_eq!(path, "rows.csv"),
+            other => panic!("expected one export, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn there_is_nothing_to_write_when_nothing_is_on_screen() {
+        let mut model = connected();
+        assert!(update(&mut model, Message::Action(Action::ExportRows)).is_empty());
+        assert!(model.name_prompt.is_none());
+
+        // A filter matching nothing is nothing on screen too.
+        let mut model = with_rows(&["alpha"]);
+        model.result_filter = "nothing".into();
+        update(&mut model, Message::Action(Action::ExportRows));
+        assert!(model.name_prompt.is_none());
+    }
+
+    #[test]
+    fn a_written_file_is_reported_where_the_user_is_looking() {
+        let mut model = connected();
+        update(
+            &mut model,
+            Message::RowsExported(Box::new(Ok("3 row(s) written to rows.csv".to_owned()))),
+        );
+        assert!(
+            model
+                .notices
+                .iter()
+                .any(|notice| notice.message.contains("rows.csv")),
+            "{:?}",
+            model.notices
+        );
+
+        update(
+            &mut model,
+            Message::RowsExported(Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "rows.csv already exists",
+                "writing",
+            )))),
+        );
+        assert!(model.error.is_some(), "a refusal is not silent");
     }
 
     #[test]

@@ -68,6 +68,8 @@ pub enum Action {
     MovePage(Direction),
     /// Save the buffer as a named query.
     SaveQuery,
+    /// Write the rows on screen to a file.
+    ExportRows,
     /// Open a saved query into the buffer.
     OpenQuery,
     /// Show the definition of the selected object.
@@ -162,6 +164,8 @@ pub enum Message {
     },
     /// The saved queries were listed.
     QueriesListed(Vec<crate::queries::SavedQuery>),
+    /// The rows on screen were written to a file, or could not be.
+    RowsExported(Box<Result<String, Diagnostic>>),
     /// A saved query was written, or could not be.
     QuerySaved(Box<Result<std::path::PathBuf, Diagnostic>>),
     /// A saved query was read, or could not be.
@@ -256,6 +260,15 @@ pub enum Effect {
         name: String,
         /// The SQL to write.
         sql: String,
+    },
+    /// Write the rows on screen to a file.
+    ///
+    /// The rows themselves are not carried: they are in the model, which the
+    /// runtime has, and copying ten thousand of them to ask for them to be
+    /// written would be a strange way to save memory.
+    ExportRows {
+        /// Where to write, as the user typed it.
+        path: String,
     },
     /// Read a saved query.
     LoadQuery {
