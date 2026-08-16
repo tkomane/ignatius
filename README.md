@@ -130,6 +130,12 @@ matters. Flags still win over the profile, and a profile can only make a session
 safer. A profile never holds a password: use a password file, the environment, or
 type it when the client asks.
 
+## Saved queries
+
+`Ctrl+K w` names the buffer and writes it; `Ctrl+K o` finds one and opens it.
+They are ordinary `.sql` files in `~/.config/ignatius/queries`, so a query worth
+keeping can be opened in an editor, committed to a repository, or run by `psql`.
+
 ## What it remembers
 
 Interactive sessions record the statements that run, on this machine only.

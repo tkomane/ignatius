@@ -66,6 +66,10 @@ pub enum Action {
     MoveBufferEnd,
     /// Move by a screenful.
     MovePage(Direction),
+    /// Save the buffer as a named query.
+    SaveQuery,
+    /// Open a saved query into the buffer.
+    OpenQuery,
     /// Show the definition of the selected object.
     ShowDefinition,
     /// Show what the selected object depends on, and what depends on it.
@@ -156,6 +160,12 @@ pub enum Message {
         /// What came back.
         payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
     },
+    /// The saved queries were listed.
+    QueriesListed(Vec<crate::queries::SavedQuery>),
+    /// A saved query was written, or could not be.
+    QuerySaved(Box<Result<std::path::PathBuf, Diagnostic>>),
+    /// A saved query was read, or could not be.
+    QueryLoaded(Box<Result<String, Diagnostic>>),
     /// An object's dependencies finished loading.
     DependenciesLoaded {
         /// Which request this answers.
@@ -237,6 +247,20 @@ pub enum Effect {
         request: crate::app::tree::RequestId,
         /// The object to describe.
         object: Box<crate::postgres::metadata::ObjectSummary>,
+    },
+    /// List the saved queries.
+    ListQueries,
+    /// Write the buffer to a named file in the saved queries directory.
+    SaveQuery {
+        /// The name, which is checked before it reaches the filesystem.
+        name: String,
+        /// The SQL to write.
+        sql: String,
+    },
+    /// Read a saved query.
+    LoadQuery {
+        /// The name to read.
+        name: String,
     },
     /// Read what an object depends on and what depends on it.
     LoadDependencies {

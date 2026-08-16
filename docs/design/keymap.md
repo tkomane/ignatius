@@ -53,6 +53,8 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `s` | Search the statements that have run |
 | `d` | Show the selected object's definition |
 | `y` | Show what depends on the selected object |
+| `w` | Save the buffer as a named query |
+| `o` | Open a saved query |
 | `v` | Pause or resume recording statements |
 
 ## Editing keys
@@ -152,7 +154,8 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `run-buffer`, `run-statement`, `cancel`, `quit`, `toggle-help`, `focus-next`,
 `toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
 `begin-prefix`, `start-filter`, `reload-objects`, `show-definition`,
-`show-dependencies`, `open-history`, `toggle-history-recording`,
+`show-dependencies`, `save-query`, `open-query`, `open-history`,
+`toggle-history-recording`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
