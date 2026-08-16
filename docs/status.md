@@ -43,9 +43,9 @@ adapter already does. ADR-0012 records that and supersedes ADR-0009. The
 credential store is rejected (ADR-0011), copy goes through OSC 52 opt-in
 (ADR-0013), and `docs/product/experience-roadmap.md` sets out what "the best
 experience anyone has used" means in concrete features, first of which is
-completion that knows the schema. Specifications exist for Entra
-(`specs/011-entra-authentication/`) and completion
-(`specs/012-schema-completion/`); neither is implemented.
+completion that knows the schema. Specifications were written for cloud identity
+(since renamed to `specs/011-cloud-identity/`) and completion
+(`specs/012-schema-completion/`); neither was implemented at that point.
 
 Also fixed: the two Feature 005 editor defects the audit of `555203f` found.
 Enter now reaches `Editor::insert_newline()` so indentation survives a line
