@@ -1,6 +1,7 @@
 # ADR-0011: Where a stored credential would live
 
-- Status: Proposed. Owner confirmation is required before implementation.
+- Status: **Rejected on 2026-08-16.** Option A: no credential store is built.
+  The owner's instruction was to follow the recommendation in this document.
 - Date: 2026-08-16
 - Related: ADR-0006 (configuration and state), ADR-0007 (secret handling),
   `specs/009-connection-profiles/spec.md`
@@ -77,3 +78,32 @@ the dependency:
 Whether a credential store is wanted at all, given that `.pgpass` already exists
 and is shared with `psql`. If it is, whether the `keyring` dependency and its
 Linux caveat are acceptable. Nothing is implemented until that answer exists.
+
+## The decision, 2026-08-16
+
+**Option A. No credential store is built.** The four existing routes stay the
+whole answer: a connection string, the environment, a `.pgpass` password file
+whose permissions are checked, and a prompt in both surfaces.
+
+The reasoning that decided it:
+
+- `.pgpass` already exists on most machines that talk to PostgreSQL, is shared
+  with `psql`, and is understood by the people who would use this. A second
+  store would not replace it; it would sit beside it, and the question "where is
+  this password coming from" would get one answer harder.
+- The `keyring` dependency carries three platform backends, and the Linux one
+  needs a session bus that an SSH session or a container often does not have.
+  That is a fallback path to build, document and test for a convenience.
+- Under ADR-0012 the credential route that actually matters for the work in
+  front of us is a short-lived Entra token, and storing one of those would be
+  the wrong thing to do at any price: it expires in under an hour, and `az`
+  already caches and refreshes it.
+
+**What this closes.** The last item of roadmap Feature 002. `credential list`,
+`credential forget` and the `keyring` dependency are not being added, and the
+refusal in `specs/009-connection-profiles/spec.md` - a profile may not hold a
+password - stands with no exception carved into it.
+
+**What would reopen it.** Someone using this daily against a server that issues
+long-lived passwords, saying the prompt is the thing that wears them down. That
+is evidence; the anticipation of it is not.

@@ -1,8 +1,12 @@
 # ADR-0010: Proposed concurrency model for the libpq adapter
 
-- Status: Proposed. Owner confirmation is required before implementation.
+- Status: **Moot as of 2026-08-16.** This ADR exists only to answer a question
+  the libpq adapter would have raised, and ADR-0012 decided that adapter is not
+  being built. Nothing here is implemented and nothing depends on it. Kept as
+  the record of the analysis, and it becomes live again only if ADR-0009 is
+  ever reopened.
 - Date: 2026-08-16
-- Related: ADR-0001, ADR-0003, ADR-0008 and ADR-0009
+- Related: ADR-0001, ADR-0003, ADR-0008, ADR-0009 and ADR-0012
 
 ## Context
 
