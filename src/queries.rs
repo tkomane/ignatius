@@ -13,6 +13,12 @@
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use std::path::{Path, PathBuf};
 
+/// Names Windows will not give to a file, whatever extension follows them.
+const RESERVED_ON_WINDOWS: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
 /// The extension every saved query has.
 pub const EXTENSION: &str = "sql";
 
@@ -81,6 +87,16 @@ impl Library {
         }
         if trimmed.chars().any(char::is_control) {
             return refuse("a name cannot contain control characters");
+        }
+        // Windows reserves these whatever extension follows them: `CON.sql`
+        // opens the console, not a file. Refused on every platform, because a
+        // saved query is meant to travel between them.
+        let stem = trimmed.split('.').next().unwrap_or(trimmed);
+        if RESERVED_ON_WINDOWS
+            .iter()
+            .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+        {
+            return refuse("Windows reserves this name for a device");
         }
 
         let file = if trimmed
@@ -239,6 +255,12 @@ mod tests {
             "   ",
             "with\nnewline",
             "with\u{1b}escape",
+            // Reserved by Windows whatever follows them, and refused everywhere
+            // so a saved query can travel between platforms.
+            "CON",
+            "nul",
+            "COM1.sql",
+            "aux",
         ] {
             let error = library.path_for(name).expect_err(name);
             assert_eq!(error.exit_code(), crate::ExitCode::Usage, "{name}");

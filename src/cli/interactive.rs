@@ -704,7 +704,14 @@ fn export_visible_rows(model: &Model, path: &str) -> Result<String, Diagnostic> 
     };
     let rows = model.filtered_rows();
 
-    let mut export = crate::query::Export::create(std::path::Path::new(path), false)?;
+    let destination = expand_home(path);
+    // The advice is written for the reader who will see it: someone in the
+    // client, who has no command-line flags to pass.
+    let mut export = crate::query::Export::create_with_advice(
+        &destination,
+        false,
+        "choose another name, or move the file that is there",
+    )?;
     let header: Vec<String> = set
         .columns
         .iter()
@@ -729,6 +736,23 @@ fn export_visible_rows(model: &Model, path: &str) -> Result<String, Diagnostic> 
         finished.rows,
         finished.path.display()
     ))
+}
+
+/// Expands a leading `~`, because there is no shell here to do it.
+///
+/// A path typed into a prompt is not a path typed into a shell. Without this,
+/// `~/exports/rows.csv` would quietly create a directory named `~` in whatever
+/// the working directory happens to be, which is a mess someone finds weeks
+/// later.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    let Some(rest) = path.strip_prefix('~') else {
+        return std::path::PathBuf::from(path);
+    };
+    let rest = rest.trim_start_matches(['/', '\\']);
+    directories::BaseDirs::new().map_or_else(
+        || std::path::PathBuf::from(path),
+        |dirs| dirs.home_dir().join(rest),
+    )
 }
 
 fn write_failure(path: &str, error: &std::io::Error) -> Diagnostic {
@@ -1095,6 +1119,109 @@ mod tests {
             crate::query::split(text).len() == 1,
             "one statement, not a surprise batch"
         );
+    }
+
+    /// A model holding two rows, as if a query had just returned them.
+    fn model_with_rows() -> Model {
+        use crate::query::result::{Execution, ExecutionStatus, JobId, ResultSet, StatementResult};
+        use crate::query::value::Cell;
+
+        let mut set = ResultSet::new(vec!["name".into(), "note".into()], 100);
+        set.push(vec![
+            Cell::Text("alpha".into()),
+            Cell::Text("has, a comma".into()),
+        ]);
+        set.push(vec![Cell::Text("beta".into()), Cell::Null]);
+
+        let mut model = Model::new(100);
+        model.last_execution = Some(Execution {
+            job: JobId(1),
+            statements: vec![StatementResult {
+                result_set: Some(set),
+                rows_affected: Some(2),
+                elapsed: Duration::from_millis(1),
+                notices: Vec::new(),
+            }],
+            status: ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(1),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+        });
+        model
+    }
+
+    #[test]
+    fn what_is_written_is_what_the_pane_shows_and_it_is_valid_csv() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("rows.csv");
+        let model = model_with_rows();
+
+        let message = export_visible_rows(&model, path.to_str().expect("utf-8")).expect("writes");
+        assert!(message.contains("2 row(s)"), "{message}");
+
+        let written = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(
+            written, "name,note\nalpha,\"has, a comma\"\nbeta,\n",
+            "the header, a quoted field, and a NULL as nothing at all"
+        );
+
+        // A filter narrows the file exactly as it narrows the pane.
+        let mut filtered = model_with_rows();
+        filtered.result_filter = "beta".into();
+        let second = dir.path().join("filtered.csv");
+        export_visible_rows(&filtered, second.to_str().expect("utf-8")).expect("writes");
+        assert_eq!(
+            std::fs::read_to_string(&second).expect("read"),
+            "name,note\nbeta,\n"
+        );
+    }
+
+    #[test]
+    fn writing_never_replaces_a_file_and_says_what_can_be_done_about_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("rows.csv");
+        std::fs::write(&path, "precious").expect("write");
+
+        let error = export_visible_rows(&model_with_rows(), path.to_str().expect("utf-8"))
+            .expect_err("must refuse");
+        let action = error.next_action.expect("an action");
+        assert!(
+            !action.contains("--force"),
+            "there are no flags to pass in here: {action}"
+        );
+        assert!(action.contains("choose another name"), "{action}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "precious",
+            "and the file that was there is still there"
+        );
+    }
+
+    #[test]
+    fn a_leading_tilde_means_home_rather_than_a_directory_called_tilde() {
+        // There is no shell behind this prompt, so the expansion is ours to do.
+        let expanded = expand_home("~/exports/rows.csv");
+        assert!(!expanded.starts_with("~"), "{}", expanded.display());
+        assert!(
+            expanded.ends_with("exports/rows.csv"),
+            "{}",
+            expanded.display()
+        );
+        assert_eq!(
+            expand_home("rows.csv"),
+            std::path::PathBuf::from("rows.csv")
+        );
+        assert_eq!(
+            expand_home("/tmp/rows.csv"),
+            std::path::PathBuf::from("/tmp/rows.csv")
+        );
+    }
+
+    #[test]
+    fn there_is_nothing_to_write_when_no_query_has_run() {
+        let error = export_visible_rows(&Model::new(100), "rows.csv").expect_err("must refuse");
+        assert!(error.next_action.is_some());
+        assert!(!std::path::Path::new("rows.csv").exists());
     }
 
     #[tokio::test]

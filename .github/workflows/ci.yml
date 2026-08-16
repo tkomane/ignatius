@@ -97,7 +97,9 @@ jobs:
         env:
           IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo
           IGNATIUS_TEST_PG_TLS_URI: postgres://ignatius_test:not-a-real-password-disposable-container@localhost:55433/ignatius_demo
-        run: cargo test --test postgres_integration --test cli_contract
+        # The password prompt needs both a real server and a real terminal, so
+        # it runs here, where there is one, under a pty allocated by `script`.
+        run: cargo test --test postgres_integration --test cli_contract --test password_prompt
 
   supply-chain:
     name: Advisories, licences and secrets

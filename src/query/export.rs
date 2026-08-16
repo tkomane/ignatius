@@ -65,7 +65,25 @@ impl Abandoned {
 
 impl Export {
     /// Opens an export, refusing to overwrite unless told to.
+    ///
+    /// The refusal's advice is the caller's, because the way out differs by
+    /// surface: a script passes `--force`, and a person in the client has no
+    /// flags to pass. Advice that names a flag the reader does not have is the
+    /// same failure as telling someone to check a status bar that is not there.
     pub fn create(destination: &Path, force: bool) -> Result<Self, Diagnostic> {
+        Self::create_with_advice(
+            destination,
+            force,
+            "choose another path, or pass --force to replace it",
+        )
+    }
+
+    /// Opens an export, saying what the reader can actually do about a refusal.
+    pub fn create_with_advice(
+        destination: &Path,
+        force: bool,
+        advice: &str,
+    ) -> Result<Self, Diagnostic> {
         if destination.exists() && !force {
             return Err(Diagnostic::new(
                 DiagnosticKind::Usage,
@@ -73,7 +91,7 @@ impl Export {
                 "opening the export destination",
             )
             .likely_cause("an export never replaces a file that is already there")
-            .next_action("choose another path, or pass --force to replace it"));
+            .next_action(advice.to_owned()));
         }
 
         let partial = partial_path(destination);
@@ -257,6 +275,21 @@ mod tests {
             message.contains("report.csv.partial"),
             "and the path: {message}"
         );
+    }
+
+    #[test]
+    fn the_way_out_of_a_refusal_is_the_callers_to_word() {
+        // A flag is the answer in a script and no answer at all to someone in
+        // the full-screen client, who has no flags to pass.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let destination = dir.path().join("report.csv");
+        std::fs::write(&destination, "precious data").expect("write");
+
+        let error = Export::create_with_advice(&destination, false, "choose another name")
+            .expect_err("must refuse");
+        let action = error.next_action.expect("an action");
+        assert_eq!(action, "choose another name");
+        assert!(!action.contains("--force"));
     }
 
     #[test]
