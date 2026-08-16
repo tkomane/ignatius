@@ -370,8 +370,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.tree.begin_loading();
             vec![Effect::LoadSchemas]
         }
+        // Enter in the editor is a line break that keeps the indentation of the
+        // line it left. It must go through `insert_newline` rather than
+        // `insert('\n')`: the indentation rule lives there, and this is the only
+        // path a key press ever takes to reach it.
         Action::Activate if model.focus == Focus::Editor => {
-            model.editor.insert('\n');
+            model.editor.insert_newline();
             Vec::new()
         }
         // In the results pane, Enter means "show me this value in full", which
@@ -1644,6 +1648,26 @@ mod tests {
         model.focus = Focus::Editor;
         update(&mut model, Message::Action(Action::Insert('x')));
         assert_eq!(model.editor.text(), "x");
+    }
+
+    #[test]
+    fn enter_in_the_editor_keeps_the_indentation_through_the_real_key_path() {
+        // The editor's own test proves `insert_newline` indents. This proves the
+        // key reaches it: the reducer used to call `insert('\n')`, so the rule
+        // existed and no key press ever ran it.
+        let mut model = connected();
+        model.focus = Focus::Editor;
+        model.editor.set_text("SELECT one\n    FROM two");
+        model.editor.move_buffer_end();
+
+        update(&mut model, Message::Action(Action::Activate));
+        update(&mut model, Message::Action(Action::Insert('W')));
+
+        assert_eq!(
+            model.editor.text(),
+            "SELECT one\n    FROM two\n    W",
+            "Enter carried the four spaces down with it"
+        );
     }
 
     #[test]
