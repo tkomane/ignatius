@@ -53,7 +53,11 @@ fn ask_and_answer(target: &str, typed: &[String]) -> Option<(String, bool)> {
     // BSD and util-linux disagree about where the command goes.
     let mut command = Command::new("script");
     if cfg!(target_os = "linux") {
-        command.args(["-q", "-c", &inner, "/dev/null"]);
+        // `-e` makes util-linux `script` return the command's exit code.
+        // Without it, it returns zero whatever happened, and any assertion
+        // about the exit status would be checking `script` rather than the
+        // client. BSD `script` returns the child's status already.
+        command.args(["-e", "-q", "-c", &inner, "/dev/null"]);
     } else {
         command.args(["-q", "/dev/null", "sh", "-c", &inner]);
     }
@@ -155,10 +159,13 @@ fn refusing_to_answer_leaves_the_servers_own_refusal() {
     };
 
     assert!(transcript.contains("Password for"), "{transcript}");
+    // The transcript is the primary evidence, because it says what the client
+    // did rather than what the program that allocated the terminal returned.
     assert!(
-        !succeeded,
+        !transcript.contains("Connected to"),
         "answering nothing cannot open a session: {transcript}"
     );
+    assert!(!succeeded, "and it is not a success: {transcript}");
     assert!(
         transcript.contains("password") || transcript.contains("Authentication"),
         "the reason is still the server's: {transcript}"
