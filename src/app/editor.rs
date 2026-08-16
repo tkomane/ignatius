@@ -252,6 +252,7 @@ impl Editor {
 
     /// Moves the cursor one character left.
     pub fn move_left(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         if self.cursor > 0 {
             self.cursor = self.previous_boundary(self.cursor);
@@ -260,6 +261,7 @@ impl Editor {
 
     /// Moves the cursor one character right.
     pub fn move_right(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         if self.cursor < self.text.len() {
             self.cursor = self.next_boundary(self.cursor);
@@ -268,6 +270,7 @@ impl Editor {
 
     /// Moves the cursor up one line, keeping the column where it can.
     pub fn move_up(&mut self) {
+        self.end_undo_run();
         let start = self.line_start();
         if start == 0 {
             // Already on the first line: go to its beginning, which is what
@@ -285,6 +288,7 @@ impl Editor {
 
     /// Moves the cursor down one line, keeping the column where it can.
     pub fn move_down(&mut self) {
+        self.end_undo_run();
         let end = self.line_end();
         if end >= self.text.len() {
             self.cursor = self.text.len();
@@ -297,36 +301,42 @@ impl Editor {
 
     /// Moves to the first character of the line.
     pub fn move_line_start(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         self.cursor = self.line_start();
     }
 
     /// Moves past the last character of the line.
     pub fn move_line_end(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         self.cursor = self.line_end();
     }
 
     /// Moves to the start of the buffer.
     pub fn move_buffer_start(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         self.cursor = 0;
     }
 
     /// Moves to the end of the buffer.
     pub fn move_buffer_end(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         self.cursor = self.text.len();
     }
 
     /// Moves to the start of the previous word.
     pub fn move_word_left(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         self.cursor = self.word_left_from(self.cursor);
     }
 
     /// Moves past the end of the next word.
     pub fn move_word_right(&mut self) {
+        self.end_undo_run();
         self.goal_column = None;
         self.cursor = self.word_right_from(self.cursor);
     }
@@ -346,6 +356,16 @@ impl Editor {
     }
 
     // ------------------------------------------------------------ internals
+
+    /// Ends the run of edits that undo folds into one step.
+    ///
+    /// Typing, moving the cursor somewhere else, and typing again is two changes
+    /// to the person who did it, so it must be two undo steps. Without this the
+    /// two runs coalesce and one undo takes back work in a place the cursor is
+    /// no longer near, which reads as the editor losing text.
+    fn end_undo_run(&mut self) {
+        self.last_edit = None;
+    }
 
     /// Records the state before a change, unless it folds into the last one.
     fn record(&mut self, kind: EditKind, coalesce: bool) {
@@ -758,5 +778,63 @@ mod tests {
         assert!(!editor.is_modified(), "the buffer matches what it holds");
         editor.insert('!');
         assert!(editor.is_modified());
+    }
+
+    #[test]
+    fn moving_the_cursor_ends_the_undo_run() {
+        // Typing in one place, going somewhere else, and typing there is two
+        // changes. Before this was fixed they shared one undo step, so a single
+        // undo took back work in a place the cursor was no longer near.
+        let mut editor = typed("SELECT");
+        editor.move_buffer_start();
+        for ch in "x".chars() {
+            editor.insert(ch);
+        }
+
+        editor.undo();
+        assert_eq!(editor.text(), "SELECT", "only the second run comes back");
+
+        editor.undo();
+        assert_eq!(editor.text(), "", "and the first run is a step of its own");
+    }
+
+    #[test]
+    fn every_movement_ends_the_undo_run_not_just_the_arrow_keys() {
+        // One test per key, because the run is ended in each method and an
+        // added movement that forgets to do it would otherwise go unnoticed.
+        type Movement = fn(&mut Editor);
+        let movements: Vec<(&str, Movement)> = vec![
+            ("left", |e| e.move_left()),
+            ("right", |e| e.move_right()),
+            ("up", |e| e.move_up()),
+            ("down", |e| e.move_down()),
+            ("line start", |e| e.move_line_start()),
+            ("line end", |e| e.move_line_end()),
+            ("buffer start", |e| e.move_buffer_start()),
+            ("buffer end", |e| e.move_buffer_end()),
+            ("word left", |e| e.move_word_left()),
+            ("word right", |e| e.move_word_right()),
+            ("page up", |e| e.move_page_up(4)),
+            ("page down", |e| e.move_page_down(4)),
+        ];
+
+        // No trailing space or newline: a run that ends mid-word is the only one
+        // the next insert would coalesce into, so this can actually fail. The
+        // first version of this test typed a trailing newline, which starts a
+        // fresh undo step by itself, and it passed with the fix taken out.
+        let source = "SELECT one\nFROM two\nWHERE three\nAND four";
+
+        for (name, movement) in movements {
+            let mut editor = typed(source);
+            movement(&mut editor);
+            editor.insert('x');
+            editor.undo();
+            assert_eq!(
+                editor.text(),
+                source,
+                "moving by {name} did not end the undo run, so one undo took back \
+                 the typing before the move as well"
+            );
+        }
     }
 }
