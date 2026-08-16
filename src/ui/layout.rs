@@ -566,6 +566,21 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
         ));
     }
 
+    // Which credential route opened this session. Said in words rather than
+    // shown as a colour, because "who am I connected as, and how" is the
+    // question a token makes harder to answer: there was no password to type,
+    // so nothing about the act of connecting recorded the answer.
+    if let Some(provider) = &model.credential_provider {
+        spans.push(Span::styled(
+            presentation.glyphs.separator(),
+            theme.style(Token::Border),
+        ));
+        spans.push(Span::styled(
+            format!("{}[auth: {provider}]", presentation.icon(Icon::Info)),
+            theme.style(Token::Info),
+        ));
+    }
+
     // A session that keeps no record says so. This is the opposite of a mode
     // that hides: the safe state is the one being announced, and someone who
     // paused recording an hour ago should not have to remember that they did.

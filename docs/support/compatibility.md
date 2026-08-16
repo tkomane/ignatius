@@ -22,8 +22,37 @@ exercised, so they are expected to work rather than known to.
 | `password` (cleartext over the connection) | Supported by the driver, untested here |
 | `trust` | Supported |
 | Certificate | Supported and tested, with `sslcert` and `sslkey` |
-| GSSAPI, Kerberos, SSPI | Not supported |
-| Cloud token authentication (for example Entra ID) | Not supported |
+| GSSAPI, Kerberos, SSPI | Not supported, and not planned. See ADR-0012 |
+| Cloud token authentication | Supported. Mechanism proven against a real server; see the table below for what has been proven per cloud |
+
+### Cloud identity providers
+
+A cloud identity provider obtains a short-lived token by running that cloud's
+own command-line tool, and presents it as the password. Named with `--auth` or
+with `auth` in a profile. The transport must be encrypted: a target whose
+`sslmode` would permit a plain connection is refused **before** the token is
+requested, because a bearer token is usable by whoever sees it.
+
+| Provider | Tool it runs | Mechanism | Live evidence |
+| --- | --- | --- | --- |
+| `entra` | `az account get-access-token --resource-type oss-rdbms` | Proven | None yet |
+| `aws` | `aws rds generate-db-auth-token` | Proven | None yet |
+| `gcp` | `gcloud sql generate-login-token` | Proven | None yet |
+| Your own | Whatever `[auth.providers]` says | Proven | Not applicable |
+
+"Mechanism proven" and "live evidence" are separate columns on purpose. The
+route - run a program, read a token, present it as the password over TLS - is
+tested end to end against a real PostgreSQL server with TLS, using a provider
+defined in configuration. What has **not** happened is anyone running each
+built-in against that cloud's own database. Until that is done and dated here,
+the built-in commands are transcriptions of vendor documentation checked on
+2026-08-16, and no more than that.
+
+The `aws` provider needs a region, which its own tool resolves from the
+environment and from AWS configuration. When it cannot, the failure says so.
+
+A provider's command is run directly, never through a shell. `{host}`, `{port}`,
+`{user}` and `{database}` are substituted as whole arguments.
 
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and
@@ -98,7 +127,7 @@ then the password file, then the prompt.
 
 **Profiles**: a `[profiles]` table in `config.toml` names a connection, reached
 as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
-`user`, `sslmode`, `environment`, `read-only` and `description`, and nothing
+`user`, `sslmode`, `environment`, `read-only`, `description` and `auth`, and nothing
 else. It never carries a password.
 
 ## Differences from `psql`

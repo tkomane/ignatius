@@ -54,6 +54,10 @@ pub fn run(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
+    // The credential is obtained before the terminal is taken, so a provider
+    // that needs to say something - or to ask for a sign-in - does it on an
+    // ordinary terminal rather than underneath a full-screen application.
+    let resolved = crate::cli::authenticate_target(resolved, &loaded.config)?;
 
     // Key bindings are read before the terminal is taken, so a file that binds a
     // key this build cannot read is an ordinary configuration error on an
@@ -176,6 +180,7 @@ async fn event_loop(
     model.editor.set_text(starter_query());
     model.history_disabled = !config.history.enabled;
     model.history_paused = history.is_paused();
+    model.credential_provider.clone_from(&target.auth);
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));

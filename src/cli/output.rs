@@ -93,6 +93,17 @@ pub fn write_execution(
     }
 
     match options.format {
+        // A JSON document is a claim about the whole run, and `[]` claims the run
+        // produced no result sets. A run that failed before producing any did not
+        // produce that answer; it produced no answer. A script reading only
+        // stdout cannot tell those apart, and the empty array is the more
+        // convincing of the two lies. So nothing is written, the reason goes to
+        // stderr, and the exit code says which it was.
+        //
+        // `[]` is still written for a run that succeeded and returned no result
+        // sets, because there it is true: `CREATE TABLE` really did return
+        // nothing. The other formats already made this distinction; JSON did not.
+        Format::Json if execution.error.is_some() && sets.is_empty() => Ok(()),
         Format::Json => write_json(out, &sets),
         Format::Ndjson => {
             if let Some(set) = sets.first() {
@@ -757,5 +768,44 @@ mod tests {
         };
         let text = render(Format::Table, &execution);
         assert!(text.contains("3 rows affected"), "{text}");
+    }
+
+    /// An execution that failed without producing anything, as a query with a
+    /// bad column name does.
+    fn failed_execution() -> Execution {
+        Execution {
+            job: JobId(1),
+            statements: Vec::new(),
+            status: ExecutionStatus::Failed,
+            elapsed: Duration::from_millis(1),
+            error: Some(crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Query,
+                "column \"nope\" does not exist",
+                "running statement 1",
+            )),
+            transaction: crate::query::result::TransactionState::Autocommit,
+        }
+    }
+
+    #[test]
+    fn a_failed_run_writes_no_json_document_at_all() {
+        // `[]` on stdout and the reason on stderr reads, to anything parsing
+        // stdout alone, as a query that succeeded and matched nothing. The
+        // exit code is the contract, but a format that quietly answers the
+        // wrong question is the kind of untruthful convenience principle I is
+        // about.
+        assert_eq!(render(Format::Json, &failed_execution()), "");
+        assert_eq!(render(Format::Ndjson, &failed_execution()), "");
+        assert_eq!(render(Format::Csv, &failed_execution()), "");
+    }
+
+    #[test]
+    fn a_run_that_succeeded_and_returned_no_result_sets_still_says_so() {
+        // The other half of the distinction: here `[]` is true. Suppressing it
+        // would be the same fault in the opposite direction.
+        let mut execution = failed_execution();
+        execution.error = None;
+        execution.status = ExecutionStatus::Succeeded;
+        assert_eq!(render(Format::Json, &execution).trim(), "[]");
     }
 }

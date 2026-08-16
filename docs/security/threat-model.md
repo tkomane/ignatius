@@ -54,6 +54,11 @@ other than the database connection.
 | A compromised dependency or release artefact | Committed lockfile, pinned toolchain, advisory and licence checks in CI | **Real.** Nothing is signed or notarised, and this is stated wherever artefacts are mentioned |
 | A hostile server sends a huge result to exhaust memory | Rows are streamed and dropped past an explicit cap while still being counted | A single enormous value is still held in memory once |
 | A hostile server sends an enormous error or notice | Rendered as text through the same escaping path | No length cap on a single message yet |
+| A cloud identity token is sent on a connection that turns out not to be encrypted | The token is never requested for a target whose `sslmode` would permit plain text; the check runs before the program does, and the transport rules are otherwise unchanged | None for the fetch. A user may still choose `require`, which encrypts without checking identity |
+| A cloud provider's command line is built from a hostile host, user or database name | The command is an argument vector run directly with no shell; substitutions replace whole elements | None known. A provider whose own tool re-interprets an argument is that tool's problem |
+| A cloud tool's error text carries a credential or terminal escapes into a message | Its standard error is redacted through the one existing implementation before display | Redaction is pattern-based, as everywhere else |
+| A token reaches a log, the history, or a process listing | It exists only in `SecretString`, is never an environment variable and never an argument; the history's credential rule is unchanged | Same residual as any other secret in memory |
+| Configuration names a program that this client then executes | Inside the user's trust boundary and stated as such: the file is theirs, owner-only on Unix, and anything able to write it can already run programs as them. Definitions are validated when configuration loads, not at the moment of connecting | **Real where the boundary is weaker.** On Windows the configuration file relies on the profile ACL, so a machine where that is loose gains a new way to be abused rather than a first one |
 
 ## Explicit non-goals
 

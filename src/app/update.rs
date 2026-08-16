@@ -34,7 +34,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             // The server was reached and said no about credentials. That is the
             // one connection failure a person can answer from here, so it is
             // asked rather than merely reported.
-            if diagnostic.kind == crate::diagnostics::DiagnosticKind::Authentication {
+            if diagnostic.kind == crate::diagnostics::DiagnosticKind::Authentication
+                && model.credential_provider.is_none()
+            {
                 model.password_prompt = Some(crate::app::model::PasswordPrompt::new(
                     model
                         .connection

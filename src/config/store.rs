@@ -320,6 +320,23 @@ max-entries = 1000
 # environment = "production"
 # read-only = false
 # description = "the one to be careful with"
+# auth = "entra"
+
+# Cloud identity. A short-lived token is obtained by running that cloud's own
+# tool and presented as the password, so nothing is stored and nothing expires
+# in a file. `entra`, `aws` and `gcp` are built in; the connection is refused
+# unless the transport is encrypted, because a bearer token is usable by whoever
+# sees it.
+#
+# This section is only needed for a cloud this build does not know, or when one
+# of them changes its tool. The command is run directly, never through a shell,
+# and {host}, {port}, {user} and {database} are substituted whole.
+#
+# [auth.providers.my-cloud]
+# command = ["my-cli", "db-token", "--host", "{host}", "--user", "{user}"]
+# json-field = "accessToken"   # omit when the whole output is the token
+# timeout-seconds = 60
+# remedy = "sign in with `my-cli login`"
 
 # Key bindings, by action name. Naming an action replaces its defaults.
 # `docs/design/keymap.md` lists every action and how keys are written.

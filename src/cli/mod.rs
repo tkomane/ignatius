@@ -265,6 +265,14 @@ pub struct ConnectionOptions {
     /// Enforced by PostgreSQL itself, not by guessing at what a statement does.
     #[arg(long)]
     pub read_only: bool,
+    /// Obtain the credential from a cloud identity provider.
+    ///
+    /// `entra` for Microsoft Entra ID, `aws` for RDS and Aurora IAM, `gcp` for
+    /// Cloud SQL IAM, or a name defined under `[auth.providers]`. The
+    /// credential is a short-lived token fetched at connection time, and the
+    /// connection is refused unless the transport is encrypted.
+    #[arg(long, value_name = "PROVIDER")]
+    pub auth: Option<String>,
 
     /// Use a named connection from the configuration file.
     ///
@@ -303,6 +311,7 @@ impl ConnectionOptions {
             username: self.username.clone(),
             sslmode,
             environment,
+            auth: self.auth.clone(),
         })
     }
 
@@ -357,6 +366,9 @@ impl ConnectionOptions {
                     "use local, development, test, staging, production, or a name of your own",
                 )
             })?);
+        }
+        if args.auth.is_none() {
+            args.auth.clone_from(&profile.auth);
         }
         // A profile can only add read-only, never take it away: a flag that
         // makes a session safer must not be undone by a file.
@@ -833,6 +845,7 @@ fn query_command(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
+    let target = authenticate_target(target, &loaded.config)?;
 
     // A production target refuses anything that is not a read unless the caller
     // said otherwise. The classification is advisory and says so; what it buys
@@ -955,6 +968,7 @@ fn plain_command(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
+    let resolved = authenticate_target(resolved, &loaded.config)?;
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
     plain::run(resolved, &loaded.config, &history, out, err)
 }
@@ -1052,6 +1066,10 @@ fn check_command(
     for note in &resolved.notes {
         writeln!(out, "Note: {}: {}", note.subject, note.message).map_err(io_diagnostic)?;
     }
+    // `check` tests the whole route, and for a cloud target the credential is
+    // part of the route. A check that skipped it would report a healthy
+    // connection for a target that cannot in fact be connected to.
+    let resolved = authenticate_target(resolved, &loaded.config)?;
     let checks = runtime()?.block_on(interactive::probe_target(resolved, &loaded.config))?;
     let report = doctor::Report { checks };
     write!(out, "{}", report.render_plain()).map_err(io_diagnostic)?;
@@ -1116,6 +1134,41 @@ fn runtime() -> Result<tokio::runtime::Runtime, Diagnostic> {
             )
             .likely_cause(err.to_string())
         })
+}
+
+/// The cloud identity providers this run understands, from configuration.
+///
+/// Built-ins are added by the registry; this is only what the file defined, and
+/// each is validated here so that a definition which could not work is a
+/// configuration error before a terminal is taken rather than a failure at the
+/// moment somebody tries to connect.
+pub(crate) fn auth_providers(
+    config: &crate::config::schema::Config,
+) -> Result<std::collections::BTreeMap<String, crate::connection::cloud::Provider>, Diagnostic> {
+    let mut providers = std::collections::BTreeMap::new();
+    for (name, defined) in &config.auth.providers {
+        defined.validate(name)?;
+        providers.insert(name.clone(), defined.to_provider(name));
+    }
+    Ok(providers)
+}
+
+/// Gives a resolved target its cloud credential, from a synchronous caller.
+///
+/// The asynchronous paths call `cloud::authenticate` directly. This exists so
+/// the command functions, which are ordinary synchronous code, go through the
+/// same single place rather than each growing its own idea of when to fetch.
+pub(crate) fn authenticate_target(
+    target: crate::connection::ConnectionTarget,
+    config: &crate::config::schema::Config,
+) -> Result<crate::connection::ConnectionTarget, Diagnostic> {
+    if target.auth.is_none() {
+        return Ok(target);
+    }
+    let providers = auth_providers(config)?;
+    runtime()?
+        .block_on(crate::connection::cloud::authenticate(target, &providers))
+        .map_err(|error| *error)
 }
 
 fn io_diagnostic(err: std::io::Error) -> Diagnostic {
