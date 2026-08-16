@@ -27,6 +27,16 @@ proven by tests that were watched failing with the fix removed - and the first
 version of the movement test passed without the fix, so it was rewritten until
 it could fail.
 
+That handoff also unblocked `tests/editor_contract.rs`, Codex's acceptance
+contract for the same feature, which had been held behind `#[ignore]` waiting
+for it. Two steps in it needed correcting and both are the same mistake in
+different clothes: it removed inherited indentation with forward-delete, which
+was a no-op that happened to leave the right text behind while Enter still
+inserted a bare newline. Backspace is what a person would press and what the
+implemented behaviour requires. The pty half also asserted only that
+`FROM orders AS o` appeared somewhere, which a line still carrying four
+inherited spaces satisfies; it now says the clause is top level.
+
 **Previous**: consolidation, and the bug it found. Five chords - the
 definition panel, dependencies, save, open and write - were documented, palette-
 listed and bound to nothing: the features worked and no key reached them. A new
@@ -263,13 +273,13 @@ These are real and none of them is hidden anywhere else:
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
-11. **Feature 005 editor: the two source defects are fixed, the terminal
-    acceptance scenario is not written.** Enter now routes to
+11. **Feature 005 editor is closed.** Enter routes to
     `Editor::insert_newline()` and every movement ends the undo coalescing run,
-    both proven by tests confirmed to fail without the fix. What remains from
-    that audit is an eight-line terminal acceptance scenario driving the editor
-    at a real small size; until it exists, Feature 005 is corrected but not
-    complete.
+    both proven by tests confirmed to fail without the fix. The acceptance
+    scenario the audit asked for exists in `tests/editor_contract.rs`, written
+    by Codex and held behind `#[ignore]` pending this handoff: an eight-line
+    statement typed, corrected, navigated and run through the reducer, and the
+    same journey through a real pty at 100 by 30. All three now pass.
 
 ## Decisions taken
 
