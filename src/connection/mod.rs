@@ -1,5 +1,6 @@
 //! Connection targets, precedence, TLS policy and secret references.
 
+pub mod cloud;
 pub mod passfile;
 pub mod service;
 pub mod target;

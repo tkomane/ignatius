@@ -37,6 +37,9 @@ tokio = { version = "1.53.1", features = [
     "sync",
     "signal",
     "io-util",
+    # A cloud identity provider is an external program, run without a shell and
+    # awaited with a timeout (ADR-0012, specs/011-cloud-identity).
+    "process",
 ] }
 tokio-postgres = { version = "0.7.18", features = [
     "runtime",

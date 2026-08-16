@@ -47,6 +47,14 @@ pub struct Config {
     /// whole purpose is to say what the keyboard does.
     #[serde(default)]
     pub keys: std::collections::BTreeMap<String, KeySpec>,
+    /// How a short-lived cloud credential is obtained.
+    ///
+    /// Built-in providers cover Azure, AWS and Google Cloud. This section adds
+    /// others, or replaces a built-in when a cloud changes its tool between our
+    /// releases - which is the whole reason providers are configuration rather
+    /// than code.
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 /// One or several keys bound to the same action.
@@ -80,7 +88,77 @@ impl Default for Config {
             history: HistoryConfig::default(),
             keys: std::collections::BTreeMap::new(),
             profiles: std::collections::BTreeMap::new(),
+            auth: AuthConfig::default(),
         }
+    }
+}
+
+/// Cloud identity providers defined by the user.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct AuthConfig {
+    /// Providers by name. A name that matches a built-in replaces it.
+    #[serde(default)]
+    pub providers: std::collections::BTreeMap<String, ProviderConfig>,
+}
+
+/// One way of obtaining a short-lived credential.
+///
+/// This says which program to run and where the token is in what it prints.
+/// Naming a program here means this client will execute it; that is inside the
+/// user's own trust boundary, since anything able to write their configuration
+/// can already run programs as them, but it is written down in the threat model
+/// because the format did not previously have that reach.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ProviderConfig {
+    /// The program and its arguments. `{host}`, `{port}`, `{user}` and
+    /// `{database}` are substituted whole. No shell is involved.
+    pub command: Vec<String>,
+    /// The JSON field holding the token. Omitted means the whole of stdout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_field: Option<String>,
+    /// How long to wait for the program.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+    /// What to tell someone when it fails, such as the sign-in command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remedy: Option<String>,
+}
+
+impl ProviderConfig {
+    /// The runtime provider this describes.
+    #[must_use]
+    pub fn to_provider(&self, name: &str) -> crate::connection::cloud::Provider {
+        use crate::connection::cloud::{DEFAULT_TIMEOUT, Extract, Provider};
+        Provider {
+            name: name.to_owned(),
+            command: self.command.clone(),
+            extract: self
+                .json_field
+                .clone()
+                .map_or(Extract::Raw, Extract::JsonField),
+            timeout: self
+                .timeout_seconds
+                .map_or(DEFAULT_TIMEOUT, std::time::Duration::from_secs),
+            remedy: self.remedy.clone().unwrap_or_default(),
+        }
+    }
+
+    /// Refuses a definition that could not work.
+    pub fn validate(&self, name: &str) -> Result<(), crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::{Diagnostic, DiagnosticKind};
+        if self.command.is_empty() || self.command[0].trim().is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("the {name:?} authentication provider has no program to run"),
+                "reading [auth.providers] from the configuration file",
+            )
+            .next_action(
+                "give it `command = [\"program\", \"argument\"]`, starting with the program",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -120,6 +198,13 @@ pub struct Profile {
     /// A short line describing what this connection is for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The cloud identity provider that supplies this connection's credential.
+    ///
+    /// A name, not a secret: `entra`, `aws`, `gcp`, or one defined under
+    /// `[auth.providers]`. The credential itself is fetched at connection time
+    /// and is never written anywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<String>,
     /// Anything else the file said, kept so it can be refused by name.
     #[serde(flatten)]
     pub other: std::collections::BTreeMap<String, toml::Value>,
@@ -135,6 +220,7 @@ pub const PROFILE_FIELDS: &[&str] = &[
     "environment",
     "read-only",
     "description",
+    "auth",
 ];
 
 impl Profile {

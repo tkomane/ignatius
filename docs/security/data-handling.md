@@ -21,6 +21,19 @@ What this program stores, where, for how long, and what it never stores.
   store a reference, not a secret.
 - **Result rows in the history.** The statement history records the SQL that ran
   and how it ended. It never records what came back.
+- **A cloud identity token.** When a connection authenticates through `entra`,
+  `aws`, `gcp` or a provider defined in configuration, the credential is obtained
+  by running that cloud's own tool and reading its standard output. It lives in
+  `SecretString` for as long as the connections of one session take to open and
+  is then dropped. It is never written to any file, never an environment
+  variable, never a process argument, never recorded in the history and never
+  logged. This client keeps no token cache of its own: the cloud's tool has one
+  already, and a second would be a second thing to get wrong.
+
+  What **is** written to configuration is the provider's name and, for a provider
+  the user defines, the command to run. A name is not a secret and neither is a
+  command line - but naming a program there means this client will execute it,
+  which the threat model states as a capability the file did not previously have.
 
 ## Exports
 

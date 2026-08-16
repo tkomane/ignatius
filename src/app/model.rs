@@ -468,6 +468,13 @@ pub struct Model {
     pub result_filter: String,
     /// Whether the filter is being typed into.
     pub result_filtering: bool,
+    /// The cloud identity provider this session's credential came from.
+    ///
+    /// When there is one, the client never asks for a password: the credential
+    /// was obtained from a program, the server accepted or refused it on its
+    /// own terms, and nothing anybody types here can help. Asking would describe
+    /// the wrong problem and take a real password on the way.
+    pub credential_provider: Option<String>,
 }
 
 impl Model {

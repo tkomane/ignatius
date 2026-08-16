@@ -440,6 +440,25 @@ pub async fn connect(
     target: &ConnectionTarget,
     statement_timeout: Duration,
 ) -> Result<Session, Diagnostic> {
+    // A backstop, not a feature. Every path that opens a connection is supposed
+    // to have run `connection::cloud::authenticate` first; a path that forgot
+    // would otherwise connect without the token and fall through to the password
+    // prompt, asking a person for something no person has. Failing here instead
+    // makes the omission loud and keeps the prompt honest.
+    if target.auth.is_some() && target.password.is_none() {
+        return Err(Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Internal,
+            "a connection using a cloud identity provider was opened without a credential",
+            "connecting to PostgreSQL",
+        )
+        .likely_cause(
+            "this is a defect in this build: a code path opened a connection without asking the \
+             provider for a token first",
+        )
+        .next_action("report it, and connect without --auth as a way through in the meantime")
+        .technical_opt("Provider", target.auth.clone()));
+    }
+
     let config = build_config(target);
     let tls = crate::postgres::tls::TlsOptions {
         mode: target.sslmode,

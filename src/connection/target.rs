@@ -279,6 +279,8 @@ pub struct ConnectionArgs {
     pub environment: Option<Environment>,
     /// `--read-only`
     pub read_only: bool,
+    /// `--auth`: the cloud identity provider that supplies the credential.
+    pub auth: Option<String>,
 }
 
 /// Copying a password on purpose.
@@ -347,6 +349,13 @@ pub struct ConnectionTarget {
     pub read_only: bool,
     /// Notes worth showing, such as unsupported non-security parameters.
     pub notes: Vec<ResolutionNote>,
+    /// The cloud identity provider that supplies this connection's credential.
+    ///
+    /// When this is set, the password is a short-lived token obtained by running
+    /// a program, and the connection may not proceed without one: see
+    /// `connection::cloud`. It is kept on the target rather than discarded after
+    /// the fetch so that any path opening a connection can check it was done.
+    pub auth: Option<String>,
 }
 
 impl ConnectionTarget {
@@ -392,6 +401,7 @@ impl ConnectionTarget {
             environment: self.environment.clone(),
             read_only: self.read_only,
             notes: self.notes.clone(),
+            auth: self.auth.clone(),
         }
     }
 
@@ -643,6 +653,10 @@ pub fn resolve(
         environment: args.environment.clone().unwrap_or_default(),
         read_only: args.read_only,
         notes,
+        // Resolution says which provider was asked for; it never runs it. The
+        // credential is fetched afterwards, by a step that can be async and can
+        // refuse the transport first.
+        auth: args.auth.clone(),
     })
 }
 

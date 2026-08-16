@@ -222,6 +222,7 @@ pub fn run(
         })?;
 
     let timeout = std::time::Duration::from_millis(config.query.statement_timeout_ms);
+    let provider = target.auth.clone();
     let session = connect_or_ask(&runtime, target, timeout, err)?;
     let info = session.info().clone();
 
@@ -233,6 +234,12 @@ pub fn run(
     )
     .ok();
     writeln!(err, "{}", connection_summary(&info)).ok();
+    if let Some(provider) = &provider {
+        // Which credential route opened this session. With a token there was no
+        // password to type, so nothing about connecting recorded the answer to
+        // "how am I authenticated here" unless it is said.
+        writeln!(err, "Authenticated with the {provider} identity provider.").ok();
+    }
     if !history.is_recording() {
         // A session that keeps no record says so once, at the top, where it can
         // be read rather than inferred from an empty file later.
@@ -394,7 +401,12 @@ fn connect_or_ask(
         Err(diagnostic) => diagnostic,
     };
 
+    // A target authenticating through a cloud provider is never asked about.
+    // The credential came from a program, it was accepted or refused on its own
+    // terms, and nothing a person can type will change that. Prompting would
+    // describe the wrong problem and waste a password on the way.
     if diagnostic.kind != crate::diagnostics::DiagnosticKind::Authentication
+        || target.auth.is_some()
         || !crate::cli::prompt::can_ask()
     {
         return Err(diagnostic);
