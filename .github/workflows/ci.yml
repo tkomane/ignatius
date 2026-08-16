@@ -48,7 +48,7 @@ jobs:
       - name: Unit, layout, CLI contract and terminal restoration tests
         # The restoration test allocates a real pty. It compiles to nothing on
         # Windows, where the equivalent needs ConPTY and is still open work.
-        run: cargo test --lib --test cli_contract --test terminal_restore
+        run: cargo test --lib --test cli_contract --test terminal_restore --test documentation_matches_the_build
       - name: Terminal restoration and startup smoke test
         shell: bash
         run: |

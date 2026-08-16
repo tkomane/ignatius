@@ -586,6 +586,23 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::ToggleHistoryRecording,
         "Pause or resume recording statements",
     ),
+    (
+        'd',
+        Action::ShowDefinition,
+        "Show the selected object's definition",
+    ),
+    (
+        'y',
+        Action::ShowDependencies,
+        "Show what depends on the selected object",
+    ),
+    ('w', Action::SaveQuery, "Save the buffer as a named query"),
+    ('o', Action::OpenQuery, "Open a saved query"),
+    (
+        'e',
+        Action::ExportRows,
+        "Write the rows on screen to a file",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -632,6 +649,9 @@ fn binding(
 }
 
 const fn short_label(action: &Action) -> &'static str {
+    // Exhaustive, so a new action stops the build here. When it does: add it to
+    // `Action::all()` as well, or the test that asks whether every action can be
+    // reached will not be asking about the new one.
     match action {
         Action::ToggleSidebar => "Objects",
         Action::OpenPalette => "Palette",
@@ -667,7 +687,6 @@ const fn short_label(action: &Action) -> &'static str {
         Action::OpenQuery => "Open",
         Action::ToggleHistoryRecording => "Private",
         Action::Redo => "Redo",
-        Action::Newline => "New line",
     }
 }
 
@@ -816,6 +835,73 @@ mod tests {
             assert!(!description_of(action).is_empty());
         }
         assert!(action_named("nonsense").is_none());
+    }
+
+    #[test]
+    fn every_action_this_build_has_can_be_reached() {
+        // The test that would have caught five features shipping with no way in.
+        // Everything else about the keymap iterates the tables, so a table
+        // missing an entry looks complete from inside it. This iterates the
+        // actions instead, which is the list that cannot agree with the mistake.
+        let keymap = Keymap::new();
+        for action in Action::all() {
+            let bound = keymap
+                .bindings()
+                .iter()
+                .any(|binding| binding.action == action);
+            let chorded = CHORDS.iter().any(|(_, chord, _)| *chord == action);
+            let typed = matches!(action, Action::Insert(_));
+            assert!(
+                bound || chorded || typed,
+                "{action:?} has no key, no chord and no other way in"
+            );
+        }
+    }
+
+    #[test]
+    fn every_action_worth_looking_up_is_in_the_palette_or_bound_to_a_key() {
+        // The palette is built from the bindings and the chords, so an action
+        // in neither is invisible there too. Typing and movement are excluded:
+        // nobody looks up "move left" by name.
+        let keymap = Keymap::new();
+        for action in Action::all() {
+            if matches!(
+                action,
+                Action::Insert(_)
+                    | Action::Move(_)
+                    | Action::MoveWord(_)
+                    | Action::MovePage(_)
+                    | Action::Backspace
+                    | Action::Activate
+                    | Action::DeleteForward
+                    | Action::DeleteWordLeft
+                    | Action::MoveLineStart
+                    | Action::MoveLineEnd
+                    | Action::MoveBufferStart
+                    | Action::MoveBufferEnd
+            ) {
+                continue;
+            }
+            let listed = keymap
+                .bindings()
+                .iter()
+                .any(|binding| binding.action == action)
+                || CHORDS.iter().any(|(_, chord, _)| *chord == action);
+            assert!(
+                listed,
+                "{action:?} cannot be found by anyone looking for it"
+            );
+        }
+    }
+
+    #[test]
+    fn every_action_has_a_short_label_for_the_footer() {
+        for action in Action::all() {
+            assert!(
+                !short_label(&action).is_empty(),
+                "{action:?} has no label, so a hint for it would be blank"
+            );
+        }
     }
 
     #[test]

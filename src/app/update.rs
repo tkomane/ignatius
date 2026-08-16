@@ -463,11 +463,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.editor.backspace();
             Vec::new()
         }
-        Action::Newline if model.focus == Focus::Editor => {
-            model.editor.insert('\n');
-            Vec::new()
-        }
-        Action::Insert(_) | Action::Backspace | Action::Newline => Vec::new(),
+        Action::Insert(_) | Action::Backspace => Vec::new(),
         Action::Move(direction) => {
             move_selection(model, direction);
             Vec::new()
@@ -663,7 +659,7 @@ fn definition_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.should_quit = true;
             return vec![Effect::Quit];
         }
-        Action::Insert(_) | Action::Backspace | Action::Newline => {}
+        Action::Insert(_) | Action::Backspace => {}
         other => {
             model.definition = None;
             return apply_action(model, other);
@@ -805,7 +801,6 @@ fn result_filter_action(model: &mut Model, action: Action) -> Vec<Effect> {
         // Same rule as everywhere else that takes typing: characters go to the
         // filter, and a key that already means something ends the typing, keeps
         // the filter, and does what it means.
-        Action::Newline => {}
         other => {
             model.result_filtering = false;
             return apply_action(model, other);
@@ -855,7 +850,7 @@ fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         // Typing is swallowed: the editor is underneath, and a keystroke that
         // silently edits SQL the user cannot see is the worst outcome here.
-        Action::Insert(_) | Action::Backspace | Action::Newline => {}
+        Action::Insert(_) | Action::Backspace => {}
         // Anything else is a key that already means something. It closes the
         // inspector and does that thing, so Ctrl+R still runs and the palette
         // still opens rather than the interface feeling stuck behind a modal.
@@ -1182,7 +1177,6 @@ fn filter_action(model: &mut Model, action: Action) -> Vec<Effect> {
         // Typing goes to the filter and nowhere else. A key that already means
         // something ends the typing, keeps the filter, and does that thing, so
         // Ctrl+R still runs rather than the interface feeling stuck in a box.
-        Action::Newline => {}
         other => {
             model.tree.filtering = false;
             return apply_action(model, other);

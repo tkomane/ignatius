@@ -6,7 +6,14 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: consolidation. The password prompt's happy path is now
+**Current feature**: consolidation, and the bug it found. Five chords - the
+definition panel, dependencies, save, open and write - were documented, palette-
+listed and bound to nothing: the features worked and no key reached them. A new
+suite compares the keymap document, the bindable action names, the profile
+fields and the exit codes against the build in both directions, and it fails when
+either side drifts. That is checked by making each side drift on purpose.
+
+**Previous**: consolidation. The password prompt's happy path is now
 proven under a real pseudo-terminal against the container - typed, connected,
 and the password absent from the transcript afterwards - which was the largest
 gap in recent work. Four features had been built without specifications, against
@@ -168,6 +175,8 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| Every action has a way in | A test over the list of actions rather than the list of keys |
+| The documentation matches the build | A suite comparing keys, actions, profile fields and exit codes both ways |
 | A typed password opens a session and is not echoed | pty test against the container: typed, connected, absent from the transcript |
 | An export from the client says what it leaves out | Reducer test over a truncated and filtered result |
 | A saved query's name can never escape its directory | Unit tests over separators, `..`, drive letters and control characters |

@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Removed a dead action. `Newline` had no key, no chord and no producer: Enter
+  reaches the editor's line break through `Activate`, and had done since the
+  beginning. Its handling arms were unreachable code in four match statements.
+- Fixed: five chords were documented and did not exist. `Ctrl+K d`, `y`, `w`,
+  `o` and `e` - definitions, dependencies, save, open and write - were listed in
+  the keymap, reachable from the palette in the documentation's telling, and
+  bound to nothing at all. The features worked; there was no way to reach them.
+  Found by a new test that compares the keymap document with the build in both
+  directions.
 - Fixed: the client's export offered `--force`, a flag that exists only on the
   command line, to someone who has no command line to type it on. The advice a
   refusal gives is now the caller's to word, so it names something the reader
