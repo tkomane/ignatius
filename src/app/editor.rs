@@ -81,6 +81,11 @@ impl Editor {
         self.cursor
     }
 
+    /// Records that the buffer now matches something on disk.
+    pub const fn mark_saved(&mut self) {
+        self.modified = false;
+    }
+
     /// Whether the buffer has unsaved edits.
     #[must_use]
     pub const fn is_modified(&self) -> bool {

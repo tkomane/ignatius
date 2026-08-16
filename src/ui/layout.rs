@@ -115,10 +115,69 @@ pub fn render(
     if let Some(pending) = &model.pending_run {
         render_confirmation(model, pending, presentation, area, buf);
     }
+    if let Some(prompt) = &model.name_prompt {
+        render_name_prompt(prompt, presentation, area, buf);
+    }
     // Topmost, because nothing else can be done until the connection is open.
     if let Some(prompt) = &model.password_prompt {
         render_password_prompt(prompt, presentation, area, buf);
     }
+}
+
+/// Asks for a name, for the one thing in this client that needs one.
+///
+/// Visible, unlike the password prompt: seeing what a query will be called is
+/// the point of asking, and the name is going to be a file name that the user
+/// will see in a directory listing afterwards.
+fn render_name_prompt(
+    prompt: &crate::app::model::NamePrompt,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(70);
+    let height = 7.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            sanitize_for_display(&prompt.subject),
+            theme.style(Token::Text),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Name: ", theme.style(Token::Text)),
+            Span::styled(
+                sanitize_for_display(&prompt.typed),
+                theme.style(Token::Focus),
+            ),
+            Span::styled("\u{2588}", theme.style(Token::Focus)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "It is saved as an ordinary .sql file you can open in anything.",
+            theme.style(Token::Muted),
+        )),
+    ];
+
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .block(pane_block(
+            format!(
+                " {}Save  Enter to save, Esc to cancel ",
+                presentation.icon(Icon::Editor)
+            ),
+            true,
+            presentation,
+        ))
+        .render(box_area, buf);
 }
 
 /// Asks for a password the server has demanded.
@@ -2679,6 +2738,22 @@ mod tests {
         assert!(text.contains("column_11"), "the window moved: {text}");
         assert!(!text.contains("column_1 "), "{text}");
         assert!(text.contains("of 80 lines"), "{text}");
+    }
+
+    #[test]
+    fn the_save_prompt_shows_the_name_and_says_what_the_file_will_be() {
+        let mut model = connected_model(Environment::Local);
+        model.name_prompt = Some(crate::app::model::NamePrompt::new(
+            "Save the buffer as",
+            "monthly-revenue",
+        ));
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("monthly-revenue"), "{text}");
+        assert!(text.contains("Enter to save"), "{text}");
+        assert!(
+            text.contains(".sql file you can open in anything"),
+            "what it becomes is stated: {text}"
+        );
     }
 
     #[test]

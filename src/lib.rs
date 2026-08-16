@@ -12,6 +12,7 @@
 //! - [`config`] - paths, schema, validation, atomic writes, migration
 //! - [`connection`] - connection target resolution, TLS policy, secret references
 //! - [`postgres`] - driver adapter, execution, cancellation, error mapping
+//! - [`queries`] - saved queries, as ordinary `.sql` files
 //! - [`query`] - statement boundaries, jobs, result model, value rendering
 //! - [`ui`] - terminal lifecycle, theme tokens, layout, keymap
 //! - [`diagnostics`] - redaction, layered diagnostics, logging, doctor
@@ -28,6 +29,7 @@ pub mod exit_code;
 pub mod history;
 pub mod platform;
 pub mod postgres;
+pub mod queries;
 pub mod query;
 pub mod ui;
 

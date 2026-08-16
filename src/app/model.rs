@@ -230,6 +230,29 @@ impl Definition {
     }
 }
 
+/// A name being typed, for the one thing in this client that needs one.
+///
+/// Visible, unlike the password prompt: there is nothing here worth hiding, and
+/// seeing what a query will be called is the point of asking.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NamePrompt {
+    /// What has been typed so far.
+    pub typed: String,
+    /// What is being named, for the title.
+    pub subject: String,
+}
+
+impl NamePrompt {
+    /// Opens a prompt for a name.
+    #[must_use]
+    pub fn new(subject: impl Into<String>, suggestion: impl Into<String>) -> Self {
+        Self {
+            typed: suggestion.into(),
+            subject: subject.into(),
+        }
+    }
+}
+
 /// A password the user is typing because the server asked for one.
 ///
 /// The characters live here and nowhere else, for as long as it takes to try
@@ -403,6 +426,10 @@ pub struct Model {
     pub running_sql: Option<String>,
     /// A password being typed because the server asked for one.
     pub password_prompt: Option<PasswordPrompt>,
+    /// A name being typed, when a query is being saved.
+    pub name_prompt: Option<NamePrompt>,
+    /// Where the saved query in the editor came from, if it came from one.
+    pub loaded_query: Option<String>,
     /// The dependency lookup in flight, so a late answer can be discarded.
     pub pending_dependencies: Option<crate::app::tree::RequestId>,
     /// The object definition being shown, when one is open.

@@ -55,6 +55,11 @@ is assembled from columns, constraints and indexes - and the panel says so, in
 those words, because a description is not a script that recreates the object and
 someone is going to copy it.
 
+**Saved queries.** `Ctrl+K w` names the buffer and writes it; `Ctrl+K o` finds
+one and opens it. They are `.sql` files in the saved-queries directory and
+nothing about them is this product's format, which is the point: a query worth
+keeping is worth being able to open somewhere else.
+
 **Dependencies.** The same palette widget over what an object is used by and
 what it depends on, opened with `Ctrl+K y`, each edge carrying the reason it is
 an edge. It follows view rewrite rules and foreign keys, which are the

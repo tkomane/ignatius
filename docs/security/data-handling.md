@@ -40,6 +40,7 @@ may be what the user needed.
 | Configuration | `~/.config/ignatius/config.toml` or `%APPDATA%\ignatius\config.toml` | `0600` on Unix; profile ACL on Windows | Until deleted |
 | Migration backups | Beside the configuration, timestamped | Same | Until deleted |
 | Logs | `~/.local/share/ignatius/logs/ignatius.log` | `0600` on Unix | Rotated at 5 MB, one previous file kept |
+| Saved queries | `~/.config/ignatius/queries/*.sql` | The directory's own | Until deleted. Written only when the user names one |
 | Statement history | `~/.local/share/ignatius/history.jsonl` | `0600` on Unix, set at creation and kept when the file is trimmed | Last 1000 entries by default; `ignatius history clear` removes it |
 
 `ignatius config paths` prints all of these. Deleting the configuration directory

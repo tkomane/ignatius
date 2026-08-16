@@ -104,12 +104,14 @@ pub fn run(
     })?;
 
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
+    let library = crate::queries::Library::new(&paths.queries_dir);
     let result = runtime.block_on(event_loop(
         resolved,
         loaded.config,
         keymap,
         presentation,
         history,
+        library,
     ));
 
     // Restore explicitly so any error below is printed on a working terminal.
@@ -134,6 +136,7 @@ async fn event_loop(
     keymap: Keymap,
     presentation: &Presentation,
     mut history: crate::history::History,
+    library: crate::queries::Library,
 ) -> Result<ExitCode, Diagnostic> {
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend).map_err(|err| {
@@ -280,6 +283,15 @@ async fn event_loop(
                         request,
                         *object,
                     );
+                }
+                Effect::ListQueries => {
+                    let _ = tx.send(Message::QueriesListed(library.list().unwrap_or_default()));
+                }
+                Effect::SaveQuery { name, sql } => {
+                    let _ = tx.send(Message::QuerySaved(Box::new(library.save(&name, &sql))));
+                }
+                Effect::LoadQuery { name } => {
+                    let _ = tx.send(Message::QueryLoaded(Box::new(library.load(&name))));
                 }
                 Effect::LoadHistory => {
                     let _ = tx.send(Message::HistoryLoaded(

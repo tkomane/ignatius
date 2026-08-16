@@ -8,6 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Saved queries. `Ctrl+K w` writes the buffer to a named file and `Ctrl+K o`
+  finds one by name and opens it. They are ordinary `.sql` files in the
+  directory `config paths` has advertised since the first release and nothing
+  had ever written to: openable in any editor, keepable in a repository,
+  readable by `psql`. A name is checked before it reaches the filesystem - no
+  separators, no `..`, no control characters - so a name is always a name and
+  never a path.
 - `ignatius config init` writes a starter configuration file: every default,
   written out with the parts worth knowing about as comments, an example profile
   and an example key binding, both commented so a first run connects to nothing

@@ -136,6 +136,50 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::QueriesListed(queries) => {
+            model.palette = Some(crate::app::palette::Palette::over_saved_queries(
+                queries
+                    .iter()
+                    .map(|query| crate::app::palette::PaletteEntry {
+                        label: query.name.clone(),
+                        detail: query.summary.clone(),
+                        group: "Saved",
+                        command: crate::app::palette::PaletteCommand::Open(query.name.clone()),
+                    })
+                    .collect(),
+            ));
+            Vec::new()
+        }
+        Message::QuerySaved(result) => {
+            match *result {
+                Ok(path) => {
+                    // The buffer is no longer unsaved, and where it went is worth
+                    // knowing: it is an ordinary file the user now owns.
+                    model.editor.mark_saved();
+                    model.notices.push(crate::query::result::Notice {
+                        severity: "SAVED".to_owned(),
+                        message: path.display().to_string(),
+                        code: None,
+                    });
+                }
+                Err(error) => model.error = Some(error),
+            }
+            Vec::new()
+        }
+        Message::QueryLoaded(result) => {
+            match *result {
+                // Loading is an edit like any other, so it can be undone.
+                Ok(text) => {
+                    model.editor.set_text(text);
+                    model.focus = Focus::Editor;
+                }
+                Err(error) => {
+                    model.loaded_query = None;
+                    model.error = Some(error);
+                }
+            }
+            Vec::new()
+        }
         Message::DependenciesLoaded { request, result } => {
             // The palette is only filled when it is still the answer to what was
             // asked, so a slow lookup cannot replace a list the user has moved on
@@ -215,6 +259,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     // that could keep it.
     if model.password_prompt.is_some() {
         return password_action(model, action);
+    }
+    if model.name_prompt.is_some() {
+        return name_action(model, action);
     }
     if model.prefix_pending {
         return resolve_prefix(model, action);
@@ -323,6 +370,17 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Activate => Vec::new(),
+        Action::SaveQuery => {
+            if model.editor.text().trim().is_empty() {
+                return Vec::new();
+            }
+            model.name_prompt = Some(crate::app::model::NamePrompt::new(
+                "Save the buffer as",
+                model.loaded_query.clone().unwrap_or_default(),
+            ));
+            Vec::new()
+        }
+        Action::OpenQuery => vec![Effect::ListQueries],
         Action::ShowDefinition => show_definition(model),
         Action::ShowDependencies => show_dependencies(model),
         Action::OpenHistory => {
@@ -820,6 +878,44 @@ fn password_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// Handles input while a name is being typed.
+fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(prompt) = model.name_prompt.as_mut() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(ch) => {
+            prompt.typed.push(ch);
+            Vec::new()
+        }
+        Action::Backspace => {
+            prompt.typed.pop();
+            Vec::new()
+        }
+        Action::Activate | Action::RunBuffer => {
+            if prompt.typed.trim().is_empty() {
+                return Vec::new();
+            }
+            let name = prompt.typed.trim().to_owned();
+            model.name_prompt = None;
+            model.loaded_query = Some(name.clone());
+            vec![Effect::SaveQuery {
+                name,
+                sql: model.editor.text().to_owned(),
+            }]
+        }
+        Action::Dismiss | Action::Cancel => {
+            model.name_prompt = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Handles input while a run is waiting to be confirmed.
 fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
     let Some(pending) = model.pending_run.as_mut() else {
@@ -980,6 +1076,10 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.palette = None;
             match chosen.map(|entry| entry.command) {
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::Open(name)) => {
+                    model.loaded_query = Some(name.clone());
+                    vec![Effect::LoadQuery { name }]
+                }
                 Some(crate::app::palette::PaletteCommand::Insert(text)) => {
                     model.focus = Focus::Editor;
                     for ch in text.chars() {
@@ -1954,6 +2054,147 @@ mod tests {
         );
         assert!(model.palette.is_none());
         assert!(model.error.is_some(), "the failure is not silent");
+    }
+
+    #[test]
+    fn saving_the_buffer_asks_for_a_name_and_writes_what_is_in_it() {
+        let mut model = connected();
+        model.editor.set_text("SELECT count(*) FROM orders;");
+
+        update(&mut model, Message::Action(Action::SaveQuery));
+        let prompt = model.name_prompt.as_ref().expect("a prompt");
+        assert!(
+            prompt.typed.is_empty(),
+            "nothing is suggested the first time"
+        );
+        assert!(prompt.subject.contains("Save"));
+
+        for ch in "monthly".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(
+            model.editor.text(),
+            "SELECT count(*) FROM orders;",
+            "typing a name never reaches the buffer being named"
+        );
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        match effects.as_slice() {
+            [Effect::SaveQuery { name, sql }] => {
+                assert_eq!(name, "monthly");
+                assert_eq!(sql, "SELECT count(*) FROM orders;");
+            }
+            other => panic!("expected one save, got {other:?}"),
+        }
+        assert!(model.name_prompt.is_none());
+
+        // What was saved is remembered, so saving again suggests the same name.
+        update(&mut model, Message::Action(Action::SaveQuery));
+        assert_eq!(model.name_prompt.as_ref().expect("prompt").typed, "monthly");
+    }
+
+    #[test]
+    fn an_empty_buffer_has_nothing_to_save_and_an_empty_name_saves_nothing() {
+        let mut model = connected();
+        model.editor.set_text("   \n  ");
+        update(&mut model, Message::Action(Action::SaveQuery));
+        assert!(model.name_prompt.is_none(), "there is nothing to name");
+
+        model.editor.set_text("SELECT 1;");
+        update(&mut model, Message::Action(Action::SaveQuery));
+        assert!(
+            update(&mut model, Message::Action(Action::Activate)).is_empty(),
+            "a name of nothing is not a name"
+        );
+        assert!(
+            model.name_prompt.is_some(),
+            "so it is still being asked for"
+        );
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.name_prompt.is_none());
+    }
+
+    #[test]
+    fn a_saved_query_can_be_found_by_name_and_opened_into_the_buffer() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+
+        let effects = update(&mut model, Message::Action(Action::OpenQuery));
+        assert!(matches!(effects.as_slice(), [Effect::ListQueries]));
+
+        update(
+            &mut model,
+            Message::QueriesListed(vec![
+                crate::queries::SavedQuery {
+                    name: "monthly-revenue".into(),
+                    path: "/tmp/monthly-revenue.sql".into(),
+                    summary: "SELECT sum(total) FROM orders;".into(),
+                },
+                crate::queries::SavedQuery {
+                    name: "stale-sessions".into(),
+                    path: "/tmp/stale-sessions.sql".into(),
+                    summary: "SELECT * FROM pg_stat_activity;".into(),
+                },
+            ]),
+        );
+        let palette = model.palette.as_ref().expect("open");
+        assert_eq!(palette.purpose, crate::app::palette::Purpose::SavedQueries);
+        assert_eq!(palette.entries.len(), 2);
+
+        for ch in "revenue".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        match effects.as_slice() {
+            [Effect::LoadQuery { name }] => assert_eq!(name, "monthly-revenue"),
+            other => panic!("expected one load, got {other:?}"),
+        }
+
+        update(
+            &mut model,
+            Message::QueryLoaded(Box::new(Ok("SELECT sum(total) FROM orders;\n".to_owned()))),
+        );
+        assert_eq!(model.editor.text(), "SELECT sum(total) FROM orders;\n");
+        assert_eq!(model.focus, Focus::Editor, "focus follows the text");
+        assert!(
+            !model.editor.is_modified(),
+            "what was just loaded matches what is on disk"
+        );
+
+        // And it can be taken back, because loading is an edit like any other.
+        model.editor.undo();
+        assert_eq!(model.editor.text(), "SELECT 1;");
+    }
+
+    #[test]
+    fn a_query_that_could_not_be_written_or_read_says_so() {
+        let mut model = connected();
+        update(
+            &mut model,
+            Message::QuerySaved(Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "could not write /queries/x.sql",
+                "saving",
+            )))),
+        );
+        assert!(model.error.is_some());
+
+        model.error = None;
+        model.loaded_query = Some("gone".into());
+        update(
+            &mut model,
+            Message::QueryLoaded(Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "could not read /queries/gone.sql",
+                "opening",
+            )))),
+        );
+        assert!(model.error.is_some());
+        assert!(
+            model.loaded_query.is_none(),
+            "the buffer did not come from a file that could not be read"
+        );
     }
 
     #[test]

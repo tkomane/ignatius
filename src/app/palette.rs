@@ -17,6 +17,8 @@ pub enum PaletteCommand {
     Run(Action),
     /// Insert text at the cursor, for example a qualified object name.
     Insert(String),
+    /// Open a saved query by name, replacing the buffer.
+    Open(String),
 }
 
 /// One entry.
@@ -64,6 +66,8 @@ pub enum Purpose {
     History,
     /// What an object depends on and what depends on it.
     Dependencies,
+    /// Queries saved as files.
+    SavedQueries,
 }
 
 impl Purpose {
@@ -76,6 +80,7 @@ impl Purpose {
             Self::Dependencies => {
                 " Dependencies  Enter puts the name in the editor, Esc to cancel "
             }
+            Self::SavedQueries => " Saved queries  Enter opens it, Esc to cancel ",
         }
     }
 
@@ -86,6 +91,7 @@ impl Purpose {
             Self::GoTo => " Nothing matches that.",
             Self::History => " No statement matches that.",
             Self::Dependencies => " Nothing here depends on it, and it depends on nothing here.",
+            Self::SavedQueries => " Nothing is saved yet. Ctrl+K w saves what is in the editor.",
         }
     }
 
@@ -103,6 +109,7 @@ impl Purpose {
             Self::Dependencies => Some(
                 " Views and foreign keys only. What a function body reads is not recorded by PostgreSQL.",
             ),
+            Self::SavedQueries => None,
         }
     }
 }
@@ -134,6 +141,15 @@ impl Palette {
     pub fn over_dependencies(entries: Vec<PaletteEntry>) -> Self {
         Self {
             purpose: Purpose::Dependencies,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens a palette over the saved queries.
+    #[must_use]
+    pub fn over_saved_queries(entries: Vec<PaletteEntry>) -> Self {
+        Self {
+            purpose: Purpose::SavedQueries,
             ..Self::new(entries)
         }
     }
