@@ -84,8 +84,6 @@ pub enum Action {
     Undo,
     /// Put back what undo took away.
     Redo,
-    /// Insert a line break in the editor.
-    Newline,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -112,6 +110,63 @@ impl TypedPassword {
 impl std::fmt::Debug for TypedPassword {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("TypedPassword(<hidden>)")
+    }
+}
+
+impl Action {
+    /// Every action this build has.
+    ///
+    /// Written out rather than derived, so that adding a variant forces a
+    /// decision here, and so a test can ask the question that matters about all
+    /// of them at once: is there any way to reach it. Five actions once shipped
+    /// with no key and no palette entry at all, and every test agreed with the
+    /// mistake because each of them iterated a list that was missing the same
+    /// five.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::RunBuffer,
+            Self::RunStatement,
+            Self::Cancel,
+            Self::Quit,
+            Self::ToggleHelp,
+            Self::FocusNext,
+            Self::ToggleErrorDetail,
+            Self::Dismiss,
+            Self::Move(Direction::Up),
+            Self::Move(Direction::Down),
+            Self::Move(Direction::Left),
+            Self::Move(Direction::Right),
+            Self::ToggleSidebar,
+            Self::OpenPalette,
+            Self::BeginPrefix,
+            Self::StartFilter,
+            Self::ReloadObjects,
+            Self::Activate,
+            Self::ToggleExpandedRow,
+            Self::ToggleInspector,
+            Self::Insert('a'),
+            Self::Backspace,
+            Self::DeleteForward,
+            Self::DeleteWordLeft,
+            Self::MoveWord(Direction::Left),
+            Self::MoveWord(Direction::Right),
+            Self::MoveLineStart,
+            Self::MoveLineEnd,
+            Self::MoveBufferStart,
+            Self::MoveBufferEnd,
+            Self::MovePage(Direction::Up),
+            Self::MovePage(Direction::Down),
+            Self::SaveQuery,
+            Self::ExportRows,
+            Self::OpenQuery,
+            Self::ShowDefinition,
+            Self::ShowDependencies,
+            Self::OpenHistory,
+            Self::ToggleHistoryRecording,
+            Self::Undo,
+            Self::Redo,
+        ]
     }
 }
 
