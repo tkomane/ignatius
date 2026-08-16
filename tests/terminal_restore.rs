@@ -39,7 +39,11 @@ fn run_in_pty(extra_args: &[&str], input: &'static [u8]) -> Option<String> {
     // BSD and util-linux disagree about where the command goes.
     let mut command = Command::new("script");
     if cfg!(target_os = "linux") {
-        command.args(["-q", "-c", &inner, "/dev/null"]);
+        // `-e` makes util-linux `script` return the command's exit code.
+        // Without it, it returns zero whatever happened, and any assertion
+        // about the exit status would be checking `script` rather than the
+        // client. BSD `script` returns the child's status already.
+        command.args(["-e", "-q", "-c", &inner, "/dev/null"]);
     } else {
         command.args(["-q", "/dev/null", "sh", "-c", &inner]);
     }
