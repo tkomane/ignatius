@@ -6,7 +6,28 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: consolidation, and the bug it found. Five chords - the
+**Current feature**: the four open decisions are closed, and the product has a
+direction rather than a finished roadmap. The owner named the real requirement
+on 2026-08-16 - Microsoft Entra ID against Azure Database for PostgreSQL, for
+the COI application - and it turns out not to need libpq at all: Entra
+authenticates with a token presented as the password over TLS, which this
+adapter already does. ADR-0012 records that and supersedes ADR-0009. The
+credential store is rejected (ADR-0011), copy goes through OSC 52 opt-in
+(ADR-0013), and `docs/product/experience-roadmap.md` sets out what "the best
+experience anyone has used" means in concrete features, first of which is
+completion that knows the schema. Specifications exist for Entra
+(`specs/011-entra-authentication/`) and completion
+(`specs/012-schema-completion/`); neither is implemented.
+
+Also fixed: the two Feature 005 editor defects the audit of `555203f` found.
+Enter now reaches `Editor::insert_newline()` so indentation survives a line
+break through the real key path, and every cursor movement ends the undo
+coalescing run so typing either side of a move is two undo steps. Both are
+proven by tests that were watched failing with the fix removed - and the first
+version of the movement test passed without the fix, so it was rewritten until
+it could fail.
+
+**Previous**: consolidation, and the bug it found. Five chords - the
 definition panel, dependencies, save, open and write - were documented, palette-
 listed and bound to nothing: the features worked and no key reached them. A new
 suite compares the keymap document, the bindable action names, the profile
@@ -212,13 +233,16 @@ These are real and none of them is hidden anywhere else:
    protocol claims rest on the Linux matrix and the local macOS runs.
 3. Every documented exit code now has a real producer with subprocess-level
    evidence, including 9 from an interrupted export.
-4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and are now the only
-   remaining reason to adopt libpq. See the addendum in ADR-0009: the other four
-   capabilities it was accepted for have been implemented natively.
-5. **No OS credential store.** Both surfaces ask for a password when the server
-   demands one, and profiles name connections, but nothing stores a credential
-   for you: the routes are a password file, the environment, the connection
-   string and the prompt.
+4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and stay that way.
+   ADR-0012 closed the libpq migration: the enterprise requirement that actually
+   exists is Entra ID, which is a token over TLS and needs no driver capability
+   this adapter lacks. If a real Kerberos requirement appears the decision
+   reopens on the same terms.
+5. **No OS credential store, by decision.** ADR-0011 is rejected. The routes are
+   a password file, the environment, the connection string and the prompt, and
+   `.pgpass` is shared with `psql`.
+5a. **Entra ID is specified and not implemented.** `specs/011-entra-authentication/`
+   describes it; no code exists. The COI server cannot be reached by this build.
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
@@ -239,26 +263,28 @@ These are real and none of them is hidden anywhere else:
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
-11. **Feature 005 editor acceptance is not complete despite the committed
-    implementation.** A direct audit of `555203f` found that Enter routes to
-    `Editor::insert('\n')` rather than `Editor::insert_newline()`, so the
-    indentation requirement is not wired through the real key path. Cursor
-    movement also does not end an undo coalescing run, so typing on both sides
-    of a move can share one undo step. Focused keymap coverage and a real
-    eight-line terminal acceptance scenario are still absent. Claude owns the
-    source follow-up in `src/app/` and `src/ui/`; do not claim Feature 005
-    complete until those paths are corrected and reverified.
+11. **Feature 005 editor: the two source defects are fixed, the terminal
+    acceptance scenario is not written.** Enter now routes to
+    `Editor::insert_newline()` and every movement ends the undo coalescing run,
+    both proven by tests confirmed to fail without the fix. What remains from
+    that audit is an eight-line terminal acceptance scenario driving the editor
+    at a real small size; until it exists, Feature 005 is corrected but not
+    complete.
 
 ## Decisions taken
 
 - **Name**: Ignatius, confirmed 2026-08-15.
-- **Driver**: ADR-0009 accepted the move to libpq on 2026-08-15. The
-  implementation remains decision-gated in Feature 001a because four of the
-  five original capability gaps are now implemented natively; the remaining
-  GSSAPI, Kerberos or Windows SSPI requirement must still justify the cost.
-  ADR-0009 supersedes ADR-0003 and records the costs: an `unsafe` exception
-  scoped to the adapter, a changed Windows distribution story, and a
-  concurrency model that needs its own ADR.
+- **Driver**: `tokio-postgres` stays. ADR-0012 supersedes ADR-0009 on
+  2026-08-16 and closes Feature 001a unimplemented: the enterprise requirement
+  is Entra ID, which is a token presented as a password over TLS. The `unsafe`
+  exception ADR-0009 granted is withdrawn, ADR-0010 is moot, and the binary
+  stays self-contained.
+- **Credential store**: rejected, ADR-0011, 2026-08-16.
+- **Copying a value out**: OSC 52, off unless configuration turns it on, no new
+  dependency. ADR-0013, 2026-08-16. Decided on the environment it will be used
+  in: a Linux clipboard crate needs a display that WSL does not have, and
+  Windows Terminal implements the write half of OSC 52 and deliberately not the
+  read half.
 - **Repository**: private, at `tkomane/ignatius`. Publishing beyond that is
   deferred; the options are in `docs/operations/release.md`.
 
@@ -266,30 +292,30 @@ These are real and none of them is hidden anywhere else:
 
 1. **Trademark search and a domain**, before publishing only. Neither blocks
    development.
-2. **Whether the remaining enterprise authentication route justifies libpq**,
-   after the T009 wrapper comparison in Feature 001a. If approved, decide how
-   libpq is bundled on Windows before implementation.
+
+Nothing else is waiting on the owner. The four that were are closed.
 
 ## Next actions, in order
 
-1. **Decision needed**: whether a credential store is wanted at all, and if so
-   whether the `keyring` dependency and its Linux caveat are acceptable. See
-   ADR-0011. Nothing is implemented until that answer exists.
-2. **Decision needed**: ADR-0009 adopted libpq for five capabilities; four are
-   now implemented without it. The remaining one is GSSAPI and Windows SSPI.
-   Whether the migration is still worth its cost is the owner's call.
-3. Open the client by hand on Windows 11 in Windows Terminal, and on Linux,
-   including the Unix socket path (T051, T052). CI proves it builds and its
-   tests pass; it does not prove the interface is usable there.
-4. A terminal-restoration test for Windows, which needs ConPTY (T055a).
-5. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
+1. **Implement Entra ID authentication** (`specs/011-entra-authentication/`).
+   It is what stands between this build and the database the owner actually
+   wants to use it against.
+2. **Implement completion that knows the schema**
+   (`specs/012-schema-completion/`). First of the experience roadmap, and the
+   one that decides whether the product's claim about cognitive load is true.
+3. Hand-verification on Windows and in WSL, using the artefact built on
+   2026-08-16. A static musl binary covers WSL and Linux including the Unix
+   socket path; a Windows-native `.exe` is a separate artefact and separate
+   evidence, and neither substitutes for the other.
+4. Implement copy through OSC 52 (ADR-0013), which closes Feature 004.
+5. The remaining experience roadmap in order: errors that point at the problem,
+   a result grid that can be worked, finding your way without being told, a
+   readable plan.
+6. An eight-line terminal acceptance scenario for the editor, the last item from
+   the Feature 005 audit.
+7. A terminal-restoration test for Windows, which needs ConPTY (T055a).
+8. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-6. **Decision needed**: how a value gets copied out. The system clipboard needs a
-   crate and platform support; OSC 52 writes the value into the terminal, where
-   it may be logged by the emulator. Neither is obviously right for a tool that
-   handles other people's data, so it is the owner's call. It is the only unbuilt
-   part of Feature 004.
-7. Migrate the PostgreSQL adapter to libpq (ADR-0009), if it is still wanted.
-   Connection profiles are already built and do not depend on it.
-8. Release packaging: checksums, SBOM, man pages and install docs (Feature 008,
-   whose planning package is already in `specs/008-release-experience/`).
+9. Release packaging (Feature 008). Codex is working on this; the planning
+   package is in `specs/008-release-experience/` and the uncommitted work in the
+   tree is theirs.

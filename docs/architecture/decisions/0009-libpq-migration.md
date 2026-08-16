@@ -1,7 +1,18 @@
 # ADR-0009: Move the PostgreSQL adapter to libpq
 
-- Status: Accepted. Supersedes ADR-0003. Implementation scheduled, not started.
+- Status: **Superseded by ADR-0012 on 2026-08-16, never implemented.** ADR-0003's
+  choice of `tokio-postgres` therefore stands, and the `unsafe` exception this
+  ADR granted is withdrawn with it.
 - Date: 2026-08-15
+
+> **Why it was superseded.** Four of the five capabilities below were
+> implemented natively. The fifth, "enterprise authentication", was read as
+> GSSAPI and Kerberos because that is what libpq means by it. The requirement
+> that actually exists is Microsoft Entra ID against Azure Database for
+> PostgreSQL, which is a token presented as a password over TLS and needs no
+> driver capability this adapter lacks. See ADR-0012. The rest of this document
+> is kept unaltered: it records what was decided and why, and the reasoning was
+> sound on what was known then.
 
 ## Context
 
