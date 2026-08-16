@@ -173,19 +173,35 @@ and a domain remain outstanding before publishing; neither blocks development.
 
 ## Last green verification
 
-Run on 2026-08-16 at committed HEAD `49df20a`, macOS 26.6.1 on Apple silicon,
-rustc 1.97.1 (Homebrew), against `postgres:18.4-alpine` both plain and with TLS.
+Run on 2026-08-16 at committed HEAD `8f98b7f`, macOS 26.6.1 on Apple silicon,
+rustc 1.97.1 (Homebrew), against `postgres:18.4-alpine` both plain and with TLS,
+with `cargo xtask db up` running. **Zero skips**, which is the part worth
+stating: an earlier run in the same session reported these numbers with the
+database down, and the PostgreSQL suites had skipped rather than passed.
 
 | Gate | Result |
 | --- | --- |
-| `cargo xtask verify` | All five gates pass |
-| Library tests | 433 passed |
-| CLI contract tests | 33 passed |
-| PostgreSQL integration tests | 33 passed |
+| Formatting and clippy, `-D warnings` | Pass |
+| Library tests | 500 passed |
+| CLI contract tests | 38 passed |
+| PostgreSQL integration tests | 38 passed, plain and TLS |
+| Editor acceptance, reducer and pty | 3 passed |
+| Password prompt, in a pty | 2 passed |
 | Terminal restoration, in a pty | 3 passed |
-| CI, all jobs | Green: macOS, Windows and Linux, plus PostgreSQL 14, 16 and 18 |
+| Documentation against the build | 6 passed |
+| Release contract suites (Codex's) | 70, 6 and 1 passed |
+| CI, all jobs | Green on macOS, Windows and Linux |
 
 Live evidence recorded in `docs/operations/verification.md`.
+
+Separately, and not the same class of evidence: a statically linked x86-64
+Linux binary built from `bdfc713` was run on a bare Alpine container with
+nothing installed, connected to PostgreSQL 18.4, and returned rows. It also
+refused a plain connection under `sslmode=verify-full` rather than downgrading,
+which is the first time that refusal has been seen from a distributed artefact
+rather than from a test. A Windows binary exists from CI run `31955237309` and
+has done nothing but start and report its own identity; no human has used
+either interactively yet.
 
 ## What is proven, and by what
 
