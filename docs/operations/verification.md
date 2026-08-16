@@ -40,11 +40,15 @@ is not a pass.** Report it as a skip.
 
 macOS 26.6.1 on Apple silicon, rustc 1.97.1 (Homebrew), against both the plain
 and TLS disposable services from `postgres:18.4-alpine`, at committed HEAD
-`42aae86`.
+`6541610`. CI ran the same suites on Linux against PostgreSQL 14, 16 and 18, and
+built and tested on Windows.
 
 **Automated**: formatting clean, `cargo clippy --all-targets -- -D warnings`
-clean, 475 library tests, 38 CLI contract tests, 38 PostgreSQL integration tests
-and 3 pseudo-terminal tests, all passing. That run covers the editor and its
+clean, 494 library tests, 38 CLI contract tests, 38 PostgreSQL integration tests
+and 5 pseudo-terminal tests, all passing. Two of the pty tests are new and prove
+the password prompt by using it: the password is typed into a real terminal, the
+session opens, and the transcript is read back to confirm the password is not in
+it. That run covers the editor and its
 undo, syntax colouring, the expanded row view and cell inspector, result
 filtering, the statement history and its refusals, object definitions and
 dependencies, the object tree's own read-only connection, connection profiles,
