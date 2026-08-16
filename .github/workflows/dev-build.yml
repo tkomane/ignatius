@@ -1,0 +1,79 @@
+name: Development build
+
+# Builds a binary for hand-verification and nothing else. It is not a release,
+# it signs nothing, it publishes nothing, and its artefact expires. The release
+# candidate path is `release.yml`, which has its own identity, checksum and
+# evidence contract; this exists so somebody can be handed something to run on a
+# platform the development machine cannot build for.
+#
+# Run it from the Actions tab, or with:
+#   gh workflow run dev-build.yml --ref main
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to build"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: ignatius.exe
+
+    steps:
+      - name: Check out the requested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          # build.rs records the source revision, so the history it reads has to
+          # be there. A shallow checkout would make the binary say `unknown`.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build inputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build
+        env:
+          IGNATIUS_BUILD_IDENTITY: dev-build/${{ github.run_id }}/${{ matrix.target }}
+        run: cargo build --locked --release --target "${{ matrix.target }}"
+
+      - name: Say what was built, and its digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          test -f "$binary"
+          # The binary's own account of itself, so the artefact can be matched to
+          # a commit without trusting the filename.
+          "./$binary" version --verbose
+          sha256sum "$binary"
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ignatius-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7
