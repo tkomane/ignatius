@@ -306,6 +306,30 @@ These are real and none of them is hidden anywhere else:
    built-in commands as unverified until a dated row says otherwise.
 5b. **The cloud provider tests are Unix-only.** They name real programs by
    absolute path. The feature is not Unix-only; the coverage is.
+5c. **`--auth entra` is suspected not to work on Windows-native**, and this is
+   the first thing to check there. The Azure CLI installs as `az.cmd`;
+   `CreateProcessW` does no `PATHEXT` appending and Rust's `Command` appends
+   only `.exe` when searching the path, so `Command::new("az")` will probably
+   report the program as missing on a machine that has it - a legible message
+   that is false, which is the worst kind. `gcloud` has the same shape; `aws`
+   ships a real `.exe` and should be fine. Confirmed from the Rust
+   documentation on 2026-08-16, not yet confirmed against a Windows machine.
+
+   Not fixed tonight on purpose: the fix is Windows-only, untested, and
+   collides with FR-1108's "no shell is involved at any point", which is a
+   security property rather than a style rule. A workaround exists today and
+   needs no release, because providers are data:
+
+   ```toml
+   [auth.providers.entra]
+   command = ["cmd", "/C", "az", "account", "get-access-token",
+              "--resource-type", "oss-rdbms", "--output", "json"]
+   json-field = "accessToken"
+   ```
+
+   If Windows confirms it, the fix is a `cfg(windows)` built-in plus an explicit
+   carve-out in the spec - safe for `entra` and `gcp` in particular because
+   neither command carries a substituted argument.
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
