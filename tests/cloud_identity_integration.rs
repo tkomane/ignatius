@@ -20,6 +20,12 @@ use std::process::Command;
 /// The TLS container's URI, split into a target with no password, and the
 /// password. TLS rather than the plain server on purpose: this route refuses to
 /// run at all without encryption, so the plain server cannot exercise it.
+///
+/// Unix only, with the fixture below, because the providers these tests define
+/// name real programs by absolute path. The route itself is not Unix-only; a
+/// Windows equivalent needs a provider command that exists there, and until one
+/// is written the coverage gap is this file's, not the feature's.
+#[cfg(unix)]
 fn tls_target_and_password() -> Option<(String, String)> {
     let uri = std::env::var("IGNATIUS_TEST_PG_TLS_URI")
         .ok()
@@ -34,10 +40,12 @@ fn tls_target_and_password() -> Option<(String, String)> {
 }
 
 /// A directory holding a configuration file and a file the provider will read.
+#[cfg(unix)]
 struct Fixture {
     dir: tempfile::TempDir,
 }
 
+#[cfg(unix)]
 impl Fixture {
     /// Writes a provider whose program prints whatever is in a file.
     ///
