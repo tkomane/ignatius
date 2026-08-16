@@ -8,6 +8,16 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: the client's export offered `--force`, a flag that exists only on the
+  command line, to someone who has no command line to type it on. The advice a
+  refusal gives is now the caller's to word, so it names something the reader
+  can actually do.
+- Fixed: a path beginning with `~` typed into the client would have created a
+  directory called `~`. There is no shell behind that prompt, so the expansion
+  is now done here.
+- A saved query cannot be named after a device Windows reserves. `CON.sql` opens
+  the console rather than a file there, so it is refused everywhere: a saved
+  query is meant to travel between platforms.
 - `Ctrl+K e` writes the rows on screen to a file. Before it does, it says how
   many rows that is and, when the result was truncated or a filter is on, what
   the file will not contain and how to get all of it. It writes through the same

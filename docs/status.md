@@ -6,7 +6,14 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: writing the rows on screen to a file, and saved queries.
+**Current feature**: consolidation. The password prompt's happy path is now
+proven under a real pseudo-terminal against the container - typed, connected,
+and the password absent from the transcript afterwards - which was the largest
+gap in recent work. Four features had been built without specifications, against
+the constitution's own rule; `specs/010-asking-and-keeping/spec.md` records them
+and says plainly that it was written after the fact.
+
+**Previous**: writing the rows on screen to a file, and saved queries.
 The export from the client says how many rows it will write and what it will not
 contain before it writes anything, because what is on screen is not what the
 query returned whenever the result was truncated.
@@ -161,6 +168,7 @@ Live evidence recorded in `docs/operations/verification.md`.
 | A failed transaction is reported | Read from the server, with ROLLBACK named as the way out |
 | Plain mode emits nothing screen-reader-hostile | Subprocess test under `TERM=dumb`: no escape sequences at all |
 | Plain mode still guards production | Subprocess test: a write to a production target is confirmed in words |
+| A typed password opens a session and is not echoed | pty test against the container: typed, connected, absent from the transcript |
 | An export from the client says what it leaves out | Reducer test over a truncated and filtered result |
 | A saved query's name can never escape its directory | Unit tests over separators, `..`, drive letters and control characters |
 | A pipe is never asked for a password | Subprocess test with stdin closed: it exits 5 rather than waiting |
