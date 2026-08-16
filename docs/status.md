@@ -6,7 +6,35 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: the four open decisions are closed, and the product has a
+**Current feature**: cloud identity authentication, implemented. The owner asked
+for Entra ID first and for a first-class experience on other clouds, and
+checking the other two turned that instruction from a generalisation into the
+obvious shape: Azure, AWS and Google Cloud authenticate a PostgreSQL connection
+identically. A command-line tool returns a short-lived bearer token, the token
+is presented as the password, and the transport must be encrypted. Only the
+command differs, so the command is data: three built-ins ship and
+`[auth.providers]` defines a fourth without waiting for a release.
+
+Two refusals are the security of it. Nothing is fetched for a target whose
+`sslmode` would permit an unencrypted connection - the check runs before the
+program does, so the token was never asked for rather than asked for and
+discarded. And nothing falls back to the password prompt: a token was accepted
+or refused on its own terms, so asking a person would describe the wrong problem
+and take a real password on the way. `postgres::connect` refuses outright if a
+target names a provider and carries no credential, which turns a forgotten call
+site into a loud defect rather than a quiet prompt.
+
+Proven end to end against the TLS container with no cloud account: a provider
+whose program prints the container's synthetic password, through the subprocess,
+the extraction, the `SecretString` and a real authenticated session. What is
+**not** proven is that `az`, `aws` and `gcloud` behave as documented - that needs
+an account, and `docs/support/compatibility.md` carries a separate column per
+provider rather than letting one word cover both.
+
+Also: `query --format json` no longer writes `[]` for a run that failed, which
+to a stdout-only reader was indistinguishable from a query that matched nothing.
+
+**Previous**: the four open decisions are closed, and the product has a
 direction rather than a finished roadmap. The owner named the real requirement
 on 2026-08-16 - Microsoft Entra ID against Azure Database for PostgreSQL, for
 the COI application - and it turns out not to need libpq at all: Entra
@@ -173,22 +201,26 @@ and a domain remain outstanding before publishing; neither blocks development.
 
 ## Last green verification
 
-Run on 2026-08-16 at committed HEAD `8f98b7f`, macOS 26.6.1 on Apple silicon,
+Run on 2026-08-16 at committed HEAD `20bb3c3`, macOS 26.6.1 on Apple silicon,
 rustc 1.97.1 (Homebrew), against `postgres:18.4-alpine` both plain and with TLS,
-with `cargo xtask db up` running. **Zero skips**, which is the part worth
-stating: an earlier run in the same session reported these numbers with the
-database down, and the PostgreSQL suites had skipped rather than passed.
+with `cargo xtask db up` running. 692 tests, and **one skip**: the Unix-socket
+integration check, which needs `IGNATIUS_TEST_PG_SOCKET_URI` and a server
+reachable over a socket, which the container does not publish. Everything else
+ran. The count of skips is stated rather than the absence of failures, because
+an earlier run in this same session reported these numbers with the database
+down and the PostgreSQL suites had skipped rather than passed.
 
 | Gate | Result |
 | --- | --- |
 | Formatting and clippy, `-D warnings` | Pass |
-| Library tests | 500 passed |
+| Library tests | 513 passed |
 | CLI contract tests | 38 passed |
 | PostgreSQL integration tests | 38 passed, plain and TLS |
 | Editor acceptance, reducer and pty | 3 passed |
 | Password prompt, in a pty | 2 passed |
 | Terminal restoration, in a pty | 3 passed |
 | Documentation against the build | 6 passed |
+| Cloud identity, against the TLS container | 4 passed |
 | Release contract suites (Codex's) | 70, 6 and 1 passed |
 | CI, all jobs | Green on macOS, Windows and Linux |
 
@@ -267,8 +299,13 @@ These are real and none of them is hidden anywhere else:
 5. **No OS credential store, by decision.** ADR-0011 is rejected. The routes are
    a password file, the environment, the connection string and the prompt, and
    `.pgpass` is shared with `psql`.
-5a. **Entra ID is specified and not implemented.** `specs/011-entra-authentication/`
-   describes it; no code exists. The COI server cannot be reached by this build.
+5a. **Cloud identity is implemented, and no cloud has been connected to.** The
+   mechanism is proven against a real PostgreSQL server; `entra`, `aws` and
+   `gcp` are transcriptions of vendor documentation checked on 2026-08-16 and
+   nobody has run any of them against that cloud's own database. Treat the
+   built-in commands as unverified until a dated row says otherwise.
+5b. **The cloud provider tests are Unix-only.** They name real programs by
+   absolute path. The feature is not Unix-only; the coverage is.
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
@@ -323,9 +360,10 @@ Nothing else is waiting on the owner. The four that were are closed.
 
 ## Next actions, in order
 
-1. **Implement Entra ID authentication** (`specs/011-entra-authentication/`).
-   It is what stands between this build and the database the owner actually
-   wants to use it against.
+1. **Connect to the COI server with `--auth entra`**, and record what happens
+   with the date and the server version. That is the only thing that can turn
+   the `entra` row's "live evidence: none yet" into a fact, and it needs an
+   account rather than more code.
 2. **Implement completion that knows the schema**
    (`specs/012-schema-completion/`). First of the experience roadmap, and the
    one that decides whether the product's claim about cognitive load is true.
