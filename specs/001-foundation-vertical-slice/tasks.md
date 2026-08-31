@@ -96,3 +96,12 @@ are independent of one another.
 Phases 1 to 7 are complete except the five open items above, which all require
 either a platform this session could not reach or CI infrastructure. They are
 carried in `docs/status.md` as the next actions.
+
+Partial T052 evidence on 2026-08-16: the focused
+`tests/postgres_socket_integration.rs` check passed inside a disposable Linux
+container against a real PostgreSQL Unix socket, executing `SELECT 1` through
+the production session path. The same pinned Linux container also passed 497
+library tests, all 38 CLI contract tests and all 3 Unix pty restoration tests.
+T052 remains unchecked because this is automated Linux evidence, not hand use
+of the full-screen client in a Linux terminal, and the shared CI workflow does
+not yet provide the socket fixture.

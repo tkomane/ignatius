@@ -126,6 +126,12 @@ verification gaps without claiming more than has been proven.
 - [ ] T034 Implement and evidence ConPTY terminal restoration for Windows in `tests/terminal_restore.rs` and `docs/status.md`
 - [x] T035 Update the authoritative current-state entry in `docs/status.md` after the plain-mode slice was committed
 
+Partial T033 evidence on 2026-08-16: the pinned Rust 1.97.1 Linux container
+passed all 38 `cli_contract` tests and all 3 Unix pty restoration tests. This
+strengthens automated Linux evidence for the full-screen refusal, `TERM=dumb`
+plain-mode and terminal lifecycle paths, but it is not hand use of a Linux
+terminal and does not close the Windows or screen-reader gates.
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
