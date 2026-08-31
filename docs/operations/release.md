@@ -1,13 +1,14 @@
 # Release
 
-Nothing has been released. This describes the intended process; every claim in it
-is a plan, not a fact, and no artefact may be described as signed, notarised or
-published until a real release proves it.
+No release has been published. This document defines the intended process and
+labels local rehearsal evidence separately. No artefact may be described as
+signed, notarised or published until a real release proves it.
 
 ## Publishing options
 
-Nothing has been published and no remote is configured. These are the routes, in
-increasing order of commitment. Each row assumes the ones above it.
+Nothing has been published. The repository has a private GitHub remote; these
+are the remaining routes in increasing order of commitment. Each row assumes
+the ones above it.
 
 | Option | Effort | Ongoing cost | Reversible | Reaches | Needs first |
 | --- | --- | --- | --- | --- | --- |
@@ -19,8 +20,8 @@ increasing order of commitment. Each row assumes the ones above it.
 | **F. Homebrew tap and Scoop** | Half a day each | A manifest update per release, forever | Yes: delete the tap | macOS and Windows users who expect a package manager | D, and a release cadence you can sustain |
 | **G. Homebrew core and Winget** | Days, plus review | Their standards, their timelines | Hard | Everyone | F, plus a user base that justifies it |
 
-**Recommendation: A now, B when convenient, C once CI is green on all three
-platforms.** Publishing source before Windows and Linux have ever been run would
+**Current state: B. Move to C only once CI is green on all three platforms.**
+Publishing source before Windows and Linux have ever been run would
 invite issues about platforms nobody has tested, which is the fastest way to
 spend a weekend on someone else's environment.
 
@@ -47,8 +48,9 @@ branch, or a CI run number.
 
 ## Candidate archive and checksum contract
 
-This section defines the identity and integrity fields a future candidate job
-must produce. It does not build, sign, upload or publish an archive.
+This section defines the identity and integrity fields candidate tooling must
+produce. The local commands below do not build, sign, upload or publish an
+archive.
 
 ### Archive names and target identity
 
@@ -72,15 +74,19 @@ must not be inferred from the machine performing verification. `<format>` is
 the actual archive or binary format recorded in the release record; the exact
 format-to-suffix mapping is defined immediately below.
 
-Names are basenames only: no path separators, spaces or duplicate names are
-allowed in one candidate. The target row, artefact name and build target must
-agree. A supported platform without a built artefact is recorded as `blocked`
-with a reason rather than represented by another platform's archive.
+Names are canonical portable basenames: they start with an ASCII letter or
+digit and contain only ASCII letters, digits, dots, underscores, hyphens and a
+plus sign when that plus sign is the SemVer build-metadata separator. They
+contain no adjacent dots, path separators or spaces, and duplicate names are
+not allowed in one candidate. The target row, artefact name and build target
+must agree. A supported platform without a built artefact is recorded as
+`blocked` with a reason rather than represented by another platform's archive.
 
 The product-version token is copied byte-for-byte from Cargo.toml and uses the
 release schema's semantic-version grammar: numeric major, minor and patch with
-optional ASCII alphanumeric, hyphen and dot prerelease/build identifiers. No
-escaping, normalisation or date suffix is allowed. The target token uses only
+optional ASCII alphanumeric, hyphen and dot prerelease/build identifiers, with
+`+` separating build metadata. No escaping, normalisation or date suffix is
+allowed. The target token uses only
 ASCII letters, digits, hyphens, underscores and periods, begins with an
 alphanumeric character, and contains no path separator, whitespace or `..`.
 The format mapping is exact: `tar.gz` ends in `.tar.gz`, `zip` ends in `.zip`,
@@ -90,6 +96,10 @@ operating system.
 The set of artefacts must equal the set of target rows whose coverage is
 `covered`, with exactly one artefact for each target. Rows marked `blocked` or
 `out-of-scope` have no artefact entry and retain a non-empty reason.
+Before a record can be `ready` or `published`, its target rows must include
+every supported target in the release matrix. A target may be covered by an
+artefact or explicitly blocked/out-of-scope with its reason; an omitted target
+is a readiness failure, not an implicit skip.
 
 ### Structured manifest and checksum list
 
@@ -168,11 +178,419 @@ $artifact = "<archive>"
 ```
 
 A passing checksum proves integrity of the bytes only; it does not prove
-signing, provenance, publication or platform hand verification. The current
-`cargo xtask release check PATH` command validates the declared record and
-evidence relationships. It does not generate archives, read these sidecars or
-recompute their bytes yet. T013/T014 own the future archive workflow, byte
-hashing, sidecar parsing, size re-read and fail-closed exit behavior.
+signing, provenance, publication or platform hand verification. The
+non-publishing sidecar commands are:
+
+~~~text
+cargo --locked xtask release manifest generate \
+  --record PATH --artefact-dir PATH --output-dir PATH
+cargo --locked xtask release manifest verify \
+  --record PATH --artefact-dir PATH \
+  --manifest PATH --checksums PATH
+~~~
+
+`manifest generate` reads only the exact artefacts named by the one-record
+catalogue, hashes their bytes and writes canonical `release-manifest.json` and
+`SHA256SUMS` files into a new output directory without overwriting existing
+evidence. The pair becomes visible together. `manifest verify` must
+pass before `cargo --locked xtask release check PATH` is accepted for a candidate: it
+re-reads the exact archive bytes, size, filename, target, source revision,
+build identity and both sidecars, and fails closed before extraction. The
+record check remains the metadata, evidence and publication-readiness gate; it
+does not imply byte verification by itself.
+
+The verifier also refuses a symlinked archive, manifest or checksum sidecar
+before opening it. The archive boundary is therefore an ordinary-file check as
+well as a digest check; a symlink cannot redirect byte verification to a
+different file.
+
+The `--output-dir` path must not already exist; this prevents a rerun from
+silently replacing an evidence pair. The check uses symlink metadata, so a
+dangling symlink at that path is also rejected rather than replaced, and a
+symlinked parent is rejected before any evidence is written.
+
+The candidate record written by `release generate` follows the same
+non-overwriting boundary: its output parent must already exist and must not be
+a symlink. This prevents a record path from redirecting writes outside the
+intended staging root. Release validation and manifest operations also refuse a
+symlinked catalogue input rather than following it as if it were the ordinary
+release record.
+
+The `--artefact-size` value passed to `release generate` is a declared
+expectation until `manifest generate` re-reads the exact file and confirms it.
+`cargo --locked xtask release generate` records a checksum as `present` only when
+`--artefact-path` was supplied and the exact bytes were hashed. A caller-supplied
+`--checksum` without that path is rejected. T013 now provides the separate
+non-publishing `.github/workflows/release.yml` rehearsal: it builds one
+target-specific archive per matrix row with the repository-owned deterministic
+archive helper, generates and verifies these sidecars,
+stages only the archive, record and verified sidecars under an exact upload
+root, checks that root with `cargo --locked xtask release evidence-scope`, and retains it
+as a run-scoped workflow artifact. That workflow is not a release, signing or
+publication gate; T015 provides the readiness assertion and T016 still owns
+reproducibility evidence. Each matrix
+job emits a per-target record; aggregate multi-target
+identity and readiness remain later work.
+
+The archive helper refuses an existing output and a symlinked output parent. It
+creates the completed archive in the destination directory and installs it
+with a same-directory hard link, so a concurrent destination cannot be
+silently replaced or redirected through a directory symlink.
+
+## Native dependency boundary
+
+The generic release contract above proves candidate identity, exact archive
+bytes, checksums, provider-neutral evidence states and recoverable installation
+steps. It does not prove the presence, version, trust or runtime loadability of
+a native database dependency.
+
+ADR-0012 closed Feature 001a without implementation: the required Entra route
+uses a bearer token as the password over the existing TLS connection and needs
+no libpq dependency. The archive therefore has no libpq discovery, bundling or
+fallback path to diagnose. If a real GSSAPI, Kerberos or SSPI requirement later
+reopens that decision, the new feature must own library and TLS identity,
+architecture and runtime closure, loader search-path trust, clean-install
+behaviour and repairable missing-dependency diagnostics. Its evidence would
+have to bind back to the same product version, source revision, target, build
+identity and archive basename recorded here.
+
+The generic workflow must not grow a speculative native-library check. It
+packages the current `tokio-postgres` build and keeps its existing driver and
+TLS failure rules unchanged.
+
+## Platform installation and first start
+
+This is the operator contract for an authorized archive once a real release has
+passed the readiness gate. The repository currently contains only a
+non-publishing packaging workflow, so the target rows below are defined
+selection rules, not proof that a hosted archive can be installed. There is no
+installer, package-manager manifest, automatic update check or published
+download URL.
+
+Select an archive by exact target triple and format. Do not choose by a broad
+platform label or extract an archive for another architecture.
+
+| Host requirement | Target triple | Archive | Local tools |
+| --- | --- | --- | --- |
+| Apple silicon macOS | `aarch64-apple-darwin` | `tar.gz` | `shasum`, `tar`; `jq` for structured-sidecar review |
+| x86_64 Windows | `x86_64-pc-windows-msvc` | `zip` | PowerShell `Get-FileHash`, `Expand-Archive` |
+| x86_64 Linux with compatible GNU libc | `x86_64-unknown-linux-gnu` | `tar.gz` | `sha256sum`, `tar`; `jq` for structured-sidecar review |
+
+The current release matrix does not define an x86_64 macOS, Windows ARM64,
+Linux ARM64 or Linux musl archive. Those hosts are outside the release claim
+until a target row and evidence are added. `uname -m` is a useful architecture
+check on Unix, and Windows must report an x64 process/OS architecture; neither
+check replaces the exact target and runtime evidence in the release record.
+
+### Wrong architecture or missing host runtime
+
+A wrong-architecture binary cannot run far enough to produce an Ignatius
+diagnostic, so this check belongs before first start. Do not work around a
+loader failure by trying an archive from another target row.
+
+- On Apple silicon, `uname -m` must print `arm64`. `Bad CPU type in executable`
+  means the selected archive does not match the host. This release matrix has
+  no Intel macOS archive.
+- On Linux, `uname -m` must print `x86_64`. `Exec format error` means the binary
+  does not match the host architecture. A message naming `GLIBC_` or a dynamic
+  loader while the file exists means the GNU runtime is absent or too old for
+  that candidate. Retain the exact message and treat that host as unsupported
+  until a compatible target row is built and evidenced.
+- On Windows, run
+  `[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture` in
+  PowerShell and require `X64`. `This app can't run on your PC` or a bad-image
+  error is a target mismatch unless the retained platform evidence proves a
+  different prerequisite failure. This matrix has no Windows ARM64 archive.
+
+If `ignatius version --verbose` starts, record its exact target and compiler
+identity. If it does not start, record the host architecture, archive basename,
+digest result and the operating system's loader message. Do not include an
+environment dump, configuration file, connection URI or credential in the
+support evidence.
+
+### Verify before extraction
+
+Keep the archive, `SHA256SUMS`, structured manifest and release record together.
+Use the exact basename named by the record, run the platform-native digest
+command from the candidate section, and compare both digest and byte count
+before extracting anything. A checksum match proves archive bytes only. It does
+not prove that the archive is signed, notarised, published or safe for an
+unverified platform.
+
+The standard checksum-list checks are:
+
+```bash
+# macOS
+shasum -a 256 -c SHA256SUMS
+
+# Linux
+sha256sum --strict --check SHA256SUMS
+```
+
+On Windows, compare the one exact basename line and the file length with
+PowerShell rather than accepting a digest copied from a different target:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$archive = '<verified-archive>'
+$name = Split-Path -Leaf $archive
+$lines = @(Get-Content -LiteralPath '.\SHA256SUMS' |
+    Where-Object { $_ -match ('^[0-9a-fA-F]{64}  ' + [regex]::Escape($name) + '$') })
+if ($lines.Count -ne 1) { throw "SHA256SUMS must contain exactly one entry for $name" }
+$expected = ($lines[0] -split '\s+', 2)[0].ToLowerInvariant()
+$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+if ($actual -cne $expected) { throw "SHA-256 mismatch for $name" }
+Write-Output "SHA-256 verified: $name"
+Write-Output "Bytes: $((Get-Item -LiteralPath $archive).Length)"
+```
+
+The structured manifest must also have exactly one entry for the basename and
+target, with the same lower-case digest and `size_bytes`. Reviewers with `jq`
+can run the following after calculating `digest` and `size` from the exact file:
+
+```bash
+archive_path='<verified-archive>'
+name="${archive_path##*/}"
+target='<target-triple>'
+if command -v shasum >/dev/null 2>&1; then
+  digest="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
+else
+  digest="$(sha256sum -- "$archive_path" | awk '{print $1}')"
+fi
+size="$(wc -c < "$archive_path" | tr -d '[:space:]')"
+jq -e --arg name "$name" --arg target "$target" \
+  --arg digest "$digest" --argjson size "$size" '
+  [.artefacts[] | select(.name == $name and .target == $target
+    and .checksum == $digest and .size_bytes == $size)] | length == 1
+' release-manifest.json
+```
+
+The repository's maintainer-level verifier is the exact
+`cargo --locked xtask release manifest verify` command documented above; it additionally
+rejects malformed or non-canonical sidecars, missing or extra entries and
+identity mismatches. If neither that verifier nor a trusted structured-JSON
+review is available, record only the standard checksum result and do not call
+the candidate's full evidence bundle verified.
+
+### macOS and Linux
+
+After verification, extract into a new temporary directory and confirm that the
+archive contains the one expected binary at its root. The workflow creates that
+shape and does not include configuration or data files:
+
+```bash
+stage="$(mktemp -d)"
+tar -xzf "<verified-archive>" -C "$stage"
+test -f "$stage/ignatius"
+"$stage/ignatius" version --verbose
+```
+
+For a per-user installation, keep the binary under a user-owned directory and
+put that directory on `PATH`. A versioned binary or directory is preferable to
+overwriting the previous one. The repository's `cargo --locked xtask install` command
+builds from a source checkout; it is not the installer for a release archive.
+For example, after the first-start check, a Unix user can keep releases
+side-by-side and point a stable per-user link at the selected one:
+
+```bash
+version='<product-version>'
+target='<target-triple>'
+install_root="$HOME/.local/lib/ignatius/$version/$target"
+mkdir -p "$install_root" "$HOME/.local/bin"
+install -m 0755 "$stage/ignatius" "$install_root/ignatius"
+ln -sfn "$install_root/ignatius" "$HOME/.local/bin/ignatius"
+```
+
+The install root is separate from `~/.config/ignatius` and
+`~/.local/share/ignatius`, which hold user state. Add `$HOME/.local/bin` to
+`PATH` if it is not already there.
+On macOS, signing and notarisation are not configured by this project. Do not
+turn off platform security controls as an installation step; a blocked launch
+must remain an explicit release-owner or signing decision.
+
+On Linux, the `gnu` target requires a compatible GNU libc runtime. A successful
+archive extraction is not a libc or first-run test. If the binary cannot start,
+retain the diagnostic and use the target-specific support boundary rather than
+substituting an archive from another row.
+
+### Windows
+
+After verification, extract to a new version-specific directory. Do not unpack
+over an existing installation while diagnosing a candidate:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$versionDir = Join-Path $env:LOCALAPPDATA 'Programs\Ignatius\<product-version>\x86_64-pc-windows-msvc'
+New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
+Expand-Archive -LiteralPath '<verified-archive>' -DestinationPath $versionDir
+$binary = Join-Path $versionDir 'ignatius.exe'
+if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+    throw "archive did not contain ignatius.exe at its root"
+}
+& $binary version --verbose
+$env:Path = "$versionDir;$env:Path"
+```
+
+The temporary `PATH` change is for the current PowerShell process only. Add a
+version directory to the user PATH through the normal Windows environment
+settings only after its first-start checks pass. The `Programs` install root is
+separate from `%APPDATA%\ignatius` and `%LOCALAPPDATA%\ignatius`, which hold
+user state. The archive is a binary-only bundle; it does not install a service,
+write configuration, or move database data.
+
+### First-start checks
+
+Run these checks from the installed binary before opening the full-screen
+client or asking a user to connect:
+
+```text
+ignatius version --verbose
+ignatius doctor --json
+ignatius config paths
+ignatius config validate
+```
+
+The first run may have no configuration file and should report built-in
+defaults. `ignatius config init` is optional and writes a starter file; it does
+not create a connection, store a password or contact a server. If a database
+check is needed, use a target with no password in the command text:
+
+```text
+ignatius connect --check "postgres://user@host:5432/database"
+```
+
+Supply credentials through the supported password-file, environment or prompt
+routes, not by placing them in an archive command or shell history. Record the
+binary's verbose identity and the exact target row used in the installation
+evidence. Do not record a successful first start as platform hand evidence until
+the binary has actually been opened on that platform.
+
+## Configuration, data preservation and rollback
+
+An archive upgrade replaces a binary, not the user's configuration or local
+state. Before changing the active binary, run `ignatius config paths` and copy
+the exact configuration and data directories it reports to a protected,
+user-controlled backup location. Treat the backup as sensitive: statement
+history contains SQL text even though credentials are filtered heuristically,
+and logs or saved queries may contain environment-specific information.
+
+The paths are normally:
+
+| Content | Unix default | Windows default |
+| --- | --- | --- |
+| Configuration and saved queries | `~/.config/ignatius` | `%APPDATA%\ignatius` |
+| Data, history and logs | `~/.local/share/ignatius` | `%LOCALAPPDATA%\ignatius` |
+
+`IGNATIUS_CONFIG_DIR`, `IGNATIUS_DATA_DIR` and the Unix XDG variables can
+override these locations. Never back up only the defaults when
+`ignatius config paths` reports an override.
+
+### Side-by-side upgrade
+
+1. Close running Ignatius processes and preserve the currently working binary
+   and its verbose identity. Do not overwrite it yet.
+2. Back up the configuration and data paths, including saved queries, history,
+   logs and any migration backups that already exist. On Unix, preserve file
+   permissions; on Windows, keep the backup in a location accessible only to
+   the intended user.
+3. Verify the new archive and extract it into a new version-specific location
+   using the installation procedure above.
+4. Run `version --verbose`, `doctor --json`, `config validate` and a non-secret
+   `connect --check` from the new binary. Keep the old binary available until
+   these checks and the required platform evidence pass.
+5. If the new binary reports an older configuration schema, run
+   `config migrate --dry-run` first. Review the named steps, then run
+   `config migrate` only after the backup exists. A real migration creates a
+   timestamped backup beside `config.toml`; a dry run writes nothing.
+6. Switch the PATH entry or per-user launcher to the new version only after
+   the checks pass. Do not delete the old binary or backup as part of the
+   upgrade.
+
+Configuration writes are atomic. A crash during a write leaves the previous
+file intact, and a migration refuses to proceed when the file is invalid or is
+from a newer schema than the binary understands. A missing configuration file
+is valid and uses defaults. There is no result cache to migrate; result rows
+are kept in memory unless the user explicitly exports them.
+
+### Failed upgrade repair
+
+If the new binary fails to start, reports a configuration error or fails its
+non-secret connection check, keep the new version directory and diagnostics for
+the evidence record. Switch the PATH or launcher back to the old binary. Do not
+delete or edit the only copy of the configuration or data directory while
+diagnosing the failure. If a migration already ran, restore the timestamped
+pre-migration configuration backup before starting the older binary. If local
+state is implicated, restore the separately backed-up data directory only
+after first moving the failed state aside so it remains recoverable.
+
+For a syntax or validation error with no known-good backup, run
+`ignatius config paths`, copy the file aside, and use `config validate` to guide
+the repair. Starting with defaults is a last-resort recovery path, not an
+upgrade step. Do not use `config init --force` until the existing file has been
+copied somewhere safe.
+
+### Rollback
+
+Rollback means returning both the binary and the configuration schema to the
+last known-good pair:
+
+1. Stop the new binary and keep its version directory and logs.
+2. Restore the previous PATH entry or launcher without overwriting the new
+   binary.
+3. If configuration was migrated, move the current `config.toml` aside and
+   restore the matching timestamped migration backup or external backup.
+4. Restore data only if the old binary cannot read the current state; keep the
+   current data under a dated recovery name rather than deleting it.
+5. Run the old binary's `version --verbose`, `config validate` and
+   `connect --check`, then record the rollback reason and the exact identities.
+
+If the old binary reports that the configuration schema is newer, the binary
+and configuration pair do not match; restore the older configuration backup or
+use a newer binary. Never make a downgrade appear successful by silently
+discarding a schema or state file. A rollback rehearsal is not complete until
+the prior binary starts, the configuration validates and the recovery outcome
+is recorded for the platform.
+
+## Non-publishing workflow dry run and authorization gate
+
+The local dry run on 2026-08-31 exercised the implemented packaging path for
+`aarch64-apple-darwin` at source revision
+`f84afda2eb6b332c2b9659ef5b83671fbbdc4f74`, explicitly labelled modified. A
+locked release build with identity `local-rehearsal-2026-08-31` produced the
+root-only archive `ignatius-0.1.0-aarch64-apple-darwin.tar.gz`, 3,010,634 bytes,
+with SHA-256
+`c7ba67b568ea803d9f6f7d8e1de802e25cdf539d1377618c76825d1683aa380d`.
+The repository validator accepted the blocked record, generated and verified
+the one-artefact manifest and checksum list, and accepted the exact four-file
+upload scope. Repeating the archive helper with the same binary and inputs
+produced identical bytes.
+
+The archive extracted to one root binary. Its identity, configuration paths
+and configuration validation passed; `doctor --json` reported seven checks OK,
+three expected skips and no failures. The network-disabled, digest-pinned
+Gitleaks v8.30.0 container scanned only the checked upload root and reported no
+leaks. These are local macOS and Docker results, not hosted workflow or
+cross-platform installation evidence. The temporary files were not retained as
+release evidence.
+
+The workflow contract still requires separate hosted Ubuntu, macOS and Windows
+target jobs. A local macOS sequence is not a hosted matrix run, and static YAML
+or shell validation is not evidence that a hosted runner built or installed
+the other targets. No hosted run, platform installation, upgrade or rollback
+evidence is recorded here.
+
+The readiness check exited 1 and named 13 blockers. It must remain blocked until
+the candidate has materialised complete evidence, clean and correctly tagged
+source, the full target set, dependency inventory, verified signatures,
+verified provenance, platform installation and recovery evidence, and owner
+authorization. A checksum match or successful local build does not satisfy
+those gates.
+
+Before any future tag, signing operation, upload, release creation or package
+manifest change, the owner must record explicit authorization naming the exact
+product version, source revision, target set, artefact destinations and
+approved evidence retention boundary. This rehearsal contains no authorization
+and performs none of those external operations.
 
 ## Steps
 

@@ -7,9 +7,11 @@ ignatius version --verbose
 ignatius doctor --json
 ```
 
-Both are safe to share. `doctor` prints the names of any `PG*` variables that are
-set but never their values, because one of them is a password. Neither command
-contacts anything except, optionally, the database target you name.
+`version --verbose` contains build identity rather than user data. `doctor`
+prints the names of any `PG*` variables that are set but never their values,
+because one of them is a password, and is designed to omit credential values.
+Review its path-bearing details before sharing. `version` never probes a
+database; `doctor` probes one only when you provide an explicit target.
 
 If the problem involves a connection, add:
 
@@ -19,6 +21,62 @@ ignatius connect --check "postgres://user@host:5432/db"
 
 Its output contains the host, port, database and role you passed, and no
 password. Review it before sharing if the host name itself is sensitive.
+
+## Privacy-safe support identity bundle
+
+Support needs to identify the exact installation and the failure boundary, not
+the user's database contents. Start with:
+
+```bash
+ignatius version --verbose
+ignatius doctor --json
+```
+
+Use the output to fill this small bundle, or attach it to the release record
+when one exists:
+
+```text
+Product version:
+Source revision and cleanliness:
+Build identity:
+Target:
+Compiler:
+Platform:
+Archive basename and checksum, if applicable:
+Terminal and terminal size, if relevant:
+PostgreSQL version and transport posture, if the user chose to test a connection:
+Error category and exit code:
+Next action shown by the client:
+```
+
+The bundle must not contain a password, token, credential-file content, full
+connection URI, SQL text, result data, or an unrestricted environment dump.
+`doctor --json` is designed to omit credential values and reports names of
+relevant environment variables only, but its directory checks can contain local
+absolute paths. Replace home-directory and organisation-specific path segments
+before sharing. Review host names, database names, role names and terminal
+program names for local sensitivity as well.
+
+If the problem is connection-specific, add a reviewed `connect --check` result
+with a target that contains no password. It can distinguish address, TCP,
+PostgreSQL, TLS and session-fact failures without exporting SQL or result data.
+If logs are requested, provide only the relevant time window after review; do
+not attach `config.toml`, saved queries or `history.jsonl` by default. Those
+files are local support material and can contain environment-specific content.
+
+## Native authentication and dependency failures
+
+Feature 001a has no implemented native route yet. When that work is approved,
+support reports must describe only the safe failure boundary: target, platform,
+build or native dependency identity, error category, exit code and the next
+repair action. Do not paste tickets, tokens, passwords, native connection
+strings or raw provider diagnostics into a report. Provider text is untrusted
+and must be redacted and terminal-sanitised before it is shown or logged.
+
+A missing or incompatible native dependency must be reported as a repairable
+dependency failure, not silently retried through a weaker authentication route.
+This guidance records the privacy and failure contract; it does not claim that
+the dependency, authentication provider or packaging route has been selected.
 
 ## Logs
 

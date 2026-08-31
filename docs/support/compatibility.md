@@ -1,8 +1,9 @@
 # Compatibility
 
-**Verified on 2026-08-15.** This is the authoritative list of what this build
-does and does not support. Where something is unsupported, the program says so at
-the point of use rather than failing quietly.
+**Evidence reconciled on 2026-08-31.** This is the authoritative list of what
+this build does and does not support. Where something is unsupported, the
+program says so at the point of use rather than failing quietly. Individual
+rows retain the date and evidence class that actually proved them.
 
 ## PostgreSQL server versions
 
@@ -43,10 +44,11 @@ requested, because a bearer token is usable by whoever sees it.
 "Mechanism proven" and "live evidence" are separate columns on purpose. The
 route - run a program, read a token, present it as the password over TLS - is
 tested end to end against a real PostgreSQL server with TLS, using a provider
-defined in configuration. What has **not** happened is anyone running each
-built-in against that cloud's own database. Until that is done and dated here,
-the built-in commands are transcriptions of vendor documentation checked on
-2026-08-16, and no more than that.
+defined in configuration. It is only tested with TLS because it refuses to run
+without it. What has **not** happened is anyone running each built-in against
+that cloud's own database. Until that is done and dated here, the built-in
+commands are transcriptions of vendor documentation checked on 2026-08-16, and
+no more than that.
 
 The `aws` provider needs a region, which its own tool resolves from the
 environment and from AWS configuration. When it cannot, the failure says so.
@@ -58,8 +60,8 @@ Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`
 a `.pgpass` password file, or the prompt: when the server asks for a password and
 none was found, both the full-screen client and plain mode ask for one, without
 echoing it, and try again. Neither asks unless there is a terminal at both ends,
-so a script fails rather than hanging. The OS credential store does not exist
-yet, and a connection profile never holds a password.
+so a script fails rather than hanging. The OS credential store is rejected by
+ADR-0011, and a connection profile never holds a password.
 
 A password file that is readable by anyone but its owner is **not used**, and the
 client says so and gives the `chmod` that fixes it. A file that is found but
@@ -224,7 +226,38 @@ line-oriented alternative.
 
 Claims are stated by runner rather than by target triple, because the runner is
 what was actually exercised. Cross-architecture builds are release work and
-nothing has been released.
+nothing has been released. The target matrix below is the separate packaging
+contract; its rows are not runtime or installation evidence until a workflow
+run and the relevant platform checks are retained.
+
+## Release target matrix
+
+The non-publishing release workflow defines the first archive targets. A target
+is not inferred from the host that verifies it, and a target outside this table
+has no release artefact claim.
+
+| Target triple | Archive format | Workflow runner | Evidence class | Current state |
+| --- | --- | --- | --- | --- |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Automated packaging contract | Defined in `.github/workflows/release.yml`; no hosted workflow result retained here |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Automated packaging contract | Defined in `.github/workflows/release.yml`; no hosted workflow result retained here |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Automated packaging contract | Defined in `.github/workflows/release.yml`; no hosted workflow result retained here |
+
+Evidence classes have distinct meanings:
+
+- **Automated packaging contract** means the source-controlled workflow names
+  the target, builds it, records its identity, verifies its exact archive bytes
+  and defines run-scoped files to upload. It does not prove that a hosted run
+  succeeded, installation or hand use.
+- **CI platform evidence** means the existing CI runner built and tested the
+  application on that runner. It does not prove that a release archive was
+  produced for the exact target triple.
+- **Hand evidence** means an operator used the client on the named platform and
+  recorded the result. It is not supplied by a compile or a checksum.
+
+Until a target has both the required packaging evidence and the applicable
+installation and first-start evidence, it remains a candidate target rather
+than a released support claim. Signing, provenance, publication and package
+manager support are separate gates.
 
 Unix-domain sockets are supported on Unix only; requesting one elsewhere fails
 with an explanation. Owner-only file permissions are enforced on Unix; on Windows

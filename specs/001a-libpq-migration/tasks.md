@@ -3,9 +3,11 @@
 **Input**: [spec.md](./spec.md), [plan.md](./plan.md), [research.md](./research.md),
 [data-model.md](./data-model.md), [contracts/libpq-adapter.md](./contracts/libpq-adapter.md)
 
-This is a decision-gated task list. The checked planning tasks document the
-package that now exists. No implementation task is checked until the owner
-approves the migration gates and the evidence exists.
+**Closed without implementation by ADR-0012 on 2026-08-16.** The checked tasks
+record planning and boundary work that exists. The unchecked native tasks are
+retained as rejected historical scope, not as an active backlog: the actual
+enterprise requirement is cloud token authentication over the existing TLS
+driver, and GSSAPI, Kerberos and SSPI are not required.
 
 ## Phase 1: Planning package
 
@@ -52,11 +54,37 @@ connection loss, redaction and exit codes.
 - [ ] T025 Add CLI stream and exit-code parity coverage in `tests/cli_contract.rs`
 - [ ] T026 Verify pure application and query layers do not depend on the native adapter in `src/app/`, `src/query/` and `src/ui/`
 
+Preparation evidence on 2026-08-16: `cargo --locked test --test
+native_boundary_contract` passes a standard-library-only guard over the pure
+layers. It rejects direct selected-driver and FFI markers while allowing public
+`crate::postgres` contract types. This is a static boundary guard only; T026
+remains open until the approved adapter seam has a build/test comparison and
+the owner-approved migration gates exist.
+
 ## Phase 5: User Story 3 - Installation and release (P1)
 
 **Independent test**: Install the release candidate on a clean macOS, Windows
 and Linux environment and either start successfully or receive one repairable
 dependency diagnostic.
+
+### Feature 008 release boundary
+
+Feature 008 owns generic release identity, target-specific archive naming,
+archive byte checksums, provider-neutral inventory/signing/provenance states,
+and versioned installation and rollback guidance. Feature 001a owns only the
+native libpq-specific evidence that is required after its owner decision:
+library and TLS identity, loader trust and search path, architecture/runtime
+closure, selected discovery or bundling route, and repairable missing-
+dependency diagnostics. A generic checksum or successful Rust build does not
+prove any of those native facts.
+
+Accordingly, T027 implements only the selected native discovery or bundle
+check; T030 records the native clean-install and missing-dependency scenarios
+without duplicating Feature 008's generic archive checks; T031 documents the
+approved native route alongside, rather than inside, the generic installation
+contract; and T032 binds native identity to the generic artifact and checksum
+identity without replacing either contract. These tasks remain decision-gated
+and unchecked until the owner approves the route.
 
 - [ ] T027 [P] Implement the selected native dependency discovery or bundle check in `src/platform/`
 - [ ] T028 [P] Include the dependency identity in build and diagnostic evidence in `build.rs` and `src/cli/`
@@ -74,7 +102,14 @@ connection loss and shutdown without secret leakage or automatic replay.
 - [ ] T034 [P] Add native-driver failure mapping cases in `src/postgres/error.rs`
 - [ ] T035 Verify native handles and worker shutdown on every outcome in `tests/postgres_libpq.rs`
 - [ ] T036 Verify no SQL replay and truthful unknown outcomes in `tests/postgres_libpq.rs`
-- [ ] T037 Update data-handling and support guidance for native credentials in `docs/security/data-handling.md` and `docs/support/diagnostics.md`
+- [x] T037 Update data-handling and support guidance for native credentials in `docs/security/data-handling.md` and `docs/support/diagnostics.md`
+
+Evidence: the security and support documents now define native credentials,
+tickets, tokens, connection strings and provider diagnostics as sensitive or
+untrusted; require the existing non-printing secret, redaction and terminal
+sanitisation boundaries; and limit support identity to safe facts and repair
+actions. The text makes no authentication, dependency or packaging choice, and
+does not claim native implementation evidence.
 
 ## Phase 7: Polish and completion evidence
 
@@ -103,34 +138,10 @@ before release evidence. Phase 7 follows all approved story gates.
 - T033 and T034 can proceed in parallel because they have separate authorities.
 - T032 and T038 must wait for all platform and server evidence to be stable.
 
-## Shared-worktree coordination
+## Closure boundary
 
-- This package changes only `docs/architecture/decisions/0010-*`, the new
-  `specs/001a-libpq-migration/` directory and explicitly named roadmap/status/
-  verification documentation at planning time.
-- Live handoff on 2026-08-16: the Feature 005 SQL-editing and syntax-colouring
-  slice is integrated in `060380c`, including the editor, query lexer and UI
-  paths. Claude has since resumed an uncommitted statement-history/UI slice
-  across `src/app/`, `src/cli/`, `src/history.rs` and `src/ui/`. Those paths
-  must not be staged, reset, reformatted or edited by 001a while Claude
-  continues.
-- The Feature 008 release-experience planning package is committed in
-  `specs/008-release-experience/`. Codex owns its remaining planning artifacts.
-  Claude owns the active source slice listed above and must not edit or reset
-  the Feature 008 planning package without an explicit handoff.
-- Codex also owns the Feature 005 planning artifacts under
-  `specs/005-sql-editing/` and the 001a threat-model addendum in
-  `docs/security/threat-model.md`. The completed Feature 007 T030/T031
-  reservation has ended.
-- Do not create `.specify/feature.json` for this package while another feature
-  is active; its explicit directory is the source of truth for this planning
-  handoff.
-- No task authorises a commit, push, release or production change.
-
-## Implementation strategy
-
-1. Keep the decision gate visible and resolve the remaining requirement.
-2. Prove one adapter seam and one approved authentication route.
-3. Prove compatibility and lifecycle parity before changing the default route.
-4. Prove clean installation on every supported platform.
-5. Update roadmap and status only from release-grade evidence.
+- ADR-0012 closes this package without a native driver or FFI implementation.
+- The unchecked tasks remain historical rejected scope and must not be treated
+  as current implementation work.
+- Any future concrete GSSAPI, Kerberos or SSPI requirement must reopen the
+  architecture, security, packaging and platform-evidence decisions together.

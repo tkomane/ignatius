@@ -5,10 +5,10 @@
 
 ## Status and gate
 
-This is a planning package, not an implementation authorization. Work after
-the design artifacts is blocked until the owner confirms that the remaining
-enterprise authentication requirement justifies libpq and accepts the
-concurrency and distribution costs recorded in ADR-0010.
+**Closed without implementation by ADR-0012 on 2026-08-16.** The owner named
+Entra token authentication as the real enterprise requirement, and it uses the
+existing TLS connection with the token as a password. This planning package is
+retained as rejected historical scope; it authorizes no native source work.
 
 ## Summary
 
@@ -69,8 +69,10 @@ recorded in ADR-0009 and narrowed further by ADR-0010.
 
 ## Project Structure
 
-The following are proposed ownership locations. They must not be created until
-the decision gate is approved.
+The native adapter and migration-specific lifecycle locations below must not be
+created until the decision gate is approved. The boundary guard is a static
+check over existing pure layers and is explicitly allowed before that gate; it
+does not implement or select the native adapter.
 
 ```text
 src/postgres/
@@ -80,6 +82,7 @@ src/postgres/
   tls.rs                 Existing TLS policy and negotiated-state reporting
 tests/
   postgres_libpq.rs      Controlled enterprise-authentication and lifecycle tests
+  native_boundary_contract.rs  Decision-independent pure-layer boundary guard
   cli_contract.rs        Existing stream and exit-code contract, extended only after handoff
 docker/ or CI services/  Synthetic or controlled server fixtures, never credentials from users
 docs/architecture/decisions/
@@ -91,6 +94,11 @@ docs/operations/
 The reducer, query model, UI, plain mode, configuration schema and diagnostics
 shape remain consumers of the existing adapter contract. No new cross-module
 shortcut is allowed.
+
+The boundary guard is deliberately weaker than native-driver parity evidence: it
+rejects direct driver and FFI markers in pure layers while allowing public
+`crate::postgres` contract types. It does not select a wrapper, approve the
+session actor or prove an enterprise authentication route.
 
 ## Architecture
 

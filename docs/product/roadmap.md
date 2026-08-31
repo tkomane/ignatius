@@ -7,7 +7,7 @@ vertical slice that leaves the product usable.
 | --- | --- | --- |
 | 001 Foundation and vertical slice | **Implemented, macOS-verified** | Architecture, terminal lifecycle, connection, execution, cancellation, CLI contract, doctor |
 | 002 Object navigation | **Implemented** | Object tree, command palette, chord popup, breadcrumbs, object symbolism. Built ahead of the libpq migration at the owner's request; it touches no credential route, so the two do not overlap |
-| 001a libpq migration | Decision-gated, per ADR-0009 and ADR-0010 | Enterprise authentication only if GSSAPI, Kerberos or Windows SSPI remains required; `.pgpass`, service files, `verify-ca` and client certificates are already implemented natively |
+| 001a libpq migration | **Closed without implementation**, per ADR-0012 | The actual enterprise requirement is Entra token authentication over TLS, which uses the existing driver. GSSAPI, Kerberos and SSPI remain unsupported |
 | 003 Credential routes | **Implemented** | `.pgpass` and `pg_service.conf`, the driver-independent half of the connection experience |
 | 002 Connection experience and secrets | Mostly done | Profiles, password files, service files, TLS states, connection diagnostics and a password prompt in the client are in (`specs/009-connection-profiles/spec.md`). `ignatius config init` writes a starter file. Remaining: an OS credential store, which ADR-0011 puts to the owner rather than assuming |
 | 003 Delightful query loop | **Implemented** | Query jobs, transaction state, the command palette, a real editor with undo and word movement, syntax colouring, and a statement history with privacy controls (`specs/005-sql-editing/spec.md`, `specs/006-statement-history/spec.md`) |
@@ -30,7 +30,7 @@ vertical slice that leaves the product usable.
 
 | Risk | Likelihood | Impact | Response |
 | --- | --- | --- | --- |
-| The libpq migration weakens the single-binary distribution story, especially on Windows | High | Medium | ADR-0009 requires the packaging answer before the migration ships, not after |
+| A future Kerberos requirement could reopen native-driver packaging and weaken the single-binary distribution story | Low | Medium | ADR-0012 keeps the current self-contained driver; reopen the rejected migration only for a concrete requirement and reapply its packaging gates |
 | FFI introduces memory-safety defects the rest of the codebase is designed to exclude | Medium | High | `unsafe` confined to the adapter behind safe wrappers, each with a stated invariant; prefer a vetted wrapper crate |
 | Cross-platform behaviour diverges because only macOS is exercised in practice | High | High | CI matrix on every push; treat Windows and Linux claims as unproven until it runs |
 | A single-maintainer project stalls | Medium | High | Repository is the source of truth; specs, tasks and status make resumption cheap |

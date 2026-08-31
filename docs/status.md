@@ -1,6 +1,6 @@
 # Status
 
-**Updated: 2026-08-16.** This file is the resumption point. Read it, then check
+**Updated: 2026-08-31.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
@@ -55,8 +55,8 @@ proven by tests that were watched failing with the fix removed - and the first
 version of the movement test passed without the fix, so it was rewritten until
 it could fail.
 
-That handoff also unblocked `tests/editor_contract.rs`, Codex's acceptance
-contract for the same feature, which had been held behind `#[ignore]` waiting
+That handoff also unblocked `tests/editor_contract.rs`, the acceptance contract
+for the same feature, which had been held behind `#[ignore]` waiting
 for it. Two steps in it needed correcting and both are the same mistake in
 different clothes: it removed inherited indentation with forward-delete, which
 was a no-op that happened to leave the right text behind while Enter still
@@ -222,7 +222,7 @@ down and the PostgreSQL suites had skipped rather than passed.
 | Terminal restoration, in a pty | 3 passed |
 | Documentation against the build | 6 passed |
 | Cloud identity, against the TLS container | 4 passed |
-| Release contract suites (Codex's) | 70, 6 and 1 passed |
+| Release archive, native, core, notes and schema contracts | 3, 1, 71, 7 and 1 passed |
 | CI, all jobs | Green on macOS, Windows and Linux |
 
 Live evidence recorded in `docs/operations/verification.md`.
@@ -413,6 +413,6 @@ Nothing else is waiting on the owner. The four that were are closed.
 6. A terminal-restoration test for Windows, which needs ConPTY (T055a).
 7. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-8. Release packaging (Feature 008). Codex is working on this; the planning
-   package is in `specs/008-release-experience/` and the uncommitted work in the
-   tree is theirs.
+8. Complete the remaining Feature 008 evidence gates. The governed candidate
+   path is implemented, but hosted target runs, cross-platform installation and
+   recovery, inventory, signing, provenance and owner authorization remain.

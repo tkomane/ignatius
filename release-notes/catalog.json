@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "schema_version": 1,
+      "product_version": "0.1.0",
+      "source_revision": "f84afda2eb6b332c2b9659ef5b83671fbbdc4f74",
+      "source_state": "modified",
+      "build_identity": "local-rehearsal-2026-08-31",
+      "target_rows": [
+        {
+          "target": "aarch64-apple-darwin",
+          "platform": "macos",
+          "architecture": "aarch64",
+          "coverage": "covered",
+          "artefact_name": "ignatius-0.1.0-aarch64-apple-darwin.tar.gz"
+        },
+        {
+          "target": "x86_64-pc-windows-msvc",
+          "platform": "windows",
+          "architecture": "x86_64",
+          "coverage": "blocked",
+          "blocked_reason": "No retained hosted Windows candidate or installation evidence"
+        },
+        {
+          "target": "x86_64-unknown-linux-gnu",
+          "platform": "linux",
+          "architecture": "x86_64",
+          "coverage": "blocked",
+          "blocked_reason": "No retained hosted Linux candidate or installation evidence"
+        }
+      ],
+      "artefacts": [
+        {
+          "name": "ignatius-0.1.0-aarch64-apple-darwin.tar.gz",
+          "target": "aarch64-apple-darwin",
+          "format": "tar.gz",
+          "size_bytes": 3010634,
+          "checksum_algorithm": "sha256",
+          "checksum_status": "present",
+          "checksum": "c7ba67b568ea803d9f6f7d8e1de802e25cdf539d1377618c76825d1683aa380d",
+          "source_revision": "f84afda2eb6b332c2b9659ef5b83671fbbdc4f74",
+          "build_identity": "local-rehearsal-2026-08-31",
+          "signature_status": "not-configured",
+          "provenance_status": "not-configured"
+        }
+      ],
+      "notes_reference": {
+        "path": "CHANGELOG.md",
+        "entry": "[0.1.0]"
+      },
+      "evidence_reference": {
+        "path": "release-evidence/runs/local-rehearsal-2026-08-31/aarch64-apple-darwin/index.json",
+        "product_version": "0.1.0",
+        "source_revision": "f84afda2eb6b332c2b9659ef5b83671fbbdc4f74",
+        "status": "incomplete"
+      },
+      "status": "blocked",
+      "blockers": [
+        "Modified source state",
+        "Hosted Windows and Linux target artefacts are not retained",
+        "Dependency inventory is not materialised",
+        "Signature is not configured",
+        "Provenance is not configured",
+        "Platform installation and rollback evidence is incomplete",
+        "Owner authorization is absent"
+      ],
+      "state_history": [
+        {
+          "from": "draft",
+          "to": "candidate"
+        },
+        {
+          "from": "candidate",
+          "to": "blocked"
+        }
+      ]
+    }
+  ]
+}

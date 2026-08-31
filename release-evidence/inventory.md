@@ -161,9 +161,12 @@ The reviewer must be able to answer from the inventory and its linked record:
 - what is missing or unverifiable; and
 - where to find the next blocked action.
 
-The later semantic validator and release gate must reject mismatched or
-incomplete records. This contract does not claim that those executable checks
-exist yet.
+The semantic readiness gate now rejects mismatched or incomplete records through
+`cargo xtask release check PATH`. This contract still does not claim that
+inventory generation or provider-backed evidence generation exist yet. Archive
+checksum generation and exact-byte verification are implemented separately by
+the non-publishing T014 sidecar commands; they do not provide an inventory or
+provider-backed evidence result.
 
 ## Privacy boundary
 
@@ -172,12 +175,16 @@ Never retain or transmit:
 - passwords, tokens, private keys, signed URLs or credential-file contents;
 - SQL text, query history, result values or exported data;
 - complete environment dumps, process arguments or unrestricted build logs;
-- arbitrary home-directory paths that identify the operator or expose files.
+- arbitrary home-directory paths that identify the operator or expose files;
+- symlinks or path traversal that can resolve outside the declared evidence
+  root.
 
 If a tool emits any of these values, the generator must stop, discard the
 unretained output, report a blocked evidence state and require a sanitised rerun.
 Redaction is not a substitute for narrowing the generator's inputs.
 
-This document defines T017. Executable generation, mismatch blocking, fixtures
-and CI enforcement remain the later Feature 008 tasks listed in
-`specs/008-release-experience/tasks.md`.
+This document defines T017. Executable inventory generation, provider-backed
+evidence, fixtures beyond the current contract cases and CI enforcement remain
+the later Feature 008 tasks listed in `specs/008-release-experience/tasks.md`.
+Archive checksum production and exact-byte verification belong to T014 and are
+implemented separately from inventory generation.

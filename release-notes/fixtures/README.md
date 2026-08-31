@@ -14,6 +14,14 @@ Each JSON file is a one-record catalogue that uses
 - `mismatched-source.json` is structurally valid but explicitly blocked because
   the artefact and evidence source revisions do not match the release record.
 
-The schema checks shape and allowed vocabulary. A later semantic validator must
-check cross-entity equality, unique versions and the reasons represented by the
-blocked fixtures.
+The schema checks shape and allowed vocabulary. The semantic validator checks
+cross-entity equality, unique versions and the reasons represented by the
+blocked fixtures. The read-only `release-notes/validate.sh` wrapper adds the
+literal changelog-entry and cross-record uniqueness checks when a real catalogue
+is available.
+
+`changelog-with-preview-entry.md` is a synthetic changelog used only by the
+read-only `release-notes/validate.sh` contract test. It is not a release note
+authority and contains no production evidence. The companion negative
+changelog fixtures exercise body-only mentions, near-version headings and
+duplicate exact headings; all must fail the exact-heading rule.

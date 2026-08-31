@@ -59,6 +59,57 @@ may be what the user needed.
 `ignatius config paths` prints all of these. Deleting the configuration directory
 returns the program to a first-run state and loses nothing else.
 
+## Release evidence handling
+
+Feature 008 release evidence is separate from user configuration, query data and
+local support logs. The current non-publishing workflow may retain only bounded
+candidate artefacts, release records, checksum sidecars and safe identity or
+gate metadata needed to review one exact target. Examples include product
+version, source revision, working-tree state, target, compiler, build identity,
+archive basename, byte size, SHA-256 digest and explicit inventory, signature,
+provenance and readiness states.
+
+Release evidence must not contain passwords, tokens, credential-bearing URIs,
+SQL text, result rows, exports, configuration files, statement history,
+environment dumps, process arguments or unrestricted logs. A workflow must use
+explicit artefact, record and evidence paths rather than uploading the
+workspace or user-data directories. The provider-neutral inventory and
+signature/provenance contracts are defined in `release-evidence/inventory.md`
+and `release-evidence/README.md`; their presence is not evidence that those
+checks or evidence objects exist.
+
+The candidate staging root is constrained by the schema-1 allowlist in
+`release-evidence/scope.schema.json`: it contains a unique, non-empty list of
+staging-root-relative portable paths, and the checker requires exactly those
+ordinary files. Absolute or traversal paths, empty or dot components,
+backslashes, colons, symlinks, non-regular files and paths outside the root are
+rejected. This is only a file-set boundary; it does not scan secrets, generate
+an inventory, verify signing or provenance, invoke a hosted runner, upload an
+artefact or publish user data.
+
+A local rehearsal is labelled `rehearsal` or `blocked` and never `published`.
+Any hosted or long-term retention path for a live release, plus signing,
+provenance, SBOM storage or publication, remains decision-gated and requires
+owner-approved lifecycle, provider or offline mechanism where applicable, and
+authorization.
+
+## Native credentials and tickets
+
+ADR-0012 closed Feature 001a without a native adapter. Its retained conditional
+data-handling rule is still fixed: if a future GSSAPI, Kerberos or SSPI
+requirement reopens that work, credentials, tickets, tokens and native
+connection strings are secrets even when a provider describes them as
+metadata. Any such adapter must keep them behind the existing non-printing
+secret boundary and must never place them in configuration, history, logs,
+release evidence or support bundles.
+
+Native-driver diagnostics are untrusted text. They must pass through the same
+redaction and terminal-sanitisation paths as other server-supplied messages
+before display or logging. A support bundle may identify the product, source or
+build, target, native dependency and error category, but must contain no ticket,
+token, password, SQL text or result value. These rules do not select a provider,
+dependency route or authentication mechanism.
+
 ## The statement history
 
 Interactive sessions record what was run. Scripted `ignatius query` runs do not:
