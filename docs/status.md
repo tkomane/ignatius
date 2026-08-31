@@ -63,7 +63,8 @@ was a no-op that happened to leave the right text behind while Enter still
 inserted a bare newline. Backspace is what a person would press and what the
 implemented behaviour requires. The pty half also asserted only that
 `FROM orders AS o` appeared somewhere, which a line still carrying four
-inherited spaces satisfies; it now says the clause is top level.
+inherited spaces satisfies; it now says the clause is top level. The three
+contracts are active and pass in the normal focused test run.
 
 **Previous**: consolidation, and the bug it found. Five chords - the
 definition panel, dependencies, save, open and write - were documented, palette-
@@ -363,10 +364,10 @@ These are real and none of them is hidden anywhere else:
 11. **Feature 005 editor is closed.** Enter routes to
     `Editor::insert_newline()` and every movement ends the undo coalescing run,
     both proven by tests confirmed to fail without the fix. The acceptance
-    scenario the audit asked for exists in `tests/editor_contract.rs`, written
-    by Codex and held behind `#[ignore]` pending this handoff: an eight-line
-    statement typed, corrected, navigated and run through the reducer, and the
-    same journey through a real pty at 100 by 30. All three now pass.
+    scenario in `tests/editor_contract.rs` is active: an eight-line statement is
+    typed, corrected, navigated and run through the reducer, and the same
+    journey runs through a real pty at 100 by 30. All three tests pass, along
+    with the two focused keymap contracts.
 
 ## Decisions taken
 
@@ -409,11 +410,9 @@ Nothing else is waiting on the owner. The four that were are closed.
 5. The remaining experience roadmap in order: errors that point at the problem,
    a result grid that can be worked, finding your way without being told, a
    readable plan.
-6. An eight-line terminal acceptance scenario for the editor, the last item from
-   the Feature 005 audit.
-7. A terminal-restoration test for Windows, which needs ConPTY (T055a).
-8. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
+6. A terminal-restoration test for Windows, which needs ConPTY (T055a).
+7. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-9. Release packaging (Feature 008). Codex is working on this; the planning
+8. Release packaging (Feature 008). Codex is working on this; the planning
    package is in `specs/008-release-experience/` and the uncommitted work in the
    tree is theirs.

@@ -9,9 +9,13 @@
 **Tests**: Included because the feature specification defines independent
 acceptance scenarios and the editor is a recoverability boundary.
 
-**Status note**: Checked tasks are backed by the current committed source and
-the 2026-08-16 verifier. Open tasks are not permission to edit Claude's active
-source paths; they identify the remaining work and evidence.
+**Status note**: Checked tasks are backed by the committed source, the active
+acceptance contracts and the 2026-08-31 verifier.
+
+**Scope reconciliation (2026-08-31)**: `spec.md` is the current feature
+authority and includes colouring requirements FR-508 through FR-510, UX-505 and
+SC-504 through SC-505. The narrower exclusions in `plan.md` and `research.md`
+record the earlier design boundary and are superseded by the implemented spec.
 
 ## Phase 1: Setup and design package
 
@@ -47,8 +51,8 @@ eight-line statement in a real pty.
 - [x] T012 [US1] Route editor movement and page actions through the focus-aware reducer in `src/app/update.rs`
 - [x] T013 [US1] Bind movement and line-break actions with readable descriptions in `src/ui/keymap.rs`
 - [x] T014 [US1] Render line numbers, cursor position and a cursor-following window in `src/ui/layout.rs`
-- [ ] T015 [US1] Route Enter through `Editor::insert_newline` and add reducer coverage for indented input in `src/app/update.rs`
-- [ ] T016 [US1] Add the eight-line type, correction and run acceptance scenario in `tests/editor_contract.rs`
+- [x] T015 [US1] Route Enter through `Editor::insert_newline` and add reducer coverage for indented input in `src/app/update.rs`
+- [x] T016 [US1] Add the eight-line type, correction and run acceptance scenario in `tests/editor_contract.rs`
 
 **Checkpoint**: The P1 editing journey is complete only when T015 and T016
 pass, not merely when the model unit tests pass.
@@ -62,8 +66,8 @@ ambiguous history state.
 real action path.
 
 - [x] T017 [US2] Route undo and redo actions only when the editor has focus in `src/app/update.rs`
-- [ ] T018 [US2] End the undo coalescing run at every cursor movement in `src/app/editor.rs`
-- [ ] T019 [US2] Add reducer coverage for undo grouping across a cursor movement in `src/app/update.rs`
+- [x] T018 [US2] End the undo coalescing run at every cursor movement in `src/app/editor.rs`
+- [x] T019 [US2] Add reducer coverage for undo grouping across a cursor movement in `src/app/update.rs`
 
 **Checkpoint**: A movement cannot silently merge edits on opposite sides of the
 cursor.
@@ -78,7 +82,7 @@ undo from the editor focus.
 
 - [x] T020 [US3] Bind Ctrl and Alt word movement plus word deletion in `src/ui/keymap.rs`
 - [x] T021 [US3] Cover identifier and punctuation word boundaries in `src/app/editor.rs`
-- [ ] T022 [US3] Add focused keymap tests for Home, End, PageUp, PageDown, Delete, undo, redo and Ctrl/Alt word movement in `src/ui/keymap.rs`
+- [x] T022 [US3] Add focused keymap tests for Home, End, PageUp, PageDown, Delete, undo, redo and Ctrl/Alt word movement in `tests/keymap_contract.rs`
 
 **Checkpoint**: Every advertised editing key has a tested action and description.
 
@@ -86,8 +90,17 @@ undo from the editor focus.
 
 - [x] T023 [P] Record the committed Feature 005 implementation and its evidence boundary in `docs/status.md`
 - [x] T024 [P] Record 402 library, 31 CLI and 33 integration tests in `docs/operations/verification.md`
-- [ ] T025 Run the full verifier after Claude's active `src/query/*` and `src/ui/*` work is stable and record the resulting counts in `docs/operations/verification.md`
-- [ ] T026 Update the Feature 005 status only after T015, T016, T018, T019 and T022 are complete in `specs/005-sql-editing/spec.md`
+- [x] T025 Run the full verifier after the shared source work is stable and record the resulting counts in `docs/operations/verification.md`
+
+Evidence on 2026-08-31: the active editor contract passes three tests. They
+cover inherited indentation and execution through the reducer, undo grouping
+across movement, and the eight-line correction journey through a real Unix pty
+at 100 by 30. The keymap contract passes two tests covering Home, End, PageUp,
+PageDown, Delete, undo, redo and both Ctrl/Alt word-movement directions. The
+full verifier passes formatting, lints, 513 unit/layout tests, 38 CLI contract
+tests and 38 PostgreSQL integration tests.
+
+- [x] T026 Update the Feature 005 status only after T015, T016, T018, T019 and T022 are complete in `specs/005-sql-editing/spec.md`
 
 ## Dependencies and execution order
 
@@ -95,10 +108,9 @@ undo from the editor focus.
 - Phase 2 precedes reducer and presentation work.
 - User Story 1 and User Story 2 depend on the model; User Story 3 reuses the
   movement and deletion primitives.
-- T015 and T018 are source-owner follow-ups and block a complete Feature 005
-  claim.
-- T016 and T022 can proceed after the source paths are handed off and stable.
-- T025 must run after all active shared-worktree source changes settle.
+- T015 and T018 precede the reducer and terminal acceptance checks.
+- T016 and T022 preserve the user-facing behaviour as integration contracts.
+- T025 follows all source work and records the complete local gate.
 
 ## Parallel opportunities
 
@@ -106,27 +118,13 @@ undo from the editor focus.
   spec is stable.
 - T007 through T011 are separate model concerns but share `src/app/editor.rs`
   and should be integrated serially by its owner.
-- T016 is a separate test file and T022 is a keymap test scope; they can run in
-  parallel only after Claude's source handoff.
+- T016 and T022 are separate test files and can run in parallel.
 - T023 and T024 are evidence documentation and can be updated alongside source
   review, but must not overstate focused or platform evidence.
 
-## Shared-worktree coordination
+## Current boundary
 
-- Codex owns the Feature 005 planning artifacts in this directory:
-  `plan.md`, `research.md`, `data-model.md`, `quickstart.md`,
-  `checklists/requirements.md` and `tasks.md`.
-- Claude owns the current source changes in `src/query/highlight.rs`,
-  `src/query/mod.rs`, `src/query/statements.rs`, `src/ui/layout.rs` and
-  `src/ui/theme.rs`, plus any source follow-up in the committed editor slice.
-- Do not stage, reset, reformat or overwrite the other agent's paths. Recheck
-  `git status --short` before any edit or verification.
-- No task authorises a commit, push, release or production change.
-
-## Implementation strategy
-
-1. Fix the P1 Enter path and prove the eight-line scenario.
-2. Fix undo boundaries and prove reducer-level recovery.
-3. Add focused keymap evidence for the P2 word-editing surface.
-4. Re-run the full verifier after Claude's syntax-highlighting work settles.
-5. Mark the spec complete only when the evidence, not code presence, supports it.
+- Feature 005 is complete in the current spec and committed source.
+- The acceptance contracts remain separate from Windows ConPTY and screen-reader
+  hand evidence, which are tracked by their platform features.
+- No result here upgrades a Unix pty run into Windows terminal evidence.
