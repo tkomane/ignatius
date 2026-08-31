@@ -5,7 +5,7 @@
 //! revision from git, the build identity from CI, and the target triple from cargo.
 //! A rebuild of the same source produces the same product version.
 
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 fn main() {
     let revision = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
@@ -32,9 +32,29 @@ fn main() {
     println!("cargo:rustc-env=IGNATIUS_RUSTC_VERSION={rustc}");
     println!("cargo:rerun-if-env-changed=IGNATIUS_BUILD_IDENTITY");
     println!("cargo:rerun-if-changed=build.rs");
-    // Rebuild when HEAD moves so the recorded revision cannot go stale.
+    // The identity includes Git state, so a source edit, staged change, branch
+    // commit or packed ref change must rebuild the metadata before the binary is
+    // considered current. Listing Git's known worktree files avoids watching
+    // `target/`, while the index and ref files cover changes Cargo cannot infer
+    // from a Rust source dependency.
+    for path in git_lines(&["ls-files", "-co", "--exclude-standard"]) {
+        watch_if_exists(&path);
+    }
     if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
-        println!("cargo:rerun-if-changed={dir}/HEAD");
+        watch_if_exists(&format!("{dir}/HEAD"));
+        watch_if_exists(&format!("{dir}/index"));
+        watch_if_exists(&format!("{dir}/packed-refs"));
+    }
+    if let Some(reference) = git(&["symbolic-ref", "--quiet", "HEAD"])
+        && let Some(path) = git(&["rev-parse", "--git-path", &reference])
+    {
+        watch_if_exists(&path);
+    }
+}
+
+fn watch_if_exists(path: &str) {
+    if Path::new(path).exists() {
+        println!("cargo:rerun-if-changed={path}");
     }
 }
 
@@ -44,4 +64,18 @@ fn git(args: &[&str]) -> Option<String> {
         return None;
     }
     Some(String::from_utf8(out.stdout).ok()?.trim().to_owned())
+}
+
+fn git_lines(args: &[&str]) -> Vec<String> {
+    let Some(out) = Command::new("git").args(args).output().ok() else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
 }

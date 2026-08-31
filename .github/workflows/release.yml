@@ -1,0 +1,211 @@
+name: Release candidate archives
+
+# This workflow prepares target-specific, non-publishing candidate bundles.
+# It never creates a GitHub Release, signs an artefact, or distributes one.
+# Each matrix job emits a per-target record; a later aggregation and readiness
+# gate are required before a multi-target candidate can be called complete.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to package"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  archive:
+    name: Archive ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            format: tar.gz
+            binary: ignatius
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            format: tar.gz
+            binary: ignatius
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            format: zip
+            binary: ignatius.exe
+
+    steps:
+      - name: Check out the requested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build inputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build the target binary
+        env:
+          IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.target }}
+        run: cargo build --locked --release --target "${{ matrix.target }}"
+
+      - name: Package and verify the candidate
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          FORMAT: ${{ matrix.format }}
+          BINARY: ${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+
+          # RUNNER_TEMP is native on Windows; cygpath makes it usable by the
+          # Git Bash shell used for the shared packaging and verification path.
+          if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+            if ! command -v cygpath >/dev/null 2>&1; then
+              echo "cygpath is required on Windows for the shared release path" >&2
+              exit 1
+            fi
+            release_root="$(cygpath -u "$RUNNER_TEMP")/ignatius-release/$TARGET"
+          else
+            release_root="$RUNNER_TEMP/ignatius-release/$TARGET"
+          fi
+          bundle="$release_root/bundle"
+          artefacts="$release_root/artefacts"
+          record_dir="$release_root/record"
+          evidence="$release_root/evidence"
+          mkdir -p "$bundle" "$artefacts" "$record_dir"
+
+          if command -v python3 >/dev/null 2>&1; then
+            python_bin=python3
+          elif command -v python >/dev/null 2>&1 && python --version 2>&1 | grep -Eq '^Python 3(\.|$)'; then
+            python_bin=python
+          else
+            echo "a Python 3 interpreter is required for deterministic archive creation" >&2
+            exit 1
+          fi
+          archive_script="$PWD/scripts/create-release-archive.py"
+          test -f "$archive_script"
+
+          version="$(cargo pkgid -p ignatius | sed -n 's/.*#ignatius@//p')"
+          test -n "$version"
+          binary_path="target/$TARGET/release/$BINARY"
+          test -f "$binary_path"
+          test ! -L "$binary_path"
+          cp "$binary_path" "$bundle/$BINARY"
+
+          archive_stem="ignatius-${version}-${TARGET}"
+          case "$FORMAT" in
+            tar.gz)
+              archive_name="$archive_stem.tar.gz"
+              ;;
+            zip)
+              archive_name="$archive_stem.zip"
+              ;;
+            *)
+              echo "unsupported workflow archive format: $FORMAT" >&2
+              exit 1
+              ;;
+          esac
+          "$python_bin" "$archive_script" \
+            --format "$FORMAT" \
+            --source-dir "$bundle" \
+            --binary "$BINARY" \
+            --output "$artefacts/$archive_name"
+          test -s "$artefacts/$archive_name"
+
+          size_bytes="$(wc -c < "$artefacts/$archive_name" | tr -d '[:space:]')"
+          run_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          build_identity="ci/${run_key}/${TARGET}"
+          # Retries change technical build and evidence identity only. Keep
+          # one release-note identity for each product version.
+          notes_entry="release candidate ${version}"
+          evidence_path="release-evidence/runs/${run_key}/${TARGET}/release-record.json"
+
+          cargo --locked xtask release generate \
+            --output "$record_dir/release-record.json" \
+            --target "$TARGET" \
+            --artefact-name "$archive_name" \
+            --artefact-format "$FORMAT" \
+            --artefact-size "$size_bytes" \
+            --notes-entry "$notes_entry" \
+            --evidence-path "$evidence_path" \
+            --build-identity "$build_identity" \
+            --artefact-path "$artefacts/$archive_name"
+
+          cargo --locked xtask release manifest generate \
+            --record "$record_dir/release-record.json" \
+            --artefact-dir "$artefacts" \
+            --output-dir "$evidence"
+
+          cargo --locked xtask release manifest verify \
+            --record "$record_dir/release-record.json" \
+            --artefact-dir "$artefacts" \
+            --manifest "$evidence/release-manifest.json" \
+            --checksums "$evidence/SHA256SUMS"
+
+          # A candidate archive is useful only when the workflow also proves
+          # that the readiness gate still refuses it until the remaining
+          # source, evidence and owner gates are satisfied.
+          set +e
+          readiness_output="$(cargo --locked xtask release check "$record_dir/release-record.json" 2>&1)"
+          readiness_status=$?
+          set -e
+          printf '%s\n' "$readiness_output"
+          if [[ "$readiness_status" -eq 0 ]]; then
+            echo "candidate unexpectedly passed the readiness gate" >&2
+            exit 1
+          fi
+          for expected_blocker in \
+            "not in a publishable readiness state" \
+            "requires complete evidence" \
+            "without verified signature evidence" \
+            "without verified provenance evidence"; do
+            if [[ "$readiness_output" != *"$expected_blocker"* ]]; then
+              echo "readiness gate did not report expected blocker: $expected_blocker" >&2
+              exit 1
+            fi
+          done
+
+          # Upload only the four files this candidate contract produces. Keep
+          # the allowlist outside the upload root so the scope file itself is
+          # not mistaken for release evidence.
+          upload="$release_root/upload"
+          scope="$release_root/upload-scope.json"
+          mkdir -p "$upload/artefacts" "$upload/record" "$upload/evidence"
+          cp "$artefacts/$archive_name" "$upload/artefacts/$archive_name"
+          cp "$record_dir/release-record.json" "$upload/record/release-record.json"
+          cp "$evidence/release-manifest.json" "$upload/evidence/release-manifest.json"
+          cp "$evidence/SHA256SUMS" "$upload/evidence/SHA256SUMS"
+          printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS"]}\n' \
+            "$archive_name" > "$scope"
+          cargo --locked xtask release evidence-scope --root "$upload" --allowlist "$scope"
+
+          echo "Prepared non-publishing candidate: $archive_name"
+          echo "Record: $record_dir/release-record.json"
+          echo "Evidence: $evidence"
+          echo "Upload scope: $upload"
+
+      - name: Store run-scoped candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/ignatius-release/${{ matrix.target }}/upload
