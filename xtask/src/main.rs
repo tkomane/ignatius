@@ -15,8 +15,11 @@
 //! cargo xtask install-hooks  Run the gates before every push
 //! ```
 //!
-//! It has no dependencies on purpose: it runs before anything else is known to
-//! work, so it must not be able to fail for a reason of its own.
+//! The development tasks keep dependencies minimal: the release checker adds
+//! a local JSON parser and SHA-256 implementation and performs no network
+//! access.
+
+mod release;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -38,6 +41,12 @@ fn main() -> ExitCode {
         ["sql", statement, rest @ ..] => run_sql(statement, rest),
         ["test"] => test(),
         ["verify"] => verify(),
+        ["release", "check", path] => release::check(Path::new(path)),
+        ["release", "validate", path] => release::validate(Path::new(path)),
+        ["release", "generate", rest @ ..] => release::generate(rest),
+        ["release", "evidence-scope", rest @ ..] => release::evidence_scope(rest),
+        ["release", "manifest", "generate", rest @ ..] => release::manifest_generate(rest),
+        ["release", "manifest", "verify", rest @ ..] => release::manifest_verify(rest),
         ["install", rest @ ..] => install(rest),
         ["install-hooks"] => install_hooks(),
         other => Err(format!(
@@ -66,6 +75,19 @@ fn print_help() {
   cargo xtask sql \"SQL\"    Run one statement against it
   cargo xtask test         Everything, including the integration tests
   cargo xtask verify       Every gate, collecting failures, with a summary
+  cargo xtask release check PATH
+                           Check a non-publishing release catalogue
+  cargo xtask release validate PATH
+                           Validate a candidate or blocked release record
+  cargo xtask release evidence-scope OPTIONS
+                           Check an explicit candidate staging-root allowlist
+  cargo xtask release generate OPTIONS
+                           Generate one non-publishing release record
+                           (hash bytes with --artefact-path)
+  cargo xtask release manifest generate OPTIONS
+                           Generate release-manifest.json and SHA256SUMS
+  cargo xtask release manifest verify OPTIONS
+                           Verify sidecars and exact archive bytes
   cargo xtask install [--dir PATH]
                            Build a release binary and put it on PATH
   cargo xtask install-hooks
@@ -188,6 +210,22 @@ fn run_quiet(program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+/// Runs a quiet command and reports whether it succeeded with meaningful output.
+fn run_quiet_with_output(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .current_dir(repo_root())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|output| has_meaningful_stdout(output.status.success(), &output.stdout))
+        .unwrap_or(false)
+}
+
+fn has_meaningful_stdout(command_succeeded: bool, stdout: &[u8]) -> bool {
+    command_succeeded && stdout.iter().any(|byte| !byte.is_ascii_whitespace())
+}
+
 // --------------------------------------------------------------------- tasks
 
 fn db_up() -> Result<(), String> {
@@ -302,7 +340,7 @@ fn db_down() -> Result<(), String> {
 
 fn db_status() -> Result<(), String> {
     let compose = compose_file();
-    let running = run_quiet(
+    let running = run_quiet_with_output(
         "docker",
         &["compose", "-f", &compose.to_string_lossy(), "ps", "--quiet"],
     );
@@ -561,4 +599,24 @@ fn on_path(dir: &Path) -> bool {
 fn flush() {
     use std::io::Write;
     let _ = std::io::stdout().flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_meaningful_stdout;
+
+    #[test]
+    fn empty_compose_output_is_not_a_running_database() {
+        assert!(!has_meaningful_stdout(true, b"\n"));
+    }
+
+    #[test]
+    fn a_compose_container_id_is_running_database_evidence() {
+        assert!(has_meaningful_stdout(true, b"container-id\n"));
+    }
+
+    #[test]
+    fn a_failed_compose_query_is_not_running_database_evidence() {
+        assert!(!has_meaningful_stdout(false, b"container-id\n"));
+    }
 }

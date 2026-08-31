@@ -6,5 +6,9 @@ publish = false
 description = "Development and release tasks for Ignatius"
 
 [dependencies]
-# Deliberately none. This runs before anything else is known to work, so it must
-# not be able to fail for a reason of its own.
+# The release gate reads source-controlled JSON contracts portably on macOS,
+# Windows and Linux. It performs no network access and keeps the other
+# development tasks independent of the application crate.
+serde = "1.0.229"
+serde_json = { version = "1.0.145", features = ["arbitrary_precision"] }
+sha2 = "0.10.9"

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ignatius:release-evidence:scope:v1",
+  "title": "Ignatius release evidence staging scope",
+  "description": "An exact relative-file allowlist for one non-publishing candidate staging root.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*/$)[A-Za-z0-9][A-Za-z0-9._+/-]*$"
+      }
+    }
+  },
+  "$comment": "The executable checker additionally rejects absolute paths, empty or dot components, traversal, backslashes, colons, symlinks and non-regular files."
+}

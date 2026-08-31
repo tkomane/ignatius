@@ -118,6 +118,46 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  release-evidence:
+    name: Release evidence scope and secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Release contract tests
+        run: >-
+          cargo test --locked
+          --test archive_helper_contract
+          --test release_contract
+          --test release_notes_contract
+          --test release_schema_contract
+      - name: Build and verify a synthetic upload scope
+        id: release-scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/release-upload"
+          allowlist="$RUNNER_TEMP/release-upload-scope.json"
+          archive="ignatius-0.0.0-ci-x86_64-unknown-linux-gnu.tar.gz"
+          mkdir -p "$root/artefacts" "$root/record" "$root/evidence"
+          printf '%s\n' 'synthetic candidate archive' > "$root/artefacts/$archive"
+          printf '%s\n' '{"schema_version":1,"records":[]}' > "$root/record/release-record.json"
+          printf '%s\n' '{"schema_version":1,"artefacts":[]}' > "$root/evidence/release-manifest.json"
+          printf '%064d  %s\n' 0 "$archive" > "$root/evidence/SHA256SUMS"
+          printf '%s\n' "{\"schema_version\":1,\"files\":[\"artefacts/$archive\",\"record/release-record.json\",\"evidence/release-manifest.json\",\"evidence/SHA256SUMS\"]}" > "$allowlist"
+          cargo xtask release evidence-scope --root "$root" --allowlist "$allowlist"
+          printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
+      - name: Scan only the checked upload scope for secrets
+        run: |
+          # Gitleaks v8.30.0, pinned to the published multi-platform image digest on 2026-08-31.
+          docker run --rm --network none \
+            --volume "${{ steps.release-scope.outputs.root }}:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            dir --no-banner --redact /scan
+
   # Generated artefacts must be reproducible and must not drift from the source.
   drift:
     name: Generated artefact drift

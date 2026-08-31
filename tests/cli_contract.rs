@@ -9,6 +9,7 @@
 // Tests report skips to the developer running them; that is what stderr is for.
 #![allow(clippy::print_stderr)]
 
+use std::env;
 use std::process::{Command, Output};
 
 fn binary() -> Command {
@@ -50,6 +51,26 @@ fn stderr(output: &Output) -> String {
 
 fn code(output: &Output) -> i32 {
     output.status.code().expect("process exited normally")
+}
+
+fn command_stdout(command: &str, args: &[&str]) -> String {
+    let output = Command::new(command)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("run {command}: {error}"));
+    assert!(
+        output.status.success(),
+        "{command} {args:?} failed: {}",
+        stderr(&output)
+    );
+    stdout(&output)
+}
+
+fn identity_field<'a>(text: &'a str, label: &str) -> &'a str {
+    text.lines()
+        .find_map(|line| line.strip_prefix(label))
+        .map(str::trim)
+        .unwrap_or_else(|| panic!("missing {label} in {text}"))
 }
 
 #[test]
@@ -457,14 +478,45 @@ fn version_verbose_separates_product_source_and_build_identity() {
         .expect("run");
     assert_eq!(code(&output), 0);
     let text = stdout(&output);
-    for field in [
-        "source revision:",
-        "build identity:",
-        "target:",
-        "compiler:",
-    ] {
-        assert!(text.contains(field), "{field} missing from {text}");
-    }
+    assert!(
+        text.starts_with(&format!("Ignatius {}\n", env!("CARGO_PKG_VERSION"))),
+        "product version is not the Cargo version: {text}"
+    );
+
+    let source = identity_field(&text, "  source revision:");
+    let (revision, state) = source
+        .split_once(" (")
+        .unwrap_or_else(|| panic!("source identity lacks state: {source}"));
+    assert_eq!(
+        revision,
+        command_stdout("git", &["rev-parse", "HEAD"]).trim(),
+        "source revision is not the checked-out revision"
+    );
+    let expected_state = if command_stdout("git", &["status", "--porcelain"])
+        .trim()
+        .is_empty()
+    {
+        "clean"
+    } else {
+        "modified"
+    };
+    assert_eq!(state.strip_suffix(')'), Some(expected_state));
+
+    assert_eq!(
+        identity_field(&text, "  build identity:"),
+        env!("IGNATIUS_BUILD_IDENTITY")
+    );
+
+    let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+    let rustc_verbose = command_stdout(&rustc, &["-vV"]);
+    assert_eq!(
+        identity_field(&text, "  target:"),
+        identity_field(&rustc_verbose, "host:")
+    );
+    assert_eq!(
+        identity_field(&text, "  compiler:"),
+        command_stdout(&rustc, &["--version"]).trim()
+    );
 }
 
 #[test]
