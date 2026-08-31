@@ -227,13 +227,23 @@ down and the PostgreSQL suites had skipped rather than passed.
 Live evidence recorded in `docs/operations/verification.md`.
 
 Separately, and not the same class of evidence: a statically linked x86-64
-Linux binary built from `bdfc713` was run on a bare Alpine container with
-nothing installed, connected to PostgreSQL 18.4, and returned rows. It also
-refused a plain connection under `sslmode=verify-full` rather than downgrading,
-which is the first time that refusal has been seen from a distributed artefact
-rather than from a test. A Windows binary exists from CI run `31955237309` and
-has done nothing but start and report its own identity; no human has used
-either interactively yet.
+Linux binary built from `4bec4e3` was run on a bare Alpine container with
+nothing installed, connected to PostgreSQL 18.4, and returned rows. From that
+same artefact, three refusals and one success that matter:
+
+- it refused a plain connection under `sslmode=verify-full` rather than
+  downgrading;
+- it opened a TLS session with a credential supplied by a provider program;
+- it refused `sslmode=disable` for that provider without asking for the
+  credential at all.
+
+Those are the claims this feature rests on, made by something distributable
+rather than by a test binary. A Windows binary exists from CI run
+`31962001053` at the same revision and has done nothing but start and report
+its own identity. No human has used either interactively yet.
+
+Both are in `~/Downloads/ignatius-handoff-2026-08-16/` on the development
+machine with their digests and a README, for hand-verification on 2026-08-17.
 
 ## What is proven, and by what
 
