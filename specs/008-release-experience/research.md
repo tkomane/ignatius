@@ -4,8 +4,9 @@
 checksum, SBOM, signature or provenance claim is being made by this document.
 
 **Evidence checked**: 2026-08-16, against the current shared worktree at
-`060380c` plus the uncommitted Claude source slice. The source slice is outside
-this feature's ownership.
+`c24c8592ff8a24590969938e484e3a57abc44772` plus the current shared
+application and documentation worktree. Those paths are outside this
+feature's ownership.
 
 ## Decision 1: Keep release notes and release identity separate
 
@@ -160,8 +161,9 @@ version makes reuse, rollback and support tracing visible.
 4. Provenance format, builder identity and retention policy.
 5. Whether a release catalogue is needed in addition to the changelog, and if
    so its final schema and validator ownership.
-6. Feature 001a's remaining enterprise authentication requirement and its
-   native dependency packaging choice.
+6. Feature 001a is closed without implementation by ADR-0012. A future concrete
+   GSSAPI, Kerberos or SSPI requirement would reopen its native dependency and
+   packaging gates; the current release has no such dependency.
 
 No open gate is silently resolved by this package. The tasks make each gate
 visible and keep implementation work behind it.

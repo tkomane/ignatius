@@ -4,8 +4,9 @@ A terminal-native PostgreSQL workbench: a full-screen client for exploring, and
 the same binary as a scriptable CLI for automating.
 
 > **Status: early. Not released.** Verified on macOS against PostgreSQL 18.4.
-> Windows and Linux support is written but not yet verified. Nothing here is
-> signed, notarised, or published, and this README makes no claim that it is.
+> Windows and Linux have CI evidence, but full-screen hand verification is not
+> yet recorded. Nothing here is signed, notarised, or published, and this README
+> makes no claim that it is.
 
 ## Why this exists
 
@@ -161,10 +162,15 @@ ignatius completion zsh         # zsh, bash, fish, powershell
 ignatius version --verbose      # version, revision, build identity, target
 ```
 
-## What it does not do yet
+## What it does not do
 
-An OS credential store, GSSAPI and Windows integrated authentication, copying a
-value to the clipboard, and a password prompt in plain mode.
+There is no OS credential store by decision: password files remain compatible
+with `psql` and keep the binary dependency-light. GSSAPI, Kerberos and Windows
+SSPI are unsupported; the required Entra, AWS and Google Cloud routes use a
+short-lived token as the password over TLS. Copying a value through opt-in OSC
+52 remains planned. When a server asks for a password, both the full-screen
+client and plain mode prompt safely when a terminal is available; a script fails
+rather than waiting for input nobody can provide.
 `docs/support/compatibility.md` is the authoritative list, and the client tells
 you at the point of use rather than failing quietly.
 

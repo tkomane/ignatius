@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+No changes have been assigned to a version after the 0.1.0 candidate.
+
+## [0.1.0]
+
 - Removed a dead action. `Newline` had no key, no chord and no producer: Enter
   reaches the editor's line break through `Activate`, and had done since the
   beginning. Its handling arms were unreachable code in four match statements.
@@ -233,9 +237,9 @@ source can generate user-facing notes.
   than assumed from the requested `sslmode`, and is reported as unknown when it
   cannot be confirmed.
 - A TLS failure is never retried without TLS.
-- Security-relevant connection parameters this build does not implement
-  (`sslrootcert`, `sslcert`, `sslkey`, `channel_binding`, `gssencmode` and
-  others) fail the connection rather than being silently ignored.
+- Security-relevant connection parameters this build does not implement,
+  including `sslcrl`, `channel_binding` and `gssencmode`, fail the connection
+  rather than being silently ignored.
 - Control characters in database values and identifiers are escaped before
   display, so a hostile value cannot emit terminal control sequences.
 - Passwords are held in types that do not print themselves, and all displayable
@@ -247,19 +251,26 @@ source can generate user-facing notes.
   classified as a read, because it is a `SELECT`. It is a usability feature, not
   a security boundary, and every place it appears says so.
 
-- Verified on macOS only. Windows and Linux are exercised in CI but have not been
-  used by hand.
-- The PostgreSQL adapter is being moved to libpq (ADR-0009) for client
-  certificates, password files, service files and enterprise authentication.
-  Until then those are unsupported and say so at the point of use.
-- Tested against PostgreSQL 18.4 only; the supported window is 14 to 18.
-- `sslmode=verify-ca` is not implemented and refuses with an explanation.
-- No connection profiles, OS credential store, `.pgpass` or service file support.
-  `PGSERVICE`, `PGSERVICEFILE` and `PGPASSFILE` are reported as unread.
-- No object explorer, query history or export.
+- Windows and Linux build and pass their applicable CI suites, but the
+  full-screen client has not been used there by hand. Warp rendering, live
+  resize, VoiceOver, NVDA and Windows ConPTY restoration are also unverified.
+- PostgreSQL 14, 16 and 18 are exercised in CI and 18.4 locally on macOS.
+  Versions 15 and 17 are inside the supported window but have no recorded
+  server-backed run.
+- Built-in Entra, AWS and Google Cloud token commands have no live cloud
+  database evidence. The provider mechanism is proven against the disposable
+  TLS server; the built-in command transcriptions remain unverified on their
+  own services. Windows-native `az` and `gcloud` command discovery also remains
+  unverified.
+- GSSAPI, Kerberos and Windows SSPI are unsupported by decision. An OS
+  credential store is rejected by ADR-0011; supported credential routes are a
+  password file, environment injection, the connection string and the prompt.
+- Copying a selected value through opt-in OSC 52 is planned but not implemented.
 - The driver reports a row count rather than the full command tag, so the
   interface says "3 rows affected" rather than "INSERT 0 3".
 - Export supports csv, tsv and ndjson. json, markdown and table need the whole
   result before the first byte is correct, so they are refused for export rather
   than quietly buffering the result they were meant to avoid holding.
-- Nothing is signed, notarised or published.
+- Release archives, manifests and evidence gates have a non-publishing workflow
+  contract only. No hosted candidate run is retained, and nothing is signed,
+  notarised or published.

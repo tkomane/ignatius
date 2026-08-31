@@ -12,7 +12,7 @@ from the release record's checksum and CI gate results.
 ## Evidence unit
 
 One evidence unit covers exactly one artefact in one release record. A future
-machine-readable record must preserve at least these fields:
+provider-backed evidence object must preserve at least these fields:
 
 ```json
 {
@@ -44,9 +44,26 @@ machine-readable record must preserve at least these fields:
 }
 ```
 
+This nested example is the future signature/provenance evidence object, not the
+current flat release-catalogue record. The current source-controlled catalogue
+keeps `checksum_status`, `signature_status`, `provenance_status`, `size_bytes`
+and `build_identity` as explicit flat artefact fields in
+`release-notes/catalog.schema.json`; provider selection and richer evidence
+objects remain separate decision-gated work.
+
 Angle-bracket values are placeholders and must not occur in retained evidence.
 The `null` values in the example are an explicit not-configured state, not a
 claim of verification.
+
+For a complete release evidence index, these units are retained in a top-level
+`artefacts` array alongside `schema_version`, `product_version`,
+`source_revision` and the verified inventory result. The array must cover the
+release record's artefacts exactly once. Each unit's target, basename, size,
+checksum algorithm, checksum, source revision, build identity, checksum state,
+signature state and provenance state must match the release
+record; an absent or mismatched unit keeps the candidate blocked. If a unit
+declares `format`, it must be one of the supported release formats and must
+match the record; the provider-neutral shape does not require this field yet.
 
 ## Signature status
 
@@ -131,6 +148,46 @@ decision. `published` additionally requires explicit owner authorization and
 live publication evidence. Local rehearsal, a clean build or a green CI run
 never changes the publication state by itself.
 
+## Candidate staging scope preparation
+
+The local `xtask` boundary can prove the file-set contract before a shared CI
+workflow is changed:
+
+```text
+cargo xtask release evidence-scope \
+  --root PATH_TO_CANDIDATE_STAGING_ROOT \
+  --allowlist PATH_TO_SCOPE_JSON
+```
+
+`scope.schema.json` defines the allowlist shape: schema version `1` and an
+explicit, unique list of staging-root-relative portable file paths. The checker
+requires the observed staging root to contain exactly those ordinary files. It
+rejects missing or unexpected files, duplicate or traversal paths, symlinks,
+non-regular files and paths outside the declared root.
+
+This is local preparation evidence for T021 only. It does not scan secrets,
+upload an artefact, invoke a hosted runner or publish user data. T021 remains
+open until the shared CI workflow uses the same staging root for its scoped
+secret scan and upload boundary, with hosted workflow evidence retained.
+
+## Canonical evidence paths and workflow transport
+
+The `evidence_reference.path` in a release record is the semantic retained
+location for that record and must remain under `release-evidence/runs/<run>/<target>/`.
+The current non-publishing workflow places the checked four-file bundle inside
+an `upload/` transport envelope, with separate `artefacts/`, `record/` and
+`evidence/` directories. That envelope is not itself the record's canonical
+evidence path.
+
+Before an incomplete rehearsal can become a complete evidence bundle, one
+coordinated change must either promote or explicitly map the scoped upload
+contents into the declared canonical path before retention and validation, or
+change the versioned record and scope contract to make the transport path
+canonical. No current workflow step performs that promotion or mapping. Until
+the choice is approved and implemented, an upload-scope pass proves only the
+transport file set; it does not prove that `evidence_reference.path` is
+materialised or that the candidate is ready.
+
 ## Privacy and retention
 
 Retain evidence beside the immutable release record for the support life of the
@@ -149,14 +206,23 @@ If a verifier would need secret material to repeat a check, retain the public
 identity and the verification result, not the secret. A missing offline
 verification route is a blocked state and must be recorded as such.
 
+Evidence references must remain below the controlled `release-evidence/` root,
+use ordinary files rather than symlinks, and name only the bounded artefact,
+record and evidence paths for the candidate. They use canonical relative path
+components: no empty, dot or parent components and no trailing separator. A
+path that traverses outside the root or resolves through a symlink is a blocked
+state, even when the referenced bytes otherwise look valid.
+
 ## Provider decision gate
 
 Before a live signing or provenance workflow is enabled, an approved decision
 must name the provider or offline mechanism, identity lifecycle, key rotation,
 expiry, revocation, failure handling, retention location and independent
-verification command. That decision belongs in the release architecture and
-threat-model authorities; this contract intentionally leaves it open.
+verification command. ADR-0008 records those gates without selecting them; the
+threat model and data-handling guidance define the corresponding trust and
+privacy boundary. This contract intentionally leaves provider implementation
+open.
 
-This document defines T018. Executable generation, verification, mismatch
-tests, provider selection and CI enforcement remain later Feature 008 tasks in
-`specs/008-release-experience/tasks.md`.
+This document defines T018. Provider-backed signing/provenance generation,
+independent verification tooling, provider selection and CI enforcement remain
+later Feature 008 tasks in `specs/008-release-experience/tasks.md`.

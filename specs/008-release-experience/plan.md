@@ -1,6 +1,6 @@
 # Implementation Plan: Governed release experience
 
-**Branch**: `008-release-experience` | **Date**: 2026-08-16 | **Spec**:
+**Feature package**: `008-release-experience` | **Date**: 2026-08-16 | **Spec**:
 [spec.md](./spec.md)
 
 **Input**: Feature specification from
@@ -52,10 +52,10 @@ supported artefact in under 15 minutes, excluding download time.
 
 **Constraints**: No secret in source or artefacts; no automatic network activity;
 no silent overwrite, downgrade or replay; no claim stronger than its evidence;
-publication and signing require owner authorization; current Claude source WIP
-in `src/app/`, `src/cli/`, `src/config/`, `src/ui/`,
-`tests/cli_contract.rs`, `src/lib.rs` and `src/history.rs` is out of scope for
-this package.
+publication and signing require owner authorization; application behaviour in
+`src/app/`, `src/cli/`, `src/config/`, `src/ui/`, `src/lib.rs` and
+`src/history.rs` is out of scope for this package. T011 is the narrow exception
+for the authoritative identity assertion in `tests/cli_contract.rs`.
 
 **Scale/Scope**: One release record per version, one evidence bundle per
 candidate, one artefact/checksum entry per supported target, and one installation
@@ -112,10 +112,8 @@ Research decisions and unresolved owner gates are recorded in
 
 ## Proposed ownership and source structure
 
-This planning package owns only `specs/008-release-experience/` until an
-explicit implementation handoff. The following are future authorities and must
-not be edited by this package's documentation-only slice without a new scoped
-task:
+This package initially owned only `specs/008-release-experience/`. The scoped
+implementation handoffs recorded below now govern edits to these authorities:
 
 ```text
 CHANGELOG.md                         # release-note source
@@ -124,18 +122,86 @@ build.rs, src/branding.rs            # build identity contract
 docs/support/compatibility.md        # support matrix and claims
 docs/operations/release.md           # operator release procedure
 docs/operations/verification.md      # evidence and merge gates
-.github/workflows/ci.yml             # CI execution and release automation
-release-notes/                        # future release catalogue, if approved
+.github/workflows/ci.yml             # shared CI execution and gates
+.github/workflows/release.yml        # T013 non-publishing candidate jobs
+release-notes/                        # schemas, blocked catalogue and validators
 artifacts/                            # future local/CI packaging workspace only
 ```
 
-The active Phase 2 handoff is deliberately narrower: Codex owns
+The implemented Feature 008 boundary includes
 `release-notes/catalog.schema.json` and `release-notes/fixtures/` for T007 and
 T008, plus the provider-neutral `release-evidence/inventory.md` and
-`release-evidence/README.md` contracts for T017 and T018. It does not own
-`release-notes/catalog.json`, the semantic validator, shared release
-documentation, CI or publication workflow until those tasks are selected and
-ownership is rechecked.
+`release-evidence/README.md` contracts for T017 and T018. The implemented
+T014/T015/T019/T020 boundary also owns `xtask/src/release.rs`, its minimal command
+registration and parser/hash dependencies, `Cargo.lock`,
+`release-notes/release-manifest.schema.json`, and `tests/release_contract.rs`.
+The completed T027-T028 slice also owns the blocked
+`release-notes/catalog.json`, its exact version heading in `CHANGELOG.md`, the
+read-only `release-notes/validate.sh` wrapper and the corresponding contracts.
+It records evidence and does not publish. The publication boundary remains
+separate. T013 owns the new `.github/workflows/release.yml` archive jobs and their run-scoped
+workflow evidence; readiness enforcement is the separate T015 slice, while
+signing and publication remain outside it. T012/T014/T015/T019/T020 also include the
+non-publishing `release generate`, `release validate` and `release manifest`
+commands; they hash only explicit archive bytes and do not publish. T009/T014
+own the candidate archive-name and checksum-contract section of
+`docs/operations/release.md`. T022, T024, T026, T033 and T034 own their named
+installation, recovery, diagnostic and rehearsal sections.
+
+The same boundary includes the T021 evidence-scope command,
+`release-evidence/scope.schema.json` and the narrow shared CI job that validates
+and secret-scans one synthetic upload root. It does not upload, publish or
+authorize a release.
+
+The selected T016 handoff additionally owns only the release-candidate identity
+and reproducibility section of `docs/operations/verification.md`; existing
+application and platform evidence in that document remains outside this slice.
+The selected T023 handoff additionally owns only the release target matrix
+section of `docs/support/compatibility.md`; existing runtime capability,
+server-version and terminal evidence remains outside this slice. The selected
+T022 and T024 handoffs additionally own only their new headings in
+`docs/operations/release.md`: platform installation/first start, and
+configuration/data preservation/upgrade/rollback respectively. T026 is now
+resolved in the same operator boundary after ADR-0012 closed the native libpq
+route without implementation.
+The selected T025 handoff additionally owns only the new installation,
+upgrade and rollback evidence section in `docs/operations/verification.md`;
+existing application and platform evidence remains separately authoritative.
+The selected T029 handoff additionally owns only the new privacy-safe support
+identity heading in `docs/support/diagnostics.md`; existing troubleshooting and
+log guidance remains separately authoritative.
+
+The selected T033 handoff additionally owns only a new `Feature 008 release
+rehearsal evidence` heading in `docs/operations/verification.md`; historical
+application evidence, T016 release identity evidence and T025 installation
+rows remain separately authoritative. The selected T034 handoff additionally
+owns only a new `Non-publishing workflow dry run and authorization gate`
+heading in `docs/operations/release.md`; existing procedure headings and the
+future native dependency diagnostics remain separately authoritative.
+
+The completed T030 implementation reconciles the README and compatibility
+authority for password prompts, the rejected OS credential-store route,
+unsupported GSSAPI/Kerberos/SSPI and cloud token authentication over TLS. It
+does not turn automated or local evidence into a hosted or hand-verification
+claim.
+
+The completed T032 implementation has a provider-neutral documentation slice in
+Feature 008 sections of `docs/security/threat-model.md` and
+`docs/security/data-handling.md`. It records the current source-to-evidence
+trust path and privacy boundary without selecting a signing, provenance or
+SBOM provider. T031 records those unresolved provider and authorization gates.
+
+T011 is consolidated in the authoritative `tests/cli_contract.rs` suite. Its
+exact assertions cover the Cargo version, Git revision and source state, build
+identity, Rust host target and compiler identity. `build.rs` retains the
+complementary Git invalidation logic, and the temporary disjoint review test
+was removed after promotion.
+
+The completed T010 handoff additionally owns only the native-dependency
+boundary section in `docs/operations/release.md` and the corresponding scope
+note in `specs/001a-libpq-migration/tasks.md`. It does not select, discover,
+bundle or load libpq, and it does not turn generic archive/checksum evidence
+into native dependency evidence.
 
 The current implementation work in `src/app/`, `src/cli/`, `src/config/`,
 `src/ui/`, `tests/cli_contract.rs`, `src/lib.rs` and `src/history.rs` is
@@ -181,20 +247,23 @@ to the evidence class that proves it.
 
 ## Dependency and collision gates
 
-- Feature 001a owns only libpq-specific native dependency discovery,
-  enterprise-authentication packaging and its clean-install evidence. Feature
-  008 owns the generic release record, checksums, inventories, signing/
-  provenance decision gate and upgrade contract.
+- ADR-0012 closed Feature 001a without implementation. Feature 008 owns the
+  generic release record, checksums, inventory contract, signing/provenance
+  decision gate and upgrade contract without adding a native dependency.
 - No task in this package may add a native library, change the adapter, or edit
-  Claude's active source paths.
-- Shared authorities such as the changelog, release procedure, verification
-  record and CI workflow are deferred until ownership is explicitly agreed and
-  the relevant task is selected.
+  application behaviour outside the explicit T011 identity assertion.
+- Shared authorities such as the changelog, verification record and CI workflow
+  remain limited to the task boundaries recorded in the ownership section.
 - The Spec Kit feature pointer is temporary tooling state only and must be
   removed after generation so another active feature cannot be redirected.
 
 ## Complexity Tracking
 
-No complexity exception is approved. A separate release host, package manager,
+No complexity exception is approved. T012, T014, T019 and T020 add only
+`serde`, `serde_json` and `sha2` to the development-task package because a
+portable generation/semantic/checksum gate must parse the source-controlled
+JSON contract, reject duplicate members and hash exact archive bytes on macOS,
+Windows and Linux; it performs no network access and does not change the
+application dependency graph. A separate release host, package manager,
 signing provider or catalogue generator requires a decision record and a
 revised scope before it is introduced.

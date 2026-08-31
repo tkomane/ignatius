@@ -70,14 +70,60 @@ other than the database connection.
 - Guaranteeing that a secret is gone from memory. Zeroing is best-effort and no
   userspace program can promise more.
 
+## Feature 008 release evidence trust path
+
+The current Feature 008 release path is a non-publishing evidence chain:
+
+```text
+source revision and lockfile -> build identity -> exact target archive
+  -> SHA-256 sidecars -> release record -> retained evidence -> operator review
+```
+
+The chain makes the facts and their boundaries visible, but it does not create
+trust by itself. Source control, a local build, a workflow record and a checksum
+are separate evidence classes. A checksum proves the exact archive bytes and
+basename; it does not prove signing, provenance, platform installation or
+publication. The release record must keep product version, source revision,
+working-tree state, build identity, target, archive size and digest bound to the
+same candidate.
+
+This boundary follows ADR-0008 and the provider-neutral contracts in
+`release-evidence/README.md` and `release-evidence/inventory.md`.
+The schema-1 allowlist in `release-evidence/scope.schema.json` constrains the
+staging file set; it is separate from secret scanning, signing, provenance
+verification and publication.
+
+Current retained evidence may contain safe identity and gate facts such as the
+product version, source revision, target, compiler, archive basename and size,
+digest, build identity, verification result and explicit status values. Signature
+and provenance states such as `not-configured`, `unsigned`, `missing`, `invalid`,
+`mismatch` and `expired` remain blocking as applicable. `declared`, `observed`
+and `blocked` evidence levels do not substitute for verification; a `verified`
+level requires the exact binding checks.
+It must not contain passwords, tokens, SQL text, result rows, configuration
+files, environment dumps, unrestricted logs or credential-bearing connection
+strings. Local, hosted and hand evidence remain distinct, and a candidate
+remains blocked while the inventory, signature, provenance or owner
+authorization gates are absent. Only verified signature and provenance states
+may contribute to `ready`, and `published` additionally requires explicit owner
+authorization and live publication evidence.
+
+The current release workflow is deliberately unsigned, unattested and
+non-publishing. Until the unresolved decision gates are resolved and an
+approved signing, provenance and SBOM trust path is evidenced, the residual
+supply-chain risk remains explicit rather than being hidden behind a successful
+build or checksum.
+
 ## Feature 001a addendum: native adapter and enterprise credentials
 
 ### Status and boundary
 
-Feature 001a remains decision-gated. The owner must first confirm that GSSAPI,
-Kerberos or Windows SSPI is still required and approve the packaging and
-serialized-session decisions in the associated ADRs. No native dependency,
-enterprise credential route or loader is implemented by this addendum.
+ADR-0012 closed Feature 001a without implementation after the owner identified
+Entra token authentication as the actual enterprise requirement. No native
+dependency, FFI boundary or loader was introduced. The controls below are
+retained as the historical gate that would apply if a real GSSAPI, Kerberos or
+Windows SSPI requirement reopens the decision; they are not current release
+prerequisites.
 
 If the migration is approved, native-driver knowledge remains inside
 `src/postgres`. The reducer, query model, UI, plain mode, configuration schema
@@ -151,9 +197,9 @@ below.
 | SEC-1003 | No authentication or TLS downgrade and no automatic replay | Server-backed refusal, cancellation and connection-loss tests with exact outcome wording |
 | SEC-1004 | Bounded loader path, architecture/symbol validation and explicit missing-dependency failure | Clean macOS, Windows and Linux installation evidence plus dependency identity and mismatch tests |
 
-These controls are prerequisites for implementation, not implementation claims.
-T008, T010 and T011 remain owner or evidence gates; no Phase 3 source task is
-authorized by this addendum.
+These controls were prerequisites for an implementation that ADR-0012 rejected.
+The former T008, T010 and T011 gates were never approved, and no Phase 3 native
+source task is authorized by this retained addendum.
 
 ## Verification
 
