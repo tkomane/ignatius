@@ -27,19 +27,27 @@ published release, so this is not published-version upgrade evidence.
 The same exact hosted binary failed a release-blocking privacy audit:
 `IGNATIUS_LOG=debug` persisted the full synthetic SQL statement through
 `tokio_postgres` dependency tracing, contrary to the documented logging
-contract. The working-tree remediation now accepts only simple log levels,
-admits only Ignatius-owned events, redacts complete events before writing and
-records only a job id and character count. Its five focused logging unit tests
-and one live PostgreSQL CLI contract pass, but its build identity is explicitly
-local and modified. It is not a replacement release candidate.
+contract. Local commit `b2ac0a547957409514a2400202cd0207e8acfa65` now accepts
+only simple log levels, admits only Ignatius-owned events, redacts complete
+events before writing and records only a job id and character count.
 
-The exact current tree also passes `cargo --locked xtask verify`: formatting,
-clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38
-PostgreSQL 18.4 plain/TLS integration tests all passed with no skips. A further
-90 focused archive, documentation, native-boundary, release, release-notes and
-release-schema tests passed, and the catalogue wrapper validated the one blocked
-record against its exact changelog heading. Teardown removed the disposable
-containers, network and data; final database status was `Not running`.
+That clean commit passed `cargo --locked xtask verify`: formatting, clippy with
+warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL 18.4
+plain/TLS integration tests all passed with no skips. Its deterministic local
+arm64 archive reproduced exact bytes at 2,764,785 bytes and SHA-256
+`197690aceabecc45ad43dc61ebf9b998bd6c37eddbb511465279b4f3dc55b353`.
+The extracted binary's mode-0600 debug log contained only a job id and statement
+character count; the SQL sentinel, result label, synthetic credential and
+`tokio_postgres` target were absent. Record, manifest, checksum and four-file
+scope checks passed, while readiness remained blocked by six named gates.
+
+The earlier modified-tree run also passed five focused logging unit tests, one
+live PostgreSQL CLI contract and a further 90 focused archive, documentation,
+native-boundary, release, release-notes and release-schema tests. The catalogue
+wrapper validated the one blocked record against its exact changelog heading.
+Both disposable database runs removed their containers, network and data; final
+database status was `Not running`. The clean archive is local evidence only,
+not a hosted replacement release candidate.
 
 Every per-target record remains correctly blocked with no signature or
 provenance. T034 is complete. T033 remains open for a corrected clean hosted
