@@ -455,13 +455,23 @@ events, and emits only a job id plus statement character count. Five logging
 unit tests and one live PostgreSQL CLI contract pass. The remediation build is
 explicitly local and modified, not a clean hosted candidate.
 
-The exact current tree then passed the full Docker-backed verifier: formatting,
+The modified tree then passed the full Docker-backed verifier: formatting,
 clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38
 PostgreSQL 18.4 plain/TLS integration tests, with no skips. A further 90 focused
 archive, documentation/build, native-boundary, release, release-notes and
 release-schema tests passed, and the catalogue wrapper validated the one blocked
-record against its exact changelog heading. Teardown removed the disposable
-containers, network and data; final database status was `Not running`.
+record against its exact changelog heading.
+
+Local commit `b2ac0a547957409514a2400202cd0207e8acfa65` subsequently passed the
+same full verifier with no skips and reported clean source identity. Its
+deterministic arm64 archive reproduced exact bytes twice at 2,764,785 bytes and
+SHA-256 `197690aceabecc45ad43dc61ebf9b998bd6c37eddbb511465279b4f3dc55b353`.
+Record, manifest, checksum and four-file scope checks passed. The extracted
+binary's mode-0600 debug log contained only the job id and 66-character statement
+length; the SQL sentinel, result label, synthetic credential and dependency
+target were absent. Readiness remained blocked by six named gates. Each teardown
+removed the disposable containers, network and data; final database status was
+`Not running`.
 
 T033 remains open because the full quickstart still lacks a corrected clean
 hosted candidate, Windows/Linux hand verification, multi-target aggregation,
