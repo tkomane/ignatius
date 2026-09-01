@@ -465,6 +465,14 @@ binary's verbose identity and the exact target row used in the installation
 evidence. Do not record a successful first start as platform hand evidence until
 the binary has actually been opened on that platform.
 
+Before accepting a candidate, repeat one synthetic statement with
+`IGNATIUS_LOG=debug` and isolated configuration/data directories. The new log
+bytes must contain the internal job id and statement character count, and must
+not contain the statement sentinel, its result value, a credential marker or a
+dependency trace target such as `tokio_postgres`. Use only the disposable local
+database for this check. Any SQL or result value in the log rejects the candidate
+even when installation and connection checks pass.
+
 ## Configuration, data preservation and rollback
 
 An archive upgrade replaces a binary, not the user's configuration or local

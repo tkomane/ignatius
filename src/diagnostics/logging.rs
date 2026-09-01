@@ -10,17 +10,81 @@
 //!   keeping at most one previous file.
 
 use crate::diagnostics::redaction::redact_text;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use tracing_subscriber::EnvFilter;
+use tracing::{Event, Metadata, Subscriber};
+use tracing_subscriber::filter::{LevelFilter, Targets, filter_fn};
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::registry::LookupSpan;
 
 /// Maximum size of the active log file before it is rotated.
 pub const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
-/// Environment variable that enables and filters logging, for example
+/// Environment variable that enables logging at one explicit level, for example
 /// `IGNATIUS_LOG=debug`.
 pub const LOG_ENV: &str = "IGNATIUS_LOG";
+
+/// The only tracing target namespace allowed into the support log.
+///
+/// Dependency traces are outside our redaction and data-minimisation contract.
+/// In particular, database drivers may log complete statements at debug level.
+const INTERNAL_TARGET_PREFIX: &str = "ignatius";
+
+fn internal_filter(level: LevelFilter) -> impl Fn(&Metadata<'_>) -> bool + Clone {
+    let levels = Targets::new().with_target(INTERNAL_TARGET_PREFIX, level);
+    move |metadata| {
+        let target = metadata.target();
+        (target == INTERNAL_TARGET_PREFIX || target.starts_with("ignatius::"))
+            && levels.would_enable(target, metadata.level())
+    }
+}
+
+fn parse_level(filter: &str) -> io::Result<LevelFilter> {
+    match filter.trim().to_ascii_lowercase().as_str() {
+        "off" => Ok(LevelFilter::OFF),
+        "error" => Ok(LevelFilter::ERROR),
+        "warn" => Ok(LevelFilter::WARN),
+        "info" => Ok(LevelFilter::INFO),
+        "debug" => Ok(LevelFilter::DEBUG),
+        "trace" => Ok(LevelFilter::TRACE),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "IGNATIUS_LOG must be one of off, error, warn, info, debug or trace",
+        )),
+    }
+}
+
+/// Formats one complete event into memory, redacts it, then writes it.
+///
+/// Formatting the whole event before redaction matters: a streaming writer could
+/// split a credential across writes and let the pattern boundary escape review.
+#[derive(Debug, Default)]
+struct RedactingFormatter;
+
+impl<S, N> FormatEvent<S, N> for RedactingFormatter
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+{
+    fn format_event(
+        &self,
+        context: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result {
+        let mut rendered = String::new();
+        tracing_subscriber::fmt::format().format_event(
+            context,
+            Writer::new(&mut rendered),
+            event,
+        )?;
+        writer.write_str(&redact_text(&rendered))
+    }
+}
 
 /// Result of initialising logging, reported by `doctor` and `version --verbose`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +131,11 @@ pub fn init(log_dir: &Path) -> LoggingState {
 }
 
 fn start(path: &Path, filter: &str) -> io::Result<()> {
+    // Validate before touching the log path. A rejected value must not create,
+    // append to or rotate any file as a side effect.
+    let level = parse_level(filter)?;
+    let filter = filter_fn(internal_filter(level));
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -77,14 +146,14 @@ fn start(path: &Path, filter: &str) -> io::Result<()> {
         .open(path)?;
     crate::platform::restrict_to_owner(path)?;
 
-    let env_filter = EnvFilter::try_new(filter)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_writer(file)
-        .with_ansi(false)
-        .with_target(true)
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .event_format(RedactingFormatter)
+                .with_writer(file)
+                .with_ansi(false)
+                .with_filter(filter),
+        )
         .try_init()
         .map_err(|e| io::Error::other(e.to_string()))
 }
@@ -122,6 +191,60 @@ mod tests {
         assert_eq!(desc, "job=7 statement_chars=41");
         assert!(!desc.contains("secret_column"));
         assert!(!desc.contains("sensitive_table"));
+    }
+
+    #[test]
+    fn logging_excludes_dependencies_and_redacts_internal_events() {
+        const SECRET: &str = "synthetic-log-secret";
+        const DEPENDENCY_SQL: &str = "dependency-sql-marker";
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ignatius.log");
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .expect("open log");
+        let filter = filter_fn(internal_filter(LevelFilter::DEBUG));
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .event_format(RedactingFormatter)
+                .with_writer(file)
+                .with_ansi(false)
+                .with_filter(filter),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!(
+                target: "tokio_postgres::simple_query",
+                "{DEPENDENCY_SQL}"
+            );
+            tracing::debug!(
+                target: "ignatius_dependency",
+                "prefix-collision-marker"
+            );
+            tracing::debug!(
+                target: "ignatius::diagnostics::logging::test",
+                "internal-marker password={SECRET}"
+            );
+        });
+
+        let log = fs::read_to_string(path).expect("read log");
+        assert!(log.contains("internal-marker"), "{log}");
+        assert!(log.contains("[redacted]"), "{log}");
+        assert!(!log.contains(SECRET), "{log}");
+        assert!(!log.contains(DEPENDENCY_SQL), "{log}");
+        assert!(!log.contains("prefix-collision-marker"), "{log}");
+    }
+
+    #[test]
+    fn logging_rejects_non_level_filters_before_writing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ignatius.log");
+        for invalid in ["tokio_postgres=debug", "4"] {
+            let error = start(&path, invalid).expect_err("non-level filter must be refused");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(!path.exists(), "invalid filter created {}", path.display());
+        }
     }
 
     #[test]

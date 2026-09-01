@@ -201,6 +201,13 @@ reviewer should be able to answer:
 It must not contain a password, token, full connection URI, SQL text, result
 value or credential-file content. Use synthetic fixtures for negative tests.
 
+Run one synthetic statement with `IGNATIUS_LOG=debug` and isolated
+configuration/data directories. Review only the resulting test log. It must
+contain an Ignatius-owned job id and statement character count, and must not
+contain the SQL sentinel, result value, credential marker or a dependency trace
+target such as `tokio_postgres`. Target directives in `IGNATIUS_LOG` must fail
+closed. This is a release-blocking privacy check, not optional support evidence.
+
 ## Definition of done for this feature
 
 - The release record and manifest validators reject version, target, checksum

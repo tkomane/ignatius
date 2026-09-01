@@ -436,15 +436,42 @@ configuration and diagnostic checks on an arm64 Mac. No Windows/Linux runtime,
 upgrade, rollback, aggregation, inventory, signing, provenance or publication
 evidence was created.
 
-T033 remains open because the full quickstart still lacks Windows/Linux hand
-verification, macOS upgrade and rollback, multi-target aggregation, hosted
-repeat-build or cross-runner reproducibility, and the remaining supply-chain
-evidence. T034 is complete: the non-publishing workflow succeeded and
-`docs/operations/release.md` records both the rehearsal authorization and its
-explicit publication exclusions. T035 stays open: the roadmap still says `In
-planning`, and the status record does not call the candidate complete or ready.
-Those completion claims remain forbidden until every accepted release criterion
-has evidence.
+Follow-up on 2026-09-02 exercised the exact retained macOS binary from a
+version-specific directory against PostgreSQL 18.4 over localhost plain
+transport and TLS 1.3 with `verify-full`, opened and cleanly left the full-screen
+client in a real pseudo-terminal, replaced a side-by-side known-good launcher
+without changing configuration, saved-query, history or log bytes, and restored
+the prior binary and complete state after a controlled schema-999 failure. Both
+binaries report `0.1.0`, and the prior build was not published, so this is
+source-revision replacement and rollback evidence rather than a published
+semantic-version upgrade.
+
+That rehearsal also found a release-blocking defect in the exact hosted
+candidate: `IGNATIUS_LOG=debug` admitted `tokio_postgres` debug events and wrote
+the full synthetic SQL statement. The password did not appear, but the SQL
+violates the documented logging boundary. A focused working-tree remediation
+restricts logging to simple levels and Ignatius-owned targets, redacts complete
+events, and emits only a job id plus statement character count. Five logging
+unit tests and one live PostgreSQL CLI contract pass. The remediation build is
+explicitly local and modified, not a clean hosted candidate.
+
+The exact current tree then passed the full Docker-backed verifier: formatting,
+clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38
+PostgreSQL 18.4 plain/TLS integration tests, with no skips. A further 90 focused
+archive, documentation/build, native-boundary, release, release-notes and
+release-schema tests passed, and the catalogue wrapper validated the one blocked
+record against its exact changelog heading. Teardown removed the disposable
+containers, network and data; final database status was `Not running`.
+
+T033 remains open because the full quickstart still lacks a corrected clean
+hosted candidate, Windows/Linux hand verification, multi-target aggregation,
+hosted repeat-build or cross-runner reproducibility, and the remaining
+supply-chain evidence. T034 is complete: the non-publishing workflow succeeded
+and `docs/operations/release.md` records both the rehearsal authorization and
+its explicit publication exclusions. T035 stays open: the roadmap still says
+`In planning`, and the status record does not call the candidate complete or
+ready. Those completion claims remain forbidden until every accepted release
+criterion has evidence.
 
 ## Dependencies and execution order
 

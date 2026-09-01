@@ -89,7 +89,9 @@ IGNATIUS_LOG=debug cargo xtask sql "SELECT 1"
 ```
 
 Logs never contain SQL text or row values. If you need to see a statement while
-debugging, print it in your own scratch code and do not commit that.
+debugging, print it in your own scratch code and do not commit that. The value is
+one of `off`, `error`, `warn`, `info`, `debug` or `trace`; dependency target
+directives are deliberately refused.
 
 ## Layout of the code
 
