@@ -351,9 +351,10 @@ Evidence on 2026-08-31: the README and compatibility authority now agree that
 both interactive surfaces prompt safely, the credential-store route was
 rejected by ADR-0011, GSSAPI/Kerberos/SSPI are unsupported, and cloud identity
 uses short-lived tokens over TLS. The compatibility record retains separate
-automated, hand, server, live-cloud and unverified evidence classes, and its
-release target matrix still says that no hosted archive run or publication has
-been observed.
+automated, hand, server, live-cloud and unverified evidence classes. At that
+point its release target matrix correctly recorded no hosted archive run. The
+2026-09-02 T034 evidence now records hosted packaging separately from runtime,
+recovery and publication evidence.
 
 **Checkpoint**: User Story 4 is complete only when a support reader can identify
 what is known, what is unverified and what to do next from the same release
@@ -382,7 +383,7 @@ gate rather than missing alignment. The retained Feature 001a addendum now
 states that ADR-0012 closed the native route without implementation.
 
 - [ ] T033 Run the full release quickstart and `cargo xtask verify`, recording every gate and evidence class in `docs/operations/verification.md`
-- [ ] T034 Perform a non-publishing dry run of the release workflow and record the owner authorization gate in `docs/operations/release.md`
+- [x] T034 Perform a non-publishing dry run of the release workflow and record the owner authorization gate in `docs/operations/release.md`
 - [ ] T035 Update `docs/product/roadmap.md` and `docs/status.md` only after all accepted release criteria have evidence
 
 Current local evidence on 2026-08-31: `cargo --locked xtask verify` passed
@@ -418,14 +419,32 @@ lints, 513 unit/layout tests, 38 CLI contracts and 38 PostgreSQL 18.4 plain/TLS
 integration tests; teardown removed the disposable containers, network and
 data, and the final status was `Not running`.
 
-T033 remains open because the full quickstart still lacks a successful hosted
-target run, Windows/Linux hand verification, macOS upgrade and rollback, and
-cross-runner reproducibility. T034 remains open because its first hosted run
-failed and the locally verified repair has not been committed, pushed or
-re-run; the owner-authorization gate also remains absent. T035 stays open: the
-roadmap still says `In planning`, and the status record does not call the
-candidate complete or ready. Those completion claims remain forbidden until
-every accepted release criterion has evidence.
+The repair was committed and pushed as
+`24f1c8e7801ab5f1f6805e54e4e5f4db67ca1949`. Hosted CI run `33563478021`
+passed all 10 jobs at that revision. The owner authorized only the scoped
+commit, push and non-publishing rerun for version `0.1.0`, that revision, the
+three declared targets and seven-day GitHub Actions artifact retention.
+Run `33563497933` completed every macOS, Windows and Linux job across
+2026-09-01 and 2026-09-02 in Africa/Johannesburg.
+
+Each downloaded run artifact contained exactly its archive, release record,
+manifest and checksum sidecar, with no symlinks. All three records validated as
+`blocked`; manifest, independent SHA-256 and four-file scope checks passed, and
+each archive held one executable matching the declared binary format and
+architecture. The downloaded macOS binary also passed isolated identity,
+configuration and diagnostic checks on an arm64 Mac. No Windows/Linux runtime,
+upgrade, rollback, aggregation, inventory, signing, provenance or publication
+evidence was created.
+
+T033 remains open because the full quickstart still lacks Windows/Linux hand
+verification, macOS upgrade and rollback, multi-target aggregation, hosted
+repeat-build or cross-runner reproducibility, and the remaining supply-chain
+evidence. T034 is complete: the non-publishing workflow succeeded and
+`docs/operations/release.md` records both the rehearsal authorization and its
+explicit publication exclusions. T035 stays open: the roadmap still says `In
+planning`, and the status record does not call the candidate complete or ready.
+Those completion claims remain forbidden until every accepted release criterion
+has evidence.
 
 ## Dependencies and execution order
 

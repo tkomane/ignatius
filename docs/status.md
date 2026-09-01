@@ -1,21 +1,30 @@
 # Status
 
-**Updated: 2026-09-01.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-02.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
 ## Where the work is
 
-**Current continuation**: Feature 008 release evidence. Hosted workflow run
-`33561901626` checked out committed revision
-`247d1c7e829aa5b642a5047e56e53d402e386dbb` and built all three declared target
-binaries. Every job then failed before archive creation in the shared version
-extraction guard, so no hosted candidate artefact or evidence bundle was
-retained. The local repair reads the product version directly from `Cargo.toml`
-instead of parsing Cargo's package-ID display and makes every pre-archive
-refusal explain itself. The focused release suite and the full Docker-backed
-verifier pass locally, but the repair is uncommitted and has not run on a hosted
-runner. T033 and T034 therefore remain open.
+**Current continuation**: Feature 008 release evidence. Commit
+`24f1c8e7801ab5f1f6805e54e4e5f4db67ca1949` repairs the hosted archive path by
+reading the product version directly from `Cargo.toml` instead of parsing
+Cargo's package-ID display. Hosted CI run `33563478021` passed all 10 jobs at
+that exact revision. Owner-authorized non-publishing run `33563497933` then
+completed the macOS, Windows and Linux archive jobs and retained one checked
+four-file bundle per target for seven days.
+
+The downloaded bundles independently passed record validation, exact-byte
+manifest and SHA-256 verification, and the exact four-file scope check. Each
+archive contains one executable of the declared architecture. The hosted
+Apple-silicon binary also passed isolated `version --verbose`, `config paths`,
+`config validate` and `doctor --json` checks on an arm64 Mac; Windows and Linux
+remain header and packaging evidence, not runtime evidence. Every per-target
+record remains correctly blocked with no signature or provenance. T034 is
+complete. T033 remains open for the rest of the full quickstart, including
+Windows/Linux hand checks, macOS upgrade and rollback, multi-target aggregation
+and reproducibility. T035 remains open, and the roadmap is still in planning.
+No tag, signing, release or publication operation was performed.
 
 **Current implemented product feature**: cloud identity authentication. The
 owner asked for Entra ID first and for a first-class experience on other clouds,
