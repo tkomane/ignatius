@@ -103,11 +103,23 @@ jobs:
           archive_script="$PWD/scripts/create-release-archive.py"
           test -f "$archive_script"
 
-          version="$(cargo pkgid -p ignatius | sed -n 's/.*#ignatius@//p')"
-          test -n "$version"
+          # Read the product authority directly. `cargo pkgid` output is a
+          # package-ID representation, not a stable version-only interface,
+          # and its spelling differs across Cargo versions.
+          version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [[ -z "$version" ]]; then
+            echo "could not read the product version from Cargo.toml" >&2
+            exit 1
+          fi
           binary_path="target/$TARGET/release/$BINARY"
-          test -f "$binary_path"
-          test ! -L "$binary_path"
+          if [[ ! -f "$binary_path" ]]; then
+            echo "target build did not produce the expected binary: $binary_path" >&2
+            exit 1
+          fi
+          if [[ -L "$binary_path" ]]; then
+            echo "refusing a symlinked target binary: $binary_path" >&2
+            exit 1
+          fi
           cp "$binary_path" "$bundle/$BINARY"
 
           archive_stem="ignatius-${version}-${TARGET}"

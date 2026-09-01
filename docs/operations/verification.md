@@ -155,7 +155,7 @@ classes.
 | Focused release contracts | Pass. The final focused run passed 3 archive-helper, 1 native-boundary, 71 release-contract, 7 release-notes and 1 release-schema tests. The repository catalogue also validated as one blocked record with one exact changelog entry. | Local automated contracts only; no hosted runner evidence. |
 | macOS archive and sidecars | Pass. The repository helper produced a root-only `ignatius-0.1.0-aarch64-apple-darwin.tar.gz`, 3,010,634 bytes, with SHA-256 `c7ba67b568ea803d9f6f7d8e1de802e25cdf539d1377618c76825d1683aa380d`. Record validation, manifest generation, exact-byte verification and the four-file evidence-scope check passed. | Temporary local Apple silicon rehearsal; no hosted archive or retained release evidence. |
 | Deterministic archive helper | Pass. Rebuilding the same `tar.gz` from the same binary and declared inputs produced byte-identical output. | Same local Python and compression runtime; hosted repeat-build and cross-runner evidence remain open. |
-| Scoped secret scan | Pass. The CI-pinned Gitleaks v8.30.0 container, addressed by digest and run with no container network, scanned the verified four-file upload root and reported no leaks. | Local Docker execution of the new CI command; the shared CI job has not run on a hosted runner. |
+| Scoped secret scan | Pass. The CI-pinned Gitleaks v8.30.0 container, addressed by digest and run with no container network, scanned the verified four-file upload root and reported no leaks. | Local Docker execution of the new CI command; the later hosted follow-up is recorded below. |
 | Extracted first start | Partial pass. The root-only archive extracted cleanly; `version --verbose`, `config paths` and `config validate` passed. `doctor --json` reported seven checks OK, three skipped for terminal, terminal size and connection, and no failures. | Isolated local first start only; no reviewed server connection, upgrade or rollback was performed. |
 | Readiness gate | Pass as a blocking test. `cargo --locked xtask release check` exited 1 and named 13 issues, including modified source, unmaterialised and incomplete evidence, absent Windows/Linux artefacts, inventory, signatures, provenance, platform recovery evidence and owner authorization. | Expected blocked result; no readiness or publication claim. |
 | Hosted target matrix | Not verified. | Ubuntu, hosted macOS and Windows jobs require a hosted workflow run. |
@@ -164,9 +164,20 @@ classes.
 | Owner authorization | Absent. | No version, revision, target set, destination or retention boundary has been authorized for publication. |
 | Publication | Not requested and not performed. | No tag, upload, release or distribution operation is authorized by this package. |
 
+### Hosted follow-up and local repair on 2026-09-01
+
+| Evidence class | Result | Boundary |
+| --- | --- | --- |
+| Shared CI | Pass. Run `33445418179` completed all 10 jobs at committed revision `247d1c7e829aa5b642a5047e56e53d402e386dbb`, including macOS, Windows, Ubuntu, PostgreSQL 14/16/18, release-evidence scope, network-disabled scoped Gitleaks, cargo-deny and generated-artefact drift. | Hosted CI and synthetic evidence-scope result only; not release archive, installation or publication evidence. |
+| First hosted archive run | Fail. Run `33561901626` checked out the same exact revision. All three target builds passed; all three jobs then exited in the common packaging step before the archive helper ran or any candidate evidence was uploaded. | No hosted archive, checksum sidecar or retained candidate bundle exists from this run. |
+| Failure diagnosis and repair | Pass locally. The workflow no longer parses the runner's Cargo package-ID display for a version. It reads `Cargo.toml` directly and names missing-version, missing-binary and symlinked-binary failures. | The repair is in the modified local worktree and has not run on a hosted runner. |
+| Focused release contracts after repair | Pass. 3 archive-helper, 1 native-boundary, 72 release-contract, 7 release-note and 1 release-schema tests passed; the six workflow-focused cases include the new version-authority contract. | Local automated contract evidence only. |
+| Full repository gate after repair | Pass. `cargo --locked xtask verify` passed formatting, lints, 513 unit/layout tests, 38 CLI contracts and 38 PostgreSQL integration tests against disposable PostgreSQL 18.4 plain/TLS services. Teardown removed the containers, network and data; final status was `Not running`. | Local macOS and synthetic PostgreSQL evidence. The earlier sandboxed verifier run skipped integration and is not counted as the full result. |
+| Readiness and authorization | Blocked. The failed hosted run closed no archive, aggregation, installation, inventory, signature, provenance, owner-authorization or publication gate. | T033 and T034 remain open until the repair is published and a successful non-publishing run is inspected. |
+
 Earlier 2026-08-16 runs remain historical evidence for their recorded
-revisions. They do not supersede this recorded modified-worktree rehearsal or close any
-hosted, cross-platform, installation, supply-chain or authorization gate.
+revisions. They do not supersede the later local and hosted evidence or close
+any cross-platform installation, supply-chain or authorization gate.
 
 ## What has not been verified
 

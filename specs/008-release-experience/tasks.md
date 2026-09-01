@@ -249,8 +249,10 @@ contracts reject missing, unexpected, duplicate, traversal, symlinked and
 non-regular entries, including a symlinked allowlist parent. A workflow contract
 asserts the checked root is the scanner mount and forbids widening it to the
 workspace. Ruby parsed the YAML and the focused workflow contract passed.
-Hosted execution remains unverified until this workflow reaches a runner; the
-task records the implemented gate, not a hosted pass.
+Hosted CI run `33445418179` passed this job at revision
+`247d1c7e829aa5b642a5047e56e53d402e386dbb` on 2026-09-01. This is hosted
+evidence for the synthetic four-file scope and secret scan, not a candidate
+archive, complete evidence bundle or publication result.
 
 **Checkpoint**: User Story 2 is complete only when an evidence reviewer can
 identify the exact missing or mismatched item and the candidate cannot be called
@@ -399,12 +401,30 @@ network-disabled, digest-pinned Gitleaks container. First-start identity and
 configuration checks passed; `doctor --json` reported seven OK, three skipped
 and no failed checks. Readiness exited 1 with all 13 blockers named.
 
-T033 remains open because the full quickstart still lacks hosted target runs,
-Windows/Linux hand verification, macOS upgrade and rollback, and cross-runner
-reproducibility. T034 remains open because the hosted non-publishing workflow
-has not run and the owner has not authorized any release operation. T035 stays
-open: the roadmap still says `In planning`, and the status record does not call
-the candidate complete or ready. Those completion claims remain forbidden until
+Follow-up evidence on 2026-09-01: hosted non-publishing run `33561901626`
+checked out exact revision
+`247d1c7e829aa5b642a5047e56e53d402e386dbb`. The macOS, Windows and Linux jobs
+all built their declared target binary, then failed in the common packaging
+step before the archive helper ran. The pinned Cargo 1.97 package-ID spelling
+did not satisfy the workflow's exact `#ignatius@` parser, leaving the version
+guard empty; no archive or run-scoped candidate evidence was retained.
+
+The local repair reads the version from its `Cargo.toml` authority and gives
+the version, missing-binary and symlink refusals explicit diagnostics. Six
+workflow-focused contracts pass. The complete focused release run passes 3
+archive-helper, 1 native-boundary, 72 release-contract, 7 release-notes and 1
+release-schema tests. The full Docker-backed verifier also passes formatting,
+lints, 513 unit/layout tests, 38 CLI contracts and 38 PostgreSQL 18.4 plain/TLS
+integration tests; teardown removed the disposable containers, network and
+data, and the final status was `Not running`.
+
+T033 remains open because the full quickstart still lacks a successful hosted
+target run, Windows/Linux hand verification, macOS upgrade and rollback, and
+cross-runner reproducibility. T034 remains open because its first hosted run
+failed and the locally verified repair has not been committed, pushed or
+re-run; the owner-authorization gate also remains absent. T035 stays open: the
+roadmap still says `In planning`, and the status record does not call the
+candidate complete or ready. Those completion claims remain forbidden until
 every accepted release criterion has evidence.
 
 ## Dependencies and execution order

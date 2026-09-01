@@ -1,14 +1,25 @@
 # Status
 
-**Updated: 2026-08-31.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-01.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
 ## Where the work is
 
-**Current feature**: cloud identity authentication, implemented. The owner asked
-for Entra ID first and for a first-class experience on other clouds, and
-checking the other two turned that instruction from a generalisation into the
+**Current continuation**: Feature 008 release evidence. Hosted workflow run
+`33561901626` checked out committed revision
+`247d1c7e829aa5b642a5047e56e53d402e386dbb` and built all three declared target
+binaries. Every job then failed before archive creation in the shared version
+extraction guard, so no hosted candidate artefact or evidence bundle was
+retained. The local repair reads the product version directly from `Cargo.toml`
+instead of parsing Cargo's package-ID display and makes every pre-archive
+refusal explain itself. The focused release suite and the full Docker-backed
+verifier pass locally, but the repair is uncommitted and has not run on a hosted
+runner. T033 and T034 therefore remain open.
+
+**Current implemented product feature**: cloud identity authentication. The
+owner asked for Entra ID first and for a first-class experience on other clouds,
+and checking the other two turned that instruction from a generalisation into the
 obvious shape: Azure, AWS and Google Cloud authenticate a PostgreSQL connection
 identically. A command-line tool returns a short-lived bearer token, the token
 is presented as the password, and the transport must be encrypted. Only the
@@ -413,6 +424,9 @@ Nothing else is waiting on the owner. The four that were are closed.
 6. A terminal-restoration test for Windows, which needs ConPTY (T055a).
 7. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-8. Complete the remaining Feature 008 evidence gates. The governed candidate
-   path is implemented, but hosted target runs, cross-platform installation and
-   recovery, inventory, signing, provenance and owner authorization remain.
+8. Complete the remaining Feature 008 evidence gates. After explicit repository
+   push authorization, commit and push the locally verified workflow repair and
+   rerun the non-publishing hosted matrix. Then retain cross-platform
+   installation and recovery, cross-runner reproducibility, inventory, signing,
+   provenance and release owner-authorization evidence. None of those later
+   gates is satisfied by the failed hosted run.

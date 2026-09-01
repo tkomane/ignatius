@@ -2002,6 +2002,31 @@ fn release_workflow_keeps_release_note_identity_stable_across_runs() {
 }
 
 #[test]
+fn release_workflow_reads_the_product_version_from_its_authority() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    assert!(
+        workflow.contains(
+            "version=\"$(sed -n 's/^version = \"\\([^\"]*\\)\"$/\\1/p' Cargo.toml | head -n 1)\""
+        ),
+        "release workflow must read the product version directly from Cargo.toml"
+    );
+    for expected in [
+        "could not read the product version from Cargo.toml",
+        "target build did not produce the expected binary",
+        "refusing a symlinked target binary",
+    ] {
+        assert!(
+            workflow.contains(expected),
+            "release workflow must explain its pre-archive refusal: {expected}"
+        );
+    }
+    assert!(
+        !workflow.contains("$(cargo pkgid"),
+        "release workflow must not parse Cargo's package-ID display format"
+    );
+}
+
+#[test]
 fn release_workflow_declares_the_exact_supported_target_matrix() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
