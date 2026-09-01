@@ -149,7 +149,12 @@ Off unless `IGNATIUS_LOG` is set. When on:
 - SQL text and row values are never written. A statement appears as a job id and
   a character count, which identifies it in a support conversation without
   revealing it.
-- Every message passes through redaction.
+- Only Ignatius-owned events are admitted. Dependency tracing is excluded
+  because a database driver may emit complete SQL at debug level. The variable
+  accepts only `off`, `error`, `warn`, `info`, `debug` or `trace`; target
+  directives fail closed.
+- Every complete event passes through the one redaction implementation before
+  any bytes are written.
 - The file is size-bounded and rotated, so it cannot grow without limit.
 
 ## In memory

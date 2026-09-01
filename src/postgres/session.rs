@@ -331,6 +331,11 @@ impl Session {
     /// Statements after a failure do not run. Results produced before the failure
     /// are kept and returned along with the diagnostic, because they happened.
     pub async fn execute(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
+        tracing::debug!(
+            target: "ignatius::query",
+            "{}",
+            crate::diagnostics::logging::statement_descriptor(job.0, sql)
+        );
         let started = Instant::now();
         let parsed = statements::split(sql);
         let mut results = Vec::new();

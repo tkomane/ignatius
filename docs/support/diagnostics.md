@@ -89,7 +89,10 @@ IGNATIUS_LOG=debug ignatius query "$DATABASE_URL" -c "SELECT 1"
 The file is under the `Logs:` path from `ignatius config paths`, is capped at
 5 MB with one previous file kept, and contains no SQL text and no row values. A
 statement appears as a job id and a character count, which is enough to correlate
-events without revealing the query.
+events without revealing the query. `IGNATIUS_LOG` accepts only `off`, `error`,
+`warn`, `info`, `debug` or `trace`. Ignatius-owned events are redacted as complete
+events before writing; dependency target directives are refused because database
+driver debug traces may contain full SQL.
 
 ## Reading an error
 

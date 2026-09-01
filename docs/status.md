@@ -17,14 +17,37 @@ four-file bundle per target for seven days.
 The downloaded bundles independently passed record validation, exact-byte
 manifest and SHA-256 verification, and the exact four-file scope check. Each
 archive contains one executable of the declared architecture. The hosted
-Apple-silicon binary also passed isolated `version --verbose`, `config paths`,
-`config validate` and `doctor --json` checks on an arm64 Mac; Windows and Linux
-remain header and packaging evidence, not runtime evidence. Every per-target
-record remains correctly blocked with no signature or provenance. T034 is
-complete. T033 remains open for the rest of the full quickstart, including
-Windows/Linux hand checks, macOS upgrade and rollback, multi-target aggregation
-and reproducibility. T035 remains open, and the roadmap is still in planning.
-No tag, signing, release or publication operation was performed.
+Apple-silicon binary also passed versioned-path installation, identity,
+configuration, PostgreSQL 18.4 over localhost plain transport and TLS 1.3 with
+`verify-full`, full-screen pseudo-terminal start and clean quit, side-by-side
+source-revision replacement, state preservation and controlled rollback on an
+arm64 Mac. Both replacement binaries report `0.1.0`, and the prior one was not a
+published release, so this is not published-version upgrade evidence.
+
+The same exact hosted binary failed a release-blocking privacy audit:
+`IGNATIUS_LOG=debug` persisted the full synthetic SQL statement through
+`tokio_postgres` dependency tracing, contrary to the documented logging
+contract. The working-tree remediation now accepts only simple log levels,
+admits only Ignatius-owned events, redacts complete events before writing and
+records only a job id and character count. Its five focused logging unit tests
+and one live PostgreSQL CLI contract pass, but its build identity is explicitly
+local and modified. It is not a replacement release candidate.
+
+The exact current tree also passes `cargo --locked xtask verify`: formatting,
+clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38
+PostgreSQL 18.4 plain/TLS integration tests all passed with no skips. A further
+90 focused archive, documentation, native-boundary, release, release-notes and
+release-schema tests passed, and the catalogue wrapper validated the one blocked
+record against its exact changelog heading. Teardown removed the disposable
+containers, network and data; final database status was `Not running`.
+
+Every per-target record remains correctly blocked with no signature or
+provenance. T034 is complete. T033 remains open for a corrected clean hosted
+candidate, Windows/Linux hand checks, multi-target aggregation, hosted
+reproducibility and the remaining supply-chain evidence. T035 remains open, and
+the roadmap is still in planning. No further workflow run is authorized by the
+earlier run-scoped approval. No tag, signing, release or publication operation
+was performed.
 
 **Current implemented product feature**: cloud identity authentication. The
 owner asked for Entra ID first and for a first-class experience on other clouds,

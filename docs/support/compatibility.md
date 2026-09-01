@@ -238,7 +238,7 @@ has no release artefact claim.
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging evidence plus partial local first start | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope, header and isolated arm64 macOS first-start checks; reviewed connection, installed-path, upgrade and rollback evidence remain open |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging plus native macOS installation and recovery evidence, rejected by privacy audit | Run `33563497933` packaged exact revision `24f1c8e`. The archive passed record, byte, scope, header, installed-path identity, plain and verified-TLS PostgreSQL 18.4 checks, full-screen pseudo-terminal start/quit, source-revision replacement, state preservation and controlled rollback on arm64 macOS. It is not release-acceptable: `IGNATIUS_LOG=debug` persisted full synthetic SQL through dependency tracing. The corrected build has local modified-worktree evidence only. |
 | `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging evidence | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope and PE32+ x86-64 header checks; Windows runtime, PowerShell, PATH, upgrade and rollback evidence remain open |
 | `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging evidence | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope and ELF x86-64 GNU/Linux header checks; Linux runtime, installed-path, upgrade and rollback evidence remain open |
 

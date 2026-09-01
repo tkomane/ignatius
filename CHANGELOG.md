@@ -12,6 +12,12 @@ No changes have been assigned to a version after the 0.1.0 candidate.
 
 ## [0.1.0]
 
+- Security: debug logging now accepts only the levels `off`, `error`, `warn`,
+  `info`, `debug` and `trace`, admits only Ignatius-owned trace targets, and
+  redacts each complete event before writing it. Earlier development candidates
+  enabled PostgreSQL driver debug tracing, which persisted full SQL text despite
+  the documented logging boundary. A statement now appears only as its job id
+  and character count, and dependency target directives fail closed.
 - Removed a dead action. `Newline` had no key, no chord and no producer: Enter
   reaches the editor's line break through `Activate`, and had done since the
   beginning. Its handling arms were unreachable code in four match statements.

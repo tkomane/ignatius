@@ -602,6 +602,47 @@ mod with_server {
     }
 
     #[test]
+    fn debug_logging_never_captures_driver_sql_or_result_values() {
+        const MARKER: &str = "release-log-sql-and-row-marker";
+        let uri = uri_or_skip!();
+        let dir =
+            std::env::temp_dir().join(format!("ignatius-log-contract-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let data_dir = dir.join("data");
+        let sql = format!("SELECT '{MARKER}' AS result_value");
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", &data_dir)
+            .env("IGNATIUS_LOG", "debug")
+            .args(["query", &uri, "-c", &sql])
+            .output()
+            .expect("run");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let log_path = data_dir.join("logs/ignatius.log");
+        let log = std::fs::read_to_string(&log_path).expect("read isolated log");
+        assert!(log.contains("job=1 statement_chars="), "{log}");
+        assert!(!log.contains(MARKER), "SQL or result value reached {log}");
+        assert!(
+            !log.contains("tokio_postgres"),
+            "dependency trace reached {log}"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&log_path)
+                .expect("log metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{}", log_path.display());
+        }
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn a_server_error_exits_with_the_query_code_and_keeps_stdout_clean() {
         let uri = uri_or_skip!();
         let output = binary()
