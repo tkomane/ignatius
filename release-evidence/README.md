@@ -165,10 +165,13 @@ requires the observed staging root to contain exactly those ordinary files. It
 rejects missing or unexpected files, duplicate or traversal paths, symlinks,
 non-regular files and paths outside the declared root.
 
-This is local preparation evidence for T021 only. It does not scan secrets,
-upload an artefact, invoke a hosted runner or publish user data. T021 remains
-open until the shared CI workflow uses the same staging root for its scoped
-secret scan and upload boundary, with hosted workflow evidence retained.
+The local command itself does not scan secrets, upload an artefact, invoke a
+hosted runner or publish user data. Shared CI run `33445418179` at revision
+`247d1c7e829aa5b642a5047e56e53d402e386dbb` subsequently built the synthetic
+four-file root, validated that exact scope and passed the network-disabled,
+digest-pinned Gitleaks scan on 2026-09-01. That is hosted T021 evidence for the
+synthetic scope only. It is not a candidate archive, canonical evidence bundle,
+signature, provenance statement or publication result.
 
 ## Canonical evidence paths and workflow transport
 

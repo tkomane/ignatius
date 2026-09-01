@@ -238,9 +238,9 @@ has no release artefact claim.
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Automated packaging contract | Defined in `.github/workflows/release.yml`; no hosted workflow result retained here |
-| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Automated packaging contract | Defined in `.github/workflows/release.yml`; no hosted workflow result retained here |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Automated packaging contract | Defined in `.github/workflows/release.yml`; no hosted workflow result retained here |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted build only | Run `33561901626` built the target at `247d1c7`, then failed before archive creation; no candidate artefact or installation result exists |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted build only | Run `33561901626` built the target at `247d1c7`, then failed before archive creation; no candidate artefact or installation result exists |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted build only | Run `33561901626` built the target at `247d1c7`, then failed before archive creation; no candidate artefact or installation result exists |
 
 Evidence classes have distinct meanings:
 
@@ -248,6 +248,9 @@ Evidence classes have distinct meanings:
   the target, builds it, records its identity, verifies its exact archive bytes
   and defines run-scoped files to upload. It does not prove that a hosted run
   succeeded, installation or hand use.
+- **Hosted build only** means the target binary compiled on the named runner,
+  but the archive and retained evidence steps did not complete. It is not
+  packaging, installation or hand evidence.
 - **CI platform evidence** means the existing CI runner built and tested the
   application on that runner. It does not prove that a release archive was
   produced for the exact target triple.

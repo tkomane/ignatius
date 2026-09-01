@@ -573,11 +573,20 @@ leaks. These are local macOS and Docker results, not hosted workflow or
 cross-platform installation evidence. The temporary files were not retained as
 release evidence.
 
-The workflow contract still requires separate hosted Ubuntu, macOS and Windows
-target jobs. A local macOS sequence is not a hosted matrix run, and static YAML
-or shell validation is not evidence that a hosted runner built or installed
-the other targets. No hosted run, platform installation, upgrade or rollback
-evidence is recorded here.
+The first hosted attempt, run `33561901626` on 2026-09-01, checked out exact
+revision `247d1c7e829aa5b642a5047e56e53d402e386dbb`. All three declared target
+builds passed. All three then failed before archive creation because the common
+step parsed one exact Cargo package-ID spelling for the version and received no
+match under the pinned runner toolchain. No candidate archive, checksum sidecar
+or run-scoped evidence bundle was retained.
+
+The local repair reads the product version directly from `Cargo.toml`, which is
+its authority, and gives each pre-archive refusal an actionable message. The
+workflow-focused and complete release suites pass, as does the full
+Docker-backed repository verifier. This is local repair evidence only. Until
+the change is committed, pushed and a second hosted run succeeds, the hosted
+target matrix remains unverified. No platform installation, upgrade or rollback
+evidence was created by the failed run.
 
 The readiness check exited 1 and named 13 blockers. It must remain blocked until
 the candidate has materialised complete evidence, clean and correctly tagged
