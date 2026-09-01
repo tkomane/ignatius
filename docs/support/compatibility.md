@@ -238,9 +238,9 @@ has no release artefact claim.
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted build only | Run `33561901626` built the target at `247d1c7`, then failed before archive creation; no candidate artefact or installation result exists |
-| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted build only | Run `33561901626` built the target at `247d1c7`, then failed before archive creation; no candidate artefact or installation result exists |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted build only | Run `33561901626` built the target at `247d1c7`, then failed before archive creation; no candidate artefact or installation result exists |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging evidence plus partial local first start | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope, header and isolated arm64 macOS first-start checks; reviewed connection, installed-path, upgrade and rollback evidence remain open |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging evidence | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope and PE32+ x86-64 header checks; Windows runtime, PowerShell, PATH, upgrade and rollback evidence remain open |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging evidence | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope and ELF x86-64 GNU/Linux header checks; Linux runtime, installed-path, upgrade and rollback evidence remain open |
 
 Evidence classes have distinct meanings:
 
@@ -251,6 +251,11 @@ Evidence classes have distinct meanings:
 - **Hosted build only** means the target binary compiled on the named runner,
   but the archive and retained evidence steps did not complete. It is not
   packaging, installation or hand evidence.
+- **Hosted packaging evidence** means the named runner completed the archive,
+  record, exact-byte sidecars, blocked readiness assertion and run-scoped
+  upload, and an independent download passed those packaging checks. It is not
+  runtime, installation, recovery, signature, provenance or publication
+  evidence.
 - **CI platform evidence** means the existing CI runner built and tested the
   application on that runner. It does not prove that a release archive was
   produced for the exact target triple.

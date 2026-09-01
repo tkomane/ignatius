@@ -580,26 +580,48 @@ step parsed one exact Cargo package-ID spelling for the version and received no
 match under the pinned runner toolchain. No candidate archive, checksum sidecar
 or run-scoped evidence bundle was retained.
 
-The local repair reads the product version directly from `Cargo.toml`, which is
-its authority, and gives each pre-archive refusal an actionable message. The
-workflow-focused and complete release suites pass, as does the full
-Docker-backed repository verifier. This is local repair evidence only. Until
-the change is committed, pushed and a second hosted run succeeds, the hosted
-target matrix remains unverified. No platform installation, upgrade or rollback
-evidence was created by the failed run.
+The repair reads the product version directly from `Cargo.toml`, which is its
+authority, and gives each pre-archive refusal an actionable message. It was
+committed and pushed as
+`24f1c8e7801ab5f1f6805e54e4e5f4db67ca1949`. Hosted CI run `33563478021`
+passed all 10 jobs at that exact revision.
 
-The readiness check exited 1 and named 13 blockers. It must remain blocked until
-the candidate has materialised complete evidence, clean and correctly tagged
-source, the full target set, dependency inventory, verified signatures,
-verified provenance, platform installation and recovery evidence, and owner
-authorization. A checksum match or successful local build does not satisfy
-those gates.
+The owner authorized only the scoped commit, push and non-publishing workflow
+rerun for product version `0.1.0`, that exact revision and the three declared
+targets. Run `33563497933` completed across 2026-09-01 and 2026-09-02 in
+Africa/Johannesburg. Every target job built one binary, created its root-only
+archive, verified its record, manifest, checksum and blocked readiness result,
+checked the exact four-file upload scope and retained that scope as a GitHub
+Actions artifact for seven days.
 
-Before any future tag, signing operation, upload, release creation or package
-manifest change, the owner must record explicit authorization naming the exact
-product version, source revision, target set, artefact destinations and
-approved evidence retention boundary. This rehearsal contains no authorization
-and performs none of those external operations.
+The three downloaded bundles were independently inspected. They contained no
+symlinks or unexpected files; record validation, manifest verification,
+SHA-256 verification and the four-file evidence-scope check passed for every
+target. Each archive contained exactly one executable with the declared binary
+format and architecture. The downloaded Apple-silicon binary also passed
+isolated first-start identity, configuration-path, configuration-validation and
+diagnostic checks on an arm64 Mac. The Windows and Linux binaries were not run
+on their target platforms, so the workflow result is packaging evidence rather
+than cross-platform installation, upgrade or rollback evidence.
+
+The earlier local aggregate readiness check exited 1 and named 13 blockers.
+Each hosted per-target record also exited 1 as required and retained eight
+blockers: incomplete and unmaterialised evidence, detached and untagged source,
+a non-publishable state, and absent verified signature and provenance evidence.
+The candidate must remain blocked until complete evidence, clean and correctly
+tagged source, the full aggregated target set, dependency inventory, verified
+signatures, verified provenance, platform installation and recovery evidence,
+and publication authorization all exist. A checksum match or successful build
+does not satisfy those gates.
+
+The recorded authorization for run `33563497933` ends at the seven-day,
+run-scoped GitHub Actions artifacts. It does not authorize a tag, signing
+operation, GitHub Release, package-registry upload, package-manifest change or
+promotion into the canonical evidence tree. Before any of those future
+operations, the owner must record new explicit authorization naming the exact
+product version, source revision, target set, artefact destinations and approved
+evidence retention boundary. This rehearsal performed none of those publication
+operations.
 
 ## Steps
 

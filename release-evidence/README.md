@@ -173,6 +173,17 @@ digest-pinned Gitleaks scan on 2026-09-01. That is hosted T021 evidence for the
 synthetic scope only. It is not a candidate archive, canonical evidence bundle,
 signature, provenance statement or publication result.
 
+Owner-authorized non-publishing run `33563497933` subsequently checked out
+revision `24f1c8e7801ab5f1f6805e54e4e5f4db67ca1949` and retained one
+target-specific four-file bundle for macOS, Windows and Linux, each with a
+seven-day GitHub Actions retention boundary. An independent download completed
+on 2026-09-02 in Africa/Johannesburg contained no symlinks or unexpected files.
+All three release records validated as `blocked`; their manifests, SHA-256
+sidecars and exact four-file scopes verified against the archive bytes. These
+are run-scoped candidate bundles, not the canonical complete evidence tree.
+Their records still declare incomplete evidence and unconfigured signatures
+and provenance, and no multi-target aggregation or publication occurred.
+
 ## Canonical evidence paths and workflow transport
 
 The `evidence_reference.path` in a release record is the semantic retained
