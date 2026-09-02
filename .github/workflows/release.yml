@@ -2,8 +2,8 @@ name: Release candidate archives
 
 # This workflow prepares target-specific, non-publishing candidate bundles.
 # It never creates a GitHub Release, signs an artefact, or distributes one.
-# Each matrix job emits a per-target record; a later aggregation and readiness
-# gate are required before a multi-target candidate can be called complete.
+# Each matrix job emits a per-target record. A final non-publishing job revalidates
+# and aggregates all three records before retaining multi-target evidence.
 on:
   push:
     tags:
@@ -63,7 +63,7 @@ jobs:
 
       - name: Build the target binary
         env:
-          IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.target }}
+          IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}
         run: cargo build --locked --release --target "${{ matrix.target }}"
 
       - name: Package and verify the candidate
@@ -144,7 +144,7 @@ jobs:
 
           size_bytes="$(wc -c < "$artefacts/$archive_name" | tr -d '[:space:]')"
           run_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          build_identity="ci/${run_key}/${TARGET}"
+          build_identity="ci/${run_key}"
           # Retries change technical build and evidence identity only. Keep
           # one release-note identity for each product version.
           notes_entry="release candidate ${version}"
@@ -221,3 +221,165 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/ignatius-release/${{ matrix.target }}/upload
+
+  aggregate:
+    name: Aggregate candidate evidence
+    needs: archive
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the requested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+
+      - name: Cache Rust build inputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Download target candidate evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/ignatius-release-inputs
+          pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+
+      - name: Reverify and aggregate the candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [[ -z "$version" ]]; then
+            echo "could not read the product version from Cargo.toml" >&2
+            exit 1
+          fi
+          run_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          inputs_root="$RUNNER_TEMP/ignatius-release-inputs"
+          release_root="$RUNNER_TEMP/ignatius-release/aggregate"
+          artefacts="$release_root/artefacts"
+          record_dir="$release_root/record"
+          evidence="$release_root/evidence"
+          mkdir -p "$artefacts" "$record_dir"
+
+          targets=(
+            aarch64-apple-darwin
+            x86_64-pc-windows-msvc
+            x86_64-unknown-linux-gnu
+          )
+          shopt -s nullglob dotglob
+          downloaded_entries=("$inputs_root"/*)
+          shopt -u nullglob dotglob
+          if [[ "${#downloaded_entries[@]}" -ne "${#targets[@]}" ]]; then
+            echo "unexpected number of downloaded target bundles: ${#downloaded_entries[@]}" >&2
+            exit 1
+          fi
+          for entry in "${downloaded_entries[@]}"; do
+            if [[ ! -d "$entry" || -L "$entry" ]]; then
+              echo "downloaded target bundle is not an ordinary directory: $entry" >&2
+              exit 1
+            fi
+          done
+          aggregate_args=()
+          archive_names=()
+          for target in "${targets[@]}"; do
+            case "$target" in
+              aarch64-apple-darwin|x86_64-unknown-linux-gnu)
+                archive_name="ignatius-${version}-${target}.tar.gz"
+                ;;
+              x86_64-pc-windows-msvc)
+                archive_name="ignatius-${version}-${target}.zip"
+                ;;
+              *)
+                echo "unsupported aggregate target: $target" >&2
+                exit 1
+                ;;
+            esac
+            bundle="$inputs_root/release-candidate-${target}-${run_key}"
+            record="$bundle/record/release-record.json"
+            input_scope="$release_root/input-scope-${target}.json"
+            printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS"]}\n' \
+              "$archive_name" > "$input_scope"
+            cargo --locked xtask release evidence-scope \
+              --root "$bundle" \
+              --allowlist "$input_scope"
+            cargo --locked xtask release validate "$record"
+            cargo --locked xtask release manifest verify \
+              --record "$record" \
+              --artefact-dir "$bundle/artefacts" \
+              --manifest "$bundle/evidence/release-manifest.json" \
+              --checksums "$bundle/evidence/SHA256SUMS"
+            test ! -e "$artefacts/$archive_name"
+            cp "$bundle/artefacts/$archive_name" "$artefacts/$archive_name"
+            aggregate_args+=(--input "$record")
+            archive_names+=("$archive_name")
+          done
+
+          aggregate_record="$record_dir/release-record.json"
+          aggregate_evidence_path="release-evidence/runs/${run_key}/aggregate/release-record.json"
+          cargo --locked xtask release aggregate \
+            --output "$aggregate_record" \
+            --evidence-path "$aggregate_evidence_path" \
+            "${aggregate_args[@]}"
+          cargo --locked xtask release validate "$aggregate_record"
+          cargo --locked xtask release manifest generate \
+            --record "$aggregate_record" \
+            --artefact-dir "$artefacts" \
+            --output-dir "$evidence"
+          cargo --locked xtask release manifest verify \
+            --record "$aggregate_record" \
+            --artefact-dir "$artefacts" \
+            --manifest "$evidence/release-manifest.json" \
+            --checksums "$evidence/SHA256SUMS"
+
+          set +e
+          readiness_output="$(cargo --locked xtask release check "$aggregate_record" 2>&1)"
+          readiness_status=$?
+          set -e
+          printf '%s\n' "$readiness_output"
+          if [[ "$readiness_status" -eq 0 ]]; then
+            echo "aggregate unexpectedly passed the readiness gate" >&2
+            exit 1
+          fi
+          for expected_blocker in \
+            "not in a publishable readiness state" \
+            "requires complete evidence" \
+            "without verified signature evidence" \
+            "without verified provenance evidence"; do
+            if [[ "$readiness_output" != *"$expected_blocker"* ]]; then
+              echo "aggregate readiness did not report expected blocker: $expected_blocker" >&2
+              exit 1
+            fi
+          done
+
+          upload="$release_root/upload"
+          scope="$release_root/upload-scope.json"
+          mkdir -p "$upload/artefacts" "$upload/record" "$upload/evidence"
+          for archive_name in "${archive_names[@]}"; do
+            cp "$artefacts/$archive_name" "$upload/artefacts/$archive_name"
+          done
+          cp "$aggregate_record" "$upload/record/release-record.json"
+          cp "$evidence/release-manifest.json" "$upload/evidence/release-manifest.json"
+          cp "$evidence/SHA256SUMS" "$upload/evidence/SHA256SUMS"
+          printf '{"schema_version":1,"files":["artefacts/%s","artefacts/%s","artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS"]}\n' \
+            "${archive_names[0]}" "${archive_names[1]}" "${archive_names[2]}" > "$scope"
+          cargo --locked xtask release evidence-scope --root "$upload" --allowlist "$scope"
+
+          echo "Prepared non-publishing aggregate for ${#archive_names[@]} targets"
+          echo "Record: $aggregate_record"
+          echo "Evidence: $evidence"
+          echo "Upload scope: $upload"
+
+      - name: Store run-scoped aggregate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/ignatius-release/aggregate/upload
