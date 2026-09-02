@@ -1,0 +1,32 @@
+name: Select immutable PostgreSQL fixture
+description: Resolve one supported PostgreSQL major to its reviewed image digest.
+
+inputs:
+  major:
+    description: Supported PostgreSQL major version.
+    required: true
+
+outputs:
+  image:
+    description: Immutable multi-platform PostgreSQL image reference.
+    value: ${{ steps.select.outputs.image }}
+
+runs:
+  using: composite
+  steps:
+    - id: select
+      shell: bash
+      env:
+        INPUT_MAJOR: ${{ inputs.major }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_MAJOR" in
+          14|15|16|17|18) ;;
+          *)
+            echo "unsupported PostgreSQL fixture major: $INPUT_MAJOR" >&2
+            exit 1
+            ;;
+        esac
+
+        image="$("$GITHUB_WORKSPACE/docker/postgres-image.sh" "$INPUT_MAJOR")"
+        printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"

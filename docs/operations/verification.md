@@ -11,30 +11,66 @@ failure so one run surfaces every problem, prints a summary, and exits non-zero
 if any gate failed. Underneath it is exactly this:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --lib
-cargo test --test cli_contract
-cargo test --test postgres_integration     # needs IGNATIUS_TEST_PG_URI
+cargo fmt --all --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
+cargo test --locked --workspace --all-targets --all-features
+cargo test --locked --workspace --doc --all-features
 ```
 
-Run them in that order: the fast gates fail fastest. Without
-`IGNATIUS_TEST_PG_URI` the integration tests skip and say so on stderr. **A skip
-is not a pass.** Report it as a skip.
+Run them in that order: the fast gates fail fastest. When the disposable plain
+and TLS services are ready, xtask injects both test URIs into the complete
+suite. Without them the database-backed cases skip and say so. The Unix-socket
+case separately requires `IGNATIUS_TEST_PG_SOCKET_URI`. **A skip is not a
+pass.** The verifier lists each missing live boundary after the ordinary gate
+results.
 
 ## Required gates before merging
 
 | Gate | Command | Blocking |
 | --- | --- | --- |
-| Formatting | `cargo fmt --check` | Yes |
-| Lints | `cargo clippy --all-targets -- -D warnings` | Yes |
-| Unit and layout tests | `cargo test --lib` | Yes |
-| CLI contract | `cargo test --test cli_contract` | Yes |
-| PostgreSQL integration | `cargo test --test postgres_integration` | Yes |
-| Compilation on every target | `cargo check --target ...` in CI | Yes |
+| Formatting | `cargo fmt --all --check` | Yes |
+| Lints | locked workspace clippy across all targets and features | Yes |
+| API documentation | locked workspace `cargo doc`, warnings denied | Yes |
+| Complete auto-discovered test suite | locked workspace `cargo test --all-targets --all-features` | Yes |
+| Documentation examples | locked workspace `cargo test --doc --all-features` | Yes |
+| CLI, PostgreSQL, prompt and cloud-token integration | live plain and TLS services in CI | Yes |
+| Unix socket integration | focused live socket fixture on Linux in CI | Yes |
+| Compilation on every primary OS | locked workspace build on Linux, macOS and Windows | Yes |
+| Minimum supported Rust | locked workspace check with Rust 1.90 | Yes |
 | Dependency advisories and licences | `cargo deny check` in CI | Yes |
 | Secret scan | gitleaks in CI | Yes |
+| Release evidence scope | allowlist validation and scoped gitleaks scan in CI | Yes |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
+
+## CI execution contract prepared on 2026-09-02
+
+The hardened workflow makes failures complete and actionable: stale branch runs
+are canceled, every job has an explicit timeout, checkout credentials are
+removed before repository code runs, and Cargo commands that consume
+dependencies use the committed lockfile. Dependency auditing, repository secret
+scanning and release-evidence scanning are independent blocking jobs.
+
+Pull requests run PostgreSQL coverage on the oldest and newest supported majors.
+Pushes to `main`, manual runs and the weekly scheduled run cover every supported
+major from 14 through 18. A separate PostgreSQL 18 fixture exposes a real Unix
+socket to the Linux runner. The cross-platform suite uses Cargo auto-discovery,
+so a newly added contract runs by default.
+
+The workflow files and repository contracts are source-controlled evidence until
+the candidate reaches GitHub-hosted runners. Do not describe PostgreSQL 15 or
+17, the Unix-socket job, Rust 1.90, workflow linting or the source-security
+preflight as hosted passes until those jobs complete successfully.
+
+## Local CI-hardening evidence recorded on 2026-09-02
+
+| Evidence class | Result | Boundary |
+| --- | --- | --- |
+| Workflow syntax and policy | Actionlint and independent YAML parsing passed for all workflow files and the local fixture action. Seven workflow contracts and 80 release contracts passed. | Isolated local integration branch only. |
+| Security controls | Cargo-deny 0.20.2, digest-pinned Gitleaks source/history scans and the Rust 1.90 locked check passed. | Local containers and tools; no hosted claim. |
+| Full verifier | Formatting, lints, documentation, workspace tests and PostgreSQL 18.4 plain/TLS integration passed. | Disposable local services; the verifier's Unix-socket case explicitly skipped because its URI was not configured. |
+| Unix-socket focused attempt | Not counted as a pass. With the URI supplied, the macOS Docker bind mount rejected PostgreSQL's socket-permission change before the server could start. | The CI job is Linux-only and must be verified on an Ubuntu runner; no local socket success is claimed. |
+| Release boundary | The candidate remains non-publishing and fail-closed. No tag, signature, provenance, release or distribution was created. | Local implementation evidence only. |
 
 ## Evidence recorded on 2026-08-16
 

@@ -3,7 +3,7 @@
 //! This is decoration and nothing else. It changes no character, decides no
 //! behaviour, and is absent with colour off; the buffer means exactly the same
 //! thing with and without it. Anything that reads a statement to decide what to
-//! do uses [`crate::query::statements`] or [`crate::query::classify`], never
+//! do uses [`crate::query::statements`] or [`crate::query::classify()`], never
 //! this.
 //!
 //! It shares the quoting rules of the statement lexer rather than reimplementing
