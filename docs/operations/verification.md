@@ -102,21 +102,21 @@ a run-scoped workflow artifact.
 
 | Fact | Evidence source | State on 2026-09-02 |
 | --- | --- | --- |
-| Product version | `Cargo.toml`, read directly by the workflow; archive basename and record must match | Hosted run `33563497933` recorded `0.1.0` consistently for all three targets; no release version is published |
-| Source revision and state | `cargo xtask release generate` captures `HEAD` and cleanliness, and checks exact tag identity | All hosted records identify `24f1c8e7801ab5f1f6805e54e4e5f4db67ca1949`, detached and untagged, and remain blocked |
-| Build identity | The current workflow injects shared `IGNATIUS_BUILD_IDENTITY=ci/<run>-<attempt>` before all three target builds and keeps target separate in each record | Automated contract present but not hosted. Historical run `33563497933` used the earlier target-suffixed identity; neither form is provenance evidence |
-| Target identity | Workflow matrix, executable header and exact Rust target triple in the archive name, record and sidecars | Run `33563497933` completed Linux `x86_64-unknown-linux-gnu`, macOS `aarch64-apple-darwin` and Windows `x86_64-pc-windows-msvc`; independent header inspection matched every row |
-| Archive size and exact bytes | `release generate --artefact-path`, `manifest generate`, `manifest verify` and the 72-case release contract suite | All three hosted archives passed record, manifest, SHA-256 and exact-scope verification after download; mutation, sidecar, symlink and conflicting-alias cases fail closed |
+| Product version | `Cargo.toml`, read directly by the workflow; archive basename and record must match | Hosted run `33614446587` recorded `0.1.0` consistently for all three targets; no release version is published |
+| Source revision and state | `cargo xtask release generate` captures `HEAD` and cleanliness, and checks exact tag identity | All aggregate records identify `fc79120b5229a1724a5a589dee4337acf2daa36b`, detached and untagged, and remain blocked |
+| Build identity | The workflow injects shared `IGNATIUS_BUILD_IDENTITY=ci/<run>-<attempt>` before all three target builds and keeps target separate in each record | Hosted run `33614446587` used `ci/33614446587-1` for all three targets; this is an identity fact, not provenance evidence |
+| Target identity | Workflow matrix, executable header and exact Rust target triple in the archive name, record and sidecars | Run `33614446587` completed Linux `x86_64-unknown-linux-gnu`, macOS `aarch64-apple-darwin` and Windows `x86_64-pc-windows-msvc`; each package and verification step passed |
+| Archive size and exact bytes | `release generate --artefact-path`, `manifest generate`, `manifest verify` and the 77-case release contract suite | The aggregate artifact from run `33614446587` contains three archives of 2,773,851, 2,806,702 and 3,053,947 bytes; downloaded SHA-256 and combined-manifest checks passed |
 | Readiness | `cargo xtask release check` after sidecar verification | The workflow requires a non-zero blocked result; signing, provenance, inventory and owner authorization remain absent |
 | Reproducibility | Repository-owned archive helper plus repeat archive comparison from the same source and inputs | The local helper produced identical `tar.gz` and `zip` bytes twice for the same synthetic binary; hosted repeat-build and cross-runner evidence remain open |
 
-The release-contract checks, local rehearsal and hosted rerun prove the identity
-and integrity rules for the three target-specific candidate bundles. Current
-local contracts also prove that the implemented aggregate path rejects an
-incomplete or inconsistent target set and can bind three exact archives to one
-record and manifest. They do not prove that the Windows or Linux archives run
-on their target platforms, that any target can be upgraded and rolled back, or
-that the aggregate job has succeeded on a hosted runner. Those are separate
+The release-contract checks, local rehearsal and hosted runs prove the identity
+and integrity rules for the three target-specific candidate bundles. Run
+`33614446587` also exercised the shared build identity, downloaded and
+re-verified all three bundles, and retained and inspected the six-file aggregate
+scope. They do not prove that the Windows or Linux archives run on their target
+platforms, that any target can be upgraded and rolled back, or that the hosted
+archives are reproducible across repeat runs or runners. Those are separate
 evidence classes and remain before any release can be called ready or
 published.
 
@@ -188,9 +188,10 @@ classes.
 | Clean local correction archive | Pass. Commit `b2ac0a547957409514a2400202cd0207e8acfa65` reported clean source and reproduced the same 2,764,785-byte arm64 archive twice with SHA-256 `197690aceabecc45ad43dc61ebf9b998bd6c37eddbb511465279b4f3dc55b353`. Record, manifest, exact-byte checksum and four-file scope checks passed. The extracted binary's 76-byte mode-0600 debug log contained `job=1 statement_chars=66`; the SQL sentinel, result label, synthetic credential and `tokio_postgres` target were absent. An invalid target directive created no log path. | Direct local macOS and synthetic PostgreSQL 18.4 evidence. Readiness remained blocked by six named gates. This is not hosted, retained workflow or publication evidence. |
 | Full repository gate after logging remediation | Pass twice. The modified remediation tree and clean commit `b2ac0a5` each passed formatting, clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL integration tests against the disposable PostgreSQL 18.4 plain/TLS services, with no skips. | Local macOS and synthetic PostgreSQL evidence. Each teardown removed the containers, network and data; final status was `Not running`. |
 | Focused release and documentation contracts after logging remediation | Pass. 3 archive-helper, 6 documentation/build, 1 native-boundary, 72 release-contract, 7 release-notes and 1 release-schema tests passed. The catalogue wrapper validated one blocked record against its exact changelog heading. | 90 local focused tests plus the read-only catalogue wrapper; no hosted or platform-runtime claim. |
-| Multi-target aggregation implementation | Focused pass. Four aggregation contracts cover canonical three-target output, combined-manifest verification, blocked-state union, create-only output and missing, duplicate, unsupported or identity-mismatched refusals. Seven workflow contracts cover the shared run-attempt identity, exact target matrix, action pins, per-target re-verification, aggregate command and six-file retained scope. The complete focused slice passed 3 archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract, 7 release-notes and 1 release-schema tests; the catalogue wrapper also passed. | 95 local working-tree tests plus the read-only wrapper. The aggregate job has not run on GitHub Actions, and no hosted aggregate bundle has been retained or inspected. |
-| Full repository gate with aggregation | Pass. `cargo --locked xtask verify` passed formatting, clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL integration tests. | Local modified tree and disposable PostgreSQL 18.4 plain/TLS services, with no skips. Teardown removed both containers, their network and synthetic data; final status was `Not running`. |
-| Readiness and authorization | Correctly blocked. Every per-target check exited 1 with eight issues, including incomplete evidence, detached and untagged source, absent verified signature and provenance, and non-publishable state. The later logging audit independently rejects the candidate. Owner authorization covered only commit, push and this seven-day run-scoped rehearsal. | T034 is complete. T033 remains open; no tag, signing, GitHub Release, package publication or canonical evidence promotion was authorized or performed. |
+| Multi-target aggregation implementation | Focused pass. Four aggregation contracts cover canonical three-target output, combined-manifest verification, blocked-state union, create-only output and missing, duplicate, unsupported or identity-mismatched refusals. Seven workflow contracts cover the shared run-attempt identity, exact target matrix, action pins, per-target re-verification, aggregate command and six-file retained scope. The complete focused slice passed 3 archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract, 7 release-notes and 1 release-schema tests; the catalogue wrapper also passed. | 95 local tests plus the read-only wrapper. Hosted run `33614446587` independently re-verified all three target bundles, aggregated their records and retained the exact six-file scope. |
+| Hosted aggregate artifact | Pass. The retained artifact contains exactly three archives, one aggregate record, one combined manifest and one `SHA256SUMS` file, with no symlinks; all files are bound to `fc79120b5229a1724a5a589dee4337acf2daa36b`. | GitHub Actions run `33614446587`, artifact retention through 2026-09-09; downloaded archive checksums and combined manifest verified locally. |
+| Full repository gate with aggregation | Pass. `cargo --locked xtask verify` passed formatting, clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL integration tests. | Exact committed tip `fc79120b` with disposable PostgreSQL 18.4 plain/TLS services, with no skips. Teardown removed both containers, their network and synthetic data; final status was `Not running`. |
+| Readiness and authorization | Correctly blocked. The aggregate readiness check exited 1 with eight issues, including incomplete evidence, detached and untagged source, absent verified signature and provenance, and non-publishable state. The historical `33563497933` logging audit remains a separate release-blocking result; the corrected run has not had an equivalent runtime privacy audit. Owner authorization covered commit, push and this seven-day run-scoped rehearsal. | T034 is complete. T033 remains open; no tag, signing, GitHub Release, package publication or canonical evidence promotion was authorized or performed. |
 
 Earlier 2026-08-16 runs remain historical evidence for their recorded
 revisions. They do not supersede the later local and hosted evidence or close
@@ -198,13 +199,13 @@ any cross-platform installation, supply-chain or authorization gate.
 
 ## What has not been verified
 
-- **A corrected hosted candidate.** The logging remediation has exact-tree local
-  evidence only. No hosted CI or replacement archive run exists for it, and no
-  further workflow run is authorized by the earlier run-scoped approval.
-- **Hosted multi-target aggregation.** The command and workflow path have local
-  contract evidence only. No run has exercised the shared identity, downloaded
-  and re-verified all three bundles, or retained and inspected the six-file
-  aggregate scope.
+- **Hosted runtime privacy correction.** The corrected target archives passed
+  hosted packaging, CI secret scanning and aggregation, but the replacement
+  binaries have not yet had the direct logging privacy audit that rejected the
+  historical candidate.
+- **Hosted repeat-build and cross-runner reproducibility.** Run `33614446587`
+  proves one shared attempt identity and one aggregate scope. A repeat run or
+  cross-runner byte comparison has not been retained.
 - **Windows and Linux by hand.** CI builds and tests both platforms, but nobody
   has opened the full-screen client there. The same is true of Warp's renderer
   and a live terminal resize.

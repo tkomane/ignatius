@@ -620,31 +620,37 @@ than cross-platform installation, upgrade or rollback evidence.
 Run `33563497933` predates the current aggregate job and embedded a
 target-suffixed build identity in each binary, so its retained records are
 historical target-specific evidence and are not retroactively aggregatable.
-The current local workflow instead gives all three target builds one
-run-attempt identity while retaining target as a separate fact. Its final job
-re-verifies the downloaded inputs and produces an exact six-file aggregate
-scope. Four aggregation-focused and seven workflow-focused contracts pass, but
-the aggregate job has not run on GitHub Actions and no aggregate artifact has
-been retained.
+The corrected workflow was pushed at
+`fc79120b5229a1724a5a589dee4337acf2daa36b`. Hosted CI run `33614417589`
+passed all ten jobs, and owner-authorized non-publishing release run
+`33614446587` passed all three target archive jobs and its aggregate job.
 
-The earlier local aggregate readiness check exited 1 and named 13 blockers.
-Each hosted per-target record also exited 1 as required and retained eight
-blockers: incomplete and unmaterialised evidence, detached and untagged source,
-a non-publishable state, and absent verified signature and provenance evidence.
+Run `33614446587` used one shared attempt identity, `ci/33614446587-1`, for
+all three targets while retaining target as a separate fact. Its final job
+re-verified each downloaded four-file bundle, produced one canonical aggregate
+record, verified one combined manifest and retained an exact six-file aggregate
+scope. The aggregate artifact and all three target artifacts are bound to the
+pushed SHA and retained through 2026-09-09. The downloaded aggregate record
+validated, all three archive checksums matched and the combined manifest
+verified locally.
+
+The aggregate readiness check exited 1 as required and named eight issues:
+incomplete and unmaterialised evidence, detached and untagged source, a
+non-publishable state, and absent verified signature and provenance evidence.
 The candidate must remain blocked until complete evidence, clean and correctly
-tagged source, the full aggregated target set, dependency inventory, verified
-signatures, verified provenance, platform installation and recovery evidence,
-and publication authorization all exist. A checksum match or successful build
-does not satisfy those gates.
+tagged source, dependency inventory, verified signatures, verified provenance,
+platform installation and recovery evidence, and publication authorization all
+exist. A checksum match, successful build or successful aggregate job does not
+satisfy those gates.
 
-The recorded authorization for run `33563497933` ends at the seven-day,
-run-scoped GitHub Actions artifacts. It does not authorize a tag, signing
-operation, GitHub Release, package-registry upload, package-manifest change or
-promotion into the canonical evidence tree. Before any of those future
-operations, the owner must record new explicit authorization naming the exact
-product version, source revision, target set, artefact destinations and approved
-evidence retention boundary. This rehearsal performed none of those publication
-operations.
+The recorded authorization for run `33614446587` covers only the commit, push
+and seven-day, run-scoped non-publishing GitHub Actions artifacts. It does not
+authorize a tag, signing operation, GitHub Release, package-registry upload,
+package-manifest change or promotion into the canonical evidence tree. Before
+any of those future operations, the owner must record new explicit
+authorization naming the exact product version, source revision, target set,
+artefact destinations and approved evidence retention boundary. This rehearsal
+performed none of those publication operations.
 
 ## Steps
 
