@@ -2335,14 +2335,17 @@ fn release_workflow_binds_run_attempt_to_candidate_identity() {
 fn release_workflow_aggregates_three_reverified_target_bundles() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
-        "aggregate:\n    name: Aggregate candidate evidence\n    needs: archive",
+        "aggregate:\n    name: Aggregate candidate evidence\n    needs: [archive, runtime]",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}",
+        "pattern: release-runtime-*-${{ github.run_id }}-${{ github.run_attempt }}",
         "merge-multiple: false",
         "downloaded_entries=(\"$inputs_root\"/*)",
         "unexpected number of downloaded target bundles",
         "cargo --locked xtask release manifest verify",
         "cargo --locked xtask release aggregate",
+        "runtime-evidence.json",
+        "runtime/%s.json",
         "cargo --locked xtask release evidence-scope --root \"$upload\" --allowlist \"$scope\"",
         "release-candidate-aggregate-${{ github.run_id }}-${{ github.run_attempt }}",
     ] {
@@ -2424,10 +2427,14 @@ fn release_workflow_declares_the_exact_supported_target_matrix() {
             "missing release target matrix row: {expected}"
         );
     }
+    let archive = workflow
+        .split_once("  runtime:\n")
+        .map(|(archive, _)| archive)
+        .expect("archive job before runtime job");
     assert_eq!(
-        workflow.matches("            target: ").count(),
+        archive.matches("            target: ").count(),
         3,
-        "the release workflow must not silently add or remove a supported target"
+        "the archive job must not silently add or remove a supported target"
     );
 }
 
@@ -2479,6 +2486,10 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
         "--source-dir \"$bundle\"",
         "--binary \"$BINARY\"",
         "--output \"$artefacts/$archive_name\"",
+        "scripts/release-runtime-smoke.py",
+        "ci/repro-${source_revision}",
+        "cmp -- \"$first\" \"$second\"",
+        "release-reproducibility-${{ github.run_id }}-${{ github.run_attempt }}",
     ] {
         assert!(
             workflow.contains(expected),
@@ -2487,7 +2498,7 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
     }
     assert_eq!(
         workflow.matches("        uses: ").count(),
-        9,
+        20,
         "each external workflow action must remain explicit and pinned"
     );
     assert!(

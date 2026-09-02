@@ -132,6 +132,7 @@ jobs:
           cargo test --locked
           --test archive_helper_contract
           --test release_contract
+          --test release_runtime_contract
           --test release_notes_contract
           --test release_schema_contract
       - name: Build and verify a synthetic upload scope
