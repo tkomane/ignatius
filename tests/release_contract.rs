@@ -1947,13 +1947,376 @@ fn complete_evidence_accepts_schema_integer_number_spellings() {
     }
 }
 
+fn aggregate_fixture(target: &str) -> Value {
+    let (platform, architecture, format) = match target {
+        "aarch64-apple-darwin" => ("macos", "aarch64", "tar.gz"),
+        "x86_64-pc-windows-msvc" => ("windows", "x86_64", "zip"),
+        "x86_64-unknown-linux-gnu" => ("linux", "x86_64", "tar.gz"),
+        _ => panic!("unsupported aggregate fixture target: {target}"),
+    };
+    let mut catalogue = fixture("valid-candidate.json");
+    let record = &mut catalogue["records"][0];
+    let version = record["product_version"]
+        .as_str()
+        .expect("fixture product version");
+    let name = format!("ignatius-{version}-{target}.{format}");
+    record["build_identity"] = json!("ci/fixture-run-1");
+    record["target_rows"] = json!([{
+        "target": target,
+        "platform": platform,
+        "architecture": architecture,
+        "coverage": "covered",
+        "artefact_name": name
+    }]);
+    record["artefacts"] = json!([{
+        "name": name,
+        "target": target,
+        "format": format,
+        "size_bytes": 3,
+        "checksum_algorithm": "sha256",
+        "checksum_status": "present",
+        "checksum": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "build_identity": "ci/fixture-run-1",
+        "signature_status": "not-configured",
+        "provenance_status": "not-configured"
+    }]);
+    record["evidence_reference"]["path"] = json!(format!(
+        "release-evidence/runs/fixture-run-1/{target}/release-record.json"
+    ));
+    catalogue
+}
+
+fn write_aggregate_input(directory: &Path, label: &str, catalogue: &Value) -> PathBuf {
+    let path = directory.join(format!("{label}.json"));
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(catalogue).expect("aggregate input JSON"),
+    )
+    .expect("aggregate input");
+    path
+}
+
+fn aggregate_args(output: &Path, inputs: &[PathBuf]) -> Vec<String> {
+    let mut args = vec![
+        "release".to_owned(),
+        "aggregate".to_owned(),
+        "--output".to_owned(),
+        output.to_str().expect("aggregate output path").to_owned(),
+        "--evidence-path".to_owned(),
+        "release-evidence/runs/fixture-run-1/aggregate/release-record.json".to_owned(),
+    ];
+    for input in inputs {
+        args.push("--input".to_owned());
+        args.push(input.to_str().expect("aggregate input path").to_owned());
+    }
+    args
+}
+
+#[test]
+fn aggregation_combines_the_exact_supported_targets_without_claiming_readiness() {
+    let temp = tempdir().expect("temporary directory");
+    let inputs = [
+        ("linux", "x86_64-unknown-linux-gnu"),
+        ("macos", "aarch64-apple-darwin"),
+        ("windows", "x86_64-pc-windows-msvc"),
+    ]
+    .map(|(label, target)| write_aggregate_input(temp.path(), label, &aggregate_fixture(target)));
+    let output_path = temp.path().join("aggregate.json");
+    let args = aggregate_args(&output_path, &inputs);
+
+    let output = run_xtask(args.clone());
+    let text = output_text(&output);
+    assert!(output.status.success(), "unexpected failure: {text}");
+    assert!(
+        text.contains("Release aggregate: generated 3 artefacts"),
+        "{text}"
+    );
+
+    let catalogue: Value =
+        serde_json::from_slice(&fs::read(&output_path).expect("aggregate catalogue"))
+            .expect("aggregate JSON");
+    let record = &catalogue["records"][0];
+    assert_eq!(record["build_identity"], json!("ci/fixture-run-1"));
+    assert_eq!(record["status"], json!("candidate"));
+    assert_eq!(
+        record["evidence_reference"]["path"],
+        json!("release-evidence/runs/fixture-run-1/aggregate/release-record.json")
+    );
+    let targets = record["target_rows"]
+        .as_array()
+        .expect("aggregate target rows")
+        .iter()
+        .map(|row| row["target"].as_str().expect("target"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        targets,
+        vec![
+            "aarch64-apple-darwin",
+            "x86_64-pc-windows-msvc",
+            "x86_64-unknown-linux-gnu"
+        ]
+    );
+    assert_eq!(
+        record["artefacts"]
+            .as_array()
+            .expect("aggregate artefacts")
+            .len(),
+        3
+    );
+
+    let artefact_dir = temp.path().join("artefacts");
+    let evidence_dir = temp.path().join("evidence");
+    fs::create_dir(&artefact_dir).expect("aggregate artefact directory");
+    for artefact in record["artefacts"].as_array().expect("aggregate artefacts") {
+        let name = artefact["name"].as_str().expect("aggregate artefact name");
+        fs::write(artefact_dir.join(name), b"abc").expect("aggregate artefact bytes");
+    }
+    let manifest = run_xtask(vec![
+        "release".to_owned(),
+        "manifest".to_owned(),
+        "generate".to_owned(),
+        "--record".to_owned(),
+        output_path.to_str().expect("aggregate path").to_owned(),
+        "--artefact-dir".to_owned(),
+        artefact_dir
+            .to_str()
+            .expect("aggregate artefact path")
+            .to_owned(),
+        "--output-dir".to_owned(),
+        evidence_dir
+            .to_str()
+            .expect("aggregate evidence path")
+            .to_owned(),
+    ]);
+    let manifest_text = output_text(&manifest);
+    assert!(
+        manifest.status.success(),
+        "aggregate manifest generation failed: {manifest_text}"
+    );
+    let verified = run_xtask(vec![
+        "release".to_owned(),
+        "manifest".to_owned(),
+        "verify".to_owned(),
+        "--record".to_owned(),
+        output_path.to_str().expect("aggregate path").to_owned(),
+        "--artefact-dir".to_owned(),
+        artefact_dir
+            .to_str()
+            .expect("aggregate artefact path")
+            .to_owned(),
+        "--manifest".to_owned(),
+        evidence_dir
+            .join("release-manifest.json")
+            .to_str()
+            .expect("aggregate manifest path")
+            .to_owned(),
+        "--checksums".to_owned(),
+        evidence_dir
+            .join("SHA256SUMS")
+            .to_str()
+            .expect("aggregate checksums path")
+            .to_owned(),
+    ]);
+    let verified_text = output_text(&verified);
+    assert!(
+        verified.status.success(),
+        "aggregate manifest verification failed: {verified_text}"
+    );
+
+    let validated = run_xtask(vec![
+        "release".to_owned(),
+        "validate".to_owned(),
+        output_path.to_str().expect("aggregate path").to_owned(),
+    ]);
+    let validated_text = output_text(&validated);
+    assert!(
+        validated.status.success(),
+        "aggregate did not validate: {validated_text}"
+    );
+    let readiness = run_xtask(vec![
+        "release".to_owned(),
+        "check".to_owned(),
+        output_path.to_str().expect("aggregate path").to_owned(),
+    ]);
+    let readiness_text = output_text(&readiness);
+    assert!(
+        !readiness.status.success(),
+        "unexpected readiness: {readiness_text}"
+    );
+    assert!(
+        readiness_text.contains("not in a publishable readiness state"),
+        "{readiness_text}"
+    );
+
+    let overwrite = run_xtask(args);
+    let overwrite_text = output_text(&overwrite);
+    assert!(
+        !overwrite.status.success(),
+        "unexpected overwrite: {overwrite_text}"
+    );
+    assert!(
+        overwrite_text.contains("without overwriting"),
+        "{overwrite_text}"
+    );
+}
+
+#[test]
+fn aggregation_rejects_cross_target_identity_mismatch() {
+    let temp = tempdir().expect("temporary directory");
+    let macos = write_aggregate_input(
+        temp.path(),
+        "macos",
+        &aggregate_fixture("aarch64-apple-darwin"),
+    );
+    let mut windows_record = aggregate_fixture("x86_64-pc-windows-msvc");
+    windows_record["records"][0]["build_identity"] = json!("ci/other-run");
+    windows_record["records"][0]["artefacts"][0]["build_identity"] = json!("ci/other-run");
+    let windows = write_aggregate_input(temp.path(), "windows", &windows_record);
+    let linux = write_aggregate_input(
+        temp.path(),
+        "linux",
+        &aggregate_fixture("x86_64-unknown-linux-gnu"),
+    );
+    let output_path = temp.path().join("aggregate.json");
+
+    let output = run_xtask(aggregate_args(&output_path, &[macos, windows, linux]));
+    let text = output_text(&output);
+    assert!(!output.status.success(), "unexpected success: {text}");
+    assert!(
+        text.contains("build_identity does not match across aggregate inputs"),
+        "{text}"
+    );
+    assert!(!output_path.exists(), "mismatched aggregate was written");
+}
+
+#[test]
+fn aggregation_preserves_blocked_status_and_unions_blockers() {
+    let temp = tempdir().expect("temporary directory");
+    let mut catalogues = [
+        aggregate_fixture("aarch64-apple-darwin"),
+        aggregate_fixture("x86_64-pc-windows-msvc"),
+        aggregate_fixture("x86_64-unknown-linux-gnu"),
+    ];
+    for (index, catalogue) in catalogues.iter_mut().enumerate() {
+        let record = &mut catalogue["records"][0];
+        record["status"] = json!("blocked");
+        record["state_history"] = json!([
+            {"from": "draft", "to": "candidate"},
+            {"from": "candidate", "to": "blocked"}
+        ]);
+        record["blockers"] = json!([format!("target blocker {index}")]);
+    }
+    let inputs = catalogues
+        .iter()
+        .enumerate()
+        .map(|(index, catalogue)| {
+            write_aggregate_input(temp.path(), &format!("target-{index}"), catalogue)
+        })
+        .collect::<Vec<_>>();
+    let output_path = temp.path().join("aggregate.json");
+
+    let output = run_xtask(aggregate_args(&output_path, &inputs));
+    let text = output_text(&output);
+    assert!(output.status.success(), "unexpected failure: {text}");
+    let catalogue: Value =
+        serde_json::from_slice(&fs::read(&output_path).expect("aggregate catalogue"))
+            .expect("aggregate JSON");
+    let record = &catalogue["records"][0];
+    assert_eq!(record["status"], json!("blocked"));
+    assert_eq!(
+        record["blockers"],
+        json!(["target blocker 0", "target blocker 1", "target blocker 2"])
+    );
+}
+
+#[test]
+fn aggregation_requires_each_supported_target_exactly_once() {
+    let temp = tempdir().expect("temporary directory");
+    let macos = write_aggregate_input(
+        temp.path(),
+        "macos",
+        &aggregate_fixture("aarch64-apple-darwin"),
+    );
+    let linux = write_aggregate_input(
+        temp.path(),
+        "linux",
+        &aggregate_fixture("x86_64-unknown-linux-gnu"),
+    );
+    let output_path = temp.path().join("aggregate.json");
+    let missing = run_xtask(aggregate_args(
+        &output_path,
+        &[macos.clone(), linux.clone()],
+    ));
+    let missing_text = output_text(&missing);
+    assert!(
+        !missing.status.success(),
+        "unexpected success: {missing_text}"
+    );
+    assert!(
+        missing_text.contains("release aggregate requires exactly 3 --input records"),
+        "{missing_text}"
+    );
+
+    let duplicate_macos = write_aggregate_input(
+        temp.path(),
+        "macos-again",
+        &aggregate_fixture("aarch64-apple-darwin"),
+    );
+    let duplicate = run_xtask(aggregate_args(
+        &output_path,
+        &[macos, duplicate_macos, linux],
+    ));
+    let duplicate_text = output_text(&duplicate);
+    assert!(
+        !duplicate.status.success(),
+        "unexpected success: {duplicate_text}"
+    );
+    assert!(
+        duplicate_text.contains("duplicate supported target in aggregate inputs"),
+        "{duplicate_text}"
+    );
+    assert!(!output_path.exists(), "incomplete aggregate was written");
+
+    let mut unsupported_record = aggregate_fixture("x86_64-unknown-linux-gnu");
+    unsupported_record["records"][0]["target_rows"][0]["target"] = json!("x86_64-unknown-freebsd");
+    unsupported_record["records"][0]["artefacts"][0]["target"] = json!("x86_64-unknown-freebsd");
+    unsupported_record["records"][0]["target_rows"][0]["artefact_name"] =
+        json!("ignatius-0.1.0-x86_64-unknown-freebsd.tar.gz");
+    unsupported_record["records"][0]["artefacts"][0]["name"] =
+        json!("ignatius-0.1.0-x86_64-unknown-freebsd.tar.gz");
+    let unsupported = write_aggregate_input(temp.path(), "unsupported", &unsupported_record);
+    let macos = write_aggregate_input(
+        temp.path(),
+        "macos-supported",
+        &aggregate_fixture("aarch64-apple-darwin"),
+    );
+    let windows = write_aggregate_input(
+        temp.path(),
+        "windows-supported",
+        &aggregate_fixture("x86_64-pc-windows-msvc"),
+    );
+    let unsupported_output =
+        run_xtask(aggregate_args(&output_path, &[macos, windows, unsupported]));
+    let unsupported_text = output_text(&unsupported_output);
+    assert!(
+        !unsupported_output.status.success(),
+        "unexpected success: {unsupported_text}"
+    );
+    assert!(
+        unsupported_text.contains("not a supported platform target"),
+        "{unsupported_text}"
+    );
+    assert!(!output_path.exists(), "unsupported aggregate was written");
+}
+
 #[test]
 fn release_workflow_binds_run_attempt_to_candidate_identity() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
-        "IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.target }}",
+        "IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}",
         "run_key=\"${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\"",
-        "build_identity=\"ci/${run_key}/${TARGET}\"",
+        "build_identity=\"ci/${run_key}\"",
         "evidence_path=\"release-evidence/runs/${run_key}/${TARGET}/release-record.json\"",
         "release-candidate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}",
     ] {
@@ -1963,9 +2326,31 @@ fn release_workflow_binds_run_attempt_to_candidate_identity() {
         );
     }
     assert!(
-        !workflow.contains("IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}/${{ matrix.target }}"),
-        "workflow retained the pre-attempt build identity",
+        !workflow.contains("IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.target }}"),
+        "workflow retained a target-specific build identity that cannot aggregate",
     );
+}
+
+#[test]
+fn release_workflow_aggregates_three_reverified_target_bundles() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    for expected in [
+        "aggregate:\n    name: Aggregate candidate evidence\n    needs: archive",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}",
+        "merge-multiple: false",
+        "downloaded_entries=(\"$inputs_root\"/*)",
+        "unexpected number of downloaded target bundles",
+        "cargo --locked xtask release manifest verify",
+        "cargo --locked xtask release aggregate",
+        "cargo --locked xtask release evidence-scope --root \"$upload\" --allowlist \"$scope\"",
+        "release-candidate-aggregate-${{ github.run_id }}-${{ github.run_attempt }}",
+    ] {
+        assert!(
+            workflow.contains(expected),
+            "missing aggregate workflow contract: {expected}"
+        );
+    }
 }
 
 #[test]
@@ -2082,6 +2467,7 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
         "dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772",
         "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6",
         "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "toolchain: \"1.97.1\"",
         "fetch-depth: 0",
         "persist-credentials: false",
@@ -2101,7 +2487,7 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
     }
     assert_eq!(
         workflow.matches("        uses: ").count(),
-        4,
+        9,
         "each external workflow action must remain explicit and pinned"
     );
     assert!(

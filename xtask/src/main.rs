@@ -44,6 +44,7 @@ fn main() -> ExitCode {
         ["release", "check", path] => release::check(Path::new(path)),
         ["release", "validate", path] => release::validate(Path::new(path)),
         ["release", "generate", rest @ ..] => release::generate(rest),
+        ["release", "aggregate", rest @ ..] => release::aggregate(rest),
         ["release", "evidence-scope", rest @ ..] => release::evidence_scope(rest),
         ["release", "manifest", "generate", rest @ ..] => release::manifest_generate(rest),
         ["release", "manifest", "verify", rest @ ..] => release::manifest_verify(rest),
@@ -84,6 +85,8 @@ fn print_help() {
   cargo xtask release generate OPTIONS
                            Generate one non-publishing release record
                            (hash bytes with --artefact-path)
+  cargo xtask release aggregate OPTIONS
+                           Combine the exact supported target records
   cargo xtask release manifest generate OPTIONS
                            Generate release-manifest.json and SHA256SUMS
   cargo xtask release manifest verify OPTIONS

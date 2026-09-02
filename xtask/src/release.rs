@@ -176,9 +176,7 @@ fn parse_json_integer(text: &str) -> Option<u64> {
     if significand.starts_with("-") || significand.is_empty() {
         return None;
     }
-    let (whole, fraction) = significand
-        .split_once(".")
-        .map_or((significand, ""), |parts| parts);
+    let (whole, fraction) = significand.split_once(".").unwrap_or((significand, ""));
     if whole.is_empty()
         || !whole.bytes().all(|byte| byte.is_ascii_digit())
         || !fraction.bytes().all(|byte| byte.is_ascii_digit())
@@ -748,6 +746,249 @@ pub fn generate(args: &[&str]) -> Result<(), String> {
         output.display()
     );
     Ok(())
+}
+
+/// Combines one validated record for each supported target into a single
+/// non-publishing candidate record. Exact archive bytes remain the manifest
+/// verifier's responsibility; aggregation only reconciles their identities.
+pub fn aggregate(args: &[&str]) -> Result<(), String> {
+    let options = AggregateOptions::parse(args)?;
+    if options.inputs.len() != RELEASE_TARGETS.len() {
+        return Err(format!(
+            "release aggregate requires exactly {} --input records",
+            RELEASE_TARGETS.len()
+        ));
+    }
+    if !is_evidence_reference(&options.evidence_path) {
+        return Err("--evidence-path must stay under release-evidence/".to_owned());
+    }
+
+    let mut seen_inputs = BTreeSet::new();
+    let mut records = Vec::with_capacity(options.inputs.len());
+    for input in &options.inputs {
+        let input = resolve_path(input);
+        if !seen_inputs.insert(input.clone()) {
+            return Err(format!(
+                "release aggregate contains a duplicate --input path: {}",
+                input.display()
+            ));
+        }
+        records.push(load_aggregate_record(&input)?);
+    }
+
+    let baseline = records
+        .first()
+        .expect("the exact input-count check guarantees one record");
+    for field in [
+        "product_version",
+        "source_revision",
+        "source_state",
+        "build_identity",
+        "notes_reference",
+    ] {
+        if records
+            .iter()
+            .skip(1)
+            .any(|record| record.get(field) != baseline.get(field))
+        {
+            return Err(format!(
+                "release aggregate {field} does not match across aggregate inputs"
+            ));
+        }
+    }
+
+    let product_version = required_text(baseline, "product_version", "aggregate record")?;
+    let source_revision = required_text(baseline, "source_revision", "aggregate record")?;
+    let source_state = required_text(baseline, "source_state", "aggregate record")?;
+    let build_identity = required_text(baseline, "build_identity", "aggregate record")?;
+    let notes_reference = baseline
+        .get("notes_reference")
+        .cloned()
+        .ok_or_else(|| "aggregate record.notes_reference is required".to_owned())?;
+
+    let mut rows_by_target = BTreeMap::new();
+    let mut artefacts_by_target = BTreeMap::new();
+    let mut blockers = BTreeSet::new();
+    let mut blocked = false;
+    for record in &records {
+        let status = required_text(record, "status", "aggregate input")?;
+        blocked |= status == "blocked";
+        if let Some(values) = record.get("blockers").and_then(Value::as_array) {
+            for value in values {
+                if let Some(value) = value.as_str() {
+                    blockers.insert(value.to_owned());
+                }
+            }
+        }
+
+        let rows = record
+            .get("target_rows")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "aggregate input target_rows must be an array".to_owned())?;
+        let artefacts = record
+            .get("artefacts")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "aggregate input artefacts must be an array".to_owned())?;
+        if rows.len() != 1 || artefacts.len() != 1 {
+            return Err(
+                "each release aggregate input must contain one target row and one artefact"
+                    .to_owned(),
+            );
+        }
+        let target = rows[0]
+            .get("target")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "aggregate input target row must name its target".to_owned())?;
+        let artefact_target = artefacts[0]
+            .get("target")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "aggregate input artefact must name its target".to_owned())?;
+        if target != artefact_target {
+            return Err("aggregate input target row and artefact do not match".to_owned());
+        }
+        if !RELEASE_TARGETS.contains(&target) {
+            return Err(format!(
+                "release aggregate contains an unsupported target: {target}"
+            ));
+        }
+        if rows_by_target.contains_key(target) || artefacts_by_target.contains_key(target) {
+            return Err("duplicate supported target in aggregate inputs".to_owned());
+        }
+        rows_by_target.insert(target.to_owned(), rows[0].clone());
+        artefacts_by_target.insert(target.to_owned(), artefacts[0].clone());
+    }
+
+    let mut target_rows = Vec::with_capacity(RELEASE_TARGETS.len());
+    let mut artefacts = Vec::with_capacity(RELEASE_TARGETS.len());
+    for target in RELEASE_TARGETS {
+        target_rows.push(
+            rows_by_target.remove(target).ok_or_else(|| {
+                format!("release aggregate is missing supported target: {target}")
+            })?,
+        );
+        artefacts.push(artefacts_by_target.remove(target).ok_or_else(|| {
+            format!("release aggregate is missing artefact for supported target: {target}")
+        })?);
+    }
+    if !rows_by_target.is_empty() || !artefacts_by_target.is_empty() {
+        return Err("release aggregate contains an unsupported target".to_owned());
+    }
+
+    let status = if blocked { "blocked" } else { "candidate" };
+    if blocked && blockers.is_empty() {
+        blockers.insert("one or more target records are blocked".to_owned());
+    }
+    let mut record = json!({
+        "schema_version": 1,
+        "product_version": product_version,
+        "source_revision": source_revision,
+        "source_state": source_state,
+        "build_identity": build_identity,
+        "target_rows": target_rows,
+        "artefacts": artefacts,
+        "notes_reference": notes_reference,
+        "evidence_reference": {
+            "path": options.evidence_path,
+            "product_version": product_version,
+            "source_revision": source_revision,
+            "status": "incomplete"
+        },
+        "status": status,
+        "state_history": if blocked {
+            json!([
+                {"from": "draft", "to": "candidate"},
+                {"from": "candidate", "to": "blocked"}
+            ])
+        } else {
+            json!([{"from": "draft", "to": "candidate"}])
+        }
+    });
+    if !blockers.is_empty() {
+        record["blockers"] = json!(blockers.into_iter().collect::<Vec<_>>());
+    }
+    let document = json!({
+        "schema_version": 1,
+        "records": [record]
+    });
+
+    let output = resolve_path(&options.output);
+    let parent = output
+        .parent()
+        .ok_or_else(|| "--output must name a file".to_owned())?;
+    if !parent.is_dir() {
+        return Err(format!(
+            "output directory does not exist: {}",
+            parent.display()
+        ));
+    }
+    if path_is_symlink(parent)? {
+        return Err(format!(
+            "output file parent must not use a symlink: {}",
+            parent.display()
+        ));
+    }
+    let mut bytes = serde_json::to_vec_pretty(&document)
+        .map_err(|error| format!("could not serialize release aggregate: {error}"))?;
+    bytes.push(b'\n');
+    write_new_file(&output, &bytes)?;
+
+    println!(
+        "Release aggregate: generated {} artefacts ({status}) at {}",
+        RELEASE_TARGETS.len(),
+        output.display()
+    );
+    Ok(())
+}
+
+fn load_aggregate_record(path: &Path) -> Result<Map<String, Value>, String> {
+    let (value, evidence_root) = read_catalogue(path)?;
+    let mut validation_blockers = Vec::new();
+    validate_catalogue(&value, &evidence_root, &mut validation_blockers, false);
+    let statuses = value
+        .get("records")
+        .and_then(Value::as_array)
+        .map(|records| {
+            records
+                .iter()
+                .map(|record| {
+                    record
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let unexpected = validation_blockers
+        .iter()
+        .filter(|blocker| !is_expected_non_ready_blocker(&statuses, blocker))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unexpected.is_empty() {
+        return Err(format!(
+            "release aggregate input {} is invalid: {}",
+            path.display(),
+            unexpected.join("; ")
+        ));
+    }
+    let records = value
+        .get("records")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "release aggregate input records must be an array".to_owned())?;
+    if records.len() != 1 {
+        return Err(
+            "each release aggregate input must contain exactly one release record".to_owned(),
+        );
+    }
+    let record = records[0]
+        .as_object()
+        .ok_or_else(|| "release aggregate input record must be an object".to_owned())?;
+    let status = record.get("status").and_then(Value::as_str);
+    if !matches!(status, Some("candidate" | "blocked")) {
+        return Err("release aggregate inputs must have candidate or blocked status".to_owned());
+    }
+    Ok(record.clone())
 }
 
 /// Generates the canonical checksum sidecars for the exact artefacts named by
@@ -1540,6 +1781,51 @@ fn parse_checksum_list(bytes: &[u8]) -> Result<Vec<(String, String)>, String> {
         entries.push((checksum.to_owned(), name.to_owned()));
     }
     Ok(entries)
+}
+
+#[derive(Debug)]
+struct AggregateOptions {
+    output: PathBuf,
+    evidence_path: String,
+    inputs: Vec<PathBuf>,
+}
+
+impl AggregateOptions {
+    fn parse(args: &[&str]) -> Result<Self, String> {
+        let mut output = None;
+        let mut evidence_path = None;
+        let mut inputs = Vec::new();
+        let mut index = 0;
+        while index < args.len() {
+            let flag = args[index];
+            if !flag.starts_with("--") {
+                return Err(format!("unexpected release aggregate argument: {flag}"));
+            }
+            let value = args
+                .get(index + 1)
+                .copied()
+                .filter(|value| !value.is_empty() && !value.starts_with("--"))
+                .ok_or_else(|| format!("{flag} needs a value"))?;
+            match flag {
+                "--output" if output.replace(PathBuf::from(value)).is_some() => {
+                    return Err("release aggregate option repeated: --output".to_owned());
+                }
+                "--evidence-path" if evidence_path.replace(value.to_owned()).is_some() => {
+                    return Err("release aggregate option repeated: --evidence-path".to_owned());
+                }
+                "--input" => inputs.push(PathBuf::from(value)),
+                "--output" | "--evidence-path" => {}
+                _ => return Err(format!("unknown release aggregate option: {flag}")),
+            }
+            index += 2;
+        }
+        Ok(Self {
+            output: output.ok_or_else(|| "release aggregate requires --output".to_owned())?,
+            evidence_path: evidence_path
+                .ok_or_else(|| "release aggregate requires --evidence-path".to_owned())?,
+            inputs,
+        })
+    }
 }
 
 #[derive(Debug)]
