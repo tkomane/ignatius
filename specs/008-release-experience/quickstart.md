@@ -194,9 +194,10 @@ when any input is blocked, and incomplete aggregate evidence never passes
 `release check`.
 
 The non-publishing workflow performs this sequence after re-verifying each
-downloaded four-file target bundle, then retains an exact six-file aggregate
-scope. A local command result proves the aggregation contract only; it is not
-hosted-run, platform-runtime, signing, provenance or publication evidence.
+downloaded four-file target bundle and its runtime sidecar, then retains an
+exact nine-file aggregate scope. A local command result proves the aggregation
+contract only; it is not hosted-run, platform-runtime, signing, provenance or
+publication evidence.
 
 ## 5. Rehearse installation and recovery
 
