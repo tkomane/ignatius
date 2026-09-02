@@ -1,128 +1,402 @@
 name: CI
 
-# Actions are pinned to immutable commit SHAs rather than tags, so a moved tag
-# cannot change what runs. The comment beside each one records the version the
-# SHA corresponded to when it was pinned, on 2026-08-15.
+# Actions are pinned to immutable commit SHAs. Dependabot keeps those pins
+# current, and tests/workflow_contract.rs rejects a tag, branch or short SHA.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Ecosystem advisories and supported PostgreSQL images can change without
+    # a source commit. Recheck them weekly at 05:17 Africa/Johannesburg.
+    - cron: "17 3 * * 1"
 
 permissions:
   contents: read
 
+# A newer commit makes an older CI result stale. Keep release candidates out of
+# this group: their workflow deliberately preserves every requested run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  # Fast gates first, so a formatting mistake does not wait behind a build.
+  # Fast gates first, so a formatting or documentation defect is immediately
+  # visible without waiting for a platform build.
   lint:
-    name: Format and lints
+    name: Format, lints and API documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: API documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --locked --workspace --no-deps
 
-  # Cross-platform behaviour is a release criterion, not a follow-up task.
+  # Text contracts catch repository-specific policy. This semantic pass catches
+  # invalid workflow expressions, job graphs and referenced local action metadata.
+  workflow-lint:
+    name: GitHub Actions semantics
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint workflows and referenced local action metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none \
+            --volume "$GITHUB_WORKSPACE:/repo:ro" \
+            --workdir /repo \
+            docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color
+
+  # Cargo.toml advertises Rust 1.90. A newer pinned development compiler cannot
+  # prove that contract, so compile the complete workspace with the minimum too.
+  msrv:
+    name: Minimum supported Rust 1.90
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.90.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The explicit +toolchain wins over rust-toolchain.toml. Without it this
+      # job would install 1.90 and then silently compile with the pinned 1.97.1.
+      - run: cargo +1.90.0 check --locked --workspace --all-targets --all-features
+
+  # Cross-platform behaviour is a release criterion, not follow-up work. This
+  # runs every auto-discovered test target so a new contract cannot be silently
+  # omitted from a hand-maintained list. Database cases report skips in this
+  # job; the live PostgreSQL jobs below are their evidence.
   test:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Test on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - name: Linux
+            runner: ubuntu-latest
+          - name: macOS
+            runner: macos-latest
+          - name: Windows
+            runner: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo build --all-targets
-      - name: Unit, layout, CLI contract and terminal restoration tests
-        # The restoration test allocates a real pty. It compiles to nothing on
-        # Windows, where the equivalent needs ConPTY and is still open work.
-        run: cargo test --lib --test cli_contract --test terminal_restore --test documentation_matches_the_build
-      - name: Terminal restoration and startup smoke test
+      - name: Compile every workspace target
+        run: cargo build --locked --workspace --all-targets --all-features
+      - name: Run every auto-discovered test target
+        run: cargo test --locked --workspace --all-targets --all-features
+      - name: Run documentation examples
+        run: cargo test --locked --workspace --doc --all-features
+      - name: Terminal refusal and startup smoke test
         shell: bash
         run: |
-          # Proves the binary starts, refuses the full-screen client without a
-          # terminal, and returns the documented exit codes.
-          cargo run --quiet -- version --verbose
-          cargo run --quiet -- doctor
+          set -euo pipefail
+          cargo run --locked --quiet --package ignatius -- version --verbose
+          cargo run --locked --quiet --package ignatius -- doctor
           set +e
-          cargo run --quiet -- connect "postgres://x@127.0.0.1:1/y?connect_timeout=2" >/dev/null 2>&1
-          test $? -eq 2 || { echo "expected usage exit code 2 without a terminal"; exit 1; }
-          cargo run --quiet -- query "postgres://x@127.0.0.1:1/y?connect_timeout=2" -c "SELECT 1" >/dev/null 2>&1
-          test $? -eq 4 || { echo "expected connection exit code 4"; exit 1; }
+          cargo run --locked --quiet --package ignatius -- connect "postgres://x@127.0.0.1:1/y?connect_timeout=2" >/dev/null 2>&1
+          connect_status=$?
+          cargo run --locked --quiet --package ignatius -- query "postgres://x@127.0.0.1:1/y?connect_timeout=2" -c "SELECT 1" >/dev/null 2>&1
+          query_status=$?
+          set -e
+          if [[ "$connect_status" -ne 2 ]]; then
+            echo "expected usage exit code 2 without a terminal, got $connect_status" >&2
+            exit 1
+          fi
+          if [[ "$query_status" -ne 4 ]]; then
+            echo "expected connection exit code 4, got $query_status" >&2
+            exit 1
+          fi
 
-  # Protocol claims need a real server, including the transport claims, which
-  # need a server that actually speaks TLS. Both come from the same compose file
-  # the developer uses, so there is one definition rather than two that drift.
+  # Protocol and transport claims need real plain and TLS servers. Pull
+  # requests cover the oldest and newest supported majors; main, manual and
+  # weekly runs cover every supported major from PostgreSQL 14 through 18.
   integration:
     name: PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["14", "16", "18"]
+        postgres: ${{ fromJSON(github.event_name == 'pull_request' && '["14","18"]' || '["14","15","16","17","18"]') }}
+    env:
+      IGNATIUS_PG_VERSION: ${{ matrix.postgres }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Start both databases
+      - name: Select immutable PostgreSQL fixture
+        id: fixture
+        uses: ./.github/actions/select-postgres-fixture
+        with:
+          major: ${{ matrix.postgres }}
+      - name: Start plain and TLS fixtures
+        shell: bash
         env:
-          IGNATIUS_PG_VERSION: ${{ matrix.postgres }}
+          IGNATIUS_POSTGRES_IMAGE: ${{ steps.fixture.outputs.image }}
         run: |
+          set -euo pipefail
           sh docker/tls/generate.sh
           docker compose -f docker/compose.yaml up -d
-          for i in $(seq 1 60); do
-            plain=$(docker compose -f docker/compose.yaml exec -T postgres \
-              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1 && echo ok || echo no)
-            tls=$(docker compose -f docker/compose.yaml exec -T postgres-tls \
-              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1 && echo ok || echo no)
-            if [ "$plain" = ok ] && [ "$tls" = ok ]; then echo "ready after ${i}s"; break; fi
+
+          ready=no
+          for attempt in $(seq 1 60); do
+            plain=no
+            tls=no
+            if docker compose -f docker/compose.yaml exec -T postgres \
+              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
+              plain=yes
+            fi
+            if docker compose -f docker/compose.yaml exec -T postgres-tls \
+              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
+              tls=yes
+            fi
+            if [[ "$plain" == yes && "$tls" == yes ]]; then
+              ready=yes
+              echo "both fixtures ready after ${attempt}s"
+              break
+            fi
             sleep 1
           done
-          docker compose -f docker/compose.yaml ps
-      - name: Integration tests
+
+          if [[ "$ready" != yes ]]; then
+            echo "PostgreSQL $IGNATIUS_PG_VERSION fixtures were not ready after 60 seconds" >&2
+            docker compose -f docker/compose.yaml ps
+            docker compose -f docker/compose.yaml logs --no-color
+            exit 1
+          fi
+      - name: Database-backed CLI, protocol, prompt and cloud-token contracts
         env:
           IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo
           IGNATIUS_TEST_PG_TLS_URI: postgres://ignatius_test:not-a-real-password-disposable-container@localhost:55433/ignatius_demo
-        # The password prompt needs both a real server and a real terminal, so
-        # it runs here, where there is one, under a pty allocated by `script`.
-        run: cargo test --test postgres_integration --test cli_contract --test password_prompt
+        run: >-
+          cargo test --locked
+          --test postgres_integration
+          --test cli_contract
+          --test password_prompt
+          --test cloud_identity_integration
+      - name: Show fixture diagnostics after a failure
+        if: failure()
+        shell: bash
+        run: |
+          docker compose -f docker/compose.yaml ps || true
+          docker compose -f docker/compose.yaml logs --no-color || true
+      - name: Remove disposable fixtures
+        if: always()
+        shell: bash
+        run: docker compose -f docker/compose.yaml down --volumes --remove-orphans
 
-  supply-chain:
-    name: Advisories, licences and secrets
+  # TCP coverage cannot prove Unix socket handling. This job exposes one
+  # disposable PostgreSQL 18 socket to the Linux host and runs the focused
+  # production-path contract against it.
+  socket-integration:
+    name: PostgreSQL 18 Unix socket
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The secret scanner walks the commit range of the push, which a
-          # shallow checkout cannot resolve. Without this it scans zero bytes
-          # and reports success, which is worse than not running it at all.
-          fetch-depth: 0
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          command: check advisories licenses bans sources
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Select immutable PostgreSQL fixture
+        id: fixture
+        uses: ./.github/actions/select-postgres-fixture
+        with:
+          major: "18"
+      - name: Start the socket fixture
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IGNATIUS_POSTGRES_IMAGE: ${{ steps.fixture.outputs.image }}
+        run: |
+          set -euo pipefail
+          socket_dir="$RUNNER_TEMP/ignatius-postgres-socket"
+          container="ignatius-postgres-socket-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$socket_dir"
+          chmod 0777 "$socket_dir"
+          printf 'IGNATIUS_SOCKET_DIR=%s\n' "$socket_dir" >> "$GITHUB_ENV"
+          printf 'IGNATIUS_SOCKET_CONTAINER=%s\n' "$container" >> "$GITHUB_ENV"
 
-  release-evidence:
-    name: Release evidence scope and secrets
+          docker run --detach --name "$container" \
+            --env POSTGRES_USER=ignatius_test \
+            --env POSTGRES_PASSWORD=not-a-real-password-disposable-container \
+            --env POSTGRES_DB=ignatius_demo \
+            --env POSTGRES_INITDB_ARGS="--auth-host=scram-sha-256 --auth-local=scram-sha-256" \
+            --mount "type=bind,src=$socket_dir,dst=/var/run/postgresql" \
+            "$IGNATIUS_POSTGRES_IMAGE" \
+            -c unix_socket_directories=/var/run/postgresql
+
+          ready=no
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" \
+              pg_isready -h /var/run/postgresql -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
+              ready=yes
+              echo "socket fixture ready after ${attempt}s"
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != yes ]]; then
+            echo "PostgreSQL socket fixture was not ready after 60 seconds" >&2
+            docker logs "$container"
+            exit 1
+          fi
+      - name: Unix socket connection contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          IGNATIUS_TEST_PG_SOCKET_URI="host='$IGNATIUS_SOCKET_DIR' port=5432 user=ignatius_test dbname=ignatius_demo password=not-a-real-password-disposable-container sslmode=disable" \
+            cargo test --locked --test postgres_socket_integration
+      - name: Show socket fixture diagnostics after a failure
+        if: failure()
+        shell: bash
+        run: |
+          if [[ -n "${IGNATIUS_SOCKET_CONTAINER:-}" ]]; then
+            docker logs "$IGNATIUS_SOCKET_CONTAINER" || true
+          fi
+      - name: Remove the socket fixture
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${IGNATIUS_SOCKET_CONTAINER:-}" ]]; then
+            docker rm --force "$IGNATIUS_SOCKET_CONTAINER" || true
+          fi
+
+  # A digest fixes each ordinary run to reviewed server bytes. The weekly
+  # comparison still tells us when an upstream major tag moves, so a security
+  # update becomes a deliberate source-controlled digest review rather than
+  # invisible fixture drift.
+  postgres-fixture-drift:
+    name: Reviewed PostgreSQL fixture drift
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect an upstream image update requiring review
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '### PostgreSQL fixture review\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Major | Reviewed digest | Current tag digest |\n| --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          for major in 14 15 16 17 18; do
+            expected="$(docker/postgres-image.sh "$major")"
+            expected_digest="${expected##*@}"
+            # shellcheck disable=SC2016 # Docker requires this literal Go template.
+            actual="$(docker buildx imagetools inspect --format "{{.Manifest.Digest}}" "postgres:${major}-alpine")"
+            printf "| %s | \`%s\` | \`%s\` |\n" "$major" "$expected_digest" "$actual" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$actual" != "$expected_digest" ]]; then
+              echo "PostgreSQL ${major}-alpine moved from $expected_digest to $actual; review and update docker/postgres-images.env" >&2
+              exit 1
+            fi
+          done
+
+  # Keep independent security controls in independent jobs. One finding must
+  # not suppress the other control and leave the run with incomplete evidence.
+  dependency-audit:
+    name: Dependency advisories and licences
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install checksum-verified cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/cargo-deny"
+          # Cargo verifies the crates.io package checksum. `--locked` uses
+          # cargo-deny's published dependency lockfile instead of resolving a
+          # new tool dependency graph during a security-sensitive check.
+          cargo install --locked --version 0.20.2 --root "$install_root" cargo-deny
+          version="$("$install_root/bin/cargo-deny" --version)"
+          printf '%s\n' "$version"
+          if [[ "$version" != "cargo-deny 0.20.2" ]]; then
+            echo "installed an unexpected cargo-deny version: $version" >&2
+            exit 1
+          fi
+          "$install_root/bin/cargo-deny" check advisories licenses bans sources
+
+  secret-scan:
+    name: Repository secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan every fetched Git revision with digest-pinned Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none \
+            --volume "$GITHUB_WORKSPACE:/repo:ro" \
+            --workdir /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            git --no-banner --redact --log-opts=--all
+
+  # Validate and scan exactly the files the release workflow is allowed to
+  # retain. This runs independently from release contract tests, which are in
+  # the auto-discovered platform suite, so either failure remains visible.
+  release-evidence:
+    name: Release evidence scope and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
@@ -149,7 +423,7 @@ jobs:
           printf '%s\n' '{"schema_version":1,"artefacts":[]}' > "$root/evidence/release-manifest.json"
           printf '%064d  %s\n' 0 "$archive" > "$root/evidence/SHA256SUMS"
           printf '%s\n' "{\"schema_version\":1,\"files\":[\"artefacts/$archive\",\"record/release-record.json\",\"evidence/release-manifest.json\",\"evidence/SHA256SUMS\"]}" > "$allowlist"
-          cargo xtask release evidence-scope --root "$root" --allowlist "$allowlist"
+          cargo --locked xtask release evidence-scope --root "$root" --allowlist "$allowlist"
           printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
       - name: Scan only the checked upload scope for secrets
         run: |
@@ -159,20 +433,26 @@ jobs:
             ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
             dir --no-banner --redact /scan
 
-  # Generated artefacts must be reproducible and must not drift from the source.
+  # Generated outputs must remain reproducible and the dependency graph must
+  # be exactly the one committed to Cargo.lock.
   drift:
-    name: Generated artefact drift
+    name: Generated output and lockfile drift
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Completions regenerate identically
+      - name: Completions regenerate as non-empty output
+        shell: bash
         run: |
+          set -euo pipefail
           for shell in zsh bash fish powershell; do
-            cargo run --quiet -- completion "$shell" > "/tmp/$shell.completion"
+            cargo run --locked --quiet --package ignatius -- completion "$shell" > "/tmp/$shell.completion"
             test -s "/tmp/$shell.completion" || { echo "$shell completion was empty"; exit 1; }
           done
       - name: Lockfile is committed and current

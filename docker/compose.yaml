@@ -7,7 +7,9 @@ name: ignatius-dev
 
 services:
   postgres:
-    image: postgres:${IGNATIUS_PG_VERSION:-18.4}-alpine
+    # Hosted CI supplies IGNATIUS_POSTGRES_IMAGE from the reviewed digest map.
+    # Local development retains the convenient explicit-major override.
+    image: ${IGNATIUS_POSTGRES_IMAGE:-postgres:${IGNATIUS_PG_VERSION:-18.4}-alpine}
     env_file:
       - ./dev.env
     environment:
@@ -28,7 +30,7 @@ services:
   # product makes can be tested rather than asserted. Its certificates are
   # generated on demand by tls/generate.sh and are never committed.
   postgres-tls:
-    image: postgres:${IGNATIUS_PG_VERSION:-18.4}-alpine
+    image: ${IGNATIUS_POSTGRES_IMAGE:-postgres:${IGNATIUS_PG_VERSION:-18.4}-alpine}
     env_file:
       - ./dev.env
     environment:

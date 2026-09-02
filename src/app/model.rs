@@ -2,7 +2,7 @@
 //!
 //! This is a plain data structure with no I/O. Everything the interface draws is
 //! derived from it, and every transition into it happens in
-//! [`crate::app::update`], which is a pure function. That is what makes states
+//! [`crate::app::update()`], which is a pure function. That is what makes states
 //! like "cancellation requested but not yet confirmed" testable without a
 //! database, a terminal, or a clock.
 
