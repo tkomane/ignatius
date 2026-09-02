@@ -449,9 +449,9 @@ Nothing else is waiting on the owner. The four that were are closed.
 6. A terminal-restoration test for Windows, which needs ConPTY (T055a).
 7. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
    absence of escape sequences is proven; the experience is not.
-8. Complete the remaining Feature 008 evidence gates. After explicit repository
-   push authorization, commit and push the locally verified workflow repair and
-   rerun the non-publishing hosted matrix. Then retain cross-platform
-   installation and recovery, cross-runner reproducibility, inventory, signing,
-   provenance and release owner-authorization evidence. None of those later
-   gates is satisfied by the failed hosted run.
+8. Complete the remaining Feature 008 evidence gates. The corrected hosted
+   archive, reproducibility, runtime-smoke and aggregate results are recorded
+   in the release documents. Still open are canonical evidence materialisation,
+   inventory/SBOM ownership, signing, provenance, direct logging-privacy review,
+   platform hand evidence and release-owner authorization. None of these gates
+   is satisfied by a successful non-publishing workflow alone.

@@ -145,9 +145,10 @@ same-directory hard link, refuses a symlinked output parent, and therefore
 cannot replace or redirect a destination silently after the initial check. The
 focused test repeats both supported archive formats, compares their exact bytes,
 confirms existing outputs remain unchanged and checks the symlinked-parent
-refusal. Hosted repeat-build, cross-runner, hosted-platform and hosted
-multi-target-aggregation evidence remain open. This makes no
-production-readiness or publication claim.
+refusal. At the time of this local evidence, hosted repeat-build,
+cross-runner, hosted-platform and multi-target aggregation evidence remained
+open; the corrected hosted results are recorded in the later T033 evidence.
+This makes no production-readiness or publication claim.
 
 The quickstart now installs failure cleanup for disposable database services
 and the temporary staging root before work begins, so an interrupted rehearsal
