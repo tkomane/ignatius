@@ -6,8 +6,10 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current continuation**: Feature 008 release evidence at pushed revision
-`259ac76de6477719b8a3515777f3623b24237dd6`. This revision hardens the hosted
+**Current continuation**: Feature 008 release evidence. Documentation is
+pushed at `b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
+evidence is bound to source revision
+`259ac76de6477719b8a3515777f3623b24237dd6`. That revision hardens the hosted
 workflow's deterministic archive builds (`/Brepro` for Windows) and corrects
 the exact runtime bundle layout. The pre-push `cargo --locked xtask verify` gate
 passed formatting, lints, 515 unit/layout tests, 39 CLI contract tests and 38
