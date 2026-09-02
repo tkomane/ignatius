@@ -35,14 +35,17 @@ jobs:
             target: x86_64-unknown-linux-gnu
             format: tar.gz
             binary: ignatius
+            rustflags: "-D warnings"
           - runner: macos-latest
             target: aarch64-apple-darwin
             format: tar.gz
             binary: ignatius
+            rustflags: "-D warnings"
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             format: zip
             binary: ignatius.exe
+            rustflags: "-D warnings -C link-arg=/Brepro"
 
     steps:
       - name: Check out the requested source
@@ -64,6 +67,7 @@ jobs:
       - name: Build the target binary
         env:
           IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --locked --release --target "${{ matrix.target }}"
 
       - name: Package and verify the candidate
@@ -269,7 +273,10 @@ jobs:
             runtime_inputs="$RUNNER_TEMP/ignatius-runtime-inputs"
             runtime_root="$RUNNER_TEMP/ignatius-runtime"
           fi
-          bundle="$runtime_inputs/release-candidate-${TARGET}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # A single exact artifact is extracted directly into the requested
+          # path by download-artifact. The aggregate job downloads three
+          # artifacts and therefore uses their named subdirectories below.
+          bundle="$runtime_inputs"
           test -d "$bundle"
 
           if command -v python3 >/dev/null 2>&1; then
@@ -513,31 +520,37 @@ jobs:
             target: x86_64-unknown-linux-gnu
             format: tar.gz
             binary: ignatius
+            rustflags: "-D warnings"
             repeat: one
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             format: tar.gz
             binary: ignatius
+            rustflags: "-D warnings"
             repeat: two
           - runner: macos-latest
             target: aarch64-apple-darwin
             format: tar.gz
             binary: ignatius
+            rustflags: "-D warnings"
             repeat: one
           - runner: macos-latest
             target: aarch64-apple-darwin
             format: tar.gz
             binary: ignatius
+            rustflags: "-D warnings"
             repeat: two
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             format: zip
             binary: ignatius.exe
+            rustflags: "-D warnings -C link-arg=/Brepro"
             repeat: one
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             format: zip
             binary: ignatius.exe
+            rustflags: "-D warnings -C link-arg=/Brepro"
             repeat: two
 
     steps:
@@ -564,6 +577,7 @@ jobs:
           FORMAT: ${{ matrix.format }}
           BINARY: ${{ matrix.binary }}
           REPEAT: ${{ matrix.repeat }}
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: |
           set -euo pipefail
           source_revision="$(git rev-parse HEAD)"
