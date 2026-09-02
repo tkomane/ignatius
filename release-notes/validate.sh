@@ -129,13 +129,22 @@ changelog_path=$(absolute_path "$changelog_path") || fail "could not resolve cha
 [ -f "$changelog_path" ] || fail "changelog is not a regular file: $changelog_path"
 [ ! -L "$catalog_path" ] || fail "catalogue must not be a symlink: $catalog_path"
 [ ! -L "$changelog_path" ] || fail "changelog must not be a symlink: $changelog_path"
-command -v cargo >/dev/null 2>&1 || fail "cargo is required for semantic validation"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required for changelog validation"
 
-(
-    cd "$repo_root"
-    cargo --locked xtask release validate "$catalog_path"
-)
+if [ -n "${IGNATIUS_XTASK_BIN:-}" ]; then
+    case "$IGNATIUS_XTASK_BIN" in
+        /*) ;;
+        *) fail "IGNATIUS_XTASK_BIN must be an absolute path" ;;
+    esac
+    [ -x "$IGNATIUS_XTASK_BIN" ] || fail "xtask helper is not executable: $IGNATIUS_XTASK_BIN"
+    "$IGNATIUS_XTASK_BIN" release validate "$catalog_path"
+else
+    command -v cargo >/dev/null 2>&1 || fail "cargo is required for semantic validation"
+    (
+        cd "$repo_root"
+        cargo --locked xtask release validate "$catalog_path"
+    )
+fi
 
 python3 - "$catalog_path" "$changelog_path" <<'PY'
 import json

@@ -174,6 +174,25 @@ fn output_text(output: &Output) -> String {
     )
 }
 
+fn workflow_job_block(workflow: &str, name: &str) -> String {
+    let lines: Vec<&str> = workflow.lines().collect();
+    let marker = format!("  {name}:");
+    let start = lines
+        .iter()
+        .position(|line| *line == marker)
+        .unwrap_or_else(|| panic!("release workflow has no {name} job"));
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| {
+            line.starts_with("  ")
+                && !line.starts_with("    ")
+                && line.trim_end().ends_with(':')
+                && !line.trim_start().starts_with('#')
+        })
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    lines[start..end].join("\n")
+}
+
 fn make_ready(mut catalogue: Value) -> Value {
     let record = catalogue["records"][0]
         .as_object_mut()
@@ -2335,19 +2354,30 @@ fn release_workflow_binds_run_attempt_to_candidate_identity() {
 fn release_workflow_aggregates_three_reverified_target_bundles() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
-        "aggregate:\n    name: Aggregate candidate evidence\n    needs: [archive, runtime]",
+        "aggregate:\n    name: Aggregate candidate evidence\n    needs: [source, archive, runtime]",
+        "timeout-minutes: 20",
+        "ref: ${{ needs.source.outputs.revision }}",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}",
         "pattern: release-runtime-*-${{ github.run_id }}-${{ github.run_attempt }}",
         "merge-multiple: false",
         "downloaded_entries=(\"$inputs_root\"/*)",
         "unexpected number of downloaded target bundles",
+        "Re-run all jobs or start a fresh full dispatch so every target shares one run attempt.",
+        "EXPECTED_REVISION: ${{ needs.source.outputs.revision }}",
+        "actual_target",
+        "actual_version",
+        "actual_revision",
+        "actual_build_identity",
         "cargo --locked xtask release manifest verify",
         "cargo --locked xtask release aggregate",
         "runtime-evidence.json",
         "runtime/%s.json",
         "cargo --locked xtask release evidence-scope --root \"$upload\" --allowlist \"$scope\"",
+        "--volume \"$upload:/scan:ro\"",
         "release-candidate-aggregate-${{ github.run_id }}-${{ github.run_attempt }}",
+        "for archive_name in \"${archive_names[@]}\"; do",
+        "verified archive count does not match the supported target count",
     ] {
         assert!(
             workflow.contains(expected),
@@ -2415,6 +2445,121 @@ fn release_workflow_reads_the_product_version_from_its_authority() {
 }
 
 #[test]
+fn release_workflow_freezes_and_rechecks_one_source_identity() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    for expected in [
+        "revision=\"$(git rev-parse HEAD)\"",
+        "revision: ${{ steps.source.outputs.revision }}",
+        "needs: source",
+        "needs: [source, preflight]",
+        "ref: ${{ needs.source.outputs.revision }}",
+        "needs: [source, archive]",
+        "actual_revision",
+        "expected $EXPECTED_REVISION",
+        "actual_version",
+        "expected $version",
+        "actual_build_identity",
+        "expected $expected_build_identity",
+        "compression-level: 0",
+        "merge-multiple: false",
+        "All target bundles were re-verified after artifact transport",
+    ] {
+        assert!(
+            workflow.contains(expected),
+            "release workflow is missing its immutable candidate-set contract: {expected}"
+        );
+    }
+
+    let source = workflow_job_block(workflow, "source");
+    assert!(
+        source.contains("ref: ${{ inputs.ref || github.sha }}"),
+        "event-triggered releases must check out the immutable event SHA"
+    );
+    assert!(
+        !source.contains("github.ref"),
+        "event-triggered releases must not resolve a mutable branch or tag ref"
+    );
+}
+
+#[test]
+fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let preflight = workflow_job_block(workflow, "preflight");
+    for expected in [
+        "preflight:\n    name: Validate candidate source",
+        "timeout-minutes: 60",
+        "Validate release notes against the candidate source",
+        "run: release-notes/validate.sh",
+        "uses: ./.github/actions/select-postgres-fixture",
+        "Run the source supply-chain policy",
+        "cargo install --locked --version 0.20.2 --root \"$install_root\" cargo-deny",
+        "Scan immutable candidate history for secrets",
+        "git --no-banner --redact --log-opts=--all",
+        "cargo xtask db up",
+        "Start the Unix socket verifier fixture",
+        "IGNATIUS_TEST_PG_SOCKET_URI=host='%s' port=5432 user=ignatius_test dbname=ignatius_demo password=not-a-real-password-disposable-container sslmode=disable",
+        "cargo xtask verify",
+        "Remove verifier fixtures",
+    ] {
+        assert!(
+            preflight.contains(expected),
+            "release workflow is missing its frozen-source preflight contract: {expected}"
+        );
+    }
+    assert!(
+        workflow.contains("needs: [source, preflight]"),
+        "archives must wait for successful source preflight"
+    );
+    for expected in [
+        "fetch-depth: 0",
+        "--volume \"$GITHUB_WORKSPACE:/repo:ro\"",
+        "--workdir /repo",
+        "docker run --rm --network none",
+        "} >> \"$GITHUB_ENV\"",
+    ] {
+        assert!(
+            preflight.contains(expected),
+            "release source preflight is missing its full-history or live-socket contract: {expected}"
+        );
+    }
+}
+
+#[test]
+fn release_workflow_scans_the_actual_retained_candidate_bundles() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let aggregate = workflow_job_block(workflow, "aggregate");
+    for expected in [
+        "Scan the exact retained target bundles and the final aggregate",
+        "--volume \"$bundle:/scan:ro\"",
+        "--volume \"$upload:/scan:ro\"",
+        "ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9",
+        "dir --no-banner --redact /scan",
+    ] {
+        assert!(
+            aggregate.contains(expected),
+            "release workflow is missing its retained-bundle secret scan: {expected}"
+        );
+    }
+    assert!(
+        aggregate.contains(
+            "for target in \"${targets[@]}\"; do\n            bundle=\"$inputs_root/release-candidate-${target}-${run_key}\"\n            docker run --rm --network none \\\n              --volume \"$bundle:/scan:ro\""
+        ),
+        "every retained target bundle must be scanned through a network-isolated read-only mount"
+    );
+    assert!(
+        aggregate.contains(
+            "docker run --rm --network none \\\n            --volume \"$upload:/scan:ro\""
+        ),
+        "the final aggregate must be scanned through a network-isolated read-only mount"
+    );
+    assert_eq!(
+        aggregate.matches("docker run --rm --network none").count(),
+        2,
+        "the aggregate must contain exactly the target-loop and final-package secret scans"
+    );
+}
+
+#[test]
 fn release_workflow_declares_the_exact_supported_target_matrix() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
@@ -2441,13 +2586,47 @@ fn release_workflow_declares_the_exact_supported_target_matrix() {
 #[test]
 fn release_workflow_is_read_only_and_non_publishing() {
     let workflow = include_str!("../.github/workflows/release.yml");
+    let lines: Vec<&str> = workflow.lines().collect();
+    let permission_starts: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (line.trim() == "permissions:").then_some(index))
+        .collect();
+    assert_eq!(
+        permission_starts.len(),
+        1,
+        "candidate workflow must have exactly one read-only workflow permission block"
+    );
+    let permission_start = permission_starts[0];
+    let jobs = lines
+        .iter()
+        .position(|line| *line == "jobs:")
+        .expect("candidate workflow jobs");
     assert!(
-        workflow.contains("permissions:\n  contents: read"),
-        "candidate workflow must use read-only repository permissions"
+        permission_start < jobs,
+        "candidate workflow permissions must be global rather than a job override"
+    );
+    let permission_end = lines[permission_start + 1..]
+        .iter()
+        .position(|line| !line.is_empty() && !line.starts_with(' ') && !line.starts_with('#'))
+        .map_or(lines.len(), |offset| permission_start + 1 + offset);
+    let permission_entries: Vec<&str> = lines[permission_start + 1..permission_end]
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(
+        permission_entries,
+        ["contents: read"],
+        "candidate workflow must grant only read repository contents"
     );
     assert!(
-        workflow.contains("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"),
-        "candidate evidence must use the pinned upload action"
+        workflow.contains("actions/upload-artifact@"),
+        "candidate evidence must use the upload action"
+    );
+    assert!(
+        !workflow.contains("continue-on-error: true"),
+        "candidate workflow must not make a required gate advisory"
     );
 
     let lowercase = workflow.to_ascii_lowercase();
@@ -2467,13 +2646,13 @@ fn release_workflow_is_read_only_and_non_publishing() {
 }
 
 #[test]
-fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
+fn release_workflow_uses_the_required_actions_and_pinned_build_inputs() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772",
         "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6",
-        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "toolchain: \"1.97.1\"",
         "fetch-depth: 0",
@@ -2500,7 +2679,7 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
     }
     assert_eq!(
         workflow.matches("        uses: ").count(),
-        20,
+        25,
         "each external workflow action must remain explicit and pinned"
     );
     assert!(
@@ -2512,26 +2691,38 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
 #[test]
 fn shared_ci_scans_only_the_checked_release_evidence_scope() {
     let workflow = include_str!("../.github/workflows/ci.yml");
+    let evidence_scan = workflow_job_block(workflow, "release-evidence");
     for expected in [
-        "release-evidence:\n    name: Release evidence scope and secrets",
-        "cargo xtask release evidence-scope --root \"$root\" --allowlist \"$allowlist\"",
+        "release-evidence:\n    name: Release evidence scope and secret scan",
+        "cargo --locked xtask release evidence-scope --root \"$root\" --allowlist \"$allowlist\"",
         "printf 'root=%s\\n' \"$root\" >> \"$GITHUB_OUTPUT\"",
         "--volume \"${{ steps.release-scope.outputs.root }}:/scan:ro\"",
         "ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9",
         "dir --no-banner --redact /scan",
     ] {
         assert!(
-            workflow.contains(expected),
+            evidence_scan.contains(expected),
             "shared CI is missing the release-evidence control: {expected}"
         );
     }
     assert!(
-        workflow.contains("docker run --rm --network none"),
+        evidence_scan.contains("docker run --rm --network none"),
         "the scanner must not receive network access"
     );
+    assert_eq!(
+        evidence_scan.matches("--volume ").count(),
+        1,
+        "the release-evidence scan must mount exactly one checked root"
+    );
+    for forbidden in ["GITHUB_WORKSPACE", "github.workspace", "$PWD"] {
+        assert!(
+            !evidence_scan.contains(forbidden),
+            "the release-evidence scan must not widen to {forbidden}"
+        );
+    }
     assert!(
-        !workflow.contains("--volume \"${{ github.workspace }}:/scan"),
-        "the release-evidence scan must not widen to the workspace"
+        evidence_scan.contains("--volume \"${{ steps.release-scope.outputs.root }}:/scan:ro\""),
+        "the release-evidence scan must mount only the verified output root"
     );
 }
 

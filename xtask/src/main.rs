@@ -110,6 +110,19 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Absolute path to this already-built xtask executable.
+///
+/// Tests that validate shell entry points may need xtask again. Passing the
+/// current binary prevents them from recursively invoking Cargo while the
+/// outer `cargo xtask` process is waiting for the test suite.
+fn current_xtask_binary() -> Result<String, String> {
+    std::env::current_exe()
+        .map_err(|error| format!("could not locate the running xtask binary: {error}"))?
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "the running xtask binary path is not valid UTF-8".to_owned())
+}
+
 fn compose_file() -> PathBuf {
     repo_root().join("docker").join("compose.yaml")
 }
@@ -409,23 +422,36 @@ fn require_database() -> Result<(), String> {
 fn test() -> Result<(), String> {
     let uri = dev_uri()?;
     let tls_uri = tls_uri()?;
+    let xtask_binary = current_xtask_binary()?;
+    let mut env = vec![("IGNATIUS_XTASK_BIN", xtask_binary.as_str())];
     if postgres_ready() {
         println!("Running everything, including the integration tests.\n");
-        run(
-            "cargo",
-            &["test"],
-            &[
-                ("IGNATIUS_TEST_PG_URI", &uri),
-                ("IGNATIUS_TEST_PG_TLS_URI", &tls_uri),
-            ],
-        )
+        env.extend([
+            ("IGNATIUS_TEST_PG_URI", uri.as_str()),
+            ("IGNATIUS_TEST_PG_TLS_URI", tls_uri.as_str()),
+        ]);
     } else {
         println!(
             "The development database is not running, so the integration tests will skip.
 Start it with `cargo xtask db up` to run them.\n"
         );
-        run("cargo", &["test"], &[])
     }
+    run(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+        ],
+        &env,
+    )?;
+    run(
+        "cargo",
+        &["test", "--locked", "--workspace", "--doc", "--all-features"],
+        &env,
+    )
 }
 
 /// Every gate, in the order that fails fastest, collecting independent failures.
@@ -436,55 +462,84 @@ fn verify() -> Result<(), String> {
     let uri = dev_uri()?;
     let tls_uri = tls_uri()?;
     let database_available = postgres_ready();
+    let socket_uri = std::env::var("IGNATIUS_TEST_PG_SOCKET_URI")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let socket_available = cfg!(unix) && socket_uri.is_some();
+    let xtask_binary = current_xtask_binary()?;
 
     let mut results: Vec<(&str, Result<(), String>)> = Vec::new();
 
     println!("== formatting ==");
-    results.push(("formatting", run("cargo", &["fmt", "--check"], &[])));
+    results.push((
+        "formatting",
+        run("cargo", &["fmt", "--all", "--check"], &[]),
+    ));
 
     println!("\n== lints ==");
     results.push((
         "lints",
         run(
             "cargo",
-            &["clippy", "--all-targets", "--", "-D", "warnings"],
+            &[
+                "clippy",
+                "--locked",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--",
+                "-D",
+                "warnings",
+            ],
             &[],
         ),
     ));
 
-    println!("\n== unit and layout tests ==");
-    results.push(("unit tests", run("cargo", &["test", "--lib"], &[])));
-
-    println!("\n== command-line contract ==");
-    let env: Vec<(&str, &str)> = if database_available {
-        vec![
-            ("IGNATIUS_TEST_PG_URI", uri.as_str()),
-            ("IGNATIUS_TEST_PG_TLS_URI", tls_uri.as_str()),
-        ]
-    } else {
-        Vec::new()
-    };
+    println!("\n== API documentation ==");
     results.push((
-        "cli contract",
-        run("cargo", &["test", "--test", "cli_contract"], &env),
+        "API documentation",
+        run(
+            "cargo",
+            &["doc", "--locked", "--workspace", "--no-deps"],
+            &[("RUSTDOCFLAGS", "-D warnings")],
+        ),
     ));
 
-    println!("\n== postgresql integration ==");
+    println!("\n== complete auto-discovered test suite ==");
+    let mut env: Vec<(&str, &str)> = vec![("IGNATIUS_XTASK_BIN", xtask_binary.as_str())];
     if database_available {
-        results.push((
-            "integration",
-            run(
-                "cargo",
-                &["test", "--test", "postgres_integration"],
-                &[
-                    ("IGNATIUS_TEST_PG_URI", &uri),
-                    ("IGNATIUS_TEST_PG_TLS_URI", &tls_uri),
-                ],
-            ),
-        ));
-    } else {
-        println!("skipped: no development database. `cargo xtask db up` starts one.");
+        env.extend([
+            ("IGNATIUS_TEST_PG_URI", uri.as_str()),
+            ("IGNATIUS_TEST_PG_TLS_URI", tls_uri.as_str()),
+        ]);
     }
+    if let Some(socket_uri) = socket_uri.as_deref() {
+        env.push(("IGNATIUS_TEST_PG_SOCKET_URI", socket_uri));
+    }
+    results.push((
+        "workspace tests",
+        run(
+            "cargo",
+            &[
+                "test",
+                "--locked",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+            ],
+            &env,
+        ),
+    ));
+
+    println!("\n== documentation tests ==");
+    results.push((
+        "documentation tests",
+        run(
+            "cargo",
+            &["test", "--locked", "--workspace", "--doc", "--all-features"],
+            &env,
+        ),
+    ));
 
     println!("\n{}", "=".repeat(60));
     let failures: Vec<&str> = results
@@ -498,16 +553,26 @@ fn verify() -> Result<(), String> {
         println!("  {status:<5} {name}");
     }
     if !database_available {
-        // An absent container is an environment limitation, not a failure, but
-        // it must never be reported as if the tests had passed.
-        println!("  skip  integration (no development database)");
+        println!("  skip  database-backed tests (no development database)");
+    } else {
+        println!("  pass  database-backed tests (plain and TLS PostgreSQL)");
+    }
+    if !socket_available {
+        let reason = if cfg!(unix) {
+            "IGNATIUS_TEST_PG_SOCKET_URI is not set"
+        } else {
+            "Unix sockets are not available on this platform"
+        };
+        println!("  skip  Unix socket integration ({reason})");
+    } else {
+        println!("  pass  Unix socket integration");
     }
 
     if failures.is_empty() {
-        if database_available {
+        if database_available && socket_available {
             println!("\nEverything passed.");
         } else {
-            println!("\nEverything that ran passed. The integration tests did not run.");
+            println!("\nEverything that ran passed. The skips above remain evidence gaps.");
         }
         Ok(())
     } else {

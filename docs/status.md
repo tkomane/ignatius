@@ -42,6 +42,27 @@ materialisation and the remaining supply-chain evidence. T035 remains open
 because the accepted release criteria are not all evidenced; the roadmap stays
 in planning. No tag, signing, release or publication operation was performed.
 
+The pending CI-hardening candidate preserves that hosted aggregate as historical
+evidence while adding exhaustive local verification, Rust 1.90 and PostgreSQL
+14-18 coverage, a real Linux Unix-socket job, immutable action and
+workflow-security contracts, bounded jobs, semantic workflow linting, and
+independent dependency and secret controls. Its release preflight freezes the
+source and runs the same security and verifier gates before retaining target
+evidence; the aggregate job rechecks transport, scope, target, product, source
+and build identity before retaining its six-file package.
+
+Those changes have passed locally in an isolated integration worktree, including
+Actionlint and YAML parsing, 80 release contracts, 7 workflow contracts,
+Cargo-deny 0.20.2, digest-pinned Gitleaks history scanning and Rust 1.90. The
+full verifier passed PostgreSQL 18.4 plain and TLS; the Unix-socket check was
+explicitly skipped because its URI was not configured. The candidate has not
+run on GitHub-hosted runners, so PostgreSQL 15/17, the socket job, Rust 1.90,
+workflow linting and the hardened release preflight remain hosted evidence gaps.
+An explicit macOS Docker socket attempt is not counted as a pass: the bind
+mount rejected PostgreSQL's socket-permission change before startup. The
+socket job deliberately targets Ubuntu, where the runner filesystem supports
+the required Unix-domain socket boundary.
+
 **Current implemented product feature**: cloud identity authentication. The
 owner asked for Entra ID first and for a first-class experience on other clouds,
 and checking the other two turned that instruction from a generalisation into the

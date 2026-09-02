@@ -226,17 +226,27 @@ target-specific archive per matrix row with the repository-owned deterministic
 archive helper, generates and verifies these sidecars,
 stages only the archive, record and verified sidecars under an exact upload
 root, checks that root with `cargo --locked xtask release evidence-scope`, and retains it
-as a run-scoped workflow artifact. Each matrix job emits a per-target record
-with one shared run-attempt build identity. A final job downloads the three
-bundles, rechecks each four-file scope, re-verifies each archive against its
-manifest, and uses `cargo --locked xtask release aggregate` to create a
-canonical three-target record. It then generates and verifies one combined
-manifest, collects one runtime sidecar per target and retains only the exact
+as a run-scoped workflow artifact. The hardened workflow first freezes one
+source revision and runs release-note validation, the dependency policy, a
+full-history secret scan and the complete Linux verifier before retaining any
+target bundle. Each matrix job emits a per-target record with one shared
+run-attempt build identity. A final job downloads the three bundles, rechecks
+each four-file scope, re-verifies each archive against its manifest, and uses
+`cargo --locked xtask release aggregate` to create a canonical three-target
+record. It then generates and verifies one combined manifest, collects one
+runtime sidecar per target, scans each retained target bundle and the final
+package, and retains only the exact
 three archives, aggregate record, combined manifest, checksum list and three
 runtime sidecars. Missing, duplicate, unsupported or identity-mismatched
 inputs fail closed. The corrected hosted run and its retained nine-file scope
 are recorded below. The workflow is not a release, signing or publication gate;
 T015 provides the readiness assertion and T016 records reproducibility evidence.
+
+The run-attempt identity intentionally prevents mixing target bytes from partial
+reruns. If one archive job needs retrying, use **Re-run all jobs** or start a
+fresh full dispatch. A partial rerun leaves the aggregate without three bundles
+from one attempt and fails with an actionable recovery instruction instead of
+assembling mixed-attempt evidence.
 
 The archive helper refuses an existing output and a symlinked output parent. It
 creates the completed archive in the destination directory and installs it

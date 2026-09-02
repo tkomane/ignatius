@@ -2,8 +2,8 @@ name: Release candidate archives
 
 # This workflow prepares target-specific, non-publishing candidate bundles.
 # It never creates a GitHub Release, signs an artefact, or distributes one.
-# Each matrix job emits a per-target record. A final non-publishing job revalidates
-# and aggregates all three records before retaining multi-target evidence.
+# Each matrix job emits a per-target record; a later aggregation and readiness
+# gate are required before a multi-target candidate can be called complete.
 on:
   push:
     tags:
@@ -20,13 +20,163 @@ permissions:
   contents: read
 
 env:
+  CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Event-triggered runs begin at the event SHA, not a movable branch or tag.
+  # An explicitly requested manual ref is resolved once here. Every later job
+  # checks out the resulting immutable revision, so a ref moving mid-run cannot
+  # create a mixed candidate.
+  source:
+    name: Resolve candidate source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      revision: ${{ steps.source.outputs.revision }}
+    steps:
+      - name: Check out the requested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record the immutable source revision
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "could not resolve one full source revision" >&2
+            exit 1
+          fi
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+          echo "Candidate source: $revision"
+
+  # A tag can be created without first passing the branch workflow. Retaining
+  # a blocked candidate is still useful, but it must not become evidence for
+  # source that has not passed the same Linux verifier and release-note checks.
+  preflight:
+    name: Validate candidate source
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the immutable candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+      - name: Cache Rust build inputs
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # A tag can bypass the ordinary branch workflow. Run the same immutable
+      # dependency policy before any candidate bytes are retained.
+      - name: Run the source supply-chain policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/cargo-deny"
+          # Cargo verifies the crates.io package checksum. `--locked` uses
+          # cargo-deny's published dependency lockfile instead of resolving a
+          # new tool dependency graph during a security-sensitive check.
+          cargo install --locked --version 0.20.2 --root "$install_root" cargo-deny
+          version="$("$install_root/bin/cargo-deny" --version)"
+          printf '%s\n' "$version"
+          if [[ "$version" != "cargo-deny 0.20.2" ]]; then
+            echo "installed an unexpected cargo-deny version: $version" >&2
+            exit 1
+          fi
+          "$install_root/bin/cargo-deny" check advisories licenses bans sources
+      - name: Scan immutable candidate history for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none \
+            --volume "$GITHUB_WORKSPACE:/repo:ro" \
+            --workdir /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            git --no-banner --redact --log-opts=--all
+      - name: Select immutable PostgreSQL fixture
+        id: fixture
+        uses: ./.github/actions/select-postgres-fixture
+        with:
+          major: "18"
+      - name: Validate release notes against the candidate source
+        run: release-notes/validate.sh
+      - name: Start plain and TLS verifier fixtures
+        shell: bash
+        env:
+          IGNATIUS_PG_VERSION: "18"
+          IGNATIUS_POSTGRES_IMAGE: ${{ steps.fixture.outputs.image }}
+        run: cargo xtask db up
+      - name: Start the Unix socket verifier fixture
+        shell: bash
+        env:
+          IGNATIUS_POSTGRES_IMAGE: ${{ steps.fixture.outputs.image }}
+        run: |
+          set -euo pipefail
+          socket_dir="$RUNNER_TEMP/ignatius-release-postgres-socket"
+          container="ignatius-release-postgres-socket-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$socket_dir"
+          chmod 0777 "$socket_dir"
+          {
+            printf 'IGNATIUS_SOCKET_DIR=%s\n' "$socket_dir"
+            printf "IGNATIUS_TEST_PG_SOCKET_URI=host='%s' port=5432 user=ignatius_test dbname=ignatius_demo password=not-a-real-password-disposable-container sslmode=disable\n" "$socket_dir"
+            printf 'IGNATIUS_SOCKET_CONTAINER=%s\n' "$container"
+          } >> "$GITHUB_ENV"
+
+          docker run --detach --name "$container" \
+            --env POSTGRES_USER=ignatius_test \
+            --env POSTGRES_PASSWORD=not-a-real-password-disposable-container \
+            --env POSTGRES_DB=ignatius_demo \
+            --env POSTGRES_INITDB_ARGS="--auth-host=scram-sha-256 --auth-local=scram-sha-256" \
+            --mount "type=bind,src=$socket_dir,dst=/var/run/postgresql" \
+            "$IGNATIUS_POSTGRES_IMAGE" \
+            -c unix_socket_directories=/var/run/postgresql
+
+          ready=no
+          for attempt in $(seq 1 60); do
+            if docker exec "$container" \
+              pg_isready -h /var/run/postgresql -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
+              ready=yes
+              echo "release socket fixture ready after ${attempt}s"
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != yes ]]; then
+            echo "release socket fixture was not ready after 60 seconds" >&2
+            docker logs "$container"
+            exit 1
+          fi
+      - name: Run the complete Linux release preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo xtask verify
+      - name: Remove verifier fixtures
+        if: always()
+        shell: bash
+        run: |
+          docker compose -f docker/compose.yaml down --volumes --remove-orphans || true
+          if [[ -n "${IGNATIUS_SOCKET_CONTAINER:-}" ]]; then
+            docker rm --force "$IGNATIUS_SOCKET_CONTAINER" || true
+          fi
+
   archive:
     name: Archive ${{ matrix.target }}
+    needs: [source, preflight]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +201,7 @@ jobs:
       - name: Check out the requested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.source.outputs.revision }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -107,9 +257,10 @@ jobs:
           archive_script="$PWD/scripts/create-release-archive.py"
           test -f "$archive_script"
 
-          # Read the product authority directly. `cargo pkgid` output is a
-          # package-ID representation, not a stable version-only interface,
-          # and its spelling differs across Cargo versions.
+          # Cargo.toml is the product-version authority. `cargo pkgid` exposes
+          # a package-ID display format whose spelling changes across Cargo
+          # versions and is not a stable version-only interface.
+          # shellcheck disable=SC2016 # The single-quoted sed program preserves regex anchors.
           version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
           if [[ -z "$version" ]]; then
             echo "could not read the product version from Cargo.toml" >&2
@@ -219,17 +370,19 @@ jobs:
           echo "Upload scope: $upload"
 
       - name: Store run-scoped candidate evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-candidate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
           path: ${{ runner.temp }}/ignatius-release/${{ matrix.target }}/upload
 
   runtime:
     name: Runtime install and rollback ${{ matrix.target }}
-    needs: archive
+    needs: [source, archive]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -245,7 +398,7 @@ jobs:
       - name: Check out the requested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.source.outputs.revision }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -294,7 +447,7 @@ jobs:
             --output "$runtime_root/runtime-evidence.json"
 
       - name: Store run-scoped runtime evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-runtime-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -303,32 +456,27 @@ jobs:
 
   aggregate:
     name: Aggregate candidate evidence
-    needs: [archive, runtime]
+    needs: [source, archive, runtime]
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Check out the requested source
+      - name: Check out the immutable candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
-          fetch-depth: 0
+          ref: ${{ needs.source.outputs.revision }}
           persist-credentials: false
-
       - name: Install the pinned Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.97.1"
-
       - name: Cache Rust build inputs
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
       - name: Download target candidate evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ${{ runner.temp }}/ignatius-release-inputs
           pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}
           merge-multiple: false
-
       - name: Download target runtime evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -336,17 +484,21 @@ jobs:
           pattern: release-runtime-*-${{ github.run_id }}-${{ github.run_attempt }}
           merge-multiple: false
 
-      - name: Reverify and aggregate the candidate
+      - name: Reverify, aggregate and inspect candidate evidence
         shell: bash
+        env:
+          EXPECTED_REVISION: ${{ needs.source.outputs.revision }}
         run: |
           set -euo pipefail
 
+          # shellcheck disable=SC2016 # The single-quoted sed program preserves regex anchors.
           version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
           if [[ -z "$version" ]]; then
             echo "could not read the product version from Cargo.toml" >&2
             exit 1
           fi
           run_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_build_identity="ci/${run_key}"
           inputs_root="$RUNNER_TEMP/ignatius-release-inputs"
           runtime_inputs_root="$RUNNER_TEMP/ignatius-runtime-inputs"
           release_root="$RUNNER_TEMP/ignatius-release/aggregate"
@@ -366,6 +518,7 @@ jobs:
           shopt -u nullglob dotglob
           if [[ "${#downloaded_entries[@]}" -ne "${#targets[@]}" ]]; then
             echo "unexpected number of downloaded target bundles: ${#downloaded_entries[@]}" >&2
+            echo "Re-run all jobs or start a fresh full dispatch so every target shares one run attempt." >&2
             exit 1
           fi
           for entry in "${downloaded_entries[@]}"; do
@@ -374,6 +527,8 @@ jobs:
               exit 1
             fi
           done
+          printf '### Verified non-publishing candidate set\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Target | Archive | SHA-256 |\n| --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
           shopt -s nullglob dotglob
           runtime_entries=("$runtime_inputs_root"/*)
           shopt -u nullglob dotglob
@@ -404,7 +559,19 @@ jobs:
             esac
             bundle="$inputs_root/release-candidate-${target}-${run_key}"
             record="$bundle/record/release-record.json"
+            manifest="$bundle/evidence/release-manifest.json"
+            checksums="$bundle/evidence/SHA256SUMS"
+            archive="$bundle/artefacts/$archive_name"
             input_scope="$release_root/input-scope-${target}.json"
+            if [[ ! -d "$bundle" || -L "$bundle" || ! -f "$record" || -L "$record" || ! -f "$manifest" || -L "$manifest" || ! -f "$checksums" || -L "$checksums" || ! -f "$archive" || -L "$archive" ]]; then
+              echo "candidate bundle is incomplete or unsafe for $target" >&2
+              exit 1
+            fi
+            mapfile -t artefact_entries < <(find "$bundle/artefacts" -mindepth 1 -maxdepth 1 -printf '%f\n')
+            if [[ "${#artefact_entries[@]}" -ne 1 || "${artefact_entries[0]}" != "$archive_name" ]]; then
+              echo "candidate bundle for $target must contain exactly its expected archive" >&2
+              exit 1
+            fi
             printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS"]}\n' \
               "$archive_name" > "$input_scope"
             cargo --locked xtask release evidence-scope \
@@ -414,8 +581,30 @@ jobs:
             cargo --locked xtask release manifest verify \
               --record "$record" \
               --artefact-dir "$bundle/artefacts" \
-              --manifest "$bundle/evidence/release-manifest.json" \
-              --checksums "$bundle/evidence/SHA256SUMS"
+              --manifest "$manifest" \
+              --checksums "$checksums"
+
+            actual_target="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["records"][0]["target_rows"][0]["target"])' "$record")"
+            actual_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["records"][0]["product_version"])' "$record")"
+            actual_revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["records"][0]["source_revision"])' "$record")"
+            actual_build_identity="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["records"][0]["build_identity"])' "$record")"
+            if [[ "$actual_target" != "$target" ]]; then
+              echo "candidate directory $target contains record for $actual_target" >&2
+              exit 1
+            fi
+            if [[ "$actual_version" != "$version" ]]; then
+              echo "candidate $target uses product version $actual_version, expected $version" >&2
+              exit 1
+            fi
+            if [[ "$actual_revision" != "$EXPECTED_REVISION" ]]; then
+              echo "candidate $target uses source $actual_revision, expected $EXPECTED_REVISION" >&2
+              exit 1
+            fi
+            if [[ "$actual_build_identity" != "$expected_build_identity" ]]; then
+              echo "candidate $target uses build identity $actual_build_identity, expected $expected_build_identity" >&2
+              exit 1
+            fi
+
             runtime_bundle="$runtime_inputs_root/release-runtime-${target}-${run_key}"
             runtime_evidence="$runtime_bundle/runtime-evidence.json"
             test -d "$runtime_bundle"
@@ -437,10 +626,18 @@ jobs:
               --allowlist "$runtime_scope"
             cp "$runtime_evidence" "$runtime/$target.json"
             test ! -e "$artefacts/$archive_name"
-            cp "$bundle/artefacts/$archive_name" "$artefacts/$archive_name"
+            cp "$archive" "$artefacts/$archive_name"
             aggregate_args+=(--input "$record")
             archive_names+=("$archive_name")
+            # shellcheck disable=SC2016 # The single-quoted awk program preserves field syntax.
+            digest="$(awk 'NR == 1 { print $1 }' "$checksums")"
+            printf "| \`%s\` | \`%s\` | \`%s\` |\n" "$target" "$archive_name" "$digest" >> "$GITHUB_STEP_SUMMARY"
           done
+
+          if [[ "${#archive_names[@]}" -ne "${#targets[@]}" ]]; then
+            echo "verified archive count does not match the supported target count" >&2
+            exit 1
+          fi
 
           aggregate_record="$record_dir/release-record.json"
           aggregate_evidence_path="release-evidence/runs/${run_key}/aggregate/release-record.json"
@@ -496,22 +693,41 @@ jobs:
             "${targets[0]}" "${targets[1]}" "${targets[2]}" > "$scope"
           cargo --locked xtask release evidence-scope --root "$upload" --allowlist "$scope"
 
+          # Scan the exact retained target bundles and the final aggregate after
+          # their allowlists and manifests verify. The image digest fixes scanner
+          # bytes and the network boundary prevents a scan from downloading code.
+          for target in "${targets[@]}"; do
+            bundle="$inputs_root/release-candidate-${target}-${run_key}"
+            docker run --rm --network none \
+              --volume "$bundle:/scan:ro" \
+              ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+              dir --no-banner --redact /scan
+          done
+          docker run --rm --network none \
+            --volume "$upload:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            dir --no-banner --redact /scan
+
+          printf '\nAll target bundles were re-verified after artifact transport. The final aggregate is scoped and scanned; readiness remains blocked until the separately recorded evidence and owner gates are complete.\n' >> "$GITHUB_STEP_SUMMARY"
           echo "Prepared non-publishing aggregate for ${#archive_names[@]} targets"
           echo "Record: $aggregate_record"
           echo "Evidence: $evidence"
           echo "Upload scope: $upload"
 
       - name: Store run-scoped aggregate evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-candidate-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
           path: ${{ runner.temp }}/ignatius-release/aggregate/upload
 
   reproducibility:
     name: Reproducibility ${{ matrix.target }} repeat ${{ matrix.repeat }}
+    needs: [source, preflight]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -557,7 +773,7 @@ jobs:
       - name: Check out the requested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.source.outputs.revision }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -578,9 +794,14 @@ jobs:
           BINARY: ${{ matrix.binary }}
           REPEAT: ${{ matrix.repeat }}
           RUSTFLAGS: ${{ matrix.rustflags }}
+          EXPECTED_REVISION: ${{ needs.source.outputs.revision }}
         run: |
           set -euo pipefail
           source_revision="$(git rev-parse HEAD)"
+          if [[ "$source_revision" != "$EXPECTED_REVISION" ]]; then
+            echo "reproducibility checkout $source_revision does not match the frozen source $EXPECTED_REVISION" >&2
+            exit 1
+          fi
           export IGNATIUS_BUILD_IDENTITY="ci/repro-${source_revision}"
           cargo build --locked --release --target "$TARGET"
 
@@ -623,7 +844,7 @@ jobs:
           test -s "$artefacts/$archive_name"
 
       - name: Store reproducibility candidate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-repro-${{ matrix.target }}-${{ matrix.repeat }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -632,14 +853,15 @@ jobs:
 
   compare-reproducibility:
     name: Compare reproducibility candidates
-    needs: reproducibility
+    needs: [source, reproducibility]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Check out the requested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.source.outputs.revision }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -652,6 +874,8 @@ jobs:
 
       - name: Compare fixed-identity archive bytes
         shell: bash
+        env:
+          EXPECTED_REVISION: ${{ needs.source.outputs.revision }}
         run: |
           set -euo pipefail
           input_root="$RUNNER_TEMP/ignatius-repro-inputs"
@@ -666,6 +890,10 @@ jobs:
             exit 1
           fi
           source_revision="$(git rev-parse HEAD)"
+          if [[ "$source_revision" != "$EXPECTED_REVISION" ]]; then
+            echo "reproducibility comparison checkout $source_revision does not match the frozen source $EXPECTED_REVISION" >&2
+            exit 1
+          fi
           version="$(sed -n 's/^version = "\([^\"]*\)"$/\1/p' Cargo.toml | head -n 1)"
           test -n "$version"
           targets=(
@@ -700,7 +928,7 @@ jobs:
           } > "$evidence_root/reproducibility-evidence.json"
 
       - name: Store reproducibility comparison
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-reproducibility-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
