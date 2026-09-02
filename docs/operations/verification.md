@@ -100,25 +100,25 @@ verifies `release-manifest.json` and `SHA256SUMS`, then proves that the
 readiness gate refuses the incomplete candidate before retaining the bundle as
 a run-scoped workflow artifact.
 
-| Fact | Evidence source | State on 2026-09-02 |
+| Fact | Evidence source | State on 2026-09-03 |
 | --- | --- | --- |
-| Product version | `Cargo.toml`, read directly by the workflow; archive basename and record must match | Hosted run `33614446587` recorded `0.1.0` consistently for all three targets; no release version is published |
-| Source revision and state | `cargo xtask release generate` captures `HEAD` and cleanliness, and checks exact tag identity | All aggregate records identify `fc79120b5229a1724a5a589dee4337acf2daa36b`, detached and untagged, and remain blocked |
-| Build identity | The workflow injects shared `IGNATIUS_BUILD_IDENTITY=ci/<run>-<attempt>` before all three target builds and keeps target separate in each record | Hosted run `33614446587` used `ci/33614446587-1` for all three targets; this is an identity fact, not provenance evidence |
-| Target identity | Workflow matrix, executable header and exact Rust target triple in the archive name, record and sidecars | Run `33614446587` completed Linux `x86_64-unknown-linux-gnu`, macOS `aarch64-apple-darwin` and Windows `x86_64-pc-windows-msvc`; each package and verification step passed |
-| Archive size and exact bytes | `release generate --artefact-path`, `manifest generate`, `manifest verify` and the 77-case release contract suite | The aggregate artifact from run `33614446587` contains three archives of 2,773,851, 2,806,702 and 3,053,947 bytes; downloaded SHA-256 and combined-manifest checks passed |
+| Product version | `Cargo.toml`, read directly by the workflow; archive basename and record must match | Hosted run `33689674455` recorded `0.1.0` consistently for all three targets; no release version is published |
+| Source revision and state | `cargo xtask release generate` captures `HEAD` and cleanliness, and checks exact tag identity | The latest aggregate identifies `259ac76de6477719b8a3515777f3623b24237dd6`, detached and untagged, and remains blocked |
+| Build identity | The workflow injects shared `IGNATIUS_BUILD_IDENTITY=ci/<run>-<attempt>` before all three target builds and keeps target separate in each record | Hosted run `33689674455` used `ci/33689674455-1` for all three targets; this is an identity fact, not provenance evidence |
+| Target identity | Workflow matrix, executable header and exact Rust target triple in the archive name, record and sidecars | Run `33689674455` completed Linux `x86_64-unknown-linux-gnu`, macOS `aarch64-apple-darwin` and Windows `x86_64-pc-windows-msvc`; each package, runtime smoke and aggregate verification step passed |
+| Archive size and exact bytes | `release generate --artefact-path`, `manifest generate`, `manifest verify` and the 77-case release contract suite | The aggregate artifact from run `33689674455` contains three archives of 2,773,854, 2,806,839 and 3,053,954 bytes; downloaded SHA-256 and combined-manifest checks passed |
 | Readiness | `cargo xtask release check` after sidecar verification | The workflow requires a non-zero blocked result; signing, provenance, inventory and owner authorization remain absent |
-| Reproducibility | Repository-owned archive helper plus repeat archive comparison from the same source and inputs | The local helper produced identical `tar.gz` and `zip` bytes twice for the same synthetic binary; hosted repeat-build and cross-runner evidence remain open |
+| Reproducibility | Repository-owned archive helper plus repeat archive comparison from the same source and inputs | Hosted run `33689674455` compared two fixed-identity builds per target; macOS, Windows and Linux byte comparisons passed. Windows builds use `/Brepro` to remove PE linker timestamps. |
 
 The release-contract checks, local rehearsal and hosted runs prove the identity
 and integrity rules for the three target-specific candidate bundles. Run
-`33614446587` also exercised the shared build identity, downloaded and
-re-verified all three bundles, and retained and inspected the six-file aggregate
-scope. They do not prove that the Windows or Linux archives run on their target
-platforms, that any target can be upgraded and rolled back, or that the hosted
-archives are reproducible across repeat runs or runners. Those are separate
-evidence classes and remain before any release can be called ready or
-published.
+`33689674455` also exercised the shared build identity, compared two exact
+archives for each target, ran the target runtime smoke and rollback checks, and
+retained and inspected the nine-file aggregate scope. The runtime smoke is
+automated hosted evidence, not full-screen terminal hand evidence or a
+published-version upgrade. Signing, provenance, dependency inventory and the
+remaining hand and server-version evidence remain before any release can be
+called ready or published.
 
 ## Installation, upgrade and rollback evidence
 
@@ -129,20 +129,22 @@ must retain the exact candidate record, archive basename and target identity,
 the command outcome and the next action for any failure, without retaining
 credentials, SQL text or result data.
 
-| Platform and target | Scenario | Required evidence | Current state on 2026-09-02 |
+| Platform and target | Scenario | Required evidence | Current state on 2026-09-03 |
 | --- | --- | --- | --- |
 | macOS Apple silicon, `aarch64-apple-darwin` | Clean install and first start | Verify the `tar.gz` bytes before extraction, run `version --verbose`, `doctor --json`, `config paths`, `config validate` and a reviewed non-secret `connect --check` | Direct hosted-archive pass on macOS 26.6.1 arm64: installed into a version-specific directory, exact identity and configuration passed, PostgreSQL 18.4 passed over localhost plain transport and TLS 1.3 with `verify-full`, and the full-screen client entered and left a real pseudo-terminal with `Ctrl+Q`. The same candidate then failed the logging privacy audit below, so this row is runtime evidence, not release acceptance. |
 | macOS Apple silicon, `aarch64-apple-darwin` | Upgrade and preservation | Install beside the known-good binary, confirm configuration, saved queries, history and logs remain at the paths reported by `config paths`, and record migration output if applicable | Direct source-revision replacement pass: known-good `247d1c7` and hosted `24f1c8e` binaries were installed side by side and selected through one launcher. Configuration, saved query, history and log files were byte-identical after first candidate start. Both binaries report product version `0.1.0`, and the prior build was not a published release, so this is not semantic-version or published-upgrade evidence. |
 | macOS Apple silicon, `aarch64-apple-darwin` | Failed upgrade and rollback | Force a documented startup or validation failure, return to the prior binary/configuration pair, validate it and retain the failed state for diagnosis | Direct pass with the same boundary: schema version 999 caused a controlled configuration failure with exit 3 and a repair action. The invalid file was retained, the valid backup and prior launcher were restored, the prior binary reconnected, and the complete configuration/data tree matched its pre-upgrade backup. |
-| Windows x86_64, `x86_64-pc-windows-msvc` | Clean install and first start | Verify the `zip` bytes with PowerShell, extract `ignatius.exe` to a new version directory, run the identity and diagnostic commands, and record the PATH outcome | Hosted archive, record, sidecars and PE32+ x86-64 header verified after download; no Windows runtime, PowerShell or PATH evidence exists |
-| Windows x86_64, `x86_64-pc-windows-msvc` | Upgrade and preservation | Keep the prior version directory, confirm `%APPDATA%\ignatius` and `%LOCALAPPDATA%\ignatius` are preserved, and record any schema migration backup | Not run; no platform upgrade evidence retained |
-| Windows x86_64, `x86_64-pc-windows-msvc` | Failed upgrade and rollback | Restore the previous PATH or launcher and matching configuration/data backup without deleting the failed version or state | Not run; rollback remains a documented contract |
-| Linux x86_64 GNU, `x86_64-unknown-linux-gnu` | Clean install and first start | Verify the `tar.gz` bytes before extraction, confirm the GNU libc target boundary, run the identity and diagnostic commands, and record the PATH outcome | Hosted archive, record, sidecars and ELF x86-64 GNU/Linux header verified after download; no Linux runtime or installed-path evidence exists |
-| Linux x86_64 GNU, `x86_64-unknown-linux-gnu` | Upgrade and preservation | Keep the prior binary available, confirm XDG or explicit configuration/data paths are preserved, and record any schema migration backup | Not run; no platform upgrade evidence retained |
-| Linux x86_64 GNU, `x86_64-unknown-linux-gnu` | Failed upgrade and rollback | Restore the prior binary and matching configuration/data backup, validate it, and preserve the failed state for diagnosis | Not run; rollback remains a documented contract |
+| Windows x86_64, `x86_64-pc-windows-msvc` | Clean install and first start | Verify the `zip` bytes with PowerShell, extract `ignatius.exe` to a new version directory, run the identity and diagnostic commands, and record the PATH outcome | Hosted run `33689674455` extracted and executed the exact candidate. `version --verbose`, `doctor --json`, `config paths`, `config init`, `config validate` and non-interactive refusal passed; PowerShell PATH and full-screen hand evidence remain open. |
+| Windows x86_64, `x86_64-pc-windows-msvc` | Upgrade and preservation | Keep the prior version directory, confirm `%APPDATA%\ignatius` and `%LOCALAPPDATA%\ignatius` are preserved, and record any schema migration backup | Hosted side-by-side candidate validation passed with isolated configuration/data state and unchanged preservation digest; this is not a published semantic-version upgrade. |
+| Windows x86_64, `x86_64-pc-windows-msvc` | Failed upgrade and rollback | Restore the previous PATH or launcher and matching configuration/data backup without deleting the failed version or state | Hosted controlled invalid-configuration and known-good rollback checks passed; ConPTY and operator hand evidence remain open. |
+| Linux x86_64 GNU, `x86_64-unknown-linux-gnu` | Clean install and first start | Verify the `tar.gz` bytes before extraction, confirm the GNU libc target boundary, run the identity and diagnostic commands, and record the PATH outcome | Hosted run `33689674455` extracted and executed the exact candidate. `version --verbose`, `doctor --json`, `config paths`, `config init`, `config validate` and non-interactive refusal passed; installed-path and full-screen hand evidence remain open. |
+| Linux x86_64 GNU, `x86_64-unknown-linux-gnu` | Upgrade and preservation | Keep the prior binary available, confirm XDG or explicit configuration/data paths are preserved, and record any schema migration backup | Hosted side-by-side candidate validation passed with isolated configuration/data state and unchanged preservation digest; this is not a published semantic-version upgrade. |
+| Linux x86_64 GNU, `x86_64-unknown-linux-gnu` | Failed upgrade and rollback | Restore the prior binary and matching configuration/data backup, validate it, and preserve the failed state for diagnosis | Hosted controlled invalid-configuration and known-good rollback checks passed; operator hand evidence remains open. |
 
-Until these rows have platform-specific evidence, the release target matrix is
-an automated packaging contract rather than a supported installation claim.
+The hosted smoke results close the automated runtime subset for all three
+targets, but do not replace platform hand checks, terminal restoration, PATH
+review or a published semantic-version upgrade. The release target matrix is
+therefore still an evidence-backed rehearsal, not a ready or published release.
 
 ## Feature 008 release rehearsal evidence
 
@@ -158,7 +160,7 @@ classes.
 | Full repository gate | Pass. With disposable PostgreSQL services running, `cargo --locked xtask verify` passed formatting, lints, 513 unit/layout tests, 38 CLI contract tests and 38 PostgreSQL integration tests. Teardown removed both containers, their network and generated data; `cargo --locked xtask db status` then reported `Not running`. | PostgreSQL 18.4 plain/TLS synthetic fixtures; no production server evidence. |
 | Focused release contracts | Pass. The final focused run passed 3 archive-helper, 1 native-boundary, 71 release-contract, 7 release-notes and 1 release-schema tests. The repository catalogue also validated as one blocked record with one exact changelog entry. | Local automated contracts only; no hosted runner evidence. |
 | macOS archive and sidecars | Pass. The repository helper produced a root-only `ignatius-0.1.0-aarch64-apple-darwin.tar.gz`, 3,010,634 bytes, with SHA-256 `c7ba67b568ea803d9f6f7d8e1de802e25cdf539d1377618c76825d1683aa380d`. Record validation, manifest generation, exact-byte verification and the four-file evidence-scope check passed. | Temporary local Apple silicon rehearsal; no hosted archive or retained release evidence. |
-| Deterministic archive helper | Pass. Rebuilding the same `tar.gz` from the same binary and declared inputs produced byte-identical output. | Same local Python and compression runtime; hosted repeat-build and cross-runner evidence remain open. |
+| Deterministic archive helper | Pass. Rebuilding the same `tar.gz` from the same binary and declared inputs produced byte-identical output. | Same local Python and compression runtime; the corrected hosted repeat-build evidence is recorded in the later 2026-09-03 section. |
 | Scoped secret scan | Pass. The CI-pinned Gitleaks v8.30.0 container, addressed by digest and run with no container network, scanned the verified four-file upload root and reported no leaks. | Local Docker execution of the new CI command; the later hosted follow-up is recorded below. |
 | Extracted first start | Partial pass. The root-only archive extracted cleanly; `version --verbose`, `config paths` and `config validate` passed. `doctor --json` reported seven checks OK, three skipped for terminal, terminal size and connection, and no failures. | Isolated local first start only; no reviewed server connection, upgrade or rollback was performed. |
 | Readiness gate | Pass as a blocking test. `cargo --locked xtask release check` exited 1 and named 13 issues, including modified source, unmaterialised and incomplete evidence, absent Windows/Linux artefacts, inventory, signatures, provenance, platform recovery evidence and owner authorization. | Expected blocked result; no readiness or publication claim. |
@@ -193,6 +195,29 @@ classes.
 | Full repository gate with aggregation | Pass. `cargo --locked xtask verify` passed formatting, clippy with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL integration tests. | Exact committed tip `fc79120b` with disposable PostgreSQL 18.4 plain/TLS services, with no skips. Teardown removed both containers, their network and synthetic data; final status was `Not running`. |
 | Readiness and authorization | Correctly blocked. The aggregate readiness check exited 1 with eight issues, including incomplete evidence, detached and untagged source, absent verified signature and provenance, and non-publishable state. The historical `33563497933` logging audit remains a separate release-blocking result; the corrected run has not had an equivalent runtime privacy audit. Owner authorization covered commit, push and this seven-day run-scoped rehearsal. | T034 is complete. T033 remains open; no tag, signing, GitHub Release, package publication or canonical evidence promotion was authorized or performed. |
 
+### Corrected hosted runtime and reproducibility run on 2026-09-03
+
+Owner-authorized, non-publishing workflow run `33689674455` checked out the
+exact pushed source revision
+`259ac76de6477719b8a3515777f3623b24237dd6`. The workflow completed all archive,
+repeat-build, comparison, runtime and aggregate jobs successfully. The run is
+retained by GitHub Actions through 2026-09-09 and is bound to build identity
+`ci/33689674455-1`.
+
+| Evidence class | Result | Boundary |
+| --- | --- | --- |
+| Target archive jobs | Pass. macOS, Windows and Linux each built one declared target, generated and re-verified its record, manifest and checksum, and passed the blocked readiness assertion. | Hosted packaging and integrity evidence; no signature, provenance or publication claim. |
+| Repeat-build reproducibility | Pass. Two fixed-identity builds for each target produced byte-identical archives; the comparison job passed for macOS, Windows and Linux. Windows uses `/Brepro` to remove PE linker timestamps. | Same source revision and declared CI inputs; not a signed or published release. |
+| Runtime install and rollback smoke | Pass. Each exact archive extracted and executed its target binary. Identity, diagnostics, configuration initialisation and validation, non-interactive refusal, side-by-side candidate validation, controlled invalid-configuration exit 3 and known-good rollback validation all passed. | Hosted automated smoke evidence only. It does not replace Windows/Linux full-screen, PATH, ConPTY or hand-terminal checks, and it does not exercise a database query or the debug logging privacy boundary. |
+| Aggregate evidence | Pass. The final artifact contains exactly three archives, one aggregate record, one combined manifest, `SHA256SUMS` and three runtime sidecars. The nine-file allowlist, record validation, combined manifest and independent archive checksums passed locally after download. | Run-scoped transport artifact; the record's canonical `evidence_reference.path` is still not materialised. |
+| Readiness | Correctly blocked. The downloaded aggregate readiness check named eight issues: incomplete and unmaterialised evidence, detached and untagged source, non-publishable state, and absent verified signature and provenance. | This is expected fail-closed behaviour, not a release approval. |
+
+The aggregate and runtime JSON sidecars record observed or verified evidence
+without credentials, SQL text, result data or publication actions. The corrected
+candidate therefore closes the hosted packaging, reproducibility and automated
+runtime subset, while the remaining hand, privacy, inventory, signature,
+provenance, canonical-path and authorization gates stay open.
+
 Earlier 2026-08-16 runs remain historical evidence for their recorded
 revisions. They do not supersede the later local and hosted evidence or close
 any cross-platform installation, supply-chain or authorization gate.
@@ -200,12 +225,14 @@ any cross-platform installation, supply-chain or authorization gate.
 ## What has not been verified
 
 - **Hosted runtime privacy correction.** The corrected target archives passed
-  hosted packaging, CI secret scanning and aggregation, but the replacement
-  binaries have not yet had the direct logging privacy audit that rejected the
-  historical candidate.
-- **Hosted repeat-build and cross-runner reproducibility.** Run `33614446587`
-  proves one shared attempt identity and one aggregate scope. A repeat run or
-  cross-runner byte comparison has not been retained.
+  hosted packaging, reproducibility, aggregation and runtime smoke, but the
+  replacement binaries have not yet had the direct logging privacy audit that
+  rejected the historical candidate. The smoke jobs do not execute a database
+  query or enable `IGNATIUS_LOG=debug`.
+- **Canonical evidence and supply-chain records.** The retained nine-file
+  aggregate is a run-scoped transport artifact. The canonical evidence path is
+  not materialised, and no dependency inventory, verified signature or verified
+  provenance record is attached.
 - **Windows and Linux by hand.** CI builds and tests both platforms, but nobody
   has opened the full-screen client there. The same is true of Warp's renderer
   and a live terminal resize.

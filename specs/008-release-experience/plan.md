@@ -176,10 +176,14 @@ log guidance remains separately authoritative.
 The selected T033 handoff additionally owns only a new `Feature 008 release
 rehearsal evidence` heading in `docs/operations/verification.md`; historical
 application evidence, T016 release identity evidence and T025 installation
-rows remain separately authoritative. The selected T034 handoff additionally
-owns only a new `Non-publishing workflow dry run and authorization gate`
-heading in `docs/operations/release.md`; existing procedure headings and the
-future native dependency diagnostics remain separately authoritative.
+rows remain separately authoritative. The 2026-09-03 corrected hosted run is
+recorded under that heading and closes the hosted archive, reproducibility and
+automated runtime-smoke evidence subset, while direct privacy, hand-terminal,
+canonical evidence, inventory, signature and provenance gates remain open. The
+selected T034 handoff additionally owns only a new `Non-publishing workflow
+dry run and authorization gate` heading in `docs/operations/release.md`; existing
+procedure headings and the future native dependency diagnostics remain
+separately authoritative.
 
 The completed T030 implementation reconciles the README and compatibility
 authority for password prompts, the rejected OS credential-store route,
@@ -242,9 +246,9 @@ to the evidence class that proves it.
 | Spec area | Design evidence | Planned validation |
 | --- | --- | --- |
 | FR-801 to FR-805, SC-801 to SC-803 | Release record, artefact and checksum entities | Deterministic manifest and mismatch scenarios |
-| FR-806 to FR-808, SEC-801 to SEC-802 | Evidence bundle and publication gate | Missing inventory/signature/provenance and tampered digest scenarios |
+| FR-806 to FR-808, SEC-801 to SEC-803 | Evidence bundle and publication gate | Missing inventory/signature/provenance, privacy-boundary and tampered digest scenarios |
 | FR-809 to FR-810, SC-804 to SC-805 | Installation contract and platform matrix | Clean install, upgrade and rollback rehearsals per platform |
-| FR-811 to FR-813, UX-801 to UX-802, SC-806 to SC-807 | Support identity and evidence-class rules | Documentation review and secret-safe diagnostic captures |
+| FR-811 to FR-813, UX-801 to UX-802, NFR-801, SC-806 to SC-807 | Support identity and evidence-class rules | Documentation review, evidence-index review and secret-safe diagnostic captures |
 | FR-814 to FR-815 | Ownership and overwrite controls | Review of authorization and idempotency gates before live release |
 
 ## Dependency and collision gates
