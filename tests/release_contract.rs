@@ -2487,7 +2487,9 @@ fn release_workflow_pins_checkout_toolchain_cache_and_upload_inputs() {
         "--binary \"$BINARY\"",
         "--output \"$artefacts/$archive_name\"",
         "scripts/release-runtime-smoke.py",
+        "bundle=\"$runtime_inputs\"",
         "ci/repro-${source_revision}",
+        "rustflags: \"-D warnings -C link-arg=/Brepro\"",
         "cmp -- \"$first\" \"$second\"",
         "release-reproducibility-${{ github.run_id }}-${{ github.run_attempt }}",
     ] {
