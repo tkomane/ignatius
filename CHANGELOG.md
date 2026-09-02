@@ -12,6 +12,11 @@ No changes have been assigned to a version after the 0.1.0 candidate.
 
 ## [0.1.0]
 
+- Improved: the non-publishing candidate workflow now re-verifies all three
+  target bundles and aggregates their records, archives and checksums into one
+  run-scoped evidence bundle. Missing, duplicate, unsupported or
+  identity-mismatched target records fail closed, and aggregate readiness stays
+  blocked until the remaining evidence and authorization gates exist.
 - Security: debug logging now accepts only the levels `off`, `error`, `warn`,
   `info`, `debug` and `trace`, admits only Ignatius-owned trace targets, and
   redacts each complete event before writing it. Earlier development candidates

@@ -2,9 +2,10 @@
 
 This guide validates the release contract without publishing anything. The
 current repository has non-publishing release-record, archive-sidecar and
-readiness commands. Catalogue aggregation, signing, provenance, platform hand
-evidence and publication remain separate gates and must not be inferred from a
-local rehearsal.
+readiness commands, plus a fail-closed command for aggregating the three target
+records. A hosted aggregate run, signing, provenance, platform hand evidence
+and publication remain separate gates and must not be inferred from a local
+rehearsal.
 
 ## Preconditions
 
@@ -169,7 +170,35 @@ generated record is expected to remain blocked when the checkout is modified,
 untagged or lacks the later evidence and owner gates; that is a truthful result,
 not a failed publication.
 
-## 4. Rehearse installation and recovery
+## 4. Aggregate the three target records
+
+After every target bundle has independently passed `release validate`,
+`release manifest verify` and `release evidence-scope`, combine exactly one
+record for each supported target. Set the five path variables below to the new
+aggregate record and evidence paths and the three verified input records:
+
+```bash
+cargo --locked xtask release aggregate \
+  --output "$aggregate_record" \
+  --evidence-path "$aggregate_evidence_path" \
+  --input "$macos_record" \
+  --input "$windows_record" \
+  --input "$linux_record"
+```
+
+The inputs must agree on version, source revision and state, build identity and
+notes identity. Missing, duplicate, unsupported or mismatched targets are
+refused, and the output path is create-only. Generate and verify one manifest
+against the three exact archives after aggregation. A record remains blocked
+when any input is blocked, and incomplete aggregate evidence never passes
+`release check`.
+
+The non-publishing workflow performs this sequence after re-verifying each
+downloaded four-file target bundle, then retains an exact six-file aggregate
+scope. A local command result proves the aggregation contract only; it is not
+hosted-run, platform-runtime, signing, provenance or publication evidence.
+
+## 5. Rehearse installation and recovery
 
 For macOS, Windows and Linux separately, capture the following evidence against
 the exact candidate target:
@@ -187,7 +216,7 @@ Do not claim hand verification from a CI build. Record the runner, operating
 system, terminal, architecture and PostgreSQL server version for each evidence
 item where relevant.
 
-## 5. Review the support identity bundle
+## 6. Review the support identity bundle
 
 The future support bundle must contain only identity and safe diagnostics. A
 reviewer should be able to answer:

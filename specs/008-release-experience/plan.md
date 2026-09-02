@@ -123,7 +123,7 @@ docs/support/compatibility.md        # support matrix and claims
 docs/operations/release.md           # operator release procedure
 docs/operations/verification.md      # evidence and merge gates
 .github/workflows/ci.yml             # shared CI execution and gates
-.github/workflows/release.yml        # T013 non-publishing candidate jobs
+.github/workflows/release.yml        # T013/T033a non-publishing candidate jobs
 release-notes/                        # schemas, blocked catalogue and validators
 artifacts/                            # future local/CI packaging workspace only
 ```
@@ -139,9 +139,11 @@ The completed T027-T028 slice also owns the blocked
 `release-notes/catalog.json`, its exact version heading in `CHANGELOG.md`, the
 read-only `release-notes/validate.sh` wrapper and the corresponding contracts.
 It records evidence and does not publish. The publication boundary remains
-separate. T013 owns the new `.github/workflows/release.yml` archive jobs and their run-scoped
-workflow evidence; readiness enforcement is the separate T015 slice, while
-signing and publication remain outside it. T012/T014/T015/T019/T020 also include the
+separate. T013 owns the `.github/workflows/release.yml` archive jobs and their
+run-scoped workflow evidence. T033a extends that boundary with the
+non-publishing aggregate job, the `release aggregate` command and their focused
+contracts. Readiness enforcement is the separate T015 slice, while signing and
+publication remain outside it. T012/T014/T015/T019/T020 also include the
 non-publishing `release generate`, `release validate` and `release manifest`
 commands; they hash only explicit archive bytes and do not publish. T009/T014
 own the candidate archive-name and checksum-contract section of

@@ -226,11 +226,16 @@ target-specific archive per matrix row with the repository-owned deterministic
 archive helper, generates and verifies these sidecars,
 stages only the archive, record and verified sidecars under an exact upload
 root, checks that root with `cargo --locked xtask release evidence-scope`, and retains it
-as a run-scoped workflow artifact. That workflow is not a release, signing or
-publication gate; T015 provides the readiness assertion and T016 still owns
-reproducibility evidence. Each matrix
-job emits a per-target record; aggregate multi-target
-identity and readiness remain later work.
+as a run-scoped workflow artifact. Each matrix job emits a per-target record
+with one shared run-attempt build identity. A final job downloads the three
+bundles, rechecks each four-file scope, re-verifies each archive against its
+manifest, and uses `cargo --locked xtask release aggregate` to create a
+canonical three-target record. It then generates and verifies one combined
+manifest and retains only the exact three archives, aggregate record and two
+sidecars. Missing, duplicate, unsupported or identity-mismatched inputs fail
+closed. This aggregate path has local contract evidence but no hosted run.
+The workflow is not a release, signing or publication gate; T015 provides the
+readiness assertion and T016 still owns reproducibility evidence.
 
 The archive helper refuses an existing output and a symlinked output parent. It
 creates the completed archive in the destination directory and installs it
@@ -612,6 +617,16 @@ diagnostic checks on an arm64 Mac. The Windows and Linux binaries were not run
 on their target platforms, so the workflow result is packaging evidence rather
 than cross-platform installation, upgrade or rollback evidence.
 
+Run `33563497933` predates the current aggregate job and embedded a
+target-suffixed build identity in each binary, so its retained records are
+historical target-specific evidence and are not retroactively aggregatable.
+The current local workflow instead gives all three target builds one
+run-attempt identity while retaining target as a separate fact. Its final job
+re-verifies the downloaded inputs and produces an exact six-file aggregate
+scope. Four aggregation-focused and seven workflow-focused contracts pass, but
+the aggregate job has not run on GitHub Actions and no aggregate artifact has
+been retained.
+
 The earlier local aggregate readiness check exited 1 and named 13 blockers.
 Each hosted per-target record also exited 1 as required and retained eight
 blockers: incomplete and unmaterialised evidence, detached and untagged source,
@@ -643,8 +658,11 @@ operations.
    server versions and the unsupported parameter list.
 5. Tag the commit. One tag, one version, one changelog entry.
 6. Build artefacts in CI for each target from that tagged commit.
-7. Publish checksums alongside the artefacts.
-8. Only then update any package manifest.
+7. Re-verify all three target bundles, aggregate their records and exact bytes,
+   and inspect the retained six-file scope.
+8. Publish checksums alongside the artefacts only after every remaining gate
+   and the exact publication authorization are recorded.
+9. Only then update any package manifest.
 
 ## Phased distribution
 

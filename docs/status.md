@@ -49,13 +49,30 @@ Both disposable database runs removed their containers, network and data; final
 database status was `Not running`. The clean archive is local evidence only,
 not a hosted replacement release candidate.
 
+The current working tree also implements T033a multi-target aggregation. Every
+future target build shares one run-attempt build identity while retaining its
+target as a separate fact. The final non-publishing job downloads the three
+four-file bundles, checks their exact scopes, re-verifies every archive and
+manifest, creates a canonical three-target record, verifies one combined
+manifest and retains only the exact six-file aggregate scope. Four aggregation
+contracts and seven workflow contracts pass, including fail-closed missing,
+duplicate, unsupported and identity-mismatch cases. The complete focused slice
+passes 3 archive-helper, 6 documentation/build, 1 native-boundary, 77
+release-contract, 7 release-notes and 1 release-schema tests, plus the catalogue
+wrapper. The modified tree also passes the full verifier: formatting, clippy
+with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL
+18.4 plain/TLS integration tests, with no skips. Teardown removed both
+containers, their network and synthetic data; final status was `Not running`.
+This path has not run on a hosted runner, so it creates no hosted aggregate or
+release evidence.
+
 Every per-target record remains correctly blocked with no signature or
 provenance. T034 is complete. T033 remains open for a corrected clean hosted
-candidate, Windows/Linux hand checks, multi-target aggregation, hosted
-reproducibility and the remaining supply-chain evidence. T035 remains open, and
-the roadmap is still in planning. No further workflow run is authorized by the
-earlier run-scoped approval. No tag, signing, release or publication operation
-was performed.
+candidate, Windows/Linux hand checks, hosted execution and retention of the
+implemented aggregation, hosted reproducibility and the remaining supply-chain
+evidence. T035 remains open, and the roadmap is still in planning. No further
+workflow run is authorized by the earlier run-scoped approval. No tag, signing,
+release or publication operation was performed.
 
 **Current implemented product feature**: cloud identity authentication. The
 owner asked for Entra ID first and for a first-class experience on other clouds,

@@ -107,12 +107,14 @@ workflow evidence. The upload root is now an exact allowlist of the archive,
 record and two verified sidecars, checked by
 `cargo xtask release evidence-scope` before upload. It has no release, signing,
 provenance or publication step; each matrix job emits a per-target record, so a
-later aggregation is still required before a multi-target candidate can be
-called complete. Publishable records now also fail closed when any supported
-target row is missing.
-Rerun identity is attempt-specific in both the embedded
-IGNATIUS_BUILD_IDENTITY and the candidate record/evidence path; the focused
-workflow contract test rejects a return to the pre-attempt identity.
+T033a aggregate job can independently re-verify all three bundles before
+combining them. A multi-target candidate is still incomplete until that job has
+run successfully and its retained evidence is inspected. Publishable records
+also fail closed when any supported target row is missing.
+Rerun identity is attempt-specific and common to all three embedded binaries
+and candidate records, while target remains a separate fact. The focused
+workflow contract rejects both the pre-attempt identity and a target-suffixed
+identity that cannot be aggregated.
 The release-note entry remains derived from the product version only, so a CI
 retry changes technical build/evidence identity without creating a second
 release-note identity for the same version.
@@ -143,7 +145,7 @@ same-directory hard link, refuses a symlinked output parent, and therefore
 cannot replace or redirect a destination silently after the initial check. The
 focused test repeats both supported archive formats, compares their exact bytes,
 confirms existing outputs remain unchanged and checks the symlinked-parent
-refusal. Hosted repeat-build, cross-runner, hosted-platform and
+refusal. Hosted repeat-build, cross-runner, hosted-platform and hosted
 multi-target-aggregation evidence remain open. This makes no
 production-readiness or publication claim.
 
@@ -383,6 +385,7 @@ gate rather than missing alignment. The retained Feature 001a addendum now
 states that ADR-0012 closed the native route without implementation.
 
 - [ ] T033 Run the full release quickstart and `cargo xtask verify`, recording every gate and evidence class in `docs/operations/verification.md`
+- [x] T033a Implement fail-closed three-target record and archive aggregation without publication in `xtask/src/release.rs` and `.github/workflows/release.yml`
 - [x] T034 Perform a non-publishing dry run of the release workflow and record the owner authorization gate in `docs/operations/release.md`
 - [ ] T035 Update `docs/product/roadmap.md` and `docs/status.md` only after all accepted release criteria have evidence
 
@@ -473,14 +476,35 @@ target were absent. Readiness remained blocked by six named gates. Each teardown
 removed the disposable containers, network and data; final database status was
 `Not running`.
 
+T033a implementation on 2026-09-02 adds a create-only `release aggregate`
+command and a final non-publishing workflow job. The command accepts exactly
+one validated record for each supported target, requires common product,
+source, build and notes identity, preserves blocked status and the union of
+declared blockers, and emits target rows and archives in canonical order. The
+workflow downloads the three run-attempt bundles, checks each exact four-file
+scope, re-verifies every manifest against its archive bytes, creates and
+verifies one three-archive manifest, checks an exact six-file aggregate scope
+and retains only that scope for seven days. Four aggregation-focused and seven
+workflow-focused contracts pass, including refusal of missing, duplicate,
+unsupported and identity-mismatched inputs. The complete focused slice passes 3
+archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract,
+7 release-notes and 1 release-schema tests, and the catalogue wrapper validates
+the blocked record against its exact changelog heading. The modified tree also
+passes the full verifier: formatting, clippy with warnings denied, 515
+unit/layout tests, 39 CLI contracts and 38 PostgreSQL 18.4 plain/TLS integration
+tests, with no skips. Teardown removed the containers, network and synthetic
+data, and final status was `Not running`. This is local implementation evidence
+only; the aggregate job has not run on a hosted runner.
+
 T033 remains open because the full quickstart still lacks a corrected clean
-hosted candidate, Windows/Linux hand verification, multi-target aggregation,
-hosted repeat-build or cross-runner reproducibility, and the remaining
-supply-chain evidence. T034 is complete: the non-publishing workflow succeeded
-and `docs/operations/release.md` records both the rehearsal authorization and
-its explicit publication exclusions. T035 stays open: the roadmap still says
-`In planning`, and the status record does not call the candidate complete or
-ready. Those completion claims remain forbidden until every accepted release
+hosted candidate, Windows/Linux hand verification, hosted execution and
+retention of the implemented multi-target aggregation, hosted repeat-build or
+cross-runner reproducibility, and the remaining supply-chain evidence. T034 is
+complete: the non-publishing workflow succeeded and
+`docs/operations/release.md` records both the rehearsal authorization and its
+explicit publication exclusions. T035 stays open: the roadmap still says `In
+planning`, and the status record does not call the candidate complete or ready.
+Those completion claims remain forbidden until every accepted release
 criterion has evidence.
 
 ## Dependencies and execution order
