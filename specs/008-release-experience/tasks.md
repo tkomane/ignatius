@@ -489,18 +489,25 @@ workflow-focused contracts pass, including refusal of missing, duplicate,
 unsupported and identity-mismatched inputs. The complete focused slice passes 3
 archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract,
 7 release-notes and 1 release-schema tests, and the catalogue wrapper validates
-the blocked record against its exact changelog heading. The modified tree also
-passes the full verifier: formatting, clippy with warnings denied, 515
+the blocked record against its exact changelog heading. The exact committed tip
+also passes the full verifier: formatting, clippy with warnings denied, 515
 unit/layout tests, 39 CLI contracts and 38 PostgreSQL 18.4 plain/TLS integration
 tests, with no skips. Teardown removed the containers, network and synthetic
-data, and final status was `Not running`. This is local implementation evidence
-only; the aggregate job has not run on a hosted runner.
+data, and final status was `Not running`.
 
-T033 remains open because the full quickstart still lacks a corrected clean
-hosted candidate, Windows/Linux hand verification, hosted execution and
-retention of the implemented multi-target aggregation, hosted repeat-build or
-cross-runner reproducibility, and the remaining supply-chain evidence. T034 is
-complete: the non-publishing workflow succeeded and
+Hosted evidence on 2026-09-02: the pushed revision
+`fc79120b5229a1724a5a589dee4337acf2daa36b` passed CI run `33614417589` with all
+ten jobs. Owner-authorized non-publishing release run `33614446587` passed all
+three target archive jobs and the aggregate job. The four retained artifacts
+are bound to that revision and retained for seven days through 2026-09-09. The
+downloaded aggregate contains exactly three archives, one aggregate record, one
+combined manifest and one `SHA256SUMS` file; checksums and the combined manifest
+verified locally, and readiness remained correctly blocked.
+
+T033 remains open because the full quickstart still lacks Windows/Linux hand
+verification, hosted repeat-build or cross-runner reproducibility, runtime
+privacy review of the corrected binaries and the remaining supply-chain
+evidence. T034 is complete: the non-publishing workflow succeeded and
 `docs/operations/release.md` records both the rehearsal authorization and its
 explicit publication exclusions. T035 stays open: the roadmap still says `In
 planning`, and the status record does not call the candidate complete or ready.

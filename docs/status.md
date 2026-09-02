@@ -6,13 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current continuation**: Feature 008 release evidence. Commit
-`24f1c8e7801ab5f1f6805e54e4e5f4db67ca1949` repairs the hosted archive path by
-reading the product version directly from `Cargo.toml` instead of parsing
-Cargo's package-ID display. Hosted CI run `33563478021` passed all 10 jobs at
-that exact revision. Owner-authorized non-publishing run `33563497933` then
-completed the macOS, Windows and Linux archive jobs and retained one checked
-four-file bundle per target for seven days.
+**Current continuation**: Feature 008 release evidence. Commits `26501bb` and
+`fc79120` add and document fail-closed three-target aggregation. They are pushed
+at exact revision `fc79120b5229a1724a5a589dee4337acf2daa36b`. Hosted CI run
+`33614417589` passed all ten jobs, and owner-authorized non-publishing run
+`33614446587` passed the macOS, Windows and Linux archive jobs plus the final
+aggregate job. The earlier repair commit `24f1c8e` and its runs remain historical
+evidence for the version-authority correction.
 
 The downloaded bundles independently passed record validation, exact-byte
 manifest and SHA-256 verification, and the exact four-file scope check. Each
@@ -46,33 +46,39 @@ live PostgreSQL CLI contract and a further 90 focused archive, documentation,
 native-boundary, release, release-notes and release-schema tests. The catalogue
 wrapper validated the one blocked record against its exact changelog heading.
 Both disposable database runs removed their containers, network and data; final
-database status was `Not running`. The clean archive is local evidence only,
-not a hosted replacement release candidate.
+database status was `Not running`. The clean archive is local evidence only;
+the hosted replacement and aggregate evidence are recorded below.
 
-The current working tree also implements T033a multi-target aggregation. Every
-future target build shares one run-attempt build identity while retaining its
-target as a separate fact. The final non-publishing job downloads the three
-four-file bundles, checks their exact scopes, re-verifies every archive and
-manifest, creates a canonical three-target record, verifies one combined
-manifest and retains only the exact six-file aggregate scope. Four aggregation
-contracts and seven workflow contracts pass, including fail-closed missing,
-duplicate, unsupported and identity-mismatch cases. The complete focused slice
-passes 3 archive-helper, 6 documentation/build, 1 native-boundary, 77
-release-contract, 7 release-notes and 1 release-schema tests, plus the catalogue
-wrapper. The modified tree also passes the full verifier: formatting, clippy
-with warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL
-18.4 plain/TLS integration tests, with no skips. Teardown removed both
-containers, their network and synthetic data; final status was `Not running`.
-This path has not run on a hosted runner, so it creates no hosted aggregate or
-release evidence.
+The current committed tip also implements T033a multi-target aggregation. Every
+target build shares one run-attempt build identity while retaining its target as
+a separate fact. The final non-publishing job downloads the three four-file
+bundles, checks their exact scopes, re-verifies every archive and manifest,
+creates a canonical three-target record, verifies one combined manifest and
+retains only the exact six-file aggregate scope. Four aggregation contracts and
+seven workflow contracts pass, including fail-closed missing, duplicate,
+unsupported and identity-mismatch cases. The complete focused slice passes 3
+archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract,
+7 release-notes and 1 release-schema tests, plus the catalogue wrapper. The
+exact committed tip also passes the full verifier: formatting, clippy with
+warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL 18.4
+plain/TLS integration tests, with no skips. Teardown removed both containers,
+their network and synthetic data; final status was `Not running`.
 
-Every per-target record remains correctly blocked with no signature or
-provenance. T034 is complete. T033 remains open for a corrected clean hosted
-candidate, Windows/Linux hand checks, hosted execution and retention of the
-implemented aggregation, hosted reproducibility and the remaining supply-chain
-evidence. T035 remains open, and the roadmap is still in planning. No further
-workflow run is authorized by the earlier run-scoped approval. No tag, signing,
-release or publication operation was performed.
+Owner-authorized hosted CI run `33614417589` passed all ten jobs at
+`fc79120b5229a1724a5a589dee4337acf2daa36b`. Non-publishing release run
+`33614446587` then passed all three target archive jobs and the aggregate job.
+The retained aggregate artifact contains exactly three archives, one aggregate
+record, one combined manifest and one `SHA256SUMS` file, all bound to that SHA
+and retained through 2026-09-09. Downloaded archive checksums, aggregate record
+validation, combined manifest verification and the expected blocked readiness
+result all passed locally.
+
+Every target and aggregate record remains correctly blocked with no verified
+signature or provenance. T034 is complete. T033 remains open for hosted repeat
+build and cross-runner reproducibility, Windows/Linux hand checks, runtime
+privacy review and the remaining supply-chain evidence. T035 remains open, and
+the roadmap is still in planning. No tag, signing, release or publication
+operation was performed.
 
 **Current implemented product feature**: cloud identity authentication. The
 owner asked for Entra ID first and for a first-class experience on other clouds,
