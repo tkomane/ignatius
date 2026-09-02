@@ -115,6 +115,9 @@ Rerun identity is attempt-specific and common to all three embedded binaries
 and candidate records, while target remains a separate fact. The focused
 workflow contract rejects both the pre-attempt identity and a target-suffixed
 identity that cannot be aggregated.
+If one target needs retrying, operators must re-run all jobs or start a fresh
+full dispatch. A partial rerun intentionally fails aggregation rather than
+combining records from different attempts.
 The release-note entry remains derived from the product version only, so a CI
 retry changes technical build/evidence identity without creating a second
 release-note identity for the same version.

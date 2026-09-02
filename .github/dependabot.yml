@@ -5,6 +5,7 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    rebase-strategy: auto
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
@@ -17,5 +18,13 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    rebase-strategy: auto
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
+    groups:
+      # Routine compatible updates should produce one coherent CI review.
+      # Major action upgrades remain separate so their runtime and input
+      # changes cannot hide inside a patch sweep.
+      patch-and-minor:
+        update-types: ["minor", "patch"]

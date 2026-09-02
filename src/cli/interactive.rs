@@ -9,7 +9,7 @@
 //!
 //! Input is read on its own thread and database work runs on the async runtime,
 //! so neither can block drawing. Nothing here decides application behaviour;
-//! that all lives in [`crate::app::update`].
+//! that all lives in [`crate::app::update()`].
 
 use crate::ExitCode;
 use crate::app::{Effect, Message, Model, update};
