@@ -184,14 +184,24 @@ are run-scoped candidate bundles, not the canonical complete evidence tree.
 Their records still declare incomplete evidence and unconfigured signatures
 and provenance, and no multi-target aggregation or publication occurred.
 
+The corrected owner-authorized run `33689674455` checked out revision
+`259ac76de6477719b8a3515777f3623b24237dd6` and retained a nine-file aggregate:
+three target archives, one aggregate record, one combined manifest,
+`SHA256SUMS` and one runtime JSON sidecar per target. The hosted archive,
+repeat-build, runtime smoke and aggregate jobs passed, and the downloaded
+allowlist, record, combined manifest and archive checksum checks passed
+independently. Runtime sidecars are automated smoke evidence; they do not
+provide a dependency inventory, verified signature, verified provenance or
+direct logging privacy audit.
+
 ## Canonical evidence paths and workflow transport
 
 The `evidence_reference.path` in a release record is the semantic retained
 location for that record and must remain under `release-evidence/runs/<run>/<target>/`.
-The current non-publishing workflow places the checked four-file bundle inside
-an `upload/` transport envelope, with separate `artefacts/`, `record/` and
-`evidence/` directories. That envelope is not itself the record's canonical
-evidence path.
+The current non-publishing workflow places each checked four-file target bundle
+inside an `upload/` transport envelope, then retains a nine-file aggregate with
+separate `artefacts/`, `record/`, `evidence/` and `runtime/` directories. That
+envelope is not itself the record's canonical evidence path.
 
 Before an incomplete rehearsal can become a complete evidence bundle, one
 coordinated change must either promote or explicitly map the scoped upload

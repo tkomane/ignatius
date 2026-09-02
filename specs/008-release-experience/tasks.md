@@ -483,9 +483,9 @@ source, build and notes identity, preserves blocked status and the union of
 declared blockers, and emits target rows and archives in canonical order. The
 workflow downloads the three run-attempt bundles, checks each exact four-file
 scope, re-verifies every manifest against its archive bytes, creates and
-verifies one three-archive manifest, checks an exact six-file aggregate scope
-and retains only that scope for seven days. Four aggregation-focused and seven
-workflow-focused contracts pass, including refusal of missing, duplicate,
+verifies one three-archive manifest, checks the aggregate allowlist and retains
+only the declared aggregate files for seven days. Four aggregation-focused and
+seven workflow-focused contracts pass, including refusal of missing, duplicate,
 unsupported and identity-mismatched inputs. The complete focused slice passes 3
 archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract,
 7 release-notes and 1 release-schema tests, and the catalogue wrapper validates
@@ -504,10 +504,29 @@ downloaded aggregate contains exactly three archives, one aggregate record, one
 combined manifest and one `SHA256SUMS` file; checksums and the combined manifest
 verified locally, and readiness remained correctly blocked.
 
+Corrected hosted evidence on 2026-09-03: owner-authorized workflow run
+`33689674455` checked out `259ac76de6477719b8a3515777f3623b24237dd6` and
+passed all target archive, repeat-build comparison, runtime smoke and aggregate
+jobs. The macOS, Windows and Linux repeat archives were byte-identical, and the
+runtime checks passed identity, diagnostics, configuration, non-interactive
+refusal, side-by-side validation, controlled invalid-configuration exit 3 and
+known-good rollback. The retained aggregate contains exactly nine files: three
+archives, one aggregate record, one combined manifest, `SHA256SUMS` and three
+runtime sidecars. Independent local allowlist, record, manifest and checksum
+checks passed. This run remains a blocked, non-publishing rehearsal; the
+runtime sidecars do not exercise a database query or the direct logging privacy
+audit.
+
+The current source revision `259ac76de6477719b8a3515777f3623b24237dd6` also
+passed the pre-push `cargo --locked xtask verify` gate with formatting, lints,
+515 unit/layout tests, 39 CLI contract tests and 38 PostgreSQL integration tests
+against disposable PostgreSQL 18.4 services, with no skips. This is local
+macOS and synthetic-server evidence, separate from the hosted target smoke.
+
 T033 remains open because the full quickstart still lacks Windows/Linux hand
-verification, hosted repeat-build or cross-runner reproducibility, runtime
-privacy review of the corrected binaries and the remaining supply-chain
-evidence. T034 is complete: the non-publishing workflow succeeded and
+verification, direct runtime privacy review of the corrected binaries, the
+canonical evidence path and the remaining supply-chain evidence. T034 is
+complete: the non-publishing workflow succeeded and
 `docs/operations/release.md` records both the rehearsal authorization and its
 explicit publication exclusions. T035 stays open: the roadmap still says `In
 planning`, and the status record does not call the candidate complete or ready.

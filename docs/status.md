@@ -1,84 +1,44 @@
 # Status
 
-**Updated: 2026-09-02.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-03.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
 ## Where the work is
 
-**Current continuation**: Feature 008 release evidence. Commits `26501bb` and
-`fc79120` add and document fail-closed three-target aggregation. They are pushed
-at exact revision `fc79120b5229a1724a5a589dee4337acf2daa36b`. Hosted CI run
-`33614417589` passed all ten jobs, and owner-authorized non-publishing run
-`33614446587` passed the macOS, Windows and Linux archive jobs plus the final
-aggregate job. The earlier repair commit `24f1c8e` and its runs remain historical
-evidence for the version-authority correction.
+**Current continuation**: Feature 008 release evidence at pushed revision
+`259ac76de6477719b8a3515777f3623b24237dd6`. This revision hardens the hosted
+workflow's deterministic archive builds (`/Brepro` for Windows) and corrects
+the exact runtime bundle layout. The pre-push `cargo --locked xtask verify` gate
+passed formatting, lints, 515 unit/layout tests, 39 CLI contract tests and 38
+PostgreSQL integration tests against disposable PostgreSQL 18.4 services, with
+no skips.
 
-The downloaded bundles independently passed record validation, exact-byte
-manifest and SHA-256 verification, and the exact four-file scope check. Each
-archive contains one executable of the declared architecture. The hosted
-Apple-silicon binary also passed versioned-path installation, identity,
-configuration, PostgreSQL 18.4 over localhost plain transport and TLS 1.3 with
-`verify-full`, full-screen pseudo-terminal start and clean quit, side-by-side
-source-revision replacement, state preservation and controlled rollback on an
-arm64 Mac. Both replacement binaries report `0.1.0`, and the prior one was not a
-published release, so this is not published-version upgrade evidence.
+Owner-authorized non-publishing workflow run `33689674455` passed all target
+archive, repeat-build comparison, runtime smoke and aggregate jobs. The
+macOS, Windows and Linux repeat archives were byte-identical. Each runtime job
+passed identity, diagnostics, configuration initialisation and validation,
+non-interactive refusal, side-by-side candidate validation, controlled invalid
+configuration exit 3 and known-good rollback validation. The retained
+aggregate contains exactly nine ordinary files: three archives, one aggregate
+record, one combined manifest, `SHA256SUMS` and three runtime sidecars. The
+downloaded allowlist, record, combined manifest and archive checksums passed
+independent local verification. Artifacts are retained through 2026-09-09.
 
-The same exact hosted binary failed a release-blocking privacy audit:
-`IGNATIUS_LOG=debug` persisted the full synthetic SQL statement through
-`tokio_postgres` dependency tracing, contrary to the documented logging
-contract. Local commit `b2ac0a547957409514a2400202cd0207e8acfa65` now accepts
-only simple log levels, admits only Ignatius-owned events, redacts complete
-events before writing and records only a job id and character count.
+The candidate is still correctly blocked. The readiness check names eight
+issues: the canonical evidence path is not materialised, the source is detached
+and untagged, the record is incomplete and non-publishable, and verified
+signature and provenance evidence are absent. The runtime sidecars are
+automated smoke evidence only and do not exercise a database query or the
+direct `IGNATIUS_LOG=debug` privacy audit. The historical hosted candidate's
+privacy failure and the local remediation remain documented in
+`docs/operations/verification.md`.
 
-That clean commit passed `cargo --locked xtask verify`: formatting, clippy with
-warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL 18.4
-plain/TLS integration tests all passed with no skips. Its deterministic local
-arm64 archive reproduced exact bytes at 2,764,785 bytes and SHA-256
-`197690aceabecc45ad43dc61ebf9b998bd6c37eddbb511465279b4f3dc55b353`.
-The extracted binary's mode-0600 debug log contained only a job id and statement
-character count; the SQL sentinel, result label, synthetic credential and
-`tokio_postgres` target were absent. Record, manifest, checksum and four-file
-scope checks passed, while readiness remained blocked by six named gates.
-
-The earlier modified-tree run also passed five focused logging unit tests, one
-live PostgreSQL CLI contract and a further 90 focused archive, documentation,
-native-boundary, release, release-notes and release-schema tests. The catalogue
-wrapper validated the one blocked record against its exact changelog heading.
-Both disposable database runs removed their containers, network and data; final
-database status was `Not running`. The clean archive is local evidence only;
-the hosted replacement and aggregate evidence are recorded below.
-
-The current committed tip also implements T033a multi-target aggregation. Every
-target build shares one run-attempt build identity while retaining its target as
-a separate fact. The final non-publishing job downloads the three four-file
-bundles, checks their exact scopes, re-verifies every archive and manifest,
-creates a canonical three-target record, verifies one combined manifest and
-retains only the exact six-file aggregate scope. Four aggregation contracts and
-seven workflow contracts pass, including fail-closed missing, duplicate,
-unsupported and identity-mismatch cases. The complete focused slice passes 3
-archive-helper, 6 documentation/build, 1 native-boundary, 77 release-contract,
-7 release-notes and 1 release-schema tests, plus the catalogue wrapper. The
-exact committed tip also passes the full verifier: formatting, clippy with
-warnings denied, 515 unit/layout tests, 39 CLI contracts and 38 PostgreSQL 18.4
-plain/TLS integration tests, with no skips. Teardown removed both containers,
-their network and synthetic data; final status was `Not running`.
-
-Owner-authorized hosted CI run `33614417589` passed all ten jobs at
-`fc79120b5229a1724a5a589dee4337acf2daa36b`. Non-publishing release run
-`33614446587` then passed all three target archive jobs and the aggregate job.
-The retained aggregate artifact contains exactly three archives, one aggregate
-record, one combined manifest and one `SHA256SUMS` file, all bound to that SHA
-and retained through 2026-09-09. Downloaded archive checksums, aggregate record
-validation, combined manifest verification and the expected blocked readiness
-result all passed locally.
-
-Every target and aggregate record remains correctly blocked with no verified
-signature or provenance. T034 is complete. T033 remains open for hosted repeat
-build and cross-runner reproducibility, Windows/Linux hand checks, runtime
-privacy review and the remaining supply-chain evidence. T035 remains open, and
-the roadmap is still in planning. No tag, signing, release or publication
-operation was performed.
+T034 is complete. T033 remains open for Windows/Linux hand-terminal checks,
+direct runtime privacy review of the corrected binaries, canonical evidence
+materialisation and the remaining supply-chain evidence. T035 remains open
+because the accepted release criteria are not all evidenced; the roadmap stays
+in planning. No tag, signing, release or publication operation was performed.
 
 **Current implemented product feature**: cloud identity authentication. The
 owner asked for Entra ID first and for a first-class experience on other clouds,

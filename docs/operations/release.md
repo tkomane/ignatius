@@ -231,11 +231,12 @@ with one shared run-attempt build identity. A final job downloads the three
 bundles, rechecks each four-file scope, re-verifies each archive against its
 manifest, and uses `cargo --locked xtask release aggregate` to create a
 canonical three-target record. It then generates and verifies one combined
-manifest and retains only the exact three archives, aggregate record and two
-sidecars. Missing, duplicate, unsupported or identity-mismatched inputs fail
-closed. This aggregate path has local contract evidence but no hosted run.
-The workflow is not a release, signing or publication gate; T015 provides the
-readiness assertion and T016 still owns reproducibility evidence.
+manifest, collects one runtime sidecar per target and retains only the exact
+three archives, aggregate record, combined manifest, checksum list and three
+runtime sidecars. Missing, duplicate, unsupported or identity-mismatched
+inputs fail closed. The corrected hosted run and its retained nine-file scope
+are recorded below. The workflow is not a release, signing or publication gate;
+T015 provides the readiness assertion and T016 records reproducibility evidence.
 
 The archive helper refuses an existing output and a symlinked output parent. It
 creates the completed archive in the destination directory and installs it
@@ -643,8 +644,29 @@ platform installation and recovery evidence, and publication authorization all
 exist. A checksum match, successful build or successful aggregate job does not
 satisfy those gates.
 
-The recorded authorization for run `33614446587` covers only the commit, push
-and seven-day, run-scoped non-publishing GitHub Actions artifacts. It does not
+The corrected workflow run `33689674455` checked out the full source revision
+`259ac76de6477719b8a3515777f3623b24237dd6` and completed all archive,
+repeat-build, comparison, runtime and aggregate jobs. Every target produced
+byte-identical repeat archives, and the three runtime jobs passed identity,
+diagnostic, configuration, non-interactive refusal, side-by-side validation,
+controlled invalid-configuration exit 3 and known-good rollback checks. The
+run uses `/Brepro` for Windows reproducibility and is retained through
+2026-09-09 with shared build identity `ci/33689674455-1`.
+
+After download, the aggregate contained exactly nine ordinary files: three
+target archives, one aggregate record, one combined manifest, `SHA256SUMS` and
+three target runtime JSON sidecars. The local allowlist, record validation,
+combined manifest and independent archive checksums passed. The runtime
+sidecars are hosted automated smoke evidence only: they do not establish a
+database query or direct `IGNATIUS_LOG=debug` privacy audit, full-screen
+Windows/Linux terminal behaviour, or a published upgrade. The aggregate
+readiness check remained blocked by eight named issues, including the
+unmaterialised canonical evidence path, detached and untagged source, and
+missing verified signature and provenance.
+
+The recorded authorization for runs `33614446587` and `33689674455` covers only
+the scoped commit, repository push, workflow dispatch and seven-day, run-scoped
+non-publishing GitHub Actions artifacts. It does not
 authorize a tag, signing operation, GitHub Release, package-registry upload,
 package-manifest change or promotion into the canonical evidence tree. Before
 any of those future operations, the owner must record new explicit
@@ -665,7 +687,7 @@ performed none of those publication operations.
 5. Tag the commit. One tag, one version, one changelog entry.
 6. Build artefacts in CI for each target from that tagged commit.
 7. Re-verify all three target bundles, aggregate their records and exact bytes,
-   and inspect the retained six-file scope.
+   and inspect the retained nine-file scope.
 8. Publish checksums alongside the artefacts only after every remaining gate
    and the exact publication authorization are recorded.
 9. Only then update any package manifest.
