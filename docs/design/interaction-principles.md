@@ -20,6 +20,12 @@ statement may still be running. `TLS state unknown` is a real answer.
 **Progressive disclosure.** An error shows four short lines by default and hides
 the server's technical fields behind one key, with a count so you know they exist.
 
+**Trust is inspectable.** The connection header answers the glance question; the
+palette's connection details surface answers the careful question. It names the
+target, server posture, TLS state, and credential route without refreshing,
+executing, or exposing a token. Inspection is read-only, dismissible with one
+key, and safe to open before a consequential query.
+
 **Density with room to breathe.** Every element earns its space. The header
 carries connection, environment, posture, transport and timing because a user
 running statements against a real database needs all five without opening a

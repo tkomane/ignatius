@@ -8,7 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
-No changes have been assigned to a version after the 0.1.0 candidate.
+- Improved: the interactive palette now opens a read-only connection and auth
+  details surface. It names the target, environment, server posture, TLS
+  guarantee, and the safe cloud credential route for Entra, AWS, Google Cloud,
+  and configured providers without refreshing or displaying tokens.
 
 ## [0.1.0]
 

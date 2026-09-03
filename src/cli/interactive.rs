@@ -181,6 +181,14 @@ async fn event_loop(
     model.history_disabled = !config.history.enabled;
     model.history_paused = history.is_paused();
     model.credential_provider.clone_from(&target.auth);
+    // Resolve only safe provider presentation metadata here. The credential was
+    // already fetched before the terminal was taken; opening the in-app trust
+    // surface must never execute a provider or refresh a token.
+    model.credential_presentation = target.auth.as_deref().and_then(|name| {
+        crate::cli::auth_providers(&config)
+            .ok()
+            .and_then(|providers| providers.get(name).map(|provider| provider.presentation()))
+    });
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
