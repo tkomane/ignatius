@@ -6,8 +6,13 @@ before trusting anything else.
 
 ## Where the work is
 
-**Current continuation**: Feature 008 release evidence. Documentation is
-pushed at `b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
+**Current continuation**: Feature 017 connection trust surface. The slice is
+implemented and pushed to `main` as
+`9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. The working tree is
+clean and local `main` matches `origin/main`; no tag, signing, release or
+publication operation was performed. Feature 008 release evidence remains the
+separate release-readiness boundary. Its documentation was first pushed at
+`b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
 evidence is bound to source revision
 `259ac76de6477719b8a3515777f3623b24237dd6`. That revision hardens the hosted
 workflow's deterministic archive builds (`/Brepro` for Windows) and corrects
@@ -64,7 +69,8 @@ socket job deliberately targets Ubuntu, where the runner filesystem supports
 the required Unix-domain socket boundary.
 
 **Current implemented product feature**: cloud identity authentication and its
-read-only connection trust surface. The
+read-only connection trust surface, implemented and pushed in
+`9f80bef3040ba80d017dae3d5d0ae120a4cfc264`. The
 owner asked for Entra ID first and for a first-class experience on other clouds,
 and checking the other two turned that instruction from a generalisation into the
 obvious shape: Azure, AWS and Google Cloud authenticate a PostgreSQL connection
@@ -461,10 +467,11 @@ Nothing else is waiting on the owner. The four that were are closed.
 
 ## Next actions, in order
 
-1. **Connect to the COI server with `--auth entra`**, and record what happens
-   with the date and the server version. That is the only thing that can turn
-   the `entra` row's "live evidence: none yet" into a fact, and it needs an
-   account rather than more code.
+1. **Exercise `Connection and auth details` against the COI server with
+   `--auth entra`**, and record what happens with the date and the server
+   version. Where accounts exist, exercise the `aws` and `gcp` routes separately
+   too. That is the only thing that can turn the provider rows' "live evidence:
+   none yet" into facts, and it needs accounts rather than more code.
 2. **Implement completion that knows the schema**
    (`specs/012-schema-completion/`). First of the experience roadmap, and the
    one that decides whether the product's claim about cognitive load is true.

@@ -8,6 +8,21 @@ much of a graphical client's help as a terminal can carry.
 This document is the argument for what to build and in what order. Each item
 becomes a specification of its own before any of it becomes code.
 
+## Current delivery
+
+As of 2026-09-03, Feature 017, the connection trust surface, is implemented and
+pushed to `main` in commit `9f80bef`. It makes the existing cloud-auth route
+legible before a query: the command palette opens a read-only view of the target,
+environment, server posture, observed TLS state, provider command summary,
+credential lifetime caveat and provider remedy. Entra, AWS, Google Cloud and
+configured providers share the same display contract, while tokens and provider
+commands are never refreshed or executed by the view.
+
+This is a cross-cutting trust and discoverability slice, not a replacement for
+the ordered experience work below. The next product slice remains Feature 012,
+schema-aware completion. Live cloud-account evidence is still separate from the
+local implementation and is recorded in the compatibility matrix when available.
+
 ## What a graphical client is actually giving people
 
 Not beauty. Four things, and they are worth naming separately because they cost
