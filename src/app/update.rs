@@ -276,6 +276,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.name_prompt.is_some() {
         return name_action(model, action);
     }
+    if model.connection_details {
+        return connection_details_action(model, action);
+    }
     if model.prefix_pending {
         return resolve_prefix(model, action);
     }
@@ -1120,6 +1123,10 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.palette = None;
             match chosen.map(|entry| entry.command) {
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::ConnectionDetails) => {
+                    model.connection_details = true;
+                    Vec::new()
+                }
                 Some(crate::app::palette::PaletteCommand::Open(name)) => {
                     model.loaded_query = Some(name.clone());
                     vec![Effect::LoadQuery { name }]
@@ -1147,6 +1154,35 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.should_quit = true;
             vec![Effect::Quit]
         }
+        _ => Vec::new(),
+    }
+}
+
+/// Handles input while the read-only connection trust surface is open.
+///
+/// The panel is intentionally a quiet inspection state. Typing and navigation
+/// are swallowed so a key cannot mutate an editor or selection hidden beneath
+/// it; Escape closes one layer, and the existing quit/palette paths remain
+/// available without requiring a second dismissal.
+fn connection_details_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ToggleHelp => {
+            model.connection_details = false;
+            Vec::new()
+        }
+        Action::OpenPalette => {
+            model.connection_details = false;
+            model.palette = Some(crate::app::palette::Palette::new(palette_entries(model)));
+            Vec::new()
+        }
+        Action::Quit => {
+            model.connection_details = false;
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        // A trust panel must not leak keystrokes into the hidden editor.
+        Action::Insert(_) | Action::Backspace => Vec::new(),
+        // Other actions are deliberately ignored until the panel is closed.
         _ => Vec::new(),
     }
 }
@@ -1269,23 +1305,31 @@ fn expand_selected(model: &mut Model) -> Vec<Effect> {
 fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
     use crate::app::palette::{PaletteCommand, PaletteEntry};
     let keymap = crate::ui::keymap::Keymap::new();
-    let mut entries: Vec<PaletteEntry> = keymap
-        .bindings()
-        .iter()
-        .filter(|binding| {
-            // Movement and typing are not commands anyone looks up in a palette.
-            !matches!(
-                binding.action,
-                Action::Move(_) | Action::Insert(_) | Action::Backspace | Action::Activate
-            )
-        })
-        .map(|binding| PaletteEntry {
-            label: binding.description.to_owned(),
-            detail: binding.key_label(),
-            group: "Command",
-            command: PaletteCommand::Run(binding.action.clone()),
-        })
-        .collect();
+    let mut entries: Vec<PaletteEntry> = vec![PaletteEntry {
+        label: "Connection and auth details".to_owned(),
+        detail: "Trust, transport, posture, and cloud identity".to_owned(),
+        group: "Session",
+        command: PaletteCommand::ConnectionDetails,
+    }];
+    entries.extend(
+        keymap
+            .bindings()
+            .iter()
+            .filter(|binding| {
+                // Movement and typing are not commands anyone looks up in a palette.
+                !matches!(
+                    binding.action,
+                    Action::Move(_) | Action::Insert(_) | Action::Backspace | Action::Activate
+                )
+            })
+            .map(|binding| PaletteEntry {
+                label: binding.description.to_owned(),
+                detail: binding.key_label(),
+                group: "Command",
+                command: PaletteCommand::Run(binding.action.clone()),
+            })
+            .collect::<Vec<_>>(),
+    );
     entries.dedup_by(|a, b| a.label == b.label);
 
     // Chords are commands too. Someone who cannot remember the second key should
@@ -2658,6 +2702,51 @@ mod tests {
 
         assert!(model.palette.is_none(), "choosing closes it");
         assert!(model.help_open, "the chosen command actually ran");
+    }
+
+    #[test]
+    fn connection_details_are_reachable_by_plain_language_and_are_read_only() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1");
+        update(&mut model, Message::Action(Action::OpenPalette));
+
+        for ch in "connection".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        let palette = model.palette.as_ref().expect("palette open");
+        assert_eq!(
+            palette
+                .matches()
+                .first()
+                .expect("connection command match")
+                .label,
+            "Connection and auth details"
+        );
+
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.connection_details, "the trust surface opened");
+        assert!(model.palette.is_none(), "the palette peeled away");
+
+        // Inspection must not leak input to the editor or alter selection.
+        let editor = model.editor.text().to_owned();
+        let selected = (model.selected_row, model.selected_column);
+        for action in [
+            Action::Insert('D'),
+            Action::Backspace,
+            Action::Move(Direction::Down),
+            Action::RunBuffer,
+        ] {
+            assert!(
+                update(&mut model, Message::Action(action.clone())).is_empty(),
+                "a read-only panel emitted an effect for {action:?}"
+            );
+        }
+        assert_eq!(model.editor.text(), editor);
+        assert_eq!((model.selected_row, model.selected_column), selected);
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(!model.connection_details, "Escape closes only the panel");
+        assert_eq!(model.editor.text(), "SELECT 1");
     }
 
     /// A model holding a result of several rows, focused on it.

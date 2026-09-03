@@ -53,6 +53,93 @@ pub struct Provider {
     pub remedy: String,
 }
 
+/// Non-secret provider facts suitable for a user-facing trust surface.
+///
+/// This is deliberately separate from [`Provider`]. A provider contains the
+/// executable argument vector that the runtime uses; a presentation contains
+/// only the small, safe subset that explains the route to a person. In
+/// particular, it never copies an argument that could contain a credential.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPresentation {
+    /// The configured provider name.
+    pub name: String,
+    /// A human-readable provider label.
+    pub display_name: String,
+    /// The executable that supplies the credential.
+    pub command_name: String,
+    /// A safe invocation hint for built-in providers, or a generic custom hint.
+    pub invocation: String,
+    /// Where the provider expects the credential in its output.
+    pub extraction: String,
+    /// The documented or provider-defined lifetime caveat.
+    pub lifetime: String,
+    /// The transport requirement for the route.
+    pub transport: String,
+    /// What a person should do if the provider cannot supply a credential.
+    pub remedy: String,
+}
+
+impl Provider {
+    /// Builds safe, display-only facts for the connection details surface.
+    ///
+    /// The command text is intentionally allowlisted for built-ins. A custom
+    /// provider may put arbitrary text in its arguments, so only its executable
+    /// name is shown and the rest stays behind the provider's own remedy.
+    #[must_use]
+    pub fn presentation(&self) -> ProviderPresentation {
+        let name = self.name.clone();
+        let lower = self.name.to_ascii_lowercase();
+        let (display_name, invocation, lifetime) = match lower.as_str() {
+            "entra" => (
+                "Microsoft Entra ID".to_owned(),
+                "az account get-access-token (OSS RDBMS resource)".to_owned(),
+                "short-lived OAuth 2.0 token, typically 5-60 minutes".to_owned(),
+            ),
+            "aws" => (
+                "AWS IAM database authentication".to_owned(),
+                "aws rds generate-db-auth-token".to_owned(),
+                "short-lived signed token, valid for 15 minutes".to_owned(),
+            ),
+            "gcp" => (
+                "Google Cloud SQL IAM".to_owned(),
+                "gcloud sql generate-login-token".to_owned(),
+                "short-lived OAuth 2.0 token, valid for about 1 hour".to_owned(),
+            ),
+            _ => (
+                format!("Configured provider {name:?}"),
+                "configured provider command (arguments hidden)".to_owned(),
+                "short-lived credential, lifetime defined by the provider".to_owned(),
+            ),
+        };
+
+        let command_name = self
+            .command
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "not configured".to_owned());
+        let extraction = match &self.extract {
+            Extract::Raw => "trimmed standard output".to_owned(),
+            Extract::JsonField(field) => format!("JSON field {field:?}"),
+        };
+        let remedy = if self.remedy.trim().is_empty() {
+            "check the provider command and its sign-in state".to_owned()
+        } else {
+            self.remedy.clone()
+        };
+
+        ProviderPresentation {
+            name,
+            display_name,
+            command_name,
+            invocation,
+            extraction,
+            lifetime,
+            transport: "TLS required before a bearer token is requested".to_owned(),
+            remedy,
+        }
+    }
+}
+
 /// The providers this build knows without being told.
 ///
 /// Every command here is transcribed from the vendor's own documentation,
@@ -462,6 +549,77 @@ mod tests {
                 "{} has no remedy to suggest",
                 provider.name
             );
+        }
+    }
+
+    #[test]
+    fn provider_presentation_names_the_cloud_and_never_copies_arguments() {
+        let entra = built_in()
+            .into_iter()
+            .find(|provider| provider.name == "entra")
+            .expect("built-in Entra provider");
+        let view = entra.presentation();
+        assert_eq!(view.display_name, "Microsoft Entra ID");
+        assert_eq!(view.command_name, "az");
+        assert!(view.invocation.contains("OSS RDBMS"));
+        assert!(view.lifetime.contains("5-60 minutes"));
+        assert!(view.transport.contains("TLS required"));
+        assert!(view.extraction.contains("accessToken"));
+        assert!(view.remedy.contains("az login"));
+        assert!(
+            !view.invocation.contains("{host}"),
+            "display metadata must not expose substituted arguments"
+        );
+    }
+
+    #[test]
+    fn custom_provider_presentation_hides_arbitrary_arguments() {
+        let provider = Provider {
+            name: "corp".into(),
+            command: vec!["corp-token".into(), "--secret-value".into()],
+            extract: Extract::Raw,
+            timeout: DEFAULT_TIMEOUT,
+            remedy: "run corp login".into(),
+        };
+        let view = provider.presentation();
+        assert!(view.display_name.contains("corp"));
+        assert_eq!(view.command_name, "corp-token");
+        assert!(view.invocation.contains("arguments hidden"));
+        assert!(!view.invocation.contains("secret-value"));
+        assert_eq!(view.remedy, "run corp login");
+    }
+
+    #[test]
+    fn every_built_in_cloud_has_a_named_route_and_lifetime() {
+        for (name, display, command, lifetime) in [
+            (
+                "entra",
+                "Microsoft Entra ID",
+                "az account get-access-token",
+                "5-60 minutes",
+            ),
+            (
+                "aws",
+                "AWS IAM database authentication",
+                "aws rds generate-db-auth-token",
+                "15 minutes",
+            ),
+            (
+                "gcp",
+                "Google Cloud SQL IAM",
+                "gcloud sql generate-login-token",
+                "about 1 hour",
+            ),
+        ] {
+            let provider = built_in()
+                .into_iter()
+                .find(|provider| provider.name == name)
+                .expect("built-in provider");
+            let view = provider.presentation();
+            assert_eq!(view.display_name, display);
+            assert!(view.invocation.contains(command), "{name}: {view:?}");
+            assert!(view.lifetime.contains(lifetime), "{name}: {view:?}");
+            assert!(view.transport.contains("TLS required"), "{name}: {view:?}");
         }
     }
 

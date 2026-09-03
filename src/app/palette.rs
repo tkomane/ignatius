@@ -15,6 +15,8 @@ use crate::app::message::Action;
 pub enum PaletteCommand {
     /// Perform an action, exactly as a key binding would.
     Run(Action),
+    /// Open the read-only connection and authentication details surface.
+    ConnectionDetails,
     /// Insert text at the cursor, for example a qualified object name.
     Insert(String),
     /// Open a saved query by name, replacing the buffer.

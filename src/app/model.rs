@@ -475,6 +475,14 @@ pub struct Model {
     /// own terms, and nothing anybody types here can help. Asking would describe
     /// the wrong problem and take a real password on the way.
     pub credential_provider: Option<String>,
+    /// Safe, display-only facts about the cloud identity provider.
+    ///
+    /// The provider command itself remains outside the model. This value is a
+    /// presentation snapshot, so opening the trust surface never refreshes a
+    /// token, executes a program, or performs network I/O.
+    pub credential_presentation: Option<crate::connection::cloud::ProviderPresentation>,
+    /// Whether the read-only connection trust surface is open.
+    pub connection_details: bool,
 }
 
 impl Model {

@@ -63,7 +63,8 @@ mount rejected PostgreSQL's socket-permission change before startup. The
 socket job deliberately targets Ubuntu, where the runner filesystem supports
 the required Unix-domain socket boundary.
 
-**Current implemented product feature**: cloud identity authentication. The
+**Current implemented product feature**: cloud identity authentication and its
+read-only connection trust surface. The
 owner asked for Entra ID first and for a first-class experience on other clouds,
 and checking the other two turned that instruction from a generalisation into the
 obvious shape: Azure, AWS and Google Cloud authenticate a PostgreSQL connection
@@ -71,6 +72,14 @@ identically. A command-line tool returns a short-lived bearer token, the token
 is presented as the password, and the transport must be encrypted. Only the
 command differs, so the command is data: three built-ins ship and
 `[auth.providers]` defines a fourth without waiting for a release.
+
+The interactive client now makes that route inspectable from the command
+palette with `Connection and auth details`. The surface names the target,
+environment, server posture, observed TLS state, provider command summary,
+credential lifetime caveat, and provider remedy. It is display-only: opening it
+does not execute a provider, refresh a token, or perform network I/O; arguments
+and token values are never rendered. A password-authenticated session says that
+no cloud token was requested instead of guessing which password route won.
 
 Two refusals are the security of it. Nothing is fetched for a target whose
 `sslmode` would permit an unencrypted connection - the check runs before the
