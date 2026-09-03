@@ -4,7 +4,8 @@
 
 **Created**: 2026-09-03
 
-**Status**: Implemented locally; release evidence follows the repository gates
+**Status**: Implemented and pushed to `main` on 2026-09-03; local verification
+complete; live cloud-provider evidence pending
 
 **Input**: User request to apply Emil Kowalski UI craft principles and make
 Ignatius a first-class cloud-authenticated PostgreSQL client.

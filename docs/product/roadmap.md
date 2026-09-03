@@ -16,6 +16,7 @@ vertical slice that leaves the product usable.
 | 006 Production-aware safety | **Implemented** | Environment policy, write protection the server enforces, advisory statement classification, and a confirmation that asks for the database's own name before anything destructive. Privacy sessions are in: recording can be paused for a run or a session, and a paused session says so |
 | 007 Accessibility and terminal hardening | **Implemented** | Plain line-oriented mode, no-colour, ASCII and narrow layouts, colour and glyph choice from configuration or flags, and configurable key bindings. Remaining: hand-verification with a screen reader and on Windows Terminal, which is evidence rather than code |
 | 008 Release experience | In planning, in `specs/008-release-experience/` | Release-note catalogue, packaged artefacts, checksums, SBOM, signing and provenance, install and upgrade docs |
+| 017 Connection trust surface | **Implemented, locally verified; live provider evidence pending** | Read-only command-palette details for Entra, AWS, Google Cloud and configured providers: target, environment, server posture, observed TLS, credential lifetime caveat and safe remedy (`specs/017-connection-trust-surface/spec.md`) |
 
 ## Before any public release
 
@@ -24,6 +25,9 @@ vertical slice that leaves the product usable.
   `docs/product/landscape.md`.
 - **Verify on Windows and Linux.** Currently authored but unverified.
 - **Run the full server matrix**, PostgreSQL 14 through 18.
+- **Exercise the built-in cloud providers live.** Entra, AWS and Google Cloud
+  still need dated account and server evidence; the mechanism is tested against
+  a real TLS PostgreSQL server, but that does not prove each vendor command.
 - **Publish a working private vulnerability reporting route.**
 
 ## Risk register
