@@ -44,7 +44,7 @@ because it trains the reflex.
 - ASCII art on launch, gradients made of glyphs, spinners without text.
 - A border around everything. Borders separate panes and nothing else.
 - Unexplained abbreviations. `read-write` rather than `rw`.
-- A permanent wall of shortcuts. Five hints in the footer; the rest in help.
+- A permanent wall of shortcuts. Six hints in the footer; the rest in help.
 - Vim assumptions. Every action has a named key and appears in help.
 - Copying another client's visual identity.
 

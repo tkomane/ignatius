@@ -56,6 +56,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 };
             }
             model.phase = QueryPhase::Idle;
+            model.completion.menu = None;
             Vec::new()
         }
         Message::ExecutionFinished(execution) => {
@@ -118,6 +119,29 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             match *result {
                 Ok(schemas) => model.tree.set_schemas(schemas),
                 Err(error) => model.tree.set_error(error),
+            }
+            Vec::new()
+        }
+        Message::CompletionLoaded {
+            request,
+            loaded_at,
+            result,
+        } => {
+            if !model.completion.accepts(request) {
+                return Vec::new();
+            }
+            match *result {
+                Ok(catalog) => {
+                    model.completion.catalog =
+                        crate::app::completion::CatalogStatus::Ready { catalog, loaded_at };
+                    refresh_completion_menu(model);
+                }
+                Err(error) => {
+                    model.completion.catalog = crate::app::completion::CatalogStatus::Unavailable {
+                        message: error.headline,
+                    };
+                    refresh_completion_menu(model);
+                }
             }
             Vec::new()
         }
@@ -288,6 +312,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.palette.is_some() {
         return palette_action(model, action);
     }
+    if model.completion.menu.is_some() {
+        return completion_action(model, action);
+    }
     if model.tree.filtering {
         return filter_action(model, action);
     }
@@ -347,7 +374,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             // user who never opens it never pays for it.
             if model.sidebar_visible && model.tree.roots.is_empty() && !model.tree.loading {
                 model.tree.begin_loading();
-                return vec![Effect::LoadSchemas];
+                return reload_effects(model);
             }
             Vec::new()
         }
@@ -373,8 +400,13 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::ReloadObjects => {
             model.tree.begin_loading();
-            vec![Effect::LoadSchemas]
+            reload_effects(model)
         }
+        Action::Complete if model.focus == Focus::Editor => {
+            open_completion(model, true);
+            Vec::new()
+        }
+        Action::Complete => Vec::new(),
         // Enter in the editor is a line break that keeps the indentation of the
         // line it left. It must go through `insert_newline` rather than
         // `insert('\n')`: the indentation rule lives there, and this is the only
@@ -466,10 +498,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         },
         Action::Insert(ch) if model.focus == Focus::Editor => {
             model.editor.insert(ch);
+            open_completion(model, false);
             Vec::new()
         }
         Action::Backspace if model.focus == Focus::Editor => {
             model.editor.backspace();
+            open_completion(model, false);
             Vec::new()
         }
         Action::Insert(_) | Action::Backspace => Vec::new(),
@@ -545,6 +579,130 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         | Action::MoveLineEnd
         | Action::Undo
         | Action::Redo => Vec::new(),
+    }
+}
+
+/// Starts the tree and completion reads as one visible refresh operation.
+fn reload_effects(model: &mut Model) -> Vec<Effect> {
+    let request = model.completion.begin_loading();
+    vec![
+        Effect::LoadSchemas,
+        Effect::LoadCompletionCatalog { request },
+    ]
+}
+
+/// Opens completion at the current editor cursor.
+fn open_completion(model: &mut Model, explicit: bool) {
+    if model.focus != Focus::Editor {
+        model.completion.menu = None;
+        return;
+    }
+    if !explicit && !model.completion.enabled {
+        model.completion.menu = None;
+        return;
+    }
+    let result = crate::query::completion::complete(
+        model.editor.text(),
+        model.editor.cursor(),
+        model.completion.catalog(),
+    );
+    if !explicit && !automatic_completion_should_open(&result) {
+        model.completion.menu = None;
+        return;
+    }
+    model.completion.menu = Some(crate::app::completion::CompletionMenu::new(
+        result, explicit,
+    ));
+}
+
+/// Recomputes a menu after a local edit or a catalogue response.
+fn refresh_completion_menu(model: &mut Model) {
+    let Some(menu) = model.completion.menu.take() else {
+        return;
+    };
+    let result = crate::query::completion::complete(
+        model.editor.text(),
+        model.editor.cursor(),
+        model.completion.catalog(),
+    );
+    if !menu.explicit && !automatic_completion_should_open(&result) {
+        return;
+    }
+    model.completion.menu = Some(menu.refreshed(result));
+}
+
+/// Automatic completion must not steal Enter after the user has already typed
+/// one complete, unambiguous candidate. Explicit completion still shows it.
+fn automatic_completion_should_open(result: &crate::query::completion::CompletionResult) -> bool {
+    if result.prefix.trim().chars().count() < 2 || result.candidates.is_empty() {
+        return false;
+    }
+    !(result.matching_count == 1
+        && result.candidates[0]
+            .label
+            .eq_ignore_ascii_case(result.prefix.trim()))
+}
+
+/// Handles input while the completion menu is open.
+fn completion_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Insert(ch) if model.focus == Focus::Editor => {
+            model.editor.insert(ch);
+            refresh_completion_menu(model);
+            Vec::new()
+        }
+        Action::Backspace if model.focus == Focus::Editor => {
+            model.editor.backspace();
+            refresh_completion_menu(model);
+            Vec::new()
+        }
+        Action::Move(Direction::Up) => {
+            if let Some(menu) = model.completion.menu.as_mut() {
+                menu.move_selection(-1);
+            }
+            Vec::new()
+        }
+        Action::Move(Direction::Down) => {
+            if let Some(menu) = model.completion.menu.as_mut() {
+                menu.move_selection(1);
+            }
+            Vec::new()
+        }
+        Action::Activate => {
+            let accepted = model.completion.menu.as_ref().and_then(|menu| {
+                menu.selected_candidate().map(|candidate| {
+                    (
+                        menu.result.replacement.clone(),
+                        candidate.insert_text.clone(),
+                    )
+                })
+            });
+            model.completion.menu = None;
+            if let Some((range, replacement)) = accepted {
+                model.editor.replace_range(range, &replacement);
+            }
+            Vec::new()
+        }
+        Action::Dismiss => {
+            model.completion.menu = None;
+            Vec::new()
+        }
+        Action::Complete => {
+            open_completion(model, true);
+            Vec::new()
+        }
+        Action::Quit => {
+            model.completion.menu = None;
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        other => {
+            // The menu is a transient layer. A key with another meaning closes
+            // it and then performs that meaning, so Ctrl+R and pane navigation
+            // never feel swallowed by an invisible popup state.
+            model.completion.menu = None;
+            apply_action(model, other)
+        }
     }
 }
 
@@ -1417,6 +1575,26 @@ mod tests {
         })
     }
 
+    fn completion_catalog() -> crate::query::completion::CompletionCatalog {
+        crate::query::completion::CompletionCatalog {
+            objects: vec![crate::query::completion::CatalogObject {
+                kind: crate::query::completion::CatalogObjectKind::Table,
+                schema: "public".into(),
+                name: "orders".into(),
+                readable: true,
+                detail: None,
+            }],
+            relations: vec![crate::query::completion::CatalogRelation {
+                schema: "public".into(),
+                name: "orders".into(),
+                columns: vec![crate::query::completion::CatalogColumn {
+                    name: "order_id".into(),
+                    data_type: "bigint".into(),
+                }],
+            }],
+        }
+    }
+
     #[test]
     fn running_a_buffer_starts_one_job_and_asks_for_execution() {
         let mut model = connected();
@@ -1436,6 +1614,123 @@ mod tests {
             }
         );
         assert!(model.phase.is_busy());
+    }
+
+    #[test]
+    fn completion_acceptance_is_explicit_quoted_and_undoable_once() {
+        let mut model = connected();
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: completion_catalog(),
+            loaded_at: "2026-09-04 10:00:00 +02:00".into(),
+        };
+        model.editor.set_text("SELECT * FROM ord");
+        let before = model.editor.text().to_owned();
+
+        assert!(update(&mut model, Message::Action(Action::Complete)).is_empty());
+        assert_eq!(model.editor.text(), before, "opening never edits SQL");
+        assert!(model.completion.menu.is_some());
+
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.editor.text(), "SELECT * FROM \"orders\"");
+        assert!(model.completion.menu.is_none());
+
+        update(&mut model, Message::Action(Action::Undo));
+        assert_eq!(model.editor.text(), before);
+    }
+
+    #[test]
+    fn dismissing_completion_leaves_the_buffer_and_cursor_exactly_unchanged() {
+        let mut model = connected();
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: completion_catalog(),
+            loaded_at: "snapshot".into(),
+        };
+        model.editor.set_text("SELECT * FROM ord");
+        let cursor = model.editor.cursor();
+        let text = model.editor.text().to_owned();
+        update(&mut model, Message::Action(Action::Complete));
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert_eq!(model.editor.text(), text);
+        assert_eq!(model.editor.cursor(), cursor);
+        assert!(model.completion.menu.is_none());
+    }
+
+    #[test]
+    fn automatic_completion_off_keeps_the_same_buffer_as_completion_on() {
+        for (prefix, typed) in [
+            ("SELECT * FROM ", "ord"),
+            ("SELECT ", "co"),
+            ("SELECT * FROM orders o WHERE o.", "to"),
+            ("WITH recent AS (SELECT 1) SELECT * FROM ", "rec"),
+        ] {
+            let mut on = connected();
+            let mut off = connected();
+            on.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+                catalog: completion_catalog(),
+                loaded_at: "snapshot".into(),
+            };
+            off.completion = on.completion.clone();
+            off.completion.enabled = false;
+            on.editor.set_text(prefix);
+            off.editor.set_text(prefix);
+
+            for character in typed.chars() {
+                update(&mut on, Message::Action(Action::Insert(character)));
+                update(&mut off, Message::Action(Action::Insert(character)));
+                assert_eq!(on.editor.text(), off.editor.text(), "prefix {prefix:?}");
+            }
+            assert_eq!(on.editor.text(), off.editor.text());
+            // Exact, unambiguous words deliberately suppress automatic menus;
+            // the invariant here is that disabling them never changes editing.
+            assert!(off.completion.menu.is_none());
+        }
+    }
+
+    #[test]
+    fn automatic_completion_does_not_capture_enter_after_an_exact_keyword() {
+        let mut model = connected();
+        for character in "SELECT".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+
+        assert!(model.completion.menu.is_none());
+        update(&mut model, Message::Action(Action::Activate));
+
+        assert_eq!(model.editor.text(), "SELECT\n");
+    }
+
+    #[test]
+    fn a_late_completion_catalogue_cannot_replace_a_newer_reload() {
+        let mut model = connected();
+        let first = update(&mut model, Message::Action(Action::ReloadObjects));
+        let first_request = first
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadCompletionCatalog { request } => Some(*request),
+                _ => None,
+            })
+            .expect("completion request");
+        let second = update(&mut model, Message::Action(Action::ReloadObjects));
+        let second_request = second
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadCompletionCatalog { request } => Some(*request),
+                _ => None,
+            })
+            .expect("second completion request");
+        assert_ne!(first_request, second_request);
+
+        update(
+            &mut model,
+            Message::CompletionLoaded {
+                request: first_request,
+                loaded_at: "old".into(),
+                result: Box::new(Ok(completion_catalog())),
+            },
+        );
+        assert!(
+            matches!(model.completion.catalog, crate::app::completion::CatalogStatus::Loading { request } if request == second_request)
+        );
     }
 
     #[test]
@@ -1927,7 +2222,14 @@ mod tests {
         model.sidebar_visible = false;
 
         let effects = update(&mut model, Message::Action(Action::ToggleSidebar));
-        assert_eq!(effects, vec![Effect::LoadSchemas], "showing it loads it");
+        assert_eq!(
+            effects,
+            vec![
+                Effect::LoadSchemas,
+                Effect::LoadCompletionCatalog { request: 1 },
+            ],
+            "showing it loads the tree and one schema snapshot"
+        );
         assert!(model.sidebar_visible);
 
         update(

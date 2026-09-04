@@ -343,6 +343,9 @@ pub struct UiConfig {
     /// Replaces animated feedback with static text.
     #[serde(default)]
     pub reduced_motion: bool,
+    /// Whether typing may open automatic schema-completion menus.
+    #[serde(default = "default_completion")]
+    pub completion: bool,
 }
 
 impl Default for UiConfig {
@@ -353,8 +356,13 @@ impl Default for UiConfig {
             color: ColorMode::Auto,
             mouse: false,
             reduced_motion: false,
+            completion: default_completion(),
         }
     }
+}
+
+const fn default_completion() -> bool {
+    true
 }
 
 /// Built-in themes.

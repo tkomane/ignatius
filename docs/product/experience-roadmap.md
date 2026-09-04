@@ -23,6 +23,15 @@ the ordered experience work below. The next product slice remains Feature 012,
 schema-aware completion. Live cloud-account evidence is still separate from the
 local implementation and is recorded in the compatibility matrix when available.
 
+As of 2026-09-04, Feature 012 is implemented on the local
+`codex/012-schema-completion` branch. The full-screen editor and plain mode share
+one lexer-backed engine and one catalogue snapshot with bounded visible lists, with cursor-scoped
+objects, aliases, schemas, columns, CTEs, quoted acceptance, truthful loading
+and stale states, and ASCII/no-colour wording. Focused reducer, renderer, CLI,
+and PostgreSQL 18.4 evidence is recorded locally; the locked full verifier
+passes all available gates, while the Unix-socket integration and cross-platform
+hand checks remain separate evidence gates.
+
 ## What a graphical client is actually giving people
 
 Not beauty. Four things, and they are worth naming separately because they cost

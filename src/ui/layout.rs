@@ -97,6 +97,9 @@ pub fn render(
 
     // Overlays are drawn in the order Esc peels them, so the topmost one is
     // always the one a keypress will act on.
+    if model.completion.menu.is_some() {
+        render_completion(model, presentation, area, buf);
+    }
     if model.help_open {
         render_help(keymap, presentation, area, buf);
     }
@@ -380,6 +383,140 @@ fn body_area(area: Rect) -> Rect {
     ])
     .areas(area);
     body
+}
+
+/// The editor's content rectangle in the current layout.
+fn editor_content_area(model: &Model, presentation: &Presentation, area: Rect) -> Rect {
+    let editor = match layout_mode(area) {
+        LayoutMode::Compact => body_area(area),
+        LayoutMode::Full => main_panes(body_area(area), model.sidebar_visible).0,
+        LayoutMode::TooSmall => area,
+    };
+    pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor)
+}
+
+/// Draws the local completion menu next to the editor caret.
+///
+/// This is deliberately a static overlay. Completion is frequent keyboard
+/// feedback, not a transition that needs to take attention away from the text
+/// being written. The status lines carry the catalogue facts that colour or an
+/// icon must never be asked to carry alone.
+fn render_completion(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+    let Some(menu) = &model.completion.menu else {
+        return;
+    };
+    if layout_mode(area) == LayoutMode::TooSmall || area.width < 12 || area.height < 5 {
+        return;
+    }
+
+    let inner = editor_content_area(model, presentation, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let (line, column) = model.editor.position();
+    let gutter = model.editor.line_count().to_string().len().max(2);
+    let offset = (line.saturating_sub(1)).saturating_sub((inner.height as usize).saturating_sub(1));
+    let cursor_y = inner
+        .y
+        .saturating_add(u16::try_from(line.saturating_sub(1).saturating_sub(offset)).unwrap_or(0))
+        .min(inner.y.saturating_add(inner.height.saturating_sub(1)));
+    let cursor_x = inner
+        .x
+        .saturating_add(u16::try_from(gutter + column + 1).unwrap_or(u16::MAX))
+        .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
+
+    let unicode = !presentation.glyphs.is_ascii();
+    let safe_names = menu
+        .result
+        .candidates
+        .iter()
+        .map(|candidate| sanitize_for_display(&candidate.label))
+        .collect::<Vec<_>>();
+    let name_width = safe_names
+        .iter()
+        .map(|name| display_width(name))
+        .max()
+        .unwrap_or(12)
+        .clamp(12, 28);
+    let max_width = area.width.saturating_sub(2).max(12);
+    let desired_width = u16::try_from(name_width + 44).unwrap_or(max_width);
+    let width = desired_width.clamp(28, 78).min(max_width);
+    let desired_height = u16::try_from(menu.result.candidates.len() + 7).unwrap_or(16);
+    let max_height = area.height.saturating_sub(1).max(5);
+    let height = desired_height.clamp(5, 20).min(max_height);
+
+    let right = area.x.saturating_add(area.width);
+    let left_limit = right.saturating_sub(width).max(area.x);
+    let x = cursor_x.saturating_sub(1).clamp(area.x, left_limit);
+    let below = cursor_y.saturating_add(1);
+    let bottom = area.y.saturating_add(area.height);
+    let y = if below.saturating_add(height) <= bottom {
+        below
+    } else {
+        cursor_y.saturating_sub(height).max(area.y)
+    };
+    let popup = Rect::new(x, y, width, height);
+    ratatui::widgets::Clear.render(popup, buf);
+
+    let content_width = width.saturating_sub(2) as usize;
+    let label_width = name_width.min(content_width.saturating_sub(8));
+    let mut lines = vec![Line::from(Span::styled(
+        sanitize_for_display(&menu.result.scope.label()),
+        presentation.theme.style(Token::Muted),
+    ))];
+    for (index, candidate) in menu.result.candidates.iter().enumerate() {
+        let marker = if index == menu.selected {
+            if unicode { "▸" } else { ">" }
+        } else {
+            " "
+        };
+        let name = truncate_to_width(&safe_names[index], label_width, unicode);
+        let name = pad_to_width(&name, label_width);
+        let detail = truncate_to_width(
+            &sanitize_for_display(&candidate.plain_detail()),
+            content_width.saturating_sub(label_width + 5),
+            unicode,
+        );
+        let text = truncate_to_width(
+            &format!("{marker} {name}  {detail}"),
+            content_width,
+            unicode,
+        );
+        let style = if index == menu.selected {
+            presentation.theme.style(Token::Selection)
+        } else {
+            presentation.theme.style(Token::Text)
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
+    if menu.result.candidates.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No candidates for this position.",
+            presentation.theme.style(Token::Warning),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Showing {} of {} matching candidates ({} available).",
+            menu.result.candidates.len(),
+            menu.result.matching_count,
+            menu.result.total_count
+        ),
+        presentation.theme.style(Token::Muted),
+    )));
+    lines.push(Line::from(Span::styled(
+        sanitize_for_display(&model.completion.catalog.message()),
+        presentation.theme.style(Token::Info),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Enter accepts, Esc cancels, Up/Down moves.",
+        presentation.theme.style(Token::Muted),
+    )));
+
+    Paragraph::new(lines)
+        .block(pane_block(" Complete ".to_owned(), true, presentation))
+        .wrap(Wrap { trim: true })
+        .render(popup, buf);
 }
 
 /// How many lines of SQL are on screen at a terminal size.
@@ -2545,6 +2682,45 @@ mod tests {
         model.connection = ConnectionState::Connected(session(environment, TlsState::Disabled));
         model.editor.set_text("SELECT 1;");
         model
+    }
+
+    #[test]
+    fn completion_menu_is_cursor_adjacent_and_readable_in_ascii_mode() {
+        let mut model = connected_model(Environment::Local);
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: crate::query::completion::CompletionCatalog {
+                objects: vec![crate::query::completion::CatalogObject {
+                    kind: crate::query::completion::CatalogObjectKind::Table,
+                    schema: "public".into(),
+                    name: "orders".into(),
+                    readable: true,
+                    detail: None,
+                }],
+                relations: Vec::new(),
+            },
+            loaded_at: "2026-09-04 10:00:00 +02:00".into(),
+        };
+        model.editor.set_text("SELECT * FROM ord");
+        crate::app::update::update(
+            &mut model,
+            crate::app::Message::Action(crate::app::Action::Complete),
+        );
+
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            100,
+            30,
+        );
+        assert!(text.contains("Complete"), "{text}");
+        assert!(text.contains("orders"), "{text}");
+        assert!(text.contains("table"), "{text}");
+        assert!(text.contains("Enter accepts"), "{text}");
+        assert!(
+            text.is_ascii(),
+            "ASCII mode must not need Unicode: {text:?}"
+        );
     }
 
     fn with_rows(model: &mut Model, columns: &[&str], rows: &[&[Cell]]) {

@@ -70,6 +70,41 @@ cargo run -- connect "$IGNATIUS_TEST_PG_URI"
 cargo test
 ```
 
+## Trying schema completion
+
+The full-screen client loads one schema snapshot alongside the object tree and
+bounds only the visible candidate list. In the editor, type a partial table or
+column name and press `Ctrl+Space`;
+the same menu is also available from the command palette. `Enter` accepts the
+visible candidate, `Esc` dismisses it, and `Ctrl+Z` undoes an accepted
+replacement in one step. Automatic popups can be disabled without removing
+explicit completion:
+
+```toml
+[ui]
+completion = false
+```
+
+Plain mode keeps the workflow line-oriented:
+
+```text
+orders => SELECT * FROM ord
+orders => \complete
+1  orders  table  public  readable
+orders => \use 1
+Completion inserted: orders
+orders => ;
+```
+
+The completion catalogue is read once per session, never once per keystroke.
+Use the focused completion tests and the PostgreSQL integration test when
+working on the analyzer or metadata query:
+
+```bash
+cargo test completion
+cargo test --test postgres_integration completion_catalog
+```
+
 ## Keeping your real configuration out of it
 
 Set `IGNATIUS_CONFIG_DIR` and `IGNATIUS_DATA_DIR` to throwaway directories while

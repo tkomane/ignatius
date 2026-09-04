@@ -26,6 +26,13 @@ pub enum Command {
     Help,
     /// Show the connection.
     Connection,
+    /// Print local schema-aware candidates for the current buffer.
+    Complete {
+        /// Optional prefix supplied by the person rather than the cursor.
+        prefix: Option<String>,
+    },
+    /// Accept one candidate from the most recent completion list.
+    Use(String),
     /// Something that is not a command.
     Unknown(String),
 }
@@ -34,11 +41,21 @@ impl Command {
     /// Parses a backslash command.
     #[must_use]
     pub fn parse(line: &str) -> Self {
-        match line.trim().trim_start_matches('\\').trim() {
+        let input = line.trim().trim_start_matches('\\').trim();
+        let (name, argument) = input
+            .find(char::is_whitespace)
+            .map_or((input, ""), |index| {
+                (&input[..index], input[index..].trim())
+            });
+        match name {
             "q" | "quit" | "exit" => Self::Quit,
             "?" | "h" | "help" => Self::Help,
             "conninfo" | "c" => Self::Connection,
-            other => Self::Unknown(other.to_owned()),
+            "complete" | "completion" => Self::Complete {
+                prefix: (!argument.is_empty()).then(|| argument.to_owned()),
+            },
+            "use" => Self::Use(argument.to_owned()),
+            _ => Self::Unknown(input.to_owned()),
         }
     }
 }
@@ -78,12 +95,42 @@ impl Reader {
         self.buffer.clear();
     }
 
+    /// The SQL that is currently being accumulated.
+    #[must_use]
+    pub fn buffer(&self) -> &str {
+        &self.buffer
+    }
+
+    /// The cursor at the end of the last line, before the newline that
+    /// `feed` stores as the line separator.
+    #[must_use]
+    pub fn completion_cursor(&self) -> usize {
+        self.buffer
+            .strip_suffix('\n')
+            .map_or(self.buffer.len(), str::len)
+    }
+
+    /// Applies one explicitly chosen completion to the accumulated SQL.
+    pub fn apply_completion(&mut self, range: std::ops::Range<usize>, replacement: &str) -> bool {
+        crate::query::completion::replace_range(&mut self.buffer, range, replacement)
+    }
+
     /// Adds one line of input.
     pub fn feed(&mut self, line: &str) -> Input {
         // A meta-command is only a meta-command at the start of a statement.
         // Otherwise a backslash inside SQL would be intercepted.
-        if !self.is_continuing() && line.trim_start().starts_with('\\') {
-            return Input::Command(Command::parse(line));
+        if line.trim_start().starts_with('\\') {
+            let command = Command::parse(line);
+            // Completion is the one pair of meta-commands allowed while SQL is
+            // being accumulated. They are whole-line, explicit requests and
+            // leave the SQL buffer in place; existing commands such as \q keep
+            // their safer start-of-statement-only behavior.
+            let out_of_band = matches!(command, Command::Complete { .. } | Command::Use(_))
+                && !crate::query::completion::context(&self.buffer, self.completion_cursor())
+                    .in_literal_or_comment;
+            if !self.is_continuing() || out_of_band {
+                return Input::Command(command);
+            }
         }
         if !self.is_continuing() && line.trim().is_empty() {
             return Input::Blank;
@@ -185,6 +232,8 @@ pub fn help_text() -> String {
          \\q      leave\n\
          \\?      this help\n\
          \\c      show the connection and what it is protected by\n\
+         \\complete [prefix]  show schema-aware candidates for the SQL buffer\n\
+         \\use <number|name>  insert one candidate from that list\n\
          \n\
          Ctrl+C cancels a running statement. Ctrl+D leaves.\n\
          This is {}'s plain mode: no full-screen interface, nothing that only\n\
@@ -255,6 +304,8 @@ pub fn run(
 
     let mut reader = Reader::default();
     let mut transaction = TransactionState::Autocommit;
+    let mut completion_catalog: Option<Option<crate::query::completion::CompletionCatalog>> = None;
+    let mut pending_completion: Option<crate::query::completion::CompletionResult> = None;
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
 
@@ -287,7 +338,14 @@ pub fn run(
         })?;
 
         let sql = match reader.feed(&line) {
-            Input::Blank | Input::Incomplete => continue,
+            Input::Blank => continue,
+            Input::Incomplete => {
+                // A numbered list belongs to the exact buffer it was computed
+                // from. Any new SQL input invalidates it before another `\use`
+                // can apply a stale range.
+                pending_completion = None;
+                continue;
+            }
             Input::Command(Command::Quit) => return Ok(crate::ExitCode::Success),
             Input::Command(Command::Help) => {
                 writeln!(err, "{}", help_text()).ok();
@@ -295,6 +353,62 @@ pub fn run(
             }
             Input::Command(Command::Connection) => {
                 writeln!(err, "{}", connection_summary(&info)).ok();
+                continue;
+            }
+            Input::Command(Command::Complete { prefix }) => {
+                if completion_catalog.is_none() {
+                    writeln!(err, "Loading schema snapshot for completion...").ok();
+                    let loaded = runtime.block_on(session.completion_catalog());
+                    match loaded {
+                        Ok(catalog) => completion_catalog = Some(Some(catalog)),
+                        Err(error) => {
+                            writeln!(err, "Schema completion unavailable: {}", error.headline).ok();
+                            completion_catalog = Some(None);
+                        }
+                    }
+                }
+                let catalog = completion_catalog.as_ref().and_then(Option::as_ref);
+                let result = crate::query::completion::complete_with_prefix(
+                    reader.buffer(),
+                    reader.completion_cursor(),
+                    catalog,
+                    prefix.as_deref(),
+                );
+                write_plain_completion(err, &result, catalog.is_some());
+                pending_completion = Some(result);
+                continue;
+            }
+            Input::Command(Command::Use(choice)) => {
+                let Some(result) = pending_completion.as_ref() else {
+                    writeln!(err, "No completion list is open. Type \\complete first.").ok();
+                    continue;
+                };
+                let chosen = choose_plain_completion(result, &choice);
+                let Some(candidate) = chosen else {
+                    writeln!(
+                        err,
+                        "There is no completion candidate {choice:?}; use its number or exact name."
+                    )
+                    .ok();
+                    continue;
+                };
+                let accepted =
+                    reader.apply_completion(result.replacement.clone(), &candidate.insert_text);
+                if accepted {
+                    writeln!(
+                        err,
+                        "Completion inserted: {}",
+                        plain_ascii(&candidate.label)
+                    )
+                    .ok();
+                    pending_completion = None;
+                } else {
+                    writeln!(
+                        err,
+                        "Completion could not replace the current word; nothing changed."
+                    )
+                    .ok();
+                }
                 continue;
             }
             Input::Command(Command::Unknown(name)) => {
@@ -307,6 +421,7 @@ pub fn run(
             }
             Input::Statement(sql) => sql,
         };
+        pending_completion = None;
 
         // The same guardrail the full-screen client applies, asked in words.
         let impact = crate::query::classify_all(&statements::split(&sql));
@@ -425,6 +540,91 @@ fn connect_or_ask(
     runtime.block_on(crate::postgres::connect(&retry, timeout))
 }
 
+/// Prints a completion result without control sequences or colour.
+fn write_plain_completion(
+    err: &mut impl std::io::Write,
+    result: &crate::query::completion::CompletionResult,
+    catalog_ready: bool,
+) {
+    writeln!(
+        err,
+        "Completion for {}. Showing {} of {} matching candidates ({} available).",
+        plain_ascii(&result.scope.label()),
+        result.candidates.len(),
+        result.matching_count,
+        result.total_count
+    )
+    .ok();
+    if catalog_ready {
+        writeln!(err, "Candidates come from one local schema snapshot.").ok();
+    } else {
+        writeln!(
+            err,
+            "Only SQL keywords are available because the schema snapshot is unavailable."
+        )
+        .ok();
+    }
+    for (index, candidate) in result.candidates.iter().enumerate() {
+        writeln!(
+            err,
+            "{}  {}  {}",
+            index + 1,
+            plain_ascii(&candidate.label),
+            plain_ascii(&candidate.plain_detail())
+        )
+        .ok();
+    }
+    if result.candidates.is_empty() {
+        writeln!(err, "No candidates for this position.").ok();
+    } else {
+        writeln!(
+            err,
+            "Use \\use <number|exact-name> to insert one; Esc is not needed in plain mode."
+        )
+        .ok();
+    }
+}
+
+/// Finds a numbered or exact-name candidate from a printed result.
+fn choose_plain_completion<'a>(
+    result: &'a crate::query::completion::CompletionResult,
+    choice: &str,
+) -> Option<&'a crate::query::completion::Candidate> {
+    if let Ok(number) = choice.trim().parse::<usize>() {
+        return number
+            .checked_sub(1)
+            .and_then(|index| result.candidates.get(index));
+    }
+    let choice = choice.trim();
+    let choice = choice
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            choice
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(choice);
+    result
+        .candidates
+        .iter()
+        .find(|candidate| candidate.exact_name(choice))
+}
+
+/// Escapes non-ASCII completion text for a plain transcript.
+fn plain_ascii(value: &str) -> String {
+    let safe = crate::query::value::sanitize_for_display(value);
+    let mut result = String::with_capacity(safe.len());
+    for character in safe.chars() {
+        if character.is_ascii() {
+            result.push(character);
+        } else {
+            result.push_str(&format!("\\u{{{:04X}}}", character as u32));
+        }
+    }
+    result
+}
+
 /// One line describing what this session is and what protects it.
 #[must_use]
 fn connection_summary(info: &crate::postgres::SessionInfo) -> String {
@@ -489,6 +689,16 @@ mod tests {
         let mut reader = Reader::default();
         assert_eq!(reader.feed("\\q"), Input::Command(Command::Quit));
         assert_eq!(reader.feed("\\?"), Input::Command(Command::Help));
+        assert_eq!(
+            reader.feed("\\complete ord"),
+            Input::Command(Command::Complete {
+                prefix: Some("ord".into())
+            })
+        );
+        assert_eq!(
+            reader.feed("\\use 1"),
+            Input::Command(Command::Use("1".into()))
+        );
         assert_eq!(reader.feed("  \\help  "), Input::Command(Command::Help));
         assert_eq!(
             reader.feed("\\nonsense"),
@@ -503,6 +713,30 @@ mod tests {
             Input::Incomplete,
             "a backslash inside SQL must not be intercepted"
         );
+    }
+
+    #[test]
+    fn plain_completion_commands_keep_the_sql_buffer_and_replace_only_on_use() {
+        let mut reader = Reader::default();
+        assert_eq!(reader.feed("SELECT * FROM ord"), Input::Incomplete);
+        let before = reader.buffer().to_owned();
+        assert!(matches!(
+            reader.feed("\\complete"),
+            Input::Command(Command::Complete { prefix: None })
+        ));
+        assert_eq!(reader.buffer(), before);
+        let end = reader.completion_cursor();
+        let start = end - "ord".len();
+        assert!(reader.apply_completion(start..end, "\"orders\""));
+        assert_eq!(reader.buffer(), "SELECT * FROM \"orders\"\n");
+    }
+
+    #[test]
+    fn a_completion_command_inside_a_dollar_quoted_body_is_not_intercepted() {
+        let mut reader = Reader::default();
+        reader.feed("DO $$");
+        assert_eq!(reader.feed("\\complete"), Input::Incomplete);
+        assert!(reader.is_continuing());
     }
 
     #[test]

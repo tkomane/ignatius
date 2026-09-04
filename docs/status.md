@@ -1,17 +1,22 @@
 # Status
 
-**Updated: 2026-09-03.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-04.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
 ## Where the work is
 
-**Current continuation**: Feature 017 connection trust surface. The slice is
-implemented and pushed to `main` as
-`9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. The working tree is
-clean and local `main` matches `origin/main`; no tag, signing, release or
-publication operation was performed. Feature 008 release evidence remains the
-separate release-readiness boundary. Its documentation was first pushed at
+**Current continuation**: Feature 012 schema-aware completion. The slice is
+implemented locally on `codex/012-schema-completion` and is intentionally not
+pushed or published. Focused pure, reducer, renderer, plain-mode, and live
+PostgreSQL 18.4 completion evidence passes on the disposable database, and the
+locked full verifier passes all available gates. Unix-socket integration remains
+an explicit skip because `IGNATIUS_TEST_PG_SOCKET_URI` is not configured;
+cross-platform hand checks remain separate gates. The
+previous Feature 017 connection trust surface remains implemented and pushed to
+`main` as `9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. No tag,
+signing, release or publication operation was performed. Feature 008 release
+evidence remains the separate release-readiness boundary. Its documentation was first pushed at
 `b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
 evidence is bound to source revision
 `259ac76de6477719b8a3515777f3623b24237dd6`. That revision hardens the hosted
@@ -105,6 +110,19 @@ provider rather than letting one word cover both.
 
 Also: `query --format json` no longer writes `[]` for a run that failed, which
 to a stdout-only reader was indistinguishable from a query that matched nothing.
+
+**Feature 012 implementation**: the TUI and plain mode now consume one shared,
+lexer-backed completion engine and one PostgreSQL catalogue snapshot with bounded
+visible candidate lists.
+The editor offers keywords, schema objects, relations, functions, columns,
+aliases and CTEs at the cursor; acceptance quotes identifiers and is one undo
+step, while dismissal leaves the buffer and cursor unchanged. Loading, stale,
+unavailable, unreadable and bounded states are written in the UI, automatic
+popups can be disabled without removing explicit `Ctrl+Space`, and plain mode
+uses `\complete` plus `\use` without executing a partial buffer. The focused
+completion run, locked verifier, and live catalogue test pass against disposable
+PostgreSQL 18.4. The Unix-socket gate is explicitly skipped because its URI is
+not configured; cross-platform terminal evidence remains pending.
 
 **Previous**: the four open decisions are closed, and the product has a
 direction rather than a finished roadmap. The owner named the real requirement
@@ -472,21 +490,18 @@ Nothing else is waiting on the owner. The four that were are closed.
    version. Where accounts exist, exercise the `aws` and `gcp` routes separately
    too. That is the only thing that can turn the provider rows' "live evidence:
    none yet" into facts, and it needs accounts rather than more code.
-2. **Implement completion that knows the schema**
-   (`specs/012-schema-completion/`). First of the experience roadmap, and the
-   one that decides whether the product's claim about cognitive load is true.
-3. Hand-verification on Windows and in WSL, using the artefact built on
+2. Hand-verify Feature 012 on Windows and in WSL, and exercise `--plain` with
+   VoiceOver/NVDA. Keep the Unix-socket integration gate explicitly skipped
+   until a Linux socket environment is configured. The artefact built on
    2026-08-16. A static musl binary covers WSL and Linux including the Unix
    socket path; a Windows-native `.exe` is a separate artefact and separate
    evidence, and neither substitutes for the other.
-4. Implement copy through OSC 52 (ADR-0013), which closes Feature 004.
-5. The remaining experience roadmap in order: errors that point at the problem,
+3. Implement copy through OSC 52 (ADR-0013), which closes Feature 004.
+4. The remaining experience roadmap in order: errors that point at the problem,
    a result grid that can be worked, finding your way without being told, a
    readable plan.
-6. A terminal-restoration test for Windows, which needs ConPTY (T055a).
-7. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
-   absence of escape sequences is proven; the experience is not.
-8. Complete the remaining Feature 008 evidence gates. The corrected hosted
+5. A terminal-restoration test for Windows, which needs ConPTY (T055a).
+6. Complete the remaining Feature 008 evidence gates. The corrected hosted
    archive, reproducibility, runtime-smoke and aggregate results are recorded
    in the release documents. Still open are canonical evidence materialisation,
    inventory/SBOM ownership, signing, provenance, direct logging-privacy review,

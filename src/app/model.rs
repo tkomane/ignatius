@@ -380,6 +380,8 @@ pub struct Model {
     pub focus: Focus,
     /// The SQL buffer.
     pub editor: Editor,
+    /// Schema-aware completion state and its catalogue snapshot.
+    pub completion: crate::app::completion::CompletionState,
     /// Connection state.
     pub connection: ConnectionState,
     /// Where the object tree reads from.
