@@ -4,7 +4,9 @@
 
 **Created**: 2026-08-16
 
-**Status**: Specified. Not implemented.
+**Status**: Implemented in local ancestor commit `3168e7c`; task list complete.
+Recorded focused and PostgreSQL 18.4 verification is in `docs/status.md`.
+Unix-socket and cross-platform hand evidence remain separate from that local run.
 
 **Input**: The owner's brief of 2026-08-16 - the least cognitive load and the
 least expertise of anything in the market - and

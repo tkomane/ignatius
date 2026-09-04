@@ -192,8 +192,9 @@ ignatius version --verbose      # version, revision, build identity, target
 There is no OS credential store by decision: password files remain compatible
 with `psql` and keep the binary dependency-light. GSSAPI, Kerberos and Windows
 SSPI are unsupported; the required Entra, AWS and Google Cloud routes use a
-short-lived token as the password over TLS. Copying a value through opt-in OSC
-52 remains planned. When a server asks for a password, both the full-screen
+short-lived token as the password over TLS. Copying a value through confirmed,
+opt-in OSC 52 is implemented locally; hand-terminal acceptance remains
+unverified. When a server asks for a password, both the full-screen
 client and plain mode prompt safely when a terminal is available; a script fails
 rather than waiting for input nobody can provide.
 `docs/support/compatibility.md` is the authoritative list, and the client tells
@@ -202,6 +203,8 @@ you at the point of use rather than failing quietly.
 ## Documentation
 
 - `docs/status.md` - what is done, what is verified, what is next
+- [Product roadmap](docs/product/roadmap.md) - milestones, evidence gates and agent assignments
+- [Agent playbook](docs/operations/agent-playbook.md) - ownership, architecture review and handoff
 - `docs/product/landscape.md` - the other tools, and why this one
 - `docs/architecture/decisions/` - why it is built this way
 - `docs/security/threat-model.md` - what is protected and what is not

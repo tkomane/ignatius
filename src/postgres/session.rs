@@ -196,6 +196,15 @@ impl Session {
         crate::postgres::metadata::columns(&self.client, schema, relation).await
     }
 
+    /// Resolves a result source and reads the live facts required for a cell update.
+    pub async fn update_relation(
+        &self,
+        schema: Option<&str>,
+        relation: &str,
+    ) -> Result<crate::postgres::metadata::UpdateRelation, Diagnostic> {
+        crate::postgres::metadata::update_relation(&self.client, schema, relation).await
+    }
+
     /// Reads the one catalogue snapshot used for local completion.
     pub async fn completion_catalog(
         &self,
@@ -228,6 +237,80 @@ impl Session {
         crate::postgres::metadata::dependencies(&self.client, object).await
     }
 
+    /// Reads one statement's structured PostgreSQL plan.
+    ///
+    /// This is deliberately separate from [`Self::execute`]. The generated
+    /// EXPLAIN command must not become an ordinary result, history entry, or
+    /// export, and keeping the boundary here makes that distinction visible at
+    /// the only place that can send it to PostgreSQL.
+    pub async fn explain(&self, sql: &str, analyze: bool) -> Result<String, Diagnostic> {
+        const PLAIN_OPTIONS: &str = "ANALYZE false, COSTS true, SUMMARY true, FORMAT JSON";
+        const ANALYZE_OPTIONS: &str =
+            "ANALYZE true, COSTS true, SUMMARY true, TIMING true, FORMAT JSON";
+        let statement = format!(
+            "EXPLAIN ({}) {}",
+            if analyze {
+                ANALYZE_OPTIONS
+            } else {
+                PLAIN_OPTIONS
+            },
+            sql.trim()
+        );
+        let stream = self
+            .client
+            .simple_query_raw(&statement)
+            .await
+            .map_err(|err| from_query_error(&err, 1))?;
+        tokio::pin!(stream);
+
+        let mut payload = None;
+        while let Some(message) = stream.next().await {
+            let message = message.map_err(|err| from_query_error(&err, 1))?;
+            if let tokio_postgres::SimpleQueryMessage::Row(row) = message {
+                if payload.is_some() {
+                    return Err(Diagnostic::new(
+                        DiagnosticKind::Query,
+                        "PostgreSQL returned more than one plan row",
+                        "reading a structured query plan",
+                    )
+                    .next_action("try one statement at a time"));
+                }
+                let Some(value) = row.get(0) else {
+                    return Err(Diagnostic::new(
+                        DiagnosticKind::Query,
+                        "PostgreSQL returned an empty plan row",
+                        "reading a structured query plan",
+                    )
+                    .next_action("check the PostgreSQL version and EXPLAIN permissions"));
+                };
+                if value.len() > crate::query::plan::MAX_PLAN_JSON_BYTES {
+                    return Err(Diagnostic::new(
+                        DiagnosticKind::Query,
+                        "the query plan exceeded the client display bound",
+                        "reading a structured query plan",
+                    )
+                    .likely_cause(format!(
+                        "the JSON response is larger than {} bytes",
+                        crate::query::plan::MAX_PLAN_JSON_BYTES
+                    ))
+                    .next_action(
+                        "simplify the statement or inspect its plan with PostgreSQL tools",
+                    ));
+                }
+                payload = Some(value.to_owned());
+            }
+        }
+
+        payload.ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "PostgreSQL returned no query plan",
+                "reading a structured query plan",
+            )
+            .next_action("check the PostgreSQL version and EXPLAIN permissions")
+        })
+    }
+
     /// Extensions installed in this database.
     pub async fn extensions(
         &self,
@@ -249,7 +332,7 @@ impl Session {
     /// statement's does answer it, since the two differ only inside an explicit
     /// transaction block. And a transaction that has failed cannot answer at
     /// all, which is exactly how a failed transaction is recognised.
-    async fn transaction_state(&self) -> crate::query::result::TransactionState {
+    pub(crate) async fn transaction_state(&self) -> crate::query::result::TransactionState {
         use crate::query::result::TransactionState;
         const PROBE: &str =
             "SELECT (transaction_timestamp() <> statement_timestamp())::text AS in_transaction";
@@ -333,6 +416,26 @@ impl Session {
         Ok(rows)
     }
 
+    /// Binds named values and streams the resulting simple query.
+    ///
+    /// The template is the only SQL descriptor retained by callers. The bound
+    /// text exists only for this request and is never logged or put in history.
+    pub async fn stream_with_parameters(
+        &self,
+        sql: &str,
+        parameters: &crate::query::ParameterBindings,
+        sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
+    ) -> Result<u64, StreamStop> {
+        let bound = crate::query::discover_parameters(sql)
+            .and_then(|template| template.bind(sql, parameters))
+            .map_err(|error| {
+                StreamStop::Server(Box::new(
+                    error.diagnostic("binding named parameters for export"),
+                ))
+            })?;
+        self.stream(&bound, sink).await
+    }
+
     /// Executes every statement in a buffer, in order.
     ///
     /// Statements after a failure do not run. Results produced before the failure
@@ -343,6 +446,46 @@ impl Session {
             "{}",
             crate::diagnostics::logging::statement_descriptor(job.0, sql)
         );
+        self.execute_bound(sql, row_cap, job).await
+    }
+
+    /// Binds named values and executes the resulting simple query.
+    ///
+    /// Binding happens after the connection exists but before the statement is
+    /// submitted. A binding failure is represented as a failed execution so
+    /// the reducer and plain client retain their normal recovery paths.
+    pub async fn execute_with_parameters(
+        &self,
+        sql: &str,
+        parameters: &crate::query::ParameterBindings,
+        row_cap: usize,
+        job: JobId,
+    ) -> Execution {
+        tracing::debug!(
+            target: "ignatius::query",
+            "{}",
+            crate::diagnostics::logging::statement_descriptor(job.0, sql)
+        );
+        let started = Instant::now();
+        let bound = match crate::query::discover_parameters(sql)
+            .and_then(|template| template.bind(sql, parameters))
+        {
+            Ok(bound) => bound,
+            Err(error) => {
+                return Execution {
+                    job,
+                    statements: Vec::new(),
+                    status: ExecutionStatus::Failed,
+                    elapsed: started.elapsed(),
+                    error: Some(error.diagnostic("binding named parameters for execution")),
+                    transaction: self.transaction_state().await,
+                };
+            }
+        };
+        self.execute_bound(&bound, row_cap, job).await
+    }
+
+    async fn execute_bound(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
         let started = Instant::now();
         let parsed = statements::split(sql);
         let mut results = Vec::new();
@@ -443,7 +586,46 @@ impl Session {
             }
         }
 
+        // The simple-query protocol gives us faithful text values and column
+        // names, but not type OIDs. Parse/describe is deliberately after the
+        // result has arrived: it does not execute the statement, and a failure
+        // here must never turn a successful query into a failed one.
+        if let Some(names) = result_set
+            .as_ref()
+            .filter(|set| !set.columns.is_empty())
+            .map(|set| set.columns.clone())
+            && let Some(types) = self.describe_columns(sql, &names).await
+            && let Some(set) = result_set.as_mut()
+        {
+            let _ = set.set_column_types(types);
+        }
+
         Ok((result_set, rows_affected))
+    }
+
+    /// Describes one already-received result without replaying its SQL.
+    ///
+    /// The names are checked as well as the count because a description that is
+    /// accepted against the wrong shape would make a truthful type label into a
+    /// quiet lie. A failed prepare or mismatch is ordinary unavailability for
+    /// the grid, not a query failure.
+    async fn describe_columns(&self, sql: &str, names: &[String]) -> Option<Vec<Option<String>>> {
+        let statement = self.client.prepare(sql).await.ok()?;
+        let columns = statement.columns();
+        if columns.len() != names.len()
+            || columns
+                .iter()
+                .zip(names)
+                .any(|(column, name)| column.name() != name)
+        {
+            return None;
+        }
+        Some(
+            columns
+                .iter()
+                .map(|column| Some(column.type_().name().to_owned()))
+                .collect(),
+        )
     }
 }
 

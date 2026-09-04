@@ -42,6 +42,9 @@ struct Snapshot {
 pub struct Editor {
     text: String,
     cursor: usize,
+    /// Changes only when the buffer text changes, so async diagnostics can tell
+    /// whether their source span still belongs to the visible buffer.
+    revision: u64,
     modified: bool,
     /// The column vertical movement is trying to keep, in characters.
     ///
@@ -79,6 +82,22 @@ impl Editor {
     #[must_use]
     pub const fn cursor(&self) -> usize {
         self.cursor
+    }
+
+    /// Revision of the buffer text. Cursor movement does not change it.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Places the caret on a UTF-8 boundary without adding undo history.
+    ///
+    /// Error mapping uses this after a server response. It is intentionally not
+    /// an edit: the SQL, modified flag and undo history remain untouched.
+    pub fn set_cursor(&mut self, byte_offset: usize) {
+        self.end_undo_run();
+        self.goal_column = None;
+        self.cursor = self.clamp_to_boundary(byte_offset);
     }
 
     /// Records that the buffer now matches something on disk.
@@ -212,6 +231,7 @@ impl Editor {
         self.last_edit = Some(EditKind::Replace);
         // Loading is not editing: the buffer matches what it was loaded from.
         self.modified = false;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Replaces one UTF-8-safe range, for example the word accepted from a
@@ -253,6 +273,7 @@ impl Editor {
         self.goal_column = None;
         self.last_edit = None;
         self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Puts back what undo took away.
@@ -270,6 +291,7 @@ impl Editor {
         self.goal_column = None;
         self.last_edit = None;
         self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     // ------------------------------------------------------------ movement
@@ -410,6 +432,7 @@ impl Editor {
     fn after_edit(&mut self) {
         self.modified = true;
         self.goal_column = None;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// The byte offset of the start of the line the cursor is on.
@@ -571,6 +594,90 @@ mod tests {
         let start = "SELECT ".len();
         editor.replace_range(start..editor.text().len(), "\"café\"");
         assert_eq!(editor.text(), "SELECT \"café\"");
+        assert_eq!(editor.cursor(), editor.text().len());
+    }
+
+    #[test]
+    fn formatted_buffer_replacement_is_one_edit_with_cursor_recovery() {
+        let source = "select café,total from orders where total>0;";
+        let source_cursor = source.find("total>0").expect("token") + "total".len();
+        let mut editor = Editor::with_text(source);
+        editor.set_cursor(source_cursor);
+        let formatted = crate::query::format_sql(source, source_cursor).expect("format");
+
+        editor.replace_range(0..source.len(), &formatted.text);
+        editor.set_cursor(formatted.cursor);
+        assert!(editor.is_modified());
+        assert!(editor.can_undo());
+        assert!(editor.text().is_char_boundary(editor.cursor()));
+
+        editor.undo();
+        assert_eq!(editor.text(), source);
+        assert_eq!(editor.cursor(), source_cursor);
+        assert!(!editor.can_undo());
+        editor.redo();
+        assert_eq!(editor.text(), formatted.text);
+        assert_eq!(editor.cursor(), formatted.cursor);
+    }
+
+    #[test]
+    fn formatted_cursor_fixtures_stay_on_ascii_and_unicode_character_boundaries() {
+        for (source, token, inside) in [
+            ("select total from orders;", "total", "tot"),
+            ("select café from orders;", "café", "ca"),
+        ] {
+            let source_cursor = source.find(token).expect("token") + inside.len();
+            let formatted = crate::query::format_sql(source, source_cursor).expect("format");
+            let mut editor = Editor::with_text(source);
+            editor.set_cursor(source_cursor);
+            editor.replace_range(0..source.len(), &formatted.text);
+            editor.set_cursor(formatted.cursor);
+            assert!(editor.text().is_char_boundary(editor.cursor()));
+            assert!(editor.cursor() <= editor.text().len());
+        }
+    }
+
+    #[test]
+    fn a_noop_format_replacement_does_not_change_revision_or_history() {
+        let source = "SELECT 1\nFROM orders;";
+        let mut editor = Editor::with_text(source);
+        editor.set_cursor(4);
+        let revision = editor.revision();
+        let cursor = editor.cursor();
+        editor.replace_range(0..source.len(), source);
+        assert_eq!(editor.revision(), revision);
+        assert_eq!(editor.cursor(), cursor);
+        assert!(!editor.can_undo());
+        assert!(!editor.is_modified());
+    }
+
+    #[test]
+    fn text_revision_changes_for_edits_but_not_cursor_positioning() {
+        let mut editor = Editor::with_text("SELECT café");
+        let initial = editor.revision();
+        editor.set_cursor("SELECT ".len() + "caf".len());
+        assert_eq!(editor.revision(), initial);
+        assert!(!editor.is_modified());
+        assert!(!editor.can_undo());
+
+        editor.insert('!');
+        assert_eq!(editor.revision(), initial + 1);
+        editor.undo();
+        assert_eq!(editor.revision(), initial + 2);
+        editor.redo();
+        assert_eq!(editor.revision(), initial + 3);
+    }
+
+    #[test]
+    fn cursor_setter_clamps_invalid_offsets_without_splitting_utf8() {
+        let mut editor = Editor::with_text("café");
+        editor.set_cursor(4);
+        assert_eq!(
+            editor.cursor(),
+            3,
+            "the caret backs up to a character boundary"
+        );
+        editor.set_cursor(999);
         assert_eq!(editor.cursor(), editor.text().len());
     }
 

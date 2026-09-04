@@ -192,6 +192,28 @@ pub struct ColumnInfo {
     pub default: Option<String>,
 }
 
+/// The live relation facts required before a result-cell update can be planned.
+///
+/// The relation name is resolved in the same session that will execute the
+/// generated statement. That matters for an unqualified source query: the
+/// session's effective `search_path`, not the client's assumptions, decides
+/// which relation is addressed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateRelation {
+    /// The schema selected by PostgreSQL.
+    pub schema: String,
+    /// The relation name exactly as stored by PostgreSQL.
+    pub relation: String,
+    /// The live relation kind.
+    pub kind: ObjectKind,
+    /// Whether the current role may select from it.
+    pub readable: bool,
+    /// Whether the current role may update it.
+    pub writable: bool,
+    /// Columns and primary-key membership in catalogue order.
+    pub columns: Vec<ColumnInfo>,
+}
+
 pub use crate::query::identifiers::quote_identifier;
 
 /// Lists schemas the current role may use, with counts by kind.
@@ -368,6 +390,81 @@ pub async fn columns(
             default: row.get::<_, Option<String>>("default_expression"),
         })
         .collect())
+}
+
+/// Resolves one source relation and reads the permission and key facts needed
+/// for a generated cell update.
+///
+/// Schema and relation names are data throughout this query. In particular,
+/// an unqualified relation is matched against the session's effective
+/// `current_schemas(false)` in search-path order, while a qualified relation
+/// is matched exactly. No name is interpolated into catalogue SQL.
+pub async fn update_relation(
+    client: &Client,
+    schema: Option<&str>,
+    relation: &str,
+) -> Result<UpdateRelation, Diagnostic> {
+    const RELATION: &str = "SELECT n.nspname::text AS schema, \
+         c.relname::text AS relation, c.relkind::text AS relkind, \
+         has_table_privilege(c.oid, 'SELECT') AS readable, \
+         has_table_privilege(c.oid, 'UPDATE') AS writable \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE c.relname = $1 \
+           AND (($2::text IS NOT NULL AND n.nspname = $2) \
+             OR ($2::text IS NULL AND n.nspname = ANY(pg_catalog.current_schemas(false)))) \
+         ORDER BY CASE WHEN $2::text IS NULL \
+                      THEN pg_catalog.array_position(pg_catalog.current_schemas(false), n.nspname) \
+                      ELSE 0 END, n.nspname \
+         LIMIT 1";
+
+    let schema_value = schema.map(str::to_owned);
+    let row = client
+        .query_opt(RELATION, &[&relation, &schema_value])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?
+        .ok_or_else(|| {
+            let qualified = schema.map_or_else(
+                || format!("unqualified relation {relation:?}"),
+                |schema| {
+                    format!(
+                        "{}.{}",
+                        quote_identifier(schema),
+                        quote_identifier(relation)
+                    )
+                },
+            );
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                format!("could not resolve {qualified} for a cell update"),
+                "reading update target metadata",
+            )
+            .likely_cause("the relation is gone, outside the session search path, or not visible")
+            .next_action("refresh the result and check the relation name and privileges")
+        })?;
+
+    let relkind: String = row.get("relkind");
+    let kind = ObjectKind::from_relkind(&relkind).ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Query,
+            "the selected relation kind cannot be updated from a result cell",
+            "reading update target metadata",
+        )
+        .likely_cause(format!("PostgreSQL reported relkind {relkind:?}"))
+        .next_action("edit an ordinary or partitioned table result instead")
+    })?;
+    let resolved_schema: String = row.get("schema");
+    let resolved_relation: String = row.get("relation");
+    let columns = columns(client, &resolved_schema, &resolved_relation).await?;
+
+    Ok(UpdateRelation {
+        schema: resolved_schema,
+        relation: resolved_relation,
+        kind,
+        readable: row.get("readable"),
+        writable: row.get("writable"),
+        columns,
+    })
 }
 
 /// Reads the relation and function names used by local completion in one
