@@ -760,6 +760,70 @@ fn columns_carry_type_nullability_and_key_membership() {
 }
 
 #[test]
+fn completion_catalogue_contains_objects_columns_and_function_detail_in_one_snapshot() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let catalog = fx
+        .block_on(fx.session.completion_catalog())
+        .expect("completion catalogue");
+
+    let orders = catalog
+        .objects
+        .iter()
+        .find(|object| object.schema == "public" && object.name == "orders")
+        .expect("orders object");
+    assert_eq!(
+        orders.kind,
+        ignatius::query::completion::CatalogObjectKind::Table
+    );
+    assert!(orders.readable);
+
+    let hostile = catalog
+        .objects
+        .iter()
+        .find(|object| object.name.contains("DROP TABLE"))
+        .expect("hostile object is catalogued as data");
+    assert_eq!(hostile.schema, "public");
+
+    let relation = catalog
+        .relations
+        .iter()
+        .find(|relation| relation.schema == "public" && relation.name == "orders")
+        .expect("orders columns");
+    assert!(
+        relation
+            .columns
+            .iter()
+            .any(|column| column.name == "order_id")
+    );
+    assert!(
+        relation
+            .columns
+            .iter()
+            .any(|column| column.data_type == "numeric(12,2)")
+    );
+
+    let function = catalog
+        .objects
+        .iter()
+        .find(|object| object.schema == "reporting" && object.name == "order_count")
+        .expect("reporting function");
+    assert_eq!(
+        function.kind,
+        ignatius::query::completion::CatalogObjectKind::Function
+    );
+    assert!(
+        function
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("bigint"),
+        "function return detail remains visible: {:?}",
+        function.detail
+    );
+}
+
+#[test]
 fn indexes_and_extensions_are_listed() {
     let uri = target_or_skip!();
     let fx = fixture(&uri);

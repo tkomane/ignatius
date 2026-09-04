@@ -40,6 +40,8 @@ pub enum Action {
     StartFilter,
     /// Reload the object tree from the server.
     ReloadObjects,
+    /// Open schema-aware completion at the editor cursor.
+    Complete,
     /// Enter: a line break, opening a node, or confirming, depending on focus.
     Activate,
     /// Show or hide the expanded view of the selected row.
@@ -142,6 +144,7 @@ impl Action {
             Self::BeginPrefix,
             Self::StartFilter,
             Self::ReloadObjects,
+            Self::Complete,
             Self::Activate,
             Self::ToggleExpandedRow,
             Self::ToggleInspector,
@@ -207,6 +210,15 @@ pub enum Message {
     Notices(Vec<Notice>),
     /// The schema list finished loading.
     SchemasLoaded(Box<Result<Vec<crate::postgres::metadata::SchemaSummary>, Diagnostic>>),
+    /// The completion catalogue finished loading.
+    CompletionLoaded {
+        /// Identity of the reload that requested it.
+        request: u64,
+        /// Time label captured by the runtime, not invented by the reducer.
+        loaded_at: String,
+        /// Snapshot data, or why it could not be read.
+        result: Box<Result<crate::query::completion::CompletionCatalog, Diagnostic>>,
+    },
     /// A node's children finished loading. Carries the request identity so a
     /// stale answer can be discarded.
     MetadataLoaded {
@@ -300,6 +312,11 @@ pub enum Effect {
     Quit,
     /// Load the schema list.
     LoadSchemas,
+    /// Load the one catalogue snapshot used by local completion.
+    LoadCompletionCatalog {
+        /// Identity used to discard a late response after another reload.
+        request: u64,
+    },
     /// Read an object's definition.
     LoadDefinition {
         /// Identity to report back with.

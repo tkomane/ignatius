@@ -196,6 +196,13 @@ impl Session {
         crate::postgres::metadata::columns(&self.client, schema, relation).await
     }
 
+    /// Reads the one catalogue snapshot used for local completion.
+    pub async fn completion_catalog(
+        &self,
+    ) -> Result<crate::query::completion::CompletionCatalog, Diagnostic> {
+        crate::postgres::metadata::completion_catalog(&self.client).await
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

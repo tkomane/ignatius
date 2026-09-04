@@ -1159,6 +1159,42 @@ mod with_server {
     }
 
     #[test]
+    fn plain_mode_completion_is_explicit_numbered_and_does_not_run_until_sql_is_finished() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let mut child = binary()
+            .args(["--plain", "connect", &uri])
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"SELECT * FROM ord\n\\complete\n\\use orders\n;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        let messages = stderr(&output);
+        assert!(messages.contains("Completion for"), "{messages}");
+        assert!(messages.contains("orders"), "{messages}");
+        assert!(messages.contains("Completion inserted"), "{messages}");
+        assert!(stdout(&output).contains("(3 rows)"), "{}", stdout(&output));
+        assert!(!messages.contains('\u{1b}'), "{messages:?}");
+        assert!(
+            messages.is_ascii(),
+            "plain completion must be ASCII: {messages:?}"
+        );
+    }
+
+    #[test]
     fn plain_mode_asks_before_writing_to_a_production_target() {
         use std::io::Write;
         use std::process::Stdio;

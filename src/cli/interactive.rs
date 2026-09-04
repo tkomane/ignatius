@@ -178,6 +178,7 @@ async fn event_loop(
     let mut model = Model::new(config.query.max_buffered_rows);
     model.connection = crate::app::ConnectionState::Connecting;
     model.editor.set_text(starter_query());
+    model.completion.enabled = config.ui.completion;
     model.history_disabled = !config.history.enabled;
     model.history_paused = history.is_paused();
     model.credential_provider.clone_from(&target.auth);
@@ -267,6 +268,9 @@ async fn event_loop(
                 }
                 Effect::LoadSchemas => {
                     spawn_load_schemas(tx.clone(), reader(&session, &metadata));
+                }
+                Effect::LoadCompletionCatalog { request } => {
+                    spawn_load_completion_catalog(tx.clone(), reader(&session, &metadata), request);
                 }
                 Effect::LoadMetadata {
                     request,
@@ -605,6 +609,27 @@ fn spawn_load_schemas(
         };
         let result = session.schemas().await;
         let _ = tx.send(Message::SchemasLoaded(Box::new(result)));
+    });
+}
+
+fn spawn_load_completion_catalog(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    request: u64,
+) {
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            return;
+        };
+        let result = session.completion_catalog().await;
+        let loaded_at = chrono::Local::now()
+            .format("%Y-%m-%d %H:%M:%S %:z")
+            .to_string();
+        let _ = tx.send(Message::CompletionLoaded {
+            request,
+            loaded_at,
+            result: Box::new(result),
+        });
     });
 }
 

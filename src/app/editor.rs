@@ -214,6 +214,30 @@ impl Editor {
         self.modified = false;
     }
 
+    /// Replaces one UTF-8-safe range, for example the word accepted from a
+    /// completion menu.
+    ///
+    /// This is deliberately one non-coalesced edit. Accepting a candidate is a
+    /// single user decision, so one undo returns the exact text and cursor that
+    /// existed before the menu changed anything.
+    pub fn replace_range(&mut self, range: std::ops::Range<usize>, replacement: &str) {
+        if range.start > range.end
+            || range.end > self.text.len()
+            || !self.text.is_char_boundary(range.start)
+            || !self.text.is_char_boundary(range.end)
+            || &self.text[range.clone()] == replacement
+        {
+            return;
+        }
+        self.record(EditKind::Replace, false);
+        let replaced =
+            crate::query::completion::replace_range(&mut self.text, range.clone(), replacement);
+        debug_assert!(replaced);
+        self.cursor = range.start + replacement.len();
+        self.last_insert_was_space = replacement.chars().last().is_some_and(char::is_whitespace);
+        self.after_edit();
+    }
+
     /// Takes back the last change.
     pub fn undo(&mut self) {
         let Some(previous) = self.past.pop() else {
@@ -525,6 +549,29 @@ mod tests {
             }
         }
         editor
+    }
+
+    #[test]
+    fn completion_replacement_is_one_undoable_edit() {
+        let mut editor = Editor::with_text("SELECT ord");
+        editor.replace_range(7..10, "\"orders\"");
+        assert_eq!(editor.text(), "SELECT \"orders\"");
+        assert_eq!(editor.cursor(), "SELECT \"orders\"".len());
+        assert!(editor.is_modified());
+
+        editor.undo();
+        assert_eq!(editor.text(), "SELECT ord");
+        assert_eq!(editor.cursor(), "SELECT ord".len());
+        assert!(!editor.can_undo());
+    }
+
+    #[test]
+    fn completion_replacement_preserves_utf8_boundaries() {
+        let mut editor = Editor::with_text("SELECT café");
+        let start = "SELECT ".len();
+        editor.replace_range(start..editor.text().len(), "\"café\"");
+        assert_eq!(editor.text(), "SELECT \"café\"");
+        assert_eq!(editor.cursor(), editor.text().len());
     }
 
     #[test]

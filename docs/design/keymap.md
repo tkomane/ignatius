@@ -11,6 +11,7 @@ checked for conflicts by a test, and listed in help at runtime.
 | `Ctrl+Q` | Quit | Yes |
 | `F1` | Show or hide help | Yes |
 | `Ctrl+P` | Open the command palette | Yes |
+| `Ctrl+Space` | Show schema completion | Yes |
 | `Ctrl+B` | Show or hide the object tree | No |
 | `Ctrl+K` | Start a chord and list what follows it | No |
 | `Ctrl+Enter` | Run the whole buffer, where the terminal can distinguish it | No |
@@ -73,6 +74,12 @@ One undo step is a word and the space after it. Character-at-a-time undo is
 tedious and whole-buffer undo is frightening, and the word is the unit people
 actually think in.
 
+`Ctrl+Space` opens completion explicitly at the cursor. When automatic
+completion is enabled, typing and deleting can also open the same local menu;
+the menu never changes the buffer until Enter accepts the visible selection.
+Esc dismisses it without changing the buffer, and Ctrl+Z undoes an accepted
+replacement in one step.
+
 ## What a key means depends on where you are
 
 `Enter` is the clearest case. In the editor it inserts a line break. On an object
@@ -86,8 +93,9 @@ separation means `Enter` never has to guess between "use this" and "open this".
 
 ## Modes
 
-Four states intercept keys before the editor sees them, peeled by `Esc` in this
-order: a pending chord, the palette, the object filter, then the cell inspector.
+Five states intercept keys before the editor sees them, peeled by `Esc` in this
+order: a pending chord, the palette, completion, the object filter, then the
+cell inspector.
 Help and the current error are peeled after those. The inspector is the one that
 does not swallow everything: typing goes nowhere, but a key that already means
 something closes it and does that thing, so `Ctrl+R` still runs. The order is fixed and tested, because a key that
@@ -154,7 +162,7 @@ modifiers followed by one key: a single character, `f1` to `f24`, or one of
 The bindable action names are the authority in `src/ui/keymap.rs`:
 `run-buffer`, `run-statement`, `cancel`, `quit`, `toggle-help`, `focus-next`,
 `toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
-`begin-prefix`, `start-filter`, `reload-objects`, `show-definition`,
+`begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,

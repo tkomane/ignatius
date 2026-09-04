@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: schema-aware completion now reads one PostgreSQL catalogue snapshot
+  with bounded visible lists for both the full-screen editor and plain mode. It offers
+  cursor-scoped tables, views, functions and columns through aliases, accepts
+  quoted identifiers in one undoable edit, keeps loading and stale states
+  truthful, and remains useful in ASCII, no-colour and screen-reader workflows.
 - Improved: the interactive palette now opens a read-only connection and auth
   details surface. It names the target, environment, server posture, TLS
   guarantee, and the safe cloud credential route for Entra, AWS, Google Cloud,
