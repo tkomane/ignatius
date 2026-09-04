@@ -2,16 +2,12 @@
 
 Reconciled on **2026-09-04** against the current local feature chain. This is
 the runtime trust model; [release evidence](../operations/release.md) has a
-separate build and distribution trust path. The later clipboard, parameter,
-reviewed-write and profile-picker flows describe the local integration target;
-this planning-only commit does not add them to main. Implementation does not
-establish live provider or terminal support; current main capabilities and
-verified support remain in the compatibility matrix.
+separate build and distribution trust path. Implementation does not establish
+live provider or terminal support; those claims live in the compatibility matrix.
 
 ```mermaid
 flowchart LR
     %% Assumption: one local user selects the target and owns configuration.
-    %% Clipboard, parameter and picker additions await W01 integration into main.
     %% Provider programs and terminals have their own caches/retention outside Ignatius.
     %% Open evidence: native provider launch, per-cloud accounts, terminal clipboard acceptance.
     user(["Engineer at a terminal"])

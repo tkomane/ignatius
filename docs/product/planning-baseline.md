@@ -4,13 +4,6 @@ Inspected on **2026-09-04, Africa/Johannesburg**. This is the dated evidence
 behind the [roadmap](roadmap.md), not a second live status file. Resume from
 [status](../status.md) and recheck the worktree before assigning work.
 
-**Integration boundary:** this assessment inspected the owner's feature worktree
-at local HEAD `3168e7c` plus uncommitted changes. The planning-only main integration
-keeps application code at `52872ac`. Implementation, task lists and detailed
-verification records for the later local slices remain in the originating
-worktree until W01 carries them together. A local implementation observation
-below is not a claim about the code shipped in this main checkout.
-
 ## Product assessment
 
 The [vision](vision.md), [personas](personas-and-jobs.md) and
@@ -47,8 +40,8 @@ programme, AI query upload, generic database layer or plugin platform to build.
 | Scheduled fixture-drift job was skipped in that run | Same run's job list; `.github/workflows/ci.yml` | That scheduled-only check did not run. It is not included in the passed gates |
 | Branch protection flag is false | GitHub branch API read on 2026-09-04 | Required checks are not currently enforced by branch protection. No assumption about plan entitlement is needed |
 | Advertised private vulnerability reporting is not verified | Repository private-vulnerability-reporting API returned HTTP 404 on 2026-09-04 | Availability or access remains unresolved; the response does not prove the feature is disabled. W13 must verify a usable private route before public distribution |
-| Recent local verifiers are recorded for Features 013-024 | Dated entries in the originating worktree's `docs/status.md` and each available `tasks.md` | Recorded local macOS/PostgreSQL 18.4 results, with semantic Unix-socket skips and manual evidence gaps; these were not rerun for this planning assessment |
-| Feature 024 completed while this assessment was running | Re-read its local spec, all 21 checked tasks and the originating status file's Feature 024 evidence entry | Focused and locked-verifier plain/TLS evidence recorded, with the socket boundary skipped. Preserve the newer completion and terminal-key follow-up records there; integration and hand-terminal evidence still remain |
+| Recent local verifiers are recorded for Features 013-024 | Dated entries in `docs/status.md` and each available `tasks.md` | Recorded local macOS/PostgreSQL 18.4 results, with semantic Unix-socket skips and manual evidence gaps; these were not rerun for this planning assessment |
+| Feature 024 completed while this assessment was running | Re-read its spec, all 21 checked tasks and the new `docs/status.md` Feature 024 evidence entry | Focused and locked-verifier plain/TLS evidence recorded, with the socket boundary skipped. Preserve the newer completion and terminal-key follow-up records there; integration and hand-terminal evidence still remain |
 | Release tooling exists; acceptance remains open | Feature 008 T033/T035, ADR-0008, `release-evidence/`, release operations guide | Packaging and a green CI run do not establish a release-ready candidate, signing, provenance or authorization |
 
 Hosted evidence above does **not** cover the newer local features. Historical
@@ -63,9 +56,6 @@ Use the full directory slug as the identifier. There are two historical `007`
 directories, and the old roadmap reused `002` through `007` for broad themes.
 Do not rename those directories or treat a number alone as an assignment.
 Existing feature task lists remain the authority for their checkboxes.
-Links below identify specifications present on main. Plain-code slugs identify
-specifications still in the originating local worktree; retrieve their complete
-packages during W01 instead of reconstructing them from this inventory.
 
 | Specification | Observed delivery state | Next boundary |
 | --- | --- | --- |
@@ -83,18 +73,18 @@ packages during W01 instead of reconstructing them from this inventory.
 | [010-asking-and-keeping](../../specs/010-asking-and-keeping/spec.md) | Implemented, specified retrospectively | Integrate config init, prompts, saved SQL and retained-result export |
 | [011-cloud-identity](../../specs/011-cloud-identity/spec.md) | Mechanism implemented; no separate task file | Native Windows launcher investigation and separate live Entra/AWS/GCP evidence |
 | [012-schema-completion](../../specs/012-schema-completion/spec.md) | Task list complete; in local HEAD ancestry | Integration and terminal evidence for scoped, stale and bounded completion |
-| `013-errors-at-cursor` | Local task list complete | Terminal and combined formatting/parameter/error-location evidence |
-| `014-workable-result-grid` | Local task list complete | Hand use, resize, sort/filter/selection/copy/update identity interactions |
-| `015-guided-discovery` | Local task list complete | First-use observation; discoverability and configured-key meaning |
-| `016-readable-query-plan` | Local task list complete | Real terminal use and explicit distinction between EXPLAIN and ANALYZE |
+| [013-errors-at-cursor](../../specs/013-errors-at-cursor/spec.md) | Local task list complete | Terminal and combined formatting/parameter/error-location evidence |
+| [014-workable-result-grid](../../specs/014-workable-result-grid/spec.md) | Local task list complete | Hand use, resize, sort/filter/selection/copy/update identity interactions |
+| [015-guided-discovery](../../specs/015-guided-discovery/spec.md) | Local task list complete | First-use observation; discoverability and configured-key meaning |
+| [016-readable-query-plan](../../specs/016-readable-query-plan/spec.md) | Local task list complete | Real terminal use and explicit distinction between EXPLAIN and ANALYZE |
 | [017-connection-trust-surface](../../specs/017-connection-trust-surface/spec.md) | On remote main; mechanism locally verified | Per-provider account evidence and accurate native-platform remedies |
-| `018-clipboard-copy` | Local task list complete | Actual terminal/WSL/SSH/multiplexer acceptance; never infer readback |
-| `019-format-buffer` | Local task list complete | Real keys, undo, protected SQL bytes and narrow/plain presentation |
-| `020-connection-picker` | Local task list complete | Quiet-session switching, stale work and native credential routes |
-| `021-intentional-exports` | Local task list complete | Retained-versus-streamed scope, file recovery and hand workflow |
-| `022-parameters-prompted` | Local task list complete | Combined execution/refresh/history/error privacy and platform prompts |
-| `023-cell-update` | Local task list complete | Review-to-write identity, concurrent server changes, count/outcome and terminal evidence |
-| `024-retained-result-refresh` | Implemented locally; its 21-task list is reconciled after this baseline inspection | Retain the recorded plain/TLS verifier evidence, semantic Unix-socket skip and terminal hand gaps in the originating worktree's status file |
+| [018-clipboard-copy](../../specs/018-clipboard-copy/spec.md) | Local task list complete | Actual terminal/WSL/SSH/multiplexer acceptance; never infer readback |
+| [019-format-buffer](../../specs/019-format-buffer/spec.md) | Local task list complete | Real keys, undo, protected SQL bytes and narrow/plain presentation |
+| [020-connection-picker](../../specs/020-connection-picker/spec.md) | Local task list complete | Quiet-session switching, stale work and native credential routes |
+| [021-intentional-exports](../../specs/021-intentional-exports/spec.md) | Local task list complete | Retained-versus-streamed scope, file recovery and hand workflow |
+| [022-parameters-prompted](../../specs/022-parameters-prompted/spec.md) | Local task list complete | Combined execution/refresh/history/error privacy and platform prompts |
+| [023-cell-update](../../specs/023-cell-update/spec.md) | Local task list complete | Review-to-write identity, concurrent server changes, count/outcome and terminal evidence |
+| [024-retained-result-refresh](../../specs/024-retained-result-refresh/spec.md) | Implemented locally; its 21-task list is reconciled after this baseline inspection | Retain the recorded plain/TLS verifier evidence, semantic Unix-socket skip and terminal hand gaps in `docs/status.md` |
 
 For older features without `plan.md` or `tasks.md`, do not fabricate historical
 implementation tasks or test results. Before changing their behaviour, create a

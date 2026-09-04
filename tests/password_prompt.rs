@@ -110,6 +110,72 @@ fn ask_and_answer(target: &str, typed: &[String]) -> Option<(String, bool)> {
     Some((transcript, output.status.success()))
 }
 
+/// Runs a plain parameterized query under a pty and returns its transcript.
+fn ask_parameter_and_run(target: &str, password: &str, value: &str) -> Option<(String, bool)> {
+    if Command::new("script").arg("--version").output().is_err()
+        && Command::new("script").arg("-h").output().is_err()
+    {
+        eprintln!("skipping: `script` is not available to allocate a pty");
+        return None;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_ignatius");
+    let inner = format!("exec {binary} --plain connect '{target}'");
+    let mut command = Command::new("script");
+    if cfg!(target_os = "linux") {
+        command.args(["-e", "-q", "-c", &inner, "/dev/null"]);
+    } else {
+        command.args(["-q", "/dev/null", "sh", "-c", &inner]);
+    }
+
+    let temp = std::env::temp_dir().join("ignatius-parameter-pty");
+    let mut child = command
+        .env("IGNATIUS_CONFIG_DIR", &temp)
+        .env("IGNATIUS_DATA_DIR", temp.join("data"))
+        .env("PGPASSWORD", password)
+        .env_remove("PGPASSFILE")
+        .env("TERM", "dumb")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn under a pty");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let value = value.to_owned();
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(2));
+        let _ = stdin.write_all(b"SELECT :value AS value;\n");
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_secs(1));
+        let _ = stdin.write_all(format!("{value}\r").as_bytes());
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_secs(1));
+        let _ = stdin.write_all(b"\\q\n");
+        let _ = stdin.flush();
+    });
+
+    let id = child.id();
+    let guard = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(30));
+        let _ = Command::new("kill")
+            .args(["-KILL", &id.to_string()])
+            .status();
+    });
+
+    let output = child.wait_with_output().expect("wait");
+    let _ = writer.join();
+    drop(guard);
+    Some((
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        output.status.success(),
+    ))
+}
+
 #[test]
 fn typing_the_password_opens_the_session_and_the_password_is_never_echoed() {
     let Some((target, password)) = target_and_password() else {
@@ -169,5 +235,33 @@ fn refusing_to_answer_leaves_the_servers_own_refusal() {
     assert!(
         transcript.contains("password") || transcript.contains("Authentication"),
         "the reason is still the server's: {transcript}"
+    );
+}
+
+#[test]
+fn plain_parameter_prompt_hides_the_answer_and_keeps_csv_data_clean() {
+    let Some((target, password)) = target_and_password() else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_URI is not set, or carries no password");
+        return;
+    };
+    let value = "synthetic-parameter-pty-marker";
+    let Some((transcript, succeeded)) = ask_parameter_and_run(&target, &password, value) else {
+        return;
+    };
+
+    assert!(
+        succeeded,
+        "the parameterized plain session did not exit cleanly: {transcript}"
+    );
+    assert!(transcript.contains("Value for :value"), "{transcript}");
+    assert!(transcript.contains("value"), "{transcript}");
+    assert_eq!(
+        transcript.matches(value).count(),
+        1,
+        "the parameter value was echoed by the prompt: {transcript}"
+    );
+    assert!(
+        !transcript.contains(&password),
+        "the password reached the transcript"
     );
 }

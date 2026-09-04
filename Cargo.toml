@@ -57,7 +57,7 @@ rustls-pki-types = { version = "1.15.1", features = ["std"] }
 
 # Configuration and machine-readable output (ADR-0006).
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = { version = "1.0.145", features = ["unbounded_depth"] }
 toml = "1.1.4"
 
 # Secret handling (ADR-0007).
@@ -79,7 +79,7 @@ tempfile = "3.24.0"
 # Integration tests drive the async API directly.
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
 # The CLI contract tests parse machine-format output the way a script would.
-serde_json = "1.0.145"
+serde_json = { version = "1.0.145", features = ["unbounded_depth"] }
 
 [profile.release]
 strip = "debuginfo"

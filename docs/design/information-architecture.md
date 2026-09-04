@@ -39,6 +39,12 @@ current keystroke.
 edits, and whether it has focus. All four are in the title so the pane body is
 only ever SQL.
 
+**Completion menu.** A static, cursor-adjacent overlay over the editor. It
+answers `Ctrl+Space` with the current scope, candidate kind, schema or source,
+type/detail, visible and true counts, catalogue freshness, and the keys that
+accept, dismiss, or move. The menu is local after the snapshot load and never
+changes the editor before Enter.
+
 **Results pane.** Column headers, rows, and in the title the execution status and
 summary. Truncation is stated in the summary, never implied by an absence. When
 an error is present it replaces this pane, because an error is the result.
@@ -84,7 +90,7 @@ and opening the surface performs no refresh or network request. The title keeps
 `Esc to close` visible so the inspection state never becomes a trap.
 
 **Footer.** What the client is doing right now (`Ready`, `Running`,
-`Cancellation requested`), the session's search path, and up to five key hints.
+`Cancellation requested`), the session's search path, and up to six key hints.
 
 ## Narrow and small
 

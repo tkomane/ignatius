@@ -26,12 +26,21 @@ pub const TRUNCATION_MARKER: char = '\u{2026}';
 pub const TRUNCATION_MARKER_ASCII: &str = "...";
 
 /// One value in a result row.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Cell {
     /// SQL NULL.
     Null,
     /// A value, exactly as the server rendered it in text format.
     Text(String),
+}
+
+impl std::fmt::Debug for Cell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Null => f.write_str("Null"),
+            Self::Text(_) => f.write_str("Text(<hidden>)"),
+        }
+    }
 }
 
 impl Cell {

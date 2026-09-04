@@ -35,6 +35,57 @@ What this program stores, where, for how long, and what it never stores.
   command line - but naming a program there means this client will execute it,
   which the threat model states as a capability the file did not previously have.
 
+- **Prompted named-parameter values.** Answers for `:name` placeholders live in
+  `SecretString` state while one query is collected or executed. The value is
+  masked in the full-screen and plain prompts, is never placed in the SQL
+  template, history, diagnostics, logs, palette, result metadata or terminal
+  decoration, and is dropped after the execution attempt. Automation names an
+  environment variable with `--param-env NAME=VARIABLE`; the value itself is
+  not a command-line argument. Binding creates an escaped text literal only at
+  the simple-query boundary. NUL is refused before send.
+
+- **Generated cell-update values.** A replacement and the selected row's key
+  values are held in secret `ParameterBindings` for one reviewed, parameterized
+  `UPDATE`. The template, identifiers, row and privilege facts are safe model
+  state; raw replacement and key values are never written to history, logs,
+  diagnostics or debug output. The interactive review intentionally shows the
+  exact bound statement to the person who is about to confirm it. This is a
+  visible decision surface, not persistence or telemetry.
+
+## Interactive connection picker
+
+The picker keeps only a safe presentation summary of each configured profile.
+It copies the profile name, known location, database, role, TLS mode,
+environment, read-only flag, provider name, description and a bounded validation
+headline. The flattened unknown-field map is deliberately excluded, so a
+password-shaped or other unsupported value cannot reach `Debug`, the renderer,
+search results or the footer. Provider presentation contains names and safe
+command summaries only; it never contains a token or provider output.
+
+The reducer emits only `Option<String>` for the selected profile. The runtime
+resolves the profile, target and credential outside the application model and
+holds any `ConnectionTarget` or `SecretString` there. Opening, searching and
+dismissing the picker do not read the network or execute a provider. Selecting
+the default row invokes normal resolution without a profile; selecting a named
+row invokes the existing profile validation and authentication boundaries.
+
+When switching, server-owned facts and retained results are removed before the
+new attempt begins. The SQL buffer and local result-reading preferences are not
+removed. A connection generation rejects late metadata, completion or
+connection messages from the previous target, so old server facts cannot be
+reintroduced after a switch.
+
+## Local SQL formatting
+
+Formatting is an in-memory transformation of the editor buffer. It creates no
+separate copy, contacts PostgreSQL, reloads metadata, writes history or files,
+transfers clipboard data, records telemetry, or changes result output. A changed
+buffer is retained only as the normal editor text and one undo entry. Strings,
+quoted identifiers, dollar bodies and comments are copied exactly; an
+unterminated or over-limit input is refused without putting the SQL text in the
+refusal message. Plain mode writes its formatted preview to stderr and keeps
+the pending buffer in memory until an explicit terminator executes it.
+
 ## Exports
 
 An export is the one route by which result data is written to disk, and it only
@@ -45,6 +96,63 @@ An export never overwrites an existing file without `--force`, and never leaves
 a truncated file at the destination: incomplete work stays under a `.partial`
 name, which is reported rather than cleaned up silently, because the rows in it
 may be what the user needed.
+
+Interactive export chooses CSV, TSV, JSON, NDJSON or Markdown before the path is
+accepted. The choice and retained-row scope are ephemeral model state; they do
+not contact PostgreSQL, add history, transfer clipboard data or expose row
+values in palette or diagnostic text. The filename extension has no authority.
+
+CLI `--format insert` requires an explicit `--insert-table` and writes one
+quoted statement per retained result row. Table and column names are quoted,
+NULL is written as SQL `NULL`, and non-NULL values are escaped text literals
+without type inference. Duplicate column labels and NUL-containing text are
+refused. Generated INSERT output is data that may be executable: this client
+never executes it automatically, and the user must review it before applying
+it.
+
+## Intentional terminal transfer
+
+Copying a retained text cell is interactive-only and disabled by default. With
+`[clipboard] osc52 = true`, and after an explicit confirmation, the client
+writes the value as an OSC 52 sequence through the held terminal and flushes it.
+The client never reads the destination clipboard, never clears it, and never
+claims that the terminal accepted the sequence. The terminal, SSH path, or
+multiplexer may observe or retain the value. NULL, stale, oversized, disabled,
+and failed writes send no value; use an explicit export when a file is the
+intended boundary.
+
+## Interactive cell updates
+
+Cell updates are TUI-only and are not an implicit edit mode. The analyzer
+accepts only one direct single-table `SELECT`; live PostgreSQL metadata resolves
+the relation, object kind, read privilege, update privilege and primary-key
+membership. The first slice refuses production-classified connections and
+server read-only sessions before asking for a replacement. It also refuses
+views, joins, expressions, CTEs, set operations, missing or NULL key values and
+primary-key cells.
+
+The client presents a value prompt and then a separate review prompt. Only the
+review Enter creates one `ExecuteParameterized` effect. Esc creates none. The
+generated template is what can enter statement history; bound values remain in
+secret memory until the adapter binds them at the existing simple-query
+boundary. The prior result remains a snapshot and is never rerun automatically.
+
+## Interactive retained-result refresh
+
+Refresh is an explicit TUI action over the source template attached to a
+completed result. It is available only for one read-classified statement and
+never falls back to the editable buffer. A multi-statement, write, structural,
+destructive or unrecognised source is refused. The action does not create a
+cache, timer, background watcher or second SQL source of truth.
+
+Named-parameter values are collected again through the existing `SecretString`
+prompt and are never reused from an earlier execution. The safe template may be
+recorded under the ordinary history rules, while values stay out of history,
+logs, diagnostics, debug output, palette state and terminal decoration. The
+refresh follows the existing execution and connection lifecycle, reports its
+actual or unknown outcome, and does not retry after failure or connection loss.
+Changing focus, filtering, sorting, layout controls, reconnecting or completing
+a cell update does not trigger it.
 
 ## Written to disk
 
@@ -157,6 +265,10 @@ Off unless `IGNATIUS_LOG` is set. When on:
   any bytes are written.
 - The file is size-bounded and rotated, so it cannot grow without limit.
 
+Parameterized statements log only the job id and the character count of the
+original template. The expanded SQL and all prompted values are deliberately
+outside the logging descriptor.
+
 ## In memory
 
 - Passwords are held in `secrecy::SecretString`, which does not print itself and
@@ -164,6 +276,10 @@ Off unless `IGNATIUS_LOG` is set. When on:
   value is unrecoverable from memory.
 - Result rows are bounded by `query.max-buffered-rows`, default 10000. Rows past
   the cap are counted and dropped rather than retained.
+- Parameter values are held only for one prompt and execution attempt. The
+  simple-query request necessarily has a short-lived expanded copy in process
+  memory; it is not retained, logged or written to history. Zeroing remains
+  best-effort because no userspace program can guarantee memory erasure.
 
 ## Exposure this program cannot fix
 
@@ -174,6 +290,7 @@ Off unless `IGNATIUS_LOG` is set. When on:
   can read is refused rather than used.
 - **Terminal scrollback.** Results shown on screen are in the terminal's buffer
   and, depending on the emulator, in its saved sessions.
-- **The clipboard.** Anything copied is readable by other applications. Timed
-  clearing is under consideration but will not be described as a guarantee,
-  because the operating system does not provide one.
+- **The terminal clipboard path.** An explicitly copied value can be read or
+  retained by the terminal, SSH path, multiplexer, or other applications. OSC 52
+  is off by default, but enabling it is permission to move that value through
+  the terminal. The client cannot verify acceptance or clear the destination.

@@ -14,6 +14,7 @@
 //! say what the keyboard does must not contain a line that quietly does
 //! nothing.
 
+use crate::app::discovery::{KeyBindingSnapshot, KeyChordSnapshot, KeymapSnapshot};
 use crate::app::message::{Action, Direction};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -72,6 +73,8 @@ impl Binding {
 pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("run-buffer", Action::RunBuffer),
     ("run-statement", Action::RunStatement),
+    ("refresh-result", Action::RefreshResult),
+    ("format-buffer", Action::FormatBuffer),
     ("cancel", Action::Cancel),
     ("quit", Action::Quit),
     ("toggle-help", Action::ToggleHelp),
@@ -80,9 +83,11 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("dismiss", Action::Dismiss),
     ("toggle-sidebar", Action::ToggleSidebar),
     ("open-palette", Action::OpenPalette),
+    ("open-result-grid", Action::OpenResultControls),
     ("begin-prefix", Action::BeginPrefix),
     ("start-filter", Action::StartFilter),
     ("reload-objects", Action::ReloadObjects),
+    ("complete", Action::Complete),
     ("show-definition", Action::ShowDefinition),
     ("show-dependencies", Action::ShowDependencies),
     ("save-query", Action::SaveQuery),
@@ -226,11 +231,36 @@ impl Keymap {
                 "Run the statement at the cursor",
                 true,
             ),
+            // Traditional terminals can encode Ctrl+Shift+R as the same
+            // control byte as Ctrl+R. F6 is the advertised portable direct
+            // key, while the shifted-control alias remains useful where the
+            // terminal preserves enhanced keyboard modifiers.
+            binding(
+                K::F(6),
+                none,
+                Action::RefreshResult,
+                "Refresh the retained result",
+                true,
+            ),
+            binding(
+                K::Char('r'),
+                ctrl | KeyModifiers::SHIFT,
+                Action::RefreshResult,
+                "Refresh the retained result (enhanced terminal modifiers)",
+                false,
+            ),
             binding(
                 K::F(9),
                 none,
                 Action::RunStatement,
                 "Run the statement at the cursor (if your system has not claimed F9)",
+                false,
+            ),
+            binding(
+                K::Char('f'),
+                ctrl | KeyModifiers::SHIFT,
+                Action::FormatBuffer,
+                "Format the SQL buffer",
                 false,
             ),
             binding(
@@ -247,6 +277,13 @@ impl Keymap {
                 Action::OpenPalette,
                 "Open the command palette",
                 true,
+            ),
+            binding(
+                K::Char(' '),
+                ctrl,
+                Action::Complete,
+                "Show schema completion",
+                false,
             ),
             binding(
                 K::Char('b'),
@@ -502,6 +539,82 @@ impl Keymap {
         &self.bindings
     }
 
+    /// Copies the active human-readable keys across the application boundary.
+    ///
+    /// The reducer and palette do not need crossterm event values. They do need
+    /// the exact configured labels, including a configured chord prefix, so a
+    /// discovery surface can never fall back to a stale default in production.
+    #[must_use]
+    pub fn snapshot(&self) -> KeymapSnapshot {
+        KeymapSnapshot {
+            bindings: self
+                .bindings
+                .iter()
+                .map(|binding| KeyBindingSnapshot {
+                    action: binding.action.clone(),
+                    key: binding.key_label(),
+                    description: binding.description.to_owned(),
+                })
+                .collect(),
+            chords: CHORDS
+                .iter()
+                .map(|(key, action, description)| KeyChordSnapshot {
+                    key: *key,
+                    action: action.clone(),
+                    description: (*description).to_owned(),
+                })
+                .collect(),
+            prefix: self
+                .bindings
+                .iter()
+                .find(|binding| binding.action == Action::BeginPrefix)
+                .map(Binding::key_label),
+        }
+    }
+
+    /// Returns the key and short label for an action in the active keymap.
+    ///
+    /// Movement is one discoverable action even though it has four bindings;
+    /// grouping them keeps the footer useful without hiding any direction.
+    #[must_use]
+    pub fn contextual_hint(&self, action: &Action) -> Option<(String, &'static str)> {
+        if matches!(action, Action::Move(_)) {
+            let keys: Vec<String> = [
+                Action::Move(Direction::Up),
+                Action::Move(Direction::Down),
+                Action::Move(Direction::Left),
+                Action::Move(Direction::Right),
+            ]
+            .iter()
+            .filter_map(|candidate| {
+                self.bindings
+                    .iter()
+                    .find(|binding| binding.action == *candidate)
+                    .map(Binding::key_label)
+            })
+            .collect();
+            if keys.is_empty() {
+                return None;
+            }
+            return Some((keys.join("/"), "Move"));
+        }
+        if let Some(binding) = self
+            .bindings
+            .iter()
+            .find(|binding| binding.action == *action)
+        {
+            return Some((binding.key_label(), short_label(action)));
+        }
+        let (key, _, _) = CHORDS.iter().find(|(_, chord, _)| chord == action)?;
+        let prefix = self
+            .bindings
+            .iter()
+            .find(|binding| binding.action == Action::BeginPrefix)
+            .map(Binding::key_label)
+            .unwrap_or_else(|| "Ctrl+K".to_owned());
+        Some((format!("{prefix} {key}"), short_label(action)))
+    }
+
     /// Bindings shown in the footer, in order.
     #[must_use]
     pub fn hints(&self) -> Vec<(String, &'static str)> {
@@ -567,6 +680,21 @@ impl Keymap {
 pub const CHORDS: &[(char, Action, &str)] = &[
     ('b', Action::ToggleSidebar, "Show or hide the object tree"),
     ('p', Action::OpenPalette, "Open the command palette"),
+    ('c', Action::CopyValue, "Copy the selected result value"),
+    (
+        'u',
+        Action::GenerateCellUpdate,
+        "Generate a reviewed UPDATE from the selected cell",
+    ),
+    ('q', Action::FormatBuffer, "Format the SQL buffer"),
+    ('n', Action::OpenConnectionPicker, "Choose a connection"),
+    ('g', Action::OpenResultControls, "Open result grid controls"),
+    ('l', Action::ExplainPlan, "Show the estimated query plan"),
+    (
+        'a',
+        Action::AnalyzePlan,
+        "Measure the query plan (executes the statement)",
+    ),
     ('f', Action::StartFilter, "Filter the object tree"),
     ('r', Action::ReloadObjects, "Reload the object tree"),
     ('h', Action::ToggleHelp, "Show or hide help"),
@@ -655,14 +783,23 @@ const fn short_label(action: &Action) -> &'static str {
     match action {
         Action::ToggleSidebar => "Objects",
         Action::OpenPalette => "Palette",
+        Action::OpenResultControls => "Grid controls",
         Action::BeginPrefix => "Chord",
         Action::StartFilter => "Filter",
         Action::ReloadObjects => "Reload",
+        Action::Complete => "Complete",
         Action::Activate => "Open",
         Action::ToggleExpandedRow => "Expand row",
         Action::ToggleInspector => "Inspect",
         Action::RunBuffer => "Run",
         Action::RunStatement => "Run statement",
+        Action::ExplainPlan => "Plan",
+        Action::AnalyzePlan => "Analyze plan",
+        Action::CopyValue => "Copy",
+        Action::GenerateCellUpdate => "Update",
+        Action::RefreshResult => "Refresh",
+        Action::FormatBuffer => "Format",
+        Action::OpenConnectionPicker => "Connections",
         Action::Cancel => "Cancel",
         Action::Quit => "Quit",
         Action::ToggleHelp => "Help",
@@ -940,6 +1077,12 @@ mod tests {
                 KeyModifiers::CONTROL,
                 Action::RunStatement,
             ),
+            (
+                KeyCode::Char('r'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                Action::RefreshResult,
+            ),
+            (KeyCode::F(6), KeyModifiers::NONE, Action::RefreshResult),
             (KeyCode::F(5), KeyModifiers::NONE, Action::RunBuffer),
             (KeyCode::F(9), KeyModifiers::NONE, Action::RunStatement),
             (KeyCode::Char('c'), KeyModifiers::CONTROL, Action::Cancel),
@@ -962,6 +1105,10 @@ mod tests {
         assert_eq!(
             keymap.resolve(&press(KeyCode::Char('s'), KeyModifiers::NONE)),
             Some(Action::Insert('s'))
+        );
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('r'), KeyModifiers::NONE)),
+            Some(Action::Insert('r'))
         );
         assert_eq!(
             keymap.resolve(&press(KeyCode::Char('S'), KeyModifiers::SHIFT)),
@@ -1002,7 +1149,7 @@ mod tests {
         for needed in ["Run", "Cancel", "Quit", "Help"] {
             assert!(text.contains(&needed), "{needed} missing from {text:?}");
         }
-        assert!(hints.len() <= 6, "the hint line must not become clutter");
+        assert!(hints.len() <= 7, "the hint line must not become clutter");
     }
 
     #[test]
@@ -1036,12 +1183,12 @@ mod tests {
     }
 
     #[test]
-    fn the_advertised_keys_are_chords_not_function_keys() {
+    fn the_advertised_keys_use_safe_direct_forms() {
         let hints = Keymap::new().hints();
         for (key, label) in &hints {
             assert!(
-                !key.starts_with('F') || key == "F1",
-                "{label} is advertised as {key}, a function key the system may claim"
+                !key.starts_with('F') || matches!(key.as_str(), "F1" | "F6"),
+                "{label} is advertised as {key}, an unsupported function key"
             );
         }
     }
@@ -1068,6 +1215,111 @@ mod tests {
         ] {
             assert_eq!(keymap.resolve(&press(code, modifiers)), Some(expected));
         }
+    }
+
+    #[test]
+    fn plan_commands_have_named_chords_without_stealing_editor_letters() {
+        assert_eq!(chord_action('l'), Some(Action::ExplainPlan));
+        assert_eq!(chord_action('a'), Some(Action::AnalyzePlan));
+        let keymap = Keymap::new();
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('l'), KeyModifiers::NONE)),
+            Some(Action::Insert('l'))
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::ExplainPlan),
+            Some(("Ctrl+K l".to_owned(), "Plan"))
+        );
+    }
+
+    #[test]
+    fn copy_has_a_named_chord_without_stealing_printable_c() {
+        assert_eq!(chord_action('c'), Some(Action::CopyValue));
+        assert_eq!(chord_action('C'), Some(Action::CopyValue));
+        let keymap = Keymap::new();
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('c'), KeyModifiers::NONE)),
+            Some(Action::Insert('c'))
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::CopyValue),
+            Some(("Ctrl+K c".to_owned(), "Copy"))
+        );
+        assert!(
+            !CONFIGURABLE
+                .iter()
+                .any(|(_, action)| *action == Action::CopyValue),
+            "copy remains a safe chord rather than a printable editor binding"
+        );
+    }
+
+    #[test]
+    fn format_has_a_direct_binding_and_safe_chord_without_stealing_printable_f() {
+        let keymap = Keymap::new();
+        let modifiers = KeyModifiers::CONTROL | KeyModifiers::SHIFT;
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('f'), modifiers)),
+            Some(Action::FormatBuffer)
+        );
+        assert_eq!(chord_action('q'), Some(Action::FormatBuffer));
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('f'), KeyModifiers::NONE)),
+            Some(Action::Insert('f'))
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::FormatBuffer),
+            Some(("Ctrl+Shift+F".to_owned(), "Format"))
+        );
+    }
+
+    #[test]
+    fn result_grid_controls_are_named_and_reachable_without_stealing_printable_keys() {
+        assert_eq!(
+            action_named("open-result-grid"),
+            Some(Action::OpenResultControls)
+        );
+        assert_eq!(
+            chord_action('g'),
+            Some(Action::OpenResultControls),
+            "Ctrl+K g is the contextual grid entry point"
+        );
+        assert_eq!(
+            chord_action('G'),
+            Some(Action::OpenResultControls),
+            "the chord popup accepts the shifted printable key too"
+        );
+
+        let keymap = Keymap::new();
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('g'), KeyModifiers::NONE)),
+            Some(Action::Insert('g')),
+            "plain g remains available for editor text"
+        );
+    }
+
+    #[test]
+    fn connection_picker_has_a_named_chord_without_stealing_printable_n() {
+        assert_eq!(
+            chord_action('n'),
+            Some(Action::OpenConnectionPicker),
+            "Ctrl+K n is the connection choice entry point"
+        );
+        assert_eq!(
+            chord_action('N'),
+            Some(Action::OpenConnectionPicker),
+            "the chord popup accepts the shifted printable key too"
+        );
+
+        let keymap = Keymap::new();
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('n'), KeyModifiers::NONE)),
+            Some(Action::Insert('n')),
+            "plain n remains available for editor text"
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::OpenConnectionPicker),
+            Some(("Ctrl+K n".to_owned(), "Connections"))
+        );
     }
 
     #[test]
@@ -1102,5 +1354,42 @@ mod tests {
         for binding in Keymap::new().bindings() {
             assert!(!binding.description.is_empty(), "{binding:?}");
         }
+    }
+
+    #[test]
+    fn discovery_snapshot_and_hints_use_configured_keys() {
+        let keymap = Keymap::from_config(&configured(&[
+            ("run-buffer", KeySpec::One("f2".to_owned())),
+            ("begin-prefix", KeySpec::One("f4".to_owned())),
+            ("refresh-result", KeySpec::One("f6".to_owned())),
+        ]))
+        .expect("valid configured keymap");
+
+        let snapshot = keymap.snapshot();
+        assert_eq!(snapshot.prefix.as_deref(), Some("F4"));
+        assert_eq!(
+            snapshot
+                .bindings
+                .iter()
+                .find(|binding| binding.action == Action::RunBuffer)
+                .map(|binding| binding.key.as_str()),
+            Some("F2")
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::RunBuffer),
+            Some(("F2".to_owned(), "Run"))
+        );
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::F(6), KeyModifiers::NONE)),
+            Some(Action::RefreshResult)
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::RefreshResult),
+            Some(("F6".to_owned(), "Refresh"))
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::OpenResultControls),
+            Some(("F4 g".to_owned(), "Grid controls"))
+        );
     }
 }

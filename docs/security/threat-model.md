@@ -11,11 +11,11 @@ route, a network call, or a way to write files.
 A local, single-user command-line program that connects to PostgreSQL servers the
 user chooses. There is no Ignatius server component or product account. The
 client connects to PostgreSQL and may execute a configured cloud provider tool
-that performs its own authentication network activity and caching. The local
-Feature 018 implementation awaiting W01 integration adds confirmed, opt-in
-OSC 52 through the terminal/SSH/multiplexer path; it is not yet a main capability.
-The [context diagram](../architecture/context.md) includes those integration
-boundaries; no query upload, telemetry or automatic update service is introduced.
+that performs its own authentication network activity and caching. Confirmed,
+opt-in OSC 52 can transfer one value through the terminal/SSH/multiplexer path.
+The current trust zones and data flows are in
+[the context diagram](../architecture/context.md); no query upload, telemetry
+or automatic update service is introduced.
 
 ## Assets
 
@@ -63,6 +63,15 @@ boundaries; no query upload, telemetry or automatic update service is introduced
 | A cloud provider's command line is built from a hostile host, user or database name | The command is an argument vector run directly with no shell; substitutions replace whole elements | None known. A provider whose own tool re-interprets an argument is that tool's problem |
 | A cloud tool's error text carries a credential or terminal escapes into a message | Its standard error is redacted through the one existing implementation before display | Redaction is pattern-based, as everywhere else |
 | A token reaches a log, the history, or a process listing | It exists only in `SecretString`, is never an environment variable and never an argument; the history's credential rule is unchanged | Same residual as any other secret in memory |
+| A prompted value closes a quote or adds a second SQL statement | The scanner recognises only executable `:name` spans and the binder sends each answer as one escaped PostgreSQL text literal; NUL is refused | Simple-query binding requires a short-lived expanded SQL copy in process memory |
+| A prompted value leaks through the TUI, plain prompt, history, debug output or log | Model, effect and runtime state use `SecretString` or redacted wrappers; prompts draw only a mask; history and logging retain the template descriptor only | A compromised terminal, debugger or process with equal privilege can inspect memory |
+| A generated cell update targets a different row or relation after the result changes | The analyzer keeps source-row and source-column identity, live metadata is resolved in the executing session, and review confirmation revalidates job, row, column, source SQL and connection posture | A database-side change between review and execution can still make the server reject or apply the statement according to the submitted primary-key predicate |
+| A client-invented UPDATE reaches production or a read-only session | Production classification and server read-only posture refuse before replacement input and again before the execution effect; there is no bypass in this workflow | Classification is user-supplied policy and cannot replace database permissions |
+| A replacement or key value becomes SQL syntax, history text or a second statement | Values remain in secret `ParameterBindings`; existing literal binding escapes them at the simple-query boundary, NUL and size limits refuse before send, and history keeps only the template | The review surface intentionally displays the bound statement to the operator who confirms it |
+| A user mistakes the retained result for a post-update read | The completion state says the UPDATE ran once, identifies the prior result as a snapshot, and never reruns the SELECT automatically | The operator can still act on stale external data after the write; a deliberate rerun is required |
+| A refresh replays edited, ambiguous or mutating input without the user's intent | The action uses only the retained source, requires exactly one read-classified statement, is available only after an explicit action, and refuses passive triggers, multi-statement input and non-read impact | Classification is advisory; a read-classified function can still have server-side side effects |
+| A refresh silently reuses a prior named-parameter value or retries after an unknown outcome | The existing masked prompt collects values again, history keeps only the template, and completion or connection-loss handling reports one outcome without retry | A value remains in process memory for the active execution attempt, as with other prompted parameters |
+| An automation route hangs for input or exposes a secret in process arguments | Non-interactive `query` refuses to prompt, accepts only `--param-env NAME=VARIABLE`, validates complete mappings before target resolution, and reads the value from the environment | Environment contents can still be observed by sufficiently privileged local processes |
 | Configuration names a program that this client then executes | Inside the user's trust boundary and stated as such: the file is theirs, owner-only on Unix, and anything able to write it can already run programs as them. Definitions are validated when configuration loads, not at the moment of connecting | **Real where the boundary is weaker.** On Windows the configuration file relies on the profile ACL, so a machine where that is loose gains a new way to be abused rather than a first one |
 
 ## Explicit non-goals

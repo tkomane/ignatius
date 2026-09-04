@@ -13,12 +13,6 @@ completion. New behaviour requires its own spec, plan and tasks before code.
 The coordinator records package progress and the next handoff in `docs/status.md`.
 Nothing below is already complete merely because it is planned.
 
-This plan is committed independently of the later local implementation. Before
-W01, main contains the earlier application baseline; the full Features 012-024
-chain, including its unmerged specifications and task evidence, must be retrieved
-from the originating feature worktree identified in the baseline. References to
-those modules and contracts describe the integration target, not main support.
-
 ## Scheduling and ownership
 
 | Package | Priority | Accountable role | Prerequisites | Exit enables |

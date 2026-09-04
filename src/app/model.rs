@@ -6,11 +6,16 @@
 //! like "cancellation requested but not yet confirmed" testable without a
 //! database, a terminal, or a clock.
 
+use crate::app::discovery::KeymapSnapshot;
 pub use crate::app::editor::Editor;
+use crate::app::grid::ResultGridState;
+use crate::app::plan::PlanView;
 use crate::connection::Environment;
 use crate::diagnostics::Diagnostic;
 use crate::postgres::SessionInfo;
+use crate::query::error_location::{ErrorLocation, StatementSource};
 use crate::query::result::{Execution, JobId, Notice};
+use secrecy::{ExposeSecret, SecretString};
 use std::time::Duration;
 
 /// Which pane has keyboard focus.
@@ -240,6 +245,60 @@ pub enum NamePurpose {
     ExportRows,
 }
 
+/// A shape for an interactive export of retained rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportFormat {
+    /// Comma-separated values.
+    #[default]
+    Csv,
+    /// Tab-separated values.
+    Tsv,
+    /// One JSON document containing the visible result set.
+    Json,
+    /// One JSON object per row.
+    Ndjson,
+    /// A Markdown pipe table.
+    Markdown,
+}
+
+impl ExportFormat {
+    /// The short name shown in a palette and path prompt.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Csv => "CSV",
+            Self::Tsv => "TSV",
+            Self::Json => "JSON",
+            Self::Ndjson => "NDJSON",
+            Self::Markdown => "Markdown",
+        }
+    }
+
+    /// The safe extension suggestion shown beside the format.
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Csv => ".csv",
+            Self::Tsv => ".tsv",
+            Self::Json => ".json",
+            Self::Ndjson => ".ndjson",
+            Self::Markdown => ".md",
+        }
+    }
+
+    /// What this shape is useful for.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Csv => "comma-separated values",
+            Self::Tsv => "tab-separated values",
+            Self::Json => "one JSON document",
+            Self::Ndjson => "one JSON object per row",
+            Self::Markdown => "a Markdown table",
+        }
+    }
+}
+
 /// A name being typed, for the two things in this client that need one.
 ///
 /// Visible, unlike the password prompt: there is nothing here worth hiding, and
@@ -254,6 +313,8 @@ pub struct NamePrompt {
     pub purpose: NamePurpose,
     /// A sentence about what will happen, shown under the field.
     pub note: String,
+    /// The selected shape when this is an export path prompt.
+    pub export_format: Option<ExportFormat>,
 }
 
 impl NamePrompt {
@@ -265,6 +326,7 @@ impl NamePrompt {
             subject: "Save the buffer as".to_owned(),
             purpose: NamePurpose::SaveQuery,
             note: "It is saved as an ordinary .sql file you can open in anything.".to_owned(),
+            export_format: None,
         }
     }
 
@@ -273,12 +335,13 @@ impl NamePrompt {
     /// The note is the honest part: this writes what is on screen, which is not
     /// the same as what the query returned when it was truncated or filtered.
     #[must_use]
-    pub fn for_export(note: impl Into<String>) -> Self {
+    pub fn for_export(format: ExportFormat, note: impl Into<String>) -> Self {
         Self {
             typed: String::new(),
-            subject: "Write the rows on screen to".to_owned(),
+            subject: format!("Write the retained rows as {} to", format.label()),
             purpose: NamePurpose::ExportRows,
             note: note.into(),
+            export_format: Some(format),
         }
     }
 }
@@ -349,6 +412,116 @@ impl PasswordPrompt {
     }
 }
 
+/// A masked, one-shot prompt for the distinct names in a SQL template.
+///
+/// The template and names are safe display data. Answers stay in
+/// [`SecretString`] until the final value is handed to the execution effect,
+/// and this type deliberately implements `Debug` by hand.
+#[derive(Clone)]
+pub struct ParameterPrompt {
+    /// The unchanged SQL template that will be recorded if it runs.
+    pub sql: String,
+    /// The original editor span when the user ran one statement.
+    pub source: Option<StatementSource>,
+    /// Distinct names in first-use order.
+    pub names: Vec<String>,
+    active: usize,
+    typed: SecretString,
+    accepted: Vec<SecretString>,
+}
+
+impl std::fmt::Debug for ParameterPrompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParameterPrompt")
+            .field("sql", &self.sql)
+            .field("source", &self.source)
+            .field("names", &self.names)
+            .field("active", &self.active)
+            .field("typed", &"<hidden>")
+            .field("accepted", &"<hidden>")
+            .finish()
+    }
+}
+
+impl ParameterPrompt {
+    /// Opens a prompt for a scanned template.
+    #[must_use]
+    pub fn new(sql: String, source: Option<StatementSource>, names: Vec<String>) -> Self {
+        let accepted = names
+            .iter()
+            .map(|_| SecretString::from(String::new()))
+            .collect();
+        Self {
+            sql,
+            source,
+            names,
+            active: 0,
+            typed: SecretString::from(String::new()),
+            accepted,
+        }
+    }
+
+    /// The zero-based active name index.
+    #[must_use]
+    pub const fn active_index(&self) -> usize {
+        self.active
+    }
+
+    /// The number of distinct names in this prompt.
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.names.len()
+    }
+
+    /// The active name without its leading colon.
+    #[must_use]
+    pub fn active_name(&self) -> Option<&str> {
+        self.names.get(self.active).map(String::as_str)
+    }
+
+    /// Adds one character to the masked current answer.
+    pub fn push(&mut self, character: char) {
+        let mut typed = self.typed.expose_secret().to_owned();
+        typed.push(character);
+        self.typed = SecretString::from(typed);
+    }
+
+    /// Removes one Unicode scalar value from the current answer.
+    pub fn backspace(&mut self) {
+        let mut typed = self.typed.expose_secret().to_owned();
+        typed.pop();
+        self.typed = SecretString::from(typed);
+    }
+
+    /// How many characters the mask should draw.
+    #[must_use]
+    pub fn typed_length(&self) -> usize {
+        self.typed.expose_secret().chars().count()
+    }
+
+    /// Accepts the current answer, returning final bindings on the last name.
+    pub fn accept(
+        &mut self,
+    ) -> Result<Option<crate::query::ParameterBindings>, crate::query::ParameterError> {
+        if self.active >= self.names.len() || self.accepted.len() != self.names.len() {
+            return Err(crate::query::ParameterError::InvalidTemplate);
+        }
+        self.accepted[self.active] =
+            std::mem::replace(&mut self.typed, SecretString::from(String::new()));
+        if self.active + 1 < self.names.len() {
+            self.active += 1;
+            return Ok(None);
+        }
+
+        let bindings = crate::query::ParameterBindings::from_secrets(
+            self.names.clone(),
+            self.accepted.clone(),
+        )?;
+        bindings.validate()?;
+        Ok(Some(bindings))
+    }
+}
+
 /// A run that is waiting for the user to confirm it.
 ///
 /// There is no session-wide unlock. A mode that quietly stays on is a mode
@@ -363,6 +536,8 @@ pub struct PendingRun {
     pub typed: String,
     /// The word that must be typed, which is the database's own name.
     pub required: String,
+    /// Original editor span when this is a Run Statement action.
+    pub source: Option<StatementSource>,
 }
 
 impl PendingRun {
@@ -373,21 +548,271 @@ impl PendingRun {
     }
 }
 
+/// An EXPLAIN ANALYZE request waiting for one explicit confirmation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPlan {
+    /// The statement that will be wrapped in EXPLAIN ANALYZE.
+    pub sql: String,
+    /// Advisory impact classification of the target statement.
+    pub impact: crate::query::Impact,
+    /// What the user has typed when a database-name confirmation is required.
+    pub typed: String,
+    /// The database name required for a destructive confirmation.
+    pub required: String,
+}
+
+impl PendingPlan {
+    /// Whether this one-shot confirmation is satisfied.
+    #[must_use]
+    pub fn is_satisfied(&self) -> bool {
+        !self.impact.needs_typed_confirmation() || self.typed == self.required
+    }
+}
+
+/// A value-free identity held while a clipboard copy awaits confirmation.
+///
+/// The raw value remains in the retained result. Keeping only its identity and
+/// counts makes the prompt safe to debug and lets confirmation reject a result
+/// or selection that changed underneath it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingCopy {
+    /// The retained execution this candidate came from.
+    pub result_job: JobId,
+    /// Source-row index before local filtering or sorting.
+    pub source_row: usize,
+    /// Source-column index in the retained result.
+    pub column: usize,
+    /// Raw UTF-8 byte count at candidate creation.
+    pub bytes: usize,
+    /// Unicode scalar-value count at candidate creation.
+    pub characters: usize,
+}
+
+/// A value-free identity for a selected result cell while update metadata is read.
+///
+/// The source SQL is retained only so a late result or changed query can be
+/// rejected. Its debug representation is hidden because the editor can contain
+/// arbitrary user text, including values that should not reach a log.
+#[derive(Clone, PartialEq, Eq)]
+pub struct UpdateCandidate {
+    /// The retained execution this cell came from.
+    pub result_job: JobId,
+    /// Source-row index before local filtering and sorting.
+    pub source_row: usize,
+    /// Result-column index selected by the user.
+    pub result_column: usize,
+    /// The exact SQL source of the retained result.
+    pub source_sql: String,
+}
+
+impl std::fmt::Debug for UpdateCandidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateCandidate")
+            .field("result_job", &self.result_job)
+            .field("source_row", &self.source_row)
+            .field("result_column", &self.result_column)
+            .field("source_sql", &"<hidden>")
+            .finish()
+    }
+}
+
+/// A source mapping waiting for live relation metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateLookup {
+    /// Monotonic request identity.
+    pub request: u64,
+    /// Result identity to revalidate when the response returns.
+    pub candidate: UpdateCandidate,
+    /// The value-free source mapping produced by the SQL analyzer.
+    pub source: crate::query::UpdateSource,
+}
+
+/// A replacement value prompt for one update candidate.
+#[derive(Clone)]
+pub struct UpdatePrompt {
+    /// Result identity to revalidate before the review step.
+    pub candidate: UpdateCandidate,
+    /// The value-free source mapping.
+    pub source: crate::query::UpdateSource,
+    /// The live relation facts used by the planner.
+    pub relation: crate::postgres::metadata::UpdateRelation,
+    typed: SecretString,
+}
+
+impl std::fmt::Debug for UpdatePrompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdatePrompt")
+            .field("candidate", &self.candidate)
+            .field("source", &self.source)
+            .field("relation", &self.relation)
+            .field("typed", &"<hidden>")
+            .finish()
+    }
+}
+
+impl UpdatePrompt {
+    /// Opens an empty replacement prompt.
+    #[must_use]
+    pub fn new(
+        candidate: UpdateCandidate,
+        source: crate::query::UpdateSource,
+        relation: crate::postgres::metadata::UpdateRelation,
+    ) -> Self {
+        Self {
+            candidate,
+            source,
+            relation,
+            typed: SecretString::from(String::new()),
+        }
+    }
+
+    /// Adds one Unicode scalar value to the replacement.
+    pub fn push(&mut self, character: char) {
+        let mut typed = self.typed.expose_secret().to_owned();
+        typed.push(character);
+        self.typed = SecretString::from(typed);
+    }
+
+    /// Removes one Unicode scalar value from the replacement.
+    pub fn backspace(&mut self) {
+        let mut typed = self.typed.expose_secret().to_owned();
+        typed.pop();
+        self.typed = SecretString::from(typed);
+    }
+
+    /// Number of characters typed, including zero for an intentional empty value.
+    #[must_use]
+    pub fn typed_length(&self) -> usize {
+        self.typed.expose_secret().chars().count()
+    }
+
+    /// The replacement for the planner and the value-visible prompt.
+    #[must_use]
+    pub fn replacement(&self) -> &str {
+        self.typed.expose_secret()
+    }
+}
+
+/// A generated update waiting for one final review confirmation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingUpdate {
+    /// Result identity to revalidate before sending.
+    pub candidate: UpdateCandidate,
+    /// Live relation facts used to produce the plan.
+    pub relation: crate::postgres::metadata::UpdateRelation,
+    /// Parameterized statement and secret values.
+    pub plan: crate::query::UpdatePlan,
+}
+
+/// A value-free outcome or refusal shown by the result surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardNotice {
+    /// The action was invoked outside a copyable Results cell.
+    Unavailable,
+    /// The operator has not opted into terminal transport.
+    Disabled,
+    /// The selected cell is SQL NULL.
+    Null,
+    /// The selected text exceeded the client-side bound.
+    TooLarge { bytes: usize },
+    /// The retained result or selection changed while confirmation was open.
+    Stale,
+    /// The terminal write completed, but acceptance remains unknowable.
+    Sent { bytes: usize, characters: usize },
+}
+
+impl ClipboardNotice {
+    /// Plain-language status for the result surface.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::Unavailable => "Focus Results on a retained text cell to copy a value.".into(),
+            Self::Disabled => {
+                "Copy is off; set `[clipboard] osc52 = true` if this terminal path may carry the value."
+                    .into()
+            }
+            Self::Null => "SQL NULL has no text value to copy; nothing was sent.".into(),
+            Self::TooLarge { bytes } => format!(
+                "Value is {bytes} bytes, over the 1 MiB copy limit; nothing was sent. Use explicit export."
+            ),
+            Self::Stale => {
+                "The selected result changed before confirmation; nothing was sent. Select the current cell and try again."
+                    .into()
+            }
+            Self::Sent { bytes, characters } => format!(
+                "Sent {bytes} bytes ({characters} characters) through the terminal; clipboard acceptance is unconfirmed."
+            ),
+        }
+    }
+}
+
+/// A value-free outcome from formatting the local SQL buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatNotice {
+    /// The buffer changed as one undoable edit.
+    Applied {
+        before_lines: usize,
+        after_lines: usize,
+    },
+    /// Formatting produced the same text.
+    AlreadyFormatted,
+    /// There was no SQL to format.
+    Empty,
+    /// Formatting refused to guess about the input.
+    Refused { message: String },
+}
+
+impl FormatNotice {
+    /// Plain-language status for the editor footer.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::Applied {
+                before_lines,
+                after_lines,
+            } => format!(
+                "Formatted SQL: {before_lines} lines to {after_lines}. Undo reverses the whole change."
+            ),
+            Self::AlreadyFormatted => "SQL is already formatted.".to_owned(),
+            Self::Empty => "There is no SQL to format.".to_owned(),
+            Self::Refused { message } => message.clone(),
+        }
+    }
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
     /// Which pane has focus.
     pub focus: Focus,
+    /// The active key labels used when discovery surfaces describe actions.
+    ///
+    /// This is a configuration snapshot supplied by the interactive runtime,
+    /// not a second source of key resolution and not persisted onboarding state.
+    pub keymap_snapshot: KeymapSnapshot,
     /// The SQL buffer.
     pub editor: Editor,
+    /// Schema-aware completion state and its catalogue snapshot.
+    pub completion: crate::app::completion::CompletionState,
     /// Connection state.
     pub connection: ConnectionState,
+    /// Safe, ephemeral summaries available to the connection picker.
+    ///
+    /// Resolved targets and credentials never enter the model. The runtime
+    /// keeps those outside this state object and receives only a profile name
+    /// when a row is chosen.
+    pub connection_profiles: Vec<crate::app::connection_picker::ConnectionProfileSummary>,
     /// Where the object tree reads from.
     pub metadata_link: MetadataLink,
     /// What the query engine is doing.
     pub phase: QueryPhase,
     /// The most recent completed execution.
     pub last_execution: Option<Execution>,
+    /// The SQL template that produced the retained execution.
+    ///
+    /// It is kept separately because `Execution` intentionally contains only
+    /// server results, and it is the source the update analyzer must revalidate.
+    pub last_sql: Option<String>,
     /// Server messages from the most recent execution.
     pub notices: Vec<Notice>,
     /// The error being shown, if any.
@@ -396,14 +821,24 @@ pub struct Model {
     pub help_open: bool,
     /// Whether the technical section of the error is expanded.
     pub error_expanded: bool,
+    /// Validated location in the current editor buffer, when one exists.
+    pub error_location: Option<ErrorLocation>,
+    /// Truthful explanation when a server position cannot be applied.
+    pub error_location_note: Option<String>,
     /// Selected row in the result grid.
     pub selected_row: usize,
     /// Selected column in the result grid.
     pub selected_column: usize,
+    /// View-only state for the current retained result. Source rows and values
+    /// remain owned by `last_execution`; selection stays here because it is a
+    /// navigation concern shared by the grid, inspector, and expanded view.
+    pub result_grid: ResultGridState,
     /// Set when the application should exit.
     pub should_quit: bool,
     /// Counter used to hand out job identities.
     pub next_job: u64,
+    /// Counter used to reject late update-metadata responses.
+    pub next_update_request: u64,
     /// Last known terminal size.
     pub size: (u16, u16),
     /// How long the last execution took, kept for the status bar.
@@ -420,6 +855,30 @@ pub struct Model {
     pub prefix_pending: bool,
     /// A run held back until the user confirms it.
     pub pending_run: Option<PendingRun>,
+    /// Named parameter values being collected for one pending run.
+    pub parameter_prompt: Option<ParameterPrompt>,
+    /// An analyzed plan held back until the user confirms execution.
+    pub pending_plan: Option<PendingPlan>,
+    /// Whether explicitly confirmed result values may use OSC 52.
+    pub clipboard_osc52: bool,
+    /// A result-cell copy held back until the user confirms it.
+    pub pending_copy: Option<PendingCopy>,
+    /// A result-cell update waiting for live relation metadata.
+    pub update_lookup: Option<UpdateLookup>,
+    /// A replacement value being typed for a result-cell update.
+    pub update_prompt: Option<UpdatePrompt>,
+    /// A generated update waiting for its final review confirmation.
+    pub pending_update: Option<PendingUpdate>,
+    /// The last safe status or refusal for the result-cell update workflow.
+    pub cell_update_notice: Option<String>,
+    /// The last explicit retained-result refresh status or refusal.
+    pub refresh_notice: Option<String>,
+    /// The last value-free copy outcome shown in Results.
+    pub clipboard_notice: Option<ClipboardNotice>,
+    /// The last value-free formatting outcome shown in the editor footer.
+    pub format_notice: Option<FormatNotice>,
+    /// The in-memory plan view over the Results pane.
+    pub plan: PlanView,
     /// The transaction state the server last reported.
     pub transaction: crate::query::result::TransactionState,
     /// Animation frame, advanced by each tick.
@@ -454,6 +913,18 @@ pub struct Model {
     /// The SQL of the statement in flight, kept so it can be recorded when it
     /// finishes with an outcome worth recording.
     pub running_sql: Option<String>,
+    /// Whether the statement in flight used prompted named parameters.
+    pub running_parameterized: bool,
+    /// Whether the statement in flight is the one-shot generated cell update.
+    pub running_cell_update: bool,
+    /// Whether the statement in flight is an explicit retained-result refresh.
+    pub running_refresh: bool,
+    /// Whether a named-parameter prompt belongs to an explicit refresh.
+    pub refresh_pending: bool,
+    /// Editor text revision captured when the current execution started.
+    pub running_editor_revision: Option<u64>,
+    /// Original source span for a Run Statement execution.
+    pub running_source: Option<StatementSource>,
     /// A password being typed because the server asked for one.
     pub password_prompt: Option<PasswordPrompt>,
     /// A name being typed, when a query is being saved.
@@ -511,6 +982,12 @@ impl Model {
         JobId(self.next_job)
     }
 
+    /// Hands out the next update-metadata request identity.
+    pub fn allocate_update_request(&mut self) -> u64 {
+        self.next_update_request += 1;
+        self.next_update_request
+    }
+
     /// The environment classification of the current connection.
     #[must_use]
     pub fn environment(&self) -> Environment {
@@ -555,10 +1032,21 @@ impl Model {
             .collect()
     }
 
-    /// The row of the result the selection points at, after filtering.
+    /// The source row of the result the selection points at after filtering and
+    /// local grid sorting.
     #[must_use]
     pub fn selected_source_row(&self) -> Option<usize> {
-        self.filtered_rows().get(self.selected_row).copied()
+        self.displayed_rows().get(self.selected_row).copied()
+    }
+
+    /// Which retained source rows are displayed, after filtering and local grid
+    /// sorting. The result itself is never reordered.
+    #[must_use]
+    pub fn displayed_rows(&self) -> Vec<usize> {
+        let filtered = self.filtered_rows();
+        self.visible_result().map_or(filtered.clone(), |set| {
+            self.result_grid.sort_rows(&filtered, set)
+        })
     }
 
     /// What the result pane says about how much is being shown.

@@ -31,9 +31,8 @@ fix is warranted, you will be credited unless you prefer otherwise.
   platform enforces them, and contains no secret values.
 - Ignatius has no telemetry, update check or query-upload service. A selected
   cloud credential provider runs its own authentication tool, which may contact
-  the cloud. The local Feature 018 implementation awaiting integration adds
-  confirmed, opt-in OSC 52 through the terminal, SSH or multiplexer path; main
-  does not yet offer it. Those boundaries are documented in
+  the cloud. Confirmed, opt-in OSC 52 can send one value through the terminal,
+  SSH or multiplexer path. Those boundaries are documented in
   [the runtime context](docs/architecture/context.md).
 
 ## What it cannot protect

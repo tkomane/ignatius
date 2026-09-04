@@ -4,64 +4,81 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Planning integration - 2026-09-04
+## Agent planning handoff - 2026-09-04
 
-The owner requested that the completed planning work be integrated into main.
-This change contains the [roadmap](product/roadmap.md),
-[dated assessment](product/planning-baseline.md),
-[product acceptance](product/acceptance.md),
-[16-package delivery plan](product/agent-delivery-plan.md),
-[agent playbook](operations/agent-playbook.md), architecture guidance and
-related documentation corrections. Six milestones, six outcomes and eight
-journeys define the delivery and acceptance sequence.
+The [roadmap](product/roadmap.md) now defines the path from the local feature
+chain through integrated correctness, daily-use acceptance, verified release
+and maintenance. Its [delivery plan](product/agent-delivery-plan.md) contains
+16 bounded work packages with role ownership, dependencies, write boundaries
+and exit evidence. Start with **W01 integration reconciliation**, retaining
+Feature 024's completed local implementation and verification below.
 
-**Source boundary:** the planning assessment inspected local branch
-`codex/013-errors-at-cursor`, HEAD `3168e7c`, plus the uncommitted feature chain
-through 024. Those application changes and their task packages remain in the
-originating worktree. This isolated documentation integration starts at main
-`52872acd7c0e0e38c6b810723ccda5eee99a28bf` and changes no application, test,
-workflow, dependency or feature-checkbox content. Main's compatibility entries
-continue to describe its existing application; the newer architecture contracts
-are labelled as the local integration target. W01 must retrieve and integrate
-that source and evidence together, preserving any later work already underway.
+Read the [dated baseline](product/planning-baseline.md) for all 26 feature
+directories, [product acceptance](product/acceptance.md) for six outcomes and
+eight reference journeys, and the [agent playbook](operations/agent-playbook.md)
+for assignment and handoff. The architecture documents now include provider,
+clipboard, persistence and session-identity boundaries. Rejected credential-
+store/libpq work is not in the active backlog. No application behaviour or
+feature checkbox was changed by this planning work.
 
-The originating planning pass recorded 15 passing documentation contracts;
-that result covered its local feature worktree, not this earlier main build.
-Fresh isolated verification: all six existing documentation/build contracts
-passed with `cargo test --locked --offline --test documentation_matches_the_build`.
-The planning audit passed for 23 Markdown files and 79 local links, all 26
-inspected feature slugs, W01-W16, O1-O6 and J1-J8. Existing feature task
-checkboxes are unchanged; AGENTS and CLAUDE match and `git diff --check` passes.
-The 16-package prerequisite graph is acyclic. On macOS 26.6.2 arm64,
-`COMPOSE_PROJECT_NAME=ignatius-planning-main-20260904 cargo --locked --offline xtask verify`
-passed formatting, lints, API documentation, workspace tests and documentation
-tests, including 522 library tests, 39 CLI contracts and 38 live PostgreSQL
-contracts against synthetic PostgreSQL 18.4 plain/TLS fixtures. The real
-Unix-socket gate skipped because its URI was not configured. An initial run
-failed when the shared fixture stopped; the final run used a separate Compose
-project owned by this integration and passed. Hosted CI for the new commit
-must be read back after the authorized main push.
-No new hand-terminal, screen-reader, cloud-provider or release-readiness evidence
-is claimed. Mermaid diagrams are reviewed as source, not graphically rendered.
+GitHub readback on 2026-09-04 confirmed private `tkomane/ignatius`, remote main
+`52872acd7c0e0e38c6b810723ccda5eee99a28bf` and unprotected main. Its
+[CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318)
+passed the executed OS, PostgreSQL 14-18 plain/TLS, PostgreSQL 18 socket,
+MSRV, workflow, security and generated-output gates. The scheduled fixture-drift
+job skipped. This source-bound hosted evidence does not cover local HEAD
+`3168e7c` or later uncommitted features. Planning verification is separate from
+the application runs below.
+The private-vulnerability-reporting API returned HTTP 404, so that route's
+availability or access remains unverified in W13; it is not labelled disabled.
 
-GitHub readback on 2026-09-04 confirmed private `tkomane/ignatius`, unprotected
-main and [successful CI at 52872ac](https://github.com/tkomane/ignatius/actions/runs/33720098318).
-Its executed OS suites, PostgreSQL 14-18 plain/TLS, PostgreSQL 18 socket, MSRV,
-workflow, dependency/security and generated-output gates passed. The scheduled
-fixture-drift job skipped. The private-vulnerability-reporting API returned
-HTTP 404; access or availability remains unverified, rather than proven disabled.
+**Planning verification:** all 15 existing
+`cargo test --locked --test documentation_matches_the_build` contracts passed.
+The roadmap's named Feature 024 entry was restored after that contract caught
+its omission. A concurrent terminal-key documentation update was allowed to
+settle and the final contract run passed against the updated files. Local link,
+feature-inventory, package/outcome/journey coverage, prose and whitespace checks
+passed across 25 documents and 87 local links. The 16-package dependency graph
+is acyclic; all 26 feature directories, six outcomes and eight journeys are
+covered. All five Mermaid blocks were reviewed as source; graphical rendering
+was not performed. No fresh application full-suite, database, cloud-provider
+or hand-terminal result is claimed by this documentation-only planning task.
+The existing application results below retain their original scope.
 
-The planning deliverables are complete. W01-W16 remain implementation and
-acceptance work; putting this plan on main does not complete W01 or authorize
-a tag, signing operation or release.
+| Planning deliverable | Verified repository evidence |
+| --- | --- |
+| Analyse product objectives and users | `product/planning-baseline.md` and six measurable outcomes in `product/acceptance.md`, grounded in the vision, personas and experience brief |
+| Architect subsequent agent work | Updated context, component and runtime documents, with trust/data flows, identity contracts and extension rules |
+| Build a thorough execution roadmap | Six milestones, all 26 feature directories, 16 scoped packages, dependencies, role ownership, risks, decisions, release and maintenance gates |
+| Make agent assignments repeatable | `operations/agent-playbook.md`, synchronized AGENTS/CLAUDE entry points and an assignment/return template |
+| Preserve evidence and work ownership | Existing feature implementation retained, current hosted baseline re-read, rejected work excluded, no feature checkbox or application source changed by the planning task |
+
+The planning handoff is complete. Product implementation acceptance and release
+readiness remain the work described in W01-W16. No commit, push, tag, signing,
+release or publication operation was performed by this planning task.
 
 ## Where the work is
 
-**Current continuation:** W01 integration reconciliation. The latest application
-slice on this main baseline is Feature 017 connection trust, pushed as
-`9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. The newer local
-feature chain is described in the planning baseline above; do not reimplement
-it or treat its uncommitted code as already merged. Feature 008 release evidence
+**Current continuation**: Feature 024 explicit retained-result refresh is
+complete in the local working tree on `codex/013-errors-at-cursor`; the first
+W02 identity-transition hardening slice is also implemented locally and
+remains under integration review. The branch is
+intentionally not pushed or published. With Results focused, portable `F6`, the
+command palette and the contextual footer request one deliberate refresh from
+the retained source; terminals with enhanced modifier reporting also accept
+`Ctrl+Shift+R`. Only one read-classified statement is eligible; the editor stays
+unchanged, named parameters are prompted again, outcomes are visible, and
+focus, filtering, sorting, reconnect or failure never replays the query.
+Focused, live and locked-verifier evidence is recorded below; manual terminal
+and screen-reader checks and the semantic Unix-socket gate remain separate
+evidence boundaries. Feature 023 reviewable cell-to-UPDATE remains implemented
+locally below, as do Feature 022 prompted named parameters.
+Feature 020 connection picking and Feature 019 formatting remain implemented
+locally below. Feature 012 schema-aware completion is in ancestor commit `3168e7c`;
+Feature 017
+connection trust remains implemented and pushed to `main` as
+`9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. No tag, signing,
+release or publication operation was performed. Feature 008 release evidence
 remains the separate release-readiness boundary. Its documentation was first pushed at
 `b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
 evidence is bound to source revision
@@ -98,7 +115,7 @@ materialisation and the remaining supply-chain evidence. T035 remains open
 because the accepted release criteria are not all evidenced; the roadmap stays
 in planning. No tag, signing, release or publication operation was performed.
 
-The merged CI hardening preserves that hosted aggregate as historical
+The merged CI-hardening work preserves that hosted aggregate as historical
 evidence while adding exhaustive local verification, Rust 1.90 and PostgreSQL
 14-18 coverage, a real Linux Unix-socket job, immutable action and
 workflow-security contracts, bounded jobs, semantic workflow linting, and
@@ -107,20 +124,20 @@ source and runs the same security and verifier gates before retaining target
 evidence; the aggregate job rechecks transport, scope, target, product, source
 and build identity before retaining its six-file package.
 
-Those changes have passed locally in an isolated integration worktree, including
+Those changes first passed locally in an isolated integration worktree, including
 Actionlint and YAML parsing, 80 release contracts, 7 workflow contracts,
 Cargo-deny 0.20.2, digest-pinned Gitleaks history scanning and Rust 1.90. The
 full verifier passed PostgreSQL 18.4 plain and TLS; the Unix-socket check was
-explicitly skipped because its URI was not configured. Subsequent main
-CI run `33720098318` passed PostgreSQL 14-18, the socket job, Rust 1.90 and
-workflow linting at `52872ac`, as rechecked on 2026-09-04. That source-CI run
-does not itself establish the separate release preflight or candidate evidence.
+explicitly skipped because its URI was not configured. The later main CI
+readback above now proves PostgreSQL 15/17, the socket job, Rust 1.90 and
+workflow linting at that source. It does not prove the separate hardened
+release preflight or a new release candidate's runtime evidence.
 An explicit macOS Docker socket attempt is not counted as a pass: the bind
 mount rejected PostgreSQL's socket-permission change before startup. The
 socket job deliberately targets Ubuntu, where the runner filesystem supports
 the required Unix-domain socket boundary.
 
-**Current implemented product feature**: cloud identity authentication and its
+**Earlier implemented product feature**: cloud identity authentication and its
 read-only connection trust surface, implemented and pushed in
 `9f80bef3040ba80d017dae3d5d0ae120a4cfc264`. The
 owner asked for Entra ID first and for a first-class experience on other clouds,
@@ -157,6 +174,74 @@ provider rather than letting one word cover both.
 
 Also: `query --format json` no longer writes `[]` for a run that failed, which
 to a stdout-only reader was indistinguishable from a query that matched nothing.
+
+**Feature 012 implementation**: the TUI and plain mode now consume one shared,
+lexer-backed completion engine and one PostgreSQL catalogue snapshot with bounded
+visible candidate lists.
+The editor offers keywords, schema objects, relations, functions, columns,
+aliases and CTEs at the cursor; acceptance quotes identifiers and is one undo
+step, while dismissal leaves the buffer and cursor unchanged. Loading, stale,
+unavailable, unreadable and bounded states are written in the UI, automatic
+popups can be disabled without removing explicit `Ctrl+Space`, and plain mode
+uses `\complete` plus `\use` without executing a partial buffer. The focused
+completion run, locked verifier, and live catalogue test pass against disposable
+PostgreSQL 18.4. The Unix-socket gate is explicitly skipped because its URI is
+not configured; cross-platform terminal evidence remains pending.
+
+**Feature 013 implementation**: query failures now retain the server's
+statement ordinal and structured schema, table, column, and constraint fields.
+For a valid position in the unchanged buffer, the TUI moves the caret to the
+server's answer, marks the line with `!`, emphasizes the smallest known token,
+and keeps the error explanation visible. A changed buffer, missing position, or
+unmappable position is labelled instead of guessed. Plain mode renders the same
+statement, line, column, source excerpt, and caret without terminal control
+sequences; failed JSON queries keep stdout empty and place the structured
+diagnostic on stderr. The live PostgreSQL suite covers syntax, unique,
+foreign-key, not-null, and check failures. Focused and full evidence is recorded
+below; cross-platform terminal, screen-reader, and Unix-socket evidence remain
+separate gaps.
+
+**Feature 014 implementation**: the interactive grid is now a local, reversible
+view over retained result rows. Sort cycles through ascending, descending, and
+original server order without an execution effect and preserves the selected
+source row. A searchable `Ctrl+K g` palette controls source-column visibility,
+bounded widths, optional server type labels, and a frozen first visible column;
+duplicate labels remain distinct by source position, the last visible column is
+protected, and reset or a new execution clears result-specific shape. The
+existing filter, inspector, expanded row, editor, history, plain, JSON, and
+streaming-export contracts remain separate.
+
+**Feature 015 implementation**: guided discovery is now derived from the current
+model and the active configured keymap. The first frame names the connection
+state and a valid next action; empty and blocked editor, result and object states
+explain their boundary; and the footer presents no more than five contextual
+action/key pairs. The general command palette identifies itself, searches by
+intent, groups useful actions, and keeps prerequisites beside unavailable chord
+entries. Opening, searching, rendering and dismissing these surfaces are
+presentation-only and do not execute SQL, reload metadata, write files, record
+history, transfer clipboard data, or persist onboarding state.
+
+**Feature 018 implementation**: copying a retained text cell is now an explicit,
+opt-in terminal action. `Ctrl+K c`, the inspector and the command palette stage
+only the result job, source row, source column and UTF-8 counts; confirmation
+revalidates that identity before creating the redacted payload. The interactive
+runtime writes one base64-framed OSC 52 sequence and flushes it. Disabled,
+NULL, empty, oversized, stale, unsupported and failed paths remain value-free,
+and success reports bytes and characters while leaving terminal acceptance
+unconfirmed. The terminal, SSH path, or multiplexer may observe or retain the
+value; the client never reads or clears the destination. Plain, JSON, NDJSON,
+history, export and SQL editing remain outside the transport boundary.
+
+**Feature 019 implementation**: the editor and plain mode now share one bounded,
+deterministic SQL formatter. `Ctrl+Shift+F`, `Ctrl+K q`, the command palette,
+and plain `\format` format the complete local buffer without contacting
+PostgreSQL or creating any effect. Major clauses, boolean predicates and
+eligible lists receive readable layout; strings, quoted identifiers,
+dollar-quoted bodies and comments remain byte-for-byte exact. A changed buffer
+is one undoable edit with logical cursor recovery, while empty, comment-only,
+malformed and over-limit input remains untouched with value-free next-action
+wording. Plain mode keeps the formatted statement pending, writes its sanitized
+preview to stderr, and leaves result stdout unchanged.
 
 **Previous**: the four open decisions are closed, and the product has a
 direction rather than a finished roadmap. The owner named the real requirement
@@ -324,7 +409,615 @@ catalogue over an existing session.
 availability check is recorded in `docs/product/landscape.md`. A trademark search
 and a domain remain outstanding before publishing; neither blocks development.
 
-## Last green verification
+## Feature 024 verification - 2026-09-04
+
+Feature 024 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. The interactive client exposes an explicit
+portable `F6` action, an enhanced-terminal `Ctrl+Shift+R` alias, a command-
+palette entry and a contextual Results hint. Refresh reads only the retained
+`last_sql` source, requires exactly one
+read-classified statement and a usable non-failed session, leaves the editor
+unchanged, and refuses multi-statement, write, plan, missing-result and
+unavailable states without an execution effect. Named parameters are prompted
+again without retaining entered values. The old snapshot stays visible while
+the refresh runs, and success, cancellation, failure and unknown connection
+outcomes are distinct. Passive result actions never trigger a refresh.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked --lib refresh` | 14 passed |
+| `cargo test --locked --lib app::discovery::tests::retained_result_refresh` | 1 passed |
+| `cargo test --locked --lib a_retained_result_refresh` | 1 passed |
+| `cargo test --locked --lib a_refused_retained_result_refresh` | 1 passed |
+| focused keymap reachability, configured-key and printable-input tests | 3 passed |
+| `cargo test --locked --test cli_contract retained_result_refresh_stays_out_of_noninteractive_machine_output` | 1 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 15 passed |
+| `git diff --check` | Pass |
+
+The focused evidence proves retained-source execution rather than editor-buffer
+execution, editor text and revision preservation, named-parameter re-prompting
+including empty input, source classification and multi-statement refusal,
+zero-row eligibility, failed-transaction and connection refusal, visible
+in-flight and outcome wording, cancellation without retry, connection loss with
+the old snapshot preserved, ordinary history behaviour, no passive replay,
+configured-key discoverability, printable `r` preservation, ASCII output and a
+narrow refusal layout. The non-interactive contract confirms that refresh state
+and a synthetic parameter value remain outside machine output.
+
+The final authoritative `cargo --locked xtask verify` exited successfully in a
+host context that could inspect the disposable services. Formatting, lints, API
+documentation, workspace tests and documentation tests all passed. The
+workspace test gate ran 990 cases: 753 library tests, 3 archive-helper tests,
+51 CLI-contract tests, 4 cloud-identity tests, 15 documentation matches, 3
+editor-contract tests, 2 keymap-contract tests, 1 native-boundary test, 3
+password-prompt tests, 49 PostgreSQL integration tests, 1 Unix-socket harness
+test, 80 release-contract tests, 7 release-note tests, 2 release-runtime tests,
+1 release-schema test, 3 terminal-restoration tests, 7 workflow-contract tests
+and 5 xtask tests. Documentation tests ran 0 tests and passed. Plain and TLS
+database-backed gates passed against disposable PostgreSQL 18.4 using
+synthetic credentials from `docker/dev.env`.
+
+The semantic Unix-socket integration gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` was not set; the harness returning without that
+URI is not live socket evidence. Manual confirmation in Warp, Windows Terminal,
+Linux terminals, SSH and multiplexers, screen-reader use, reduced-motion and
+live-resize checks remain unverified. The run used Homebrew Rust/Cargo 1.98.0
+and PostgreSQL 18.4; broader PostgreSQL matrix, hosted toolchain and
+cross-platform evidence remain separate. Release readiness, signing,
+provenance, publication and owner authorization remain separate and are not
+implied by this green local verifier. The disposable services were torn down
+with `cargo xtask db down`, and `cargo xtask db status` reported `Not running.`
+No tag, signing, release, push or publication operation was performed.
+
+## W02 identity-transition hardening slice - 2026-09-04
+
+The reducer now treats a connection-loss message as the boundary for every
+server-bound prompt and running identity. It discards production confirmations,
+analyzed-plan confirmations, named-parameter prompts, update metadata/value/review
+state and late execution markers before the runtime's stale completion arrives.
+It sets transaction state to `Unknown`, preserves the prior retained result, and
+keeps a pending copy available because copying that already-retained snapshot is
+local and does not contact the server. Refresh remains bound to its retained
+source when the editor changes during the request.
+
+The focused W02 checks passed: refresh-source/editor interleaving, connection
+loss across parameter, refresh-parameter, production, plan and cell-update
+prompts, local copy after connection loss, and late execution identity cleanup.
+The refreshed `cargo --locked xtask verify` exited successfully after this
+reducer change: 753 library tests and 990 workspace tests passed, along with
+formatting, lints, API documentation, documentation tests and the plain/TLS
+PostgreSQL gates. The Unix-socket semantic gate remained skipped because
+`IGNATIUS_TEST_PG_SOCKET_URI` was not set. Runtime connection-generation
+interleavings beyond this reducer slice, the broader PostgreSQL matrix, native
+terminal evidence and hand acceptance remain open under W02 and later
+packages.
+
+## Feature 023 verification - 2026-09-04
+
+Feature 023 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. The interactive client now turns one selected
+cell from a retained direct single-table `SELECT` into a conservative,
+reviewable `UPDATE`. It resolves bare relations through the active session
+search path, reads live relation kind, read and update privileges and ordered
+primary-key metadata, then keeps the replacement and key values in secret
+parameter bindings. Production and server read-only sessions refuse before
+replacement input. The exact bound statement is shown in a separate review;
+only its Enter emits one parameterized execution, and the prior result remains
+a snapshot rather than being rerun.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo test --locked --lib query::update` | 9 passed |
+| `cargo test --locked --lib app::update::tests::cell_update` | 3 passed |
+| stale metadata identity reducer test | 1 passed |
+| generated-update snapshot and no-rerun reducer test | 1 passed |
+| `cargo test --locked --lib app::discovery::tests::cell_update_is_discoverable_only_for_a_retained_read_write_result_source` | 1 passed |
+| `cargo test --locked --lib ui::layout::tests::cell_update` | 2 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 14 passed |
+| focused live table-update PostgreSQL check | 1 passed against disposable PostgreSQL 18.4 |
+| focused live view-kind refusal PostgreSQL check | 1 passed against disposable PostgreSQL 18.4 |
+| `git diff --check` | Pass |
+
+The focused evidence proves direct projection and alias mapping, trailing
+multiple-statement refusal, joins, expressions, CTEs, set operations,
+duplicate output, missing and NULL keys, primary-key target refusal, quoted
+identifiers, literal escaping, empty text, NUL and 16 KiB bounds, redacted
+debug state, stale result identity, production and read-only refusal, live
+search-path resolution, primary-key discovery, update privilege and view-kind
+metadata. The renderer checks the value prompt, literal semantics, exact bound
+review statement, no-send boundary, narrow output and ASCII output. The live
+table check proves no row changes before the execution effect, one intended row
+changes after confirmation, and a deliberate read sees the replacement. The
+live view check proves that a non-table relation is reported before the
+interactive refusal.
+
+The authoritative `cargo --locked xtask verify` exited successfully with the
+disposable `postgres:18.4-alpine` plain and TLS fixtures running and synthetic
+credentials from `docker/dev.env`. It passed formatting, lints, API
+documentation, 737 unit and layout tests, 50 CLI-contract tests, 3
+archive-helper tests, 4 cloud-identity tests, 14 documentation matches, 3
+editor-contract tests, 2 keymap-contract tests, 1 native-boundary test, 3
+password-prompt tests, 49 PostgreSQL integration tests, 80 release-contract
+tests, 7 release-note tests, 2 release-runtime tests, 1 release-schema test, 3
+terminal-restoration tests, 7 workflow-contract tests, 5 xtask tests, and the
+documentation tests. Plain and TLS PostgreSQL database gates passed.
+
+The semantic Unix-socket integration gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. The socket harness returned without a
+configured URI; that is not live socket evidence. Manual confirmation in Warp,
+Windows Terminal, Linux terminals, SSH and multiplexers, screen-reader use,
+reduced-motion and live-resize checks remain unverified. The available local run
+used Homebrew Rust/Cargo 1.98.0 and PostgreSQL 18.4; broader PostgreSQL matrix,
+hosted toolchain and cross-platform evidence remain separate. Release
+readiness, signing, provenance, publication and owner authorization remain
+separate and are not implied by this green local verifier. The disposable
+services were explicitly torn down with `cargo xtask db down`, and `cargo xtask
+db status` reported `Not running.` No tag, signing, release, push or publication
+operation was performed.
+
+## Feature 022 verification - 2026-09-04
+
+Feature 022 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. The full-screen and plain interactive clients
+recognize bounded `:name` placeholders only in executable SQL, prompt once per
+distinct name in first-use order, accept empty text, and keep the original
+template in the editor and history. Values are held in `SecretString`, shown
+only as a mask, and bound as escaped PostgreSQL text literals at the existing
+simple-query boundary. Non-interactive `query` accepts only complete
+`--param-env NAME=VARIABLE` mappings and validates them before target work.
+NUL is refused, and server positions after expansion are reported without a
+guessed template caret.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo test --locked --lib parameter` | 25 passed |
+| `cargo test --locked --test cli_contract named_parameter` | 1 passed |
+| `cargo test --locked --test documentation_matches_the_build prompted_parameters` | 1 passed |
+| `cargo test --locked --test postgres_integration parameterized` | 3 passed against disposable PostgreSQL 18.4 |
+| `cargo test --locked --test password_prompt plain_parameter` | 1 passed through a real macOS pseudo-terminal against disposable PostgreSQL 18.4 |
+| CLI `--param-env` probe | Pass; stdout contained only the requested CSV data |
+| Missing mapping against an unreachable target | Pass; usage error returned before connection work |
+| `git diff --check` | Pass |
+
+The focused evidence proves protected-region scanning, cast exclusion, first-use
+ordering, repeated-name reuse, adversarial literal escaping, empty values, NUL
+refusal, the 64-name limit, masked prompt rendering, cancellation without an
+effect, template-preserving history and diagnostics, redacted effect and log
+descriptors, exact environment mapping validation, data-only stdout, and honest
+post-expansion error locations. The live PostgreSQL checks also prove execute,
+stream, escaped and repeated values, empty text, NUL refusal before send, and
+server-confirmed cancellation. The pseudo-terminal check proves that plain
+mode accepts a hidden answer and that the returned value appears once as data,
+not as prompt echo.
+
+The final authoritative `cargo --locked xtask verify` exited successfully with
+the disposable `postgres:18.4-alpine` plain and TLS fixtures running and
+synthetic credentials from `docker/dev.env`. It passed formatting, lints, API
+documentation, the complete 720-test library suite, 50 CLI-contract tests, 3
+archive-helper tests, 4 cloud-identity tests, 13 documentation matches, 3
+editor-contract tests, 2 keymap-contract tests, 1 native-boundary test, 3
+password-prompt tests, 47 PostgreSQL integration tests, 80 release-contract
+tests, 7 release-note tests, 2 release-runtime tests, 1 release-schema test, 3
+terminal-restoration tests, 7 workflow-contract tests, 5 xtask tests, and the
+documentation tests. Plain and TLS PostgreSQL database gates passed.
+
+The semantic Unix-socket integration gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. The socket harness returned without a
+configured URI; that is not live socket evidence. Manual confirmation in Warp,
+Windows Terminal, Linux terminals, SSH and multiplexers, screen-reader use,
+reduced-motion and live-resize checks, and live cloud-provider account routes
+remain unverified. The available local run used Homebrew Rust/Cargo 1.98.0 and
+PostgreSQL 18.4; the broader PostgreSQL 14-18 matrix and hosted toolchain
+evidence remain separate. Release readiness, signing, provenance, publication,
+and owner authorization remain separate and are not implied by this green local
+verifier. The disposable services were explicitly torn down with `cargo xtask
+db down`, and `cargo xtask db status` reported `Not running.` No tag, signing,
+release, push, or publication operation was performed.
+
+## Feature 021 verification - 2026-09-04
+
+Feature 021 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. Interactive export now chooses CSV, TSV, JSON,
+NDJSON or Markdown in a searchable palette before the destination path. The
+choice is carried through the existing retained-row, filter, no-overwrite and
+atomic export boundary; the filename extension is never consulted. CLI INSERT
+output requires an explicit destination table, quotes table and column
+identifiers, preserves NULL, emits escaped PostgreSQL text literals without type
+inference, and refuses duplicate labels, NUL text and header suppression.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo test --locked cli::output --lib` | 25 passed |
+| `cargo test --locked app::update --lib` | 126 passed |
+| `cargo test --locked ui::layout --lib` | 82 passed |
+| `cargo test --locked cli::interactive --lib` | 14 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 12 passed |
+| `cargo test --locked --test cli_contract` without database environment | 48 passed; database cases skipped |
+| `git diff --check` | Pass |
+
+The focused evidence proves deterministic format ordering, searchable choice,
+no effect before path acceptance, retained and filtered row scope, compact and
+ASCII wording, output safety for hostile identifiers and literals, NULL and
+empty-text distinction, NUL and duplicate-label refusal, header validation,
+buffered/streamed byte equivalence, existing-format stability, and no
+decoration on machine output. The interactive JSON route also preserves the
+server's original row count and truncation fact while writing only retained
+filtered rows. The CLI contract covers validation before connection work,
+streamed file output, and the explicit application of generated INSERT data to
+a disposable probe table.
+
+The authoritative `cargo --locked xtask verify` exited successfully with the
+following environment: `rustc 1.98.0` and `cargo 1.98.0` from Homebrew, against
+the local `postgres:18.4-alpine` image
+`sha256:db676a0ed906c00f55020fb8999e4fb30c598bf5c3b5c188630aef2812d3f11d`.
+It passed formatting, lints, API documentation, the complete 703-test library
+suite, 49 CLI-contract tests, 3 archive-helper tests, 4 cloud-identity tests,
+12 documentation matches, 3 editor-contract tests, 2 keymap-contract tests, 1
+native-boundary test, 2 password-prompt tests, 44 PostgreSQL integration tests,
+80 release-contract tests, 7 release-note tests, 2 release-runtime tests, 1
+release-schema test, 3 terminal-restoration tests, 7 workflow-contract tests,
+5 xtask tests, and the documentation tests. Plain and TLS PostgreSQL database
+gates passed. The live INSERT contract generated, streamed, and explicitly
+applied the statements to the disposable probe table, confirming three rows.
+
+The semantic Unix-socket integration gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. The workspace socket harness safely
+returned without a configured URI; that is not live socket evidence. Manual
+confirmation in Warp, Windows Terminal, Linux terminals, SSH and multiplexers,
+screen-reader use, reduced-motion and live-resize checks, and live
+cloud-provider account routes remain unverified. The pinned rustup 1.97.1
+toolchain and the broader PostgreSQL 14-18 matrix remain separate hosted or
+environment evidence gates; this run used the available Homebrew 1.98.0 and
+PostgreSQL 18.4 fixtures. Release readiness, signing, provenance, publication,
+and owner authorization remain separate and are not implied by this green local
+verifier. The disposable services were explicitly torn down with
+`cargo xtask db down`, and `cargo xtask db status` reported `Not running.` No
+tag, signing, release, push, or publication operation was performed.
+
+## Feature 020 verification - 2026-09-04
+
+Feature 020 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. Named profiles now produce a searchable
+connection picker before implicit startup resolution, with an explicit default
+route and safe, bounded profile summaries. `Ctrl+K n` reaches the same picker
+after a quiet session. Selection carries only an optional profile name through
+the reducer, keeps resolved targets and credentials in runtime-only slots,
+retains the editor and local result preferences, clears server-derived state,
+and rejects late work from the previous connection generation.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked app::connection_picker --lib` | 5 passed |
+| `cargo test --locked app::palette --lib` | 14 passed |
+| `cargo test --locked app::update --lib` | 125 passed |
+| `cargo test --locked app::discovery --lib` | 9 passed |
+| `cargo test --locked ui::keymap --lib` | 28 passed |
+| `cargo test --locked ui::layout --lib` | 81 passed |
+| `cargo test --locked cli::interactive --lib` | 13 passed |
+| `cargo test --locked --test native_boundary_contract` | 1 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 11 passed |
+| `cargo test --locked --test cli_contract` | 46 passed |
+| `cargo test --locked --lib` | 696 passed |
+| `git diff --check` | Pass |
+
+The focused evidence proves deterministic safe summaries, missing-field and
+provider wording, bounded derived details, exclusion of password-shaped
+unknown values and provider arguments, searchable picker construction, default
+and profile choice transitions, quiet-session reset semantics, retained editor
+and reading preferences, explicit-route detection, resolver and cloud-auth
+boundaries, no-fallback refusal, active-keymap discovery, printable `n`
+preservation, full and compact accessible rendering, documentation parity, and
+unchanged plain and machine-output routes. The native-boundary check also
+confirmed that the new pure picker layer contains no driver or FFI markers.
+
+The authoritative `cargo --locked xtask verify` exited successfully. It passed
+formatting, lints, API documentation, the complete 696-test library suite, 46
+CLI-contract tests, 3 archive-helper tests, 4 cloud-identity tests, 11
+documentation matches, 3 editor-contract tests, 2 keymap-contract tests, 1
+native-boundary test, 2 password-prompt tests, 44 PostgreSQL integration tests,
+80 release-contract tests, 7 release-note tests, 2 release-runtime tests, 1
+release-schema test, 3 terminal-restoration tests, 7 workflow-contract tests,
+and 5 xtask tests. The disposable PostgreSQL 18.4 plain and TLS fixtures
+supplied live database evidence using synthetic credentials only.
+
+The semantic Unix-socket integration gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. The workspace socket harness was
+included and safely returned without a configured URI; that is not live socket
+evidence. Manual confirmation in Warp, Windows Terminal, Linux terminals, SSH
+and multiplexers, screen-reader use, reduced-motion and live-resize checks,
+and live cloud-provider account routes remain unverified. Release readiness,
+signing, provenance, publication, and owner authorization remain separate and
+are not implied by this green local verifier. The disposable services were
+torn down and `cargo xtask db status` reported `Not running.` No tag, signing,
+release, push, or publication operation was performed.
+
+## Feature 019 verification - 2026-09-04
+
+Feature 019 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. The focused checks cover the bounded lexical
+formatter, protected regions, cursor mapping, editor history, reducer,
+discovery, keymap, renderer, plain mode, documentation, and machine-output
+boundaries.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked query::format --lib` | 14 passed |
+| `cargo test --locked app::editor --lib` | 23 passed |
+| `cargo test --locked app::update --lib` | 121 passed |
+| `cargo test --locked app::discovery --lib` | 9 passed |
+| `cargo test --locked ui::keymap --lib` | 27 passed |
+| `cargo test --locked ui::layout --lib` | 80 passed |
+| `cargo test --locked cli::plain --lib` | 16 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 10 passed |
+| `cargo test --locked --test cli_contract` | 45 passed |
+| `cargo test --locked --lib` | 678 passed |
+| `git diff --check` | Pass |
+
+The focused evidence proves clause, predicate, list, join, nested-query,
+operator, cast, array, parameter, custom-operator, numeric-exponent,
+multiple-statement and idempotence behavior; exact protected strings,
+identifiers, dollar bodies and nested comments; control-looking protected text;
+empty and comment-only no-ops; every supported unterminated region refusal;
+the inclusive 1 MiB bound; UTF-8-safe cursor mapping; one editor edit with
+undo/redo and modified-state preservation; stale error-location invalidation;
+active-keymap discovery; accessible outcome wording; plain pending-buffer
+replacement; sanitized message-stream preview; and unchanged result stdout.
+
+The authoritative `cargo --locked xtask verify` passed every gate that ran:
+formatting, lints, API documentation, 678 library tests, 45 CLI-contract tests,
+44 PostgreSQL integration tests against disposable PostgreSQL 18.4 plain and
+TLS services, 3 terminal-restoration tests, 10 documentation matches, 4
+cloud-identity tests, 2 keymap-contract tests, 3 editor-contract tests, 1
+native-boundary test, 2 password-prompt tests, 80 release-contract tests, 7
+release-note tests, 2 release-runtime tests, 1 release-schema test, 7
+workflow-contract tests, and 5 xtask tests. The run exited successfully.
+
+The semantic Unix-socket gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. Manual confirmation in Warp, Windows
+Terminal, Linux terminals, SSH and multiplexers, screen-reader use, and
+reduced-motion or live-resize hand checks remain unverified. The formatter's
+local transformation does not prove terminal rendering on those platforms.
+Release readiness, signing, provenance, publication, and owner authorization
+remain separate and are not implied by this local verifier. The disposable
+services were torn down and `cargo xtask db status` reported `Not running.` No
+tag, signing, release, push, or publication operation was performed.
+
+## Feature 018 verification - 2026-09-04
+
+Feature 018 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. The focused checks below cover the bounded
+transport, configuration, reducer, discovery, renderer, runtime, documentation,
+and non-interactive boundaries.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked clipboard --lib` | 10 passed |
+| `cargo test --locked config --lib` | 36 passed |
+| `cargo test --locked app::update --lib` | 118 passed |
+| `cargo test --locked app::discovery --lib` | 8 passed |
+| `cargo test --locked ui::keymap --lib` | 26 passed |
+| `cargo test --locked ui::layout --lib` | 79 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 9 passed |
+| `cargo test --locked --test cli_contract` | 44 passed |
+| `cargo test --locked --lib` | 652 passed |
+| `git diff --check` | Pass |
+
+The focused evidence proves exact OSC 52 framing and UTF-8 bytes, control-byte
+containment, the inclusive 1 MiB bound, redacted payload and retained-cell
+identity, opt-in and refusal paths, confirmation and cancellation, stale
+selection rejection, filtered source-row identity, inspector and palette
+discovery, printable `c` preservation, safe write failures, value-free
+rendering, and no transport in plain, JSON, NDJSON, history, or export routes.
+
+The authoritative `cargo --locked xtask verify` passed every gate that ran:
+formatting, lints, API documentation, workspace tests, documentation tests,
+652 library tests, 44 CLI-contract tests, 44 PostgreSQL integration tests, 3
+terminal-restoration tests, 9 documentation matches, 4 cloud-identity tests,
+2 keymap-contract tests, 3 editor-contract tests, 1 native-boundary test, 2
+password-prompt tests, 80 release-contract tests, 7 release-note tests, 2
+release-runtime tests, 1 release-schema test, 7 workflow-contract tests, and 5
+xtask tests. Plain and TLS disposable PostgreSQL 18.4 services supplied the
+database evidence. The run exited successfully with no failures.
+
+The semantic Unix-socket gate remains a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. Manual confirmation in Warp, Windows
+Terminal, Linux terminals, SSH and multiplexers, screen-reader use, and
+terminal clipboard acceptance remain unverified. The client deliberately cannot
+infer acceptance from a successful write and flush. Release readiness, signing,
+provenance, publication, and owner authorization remain separate and are not
+implied by this local verifier. The disposable services were torn down and
+`cargo xtask db status` reported `Not running.` No tag, signing, release, push,
+or publication operation was performed.
+
+## Feature 016 verification - 2026-09-04
+
+Feature 016 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. It adds a pure bounded PostgreSQL JSON plan
+model, a Results-pane tree, plain and analyzed plan actions, explicit analysis
+confirmation, local selection and collapse state, stale-completion protection,
+connection-loss recovery, and preserved ordinary result state.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked query::plan --lib` | 7 passed |
+| `cargo test --locked app::plan --lib` | 4 passed |
+| `cargo test --locked app::discovery --lib` | 8 passed |
+| `cargo test --locked app::update --lib` | 110 passed |
+| `cargo test --locked ui::keymap --lib` | 25 passed |
+| `cargo test --locked ui::layout --lib` | 77 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 8 passed |
+| `cargo test --locked --test cli_contract` | 43 passed |
+| `cargo test --locked --test postgres_integration --no-run` | Pass |
+| `git diff --check` | Pass |
+
+The focused evidence proves bounded parsing, truthful missing metrics, plan
+preconditions, confirmation and cancellation, stale completion rejection,
+ordinary-result preservation, local navigation, compact/narrow/ASCII/no-colour
+rendering, key discovery, documentation contracts, and unchanged plain/JSON/
+NDJSON/history boundaries.
+
+The authoritative `cargo --locked xtask verify` passed every gate that ran:
+formatting, lints, API documentation, workspace tests, documentation tests,
+632 library tests, 43 CLI-contract tests, 44 PostgreSQL integration tests, 3
+terminal-restoration tests, 8 documentation matches, 4 cloud-identity tests, 2
+keymap-contract tests, 3 editor-contract tests, 1 native-boundary test, 2
+password-prompt tests, 80 release-contract tests, 7 release-note tests, 2
+release-runtime tests, 1 release-schema test, 7 workflow-contract tests, and 5
+xtask tests. The run exited successfully.
+
+The live plan evidence ran against disposable `postgres:18.4-alpine` plain and
+TLS services. Plain EXPLAIN did not mutate a guarded UPDATE, analyzed SELECT
+returned actual metrics, and the TLS plan ran on the encrypted session. The
+fixtures were then removed with `cargo xtask db down`; they are disposable and
+recreatable with `cargo xtask db up`. A subsequent `cargo xtask db status`
+reported `Not running.`
+
+The Unix-socket integration gate remains a semantic skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. Manual Windows/Linux terminal checks,
+live resize, Warp rendering, screen-reader use, and a configured Unix-socket
+server remain unverified. Release readiness, signing, provenance, publication,
+and owner authorization remain separate and are not implied by this local
+verifier. No tag, signing, release, push, or publication operation was
+performed.
+
+## Feature 015 verification - 2026-09-04
+
+Feature 015 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. Focused checks cover the pure discovery model,
+active keymap snapshot, reducer, palette, renderer, documentation, and the
+machine-output boundary.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo check --locked` | Pass |
+| `cargo test app::discovery --lib` | 7 passed |
+| `cargo test app::palette --lib` | 14 passed |
+| `cargo test app::update --lib` | 103 passed |
+| `cargo test ui::keymap --lib` | 24 passed |
+| `cargo test ui::layout --lib` | 72 passed |
+| `cargo test --test documentation_matches_the_build` | 7 passed |
+| Guided-discovery CLI contract test | Pass |
+| `git diff --check` | Pass |
+
+The focused evidence proves that state-specific first-frame and empty-state
+guidance, the five-item contextual footer, configured-key labels, intent search,
+prerequisite wording, ASCII input cursors, filtered-empty recovery, and command
+palette dismissal remain presentation-only. No discovery surface executes SQL,
+reloads metadata, records history, writes files, transfers clipboard data, or
+persists onboarding state. Plain, JSON, NDJSON, streaming export, history, and
+terminal-restoration routes remain outside the discovery path.
+
+The authoritative `cargo --locked xtask verify` passed every gate that ran. The
+auto-discovered suite recorded 607 library tests, 43 CLI-contract tests, 41
+PostgreSQL integration tests, 3 terminal-restoration tests, 7 documentation
+matches, 4 cloud-identity tests, 2 keymap-contract tests, 3 editor-contract
+tests, 1 native-boundary test, 2 password-prompt tests, 80 release-contract
+tests, 7 release-note tests, 2 release-runtime tests, 1 release-schema test, 7
+workflow-contract tests, and 5 xtask tests, with no failures. Disposable
+`postgres:18.4-alpine` plain and TLS services supplied the passed database
+evidence and were torn down afterward; `cargo xtask db status` reported
+`Not running.`
+
+The Unix-socket integration gate remains a semantic skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` is not set. Manual Windows/Linux terminal checks,
+live resize, Warp rendering, screen-reader use, and a configured Unix-socket
+server remain unverified. Release readiness, signing, provenance, publication,
+and owner authorization remain separate and are not implied by this local
+verifier.
+
+## Feature 013 verification - 2026-09-04
+
+The working tree on `codex/013-errors-at-cursor` passed
+`cargo --locked xtask verify` with the disposable PostgreSQL 18.4 plain and TLS
+services running. The run was non-publishing and did not create a release or
+tag.
+
+| Gate | Result |
+| --- | --- |
+| Formatting | Pass |
+| Clippy with warnings denied | Pass |
+| API documentation with warnings denied | Pass |
+| Workspace tests | 772 passed, 0 failed |
+| Library tests | 563 passed |
+| CLI contract tests | 42 passed, including failed JSON and constraint diagnostics |
+| PostgreSQL integration tests | 40 passed, including syntax and four constraint cases |
+| Documentation tests | Pass |
+| Database-backed tests | Pass for disposable plain and TLS PostgreSQL |
+| Unix-socket integration | Skip: `IGNATIUS_TEST_PG_SOCKET_URI` is not set |
+
+Focused mapper, editor, reducer, renderer, plain-mode, object-context, and JSON
+checks are included in those results. The Unix-socket, Windows and Linux hand
+terminal checks, screen-reader use, and Warp renderer behavior remain
+unverified.
+
+## Feature 014 verification - 2026-09-04
+
+Feature 014 is implemented locally and remains uncommitted, unpublished, and
+separate from release readiness. The focused checks below exercise the new grid
+state and its boundaries. The authoritative verifier and disposable database
+evidence are now complete for the available host environment.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo check --locked` | Pass |
+| `cargo test app::grid --lib` | 14 passed |
+| `cargo test query::result --lib` | 10 passed |
+| `cargo test postgres::session --lib` | 3 passed |
+| `cargo test app::update --lib` | 100 passed |
+| `cargo test app::palette --lib` | 13 passed |
+| `cargo test ui::keymap --lib` | 23 passed |
+| `cargo test ui::layout --lib` | 68 passed |
+| `cargo test cli::output --lib` | 20 passed |
+| `cargo test --test postgres_integration --no-run` | Pass |
+| `git diff --check` | Pass after the final review |
+
+The focused evidence proves local sorting is stable and reversible, selection
+keeps source-row identity, filtering remains retained-row scoped, duplicate
+column labels remain source-position safe, the last visible column is protected,
+widths are bounded, available and unavailable type labels are distinct, frozen
+wide views keep the selected column reachable, ASCII and no-colour output retain
+meaning, hostile labels and cells cannot emit terminal controls, and machine
+output is unchanged by result-view metadata. No focused check emitted an
+`Effect::Execute` for a grid action.
+
+The live row-bearing type-description test in `tests/postgres_integration.rs`
+passed against disposable PostgreSQL 18.4 in both plain and TLS modes. It
+returned `n`, `label`, and `active` as `int4`, `text`, and `bool`, while the
+retained values stayed `2`, `ok`, and `NULL`; no second execution was required.
+
+The final `cargo --locked xtask verify` passed formatting, lints with warnings
+denied, API documentation, the complete auto-discovered suite, and documentation
+tests. The suite reported 591 library tests and 210 integration or contract
+cases without harness failures; the Unix-socket case remains a semantic skip,
+not live evidence, because `IGNATIUS_TEST_PG_SOCKET_URI` is unset. The verifier
+also marked the disposable plain and TLS PostgreSQL gates as passed.
+
+Manual screen-reader use, live resize, Warp rendering, Windows/Linux hand
+terminal checks, and a configured Unix-socket server remain unverified. Release
+readiness, signing, provenance, publication, and owner authorization remain
+separate and are not implied by this green local verifier.
+
+## Previous green verification
 
 Run on 2026-08-16 at committed HEAD `20bb3c3`, macOS 26.6.1 on Apple silicon,
 rustc 1.97.1 (Homebrew), against `postgres:18.4-alpine` both plain and with TLS,
@@ -421,10 +1114,11 @@ These are real and none of them is hidden anywhere else:
    both. Nobody has yet opened the full-screen client on either platform and
    used it. Warp's own renderer and a live terminal resize are likewise
    unverified anywhere.
-2. **Hosted database integration runs on Linux.** PostgreSQL 14-18 plain/TLS
-   and PostgreSQL 18 Unix socket passed at `52872ac`. The macOS and Windows
-   CI jobs do not connect to a server; local macOS runs and native Windows
-   database/terminal evidence remain separately scoped.
+2. **Hosted database integration runs on Linux.** PostgreSQL 14-18 and the
+   PostgreSQL 18 socket passed at remote main `52872ac`, rechecked on
+   2026-09-04. The macOS and Windows CI jobs do not connect to a server.
+   Newer local features have recorded macOS PostgreSQL 18.4 evidence and
+   require a fresh candidate-source hosted matrix and native platform checks.
 3. Every documented exit code now has a real producer with subprocess-level
    evidence, including 9 from an interrupted export.
 4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and stay that way.
@@ -479,10 +1173,10 @@ These are real and none of them is hidden anywhere else:
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
    full history for that job. Every earlier green run of that gate should be read
    as "did not run".
-9. **Main is unprotected.** GitHub's branch API returned `protected: false`
-   on 2026-09-04. Local hooks do not enforce server-side review/check policy.
-   W13 reviews the repository's actual available rules before proposing changes;
-   no current hosting-plan entitlement is assumed.
+9. **Main is not protected.** GitHub readback on 2026-09-04 reports
+   `protected: false`. Local hooks and CI do not enforce server-side required
+   checks. W13 prepares the governance proposal against current hosting
+   capabilities; no hosting-plan entitlement is assumed by this observation.
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
@@ -513,29 +1207,37 @@ These are real and none of them is hidden anywhere else:
 
 ## Decisions still pending
 
-- Trademark review and a domain before public distribution, under W13.
-- Release inventory, signing/provenance and trust custody choices under W11
-  and ADR-0008; a concrete decision package precedes any live setup.
-- A verified private vulnerability-reporting route and repository governance
-  under W13. Any external configuration change needs its applicable authority.
-- The exact candidate and distribution decision under W14, after its evidence
-  gates. Source integration is not release authorization.
+1. **Trademark search and a domain**, before publishing only. Neither blocks
+   development.
+2. **Release trust choices in ADR-0008:** inventory/SBOM, signing identity and
+   custody, provenance verification and retention. W11 prepares a concrete
+   decision package before seeking the owner's choice.
+3. **Public distribution/support and repository-governance actions:** W13
+   prepares the routes and changes; W14 obtains authority for the exact
+   candidate and external operation. Historical non-publishing authority is
+   not a public release decision.
+
+The credential-store, driver and initial clipboard decisions are closed.
+Controlled provider accounts and native/assistive-technology access are
+evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W01: integrate the existing local chain.** Retrieve Feature 012 at
-   `3168e7c` plus the later source/spec/task/evidence packages from the originating
-   worktree. Reconcile any ongoing hardening without overwriting it. Record
-   integrated focused/full/live evidence before treating the chain as main.
-2. **W02-W05: verify combined identity, semantics, privacy and PostgreSQL.**
-   Recheck work already underway, then use the scoped assignments and affected
-   tests. Historical source passes do not cover a later changed implementation.
-3. **W06-W10: close native, provider, accessibility and resource evidence.**
-   Use explicitly authorized controlled cloud targets; keep native Windows,
-   WSL, Linux and macOS evidence separate. Add ConPTY restoration and observe
-   the acceptance journeys on the integrated candidate.
-4. **W11/W13: prepare release trust and support decisions.** This preparation
-   can proceed independently while integration is underway.
-5. **W12/W14: assemble exact candidate evidence, then seek the release decision.**
-   Feature 008 T033/T035 remain open until their complete criteria are evidenced.
-6. Continue W15 maintenance and open W16 scope only where observed jobs justify it.
+1. **W01:** review the combined local changes and existing Feature 024 evidence,
+   preserve all intended behaviours, and prepare a reproducible integration
+   baseline. Reuse matching results; rerun affected gates when code changes.
+2. **W02-W07/W10:** work through session/result identity, binding and reviewed
+   writes, runtime privacy, the current-source PostgreSQL matrix, native cloud
+   launch and terminal restoration, and measured resource/recovery boundaries.
+3. **W08-W09:** hand-verify the complete experience through Feature 024 on
+   macOS/Warp, native Windows, Linux and WSL; test VoiceOver/NVDA, real resize,
+   configured keys and opt-in clipboard paths. Run the first-use/daily-use
+   acceptance protocol, then fix observed blockers through scoped features.
+4. **W11/W13 can prepare independently:** resolve release trust, support,
+   naming and governance decisions before candidate freeze. Use controlled
+   cloud accounts only under explicit access authority; keep provider evidence
+   separate from the synthetic mechanism.
+5. **W12/W14:** complete Feature 008's exact candidate evidence, direct runtime
+   privacy and target install/rollback gates, then obtain and execute only the
+   owner's authorized release scope. T033/T035 remain open until their actual
+   requirements are met. Maintenance and evidence-led follow-up are W15/W16.

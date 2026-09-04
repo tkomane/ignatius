@@ -4,9 +4,7 @@ Planning targets set on **2026-09-04**. These operationalise the
 [vision](vision.md) and [experience brief](experience-roadmap.md); they are not
 measured results. Existing feature requirements and the constitution take
 precedence. Record actual results in [status](../status.md), feature evidence
-and the [compatibility matrix](../support/compatibility.md). These journeys
-cover the intended integrated feature chain. Features observed only in the local
-worktree remain unavailable on main until W01 integrates them with their specs.
+and the [compatibility matrix](../support/compatibility.md).
 
 ## Outcomes that define the product
 
@@ -96,8 +94,7 @@ into the relevant feature plan before adding a timing gate:
 | Streaming export growth | Additional rows do not create proportional retained memory growth | Compare 200,000 and 2,000,000 fixed-width synthetic rows; record peak RSS and byte/row counts, explain driver/OS variance |
 | Malformed or large input | A documented bound/refusal or recoverable degraded state | Exercise formatter 1 MiB, plan 1 MiB/500 nodes, clipboard 1 MiB, 64 parameter names, update 16 KiB, configured result cap and one oversized value/notice |
 
-The limits above come from the feature specifications inspected in the local
-planning worktree; W01 must bring those contracts with their implementation. No whole-
+The existing limits above come from their feature specifications. No whole-
 process memory ceiling is currently established for an oversized single value
 or notice. W10 must measure and specify that boundary instead of calling the
 row cap a complete memory guarantee. Record hardware, toolchain, server,
