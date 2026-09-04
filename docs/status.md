@@ -59,11 +59,12 @@ release or publication operation was performed by this planning task.
 
 ## Where the work is
 
-**Current continuation**: Feature 024 explicit retained-result refresh is
-complete in the local working tree on `codex/013-errors-at-cursor`; the first
-W02 identity-transition hardening slice is also implemented locally and
-remains under integration review. The branch is
-intentionally not pushed or published. With Results focused, portable `F6`, the
+**Current continuation**: Feature 024 explicit retained-result refresh and the
+first W02 identity-transition hardening slice are integrated into `main` at
+merge commit `a8a2b19664699b46a2edc3fff9478eb38f60ae40`, pushed to
+`origin/main` on 2026-09-04. The integrated source is now the resumption point;
+the older local feature branch was deleted after the merge. With Results
+focused, portable `F6`, the
 command palette and the contextual footer request one deliberate refresh from
 the retained source; terminals with enhanced modifier reporting also accept
 `Ctrl+Shift+R`. Only one read-classified statement is eligible; the editor stays
@@ -71,14 +72,14 @@ unchanged, named parameters are prompted again, outcomes are visible, and
 focus, filtering, sorting, reconnect or failure never replays the query.
 Focused, live and locked-verifier evidence is recorded below; manual terminal
 and screen-reader checks and the semantic Unix-socket gate remain separate
-evidence boundaries. Feature 023 reviewable cell-to-UPDATE remains implemented
-locally below, as do Feature 022 prompted named parameters.
-Feature 020 connection picking and Feature 019 formatting remain implemented
-locally below. Feature 012 schema-aware completion is in ancestor commit `3168e7c`;
+evidence boundaries. Feature 023 reviewable cell-to-UPDATE and Feature 022
+prompted named parameters are integrated and have their evidence below.
+Feature 020 connection picking and Feature 019 formatting are integrated as
+well. Feature 012 schema-aware completion is in ancestor commit `3168e7c`;
 Feature 017
-connection trust remains implemented and pushed to `main` as
+connection trust remains implemented and was previously pushed to `main` as
 `9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. No tag, signing,
-release or publication operation was performed. Feature 008 release evidence
+release or publication operation was performed for this integration. Feature 008 release evidence
 remains the separate release-readiness boundary. Its documentation was first pushed at
 `b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
 evidence is bound to source revision
@@ -411,8 +412,8 @@ and a domain remain outstanding before publishing; neither blocks development.
 
 ## Feature 024 verification - 2026-09-04
 
-Feature 024 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. The interactive client exposes an explicit
+Feature 024 is integrated into `main` and remains separate from release
+readiness. The interactive client exposes an explicit
 portable `F6` action, an enhanced-terminal `Ctrl+Shift+R` alias, a command-
 palette entry and a contextual Results hint. Refresh reads only the retained
 `last_sql` source, requires exactly one
@@ -497,8 +498,8 @@ packages.
 
 ## Feature 023 verification - 2026-09-04
 
-Feature 023 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. The interactive client now turns one selected
+Feature 023 is integrated into `main` and remains separate from release
+readiness. The interactive client now turns one selected
 cell from a retained direct single-table `SELECT` into a conservative,
 reviewable `UPDATE`. It resolves bare relations through the active session
 search path, reads live relation kind, read and update privileges and ordered
@@ -561,8 +562,8 @@ operation was performed.
 
 ## Feature 022 verification - 2026-09-04
 
-Feature 022 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. The full-screen and plain interactive clients
+Feature 022 is integrated into `main` and remains separate from release
+readiness. The full-screen and plain interactive clients
 recognize bounded `:name` placeholders only in executable SQL, prompt once per
 distinct name in first-use order, accept empty text, and keep the original
 template in the editor and history. Values are held in `SecretString`, shown
@@ -621,8 +622,8 @@ release, push, or publication operation was performed.
 
 ## Feature 021 verification - 2026-09-04
 
-Feature 021 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. Interactive export now chooses CSV, TSV, JSON,
+Feature 021 is integrated into `main` and remains separate from release
+readiness. Interactive export now chooses CSV, TSV, JSON,
 NDJSON or Markdown in a searchable palette before the destination path. The
 choice is carried through the existing retained-row, filter, no-overwrite and
 atomic export boundary; the filename extension is never consulted. CLI INSERT
@@ -683,8 +684,8 @@ tag, signing, release, push, or publication operation was performed.
 
 ## Feature 020 verification - 2026-09-04
 
-Feature 020 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. Named profiles now produce a searchable
+Feature 020 is integrated into `main` and remains separate from release
+readiness. Named profiles now produce a searchable
 connection picker before implicit startup resolution, with an explicit default
 route and safe, bounded profile summaries. `Ctrl+K n` reaches the same picker
 after a quiet session. Selection carries only an optional profile name through
@@ -743,8 +744,8 @@ release, push, or publication operation was performed.
 
 ## Feature 019 verification - 2026-09-04
 
-Feature 019 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. The focused checks cover the bounded lexical
+Feature 019 is integrated into `main` and remains separate from release
+readiness. The focused checks cover the bounded lexical
 formatter, protected regions, cursor mapping, editor history, reducer,
 discovery, keymap, renderer, plain mode, documentation, and machine-output
 boundaries.
@@ -797,8 +798,8 @@ tag, signing, release, push, or publication operation was performed.
 
 ## Feature 018 verification - 2026-09-04
 
-Feature 018 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. The focused checks below cover the bounded
+Feature 018 is integrated into `main` and remains separate from release
+readiness. The focused checks below cover the bounded
 transport, configuration, reducer, discovery, renderer, runtime, documentation,
 and non-interactive boundaries.
 
@@ -847,8 +848,8 @@ or publication operation was performed.
 
 ## Feature 016 verification - 2026-09-04
 
-Feature 016 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. It adds a pure bounded PostgreSQL JSON plan
+Feature 016 is integrated into `main` and remains separate from release
+readiness. It adds a pure bounded PostgreSQL JSON plan
 model, a Results-pane tree, plain and analyzed plan actions, explicit analysis
 confirmation, local selection and collapse state, stale-completion protection,
 connection-loss recovery, and preserved ordinary result state.
@@ -901,8 +902,8 @@ performed.
 
 ## Feature 015 verification - 2026-09-04
 
-Feature 015 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. Focused checks cover the pure discovery model,
+Feature 015 is integrated into `main` and remains separate from release
+readiness. Focused checks cover the pure discovery model,
 active keymap snapshot, reducer, palette, renderer, documentation, and the
 machine-output boundary.
 
@@ -947,10 +948,10 @@ verifier.
 
 ## Feature 013 verification - 2026-09-04
 
-The working tree on `codex/013-errors-at-cursor` passed
+The integrated source on `main` passed
 `cargo --locked xtask verify` with the disposable PostgreSQL 18.4 plain and TLS
-services running. The run was non-publishing and did not create a release or
-tag.
+services running. The verification run was non-publishing and did not create a
+release or tag; the later main integration is recorded above.
 
 | Gate | Result |
 | --- | --- |
@@ -972,8 +973,8 @@ unverified.
 
 ## Feature 014 verification - 2026-09-04
 
-Feature 014 is implemented locally and remains uncommitted, unpublished, and
-separate from release readiness. The focused checks below exercise the new grid
+Feature 014 is integrated into `main` and remains separate from release
+readiness. The focused checks below exercise the new grid
 state and its boundaries. The authoritative verifier and disposable database
 evidence are now complete for the available host environment.
 
