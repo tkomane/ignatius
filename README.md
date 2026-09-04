@@ -177,6 +177,8 @@ you at the point of use rather than failing quietly.
 ## Documentation
 
 - `docs/status.md` - what is done, what is verified, what is next
+- [Product roadmap](docs/product/roadmap.md) - milestones, evidence gates and agent assignments
+- [Agent playbook](docs/operations/agent-playbook.md) - ownership, architecture review and handoff
 - `docs/product/landscape.md` - the other tools, and why this one
 - `docs/architecture/decisions/` - why it is built this way
 - `docs/security/threat-model.md` - what is protected and what is not

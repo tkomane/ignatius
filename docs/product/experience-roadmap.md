@@ -8,6 +8,15 @@ much of a graphical client's help as a terminal can carry.
 This document is the argument for what to build and in what order. Each item
 becomes a specification of its own before any of it becomes code.
 
+**Execution planning updated 2026-09-04:** the originating local worktree now
+contains the experience through Feature 024. Those application changes have not
+been merged by this planning-only integration. Use the [product roadmap](roadmap.md)
+for milestone order, the [agent delivery plan](agent-delivery-plan.md) for
+assignments and the [dated baseline](planning-baseline.md) for the source boundary.
+This document retains the product rationale and original sequencing.
+[Product acceptance](acceptance.md) defines how to test the promised reduction
+in expertise and remembering.
+
 ## Current delivery
 
 As of 2026-09-03, Feature 017, the connection trust surface, is implemented and
@@ -19,9 +28,10 @@ configured providers share the same display contract, while tokens and provider
 commands are never refreshed or executed by the view.
 
 This is a cross-cutting trust and discoverability slice, not a replacement for
-the ordered experience work below. The next product slice remains Feature 012,
-schema-aware completion. Live cloud-account evidence is still separate from the
-local implementation and is recorded in the compatibility matrix when available.
+the ordered experience work below. The next step is W01 integration of the
+existing local chain starting with Feature 012, rather than repeating its
+implementation. Live cloud-account evidence is still separate and is recorded
+in the compatibility matrix when available.
 
 ## What a graphical client is actually giving people
 
@@ -61,7 +71,7 @@ The constitution is not decoration here; three principles decide real questions.
 - **Keyboard-first, never keyboard-only (V).** Mouse support is welcome and is
   never load-bearing. No workflow may assume Vim.
 
-## The order, and why
+## The original order, and why
 
 ### 1. Completion that knows the schema - Feature 012
 

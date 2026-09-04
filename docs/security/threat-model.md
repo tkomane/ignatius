@@ -9,8 +9,13 @@ route, a network call, or a way to write files.
 ## Scope
 
 A local, single-user command-line program that connects to PostgreSQL servers the
-user chooses. There is no server component, no account, and no network activity
-other than the database connection.
+user chooses. There is no Ignatius server component or product account. The
+client connects to PostgreSQL and may execute a configured cloud provider tool
+that performs its own authentication network activity and caching. The local
+Feature 018 implementation awaiting W01 integration adds confirmed, opt-in
+OSC 52 through the terminal/SSH/multiplexer path; it is not yet a main capability.
+The [context diagram](../architecture/context.md) includes those integration
+boundaries; no query upload, telemetry or automatic update service is introduced.
 
 ## Assets
 
@@ -48,7 +53,7 @@ other than the database connection.
 | A user believes `require` verifies identity | The two are never described identically; the negotiated state is read from `pg_stat_ssl` | The user can still choose `require` deliberately |
 | A parameter like `sslrootcert` is silently ignored, so verification is weaker than asked | Unsupported security parameters fail the connection | None; this is the deliberate trade |
 | A password leaks into a log, error, or screenshot | One redaction implementation; secrets in types that do not print; diagnostics redact on construction; the support logger admits only Ignatius-owned targets and redacts a complete event before writing | Redaction is pattern-based and cannot recognise a bare secret in prose |
-| A password is exposed in the process list or shell history | Documented; `PGPASSWORD` produces a note offering a safer route | **Real and unmitigated.** Credential-store support is Feature 002 |
+| A password is exposed in the process list or shell history | Documented; `PGPASSWORD` produces a note offering a safer route | **Real for user-selected exposed routes.** Use the prompt or permission-checked passfile; ADR-0011 rejects a new OS credential store |
 | Another local user reads the configuration file | Owner-only permissions on Unix; no secret values in the file at all | Windows relies on the profile ACL, which is weaker |
 | A support bundle carries data the user did not intend to share | Logs exclude SQL text, row values and dependency traces; logging is off by default and target directives fail closed | Terminal scrollback is outside the program's control |
 | A compromised dependency or release artefact | Committed lockfile, pinned toolchain, advisory and licence checks in CI | **Real.** Nothing is signed or notarised, and this is stated wherever artefacts are mentioned |
