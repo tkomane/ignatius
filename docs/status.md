@@ -1,17 +1,68 @@
 # Status
 
-**Updated: 2026-09-03.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-04.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Planning integration - 2026-09-04
+
+The owner requested that the completed planning work be integrated into main.
+This change contains the [roadmap](product/roadmap.md),
+[dated assessment](product/planning-baseline.md),
+[product acceptance](product/acceptance.md),
+[16-package delivery plan](product/agent-delivery-plan.md),
+[agent playbook](operations/agent-playbook.md), architecture guidance and
+related documentation corrections. Six milestones, six outcomes and eight
+journeys define the delivery and acceptance sequence.
+
+**Source boundary:** the planning assessment inspected local branch
+`codex/013-errors-at-cursor`, HEAD `3168e7c`, plus the uncommitted feature chain
+through 024. Those application changes and their task packages remain in the
+originating worktree. This isolated documentation integration starts at main
+`52872acd7c0e0e38c6b810723ccda5eee99a28bf` and changes no application, test,
+workflow, dependency or feature-checkbox content. Main's compatibility entries
+continue to describe its existing application; the newer architecture contracts
+are labelled as the local integration target. W01 must retrieve and integrate
+that source and evidence together, preserving any later work already underway.
+
+The originating planning pass recorded 15 passing documentation contracts;
+that result covered its local feature worktree, not this earlier main build.
+Fresh isolated verification: all six existing documentation/build contracts
+passed with `cargo test --locked --offline --test documentation_matches_the_build`.
+The planning audit passed for 23 Markdown files and 79 local links, all 26
+inspected feature slugs, W01-W16, O1-O6 and J1-J8. Existing feature task
+checkboxes are unchanged; AGENTS and CLAUDE match and `git diff --check` passes.
+The 16-package prerequisite graph is acyclic. On macOS 26.6.2 arm64,
+`COMPOSE_PROJECT_NAME=ignatius-planning-main-20260904 cargo --locked --offline xtask verify`
+passed formatting, lints, API documentation, workspace tests and documentation
+tests, including 522 library tests, 39 CLI contracts and 38 live PostgreSQL
+contracts against synthetic PostgreSQL 18.4 plain/TLS fixtures. The real
+Unix-socket gate skipped because its URI was not configured. An initial run
+failed when the shared fixture stopped; the final run used a separate Compose
+project owned by this integration and passed. Hosted CI for the new commit
+must be read back after the authorized main push.
+No new hand-terminal, screen-reader, cloud-provider or release-readiness evidence
+is claimed. Mermaid diagrams are reviewed as source, not graphically rendered.
+
+GitHub readback on 2026-09-04 confirmed private `tkomane/ignatius`, unprotected
+main and [successful CI at 52872ac](https://github.com/tkomane/ignatius/actions/runs/33720098318).
+Its executed OS suites, PostgreSQL 14-18 plain/TLS, PostgreSQL 18 socket, MSRV,
+workflow, dependency/security and generated-output gates passed. The scheduled
+fixture-drift job skipped. The private-vulnerability-reporting API returned
+HTTP 404; access or availability remains unverified, rather than proven disabled.
+
+The planning deliverables are complete. W01-W16 remain implementation and
+acceptance work; putting this plan on main does not complete W01 or authorize
+a tag, signing operation or release.
+
 ## Where the work is
 
-**Current continuation**: Feature 017 connection trust surface. The slice is
-implemented and pushed to `main` as
-`9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. The working tree is
-clean and local `main` matches `origin/main`; no tag, signing, release or
-publication operation was performed. Feature 008 release evidence remains the
-separate release-readiness boundary. Its documentation was first pushed at
+**Current continuation:** W01 integration reconciliation. The latest application
+slice on this main baseline is Feature 017 connection trust, pushed as
+`9f80bef3040ba80d017dae3d5d0ae120a4cfc264` on 2026-09-03. The newer local
+feature chain is described in the planning baseline above; do not reimplement
+it or treat its uncommitted code as already merged. Feature 008 release evidence
+remains the separate release-readiness boundary. Its documentation was first pushed at
 `b1e032f0344b88c0002c8fb32c08be13d72d73d9`; the hosted candidate
 evidence is bound to source revision
 `259ac76de6477719b8a3515777f3623b24237dd6`. That revision hardens the hosted
@@ -47,7 +98,7 @@ materialisation and the remaining supply-chain evidence. T035 remains open
 because the accepted release criteria are not all evidenced; the roadmap stays
 in planning. No tag, signing, release or publication operation was performed.
 
-The pending CI-hardening candidate preserves that hosted aggregate as historical
+The merged CI hardening preserves that hosted aggregate as historical
 evidence while adding exhaustive local verification, Rust 1.90 and PostgreSQL
 14-18 coverage, a real Linux Unix-socket job, immutable action and
 workflow-security contracts, bounded jobs, semantic workflow linting, and
@@ -60,9 +111,10 @@ Those changes have passed locally in an isolated integration worktree, including
 Actionlint and YAML parsing, 80 release contracts, 7 workflow contracts,
 Cargo-deny 0.20.2, digest-pinned Gitleaks history scanning and Rust 1.90. The
 full verifier passed PostgreSQL 18.4 plain and TLS; the Unix-socket check was
-explicitly skipped because its URI was not configured. The candidate has not
-run on GitHub-hosted runners, so PostgreSQL 15/17, the socket job, Rust 1.90,
-workflow linting and the hardened release preflight remain hosted evidence gaps.
+explicitly skipped because its URI was not configured. Subsequent main
+CI run `33720098318` passed PostgreSQL 14-18, the socket job, Rust 1.90 and
+workflow linting at `52872ac`, as rechecked on 2026-09-04. That source-CI run
+does not itself establish the separate release preflight or candidate evidence.
 An explicit macOS Docker socket attempt is not counted as a pass: the bind
 mount rejected PostgreSQL's socket-permission change before startup. The
 socket job deliberately targets Ubuntu, where the runner filesystem supports
@@ -369,9 +421,10 @@ These are real and none of them is hidden anywhere else:
    both. Nobody has yet opened the full-screen client on either platform and
    used it. Warp's own renderer and a live terminal resize are likewise
    unverified anywhere.
-2. **Database integration runs on Linux only.** PostgreSQL 14, 16 and 18 all
-   pass there. The macOS and Windows jobs do not connect to a server, so the
-   protocol claims rest on the Linux matrix and the local macOS runs.
+2. **Hosted database integration runs on Linux.** PostgreSQL 14-18 plain/TLS
+   and PostgreSQL 18 Unix socket passed at `52872ac`. The macOS and Windows
+   CI jobs do not connect to a server; local macOS runs and native Windows
+   database/terminal evidence remain separately scoped.
 3. Every documented exit code now has a real producer with subprocess-level
    evidence, including 9 from an interrupted export.
 4. **GSSAPI, Kerberos and Windows SSPI are unsupported**, and stay that way.
@@ -426,10 +479,10 @@ These are real and none of them is hidden anywhere else:
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
    full history for that job. Every earlier green run of that gate should be read
    as "did not run".
-9. **Branch protection is unavailable.** Required status checks need a paid
-   GitHub plan on a private repository. `cargo xtask install-hooks` runs the same
-   gates before every push as the local stand-in, and CI runs on every push
-   regardless, but nothing prevents a push that skips the hook.
+9. **Main is unprotected.** GitHub's branch API returned `protected: false`
+   on 2026-09-04. Local hooks do not enforce server-side review/check policy.
+   W13 reviews the repository's actual available rules before proposing changes;
+   no current hosting-plan entitlement is assumed.
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
@@ -460,35 +513,29 @@ These are real and none of them is hidden anywhere else:
 
 ## Decisions still pending
 
-1. **Trademark search and a domain**, before publishing only. Neither blocks
-   development.
-
-Nothing else is waiting on the owner. The four that were are closed.
+- Trademark review and a domain before public distribution, under W13.
+- Release inventory, signing/provenance and trust custody choices under W11
+  and ADR-0008; a concrete decision package precedes any live setup.
+- A verified private vulnerability-reporting route and repository governance
+  under W13. Any external configuration change needs its applicable authority.
+- The exact candidate and distribution decision under W14, after its evidence
+  gates. Source integration is not release authorization.
 
 ## Next actions, in order
 
-1. **Exercise `Connection and auth details` against the COI server with
-   `--auth entra`**, and record what happens with the date and the server
-   version. Where accounts exist, exercise the `aws` and `gcp` routes separately
-   too. That is the only thing that can turn the provider rows' "live evidence:
-   none yet" into facts, and it needs accounts rather than more code.
-2. **Implement completion that knows the schema**
-   (`specs/012-schema-completion/`). First of the experience roadmap, and the
-   one that decides whether the product's claim about cognitive load is true.
-3. Hand-verification on Windows and in WSL, using the artefact built on
-   2026-08-16. A static musl binary covers WSL and Linux including the Unix
-   socket path; a Windows-native `.exe` is a separate artefact and separate
-   evidence, and neither substitutes for the other.
-4. Implement copy through OSC 52 (ADR-0013), which closes Feature 004.
-5. The remaining experience roadmap in order: errors that point at the problem,
-   a result grid that can be worked, finding your way without being told, a
-   readable plan.
-6. A terminal-restoration test for Windows, which needs ConPTY (T055a).
-7. Drive `--plain` with VoiceOver on macOS and NVDA on Windows by hand. The
-   absence of escape sequences is proven; the experience is not.
-8. Complete the remaining Feature 008 evidence gates. The corrected hosted
-   archive, reproducibility, runtime-smoke and aggregate results are recorded
-   in the release documents. Still open are canonical evidence materialisation,
-   inventory/SBOM ownership, signing, provenance, direct logging-privacy review,
-   platform hand evidence and release-owner authorization. None of these gates
-   is satisfied by a successful non-publishing workflow alone.
+1. **W01: integrate the existing local chain.** Retrieve Feature 012 at
+   `3168e7c` plus the later source/spec/task/evidence packages from the originating
+   worktree. Reconcile any ongoing hardening without overwriting it. Record
+   integrated focused/full/live evidence before treating the chain as main.
+2. **W02-W05: verify combined identity, semantics, privacy and PostgreSQL.**
+   Recheck work already underway, then use the scoped assignments and affected
+   tests. Historical source passes do not cover a later changed implementation.
+3. **W06-W10: close native, provider, accessibility and resource evidence.**
+   Use explicitly authorized controlled cloud targets; keep native Windows,
+   WSL, Linux and macOS evidence separate. Add ConPTY restoration and observe
+   the acceptance journeys on the integrated candidate.
+4. **W11/W13: prepare release trust and support decisions.** This preparation
+   can proceed independently while integration is underway.
+5. **W12/W14: assemble exact candidate evidence, then seek the release decision.**
+   Feature 008 T033/T035 remain open until their complete criteria are evidenced.
+6. Continue W15 maintenance and open W16 scope only where observed jobs justify it.

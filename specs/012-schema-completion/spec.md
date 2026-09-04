@@ -4,7 +4,10 @@
 
 **Created**: 2026-08-16
 
-**Status**: Specified. Not implemented.
+**Status**: Specified on main. Implemented in local commit `3168e7c`, whose
+full specification/task package and code await W01 integration. The
+[dated planning baseline](../../docs/product/planning-baseline.md) records that
+local observation; this planning-only change does not merge the implementation.
 
 **Input**: The owner's brief of 2026-08-16 - the least cognitive load and the
 least expertise of anything in the market - and

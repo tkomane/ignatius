@@ -1,5 +1,10 @@
 # Runtime state
 
+Reconciled on **2026-09-04**. This describes the execution model and identity
+invariants inspected in the local Features 012-024 chain. Its profile-switch,
+parameter, plan, grid, update and refresh extensions await W01 integration into
+main; the baseline query/cancellation and terminal lifecycles already exist.
+
 ## The loop
 
 ```text
@@ -19,6 +24,8 @@ neither can block drawing. The reducer is the only place state changes.
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
+    %% Assumption: one foreground execution at a time in an interactive session.
+    %% Open evidence: combined switch, parameter, plan, update and refresh interleavings (W02).
     Idle --> Running: RunBuffer or RunStatement<br/>(only when connected and not busy)
     Running --> CancellationRequested: Cancel
     CancellationRequested --> CancellationRequested: Cancel again<br/>(no second request sent)
@@ -41,10 +48,13 @@ result. This is asserted by test, not by timing.
 ```mermaid
 stateDiagram-v2
     [*] --> Disconnected
+    %% Trust boundary: connection facts are read from the selected PostgreSQL server.
+    %% Open evidence: native cloud launcher and provider-account behaviour (W06).
     Disconnected --> Connecting: startup
     Connecting --> Connected: session facts read back from the server
     Connecting --> Failed: diagnostic shown, exit code mapped
     Connected --> Lost: connection dropped
+    Connected --> Connecting: explicit quiet profile choice (local Feature 020; W01 pending)
     Lost --> [*]: no automatic reconnection in this release
     note right of Lost
         A statement in flight when this
@@ -57,6 +67,39 @@ stateDiagram-v2
 `Connected` is only entered after the server has answered questions about itself:
 version, backend pid, search path, read-only posture and transport state. Those
 facts come from the server, not from what was requested.
+
+An explicit quiet-session profile choice re-enters connecting. The runtime
+increments a connection generation and discards late work from the old target.
+It clears old server facts, results, catalogue and pending prompts while keeping
+the editor and documented local reading preferences. It does not reconnect on
+loss automatically. `Reconnect` in the effect enum is the explicit password-
+prompt retry during authentication, not authorization to replay a query.
+
+## Identity and confirmation boundaries
+
+| Identity | Protects | Agent rule |
+| --- | --- | --- |
+| Connection generation in the runtime | Connection and metadata completions after a profile switch | Check current generation before publishing old facts; W02 reviews combined interleavings |
+| Query/plan job identity | Foreground completions and cancel intent | Accept only the matching operation; keep ordinary results and plan state separate |
+| Metadata request and object path | Tree definitions, dependencies and catalogue refresh | Reject superseded responses and expose loading/stale/unavailable states |
+| Retained source job, row and column | Grid selection, copy and generated UPDATE | Use original positions, not sorted/filtered view indexes; revalidate at confirmation |
+| Template and parameter bindings | Prompted query, reviewed write and explicit refresh | Keep values secret-bound and ephemeral; history retains the template, refresh prompts again |
+
+The current implementation distributes those checks between the reducer and
+runtime. This table states the contract to verify, not evidence that every
+possible interleaving has already passed a runtime test.
+
+Local view actions produce no execution effect. Plain EXPLAIN requests an
+estimate; ANALYZE executes the statement after explicit confirmation and does
+not imply rollback. A cell UPDATE has separate metadata, replacement and
+exact-bound-review stages; only final confirmation sends one write. The prior
+result remains a snapshot. A refresh explicitly reruns the eligible retained
+source once, ignores later editor edits and re-prompts for parameters.
+
+An outcome may be completed, failed, cancelled by the server or unknown after
+connection loss. `Cancellation requested` and a successfully delivered cancel
+packet cannot establish which of those occurred. Never infer a commit,
+rollback, affected row or fresh result from losing the transport.
 
 ### The object tree's connection
 

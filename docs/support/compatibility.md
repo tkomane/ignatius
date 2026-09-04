@@ -7,13 +7,21 @@ rows retain the date and evidence class that actually proved them.
 
 ## PostgreSQL server versions
 
-Supported window follows upstream: **14 through 18**, per
-<https://www.postgresql.org/support/versioning/> as read on 2026-08-15, where 18.6
-was current and 13 had already reached end of life.
+The repository's declared support window is **14 through 18**. Review the
+[upstream version policy](https://www.postgresql.org/support/versioning/)
+before a release or support-window change; this declaration does not assert
+which upstream minor version is current.
 
-**Tested: 14, 16 and 18**, by the integration suite in CI on Linux, and 18.4
-locally on macOS. Versions 15 and 17 are within the supported window but are not
-exercised, so they are expected to work rather than known to.
+**Hosted evidence: 14, 15, 16, 17 and 18**, through plain/TLS integration
+contracts on Linux at source `52872ac` in
+[CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
+whose executed jobs were rechecked on 2026-09-04. Its PostgreSQL 18 Unix-socket
+job also executed successfully. **Local evidence: PostgreSQL 18.4 on macOS**,
+with recorded evidence in `docs/status.md`. Later feature runs remain in the
+originating feature worktree and are not evidence for this main build. The hosted
+baseline does not cover the newer local worktree;
+rerun the applicable matrix against the source to be released. Native Windows
+database and hand-terminal claims remain separate evidence requirements.
 
 ## Authentication
 

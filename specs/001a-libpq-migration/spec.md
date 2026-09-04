@@ -4,7 +4,9 @@
 
 **Created**: 2026-08-16
 
-**Status**: Proposed and decision-gated. Implementation has not started.
+**Status**: Closed without implementation by ADR-0012 on 2026-08-16.
+The following migration proposal is historical; unchecked native tasks are
+inactive. Cloud token authentication uses the existing driver in Feature 011.
 
 **Input**: ADR-0009, the product roadmap and the remaining requirement for
 GSSAPI, Kerberos or Windows integrated authentication.

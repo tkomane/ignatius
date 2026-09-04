@@ -9,16 +9,16 @@ What this program stores, where, for how long, and what it never stores.
 - **Passwords.** No credential is written to the configuration file. A connection
   profile that names `password`, `pgpassword` or `sslpassword` is refused, by
   name, with the routes that do exist; the refusal never repeats the value back.
-  A profile that references a credential held elsewhere is a later feature, and
-  a reference is not a secret.
+  ADR-0011 rejects a new OS credential store; existing user-managed credential
+  routes remain the supported approach.
 - **A password typed at the prompt.** When the server asks for one, what is
   typed lives in memory for as long as it takes to try the connection again and
   is then dropped. It is never written to the configuration file, never recorded
   in the history, never logged, and never passed as a process argument. The type
   holding it prints `<hidden>` rather than its contents, so an unexpected
   `{:?}` - in a panic, a test failure, a log line - cannot leak it. Nothing
-  offers to remember it: an OS credential store is a later feature and will
-  store a reference, not a secret.
+  offers to remember it: ADR-0011 rejected the OS credential store. Reopening
+  that decision requires the daily-use evidence named in the ADR.
 - **Result rows in the history.** The statement history records the SQL that ran
   and how it ended. It never records what came back.
 - **A cloud identity token.** When a connection authenticates through `entra`,
