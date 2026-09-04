@@ -22,6 +22,7 @@
 pub mod app;
 pub mod branding;
 pub mod cli;
+pub mod clipboard;
 pub mod config;
 pub mod connection;
 pub mod diagnostics;

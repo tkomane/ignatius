@@ -27,15 +27,15 @@ pub fn can_ask() -> bool {
 struct RawMode;
 
 impl RawMode {
-    fn enter() -> Result<Self, Diagnostic> {
+    fn enter(attempted: &str, next_action: &str) -> Result<Self, Diagnostic> {
         crossterm::terminal::enable_raw_mode().map_err(|err| {
             Diagnostic::new(
                 DiagnosticKind::Internal,
-                "could not turn off echo to ask for a password",
-                "asking for a password",
+                "could not turn off terminal echo",
+                attempted,
             )
             .likely_cause(err.to_string())
-            .next_action("supply the password another way, for example a password file")
+            .next_action(next_action)
         })?;
         Ok(Self)
     }
@@ -54,18 +54,47 @@ impl Drop for RawMode {
 /// Returns `None` when the user cancels, which is an answer rather than a
 /// failure: they chose not to give one.
 pub fn read_password(question: &str, err: &mut impl Write) -> Result<Option<String>, Diagnostic> {
+    Ok(read_hidden_with_context(
+        question,
+        err,
+        "asking for a password",
+        "supply the password another way, for example a password file",
+    )?
+    .filter(|password| !password.is_empty()))
+}
+
+/// Asks for a hidden answer without echoing it.
+///
+/// Unlike [`read_password`], an empty answer is meaningful and is returned as
+/// `Some(String::new())`. This boundary is shared by plain-mode parameter
+/// prompts so terminal cleanup and cancellation semantics cannot drift.
+pub fn read_hidden(question: &str, err: &mut impl Write) -> Result<Option<String>, Diagnostic> {
+    read_hidden_with_context(
+        question,
+        err,
+        "asking for a hidden parameter value",
+        "use --param-env NAME=VARIABLE in a non-interactive query",
+    )
+}
+
+fn read_hidden_with_context(
+    question: &str,
+    err: &mut impl Write,
+    attempted: &str,
+    next_action: &str,
+) -> Result<Option<String>, Diagnostic> {
     write!(err, "{question}").ok();
     err.flush().ok();
 
     let mut typed = String::new();
     let outcome = {
-        let _raw = RawMode::enter()?;
+        let _raw = RawMode::enter(attempted, next_action)?;
         loop {
             let event = crossterm::event::read().map_err(|error| {
                 Diagnostic::new(
                     DiagnosticKind::Internal,
-                    "could not read the password",
-                    "asking for a password",
+                    "could not read hidden terminal input",
+                    attempted,
                 )
                 .likely_cause(error.to_string())
             })?;
@@ -96,7 +125,7 @@ pub fn read_password(question: &str, err: &mut impl Write) -> Result<Option<Stri
     // printed next starts where it should.
     writeln!(err).ok();
     err.flush().ok();
-    Ok(outcome.filter(|password| !password.is_empty()))
+    Ok(outcome)
 }
 
 #[cfg(test)]

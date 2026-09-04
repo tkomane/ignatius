@@ -2,15 +2,12 @@
 
 **Replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
-The planned experience through Feature 024 was implemented in the originating
-local feature worktree. This documentation integration leaves main's application
-at `52872ac`; it does not merge that feature chain. W01 retrieves and integrates
-its source, specifications and evidence before the later acceptance work.
+The planned experience through Feature 024 is now implemented locally. The
+next phase integrates that work and proves product, platform and release claims.
 
-The latest completed local slice at the planning snapshot was
-**024 Explicit retained-result refresh**. Its recorded plain/TLS verifier pass,
-semantic Unix-socket skip and outstanding terminal checks belong to that local
-worktree, as recorded in the [dated baseline](planning-baseline.md).
+The latest completed local slice is **024 Explicit retained-result refresh**;
+its recorded plain/TLS verifier pass, semantic Unix-socket skip and outstanding
+terminal checks remain distinct in `docs/status.md`.
 
 | Read this for | Authority |
 | --- | --- |

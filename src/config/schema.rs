@@ -32,6 +32,9 @@ pub struct Config {
     /// What is kept about statements that have run.
     #[serde(default)]
     pub history: HistoryConfig,
+    /// Whether explicitly confirmed result values may travel through the terminal.
+    #[serde(default)]
+    pub clipboard: ClipboardConfig,
     /// Named connections, by profile name.
     ///
     /// A profile holds where a database is and how it is classified. It never
@@ -86,6 +89,7 @@ impl Default for Config {
             query: QueryConfig::default(),
             connection: ConnectionConfig::default(),
             history: HistoryConfig::default(),
+            clipboard: ClipboardConfig::default(),
             keys: std::collections::BTreeMap::new(),
             profiles: std::collections::BTreeMap::new(),
             auth: AuthConfig::default(),
@@ -311,6 +315,19 @@ impl Default for HistoryConfig {
     }
 }
 
+/// Terminal clipboard transport settings.
+///
+/// OSC 52 is deliberately opt-in: an explicitly copied result value travels
+/// through the terminal, and may cross SSH or a multiplexer. Ignatius writes
+/// the request but never reads the destination clipboard.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ClipboardConfig {
+    /// Allow explicitly confirmed result values to be sent through OSC 52.
+    #[serde(default)]
+    pub osc52: bool,
+}
+
 const fn default_history_enabled() -> bool {
     true
 }
@@ -343,6 +360,9 @@ pub struct UiConfig {
     /// Replaces animated feedback with static text.
     #[serde(default)]
     pub reduced_motion: bool,
+    /// Whether typing may open automatic schema-completion menus.
+    #[serde(default = "default_completion")]
+    pub completion: bool,
 }
 
 impl Default for UiConfig {
@@ -353,8 +373,13 @@ impl Default for UiConfig {
             color: ColorMode::Auto,
             mouse: false,
             reduced_motion: false,
+            completion: default_completion(),
         }
     }
+}
+
+const fn default_completion() -> bool {
+    true
 }
 
 /// Built-in themes.
@@ -560,6 +585,10 @@ mod tests {
         assert!(config.validate().is_empty(), "{:?}", config.validate());
         // Safe by default: mouse capture off keeps terminal selection working.
         assert!(!config.ui.mouse);
+        assert!(
+            !config.clipboard.osc52,
+            "terminal clipboard transport is opt-in"
+        );
     }
 
     #[test]
@@ -587,6 +616,17 @@ mod tests {
         let config: Config = toml::from_str("[ui]\ntheme = \"light\"\n").expect("parse");
         assert_eq!(config.schema_version, 0);
         assert_eq!(config.ui.theme, ThemeChoice::Light);
+        assert!(!config.clipboard.osc52);
+    }
+
+    #[test]
+    fn clipboard_setting_is_explicit_and_rejects_unknown_nested_fields() {
+        let config: Config = toml::from_str("[clipboard]\nosc52 = true\n").expect("parse opt-in");
+        assert!(config.clipboard.osc52);
+
+        let err = toml::from_str::<Config>("[clipboard]\nunknown = true\n")
+            .expect_err("unknown clipboard setting must fail");
+        assert!(err.to_string().contains("unknown"), "{err}");
     }
 
     #[test]

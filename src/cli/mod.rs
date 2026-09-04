@@ -17,6 +17,7 @@ use crate::diagnostics::doctor;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use output::{Format, OutputOptions};
+use secrecy::SecretString;
 use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
 
@@ -149,6 +150,16 @@ pub enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Table)]
         format: Format,
+        /// Destination table for `--format insert`.
+        #[arg(long, value_name = "TABLE")]
+        insert_table: Option<String>,
+        /// Read one named parameter from an environment variable.
+        ///
+        /// Repeat once per distinct `:name`, for example
+        /// `--param-env customer_id=IGNATIUS_CUSTOMER_ID`. Values stay out of
+        /// process arguments and are never printed by this command.
+        #[arg(long = "param-env", value_name = "NAME=VARIABLE")]
+        parameter_env: Vec<String>,
         /// Omit the header row.
         #[arg(long)]
         no_header: bool,
@@ -285,6 +296,21 @@ pub struct ConnectionOptions {
 }
 
 impl ConnectionOptions {
+    /// Whether the user supplied any connection-route or safety option that
+    /// should keep implicit startup on the existing direct path.
+    #[must_use]
+    pub fn has_explicit_route(&self) -> bool {
+        self.host.is_some()
+            || self.port.is_some()
+            || self.dbname.is_some()
+            || self.username.is_some()
+            || self.sslmode.is_some()
+            || self.environment.is_some()
+            || self.read_only
+            || self.auth.is_some()
+            || self.profile.is_some()
+    }
+
     /// Converts to resolved connection arguments.
     pub fn to_args(&self) -> Result<ConnectionArgs, Diagnostic> {
         let sslmode = match &self.sslmode {
@@ -433,6 +459,17 @@ pub(crate) fn resolve_target_and_profile<'a>(
     Ok((target, args))
 }
 
+/// Whether implicit interactive startup should ask for a profile before doing
+/// any target or credential work.
+#[must_use]
+pub(crate) fn should_open_connection_picker(
+    target: Option<&str>,
+    connection: &ConnectionOptions,
+    has_profiles: bool,
+) -> bool {
+    target.is_none() && has_profiles && !connection.has_explicit_route()
+}
+
 /// Configuration sub-commands.
 #[derive(Debug, Subcommand)]
 pub enum ConfigAction {
@@ -505,6 +542,8 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             command,
             file,
             format,
+            insert_table,
+            parameter_env,
             no_header,
             null,
             max_rows,
@@ -522,11 +561,13 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
                     header: !*no_header,
                     null_encoding: null.clone(),
                     unicode: presentation.unicode(),
+                    insert_table: insert_table.clone(),
                 },
                 max_rows: *max_rows,
                 output: output.as_deref(),
                 force: *force,
                 allow_write: *allow_write,
+                parameter_env,
                 connection,
             },
             &paths,
@@ -811,7 +852,139 @@ struct QueryRequest<'a> {
     output: Option<&'a std::path::Path>,
     force: bool,
     allow_write: bool,
+    parameter_env: &'a [String],
     connection: &'a ConnectionOptions,
+}
+
+/// Resolves complete named-parameter mappings before any target or database
+/// work. The declaration contains only names; secret values come from the
+/// process environment and are kept in `SecretString` immediately.
+fn parameter_bindings_from_env(
+    sql: &str,
+    mappings: &[String],
+) -> Result<Option<crate::query::ParameterBindings>, Diagnostic> {
+    let template = crate::query::discover_parameters(sql)
+        .map_err(|error| error.diagnostic("discovering named parameters"))?;
+
+    if template.is_empty() {
+        if mappings.is_empty() {
+            return Ok(None);
+        }
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "--param-env was supplied, but the statement has no named parameters",
+            "reading --param-env mappings",
+        )
+        .next_action("remove --param-env, or add a :name placeholder to the statement"));
+    }
+
+    if mappings.is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "the statement has named parameters but no --param-env mappings",
+            "reading named parameter values",
+        )
+        .next_action(format!(
+            "provide one --param-env NAME=VARIABLE mapping for each of: {}",
+            template
+                .names()
+                .iter()
+                .map(|name| format!(":{name}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+
+    let mut mapped = std::collections::BTreeMap::<String, String>::new();
+    for mapping in mappings {
+        if mapping.matches('=').count() != 1 {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "each --param-env mapping must have the form NAME=VARIABLE",
+                "reading --param-env mappings",
+            )
+            .next_action("use shell-safe parameter and environment names without secret values"));
+        }
+        let (name, variable) = mapping
+            .split_once('=')
+            .expect("validated exactly one equals sign");
+        if !is_environment_name(name) || !is_environment_name(variable) {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "each --param-env mapping must use non-empty ASCII names",
+                "reading --param-env mappings",
+            )
+            .next_action(
+                "use letters, digits and underscores, with a letter or underscore first",
+            ));
+        }
+        if !template.names().iter().any(|expected| expected == name) {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("--param-env names unknown parameter :{name}"),
+                "checking named parameter mappings",
+            )
+            .next_action("map only the distinct :name placeholders in the statement"));
+        }
+        if mapped
+            .insert(name.to_owned(), variable.to_owned())
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("parameter :{name} was mapped more than once"),
+                "checking named parameter mappings",
+            )
+            .next_action("provide exactly one --param-env mapping for each :name"));
+        }
+    }
+
+    for name in template.names() {
+        if !mapped.contains_key(name) {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("no --param-env mapping was supplied for :{name}"),
+                "checking named parameter mappings",
+            )
+            .next_action(format!("add --param-env {name}=VARIABLE")));
+        }
+    }
+
+    let mut values = Vec::with_capacity(template.names().len());
+    for name in template.names() {
+        let variable = mapped.get(name).expect("missing mappings were rejected");
+        let value = std::env::var(variable).map_err(|error| match error {
+            std::env::VarError::NotPresent => Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("environment variable {variable} is not set"),
+                "reading named parameter values",
+            )
+            .next_action(format!("set {variable} before running the query")),
+            std::env::VarError::NotUnicode(_) => Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("environment variable {variable} is not valid UTF-8"),
+                "reading named parameter values",
+            )
+            .next_action(format!("set {variable} to UTF-8 text")),
+        })?;
+        values.push(SecretString::from(value));
+    }
+
+    let bindings = crate::query::ParameterBindings::from_secrets(template.names().to_vec(), values)
+        .map_err(|error| error.diagnostic("building named parameter bindings"))?;
+    bindings
+        .validate()
+        .map_err(|error| error.diagnostic("validating named parameter values"))?;
+    Ok(Some(bindings))
+}
+
+fn is_environment_name(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 fn query_command(
@@ -832,6 +1005,10 @@ fn query_command(
             branding::BINARY_NAME
         )));
     }
+
+    output::validate_options(&request.options)?;
+
+    let parameters = parameter_bindings_from_env(&sql, request.parameter_env)?;
 
     let loaded = config::load(paths)?;
     let row_cap = request
@@ -880,10 +1057,11 @@ fn query_command(
     if let Some(destination) = request.output {
         let writer = output::StreamWriter::new(request.options.clone())?;
         let export = crate::query::export::Export::create(destination, request.force)?;
-        let outcome = runtime()?.block_on(interactive::export_once(
+        let outcome = runtime()?.block_on(interactive::export_once_with_parameters(
             target,
             &loaded.config,
             sql,
+            parameters,
             export,
             writer,
         ))?;
@@ -922,10 +1100,11 @@ fn query_command(
         };
     }
 
-    let execution = runtime()?.block_on(interactive::execute_once(
+    let execution = runtime()?.block_on(interactive::execute_once_with_parameters(
         target,
         &loaded.config,
         sql,
+        parameters,
         row_cap,
     ))?;
 
@@ -946,6 +1125,13 @@ fn query_command(
     }
 
     if let Some(error) = &execution.error {
+        if request.options.format == Format::Json {
+            // JSON diagnostics are written to stderr because stdout remains a
+            // data stream. The failed execution intentionally wrote no JSON
+            // result document, so a parser cannot mistake it for success.
+            writeln!(err, "{}", error.to_json()).map_err(io_diagnostic)?;
+            return Ok(error.exit_code());
+        }
         return Err(error.clone());
     }
     Ok(ExitCode::Success)
@@ -1213,6 +1399,80 @@ mod tests {
     }
 
     #[test]
+    fn query_parses_repeatable_parameter_environment_mappings() {
+        let cli = Cli::try_parse_from([
+            "ignatius",
+            "query",
+            "-c",
+            "SELECT :customer_id, :status",
+            "--param-env",
+            "customer_id=IGNATIUS_CUSTOMER_ID",
+            "--param-env",
+            "status=IGNATIUS_STATUS",
+        ])
+        .expect("parse");
+        let Some(Command::Query { parameter_env, .. }) = cli.command else {
+            panic!("expected query");
+        };
+        assert_eq!(
+            parameter_env,
+            vec![
+                "customer_id=IGNATIUS_CUSTOMER_ID".to_owned(),
+                "status=IGNATIUS_STATUS".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn parameter_environment_mappings_are_validated_without_target_work() {
+        let missing = parameter_bindings_from_env("SELECT :customer_id", &[])
+            .expect_err("prompting is not allowed here");
+        assert_eq!(missing.kind, DiagnosticKind::Usage);
+        assert!(
+            missing
+                .next_action
+                .as_deref()
+                .is_some_and(|action| action.contains(":customer_id"))
+        );
+
+        let duplicate = parameter_bindings_from_env(
+            "SELECT :customer_id",
+            &["customer_id=PATH".to_owned(), "customer_id=PATH".to_owned()],
+        )
+        .expect_err("duplicate mapping");
+        assert!(duplicate.headline.contains("mapped more than once"));
+
+        let extra = parameter_bindings_from_env("SELECT :customer_id", &["other=PATH".to_owned()])
+            .expect_err("extra mapping");
+        assert!(extra.headline.contains("unknown parameter"));
+
+        let malformed = parameter_bindings_from_env(
+            "SELECT :customer_id",
+            &["customer_id=PATH=OTHER".to_owned()],
+        )
+        .expect_err("malformed mapping");
+        assert!(malformed.headline.contains("NAME=VARIABLE"));
+
+        let no_parameters =
+            parameter_bindings_from_env("SELECT 1", &["customer_id=PATH".to_owned()])
+                .expect_err("mapping without a placeholder");
+        assert!(no_parameters.headline.contains("no named parameters"));
+    }
+
+    #[test]
+    fn a_complete_parameter_environment_mapping_keeps_values_secret() {
+        if std::env::var_os("PATH").is_none() {
+            return;
+        }
+        let bindings = parameter_bindings_from_env("SELECT :value", &["value=PATH".to_owned()])
+            .expect("PATH is available")
+            .expect("one binding");
+        assert_eq!(bindings.names(), vec!["value"]);
+        let debug = format!("{bindings:?}");
+        assert!(!debug.contains("/"), "environment values stay out of debug");
+    }
+
+    #[test]
     fn command_and_file_cannot_both_be_given() {
         let err = Cli::try_parse_from(["ignatius", "query", "-c", "SELECT 1", "-f", "x.sql"])
             .expect_err("must conflict");
@@ -1246,6 +1506,59 @@ mod tests {
                 .environment
                 .is_none()
         );
+    }
+
+    #[test]
+    fn implicit_interactive_start_is_kept_only_when_no_route_option_was_typed() {
+        assert!(!ConnectionOptions::default().has_explicit_route());
+
+        for options in [
+            ConnectionOptions {
+                host: Some("db.example.net".into()),
+                ..ConnectionOptions::default()
+            },
+            ConnectionOptions {
+                dbname: Some("orders".into()),
+                ..ConnectionOptions::default()
+            },
+            ConnectionOptions {
+                sslmode: Some("verify-full".into()),
+                ..ConnectionOptions::default()
+            },
+            ConnectionOptions {
+                read_only: true,
+                ..ConnectionOptions::default()
+            },
+            ConnectionOptions {
+                profile: Some("orders-prod".into()),
+                ..ConnectionOptions::default()
+            },
+        ] {
+            assert!(
+                options.has_explicit_route(),
+                "a typed connection or safety option must bypass the picker: {options:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_startup_picker_requires_profiles_and_an_implicit_route() {
+        let defaults = ConnectionOptions::default();
+        assert!(should_open_connection_picker(None, &defaults, true));
+        assert!(!should_open_connection_picker(None, &defaults, false));
+        assert!(!should_open_connection_picker(
+            Some("@orders-dev"),
+            &defaults,
+            true
+        ));
+        assert!(!should_open_connection_picker(
+            None,
+            &ConnectionOptions {
+                profile: Some("orders-dev".into()),
+                ..ConnectionOptions::default()
+            },
+            true
+        ));
     }
 
     #[test]

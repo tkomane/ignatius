@@ -28,6 +28,12 @@ pub struct Notice {
 pub struct ResultSet {
     /// Column names in order.
     pub columns: Vec<String>,
+    /// Optional server-described PostgreSQL type names in the same order.
+    ///
+    /// The simple query value path deliberately remains text-based so extension
+    /// values keep their server rendering. A missing entry means the type could
+    /// not be described, never that it was inferred from a cell.
+    pub column_types: Vec<Option<String>>,
     /// Retained rows. Never longer than the cap.
     pub rows: Vec<Vec<Cell>>,
     /// Total rows the server sent, including any beyond the cap.
@@ -39,13 +45,47 @@ pub struct ResultSet {
 impl ResultSet {
     /// Creates an empty set with a row cap.
     #[must_use]
-    pub const fn new(columns: Vec<String>, cap: usize) -> Self {
+    pub fn new(columns: Vec<String>, cap: usize) -> Self {
         Self {
+            column_types: vec![None; columns.len()],
             columns,
             rows: Vec::new(),
             rows_seen: 0,
             cap,
         }
+    }
+
+    /// Creates a result set with optional type labels from a server description.
+    ///
+    /// A vector with the wrong length is rejected as unavailable rather than
+    /// being padded or truncated, because shifting a label onto another source
+    /// column would be a more dangerous result than no label.
+    #[must_use]
+    pub fn with_column_types(
+        columns: Vec<String>,
+        column_types: Vec<Option<String>>,
+        cap: usize,
+    ) -> Self {
+        let mut result = Self::new(columns, cap);
+        result.set_column_types(column_types);
+        result
+    }
+
+    /// Replaces type labels when their positions align exactly with the headers.
+    /// Returns whether the metadata was accepted.
+    pub fn set_column_types(&mut self, column_types: Vec<Option<String>>) -> bool {
+        if column_types.len() != self.columns.len() {
+            self.column_types = vec![None; self.columns.len()];
+            return false;
+        }
+        self.column_types = column_types;
+        true
+    }
+
+    /// The server-described type label for one source column, when available.
+    #[must_use]
+    pub fn column_type(&self, index: usize) -> Option<&str> {
+        self.column_types.get(index).and_then(Option::as_deref)
     }
 
     /// Adds a row, keeping it only while the cap allows.
@@ -421,5 +461,30 @@ mod tests {
         assert_eq!(set.retained(), 0);
         assert_eq!(set.rows_seen, 1);
         assert!(set.is_truncated());
+    }
+
+    #[test]
+    fn type_metadata_is_optional_and_positionally_safe() {
+        let mut set = ResultSet::new(vec!["n".into(), "label".into()], 10);
+        assert_eq!(set.column_types, vec![None, None]);
+        assert!(set.set_column_types(vec![Some("int4".into()), Some("text".into())]));
+        assert_eq!(set.column_type(0), Some("int4"));
+        assert_eq!(set.column_type(1), Some("text"));
+
+        assert!(!set.set_column_types(vec![Some("wrong".into())]));
+        assert_eq!(set.column_types, vec![None, None]);
+        assert!(set.column_type(8).is_none());
+    }
+
+    #[test]
+    fn partial_type_metadata_stays_partial_instead_of_shifting_labels() {
+        let set = ResultSet::with_column_types(
+            vec!["id".into(), "payload".into(), "created".into()],
+            vec![Some("int8".into()), None, Some("timestamptz".into())],
+            10,
+        );
+        assert_eq!(set.column_type(0), Some("int8"));
+        assert!(set.column_type(1).is_none());
+        assert_eq!(set.column_type(2), Some("timestamptz"));
     }
 }

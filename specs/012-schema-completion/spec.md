@@ -4,10 +4,9 @@
 
 **Created**: 2026-08-16
 
-**Status**: Specified on main. Implemented in local commit `3168e7c`, whose
-full specification/task package and code await W01 integration. The
-[dated planning baseline](../../docs/product/planning-baseline.md) records that
-local observation; this planning-only change does not merge the implementation.
+**Status**: Implemented in local ancestor commit `3168e7c`; task list complete.
+Recorded focused and PostgreSQL 18.4 verification is in `docs/status.md`.
+Unix-socket and cross-platform hand evidence remain separate from that local run.
 
 **Input**: The owner's brief of 2026-08-16 - the least cognitive load and the
 least expertise of anything in the market - and

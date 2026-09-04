@@ -15,6 +15,7 @@
 use crate::app::model::PendingRun;
 use crate::query::result::{Execution, TransactionState};
 use crate::query::statements;
+use secrecy::SecretString;
 use std::fmt::Write as _;
 
 /// A command that is not SQL.
@@ -26,6 +27,15 @@ pub enum Command {
     Help,
     /// Show the connection.
     Connection,
+    /// Format the pending SQL buffer locally.
+    Format,
+    /// Print local schema-aware candidates for the current buffer.
+    Complete {
+        /// Optional prefix supplied by the person rather than the cursor.
+        prefix: Option<String>,
+    },
+    /// Accept one candidate from the most recent completion list.
+    Use(String),
     /// Something that is not a command.
     Unknown(String),
 }
@@ -34,11 +44,22 @@ impl Command {
     /// Parses a backslash command.
     #[must_use]
     pub fn parse(line: &str) -> Self {
-        match line.trim().trim_start_matches('\\').trim() {
+        let input = line.trim().trim_start_matches('\\').trim();
+        let (name, argument) = input
+            .find(char::is_whitespace)
+            .map_or((input, ""), |index| {
+                (&input[..index], input[index..].trim())
+            });
+        match name {
             "q" | "quit" | "exit" => Self::Quit,
             "?" | "h" | "help" => Self::Help,
             "conninfo" | "c" => Self::Connection,
-            other => Self::Unknown(other.to_owned()),
+            "format" | "fmt" => Self::Format,
+            "complete" | "completion" => Self::Complete {
+                prefix: (!argument.is_empty()).then(|| argument.to_owned()),
+            },
+            "use" => Self::Use(argument.to_owned()),
+            _ => Self::Unknown(input.to_owned()),
         }
     }
 }
@@ -78,12 +99,51 @@ impl Reader {
         self.buffer.clear();
     }
 
+    /// The SQL that is currently being accumulated.
+    #[must_use]
+    pub fn buffer(&self) -> &str {
+        &self.buffer
+    }
+
+    /// The cursor at the end of the last line, before the newline that
+    /// `feed` stores as the line separator.
+    #[must_use]
+    pub fn completion_cursor(&self) -> usize {
+        self.buffer
+            .strip_suffix('\n')
+            .map_or(self.buffer.len(), str::len)
+    }
+
+    /// Applies one explicitly chosen completion to the accumulated SQL.
+    pub fn apply_completion(&mut self, range: std::ops::Range<usize>, replacement: &str) -> bool {
+        crate::query::completion::replace_range(&mut self.buffer, range, replacement)
+    }
+
+    /// Replaces the pending SQL after a successful local transformation.
+    pub fn replace_buffer(&mut self, text: String) {
+        self.buffer = text;
+    }
+
     /// Adds one line of input.
     pub fn feed(&mut self, line: &str) -> Input {
         // A meta-command is only a meta-command at the start of a statement.
         // Otherwise a backslash inside SQL would be intercepted.
-        if !self.is_continuing() && line.trim_start().starts_with('\\') {
-            return Input::Command(Command::parse(line));
+        if line.trim_start().starts_with('\\') {
+            let command = Command::parse(line);
+            // Completion is the one pair of meta-commands allowed while SQL is
+            // being accumulated. They are whole-line, explicit requests and
+            // leave the SQL buffer in place; existing commands such as \q keep
+            // their safer start-of-statement-only behavior.
+            let context = crate::query::completion::context(&self.buffer, self.completion_cursor());
+            let format_comment_only = matches!(command, Command::Format)
+                && crate::query::format::is_comment_only(&self.buffer);
+            let out_of_band = matches!(
+                command,
+                Command::Complete { .. } | Command::Use(_) | Command::Format
+            ) && (!context.in_literal_or_comment || format_comment_only);
+            if !self.is_continuing() || out_of_band {
+                return Input::Command(command);
+            }
         }
         if !self.is_continuing() && line.trim().is_empty() {
             return Input::Blank;
@@ -185,6 +245,12 @@ pub fn help_text() -> String {
          \\q      leave\n\
          \\?      this help\n\
          \\c      show the connection and what it is protected by\n\
+         \\format  format the pending SQL buffer locally\n\
+         \\complete [prefix]  show schema-aware candidates for the SQL buffer\n\
+         \\use <number|name>  insert one candidate from that list\n\
+         Named values such as :customer_id are prompted without echo. For\n\
+         scripts, pass --param-env NAME=VARIABLE; values stay out of arguments\n\
+         and output remains data-only.\n\
          \n\
          Ctrl+C cancels a running statement. Ctrl+D leaves.\n\
          This is {}'s plain mode: no full-screen interface, nothing that only\n\
@@ -255,6 +321,8 @@ pub fn run(
 
     let mut reader = Reader::default();
     let mut transaction = TransactionState::Autocommit;
+    let mut completion_catalog: Option<Option<crate::query::completion::CompletionCatalog>> = None;
+    let mut pending_completion: Option<crate::query::completion::CompletionResult> = None;
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
 
@@ -287,7 +355,14 @@ pub fn run(
         })?;
 
         let sql = match reader.feed(&line) {
-            Input::Blank | Input::Incomplete => continue,
+            Input::Blank => continue,
+            Input::Incomplete => {
+                // A numbered list belongs to the exact buffer it was computed
+                // from. Any new SQL input invalidates it before another `\use`
+                // can apply a stale range.
+                pending_completion = None;
+                continue;
+            }
             Input::Command(Command::Quit) => return Ok(crate::ExitCode::Success),
             Input::Command(Command::Help) => {
                 writeln!(err, "{}", help_text()).ok();
@@ -295,6 +370,89 @@ pub fn run(
             }
             Input::Command(Command::Connection) => {
                 writeln!(err, "{}", connection_summary(&info)).ok();
+                continue;
+            }
+            Input::Command(Command::Format) => {
+                let source = reader.buffer().to_owned();
+                if source.trim().is_empty() || crate::query::format::is_comment_only(&source) {
+                    writeln!(err, "There is no SQL to format.").ok();
+                    pending_completion = None;
+                    continue;
+                }
+                match crate::query::format_sql(&source, reader.completion_cursor()) {
+                    Ok(formatted) if formatted.text != source => {
+                        reader.replace_buffer(formatted.text.clone());
+                        let preview = crate::query::value::sanitize_for_display(&formatted.text);
+                        writeln!(err, "Formatted SQL buffer:").ok();
+                        write!(err, "{preview}").ok();
+                        if !formatted.text.ends_with('\n') {
+                            writeln!(err).ok();
+                        }
+                    }
+                    Ok(_) => {
+                        writeln!(err, "SQL buffer is already formatted.").ok();
+                    }
+                    Err(error) => {
+                        writeln!(err, "{}", error.message(&source)).ok();
+                    }
+                }
+                pending_completion = None;
+                continue;
+            }
+            Input::Command(Command::Complete { prefix }) => {
+                if completion_catalog.is_none() {
+                    writeln!(err, "Loading schema snapshot for completion...").ok();
+                    let loaded = runtime.block_on(session.completion_catalog());
+                    match loaded {
+                        Ok(catalog) => completion_catalog = Some(Some(catalog)),
+                        Err(error) => {
+                            writeln!(err, "Schema completion unavailable: {}", error.headline).ok();
+                            completion_catalog = Some(None);
+                        }
+                    }
+                }
+                let catalog = completion_catalog.as_ref().and_then(Option::as_ref);
+                let result = crate::query::completion::complete_with_prefix(
+                    reader.buffer(),
+                    reader.completion_cursor(),
+                    catalog,
+                    prefix.as_deref(),
+                );
+                write_plain_completion(err, &result, catalog.is_some());
+                pending_completion = Some(result);
+                continue;
+            }
+            Input::Command(Command::Use(choice)) => {
+                let Some(result) = pending_completion.as_ref() else {
+                    writeln!(err, "No completion list is open. Type \\complete first.").ok();
+                    continue;
+                };
+                let chosen = choose_plain_completion(result, &choice);
+                let Some(candidate) = chosen else {
+                    writeln!(
+                        err,
+                        "There is no completion candidate {choice:?}; use its number or exact name."
+                    )
+                    .ok();
+                    continue;
+                };
+                let accepted =
+                    reader.apply_completion(result.replacement.clone(), &candidate.insert_text);
+                if accepted {
+                    writeln!(
+                        err,
+                        "Completion inserted: {}",
+                        plain_ascii(&candidate.label)
+                    )
+                    .ok();
+                    pending_completion = None;
+                } else {
+                    writeln!(
+                        err,
+                        "Completion could not replace the current word; nothing changed."
+                    )
+                    .ok();
+                }
                 continue;
             }
             Input::Command(Command::Unknown(name)) => {
@@ -307,6 +465,7 @@ pub fn run(
             }
             Input::Statement(sql) => sql,
         };
+        pending_completion = None;
 
         // The same guardrail the full-screen client applies, asked in words.
         let impact = crate::query::classify_all(&statements::split(&sql));
@@ -316,6 +475,7 @@ pub fn run(
                 impact,
                 typed: String::new(),
                 required: info.database.clone(),
+                source: None,
             };
             write!(err, "{}", confirmation_question(&pending)).ok();
             err.flush().ok();
@@ -330,12 +490,42 @@ pub fn run(
             }
         }
 
-        let execution = runtime.block_on(crate::cli::interactive::execute_cancellable(
-            &session,
-            &sql,
-            config.query.max_buffered_rows,
-            JobId(1),
-        ));
+        let template = match crate::query::discover_parameters(&sql) {
+            Ok(template) => template,
+            Err(error) => {
+                writeln!(
+                    err,
+                    "{}",
+                    error
+                        .diagnostic("discovering named parameters")
+                        .render_plain(true)
+                )
+                .ok();
+                continue;
+            }
+        };
+        let parameters = if template.is_empty() {
+            None
+        } else {
+            match prompt_parameters(&template, err) {
+                Ok(Some(parameters)) => Some(parameters),
+                Ok(None) => continue,
+                Err(error) => {
+                    writeln!(err, "{}", error.render_plain(true)).ok();
+                    continue;
+                }
+            }
+        };
+
+        let execution = runtime.block_on(
+            crate::cli::interactive::execute_cancellable_with_parameters(
+                &session,
+                &sql,
+                parameters.as_ref(),
+                config.query.max_buffered_rows,
+                JobId(1),
+            ),
+        );
         transaction = execution.transaction;
 
         // Stdout carries rows and nothing else, so a transcript can be piped
@@ -358,6 +548,7 @@ pub fn run(
         }
         if let Some(error) = &execution.error {
             write!(err, "{}", error.render_plain(true)).ok();
+            write_error_location(err, &sql, error, parameters.is_some());
         }
         writeln!(err, "{}", outcome_line(&execution)).ok();
 
@@ -380,6 +571,103 @@ pub fn run(
             Err(diagnostic) => {
                 writeln!(err, "{}", diagnostic.headline).ok();
             }
+        }
+    }
+}
+
+/// Collects one hidden answer per distinct named parameter in first-use order.
+fn prompt_parameters(
+    template: &crate::query::ParameterTemplate,
+    err: &mut impl std::io::Write,
+) -> Result<Option<crate::query::ParameterBindings>, crate::diagnostics::Diagnostic> {
+    if !crate::cli::prompt::can_ask() {
+        writeln!(
+            err,
+            "This statement has named parameters, but plain mode has no interactive terminal."
+        )
+        .ok();
+        writeln!(
+            err,
+            "Use `{} query --param-env NAME=VARIABLE` for automation, or run without --plain.",
+            crate::branding::BINARY_NAME
+        )
+        .ok();
+        return Ok(None);
+    }
+
+    let mut values = Vec::with_capacity(template.names().len());
+    for name in template.names() {
+        let question = format!("Value for :{name} (hidden literal text; empty is valid): ");
+        let Some(value) = crate::cli::prompt::read_hidden(&question, err)? else {
+            writeln!(err, "Cancelled. Nothing was sent.").ok();
+            return Ok(None);
+        };
+        values.push(SecretString::from(value));
+    }
+
+    let bindings = crate::query::ParameterBindings::from_secrets(template.names().to_vec(), values)
+        .map_err(|error| error.diagnostic("collecting named parameter values"))?;
+    bindings
+        .validate()
+        .map_err(|error| error.diagnostic("collecting named parameter values"))?;
+    Ok(Some(bindings))
+}
+
+/// Adds a line-oriented source excerpt to a plain diagnostic when PostgreSQL's
+/// position can be mapped honestly into the submitted SQL.
+fn write_error_location(
+    err: &mut impl std::io::Write,
+    sql: &str,
+    error: &crate::diagnostics::Diagnostic,
+    parameterized: bool,
+) {
+    if error.kind != crate::diagnostics::DiagnosticKind::Query {
+        return;
+    }
+    if parameterized && error.position.is_some() {
+        writeln!(
+            err,
+            "  Location: unavailable; the server position belongs to the expanded request after parameter binding."
+        )
+        .ok();
+        return;
+    }
+    let Some(position) = error.position else {
+        writeln!(
+            err,
+            "  Location: unavailable; PostgreSQL did not report an editor position."
+        )
+        .ok();
+        return;
+    };
+    let Some(statement_number) = error.statement_number.filter(|number| *number > 0) else {
+        writeln!(
+            err,
+            "  Location: unavailable; the failed statement number was not reported."
+        )
+        .ok();
+        return;
+    };
+    let Some(location) =
+        crate::query::error_location::locate(sql, None, statement_number, position)
+    else {
+        writeln!(
+            err,
+            "  Location: unavailable; server character {} is outside the submitted statement.",
+            position.character
+        )
+        .ok();
+        return;
+    };
+    writeln!(
+        err,
+        "  Location: statement {}, line {}, column {}",
+        location.statement_number, location.line, location.column
+    )
+    .ok();
+    if let Some(marker) = crate::query::error_location::render_marker(sql, &location) {
+        for line in marker.lines() {
+            writeln!(err, "  {line}").ok();
         }
     }
 }
@@ -423,6 +711,91 @@ fn connect_or_ask(
     // The password goes into one attempt and is dropped with it.
     let retry = target.with_password(secrecy::SecretString::from(password));
     runtime.block_on(crate::postgres::connect(&retry, timeout))
+}
+
+/// Prints a completion result without control sequences or colour.
+fn write_plain_completion(
+    err: &mut impl std::io::Write,
+    result: &crate::query::completion::CompletionResult,
+    catalog_ready: bool,
+) {
+    writeln!(
+        err,
+        "Completion for {}. Showing {} of {} matching candidates ({} available).",
+        plain_ascii(&result.scope.label()),
+        result.candidates.len(),
+        result.matching_count,
+        result.total_count
+    )
+    .ok();
+    if catalog_ready {
+        writeln!(err, "Candidates come from one local schema snapshot.").ok();
+    } else {
+        writeln!(
+            err,
+            "Only SQL keywords are available because the schema snapshot is unavailable."
+        )
+        .ok();
+    }
+    for (index, candidate) in result.candidates.iter().enumerate() {
+        writeln!(
+            err,
+            "{}  {}  {}",
+            index + 1,
+            plain_ascii(&candidate.label),
+            plain_ascii(&candidate.plain_detail())
+        )
+        .ok();
+    }
+    if result.candidates.is_empty() {
+        writeln!(err, "No candidates for this position.").ok();
+    } else {
+        writeln!(
+            err,
+            "Use \\use <number|exact-name> to insert one; Esc is not needed in plain mode."
+        )
+        .ok();
+    }
+}
+
+/// Finds a numbered or exact-name candidate from a printed result.
+fn choose_plain_completion<'a>(
+    result: &'a crate::query::completion::CompletionResult,
+    choice: &str,
+) -> Option<&'a crate::query::completion::Candidate> {
+    if let Ok(number) = choice.trim().parse::<usize>() {
+        return number
+            .checked_sub(1)
+            .and_then(|index| result.candidates.get(index));
+    }
+    let choice = choice.trim();
+    let choice = choice
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            choice
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(choice);
+    result
+        .candidates
+        .iter()
+        .find(|candidate| candidate.exact_name(choice))
+}
+
+/// Escapes non-ASCII completion text for a plain transcript.
+fn plain_ascii(value: &str) -> String {
+    let safe = crate::query::value::sanitize_for_display(value);
+    let mut result = String::with_capacity(safe.len());
+    for character in safe.chars() {
+        if character.is_ascii() {
+            result.push(character);
+        } else {
+            result.push_str(&format!("\\u{{{:04X}}}", character as u32));
+        }
+    }
+    result
 }
 
 /// One line describing what this session is and what protects it.
@@ -489,6 +862,17 @@ mod tests {
         let mut reader = Reader::default();
         assert_eq!(reader.feed("\\q"), Input::Command(Command::Quit));
         assert_eq!(reader.feed("\\?"), Input::Command(Command::Help));
+        assert_eq!(reader.feed("\\format"), Input::Command(Command::Format));
+        assert_eq!(
+            reader.feed("\\complete ord"),
+            Input::Command(Command::Complete {
+                prefix: Some("ord".into())
+            })
+        );
+        assert_eq!(
+            reader.feed("\\use 1"),
+            Input::Command(Command::Use("1".into()))
+        );
         assert_eq!(reader.feed("  \\help  "), Input::Command(Command::Help));
         assert_eq!(
             reader.feed("\\nonsense"),
@@ -503,6 +887,67 @@ mod tests {
             Input::Incomplete,
             "a backslash inside SQL must not be intercepted"
         );
+    }
+
+    #[test]
+    fn plain_completion_commands_keep_the_sql_buffer_and_replace_only_on_use() {
+        let mut reader = Reader::default();
+        assert_eq!(reader.feed("SELECT * FROM ord"), Input::Incomplete);
+        let before = reader.buffer().to_owned();
+        assert!(matches!(
+            reader.feed("\\complete"),
+            Input::Command(Command::Complete { prefix: None })
+        ));
+        assert_eq!(reader.buffer(), before);
+        let end = reader.completion_cursor();
+        let start = end - "ord".len();
+        assert!(reader.apply_completion(start..end, "\"orders\""));
+        assert_eq!(reader.buffer(), "SELECT * FROM \"orders\"\n");
+    }
+
+    #[test]
+    fn plain_format_command_keeps_pending_sql_and_replaces_only_on_success() {
+        let mut reader = Reader::default();
+        reader.feed("select o.id,o.total from orders o where o.total>0");
+        let before = reader.buffer().to_owned();
+
+        assert_eq!(reader.feed("\\format"), Input::Command(Command::Format));
+        assert_eq!(reader.buffer(), before);
+
+        let source = reader.buffer().to_owned();
+        let formatted = crate::query::format_sql(&source, reader.completion_cursor())
+            .expect("format should succeed");
+        reader.replace_buffer(formatted.text.clone());
+        assert_eq!(reader.buffer(), formatted.text);
+        assert!(reader.buffer().contains("\nfrom orders"));
+
+        assert!(matches!(reader.feed(";"), Input::Statement(sql) if sql.contains("\nfrom orders")));
+        assert!(!reader.is_continuing());
+    }
+
+    #[test]
+    fn plain_format_command_treats_comment_only_input_as_empty() {
+        let mut reader = Reader::default();
+        reader.feed("-- only a note");
+        assert_eq!(reader.feed("\\format"), Input::Command(Command::Format));
+        assert_eq!(reader.buffer(), "-- only a note\n");
+        assert!(crate::query::statements::split(reader.buffer()).is_empty());
+    }
+
+    #[test]
+    fn a_completion_command_inside_a_dollar_quoted_body_is_not_intercepted() {
+        let mut reader = Reader::default();
+        reader.feed("DO $$");
+        assert_eq!(reader.feed("\\complete"), Input::Incomplete);
+        assert!(reader.is_continuing());
+    }
+
+    #[test]
+    fn a_format_command_inside_a_dollar_quoted_body_is_not_intercepted() {
+        let mut reader = Reader::default();
+        reader.feed("DO $$");
+        assert_eq!(reader.feed("\\format"), Input::Incomplete);
+        assert!(reader.buffer().contains("\\format"));
     }
 
     #[test]
@@ -595,6 +1040,7 @@ mod tests {
             impact: crate::query::Impact::Destructive,
             typed: String::new(),
             required: "orders".into(),
+            source: None,
         };
         let question = confirmation_question(&pending);
         assert!(question.contains("destroys data"), "{question}");
@@ -619,9 +1065,77 @@ mod tests {
     }
 
     #[test]
+    fn plain_errors_keep_statement_location_and_a_safe_source_caret() {
+        let sql = "SELECT 1;\nSELECT café FROM orders WHERE id = 0;\n";
+        let diagnostic = crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Query,
+            "syntax error",
+            "running statement 2",
+        )
+        .in_statement(2)
+        .at_position(19);
+        let mut out = Vec::new();
+        write_error_location(&mut out, sql, &diagnostic, false);
+        let text = String::from_utf8(out).expect("plain UTF-8");
+        assert!(
+            text.contains("Location: statement 2, line 2, column 19"),
+            "{text}"
+        );
+        assert!(text.contains("2 | SELECT café FROM orders"), "{text}");
+        assert!(text.contains('^'), "{text}");
+        assert!(!text.contains('\x1b'), "terminal controls leaked: {text:?}");
+    }
+
+    #[test]
+    fn plain_errors_explain_when_a_server_position_is_unavailable() {
+        let diagnostic = crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Query,
+            "permission denied",
+            "running statement 1",
+        )
+        .in_statement(1);
+        let mut out = Vec::new();
+        write_error_location(&mut out, "SELECT 1;", &diagnostic, false);
+        let text = String::from_utf8(out).expect("plain UTF-8");
+        assert!(text.contains("Location: unavailable"), "{text}");
+        assert!(!text.contains('^'), "a missing position must not guess");
+    }
+
+    #[test]
+    fn plain_parameter_prompt_refuses_without_a_terminal_and_names_the_safe_route() {
+        let template = crate::query::discover_parameters("SELECT :secret").expect("template");
+        let mut out = Vec::new();
+        let result = prompt_parameters(&template, &mut out).expect("refusal is not an error");
+        assert!(result.is_none());
+        let text = String::from_utf8(out).expect("plain UTF-8");
+        assert!(text.contains("no interactive terminal"), "{text}");
+        assert!(text.contains("--param-env NAME=VARIABLE"), "{text}");
+        assert!(!text.contains("secret-value"));
+    }
+
+    #[test]
+    fn plain_parameterized_errors_do_not_draw_a_template_caret() {
+        let diagnostic = crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Query,
+            "syntax error",
+            "running statement 1",
+        )
+        .in_statement(1)
+        .at_position(17);
+        let mut out = Vec::new();
+        write_error_location(&mut out, "SELECT :value;", &diagnostic, true);
+        let text = String::from_utf8(out).expect("plain UTF-8");
+        assert!(text.contains("expanded request"), "{text}");
+        assert!(
+            !text.contains('^'),
+            "the expanded position cannot mark a template"
+        );
+    }
+
+    #[test]
     fn help_lists_every_command_that_exists() {
         let help = help_text();
-        for command in ["\\q", "\\?", "\\c"] {
+        for command in ["\\q", "\\?", "\\c", "\\format"] {
             assert!(help.contains(command), "{command} missing from help");
         }
         assert!(help.contains("Ctrl+C"), "cancelling must be discoverable");

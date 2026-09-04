@@ -7,10 +7,7 @@ consumer and no compile-time reason to split.
 Reconciled on **2026-09-04**. Retain this architecture through the roadmap;
 extend a module at its existing boundary before adding another service, crate
 or abstraction. [ADR-0012](decisions/0012-enterprise-authentication-without-libpq.md)
-keeps `tokio-postgres` and crate-wide unsafe denial. This describes the local
-integration target: completion, grid, clipboard, formatting, parameter/update,
-plan, picker and refresh extensions await W01 on main. Their contracts below
-are integration guidance, not a claim that those modules are present here.
+keeps `tokio-postgres` and crate-wide unsafe denial.
 
 ```mermaid
 flowchart TB

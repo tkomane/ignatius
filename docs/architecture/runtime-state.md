@@ -1,9 +1,7 @@
 # Runtime state
 
-Reconciled on **2026-09-04**. This describes the execution model and identity
-invariants inspected in the local Features 012-024 chain. Its profile-switch,
-parameter, plan, grid, update and refresh extensions await W01 integration into
-main; the baseline query/cancellation and terminal lifecycles already exist.
+Reconciled on **2026-09-04**. This describes the current execution model and
+the identity invariants agents must preserve while integrating Features 012-024.
 
 ## The loop
 
@@ -54,7 +52,7 @@ stateDiagram-v2
     Connecting --> Connected: session facts read back from the server
     Connecting --> Failed: diagnostic shown, exit code mapped
     Connected --> Lost: connection dropped
-    Connected --> Connecting: explicit quiet profile choice (local Feature 020; W01 pending)
+    Connected --> Connecting: explicit profile choice from eligible quiet state
     Lost --> [*]: no automatic reconnection in this release
     note right of Lost
         A statement in flight when this
