@@ -308,6 +308,11 @@ application-name = "ignatius"
 enabled = true
 max-entries = 1000
 
+[clipboard]
+# Sends explicitly copied values through the terminal using OSC 52. The
+# terminal, SSH path, or multiplexer may observe or retain the value.
+osc52 = false
+
 # Named connections. `ignatius connect @orders-prod` uses one.
 #
 # The classification is the point: written down once, the production write guard

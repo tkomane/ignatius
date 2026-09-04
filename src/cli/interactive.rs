@@ -24,6 +24,7 @@ use crate::ui::keymap::Keymap;
 use crate::ui::layout;
 use crate::ui::theme::Theme;
 use crossterm::event::{self, Event};
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -46,18 +47,30 @@ pub fn run(
     no_history: bool,
 ) -> Result<ExitCode, Diagnostic> {
     let loaded = crate::config::load(paths)?;
-    let (requested, args) =
-        crate::cli::resolve_target_and_profile(target, connection, &loaded.config)?;
-    let resolved = crate::connection::resolve(
-        requested,
-        &args,
-        &EnvSnapshot::from_process(),
-        &loaded.config.connection,
-    )?;
-    // The credential is obtained before the terminal is taken, so a provider
-    // that needs to say something - or to ask for a sign-in - does it on an
-    // ordinary terminal rather than underneath a full-screen application.
-    let resolved = crate::cli::authenticate_target(resolved, &loaded.config)?;
+    // When named profiles exist and no route was typed, let the first frame ask
+    // which database the person means. Explicit targets and flags retain the
+    // existing pre-terminal resolution and authentication path.
+    let choose_before_connecting = crate::cli::should_open_connection_picker(
+        target,
+        connection,
+        !loaded.config.profiles.is_empty(),
+    );
+    let resolved = if choose_before_connecting {
+        None
+    } else {
+        let (requested, args) =
+            crate::cli::resolve_target_and_profile(target, connection, &loaded.config)?;
+        let resolved = crate::connection::resolve(
+            requested,
+            &args,
+            &EnvSnapshot::from_process(),
+            &loaded.config.connection,
+        )?;
+        // The credential is obtained before the terminal is taken, so a
+        // provider that needs to say something - or to ask for a sign-in - does
+        // it on an ordinary terminal rather than underneath a full-screen app.
+        Some(crate::cli::authenticate_target(resolved, &loaded.config)?)
+    };
 
     // Key bindings are read before the terminal is taken, so a file that binds a
     // key this build cannot read is an ordinary configuration error on an
@@ -135,7 +148,7 @@ pub fn run(
 }
 
 async fn event_loop(
-    target: ConnectionTarget,
+    target: Option<ConnectionTarget>,
     config: Config,
     keymap: Keymap,
     presentation: &Presentation,
@@ -176,19 +189,32 @@ async fn event_loop(
         config.ui.reduced_motion,
     );
     let mut model = Model::new(config.query.max_buffered_rows);
-    model.connection = crate::app::ConnectionState::Connecting;
+    model.keymap_snapshot = keymap.snapshot();
+    let configured_providers = crate::cli::auth_providers(&config).unwrap_or_default();
+    let providers = crate::connection::cloud::registry(&configured_providers);
+    model.connection_profiles =
+        crate::app::connection_picker::summaries(&config.profiles, &providers);
+    model.connection = if target.is_some() {
+        crate::app::ConnectionState::Connecting
+    } else {
+        crate::app::ConnectionState::Disconnected
+    };
     model.editor.set_text(starter_query());
     model.completion.enabled = config.ui.completion;
+    model.clipboard_osc52 = config.clipboard.osc52;
     model.history_disabled = !config.history.enabled;
     model.history_paused = history.is_paused();
-    model.credential_provider.clone_from(&target.auth);
+    if let Some(target) = target.as_ref() {
+        model.credential_provider.clone_from(&target.auth);
+    }
     // Resolve only safe provider presentation metadata here. The credential was
     // already fetched before the terminal was taken; opening the in-app trust
     // surface must never execute a provider or refresh a token.
-    model.credential_presentation = target.auth.as_deref().and_then(|name| {
-        crate::cli::auth_providers(&config)
-            .ok()
-            .and_then(|providers| providers.get(name).map(|provider| provider.presentation()))
+    model.credential_presentation = target.as_ref().and_then(|target| {
+        target
+            .auth
+            .as_deref()
+            .and_then(|name| providers.get(name).map(|provider| provider.presentation()))
     });
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -203,7 +229,8 @@ async fn event_loop(
     spawn_ticker(tx.clone(), activity_rx);
 
     // The connection is opened as an effect like any other, so the interface is
-    // drawn and responsive while it happens.
+    // drawn and responsive while it happens. When the picker was shown, this
+    // branch deliberately does not start a connection before a choice.
     let session: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
     // The tree gets a connection of its own so a long statement cannot delay it.
@@ -213,15 +240,29 @@ async fn event_loop(
     let metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
     // Held so a retry with a password the user types can be made from exactly
-    // the target that was resolved, rather than resolved again.
-    let target = Arc::new(target);
-    spawn_connect(
-        tx.clone(),
-        Arc::clone(&session),
-        Arc::clone(&metadata),
-        Arc::clone(&target),
-        config.clone(),
-    );
+    // the target that was resolved, rather than resolved again. It remains
+    // outside Model because it may carry a password or cloud token.
+    let current_target: Arc<tokio::sync::RwLock<Option<Arc<ConnectionTarget>>>> =
+        Arc::new(tokio::sync::RwLock::new(None));
+    let connection_generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
+    if let Some(target) = target {
+        let target = Arc::new(target);
+        *current_target.write().await = Some(Arc::clone(&target));
+        spawn_connect(
+            tx.clone(),
+            Arc::clone(&session),
+            Arc::clone(&metadata),
+            target,
+            config.clone(),
+            Arc::clone(&connection_generation),
+            1,
+        );
+    } else {
+        crate::app::update(
+            &mut model,
+            Message::Action(crate::app::Action::OpenConnectionPicker),
+        );
+    }
 
     // Reading the history is a file read, not a query, so it happens once here
     // and the interface never waits on it.
@@ -249,28 +290,120 @@ async fn event_loop(
                     // The password goes straight into a connection attempt and
                     // is dropped with it. Nothing keeps it: not the model, not
                     // configuration, not the history.
+                    let Some(target) = current_target.read().await.clone() else {
+                        continue;
+                    };
                     let retry = Arc::new(
                         target.with_password(secrecy::SecretString::from(password.into_inner())),
                     );
+                    let generation =
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst);
                     spawn_connect(
                         tx.clone(),
                         Arc::clone(&session),
                         Arc::clone(&metadata),
                         retry,
                         config.clone(),
+                        Arc::clone(&connection_generation),
+                        generation,
                     );
+                }
+                Effect::ConnectProfile { profile } => {
+                    let generation =
+                        connection_generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    // Drop the old runtime routes before resolving the new one.
+                    // The generation and lock ordering keep a late old task
+                    // from replacing either slot after this point.
+                    *current_target.write().await = None;
+                    *session.write().await = None;
+                    *metadata.write().await = None;
+                    let selected_config = config.clone();
+                    let selected_tx = tx.clone();
+                    let selected_target = Arc::clone(&current_target);
+                    let selected_session = Arc::clone(&session);
+                    let selected_metadata = Arc::clone(&metadata);
+                    let selected_generation = Arc::clone(&connection_generation);
+                    tokio::spawn(async move {
+                        let result =
+                            prepare_profile_target(profile.as_deref(), &selected_config).await;
+                        if selected_generation.load(std::sync::atomic::Ordering::SeqCst)
+                            != generation
+                        {
+                            return;
+                        }
+                        match result {
+                            Ok(target) => {
+                                let target = Arc::new(target);
+                                *selected_target.write().await = Some(Arc::clone(&target));
+                                if selected_generation.load(std::sync::atomic::Ordering::SeqCst)
+                                    != generation
+                                {
+                                    return;
+                                }
+                                spawn_connect(
+                                    selected_tx,
+                                    selected_session,
+                                    selected_metadata,
+                                    target,
+                                    selected_config,
+                                    selected_generation,
+                                    generation,
+                                );
+                            }
+                            Err(diagnostic) => {
+                                let _ = selected_tx
+                                    .send(Message::ConnectionFailed(Box::new(diagnostic)));
+                            }
+                        }
+                    });
                 }
                 Effect::Execute { job, sql } => {
                     spawn_execute(tx.clone(), Arc::clone(&session), job, sql, model.row_cap);
+                }
+                Effect::ExecuteParameterized {
+                    job,
+                    sql,
+                    parameters,
+                } => {
+                    spawn_execute_parameterized(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        job,
+                        sql,
+                        parameters,
+                        model.row_cap,
+                    );
+                }
+                Effect::Explain { job, sql, analyze } => {
+                    spawn_explain(tx.clone(), Arc::clone(&session), job, sql, analyze);
+                }
+                Effect::CopyValue { payload } => {
+                    let message = copy_to_terminal(terminal.backend_mut(), &payload);
+                    let _ = tx.send(message);
                 }
                 Effect::Cancel { job } => {
                     spawn_cancel(tx.clone(), Arc::clone(&session), job);
                 }
                 Effect::LoadSchemas => {
-                    spawn_load_schemas(tx.clone(), reader(&session, &metadata));
+                    let generation =
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst);
+                    spawn_load_schemas(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        Arc::clone(&connection_generation),
+                        generation,
+                    );
                 }
                 Effect::LoadCompletionCatalog { request } => {
-                    spawn_load_completion_catalog(tx.clone(), reader(&session, &metadata), request);
+                    let generation =
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst);
+                    spawn_load_completion_catalog(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        generation,
+                    );
                 }
                 Effect::LoadMetadata {
                     request,
@@ -283,6 +416,18 @@ async fn event_loop(
                         request,
                         path,
                         query,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadUpdateTarget { request, relation } => {
+                    spawn_load_update_target(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        relation,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
                 Effect::LoadDefinition { request, object } => {
@@ -291,6 +436,8 @@ async fn event_loop(
                         reader(&session, &metadata),
                         request,
                         *object,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
                 Effect::LoadDependencies { request, object } => {
@@ -299,11 +446,13 @@ async fn event_loop(
                         reader(&session, &metadata),
                         request,
                         *object,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
-                Effect::ExportRows { path } => {
+                Effect::ExportRows { path, format } => {
                     let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
-                        &model, &path,
+                        &model, &path, format,
                     ))));
                 }
                 Effect::ListQueries => {
@@ -358,6 +507,31 @@ async fn event_loop(
     }
 
     Ok(ExitCode::Success)
+}
+
+/// Performs the one-way clipboard write at the already-held terminal boundary.
+///
+/// The reducer has already made the opt-in, confirmation, and stale-candidate
+/// decisions. This helper only writes and flushes the safe OSC 52 sequence, and
+/// reports metadata or an I/O error without carrying the result value further.
+fn copy_to_terminal<W: Write>(
+    writer: &mut W,
+    payload: &crate::clipboard::ClipboardPayload,
+) -> Message {
+    let bytes = payload.len();
+    let characters = payload.characters();
+    match crate::clipboard::write_osc52(writer, payload) {
+        Ok(()) => Message::ClipboardSent { bytes, characters },
+        Err(error) => Message::ClipboardFailed(Box::new(
+            Diagnostic::new(
+                DiagnosticKind::Internal,
+                "could not send the selected value through the terminal",
+                "copying a result value through the terminal",
+            )
+            .likely_cause(error.to_string())
+            .next_action("check terminal output, or use an explicit file export"),
+        )),
+    }
 }
 
 /// Offers a statement to the history and reports what was kept.
@@ -502,24 +676,71 @@ fn spawn_connect(
     metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     target: Arc<ConnectionTarget>,
     config: Config,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request: u64,
 ) {
     tokio::spawn(async move {
         let timeout = Duration::from_millis(config.query.statement_timeout_ms);
         match session::connect(&target, timeout).await {
             Ok(opened) => {
                 let info = opened.info().clone();
-                *slot.write().await = Some(Arc::new(opened));
+                let mut held = slot.write().await;
+                if !connection_generation_is_current(&generation, request) {
+                    return;
+                }
+                *held = Some(Arc::new(opened));
+                drop(held);
                 let _ = tx.send(Message::Connected(Box::new(info)));
                 // The tree is populated as soon as there is something to read it
                 // from, so the sidebar is useful the moment it appears.
+                if !connection_generation_is_current(&generation, request) {
+                    return;
+                }
                 let _ = tx.send(Message::Action(crate::app::Action::ReloadObjects));
-                spawn_metadata_connect(tx, metadata, target, timeout);
+                spawn_metadata_connect(tx, metadata, target, timeout, generation, request);
             }
             Err(diagnostic) => {
+                if !connection_generation_is_current(&generation, request) {
+                    return;
+                }
                 let _ = tx.send(Message::ConnectionFailed(Box::new(diagnostic)));
             }
         }
     });
+}
+
+/// Resolves one picker choice through the same profile and credential routes as
+/// the command line. This runs in an async task because a cloud provider may
+/// need to start a process or wait for its configured timeout.
+async fn prepare_profile_target(
+    profile: Option<&str>,
+    config: &Config,
+) -> Result<ConnectionTarget, Diagnostic> {
+    let connection = ConnectionOptions {
+        profile: profile.map(str::to_owned),
+        ..ConnectionOptions::default()
+    };
+    let (requested, args) = crate::cli::resolve_target_and_profile(None, &connection, config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &args,
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )?;
+    if target.auth.is_none() {
+        return Ok(target);
+    }
+    let providers = crate::cli::auth_providers(config)?;
+    crate::connection::cloud::authenticate(target, &providers)
+        .await
+        .map_err(|error| *error)
+}
+
+fn connection_generation_is_current(
+    generation: &std::sync::atomic::AtomicU64,
+    request: u64,
+) -> bool {
+    generation.load(std::sync::atomic::Ordering::SeqCst) == request
 }
 
 /// Opens the connection the object tree reads on.
@@ -542,7 +763,12 @@ fn spawn_metadata_connect(
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     target: Arc<ConnectionTarget>,
     timeout: Duration,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request: u64,
 ) {
+    if !connection_generation_is_current(&generation, request) {
+        return;
+    }
     let _ = tx.send(Message::MetadataConnection(
         crate::app::model::MetadataLink::Opening,
     ));
@@ -550,11 +776,18 @@ fn spawn_metadata_connect(
         let target = target.for_object_tree();
         let link = match session::connect(&target, timeout).await {
             Ok(opened) => {
-                *slot.write().await = Some(Arc::new(opened));
+                let mut held = slot.write().await;
+                if !connection_generation_is_current(&generation, request) {
+                    return;
+                }
+                *held = Some(Arc::new(opened));
                 crate::app::model::MetadataLink::Dedicated
             }
             Err(diagnostic) => crate::app::model::MetadataLink::Unavailable(diagnostic.headline),
         };
+        if !connection_generation_is_current(&generation, request) {
+            return;
+        }
         let _ = tx.send(Message::MetadataConnection(link));
     });
 }
@@ -575,6 +808,84 @@ fn spawn_execute(
             let _ = tx.send(Message::ConnectionLost);
         }
         let _ = tx.send(Message::ExecutionFinished(Box::new(execution)));
+    });
+}
+
+fn spawn_execute_parameterized(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    job: JobId,
+    sql: String,
+    parameters: crate::query::ParameterBindings,
+    row_cap: usize,
+) {
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            return;
+        };
+        let execution = session
+            .execute_with_parameters(&sql, &parameters, row_cap, job)
+            .await;
+        if execution.status == ExecutionStatus::ConnectionLost {
+            let _ = tx.send(Message::ConnectionLost);
+        }
+        let _ = tx.send(Message::ExecutionFinished(Box::new(execution)));
+    });
+}
+
+fn spawn_explain(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    job: JobId,
+    sql: String,
+    analyzed: bool,
+) {
+    tokio::spawn(async move {
+        let Some(session) = slot.read().await.clone() else {
+            let _ = tx.send(Message::PlanFinished(Box::new(crate::app::PlanExecution {
+                job,
+                analyzed,
+                elapsed: Duration::ZERO,
+                transaction: crate::query::result::TransactionState::Unknown,
+                result: Err(Diagnostic::new(
+                    DiagnosticKind::Connection,
+                    "the connection was unavailable while reading the query plan",
+                    "reading a structured query plan",
+                )
+                .next_action("reconnect before asking for a plan")),
+                connection_lost: true,
+            })));
+            return;
+        };
+        let started = std::time::Instant::now();
+        let result = match session.explain(&sql, analyzed).await {
+            Ok(json) => crate::query::PlanDocument::parse(&json, analyzed).map_err(|error| {
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "the server returned a plan the client could not read",
+                    "reading a structured query plan",
+                )
+                .likely_cause(error.to_string())
+                .next_action(
+                    "run the statement normally, or inspect the plan with PostgreSQL tools",
+                )
+            }),
+            Err(error) => Err(error),
+        };
+        let connection_lost = session.is_closed();
+        let transaction = if connection_lost {
+            crate::query::result::TransactionState::Unknown
+        } else {
+            session.transaction_state().await
+        };
+        let _ = tx.send(Message::PlanFinished(Box::new(crate::app::PlanExecution {
+            job,
+            analyzed,
+            elapsed: started.elapsed(),
+            transaction,
+            result,
+            connection_lost,
+        })));
     });
 }
 
@@ -602,12 +913,17 @@ fn spawn_cancel(
 fn spawn_load_schemas(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
 ) {
     tokio::spawn(async move {
         let Some(session) = slot.read().await.clone() else {
             return;
         };
         let result = session.schemas().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
         let _ = tx.send(Message::SchemasLoaded(Box::new(result)));
     });
 }
@@ -616,6 +932,8 @@ fn spawn_load_completion_catalog(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
 ) {
     tokio::spawn(async move {
         let Some(session) = slot.read().await.clone() else {
@@ -625,6 +943,9 @@ fn spawn_load_completion_catalog(
         let loaded_at = chrono::Local::now()
             .format("%Y-%m-%d %H:%M:%S %:z")
             .to_string();
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
         let _ = tx.send(Message::CompletionLoaded {
             request,
             loaded_at,
@@ -639,6 +960,8 @@ fn spawn_load_metadata(
     request: crate::app::tree::RequestId,
     path: crate::app::tree::NodePath,
     query: crate::app::tree::MetadataQuery,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
 ) {
     use crate::app::tree::{MetadataPayload, MetadataQuery};
     tokio::spawn(async move {
@@ -676,10 +999,46 @@ fn spawn_load_metadata(
                     })
             }
         };
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
         let _ = tx.send(Message::MetadataLoaded {
             request,
             path,
             payload: Box::new(payload),
+        });
+    });
+}
+
+/// Reads the live relation facts for a pending result-cell update.
+fn spawn_load_update_target(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    request: u64,
+    relation: crate::query::RelationReference,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let result = match slot.read().await.clone() {
+            Some(session) => {
+                session
+                    .update_relation(relation.schema.as_deref(), &relation.relation)
+                    .await
+            }
+            None => Err(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "the connection was unavailable while reading update target metadata",
+                "preparing a result-cell update",
+            )
+            .next_action("reconnect before preparing a cell update")),
+        };
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(Message::UpdateTargetLoaded {
+            request,
+            result: Box::new(result),
         });
     });
 }
@@ -706,12 +1065,17 @@ fn spawn_load_definition(
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     request: crate::app::tree::RequestId,
     object: crate::postgres::metadata::ObjectSummary,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
 ) {
     tokio::spawn(async move {
         let Some(session) = slot.read().await.clone() else {
             return;
         };
         let result = session.definition(&object).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
         let _ = tx.send(Message::DefinitionLoaded {
             request,
             result: Box::new(result),
@@ -719,19 +1083,22 @@ fn spawn_load_definition(
     });
 }
 
-/// Writes the rows on screen to a file.
+/// Writes the selected shape of the rows on screen to a file.
 ///
 /// What is written is what the pane shows: the rows the result kept, narrowed by
 /// the filter if one is on. That is smaller than what the query returned
-/// whenever the result was truncated, which is why the prompt says so before
-/// this runs and why the message afterwards says how many rows there were.
+/// whenever the result was truncated, which is why the format palette and path
+/// prompt say so before this runs and why the message afterwards says how many
+/// rows there were.
 ///
 /// The file is written through the same export machinery a scripted export
 /// uses, so it lands complete or not at all, and never replaces a file that is
 /// already there.
-fn export_visible_rows(model: &Model, path: &str) -> Result<String, Diagnostic> {
-    use std::io::Write as _;
-
+fn export_visible_rows(
+    model: &Model,
+    path: &str,
+    format: crate::app::model::ExportFormat,
+) -> Result<String, Diagnostic> {
     let Some(set) = model.visible_result() else {
         return Err(Diagnostic::new(
             DiagnosticKind::Usage,
@@ -741,6 +1108,12 @@ fn export_visible_rows(model: &Model, path: &str) -> Result<String, Diagnostic> 
         .next_action("run a statement that returns rows first"));
     };
     let rows = model.filtered_rows();
+    let mut visible = set.clone();
+    visible.rows = rows
+        .iter()
+        .filter_map(|index| set.rows.get(*index).cloned())
+        .collect();
+    let visible_row_count = visible.rows.len();
 
     let destination = expand_home(path);
     // The advice is written for the reader who will see it: someone in the
@@ -750,22 +1123,33 @@ fn export_visible_rows(model: &Model, path: &str) -> Result<String, Diagnostic> 
         false,
         "choose another name, or move the file that is there",
     )?;
-    let header: Vec<String> = set
-        .columns
-        .iter()
-        .map(|name| crate::cli::output::encode_field(name, ','))
-        .collect();
-    writeln!(export.writer(), "{}", header.join(",")).map_err(|err| write_failure(path, &err))?;
-    for index in &rows {
-        let Some(row) = set.rows.get(*index) else {
-            continue;
-        };
-        let values: Vec<String> = row
-            .iter()
-            .map(|cell| crate::cli::output::encode_field(&cell.export(""), ','))
-            .collect();
-        writeln!(export.writer(), "{}", values.join(","))
-            .map_err(|err| write_failure(path, &err))?;
+    let execution = crate::query::result::Execution {
+        job: crate::query::result::JobId(0),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some(visible),
+            rows_affected: None,
+            elapsed: Duration::ZERO,
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: Duration::ZERO,
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+    };
+    let options = crate::cli::output::OutputOptions {
+        format: match format {
+            crate::app::model::ExportFormat::Csv => crate::cli::output::Format::Csv,
+            crate::app::model::ExportFormat::Tsv => crate::cli::output::Format::Tsv,
+            crate::app::model::ExportFormat::Json => crate::cli::output::Format::Json,
+            crate::app::model::ExportFormat::Ndjson => crate::cli::output::Format::Ndjson,
+            crate::app::model::ExportFormat::Markdown => crate::cli::output::Format::Markdown,
+        },
+        unicode: false,
+        ..crate::cli::output::OutputOptions::default()
+    };
+    crate::cli::output::write_execution(export.writer(), &execution, &options)
+        .map_err(|err| write_failure(path, &err))?;
+    for _ in 0..visible_row_count {
         export.count_row();
     }
     let finished = export.finish()?;
@@ -809,12 +1193,17 @@ fn spawn_load_dependencies(
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     request: crate::app::tree::RequestId,
     object: crate::postgres::metadata::ObjectSummary,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
 ) {
     tokio::spawn(async move {
         let Some(session) = slot.read().await.clone() else {
             return;
         };
         let result = session.dependencies(&object).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
         let _ = tx.send(Message::DependenciesLoaded {
             request,
             result: Box::new(result),
@@ -840,9 +1229,23 @@ pub async fn execute_once(
     sql: String,
     row_cap: usize,
 ) -> Result<Execution, Diagnostic> {
+    execute_once_with_parameters(target, config, sql, None, row_cap).await
+}
+
+/// Connects, binds any supplied named values, runs SQL once, and closes.
+pub async fn execute_once_with_parameters(
+    target: ConnectionTarget,
+    config: &Config,
+    sql: String,
+    parameters: Option<crate::query::ParameterBindings>,
+    row_cap: usize,
+) -> Result<Execution, Diagnostic> {
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
     let session = session::connect(&target, timeout).await?;
-    Ok(execute_cancellable(&session, &sql, row_cap, JobId(1)).await)
+    Ok(
+        execute_cancellable_with_parameters(&session, &sql, parameters.as_ref(), row_cap, JobId(1))
+            .await,
+    )
 }
 
 /// Runs a statement, letting Ctrl+C ask the server to cancel it.
@@ -855,8 +1258,28 @@ pub async fn execute_cancellable(
     row_cap: usize,
     job: JobId,
 ) -> Execution {
+    execute_cancellable_with_parameters(session, sql, None, row_cap, job).await
+}
+
+/// Runs SQL with optional named values, letting Ctrl+C ask the server to cancel.
+pub async fn execute_cancellable_with_parameters(
+    session: &Session,
+    sql: &str,
+    parameters: Option<&crate::query::ParameterBindings>,
+    row_cap: usize,
+    job: JobId,
+) -> Execution {
     let cancel = session.cancel_handle();
-    let execution = session.execute(sql, row_cap, job);
+    let execution = async {
+        match parameters {
+            Some(parameters) => {
+                session
+                    .execute_with_parameters(sql, parameters, row_cap, job)
+                    .await
+            }
+            None => session.execute(sql, row_cap, job).await,
+        }
+    };
     tokio::pin!(execution);
 
     tokio::select! {
@@ -894,6 +1317,19 @@ pub async fn export_once(
     target: ConnectionTarget,
     config: &Config,
     sql: String,
+    export: crate::query::export::Export,
+    writer: crate::cli::output::StreamWriter,
+) -> Result<ExportOutcome, Diagnostic> {
+    export_once_with_parameters(target, config, sql, None, export, writer).await
+}
+
+/// Connects, binds any supplied named values, streams one statement into a file,
+/// and closes.
+pub async fn export_once_with_parameters(
+    target: ConnectionTarget,
+    config: &Config,
+    sql: String,
+    parameters: Option<crate::query::ParameterBindings>,
     mut export: crate::query::export::Export,
     mut writer: crate::cli::output::StreamWriter,
 ) -> Result<ExportOutcome, Diagnostic> {
@@ -919,7 +1355,16 @@ pub async fn export_once(
             }
         };
 
-        let stream = session.stream(&sql, &mut sink);
+        let stream = async {
+            match parameters.as_ref() {
+                Some(parameters) => {
+                    session
+                        .stream_with_parameters(&sql, parameters, &mut sink)
+                        .await
+                }
+                None => session.stream(&sql, &mut sink).await,
+            }
+        };
         tokio::pin!(stream);
         tokio::select! {
             result = &mut stream => result,
@@ -1145,6 +1590,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_connection_switch_rejects_late_work_from_the_old_generation() {
+        let generation = std::sync::atomic::AtomicU64::new(7);
+        assert!(connection_generation_is_current(&generation, 7));
+
+        generation.store(8, std::sync::atomic::Ordering::SeqCst);
+
+        assert!(!connection_generation_is_current(&generation, 7));
+        assert!(connection_generation_is_current(&generation, 8));
+    }
+
+    #[test]
     fn the_starter_buffer_is_useful_and_names_the_run_key() {
         let text = starter_query();
         assert!(text.contains("Ctrl+R"), "{text}");
@@ -1156,6 +1612,78 @@ mod tests {
         assert!(
             crate::query::split(text).len() == 1,
             "one statement, not a surprise batch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_picker_profile_is_resolved_by_the_existing_connection_boundary() {
+        let config: Config = toml::from_str(
+            "[profiles.orders-dev]\n\
+             host = \"127.0.0.1\"\n\
+             port = 55432\n\
+             dbname = \"ignatius_demo\"\n\
+             user = \"ignatius_test\"\n\
+             sslmode = \"disable\"\n\
+             environment = \"development\"\n\
+             read-only = true\n",
+        )
+        .expect("profile config");
+
+        let target = prepare_profile_target(Some("orders-dev"), &config)
+            .await
+            .expect("resolve without opening a database");
+        assert_eq!(
+            target.safe_display(),
+            "ignatius_test@127.0.0.1:55432/ignatius_demo"
+        );
+        assert_eq!(target.sslmode, crate::connection::SslMode::Disable);
+        assert_eq!(
+            target.environment,
+            crate::connection::Environment::Development
+        );
+        assert!(target.read_only);
+        assert!(target.password.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_picker_unknown_profile_refuses_without_falling_back_to_defaults() {
+        let config: Config = toml::from_str("[profiles.orders-dev]\nhost = \"127.0.0.1\"\n")
+            .expect("profile config");
+
+        let error = prepare_profile_target(Some("orders-prod"), &config)
+            .await
+            .expect_err("unknown selection must not silently use defaults");
+        assert_eq!(error.kind, DiagnosticKind::Config);
+        assert!(
+            error
+                .likely_cause
+                .as_deref()
+                .is_some_and(|cause| cause.contains("orders-dev")),
+            "known profiles should be named: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_picker_cloud_route_keeps_the_existing_encryption_gate_before_provider_work() {
+        let config: Config = toml::from_str(
+            "[profiles.orders-local]\n\
+             host = \"127.0.0.1\"\n\
+             dbname = \"orders\"\n\
+             sslmode = \"disable\"\n\
+             auth = \"entra\"\n",
+        )
+        .expect("profile config");
+
+        let error = prepare_profile_target(Some("orders-local"), &config)
+            .await
+            .expect_err("cloud credentials may not cross an unencrypted route");
+        assert!(
+            error.headline.contains("encrypted") || error.headline.contains("TLS"),
+            "the existing encryption gate should explain the refusal: {error:?}"
+        );
+        assert!(
+            !format!("{error:?}").contains("az account"),
+            "the provider command is not exposed by the refusal: {error:?}"
         );
     }
 
@@ -1194,7 +1722,12 @@ mod tests {
         let path = dir.path().join("rows.csv");
         let model = model_with_rows();
 
-        let message = export_visible_rows(&model, path.to_str().expect("utf-8")).expect("writes");
+        let message = export_visible_rows(
+            &model,
+            path.to_str().expect("utf-8"),
+            crate::app::model::ExportFormat::Csv,
+        )
+        .expect("writes");
         assert!(message.contains("2 row(s)"), "{message}");
 
         let written = std::fs::read_to_string(&path).expect("read");
@@ -1207,11 +1740,48 @@ mod tests {
         let mut filtered = model_with_rows();
         filtered.result_filter = "beta".into();
         let second = dir.path().join("filtered.csv");
-        export_visible_rows(&filtered, second.to_str().expect("utf-8")).expect("writes");
+        export_visible_rows(
+            &filtered,
+            second.to_str().expect("utf-8"),
+            crate::app::model::ExportFormat::Csv,
+        )
+        .expect("writes");
         assert_eq!(
             std::fs::read_to_string(&second).expect("read"),
             "name,note\nbeta,\n"
         );
+    }
+
+    #[test]
+    fn json_export_keeps_the_server_count_and_truncation_boundary() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("filtered.json");
+        let mut model = model_with_rows();
+        let set = model
+            .last_execution
+            .as_mut()
+            .expect("execution")
+            .statements
+            .first_mut()
+            .and_then(|statement| statement.result_set.as_mut())
+            .expect("result");
+        set.cap = 1;
+        set.rows_seen = 3;
+        model.result_filter = "beta".into();
+
+        export_visible_rows(
+            &model,
+            path.to_str().expect("utf-8"),
+            crate::app::model::ExportFormat::Json,
+        )
+        .expect("writes");
+
+        let document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read"))
+                .expect("valid json");
+        assert_eq!(document[0]["rows"].as_array().expect("rows").len(), 1);
+        assert_eq!(document[0]["rows_seen"], 3);
+        assert_eq!(document[0]["truncated"], true);
     }
 
     #[test]
@@ -1220,8 +1790,12 @@ mod tests {
         let path = dir.path().join("rows.csv");
         std::fs::write(&path, "precious").expect("write");
 
-        let error = export_visible_rows(&model_with_rows(), path.to_str().expect("utf-8"))
-            .expect_err("must refuse");
+        let error = export_visible_rows(
+            &model_with_rows(),
+            path.to_str().expect("utf-8"),
+            crate::app::model::ExportFormat::Csv,
+        )
+        .expect_err("must refuse");
         let action = error.next_action.expect("an action");
         assert!(
             !action.contains("--force"),
@@ -1257,7 +1831,12 @@ mod tests {
 
     #[test]
     fn there_is_nothing_to_write_when_no_query_has_run() {
-        let error = export_visible_rows(&Model::new(100), "rows.csv").expect_err("must refuse");
+        let error = export_visible_rows(
+            &Model::new(100),
+            "rows.csv",
+            crate::app::model::ExportFormat::Csv,
+        )
+        .expect_err("must refuse");
         assert!(error.next_action.is_some());
         assert!(!std::path::Path::new("rows.csv").exists());
     }
@@ -1311,5 +1890,72 @@ mod tests {
             target_check.detail.contains("no identity check"),
             "the report must not let require pass for verification: {target_check:?}"
         );
+    }
+
+    #[test]
+    fn clipboard_runtime_writes_one_sequence_and_flushes_before_reporting_sent() {
+        let payload = crate::clipboard::ClipboardPayload::try_new("hé".to_owned()).expect("fits");
+        let expected = crate::clipboard::osc52_sequence(&payload);
+        let message = {
+            let mut writer = RecordingWriter::default();
+            let message = copy_to_terminal(&mut writer, &payload);
+            assert_eq!(writer.writes, 1);
+            assert_eq!(writer.flushes, 1);
+            assert_eq!(writer.output, expected.as_bytes());
+            message
+        };
+        assert_eq!(
+            message,
+            Message::ClipboardSent {
+                bytes: 3,
+                characters: 2
+            }
+        );
+    }
+
+    #[test]
+    fn clipboard_runtime_failure_is_safe_and_actionable() {
+        let payload =
+            crate::clipboard::ClipboardPayload::try_new("sensitive".to_owned()).expect("fits");
+        let message = copy_to_terminal(&mut FailingWriter, &payload);
+        let Message::ClipboardFailed(diagnostic) = message else {
+            panic!("expected a safe failure message");
+        };
+        assert!(diagnostic.next_action.as_deref().is_some_and(|action| {
+            action.contains("terminal output") && action.contains("export")
+        }));
+        assert!(!format!("{diagnostic:?}").contains("sensitive"));
+    }
+
+    #[derive(Default)]
+    struct RecordingWriter {
+        output: Vec<u8>,
+        writes: usize,
+        flushes: usize,
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.writes += 1;
+            self.output.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("synthetic terminal failure"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("synthetic terminal flush failure"))
+        }
     }
 }

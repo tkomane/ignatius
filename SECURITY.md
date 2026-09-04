@@ -2,8 +2,11 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue. Use GitHub's private vulnerability reporting on this
-repository, which delivers the report only to the maintainers.
+Do not open a public issue. The intended channel is GitHub's private vulnerability
+reporting. Its availability is not yet verified for this private repository;
+confirming an accessible private route is a release prerequisite in
+[W13](docs/product/agent-delivery-plan.md). Until then, share details only through
+an already established private maintainer channel.
 
 Include what you did, what happened, what you expected, and the version from
 `ignatius version --verbose`. Please do not include real credentials or real data
@@ -26,8 +29,11 @@ fix is warranted, you will be credited unless you prefer otherwise.
   hostile value cannot emit terminal control sequences.
 - Configuration is written atomically with owner-only permissions where the
   platform enforces them, and contains no secret values.
-- Nothing leaves the machine except the database connection. There is no
-  telemetry and no update check.
+- Ignatius has no telemetry, update check or query-upload service. A selected
+  cloud credential provider runs its own authentication tool, which may contact
+  the cloud. Confirmed, opt-in OSC 52 can send one value through the terminal,
+  SSH or multiplexer path. Those boundaries are documented in
+  [the runtime context](docs/architecture/context.md).
 
 ## What it cannot protect
 

@@ -14,9 +14,11 @@
 
 use ignatius::config::Config;
 use ignatius::connection::{ConnectionArgs, EnvSnapshot, SslMode, resolve};
-use ignatius::postgres::{TlsState, session};
+use ignatius::postgres::{StreamEvent, TlsState, session};
+use ignatius::query::ParameterBindings;
 use ignatius::query::result::{ExecutionStatus, JobId};
 use ignatius::query::value::Cell;
+use secrecy::SecretString;
 use std::time::{Duration, Instant};
 
 /// Reads the target from the environment, or skips the test.
@@ -91,6 +93,377 @@ fn select_one_returns_one_row_with_the_expected_value() {
 }
 
 #[test]
+fn parameterized_execute_and_stream_preserve_literal_text_and_repeated_values() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let value = "quote ' slash \\\\ newline\n unicode ✓ ; --";
+    let bindings = ParameterBindings::from_secrets(
+        vec!["value".into(), "empty".into()],
+        vec![
+            SecretString::from(value.to_owned()),
+            SecretString::from(String::new()),
+        ],
+    )
+    .expect("bindings");
+
+    let execution = fx.block_on(fx.session.execute_with_parameters(
+        "SELECT :value AS first, :value AS second, :empty AS empty",
+        &bindings,
+        100,
+        JobId(300),
+    ));
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "parameterized query failed: {:?}",
+        execution.error
+    );
+    let set = execution.statements[0].result_set.as_ref().expect("rows");
+    assert_eq!(set.rows[0][0], Cell::Text(value.into()));
+    assert_eq!(set.rows[0][1], Cell::Text(value.into()));
+    assert_eq!(set.rows[0][2], Cell::Text(String::new()));
+
+    let stream_bindings = ParameterBindings::from_secrets(
+        vec!["value".into()],
+        vec![SecretString::from(value.to_owned())],
+    )
+    .expect("stream bindings");
+    let mut events = Vec::new();
+    let rows = fx.block_on(fx.session.stream_with_parameters(
+        "SELECT :value AS value",
+        &stream_bindings,
+        &mut |event| {
+            events.push(event);
+            Ok(())
+        },
+    ));
+    assert_eq!(rows.expect("stream succeeds"), 1);
+    assert!(matches!(events.first(), Some(StreamEvent::Columns(columns)) if columns == &["value"]));
+    assert!(
+        matches!(events.get(1), Some(StreamEvent::Row(row)) if row == &vec![Cell::Text(value.into())])
+    );
+}
+
+#[test]
+fn parameterized_nul_is_refused_before_the_statement_is_sent() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let bindings = ParameterBindings::from_secrets(
+        vec!["value".into()],
+        vec![SecretString::from("safe-marker\0never-log".to_owned())],
+    )
+    .expect("bindings");
+    let execution = fx.block_on(fx.session.execute_with_parameters(
+        "SELECT :value",
+        &bindings,
+        100,
+        JobId(301),
+    ));
+    assert_eq!(execution.status, ExecutionStatus::Failed);
+    let error = execution.error.expect("binding diagnostic");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Usage);
+    assert!(error.headline.contains(":value"));
+    assert!(!error.headline.contains("never-log"));
+}
+
+#[test]
+fn a_result_cell_plan_updates_the_selected_primary_key_row_only_when_executed() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE cell_update_probe (id integer PRIMARY KEY, note text); \
+         INSERT INTO cell_update_probe VALUES (1, 'before'); \
+         SET search_path TO pg_temp",
+        100,
+        JobId(303),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = "SELECT id, note FROM cell_update_probe";
+    let selected = fx.block_on(fx.session.execute(source_sql, 10, JobId(304)));
+    assert_eq!(selected.status, ExecutionStatus::Succeeded, "{selected:?}");
+    let set = selected.statements[0]
+        .result_set
+        .as_ref()
+        .expect("source rows");
+    let source =
+        ignatius::query::parse_update_source(source_sql, &set.columns, 1).expect("direct source");
+    let relation = fx
+        .block_on(fx.session.update_relation(None, "cell_update_probe"))
+        .expect("search-path relation metadata");
+    assert_eq!(
+        relation.kind,
+        ignatius::postgres::metadata::ObjectKind::Table
+    );
+    assert!(relation.readable);
+    assert!(relation.writable);
+    assert_eq!(relation.columns[0].name, "id");
+    assert!(relation.columns[0].primary_key);
+
+    let columns = relation
+        .columns
+        .iter()
+        .map(|column| ignatius::query::UpdateColumn {
+            name: column.name.clone(),
+            primary_key: column.primary_key,
+        })
+        .collect::<Vec<_>>();
+    let plan = ignatius::query::plan_update(
+        &source,
+        &relation.schema,
+        &relation.relation,
+        &set.columns,
+        &set.rows[0],
+        &columns,
+        "after",
+    )
+    .expect("safe update plan");
+    assert!(plan.sql_template.contains(":__ignatius_new_value"));
+    assert!(
+        plan.bound_sql()
+            .expect("review statement")
+            .contains("after")
+    );
+
+    let before = fx.block_on(fx.session.execute(
+        "SELECT note FROM cell_update_probe WHERE id = 1",
+        10,
+        JobId(305),
+    ));
+    assert_eq!(
+        before.statements[0]
+            .result_set
+            .as_ref()
+            .expect("before row")
+            .rows[0][0],
+        Cell::Text("before".into())
+    );
+
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(306),
+    ));
+    assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
+    assert_eq!(applied.statements[0].rows_affected, Some(1));
+
+    let after = fx.block_on(fx.session.execute(
+        "SELECT note FROM cell_update_probe WHERE id = 1",
+        10,
+        JobId(307),
+    ));
+    assert_eq!(
+        after.statements[0]
+            .result_set
+            .as_ref()
+            .expect("after row")
+            .rows[0][0],
+        Cell::Text("after".into())
+    );
+}
+
+#[test]
+fn update_relation_reports_view_kind_for_the_interactive_refusal() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE cell_update_view_source (id integer PRIMARY KEY, note text); \
+         CREATE TEMP VIEW cell_update_view AS SELECT id, note FROM cell_update_view_source; \
+         SET search_path TO pg_temp",
+        100,
+        JobId(308),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let relation = fx
+        .block_on(fx.session.update_relation(None, "cell_update_view"))
+        .expect("search-path view metadata");
+    assert_eq!(
+        relation.kind,
+        ignatius::postgres::metadata::ObjectKind::View
+    );
+    assert_eq!(relation.relation, "cell_update_view");
+    assert_eq!(
+        relation
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>(),
+        ["id", "note"]
+    );
+}
+
+#[test]
+fn a_parameterized_long_statement_can_be_cancelled_and_the_server_confirms_it() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let bindings = ParameterBindings::from_secrets(
+        vec!["seconds".into()],
+        vec![SecretString::from("30".to_owned())],
+    )
+    .expect("bindings");
+    let cancel = fx.session.cancel_handle();
+
+    let started = Instant::now();
+    let execution = fx.block_on(async {
+        let running = fx.session.execute_with_parameters(
+            "SELECT pg_sleep(:seconds::double precision)",
+            &bindings,
+            100,
+            JobId(302),
+        );
+        let stopper = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            cancel.cancel().await.expect("cancel delivered");
+        };
+        let (execution, ()) = tokio::join!(running, stopper);
+        execution
+    });
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(execution.status, ExecutionStatus::Cancelled);
+    assert_eq!(
+        execution
+            .error
+            .expect("cancel diagnostic")
+            .technical
+            .iter()
+            .find(|field| field.label == "SQLSTATE")
+            .expect("SQLSTATE")
+            .value,
+        "57014"
+    );
+}
+
+#[test]
+fn plain_explain_plan_does_not_execute_the_target_statement() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE explain_guard (value integer); INSERT INTO explain_guard VALUES (1)",
+        100,
+        JobId(10),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let before = fx.block_on(
+        fx.session
+            .execute("SELECT value FROM explain_guard", 10, JobId(11)),
+    );
+    assert_eq!(
+        before.statements[0]
+            .result_set
+            .as_ref()
+            .expect("guard row")
+            .rows[0][0],
+        Cell::Text("1".into())
+    );
+
+    let json = fx
+        .block_on(
+            fx.session
+                .explain("UPDATE explain_guard SET value = 2", false),
+        )
+        .expect("plain EXPLAIN returns JSON");
+    let plan = ignatius::query::PlanDocument::parse(&json, false).expect("structured plan");
+    assert!(!plan.analyzed);
+    assert_eq!(plan.root.node_type, "ModifyTable");
+
+    let after = fx.block_on(
+        fx.session
+            .execute("SELECT value FROM explain_guard", 10, JobId(12)),
+    );
+    assert_eq!(
+        after.statements[0]
+            .result_set
+            .as_ref()
+            .expect("guard row")
+            .rows[0][0],
+        Cell::Text("1".into()),
+        "plain EXPLAIN must not apply the UPDATE"
+    );
+}
+
+#[test]
+fn analyzed_explain_plan_reports_actual_metrics_for_a_synthetic_select() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let json = fx
+        .block_on(fx.session.explain("SELECT generate_series(1, 3)", true))
+        .expect("analyzed EXPLAIN returns JSON");
+    let plan = ignatius::query::PlanDocument::parse(&json, true).expect("structured analyzed plan");
+    assert!(plan.analyzed);
+    assert!(plan.execution_time_ms.is_some());
+    assert!(plan.root.actual_rows.is_some());
+    assert!(plan.root.actual_loops.is_some());
+}
+
+#[test]
+fn tls_explain_plan_uses_the_encrypted_session_when_the_tls_fixture_is_available() {
+    let uri = match std::env::var("IGNATIUS_TEST_PG_TLS_URI") {
+        Ok(uri) if !uri.is_empty() => uri,
+        _ => {
+            eprintln!("skipping: IGNATIUS_TEST_PG_TLS_URI is not set");
+            return;
+        }
+    };
+    let target = tls_target(
+        &uri,
+        &format!("sslmode=verify-full&sslrootcert={}", certificate("ca.crt")),
+    );
+    let runtime = runtime();
+    let session = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("TLS fixture connects");
+    assert!(session.info().tls.is_encrypted());
+    let json = runtime
+        .block_on(session.explain("SELECT 1", false))
+        .expect("TLS EXPLAIN returns JSON");
+    let plan = ignatius::query::PlanDocument::parse(&json, false).expect("structured TLS plan");
+    assert_eq!(plan.root.node_type, "Result");
+}
+
+#[test]
+fn row_headers_carry_server_types_without_changing_text_values() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let execution = fx.block_on(fx.session.execute(
+        "SELECT 2::integer AS n, 'ok'::text AS label, NULL::boolean AS active",
+        100,
+        JobId(2),
+    ));
+
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "type description must not change query success: {:?}",
+        execution.error
+    );
+    let set = execution.statements[0].result_set.as_ref().expect("rows");
+    assert_eq!(
+        set.columns,
+        vec!["n".to_owned(), "label".to_owned(), "active".to_owned()]
+    );
+    assert_eq!(
+        set.column_types,
+        vec![
+            Some("int4".to_owned()),
+            Some("text".to_owned()),
+            Some("bool".to_owned()),
+        ]
+    );
+    assert_eq!(
+        set.rows,
+        vec![vec![
+            Cell::Text("2".into()),
+            Cell::Text("ok".into()),
+            Cell::Null,
+        ]]
+    );
+    assert_eq!(set.rows_seen, 1);
+}
+
+#[test]
 fn the_session_reports_what_the_server_says_about_itself() {
     let uri = target_or_skip!();
     let fx = fixture(&uri);
@@ -143,6 +516,141 @@ fn a_server_error_carries_sqlstate_and_a_position() {
         "an error must say what to do next"
     );
     assert!(error.position.is_some(), "the server reported a position");
+    assert_eq!(error.statement_number, Some(1));
+}
+
+#[test]
+fn constraint_errors_preserve_server_object_fields_and_statement_identity() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE constraint_parents (id integer PRIMARY KEY); \
+         CREATE TEMP TABLE constraint_children ( \
+             id integer PRIMARY KEY, \
+             parent_id integer, \
+             amount integer, \
+             CONSTRAINT children_parent_id_fkey FOREIGN KEY (parent_id) \
+                 REFERENCES constraint_parents (id), \
+             CONSTRAINT children_amount_positive CHECK (amount > 0) \
+         )",
+        100,
+        JobId(1),
+    ));
+    assert_eq!(
+        setup.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        setup.error
+    );
+
+    let unique = fx.block_on(fx.session.execute(
+        "INSERT INTO orders (order_id, customer_id, total) VALUES (1, 99999, 1.00)",
+        100,
+        JobId(2),
+    ));
+    assert_eq!(unique.status, ExecutionStatus::Failed);
+    let unique = unique.error.expect("unique diagnostic");
+    assert_eq!(sqlstate(&unique), "23505");
+    assert_eq!(unique.statement_number, Some(1));
+    assert_eq!(
+        unique
+            .object
+            .as_ref()
+            .and_then(|object| object.schema.as_deref()),
+        Some("public")
+    );
+    assert_eq!(
+        unique
+            .object
+            .as_ref()
+            .and_then(|object| object.table.as_deref()),
+        Some("orders")
+    );
+    assert_eq!(
+        unique
+            .object
+            .as_ref()
+            .and_then(|object| object.constraint.as_deref()),
+        Some("orders_pkey")
+    );
+
+    let foreign_key = fx.block_on(fx.session.execute(
+        "INSERT INTO constraint_children (id, parent_id, amount) VALUES (1, 999, 1)",
+        100,
+        JobId(3),
+    ));
+    assert_eq!(foreign_key.status, ExecutionStatus::Failed);
+    let foreign_key = foreign_key.error.expect("foreign-key diagnostic");
+    assert_eq!(sqlstate(&foreign_key), "23503");
+    assert_eq!(
+        foreign_key
+            .object
+            .as_ref()
+            .and_then(|object| object.table.as_deref()),
+        Some("constraint_children")
+    );
+    assert_eq!(
+        foreign_key
+            .object
+            .as_ref()
+            .and_then(|object| object.constraint.as_deref()),
+        Some("children_parent_id_fkey")
+    );
+
+    let not_null = fx.block_on(fx.session.execute(
+        "INSERT INTO orders (customer_id, total) VALUES (NULL, 1.00)",
+        100,
+        JobId(4),
+    ));
+    assert_eq!(not_null.status, ExecutionStatus::Failed);
+    let not_null = not_null.error.expect("not-null diagnostic");
+    assert_eq!(sqlstate(&not_null), "23502");
+    assert_eq!(
+        not_null
+            .object
+            .as_ref()
+            .and_then(|object| object.table.as_deref()),
+        Some("orders")
+    );
+    assert_eq!(
+        not_null
+            .object
+            .as_ref()
+            .and_then(|object| object.column.as_deref()),
+        Some("customer_id")
+    );
+
+    let check = fx.block_on(fx.session.execute(
+        "INSERT INTO constraint_children (id, parent_id, amount) VALUES (2, NULL, -1)",
+        100,
+        JobId(5),
+    ));
+    assert_eq!(check.status, ExecutionStatus::Failed);
+    let check = check.error.expect("check diagnostic");
+    assert_eq!(sqlstate(&check), "23514");
+    assert_eq!(
+        check
+            .object
+            .as_ref()
+            .and_then(|object| object.table.as_deref()),
+        Some("constraint_children")
+    );
+    assert_eq!(
+        check
+            .object
+            .as_ref()
+            .and_then(|object| object.constraint.as_deref()),
+        Some("children_amount_positive")
+    );
+}
+
+fn sqlstate(error: &ignatius::diagnostics::Diagnostic) -> &str {
+    error
+        .technical
+        .iter()
+        .find(|field| field.label == "SQLSTATE")
+        .map_or("", |field| field.value.as_str())
 }
 
 #[test]

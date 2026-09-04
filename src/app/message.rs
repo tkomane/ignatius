@@ -7,7 +7,9 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::postgres::SessionInfo;
-use crate::query::result::{Execution, JobId, Notice};
+use crate::query::plan::PlanDocument;
+use crate::query::result::{Execution, JobId, Notice, TransactionState};
+use std::time::Duration;
 
 /// A user intent, produced by the keymap or the command palette.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +18,20 @@ pub enum Action {
     RunBuffer,
     /// Run only the statement under the cursor.
     RunStatement,
+    /// Show the estimated PostgreSQL plan for the statement under the cursor.
+    ExplainPlan,
+    /// Execute the statement under the cursor while collecting plan metrics.
+    AnalyzePlan,
+    /// Copy the selected retained result value through the configured terminal transport.
+    CopyValue,
+    /// Generate a reviewed one-row UPDATE from the selected retained result cell.
+    GenerateCellUpdate,
+    /// Explicitly rerun the one retained read result.
+    RefreshResult,
+    /// Format the SQL buffer locally without contacting the server.
+    FormatBuffer,
+    /// Open the searchable connection picker.
+    OpenConnectionPicker,
     /// Ask the server to cancel the running statement.
     Cancel,
     /// Leave the application.
@@ -34,6 +50,8 @@ pub enum Action {
     ToggleSidebar,
     /// Open the command palette.
     OpenPalette,
+    /// Open the contextual controls for the focused result grid.
+    OpenResultControls,
     /// Begin a two-key chord and show the continuations.
     BeginPrefix,
     /// Filter the object tree.
@@ -129,6 +147,13 @@ impl Action {
         vec![
             Self::RunBuffer,
             Self::RunStatement,
+            Self::ExplainPlan,
+            Self::AnalyzePlan,
+            Self::CopyValue,
+            Self::GenerateCellUpdate,
+            Self::RefreshResult,
+            Self::FormatBuffer,
+            Self::OpenConnectionPicker,
             Self::Cancel,
             Self::Quit,
             Self::ToggleHelp,
@@ -141,6 +166,7 @@ impl Action {
             Self::Move(Direction::Right),
             Self::ToggleSidebar,
             Self::OpenPalette,
+            Self::OpenResultControls,
             Self::BeginPrefix,
             Self::StartFilter,
             Self::ReloadObjects,
@@ -186,6 +212,23 @@ pub enum Direction {
     Right,
 }
 
+/// The result of a plan-specific database request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanExecution {
+    /// Identity used to reject a late response.
+    pub job: JobId,
+    /// Whether the target was executed for observed metrics.
+    pub analyzed: bool,
+    /// Client-measured duration of the plan request.
+    pub elapsed: Duration,
+    /// Transaction state read after the request, when the connection remained usable.
+    pub transaction: TransactionState,
+    /// A parsed bounded plan, or a truthful failure.
+    pub result: Result<PlanDocument, Diagnostic>,
+    /// Whether the session reported that the connection was lost.
+    pub connection_lost: bool,
+}
+
 /// Everything that can change the model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
@@ -202,6 +245,19 @@ pub enum Message {
     /// An execution finished. Carries its job identity so a stale result from a
     /// superseded query can be recognised and discarded.
     ExecutionFinished(Box<Execution>),
+    /// A plan request finished. It is separate from ordinary execution so a
+    /// generated EXPLAIN never enters result, history, or export state.
+    PlanFinished(Box<PlanExecution>),
+    /// One clipboard sequence was written and flushed. Terminal acceptance is
+    /// still unconfirmed, so only safe metadata is carried back.
+    ClipboardSent {
+        /// Raw UTF-8 bytes sent to the terminal boundary.
+        bytes: usize,
+        /// Unicode scalar values represented by those bytes.
+        characters: usize,
+    },
+    /// The terminal clipboard write or flush failed.
+    ClipboardFailed(Box<Diagnostic>),
     /// The cancellation request was delivered to the server.
     CancellationDelivered(JobId),
     /// The cancellation request could not be delivered.
@@ -228,6 +284,13 @@ pub enum Message {
         path: crate::app::tree::NodePath,
         /// What came back.
         payload: Box<Result<crate::app::tree::MetadataPayload, Diagnostic>>,
+    },
+    /// Live relation metadata finished loading for a pending cell update.
+    UpdateTargetLoaded {
+        /// Which lookup this answers.
+        request: u64,
+        /// The resolved relation, or why it could not be read.
+        result: Box<Result<crate::postgres::metadata::UpdateRelation, Diagnostic>>,
     },
     /// The saved queries were listed.
     QueriesListed(Vec<crate::queries::SavedQuery>),
@@ -296,12 +359,46 @@ pub enum Effect {
         /// What was typed. Its `Debug` never prints it.
         password: TypedPassword,
     },
+    /// Resolve and open the selected named profile, or the default route.
+    ///
+    /// Only the profile name crosses the reducer/runtime boundary. The runtime
+    /// resolves targets and holds credentials outside the application model.
+    ConnectProfile {
+        /// `Some` selects that profile; `None` uses normal defaults.
+        profile: Option<String>,
+    },
     /// Run SQL under a job identity.
     Execute {
         /// Identity to report back with the result.
         job: JobId,
         /// The SQL to run.
         sql: String,
+    },
+    /// Run a named-parameter template with secret values held only for this job.
+    ExecuteParameterized {
+        /// Identity to report back with the result.
+        job: JobId,
+        /// The original SQL template, retained for history and diagnostics.
+        sql: String,
+        /// Values to bind at the PostgreSQL simple-query boundary.
+        parameters: crate::query::ParameterBindings,
+    },
+    /// Ask PostgreSQL for a structured EXPLAIN plan under a job identity.
+    Explain {
+        /// Identity to report back with the plan.
+        job: JobId,
+        /// The one statement selected by the reducer.
+        sql: String,
+        /// Whether to execute the target to collect observed metrics.
+        analyze: bool,
+    },
+    /// Send one already-confirmed result value through the terminal as OSC 52.
+    ///
+    /// The payload's Debug representation is redacted and it is created only
+    /// after the reducer has revalidated the retained result cell.
+    CopyValue {
+        /// Exact selected text, consumed by the interactive runtime.
+        payload: crate::clipboard::ClipboardPayload,
     },
     /// Ask the server to cancel a job.
     Cancel {
@@ -341,6 +438,8 @@ pub enum Effect {
     ExportRows {
         /// Where to write, as the user typed it.
         path: String,
+        /// Which shape the user selected before naming the destination.
+        format: crate::app::model::ExportFormat,
     },
     /// Read a saved query.
     LoadQuery {
@@ -373,5 +472,12 @@ pub enum Effect {
         path: crate::app::tree::NodePath,
         /// What to fetch.
         query: crate::app::tree::MetadataQuery,
+    },
+    /// Resolve a result source relation and read its update metadata.
+    LoadUpdateTarget {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// The source relation named by the retained SELECT.
+        relation: crate::query::RelationReference,
     },
 }

@@ -118,6 +118,124 @@ fn an_invalid_sslmode_is_a_usage_error_and_names_the_alternatives() {
 }
 
 #[test]
+fn insert_output_requires_an_explicit_table_before_connection_work() {
+    for args in [
+        vec!["query", "-c", "SELECT 1", "--format", "insert"],
+        vec![
+            "query",
+            "-c",
+            "SELECT 1",
+            "--format",
+            "insert",
+            "--insert-table",
+            "",
+        ],
+        vec![
+            "query",
+            "-c",
+            "SELECT 1",
+            "--format",
+            "insert",
+            "--insert-table",
+            "orders",
+            "--no-header",
+        ],
+    ] {
+        let output = binary().args(args).output().expect("run");
+        assert_eq!(code(&output), 2, "{}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "usage errors stay off stdout");
+        assert!(
+            stderr(&output).contains("INSERT output") || stderr(&output).contains("insert-table"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            !stderr(&output).contains("Connection failed"),
+            "validation must happen before a target is contacted: {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn named_parameter_mappings_fail_before_connection_or_prompting() {
+    let cases: &[(&[&str], &str)] = &[
+        (
+            &[
+                "query",
+                "postgres://app@127.0.0.1:1/does-not-connect",
+                "-c",
+                "SELECT :customer_id",
+            ],
+            "no --param-env mappings",
+        ),
+        (
+            &[
+                "query",
+                "postgres://app@127.0.0.1:1/does-not-connect",
+                "-c",
+                "SELECT :customer_id",
+                "--param-env",
+                "other=PATH",
+            ],
+            "unknown parameter",
+        ),
+        (
+            &[
+                "query",
+                "postgres://app@127.0.0.1:1/does-not-connect",
+                "-c",
+                "SELECT :customer_id",
+                "--param-env",
+                "customer_id=PATH",
+                "--param-env",
+                "customer_id=PATH",
+            ],
+            "mapped more than once",
+        ),
+        (
+            &[
+                "query",
+                "postgres://app@127.0.0.1:1/does-not-connect",
+                "-c",
+                "SELECT :customer_id",
+                "--param-env",
+                "customer_id=PATH=OTHER",
+            ],
+            "NAME=VARIABLE",
+        ),
+        (
+            &[
+                "query",
+                "postgres://app@127.0.0.1:1/does-not-connect",
+                "-c",
+                "SELECT :customer_id",
+                "--param-env",
+                "customer_id=IGNATIUS_FEATURE_022_MISSING",
+            ],
+            "is not set",
+        ),
+    ];
+
+    for (args, expected) in cases {
+        let mut command = binary();
+        command.env_remove("IGNATIUS_FEATURE_022_MISSING");
+        let output = command.args(*args).output().expect("run");
+        assert_eq!(code(&output), 2, "{}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "usage errors stay off stdout");
+        let message = stderr(&output);
+        assert!(
+            message.contains(expected),
+            "expected {expected:?}: {message}"
+        );
+        assert!(
+            !message.contains("could not reach") && !message.contains("Connection failed"),
+            "mapping validation must precede connection work: {message}"
+        );
+    }
+}
+
+#[test]
 fn an_unreachable_server_exits_with_the_connection_code() {
     let output = binary()
         .args([
@@ -141,6 +259,36 @@ fn an_unreachable_server_exits_with_the_connection_code() {
     assert!(
         message.contains("Next:"),
         "a failure must state a next action: {message}"
+    );
+}
+
+#[test]
+fn retained_result_refresh_stays_out_of_noninteractive_machine_output() {
+    let marker = "synthetic-refresh-value";
+    let output = binary()
+        .env("IGNATIUS_REFRESH_TEST_VALUE", marker)
+        .args([
+            "query",
+            "postgres://someone@127.0.0.1:1/nothing?connect_timeout=2",
+            "-c",
+            "SELECT :value AS value",
+            "--param-env",
+            "value=IGNATIUS_REFRESH_TEST_VALUE",
+            "--format",
+            "csv",
+        ])
+        .output()
+        .expect("run");
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "failed query emitted data");
+    let combined = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        !combined.contains(marker),
+        "parameter value leaked: {combined}"
+    );
+    assert!(
+        !combined.contains("Refreshing retained result"),
+        "an interactive-only state reached machine output: {combined}"
     );
 }
 
@@ -228,6 +376,18 @@ fn config_init_writes_a_file_this_build_accepts_and_refuses_to_overwrite() {
     assert!(
         written.contains("No password belongs in this file"),
         "the one rule that matters is in the file itself"
+    );
+    assert!(
+        written.contains("[clipboard]") && written.contains("osc52 = false"),
+        "the starter file exposes the safe clipboard default"
+    );
+
+    let output = run(&["config", "show"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("[clipboard]") && stdout(&output).contains("osc52 = false"),
+        "config show exposes the clipboard preference: {}",
+        stdout(&output)
     );
 
     // What it wrote, it accepts.
@@ -324,6 +484,57 @@ fn a_profile_names_a_connection_and_never_holds_a_password() {
         !message.contains("hunter2"),
         "the value is never repeated back: {message}"
     );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn named_profiles_remain_explicit_in_noninteractive_routes() {
+    let dir = std::env::temp_dir().join(format!(
+        "ignatius-picker-cli-contract-{}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("create directory");
+    std::fs::write(
+        dir.join("config.toml"),
+        "[profiles.orders-dev]\nhost = \"127.0.0.1\"\nport = 1\ndbname = \"orders\"\n",
+    )
+    .expect("write profile");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ignatius"))
+        .env("IGNATIUS_CONFIG_DIR", &dir)
+        .env("IGNATIUS_DATA_DIR", dir.join("data"))
+        .args(["query", "@orders-dev", "-c", "SELECT 1", "--format", "json"])
+        .output()
+        .expect("run named route");
+    assert_eq!(
+        code(&output),
+        4,
+        "the named route reaches connection: {}",
+        stderr(&output)
+    );
+    assert!(stdout(&output).is_empty(), "failed query data on stdout");
+    let combined = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(!combined.contains("Connection picker"), "{combined}");
+    assert!(
+        combined.contains("127.0.0.1"),
+        "the profile route was used: {combined}"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ignatius"))
+        .env("IGNATIUS_CONFIG_DIR", &dir)
+        .env("IGNATIUS_DATA_DIR", dir.join("data"))
+        .args(["query", "--profile", "orders-dev", "-c", "SELECT 1"])
+        .output()
+        .expect("run profile flag");
+    assert_eq!(
+        code(&output),
+        4,
+        "the profile flag remains a route: {}",
+        stderr(&output)
+    );
+    assert!(!format!("{}{}", stdout(&output), stderr(&output)).contains("Connection picker"));
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -553,6 +764,103 @@ fn the_interactive_client_refuses_to_start_without_a_terminal() {
 }
 
 #[test]
+fn guided_discovery_stays_outside_plain_machine_and_history_routes() {
+    // Feature 015 belongs to the full-screen presentation. A piped invocation
+    // must keep the existing line-oriented and machine-readable boundaries.
+    let uri = "postgres://x@127.0.0.1:1/y?connect_timeout=2";
+
+    let output = binary()
+        .env("TERM", "dumb")
+        .args(["--plain", "connect", uri])
+        .output()
+        .expect("run");
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    let plain = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(!plain.contains("Command palette"), "{plain}");
+    assert!(!plain.contains('\u{1b}'), "{plain:?}");
+
+    let output = binary()
+        .args(["query", uri, "-c", "SELECT 1", "--format", "json"])
+        .output()
+        .expect("run");
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    let machine = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(!machine.contains("Command palette"), "{machine}");
+    assert!(
+        !machine.contains("EXPLAIN"),
+        "plan output must stay interactive: {machine}"
+    );
+    assert!(!machine.contains('\u{1b}'), "{machine:?}");
+
+    let output = binary()
+        .args(["query", uri, "-c", "SELECT 1", "--format", "ndjson"])
+        .output()
+        .expect("run");
+    assert_eq!(code(&output), 4, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    let machine = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        !machine.contains("EXPLAIN"),
+        "plan output must stay interactive: {machine}"
+    );
+    assert!(!machine.contains('\u{1b}'), "{machine:?}");
+
+    let output = binary().args(["history", "list"]).output().expect("run");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    assert!(
+        !stderr(&output).contains("Command palette"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn clipboard_transport_stays_outside_plain_and_machine_routes() {
+    let dir = std::env::temp_dir().join(format!("ignatius-clipboard-cli-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("create config dir");
+    std::fs::write(dir.join("config.toml"), "[clipboard]\nosc52 = true\n")
+        .expect("write opt-in config");
+    let uri = "postgres://x@127.0.0.1:1/y?connect_timeout=2";
+
+    for args in [
+        vec!["--plain", "connect", uri],
+        vec!["query", uri, "-c", "SELECT 1", "--format", "json"],
+        vec!["query", uri, "-c", "SELECT 1", "--format", "ndjson"],
+        vec!["query", uri, "-c", "SELECT 1", "--output", "rows.csv"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ignatius"))
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", dir.join("data"))
+            .env("TERM", "dumb")
+            .args(&args)
+            .output()
+            .expect("run");
+        let combined = format!("{}{}", stdout(&output), stderr(&output));
+        assert!(
+            !combined.contains("\u{1b}]52;"),
+            "machine/plain route emitted OSC 52 for {args:?}: {combined:?}"
+        );
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ignatius"))
+        .env("IGNATIUS_CONFIG_DIR", &dir)
+        .env("IGNATIUS_DATA_DIR", dir.join("data"))
+        .args(["history", "list"])
+        .output()
+        .expect("run history");
+    let combined = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        !combined.contains("\u{1b}]52;"),
+        "history emitted OSC 52: {combined:?}"
+    );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn a_security_relevant_parameter_is_refused_rather_than_ignored() {
     // gssencmode is genuinely unimplemented. Ignoring it would give weaker
     // protection than was asked for, so the connection is refused instead.
@@ -661,6 +969,84 @@ mod with_server {
     }
 
     #[test]
+    fn a_failed_json_query_keeps_stdout_empty_and_emits_one_diagnostic_object() {
+        let uri = uri_or_skip!();
+        let dir = std::env::temp_dir().join(format!(
+            "ignatius-json-error-contract-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        let data_dir = dir.join("data");
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", &data_dir)
+            .env("IGNATIUS_LOG", "debug")
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT * FROM no_such_table",
+                "--format",
+                "json",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&output), 7, "query failures exit 7");
+        assert!(
+            stdout(&output).is_empty(),
+            "stdout carried: {:?}",
+            stdout(&output)
+        );
+
+        let diagnostic: serde_json::Value =
+            serde_json::from_str(stderr(&output).trim()).expect("one JSON diagnostic on stderr");
+        assert_eq!(diagnostic["kind"], "query");
+        assert_eq!(diagnostic["statement_number"], 1);
+        assert!(diagnostic["position"].is_number());
+        assert!(diagnostic["technical"].as_array().is_some_and(|fields| {
+            fields
+                .iter()
+                .any(|field| field["label"] == "SQLSTATE" && field["value"] == "42P01")
+        }));
+        let log = std::fs::read_to_string(data_dir.join("logs/ignatius.log"))
+            .expect("isolated diagnostic log");
+        assert_eq!(
+            log.matches("job=1 statement_chars=").count(),
+            1,
+            "a failed query is not retried automatically: {log}"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn failed_json_constraint_diagnostics_keep_server_object_fields() {
+        let uri = uri_or_skip!();
+        let output = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "INSERT INTO orders (order_id, customer_id, total) VALUES (1, 99999, 1.00)",
+                "--format",
+                "json",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&output), 7, "constraint failures exit 7");
+        assert!(
+            stdout(&output).is_empty(),
+            "stdout carried: {:?}",
+            stdout(&output)
+        );
+
+        let diagnostic: serde_json::Value =
+            serde_json::from_str(stderr(&output).trim()).expect("one JSON diagnostic on stderr");
+        assert_eq!(diagnostic["object"]["schema"], "public");
+        assert_eq!(diagnostic["object"]["table"], "orders");
+        assert_eq!(diagnostic["object"]["constraint"], "orders_pkey");
+    }
+
+    #[test]
     fn verbose_reveals_sqlstate_on_stderr() {
         let uri = uri_or_skip!();
         let output = binary()
@@ -695,6 +1081,73 @@ mod with_server {
         let rows = parsed[0]["rows"].as_array().expect("rows");
         assert_eq!(rows.len(), 3);
         assert!(rows[1]["note"].is_null(), "SQL NULL survives as JSON null");
+    }
+
+    #[test]
+    fn insert_output_is_explicit_quoted_and_streamable() {
+        let uri = uri_or_skip!();
+        let output = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT order_id, note FROM orders ORDER BY order_id",
+                "--format",
+                "insert",
+                "--insert-table",
+                "orders",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert!(
+            stdout(&output).starts_with("INSERT INTO \"orders\""),
+            "{}",
+            stdout(&output)
+        );
+        assert!(
+            stdout(&output).contains("\"order_id\""),
+            "{}",
+            stdout(&output)
+        );
+        assert!(stdout(&output).contains("NULL"), "{}", stdout(&output));
+        assert!(
+            !stdout(&output).contains('\x1b'),
+            "machine output is undecorated"
+        );
+        assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+
+        let dir =
+            std::env::temp_dir().join(format!("ignatius-insert-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let destination = dir.join("orders.sql");
+        let streamed = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT order_id, note FROM orders ORDER BY order_id",
+                "--format",
+                "insert",
+                "--insert-table",
+                "orders",
+                "--output",
+                &destination.display().to_string(),
+            ])
+            .output()
+            .expect("stream");
+        assert_eq!(code(&streamed), 0, "{}", stderr(&streamed));
+        assert!(stdout(&streamed).is_empty(), "{}", stdout(&streamed));
+        assert!(
+            stderr(&streamed).contains("Exported 3 row(s)"),
+            "{}",
+            stderr(&streamed)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&destination).expect("read"),
+            stdout(&output)
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -896,6 +1349,65 @@ mod with_server {
             !destination.with_extension("csv.partial").exists(),
             "the partial file is gone once the export is complete"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn generated_insert_output_is_accepted_when_applied_explicitly() {
+        let uri = uri_or_skip!();
+        let setup = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "CREATE TABLE IF NOT EXISTS insert_contract_probe (order_id integer, note text); TRUNCATE insert_contract_probe",
+            ])
+            .output()
+            .expect("setup");
+        assert_eq!(code(&setup), 0, "{}", stderr(&setup));
+
+        let dir =
+            std::env::temp_dir().join(format!("ignatius-insert-apply-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let destination = dir.join("probe.sql");
+        let generated = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT order_id, note FROM orders ORDER BY order_id",
+                "--format",
+                "insert",
+                "--insert-table",
+                "insert_contract_probe",
+                "--output",
+                &destination.display().to_string(),
+            ])
+            .output()
+            .expect("generate");
+        assert_eq!(code(&generated), 0, "{}", stderr(&generated));
+
+        // Applying the file is a separate, explicit user action. The client
+        // generated it as data and did not execute it as part of the export.
+        let applied = binary()
+            .args(["query", &uri, "--file", &destination.display().to_string()])
+            .output()
+            .expect("apply");
+        assert_eq!(code(&applied), 0, "{}", stderr(&applied));
+
+        let count = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT count(*) AS inserted FROM insert_contract_probe",
+                "--format",
+                "csv",
+            ])
+            .output()
+            .expect("count");
+        assert_eq!(code(&count), 0, "{}", stderr(&count));
+        assert_eq!(stdout(&count), "inserted\n3\n");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1192,6 +1704,43 @@ mod with_server {
             messages.is_ascii(),
             "plain completion must be ASCII: {messages:?}"
         );
+    }
+
+    #[test]
+    fn plain_mode_formats_pending_sql_on_the_message_stream_without_running_until_finished() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let mut child = binary()
+            .args(["--plain", "connect", &uri])
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"SELECT 1 AS one WHERE 1=1\n\\format\n;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+        assert!(messages.contains("Formatted SQL buffer:"), "{messages}");
+        assert!(messages.contains("WHERE 1 = 1"), "{messages}");
+        assert!(data.contains("one"), "{data}");
+        assert!(data.contains("(1 row)"), "{data}");
+        assert!(!data.contains("Formatted SQL"), "{data}");
+        assert!(!data.contains('\u{1b}'), "{data:?}");
+        assert!(!messages.contains('\u{1b}'), "{messages:?}");
+        assert!(messages.is_ascii(), "{messages:?}");
     }
 
     #[test]

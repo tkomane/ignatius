@@ -152,6 +152,13 @@ impl Default for CompletionState {
 }
 
 impl CompletionState {
+    /// Clears the catalogue for a new connection without reusing request ids.
+    pub fn reset_for_connection(&mut self) {
+        self.catalog = CatalogStatus::NotLoaded;
+        self.menu = None;
+        self.next_request = self.next_request.wrapping_add(1);
+    }
+
     /// Starts a catalogue request and returns its identity.
     pub fn begin_loading(&mut self) -> u64 {
         self.next_request = self.next_request.wrapping_add(1).max(1);

@@ -4,7 +4,10 @@
 
 **Created**: 2026-08-16
 
-**Status**: Specified. Implementation in progress.
+**Status**: Mechanism implemented and verified against synthetic TLS PostgreSQL.
+Live Entra/AWS/GCP accounts and native Windows provider-launch evidence remain
+open in `docs/support/compatibility.md`; synthetic provider evidence does not
+close those rows.
 
 **Input**: The owner's requirement of 2026-08-16 - connect to the COI
 application's Azure Database for PostgreSQL, which authenticates with Microsoft

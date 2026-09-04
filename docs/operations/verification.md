@@ -57,10 +57,15 @@ major from 14 through 18. A separate PostgreSQL 18 fixture exposes a real Unix
 socket to the Linux runner. The cross-platform suite uses Cargo auto-discovery,
 so a newly added contract runs by default.
 
-The workflow files and repository contracts are source-controlled evidence until
-the candidate reaches GitHub-hosted runners. Do not describe PostgreSQL 15 or
-17, the Unix-socket job, Rust 1.90, workflow linting or the source-security
-preflight as hosted passes until those jobs complete successfully.
+**Hosted readback on 2026-09-04:**
+[main CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318)
+completed successfully at `52872acd7c0e0e38c6b810723ccda5eee99a28bf`.
+The executed jobs include PostgreSQL 14-18 plain/TLS contracts, PostgreSQL 18
+Unix socket, native OS suites, Rust 1.90, workflow semantics, dependency/licence
+checks, source/evidence scans and generated-output checks. The scheduled-only
+fixture-drift job was skipped and is not included in those passes. This is
+historical main-source CI evidence, not verification of the newer local
+feature chain or of the separate release preflight and candidate artifacts.
 
 ## Local CI-hardening evidence recorded on 2026-09-02
 

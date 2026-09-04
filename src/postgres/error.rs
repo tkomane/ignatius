@@ -7,7 +7,7 @@
 //! actually hit, and a safe next action.
 
 use crate::connection::ConnectionTarget;
-use crate::diagnostics::{Diagnostic, DiagnosticKind};
+use crate::diagnostics::{Diagnostic, DiagnosticKind, ObjectContext};
 use tokio_postgres::error::{DbError, ErrorPosition, SqlState};
 
 /// How the driver renders any TLS-class failure.
@@ -130,7 +130,8 @@ pub fn from_query_error(err: &tokio_postgres::Error, statement_number: usize) ->
             DiagnosticKind::Query
         };
         let mut diagnostic = decorate(
-            Diagnostic::new(kind, db.message().to_owned(), attempted),
+            Diagnostic::new(kind, db.message().to_owned(), attempted)
+                .in_statement(statement_number),
             db,
             query_advice(db.code()),
         );
@@ -146,6 +147,7 @@ pub fn from_query_error(err: &tokio_postgres::Error, statement_number: usize) ->
             "the connection closed while the statement was running",
             attempted,
         )
+        .in_statement(statement_number)
         .likely_cause(
             "the server, a proxy, or the network ended the session. Whether the statement \
              committed is not known from here.",
@@ -157,6 +159,7 @@ pub fn from_query_error(err: &tokio_postgres::Error, statement_number: usize) ->
     }
 
     Diagnostic::new(DiagnosticKind::Query, err.to_string(), attempted)
+        .in_statement(statement_number)
         .next_action("check the statement and the connection, then try again")
 }
 
@@ -177,6 +180,11 @@ fn decorate(
         .technical_opt("Column", db.column())
         .technical_opt("Constraint", db.constraint())
         .technical_opt("Routine", db.routine());
+    if let Some(object) =
+        ObjectContext::from_server_fields(db.schema(), db.table(), db.column(), db.constraint())
+    {
+        out = out.object_context(object);
+    }
     if let (Some(cause), _) = &advice {
         out = out.likely_cause(cause.clone());
     }

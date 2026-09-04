@@ -15,6 +15,15 @@ cat specs/001-foundation-vertical-slice/tasks.md    # task checkboxes are author
 
 Never assume the repository is empty or that a summary of it is current. Check.
 
+## Plan and take an agent assignment
+
+Read [the roadmap](docs/product/roadmap.md) for milestone order,
+[the delivery plan](docs/product/agent-delivery-plan.md) for scoped work packages,
+and [the agent playbook](docs/operations/agent-playbook.md) for ownership and
+handoff. Use full feature slugs, including the two historical `007` directories.
+The selected feature's spec/tasks remain authoritative; roadmap packages do not
+replace their completion evidence or authorize external actions.
+
 ## Where authority lives
 
 | Question | Authority |
