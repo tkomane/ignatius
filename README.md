@@ -1,5 +1,7 @@
 # Ignatius
 
+[![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
+
 A terminal-native PostgreSQL workbench: a full-screen client for exploring, and
 the same binary as a scriptable CLI for automating.
 

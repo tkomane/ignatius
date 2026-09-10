@@ -636,9 +636,9 @@ fn install(args: &[&str]) -> Result<(), String> {
 
 /// Points git at the version-controlled hooks directory.
 ///
-/// Required status checks are not available on a private repository without a
-/// paid GitHub plan, so the same gates run locally before a push instead. Both
-/// are belt and braces: CI still runs on every push regardless.
+/// Main requires the CI checks on a pull request. The same gates run locally
+/// before a push as an early warning, so a failure is found in seconds rather
+/// than after a push. Both are belt and braces: CI still runs on every push.
 fn install_hooks() -> Result<(), String> {
     run("git", &["config", "core.hooksPath", ".githooks"], &[])?;
     println!(
