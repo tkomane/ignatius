@@ -39,6 +39,12 @@ current keystroke.
 edits, and whether it has focus. All four are in the title so the pane body is
 only ever SQL.
 
+**Completion menu.** A static, cursor-adjacent overlay over the editor. It
+answers `Ctrl+Space` with the current scope, candidate kind, schema or source,
+type/detail, visible and true counts, catalogue freshness, and the keys that
+accept, dismiss, or move. The menu is local after the snapshot load and never
+changes the editor before Enter.
+
 **Results pane.** Column headers, rows, and in the title the execution status and
 summary. Truncation is stated in the summary, never implied by an absence. When
 an error is present it replaces this pane, because an error is the result.
@@ -75,8 +81,16 @@ lines, so a pane fact is never read as a value fact. This is the one place SQL
 NULL, an empty string and the text `NULL` are distinguished by reading rather
 than by knowing what the marker means.
 
+**Connection details.** The command palette's `Connection and auth details`
+entry opens a read-only trust surface. It expands the compressed header into the
+target, database, role, environment, server-enforced posture, observed TLS
+state, and cloud credential route. Entra, AWS, Google Cloud, and configured
+providers use the same shape; provider arguments and tokens are not displayed,
+and opening the surface performs no refresh or network request. The title keeps
+`Esc to close` visible so the inspection state never becomes a trap.
+
 **Footer.** What the client is doing right now (`Ready`, `Running`,
-`Cancellation requested`), the session's search path, and up to five key hints.
+`Cancellation requested`), the session's search path, and up to six key hints.
 
 ## Narrow and small
 
@@ -95,7 +109,10 @@ colour.
 
 ## Overlays
 
-Help is the only overlay. It is centred, lists every binding with its
-description, and says `Esc to close` in its own title. There is no other modal
-state, and no confirmation dialog exists yet, because nothing in this release is
-destructive enough to earn one.
+Help is centred, lists every binding with its description, and says `Esc to
+close` in its own title. The connection details surface is a second, read-only
+overlay for inspecting trust facts; it also keeps `Esc to close` visible and
+swallows edits until dismissed. Other overlays are purpose-specific panels for
+definitions, dependencies, saved queries, cell inspection, confirmations, and
+credential prompts. Each has one clear dismissal path, and no confirmation
+dialog exists for harmless actions.

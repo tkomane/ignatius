@@ -171,12 +171,30 @@ pub struct ExpandedField {
 /// aligned to the longest name so the values line up and can be scanned.
 #[must_use]
 pub fn expand_row(set: &ResultSet, row: usize, width: usize, unicode: bool) -> Vec<ExpandedField> {
+    let columns: Vec<usize> = (0..set.columns.len()).collect();
+    expand_row_columns(set, row, width, unicode, &columns)
+}
+
+/// Lays out only the requested source columns, preserving their source order.
+///
+/// The expanded view follows the grid's visibility choices, but it still reads
+/// values by source position. That keeps a hidden column from shifting a value
+/// under the wrong header and lets the ordinary public [`expand_row`] helper
+/// retain its all-column contract for callers outside the interactive grid.
+#[must_use]
+pub fn expand_row_columns(
+    set: &ResultSet,
+    row: usize,
+    width: usize,
+    unicode: bool,
+    columns: &[usize],
+) -> Vec<ExpandedField> {
     let Some(cells) = set.rows.get(row) else {
         return Vec::new();
     };
-    let name_width = set
-        .columns
+    let name_width = columns
         .iter()
+        .filter_map(|index| set.columns.get(*index))
         .map(|name| value::display_width(&value::sanitize_for_display(name)))
         .max()
         .unwrap_or(0);
@@ -184,9 +202,9 @@ pub fn expand_row(set: &ResultSet, row: usize, width: usize, unicode: bool) -> V
     // one for the value itself. The renderer uses the same three.
     let value_width = width.saturating_sub(name_width + 3).max(1);
 
-    set.columns
+    columns
         .iter()
-        .enumerate()
+        .filter_map(|index| set.columns.get(*index).map(|name| (*index, name)))
         .map(|(index, name)| {
             let cell = cells.get(index).unwrap_or(&Cell::Null);
             let shown = cell.display();
@@ -391,6 +409,19 @@ mod tests {
         // In ASCII the marker is still there, in ASCII.
         let ascii = expand_row(&set, 0, 20, false);
         assert!(ascii[1].value.ends_with("..."));
+    }
+
+    #[test]
+    fn an_expanded_view_can_hide_columns_without_shifting_source_values() {
+        let set = set();
+        let fields = expand_row_columns(&set, 0, 80, true, &[0, 2]);
+
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name.trim(), "id");
+        assert_eq!(fields[0].value, "1");
+        assert_eq!(fields[1].name.trim(), "amount");
+        assert_eq!(fields[1].value, crate::query::value::NULL_MARKER);
+        assert!(fields[1].is_null);
     }
 
     #[test]

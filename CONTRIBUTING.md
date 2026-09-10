@@ -21,9 +21,9 @@ cargo xtask verify         # every gate, with a summary
 cargo xtask install-hooks  # run those gates before every push
 ```
 
-Required status checks are not available on a private repository without a paid
-GitHub plan, so the pre-push hook is the local stand-in. CI runs on every push
-either way.
+Main is protected: changes arrive as a pull request, and its required CI checks
+must pass before it can merge. The pre-push hook runs the same gates locally
+first, so a failure is found in seconds rather than after a push.
 
 ## What a good change looks like
 

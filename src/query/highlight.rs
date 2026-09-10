@@ -161,15 +161,15 @@ fn push(tokens: &mut Vec<Token>, start: usize, end: usize, kind: TokenKind) {
     }
 }
 
-const fn is_word_start(byte: u8) -> bool {
+pub(crate) const fn is_word_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80
 }
 
-const fn is_word_byte(byte: u8) -> bool {
+pub(crate) const fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80
 }
 
-fn is_keyword(word: &str) -> bool {
+pub(crate) fn is_keyword(word: &str) -> bool {
     if !word.is_ascii() {
         return false;
     }
@@ -182,7 +182,7 @@ fn is_keyword(word: &str) -> bool {
 /// Deliberately not the full reserved-word list. This exists to make a statement
 /// scannable, and a word that is missing simply looks like an identifier, which
 /// is a cost of nothing. Kept sorted, which a test enforces.
-const KEYWORDS: &[&str] = &[
+pub(crate) const KEYWORDS: &[&str] = &[
     "add",
     "all",
     "alter",

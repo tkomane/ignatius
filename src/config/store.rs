@@ -288,6 +288,8 @@ color = "auto"
 mouse = false
 # Replaces animated feedback with static text.
 reduced-motion = false
+# Opens a local schema-completion menu while typing. Ctrl+Space always opens it.
+completion = true
 
 [query]
 # Rows the interactive grid keeps in memory. Reaching this is always reported,
@@ -305,6 +307,11 @@ application-name = "ignatius"
 # credential is never recorded whatever this says.
 enabled = true
 max-entries = 1000
+
+[clipboard]
+# Sends explicitly copied values through the terminal using OSC 52. The
+# terminal, SSH path, or multiplexer may observe or retain the value.
+osc52 = false
 
 # Named connections. `ignatius connect @orders-prod` uses one.
 #

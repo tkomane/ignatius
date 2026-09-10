@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a capability or a change in behaviour.
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Behaviour changes start with a specification, not a pull request. Read
+        [CONTRIBUTING.md](https://github.com/tkomane/ignatius/blob/main/CONTRIBUTING.md)
+        for how a change gets accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you unable to do today, and what does it cost you?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should happen instead? Describe the outcome, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you tried, or other tools that solve this well.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This fits the local-first, no-account boundary in the constitution.
+          required: true

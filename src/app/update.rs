@@ -11,8 +11,13 @@
 //! - Statements are never sent on a connection that is not usable.
 //! - Nothing is ever re-run automatically.
 
+use crate::app::grid::GridCommand;
 use crate::app::message::{Action, Direction, Effect, Message};
-use crate::app::model::{ConnectionState, Focus, Model, QueryPhase};
+use crate::app::model::{
+    ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PendingUpdate, QueryPhase,
+    UpdateCandidate, UpdateLookup, UpdatePrompt,
+};
+use crate::query::error_location::{self, StatementSource};
 use crate::query::result::ExecutionStatus;
 use crate::query::statements;
 
@@ -27,10 +32,14 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         Message::Connected(info) => {
             model.connection = ConnectionState::Connected(info);
             model.error = None;
+            clear_error_location(model);
             Vec::new()
         }
         Message::ConnectionFailed(diagnostic) => {
             model.phase = QueryPhase::Idle;
+            model.update_lookup = None;
+            model.update_prompt = None;
+            model.pending_update = None;
             // The server was reached and said no about credentials. That is the
             // one connection failure a person can answer from here, so it is
             // asked rather than merely reported.
@@ -46,16 +55,61 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 ));
             }
             model.error = Some((*diagnostic).clone());
+            clear_error_location(model);
             model.connection = ConnectionState::Failed(diagnostic);
             Vec::new()
         }
         Message::ConnectionLost => {
+            let cell_update_in_flight = model.running_cell_update
+                || model.update_lookup.is_some()
+                || model.update_prompt.is_some()
+                || model.pending_update.is_some();
+            let refresh_in_flight = model.running_refresh || model.refresh_pending;
             if let Some(info) = model.connection.info() {
                 model.connection = ConnectionState::Lost {
                     info: Box::new(info.clone()),
                 };
             }
+            if model.plan.is_loading() {
+                let analyzed = model.plan.analyzed();
+                model.plan.failed(
+                    analyzed,
+                    "the connection was lost while reading the query plan",
+                    "reconnect and check the session before trying again; nothing was retried",
+                );
+                model.transaction = crate::query::result::TransactionState::Unknown;
+                model.focus = Focus::Results;
+                model.running_for = None;
+            }
             model.phase = QueryPhase::Idle;
+            model.transaction = crate::query::result::TransactionState::Unknown;
+            model.completion.menu = None;
+            // The runtime sends this message before the late execution result
+            // when a session closes. Clear every server-bound prompt and
+            // running marker now: the result that follows is deliberately
+            // stale, and confirming one of these prompts must not bypass the
+            // ordinary usable-connection gate.
+            model.pending_run = None;
+            model.parameter_prompt = None;
+            model.pending_plan = None;
+            model.running_sql = None;
+            model.running_parameterized = false;
+            model.running_cell_update = false;
+            model.running_editor_revision = None;
+            model.running_source = None;
+            model.update_lookup = None;
+            model.update_prompt = None;
+            model.pending_update = None;
+            model.running_refresh = false;
+            model.refresh_pending = false;
+            model.cell_update_notice = cell_update_in_flight
+                .then(|| "The connection was lost; no cell update was retried.".to_owned());
+            if refresh_in_flight && !cell_update_in_flight {
+                model.refresh_notice = Some(
+                    "The connection was lost while refreshing; the outcome is unknown and nothing was retried."
+                        .to_owned(),
+                );
+            }
             Vec::new()
         }
         Message::ExecutionFinished(execution) => {
@@ -63,12 +117,42 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             if model.phase.job() != Some(execution.job) {
                 return Vec::new();
             }
+            let current_revision = model.editor.revision();
+            let running_revision = model.running_editor_revision.take();
+            let running_source = model.running_source.take();
+            let running_parameterized = model.running_parameterized;
+            let running_cell_update = model.running_cell_update;
+            let running_refresh = model.running_refresh;
+            let completed_sql = model.running_sql.take();
+            let retained_execution = running_cell_update
+                .then(|| model.last_execution.take())
+                .flatten();
+            let retained_sql = running_cell_update.then(|| model.last_sql.take()).flatten();
+            model.running_parameterized = false;
+            model.running_cell_update = false;
+            model.running_refresh = false;
+            model.refresh_pending = false;
+            let (location, location_note) = map_error_location(
+                model,
+                execution.error.as_ref(),
+                running_revision,
+                running_source,
+                running_parameterized,
+            );
             model.phase = QueryPhase::Idle;
             model.running_for = None;
             model.transaction = execution.transaction;
             model.last_elapsed = Some(execution.elapsed);
             model.error = execution.error.clone();
             model.error_expanded = false;
+            model.error_location = location;
+            model.error_location_note = location_note;
+            if let Some(location) = model.error_location.as_ref()
+                && running_revision == Some(current_revision)
+            {
+                model.editor.set_cursor(location.cursor);
+                model.focus = Focus::Editor;
+            }
             model.notices = execution
                 .statements
                 .iter()
@@ -81,22 +165,83 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     info: Box::new(info.clone()),
                 };
             }
-            model.selected_row = 0;
-            model.selected_column = 0;
-            // A filter belongs to the rows it was typed against. Carrying it
-            // into a different result would hide rows the user never filtered.
-            model.result_filter.clear();
-            model.result_filtering = false;
-            // The cell it was showing belongs to a result that no longer exists.
-            // Leaving it open would show a value from one query labelled as
-            // though it came from another.
-            model.inspector = None;
+            if !running_cell_update {
+                model.selected_row = 0;
+                model.selected_column = 0;
+                // A filter belongs to the rows it was typed against. Carrying it
+                // into a different result would hide rows the user never filtered.
+                model.result_filter.clear();
+                model.result_filtering = false;
+                // The cell it was showing belongs to a result that no longer exists.
+                // Leaving it open would show a value from one query labelled as
+                // though it came from another.
+                model.inspector = None;
+            }
+            model.pending_copy = None;
+            model.clipboard_notice = None;
+            model.update_lookup = None;
+            model.update_prompt = None;
+            model.pending_update = None;
             let outcome = crate::history::Outcome::from_status(&execution.status);
             let elapsed = execution.elapsed;
-            model.last_execution = Some(*execution);
+            if running_cell_update {
+                // A generated UPDATE is a write against the retained result,
+                // not a replacement result. Keep the source snapshot and its
+                // identity available so the notice can honestly say that a
+                // deliberate SELECT is needed to read fresh data.
+                model.last_execution = retained_execution;
+                model.last_sql = retained_sql;
+                model.cell_update_notice = Some(match outcome {
+                    crate::history::Outcome::Succeeded => {
+                        let affected = execution
+                            .statements
+                            .first()
+                            .and_then(|statement| statement.rows_affected);
+                        match affected {
+                            Some(affected) => format!(
+                                "UPDATE completed once; PostgreSQL reported {affected} row(s) affected. The prior result is a snapshot; run the SELECT again to read fresh data."
+                            ),
+                            None => "UPDATE completed once; PostgreSQL did not report an affected-row count. The prior result is a snapshot; run the SELECT again to read fresh data.".to_owned(),
+                        }
+                    }
+                    crate::history::Outcome::Cancelled => {
+                        "The generated UPDATE was cancelled; nothing was retried.".to_owned()
+                    }
+                    crate::history::Outcome::Failed => {
+                        "The generated UPDATE failed; nothing was retried. Read the error for details.".to_owned()
+                    }
+                    crate::history::Outcome::Unknown => {
+                        "The connection was lost while sending the generated UPDATE; the outcome is unknown and nothing was retried.".to_owned()
+                    }
+                });
+            } else {
+                model.last_execution = Some(*execution);
+                model.last_sql = completed_sql.clone();
+                model.cell_update_notice = None;
+                model.refresh_notice = running_refresh.then(|| match outcome {
+                    crate::history::Outcome::Succeeded => {
+                        "Retained result refreshed once; no follow-up query was run.".to_owned()
+                    }
+                    crate::history::Outcome::Cancelled => {
+                        "Retained result refresh was cancelled; nothing was retried.".to_owned()
+                    }
+                    crate::history::Outcome::Failed => {
+                        "Retained result refresh failed; nothing was retried. Read the error for details."
+                            .to_owned()
+                    }
+                    crate::history::Outcome::Unknown => {
+                        "The connection was lost while refreshing; the outcome is unknown and nothing was retried."
+                            .to_owned()
+                    }
+                });
+                let columns = model
+                    .visible_result()
+                    .map_or_else(Vec::new, |set| set.columns.clone());
+                model.result_grid.reset_for_result(&columns);
+            }
             // The statement is recorded once it has an outcome, so what the
             // history holds is what really ran rather than what was submitted.
-            match model.running_sql.take() {
+            match completed_sql {
                 Some(sql) if model.records_history() => vec![Effect::RecordHistory {
                     sql,
                     outcome,
@@ -105,9 +250,24 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 _ => Vec::new(),
             }
         }
+        Message::PlanFinished(execution) => finish_plan(model, *execution),
+        Message::ClipboardSent { bytes, characters } => {
+            model.pending_copy = None;
+            model.clipboard_notice =
+                Some(crate::app::model::ClipboardNotice::Sent { bytes, characters });
+            Vec::new()
+        }
+        Message::ClipboardFailed(diagnostic) => {
+            model.pending_copy = None;
+            model.error_expanded = false;
+            clear_error_location(model);
+            model.error = Some(*diagnostic);
+            Vec::new()
+        }
         Message::CancellationDelivered(_) => Vec::new(),
         Message::CancellationFailed(diagnostic) => {
             model.error = Some(*diagnostic);
+            clear_error_location(model);
             Vec::new()
         }
         Message::Notices(notices) => {
@@ -118,6 +278,29 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             match *result {
                 Ok(schemas) => model.tree.set_schemas(schemas),
                 Err(error) => model.tree.set_error(error),
+            }
+            Vec::new()
+        }
+        Message::CompletionLoaded {
+            request,
+            loaded_at,
+            result,
+        } => {
+            if !model.completion.accepts(request) {
+                return Vec::new();
+            }
+            match *result {
+                Ok(catalog) => {
+                    model.completion.catalog =
+                        crate::app::completion::CatalogStatus::Ready { catalog, loaded_at };
+                    refresh_completion_menu(model);
+                }
+                Err(error) => {
+                    model.completion.catalog = crate::app::completion::CatalogStatus::Unavailable {
+                        message: error.headline,
+                    };
+                    refresh_completion_menu(model);
+                }
             }
             Vec::new()
         }
@@ -137,6 +320,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 }
             }
             Vec::new()
+        }
+        Message::UpdateTargetLoaded { request, result } => {
+            finish_update_target(model, request, *result)
         }
         Message::QueriesListed(queries) => {
             model.palette = Some(crate::app::palette::Palette::over_saved_queries(
@@ -183,7 +369,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             match *result {
                 // Loading is an edit like any other, so it can be undone.
                 Ok(text) => {
-                    model.editor.set_text(text);
+                    edit_editor(model, |editor| editor.set_text(text));
                     model.focus = Focus::Editor;
                 }
                 Err(error) => {
@@ -263,6 +449,143 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
     }
 }
 
+/// Maps a server error only when its source buffer is still the one on screen.
+fn map_error_location(
+    model: &Model,
+    error: Option<&crate::diagnostics::Diagnostic>,
+    running_revision: Option<u64>,
+    running_source: Option<StatementSource>,
+    running_parameterized: bool,
+) -> (
+    Option<crate::query::error_location::ErrorLocation>,
+    Option<String>,
+) {
+    let Some(error) = error else {
+        return (None, None);
+    };
+    if error.kind != crate::diagnostics::DiagnosticKind::Query {
+        return (None, None);
+    }
+    if running_revision != Some(model.editor.revision()) {
+        return (
+            None,
+            Some(
+                "The buffer changed while this statement was running; the reported position \
+                 belongs to the previous submission."
+                    .to_owned(),
+            ),
+        );
+    }
+    if running_parameterized && error.position.is_some() {
+        return (
+            None,
+            Some(
+                "This statement used prompted parameters; the server position belongs to the \
+                 expanded request, so no editor location was guessed."
+                    .to_owned(),
+            ),
+        );
+    }
+    let Some(position) = error.position else {
+        return (
+            None,
+            Some("PostgreSQL did not report an editor position for this error.".to_owned()),
+        );
+    };
+    let Some(statement_number) = running_source
+        .map(|source| source.number)
+        .or(error.statement_number)
+        .filter(|number| *number > 0)
+    else {
+        return (
+            None,
+            Some(
+                "The failed statement number is unavailable, so no editor location was guessed."
+                    .to_owned(),
+            ),
+        );
+    };
+    match error_location::locate(
+        model.editor.text(),
+        running_source,
+        statement_number,
+        position,
+    ) {
+        Some(location) => (Some(location), None),
+        None => (
+            None,
+            Some(
+                "The server position is outside the submitted statement, so no editor location \
+                 was guessed."
+                    .to_owned(),
+            ),
+        ),
+    }
+}
+
+/// Clears the transient marker and its explanation.
+fn clear_error_location(model: &mut Model) {
+    model.error_location = None;
+    model.error_location_note = None;
+}
+
+/// Applies an editor text mutation and invalidates an old server marker if it
+/// actually changed the buffer.
+fn edit_editor<F>(model: &mut Model, edit: F)
+where
+    F: FnOnce(&mut crate::app::editor::Editor),
+{
+    let before = model.editor.revision();
+    edit(&mut model.editor);
+    if model.editor.revision() != before {
+        if model.error_location.take().is_some() {
+            model.error_location_note = Some(
+                "The buffer changed; this error location belongs to the previous submission."
+                    .to_owned(),
+            );
+        }
+        model.format_notice = None;
+    }
+}
+
+/// Formats the editor as one local, undoable edit.
+fn format_buffer(model: &mut Model) {
+    let source = model.editor.text().to_owned();
+    if source.trim().is_empty() || crate::query::format::is_comment_only(&source) {
+        model.format_notice = Some(crate::app::model::FormatNotice::Empty);
+        return;
+    }
+
+    let cursor = model.editor.cursor();
+    let formatted = match crate::query::format_sql(&source, cursor) {
+        Ok(formatted) => formatted,
+        Err(error) => {
+            model.format_notice = Some(crate::app::model::FormatNotice::Refused {
+                message: error.message(&source),
+            });
+            return;
+        }
+    };
+
+    if formatted.text == source {
+        model.format_notice = Some(crate::app::model::FormatNotice::AlreadyFormatted);
+        return;
+    }
+
+    let before_lines = source.matches('\n').count() + 1;
+    let after_lines = formatted.text.matches('\n').count() + 1;
+    let mapped_cursor = formatted.cursor;
+    let replacement = formatted.text;
+    edit_editor(model, |editor| {
+        editor.replace_range(0..source.len(), &replacement)
+    });
+    model.editor.set_cursor(mapped_cursor);
+    model.format_notice = Some(crate::app::model::FormatNotice::Applied {
+        before_lines,
+        after_lines,
+    });
+}
+
 fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     // Modes are peeled in a fixed order, highest first. Getting this wrong is
     // how typing in the editor starts doing surprising things, so the order is
@@ -273,8 +596,14 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.password_prompt.is_some() {
         return password_action(model, action);
     }
+    if model.parameter_prompt.is_some() {
+        return parameter_action(model, action);
+    }
     if model.name_prompt.is_some() {
         return name_action(model, action);
+    }
+    if model.connection_details {
+        return connection_details_action(model, action);
     }
     if model.prefix_pending {
         return resolve_prefix(model, action);
@@ -282,8 +611,23 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.pending_run.is_some() {
         return confirmation_action(model, action);
     }
+    if model.pending_plan.is_some() {
+        return plan_confirmation_action(model, action);
+    }
+    if model.pending_copy.is_some() {
+        return copy_confirmation_action(model, action);
+    }
+    if model.update_prompt.is_some() {
+        return update_prompt_action(model, action);
+    }
+    if model.pending_update.is_some() {
+        return pending_update_action(model, action);
+    }
     if model.palette.is_some() {
         return palette_action(model, action);
+    }
+    if model.completion.menu.is_some() {
+        return completion_action(model, action);
     }
     if model.tree.filtering {
         return filter_action(model, action);
@@ -317,13 +661,16 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             // One layer at a time, in the order they were opened. Dismissing an
             // error the user has not read is the more expensive mistake, so it
             // goes last.
-            if model.help_open {
+            if model.plan.is_visible() && !model.plan.is_loading() {
+                model.plan.clear();
+            } else if model.help_open {
                 model.help_open = false;
             } else if !model.tree.filter.is_empty() {
                 model.tree.filter.clear();
             } else {
                 model.error = None;
                 model.error_expanded = false;
+                clear_error_location(model);
             }
             Vec::new()
         }
@@ -344,20 +691,34 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             // user who never opens it never pays for it.
             if model.sidebar_visible && model.tree.roots.is_empty() && !model.tree.loading {
                 model.tree.begin_loading();
-                return vec![Effect::LoadSchemas];
+                return reload_effects(model);
             }
             Vec::new()
         }
         Action::OpenPalette => {
-            model.palette = Some(crate::app::palette::Palette::new(palette_entries(model)));
+            model.palette = Some(crate::app::palette::Palette::over_commands(
+                palette_entries(model),
+                crate::app::discovery::palette_note(model),
+            ));
             Vec::new()
         }
+        Action::OpenConnectionPicker => {
+            if crate::app::discovery::action_is_available(model, &Action::OpenConnectionPicker) {
+                model.palette = Some(crate::app::palette::Palette::over_connections(
+                    connection_entries(model),
+                ));
+            }
+            Vec::new()
+        }
+        Action::OpenResultControls if model.plan.is_visible() => Vec::new(),
+        Action::OpenResultControls => open_result_controls(model),
         Action::BeginPrefix => {
             model.prefix_pending = true;
             Vec::new()
         }
         // The filter key belongs to whatever is being looked at. In the results
         // that means the rows; anywhere else it means the object tree.
+        Action::StartFilter if model.plan.is_visible() => Vec::new(),
         Action::StartFilter if model.focus == Focus::Results => {
             model.result_filtering = true;
             Vec::new()
@@ -370,20 +731,29 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::ReloadObjects => {
             model.tree.begin_loading();
-            vec![Effect::LoadSchemas]
+            reload_effects(model)
         }
+        Action::Complete if model.focus == Focus::Editor => {
+            open_completion(model, true);
+            Vec::new()
+        }
+        Action::Complete => Vec::new(),
         // Enter in the editor is a line break that keeps the indentation of the
         // line it left. It must go through `insert_newline` rather than
         // `insert('\n')`: the indentation rule lives there, and this is the only
         // path a key press ever takes to reach it.
         Action::Activate if model.focus == Focus::Editor => {
-            model.editor.insert_newline();
+            edit_editor(model, |editor| editor.insert_newline());
             Vec::new()
         }
         // In the results pane, Enter means "show me this value in full", which
         // is the only thing there is to do to a cell.
         Action::Activate if model.focus == Focus::Results => {
-            toggle_inspector(model);
+            if model.plan.document().is_some() {
+                model.plan.toggle_selected();
+            } else {
+                toggle_inspector(model);
+            }
             Vec::new()
         }
         Action::Activate => Vec::new(),
@@ -397,6 +767,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::ExportRows => {
+            if model.plan.is_visible() {
+                return Vec::new();
+            }
             // Only what is on screen can be written, so there has to be
             // something on screen.
             let Some(set) = model.visible_result() else {
@@ -406,19 +779,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             if matching == 0 {
                 return Vec::new();
             }
-            // The note is the whole honesty of this feature: a truncated result
-            // and a filtered view are both smaller than what the query returned,
-            // and the file will be smaller with them.
-            let note = if set.is_truncated() || !model.result_filter.trim().is_empty() {
-                format!(
-                    "{matching} row(s) will be written: what is on screen, not the {} the \
-                     server returned. Run the statement with --output to write all of it.",
-                    set.rows_seen
-                )
-            } else {
-                format!("{matching} row(s) will be written, as comma-separated values.")
-            };
-            model.name_prompt = Some(crate::app::model::NamePrompt::for_export(note));
+            model.palette = Some(crate::app::palette::Palette::over_export_formats(
+                export_format_entries(),
+                export_note(model, set, matching),
+            ));
             Vec::new()
         }
         Action::OpenQuery => vec![Effect::ListQueries],
@@ -439,19 +803,37 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::ToggleExpandedRow => {
-            model.expanded_row = !model.expanded_row;
+            if !model.plan.is_visible() {
+                model.expanded_row = !model.expanded_row;
+            }
             Vec::new()
         }
         Action::ToggleInspector => {
-            toggle_inspector(model);
+            if !model.plan.is_visible() {
+                toggle_inspector(model);
+            }
             Vec::new()
         }
-        Action::RunBuffer => run(model, model.editor.text().to_owned()),
+        Action::ExplainPlan => begin_plan(model, false),
+        Action::AnalyzePlan => begin_plan(model, true),
+        Action::CopyValue => begin_copy(model),
+        Action::GenerateCellUpdate => begin_cell_update(model),
+        Action::RefreshResult => begin_refresh_result(model),
+        Action::FormatBuffer => {
+            format_buffer(model);
+            Vec::new()
+        }
+        Action::RunBuffer => {
+            let sql = model.editor.text().to_owned();
+            run(model, sql, None)
+        }
         Action::RunStatement => {
-            let sql = statements::statement_at(model.editor.text(), model.editor.cursor())
-                .map(|s| s.text)
+            let source =
+                error_location::source_at_cursor(model.editor.text(), model.editor.cursor());
+            let sql = source
+                .map(|source| model.editor.text()[source.start..source.end].to_owned())
                 .unwrap_or_default();
-            run(model, sql)
+            run(model, sql, source)
         }
         Action::Cancel => match model.phase {
             QueryPhase::Running { job, .. } => {
@@ -462,11 +844,13 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             QueryPhase::CancellationRequested { .. } | QueryPhase::Idle => Vec::new(),
         },
         Action::Insert(ch) if model.focus == Focus::Editor => {
-            model.editor.insert(ch);
+            edit_editor(model, |editor| editor.insert(ch));
+            open_completion(model, false);
             Vec::new()
         }
         Action::Backspace if model.focus == Focus::Editor => {
-            model.editor.backspace();
+            edit_editor(model, |editor| editor.backspace());
+            open_completion(model, false);
             Vec::new()
         }
         Action::Insert(_) | Action::Backspace => Vec::new(),
@@ -477,11 +861,11 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         // Editing keys belong to the editor. Elsewhere they do nothing rather
         // than doing something that looks like an edit somewhere else.
         Action::DeleteForward if model.focus == Focus::Editor => {
-            model.editor.delete_forward();
+            edit_editor(model, |editor| editor.delete_forward());
             Vec::new()
         }
         Action::DeleteWordLeft if model.focus == Focus::Editor => {
-            model.editor.delete_word_left();
+            edit_editor(model, |editor| editor.delete_word_left());
             Vec::new()
         }
         Action::MoveWord(direction) if model.focus == Focus::Editor => {
@@ -501,11 +885,11 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Undo if model.focus == Focus::Editor => {
-            model.editor.undo();
+            edit_editor(model, |editor| editor.undo());
             Vec::new()
         }
         Action::Redo if model.focus == Focus::Editor => {
-            model.editor.redo();
+            edit_editor(model, |editor| editor.redo());
             Vec::new()
         }
         // These two are useful in every pane, so they are not editor-only.
@@ -513,7 +897,11 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             match model.focus {
                 Focus::Editor => model.editor.move_buffer_start(),
                 Focus::Results => {
-                    model.selected_row = 0;
+                    if model.plan.document().is_some() {
+                        model.plan.selected_path.clear();
+                    } else {
+                        model.selected_row = 0;
+                    }
                 }
                 Focus::Objects => model.tree.move_selection(isize::MIN / 2),
             }
@@ -523,9 +911,11 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             match model.focus {
                 Focus::Editor => model.editor.move_buffer_end(),
                 Focus::Results => {
-                    model.selected_row = model
-                        .visible_result()
-                        .map_or(0, |set| set.rows.len().saturating_sub(1));
+                    if model.plan.document().is_some() {
+                        model.plan.move_selection(isize::MAX / 2);
+                    } else {
+                        model.selected_row = model.displayed_rows().len().saturating_sub(1);
+                    }
                 }
                 Focus::Objects => model.tree.move_selection(isize::MAX / 2),
             }
@@ -542,6 +932,130 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         | Action::MoveLineEnd
         | Action::Undo
         | Action::Redo => Vec::new(),
+    }
+}
+
+/// Starts the tree and completion reads as one visible refresh operation.
+fn reload_effects(model: &mut Model) -> Vec<Effect> {
+    let request = model.completion.begin_loading();
+    vec![
+        Effect::LoadSchemas,
+        Effect::LoadCompletionCatalog { request },
+    ]
+}
+
+/// Opens completion at the current editor cursor.
+fn open_completion(model: &mut Model, explicit: bool) {
+    if model.focus != Focus::Editor {
+        model.completion.menu = None;
+        return;
+    }
+    if !explicit && !model.completion.enabled {
+        model.completion.menu = None;
+        return;
+    }
+    let result = crate::query::completion::complete(
+        model.editor.text(),
+        model.editor.cursor(),
+        model.completion.catalog(),
+    );
+    if !explicit && !automatic_completion_should_open(&result) {
+        model.completion.menu = None;
+        return;
+    }
+    model.completion.menu = Some(crate::app::completion::CompletionMenu::new(
+        result, explicit,
+    ));
+}
+
+/// Recomputes a menu after a local edit or a catalogue response.
+fn refresh_completion_menu(model: &mut Model) {
+    let Some(menu) = model.completion.menu.take() else {
+        return;
+    };
+    let result = crate::query::completion::complete(
+        model.editor.text(),
+        model.editor.cursor(),
+        model.completion.catalog(),
+    );
+    if !menu.explicit && !automatic_completion_should_open(&result) {
+        return;
+    }
+    model.completion.menu = Some(menu.refreshed(result));
+}
+
+/// Automatic completion must not steal Enter after the user has already typed
+/// one complete, unambiguous candidate. Explicit completion still shows it.
+fn automatic_completion_should_open(result: &crate::query::completion::CompletionResult) -> bool {
+    if result.prefix.trim().chars().count() < 2 || result.candidates.is_empty() {
+        return false;
+    }
+    !(result.matching_count == 1
+        && result.candidates[0]
+            .label
+            .eq_ignore_ascii_case(result.prefix.trim()))
+}
+
+/// Handles input while the completion menu is open.
+fn completion_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Insert(ch) if model.focus == Focus::Editor => {
+            edit_editor(model, |editor| editor.insert(ch));
+            refresh_completion_menu(model);
+            Vec::new()
+        }
+        Action::Backspace if model.focus == Focus::Editor => {
+            edit_editor(model, |editor| editor.backspace());
+            refresh_completion_menu(model);
+            Vec::new()
+        }
+        Action::Move(Direction::Up) => {
+            if let Some(menu) = model.completion.menu.as_mut() {
+                menu.move_selection(-1);
+            }
+            Vec::new()
+        }
+        Action::Move(Direction::Down) => {
+            if let Some(menu) = model.completion.menu.as_mut() {
+                menu.move_selection(1);
+            }
+            Vec::new()
+        }
+        Action::Activate => {
+            let accepted = model.completion.menu.as_ref().and_then(|menu| {
+                menu.selected_candidate().map(|candidate| {
+                    (
+                        menu.result.replacement.clone(),
+                        candidate.insert_text.clone(),
+                    )
+                })
+            });
+            model.completion.menu = None;
+            if let Some((range, replacement)) = accepted {
+                edit_editor(model, |editor| editor.replace_range(range, &replacement));
+            }
+            Vec::new()
+        }
+        Action::Dismiss => {
+            model.completion.menu = None;
+            Vec::new()
+        }
+        Action::Complete => {
+            open_completion(model, true);
+            Vec::new()
+        }
+        Action::Quit => {
+            model.completion.menu = None;
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        other => {
+            // The menu is a transient layer. A key with another meaning closes
+            // it and then performs that meaning, so Ctrl+R and pane navigation
+            // never feel swallowed by an invisible popup state.
+            model.completion.menu = None;
+            apply_action(model, other)
+        }
     }
 }
 
@@ -712,7 +1226,15 @@ fn page(model: &mut Model, direction: Direction) {
             Direction::Left | Direction::Right => {}
         },
         Focus::Results => {
-            let rows = model.visible_result().map_or(0, |set| set.rows.len());
+            if model.plan.document().is_some() {
+                match direction {
+                    Direction::Up => model.plan.move_selection(-1),
+                    Direction::Down => model.plan.move_selection(1),
+                    Direction::Left | Direction::Right => {}
+                }
+                return;
+            }
+            let rows = model.displayed_rows().len();
             let step = crate::ui::layout::results_page(model.size);
             match direction {
                 Direction::Up => model.selected_row = model.selected_row.saturating_sub(step),
@@ -739,6 +1261,9 @@ fn page(model: &mut Model, direction: Direction) {
 /// no rows would be a window onto nothing, and the selection can outlive the
 /// result it was made in, so the cell is looked up rather than assumed.
 fn toggle_inspector(model: &mut Model) {
+    if model.plan.is_visible() {
+        return;
+    }
     if model.inspector.is_some() {
         model.inspector = None;
         return;
@@ -914,6 +1439,64 @@ fn password_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// Handles input while named parameter values are being collected.
+fn parameter_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Insert(character) => {
+            if let Some(prompt) = model.parameter_prompt.as_mut() {
+                prompt.push(character);
+            }
+            Vec::new()
+        }
+        Action::Backspace => {
+            if let Some(prompt) = model.parameter_prompt.as_mut() {
+                prompt.backspace();
+            }
+            Vec::new()
+        }
+        Action::Activate | Action::RunBuffer => {
+            let accepted = model.parameter_prompt.as_mut().map(ParameterPrompt::accept);
+            match accepted {
+                Some(Ok(None)) => Vec::new(),
+                Some(Ok(Some(parameters))) => {
+                    let prompt = model
+                        .parameter_prompt
+                        .take()
+                        .expect("parameter prompt still exists after acceptance");
+                    start_parameterized(model, prompt.sql, prompt.source, parameters)
+                }
+                Some(Err(error)) => {
+                    model.parameter_prompt = None;
+                    if model.refresh_pending {
+                        model.refresh_pending = false;
+                        model.refresh_notice = Some(
+                            "Retained result refresh was refused before sending; nothing was retried."
+                                .to_owned(),
+                        );
+                    }
+                    model.error = Some(error.diagnostic("accepting named parameter values"));
+                    clear_error_location(model);
+                    Vec::new()
+                }
+                None => Vec::new(),
+            }
+        }
+        Action::Dismiss | Action::Cancel => {
+            model.parameter_prompt = None;
+            if model.refresh_pending {
+                model.refresh_pending = false;
+                model.refresh_notice = None;
+            }
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Handles input while a name is being typed.
 fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
     let Some(prompt) = model.name_prompt.as_mut() else {
@@ -934,6 +1517,7 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
             let name = prompt.typed.trim().to_owned();
             let purpose = prompt.purpose;
+            let export_format = prompt.export_format;
             model.name_prompt = None;
             match purpose {
                 crate::app::model::NamePurpose::SaveQuery => {
@@ -944,7 +1528,10 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     }]
                 }
                 crate::app::model::NamePurpose::ExportRows => {
-                    vec![Effect::ExportRows { path: name }]
+                    let Some(format) = export_format else {
+                        return Vec::new();
+                    };
+                    vec![Effect::ExportRows { path: name, format }]
                 }
             }
         }
@@ -981,8 +1568,9 @@ fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 return Vec::new();
             }
             let sql = pending.sql.clone();
+            let source = pending.source;
             model.pending_run = None;
-            start(model, sql)
+            start(model, sql, source)
         }
         Action::Dismiss | Action::Cancel => {
             model.pending_run = None;
@@ -996,9 +1584,687 @@ fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// Handles the explicit confirmation required before EXPLAIN ANALYZE can be
+/// sent. A plain Enter is enough for read-looking statements; destructive
+/// impact still requires the database name, just as an ordinary run does.
+fn plan_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(pending) = model.pending_plan.as_mut() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(ch) => {
+            pending.typed.push(ch);
+            Vec::new()
+        }
+        Action::Backspace => {
+            pending.typed.pop();
+            Vec::new()
+        }
+        Action::Activate | Action::RunBuffer => {
+            if !pending.is_satisfied() {
+                return Vec::new();
+            }
+            let sql = pending.sql.clone();
+            let impact = pending.impact;
+            model.pending_plan = None;
+            start_plan(model, sql, true, impact)
+        }
+        Action::Dismiss | Action::Cancel => {
+            model.pending_plan = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Handles input while a result value is waiting for explicit copy approval.
+///
+/// This is a stricter modal than the inspector: typing and navigation are
+/// swallowed, and Enter rechecks the retained result before a payload exists.
+fn copy_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(candidate) = model.pending_copy.take() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Activate | Action::RunBuffer => {
+            let Some(value) = copy_payload_for_candidate(model, candidate) else {
+                model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Stale);
+                return Vec::new();
+            };
+            model.clipboard_notice = None;
+            vec![Effect::CopyValue { payload: value }]
+        }
+        Action::Dismiss | Action::Cancel => {
+            // There is no "copied" state to undo: nothing was written before
+            // this point, and the retained result and selection stay intact.
+            model.clipboard_notice = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => {
+            // A copy prompt owns the keyboard until it is confirmed or
+            // dismissed, so an editor action cannot leak through underneath.
+            model.pending_copy = Some(candidate);
+            Vec::new()
+        }
+    }
+}
+
+/// Opens a value-free copy confirmation for the selected retained cell.
+fn begin_copy(model: &mut Model) -> Vec<Effect> {
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.visible_result().is_none()
+    {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    }
+
+    let Some(result_job) = model.last_execution.as_ref().map(|execution| execution.job) else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    };
+    let Some(source_row) = model.selected_source_row() else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    };
+    let selected = model.visible_result().and_then(|set| {
+        let visible = model.result_grid.visible_columns(set.columns.len());
+        if !visible.contains(&model.selected_column) {
+            return None;
+        }
+        let cell = set.rows.get(source_row)?.get(model.selected_column)?;
+        Some((
+            cell.is_null(),
+            cell.raw().map(|value| (value.len(), value.chars().count())),
+        ))
+    });
+    let Some((is_null, counts)) = selected else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    };
+    if is_null {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Null);
+        return Vec::new();
+    }
+    if !model.clipboard_osc52 {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Disabled);
+        return Vec::new();
+    }
+    let Some((bytes, characters)) = counts else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Null);
+        return Vec::new();
+    };
+    if bytes > crate::clipboard::MAX_OSC52_BYTES {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::TooLarge { bytes });
+        return Vec::new();
+    }
+
+    model.clipboard_notice = None;
+    model.pending_copy = Some(crate::app::model::PendingCopy {
+        result_job,
+        source_row,
+        column: model.selected_column,
+        bytes,
+        characters,
+    });
+    Vec::new()
+}
+
+/// Re-derives the selected value after a copy confirmation and wraps it for the
+/// transport. Any changed identity or count is a stale candidate, not a guess.
+fn copy_payload_for_candidate(
+    model: &Model,
+    candidate: crate::app::model::PendingCopy,
+) -> Option<crate::clipboard::ClipboardPayload> {
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.last_execution.as_ref()?.job != candidate.result_job
+        || model.selected_source_row() != Some(candidate.source_row)
+        || model.selected_column != candidate.column
+    {
+        return None;
+    }
+    let set = model.visible_result()?;
+    if !model
+        .result_grid
+        .visible_columns(set.columns.len())
+        .contains(&candidate.column)
+    {
+        return None;
+    }
+    let value = set
+        .rows
+        .get(candidate.source_row)?
+        .get(candidate.column)?
+        .raw()?;
+    if value.len() != candidate.bytes || value.chars().count() != candidate.characters {
+        return None;
+    }
+    crate::clipboard::ClipboardPayload::try_new(value.to_owned()).ok()
+}
+
+/// Handles input while a replacement value is being typed for a cell update.
+///
+/// The value stays in the secret prompt until the planner has accepted it. A
+/// refusal leaves the prompt open so the operator can correct the value, while
+/// a changed result clears it as stale rather than guessing at a new row.
+fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(mut prompt) = model.update_prompt.take() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(character) => {
+            prompt.push(character);
+            model.update_prompt = Some(prompt);
+            Vec::new()
+        }
+        Action::Backspace => {
+            prompt.backspace();
+            model.update_prompt = Some(prompt);
+            Vec::new()
+        }
+        Action::Activate | Action::RunBuffer => {
+            if !update_candidate_is_current(model, &prompt.candidate) {
+                model.cell_update_notice = Some(
+                    "The result or selection changed; the cell update was discarded.".to_owned(),
+                );
+                return Vec::new();
+            }
+            let Some(set) = model.visible_result() else {
+                model.cell_update_notice =
+                    Some("The retained result is gone; the cell update was discarded.".to_owned());
+                return Vec::new();
+            };
+            let Some(selected_row) = model.selected_source_row() else {
+                model.cell_update_notice = Some(
+                    "The selected result row is gone; the cell update was discarded.".to_owned(),
+                );
+                return Vec::new();
+            };
+            let Some(row) = set.rows.get(selected_row) else {
+                model.cell_update_notice = Some(
+                    "The selected result row is gone; the cell update was discarded.".to_owned(),
+                );
+                return Vec::new();
+            };
+            let relation_columns = prompt
+                .relation
+                .columns
+                .iter()
+                .map(|column| crate::query::UpdateColumn {
+                    name: column.name.clone(),
+                    primary_key: column.primary_key,
+                })
+                .collect::<Vec<_>>();
+            let plan = crate::query::plan_update(
+                &prompt.source,
+                &prompt.relation.schema,
+                &prompt.relation.relation,
+                &set.columns,
+                row,
+                &relation_columns,
+                prompt.replacement(),
+            );
+            match plan {
+                Ok(plan) => {
+                    model.pending_update = Some(PendingUpdate {
+                        candidate: prompt.candidate,
+                        relation: prompt.relation,
+                        plan,
+                    });
+                    model.cell_update_notice =
+                        Some("Review the generated UPDATE. Nothing has been sent yet.".to_owned());
+                }
+                Err(error) => {
+                    model.cell_update_notice = Some(error.to_string());
+                    model.update_prompt = Some(prompt);
+                }
+            }
+            Vec::new()
+        }
+        Action::Dismiss | Action::Cancel => {
+            model.cell_update_notice = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => {
+            // The value prompt owns the keyboard until review or dismissal.
+            model.update_prompt = Some(prompt);
+            Vec::new()
+        }
+    }
+}
+
+/// Handles the final, one-shot confirmation of a generated update.
+fn pending_update_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(pending) = model.pending_update.take() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Activate | Action::RunBuffer => {
+            if !update_candidate_is_current(model, &pending.candidate) {
+                model.cell_update_notice = Some(
+                    "The result or selection changed; the cell update was discarded.".to_owned(),
+                );
+                return Vec::new();
+            }
+            if !model.connection.is_usable() {
+                model.cell_update_notice =
+                    Some("The connection is not usable; nothing was sent.".to_owned());
+                return Vec::new();
+            }
+            if model.environment().is_production() {
+                model.cell_update_notice = Some(
+                    "Cell updates are refused on production-classified connections; nothing was sent."
+                        .to_owned(),
+                );
+                return Vec::new();
+            }
+            if model.connection.info().is_some_and(|info| info.read_only) {
+                model.cell_update_notice = Some(
+                    "Cell updates are refused on a read-only session; nothing was sent.".to_owned(),
+                );
+                return Vec::new();
+            }
+            if model.transaction == crate::query::result::TransactionState::Failed {
+                model.cell_update_notice = Some(
+                    "The transaction is failed; recover it before sending a cell update."
+                        .to_owned(),
+                );
+                return Vec::new();
+            }
+            let sql = pending.plan.sql_template.clone();
+            let parameters = pending.plan.parameters.clone();
+            let effects = start_with_parameters(model, sql, None, Some(parameters));
+            if effects.is_empty() {
+                model.cell_update_notice =
+                    Some("The generated UPDATE could not be started; nothing was sent.".to_owned());
+            } else {
+                model.running_cell_update = true;
+                model.cell_update_notice =
+                    Some("Sending the generated UPDATE once. The SELECT will not be rerun automatically.".to_owned());
+            }
+            effects
+        }
+        Action::Dismiss | Action::Cancel => {
+            model.cell_update_notice = None;
+            Vec::new()
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => {
+            // Review owns the keyboard so navigation cannot change the row
+            // underneath the statement shown for confirmation.
+            model.pending_update = Some(pending);
+            Vec::new()
+        }
+    }
+}
+
+/// Returns whether a value-free update candidate still names the current cell.
+fn update_candidate_is_current(model: &Model, candidate: &UpdateCandidate) -> bool {
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.last_execution.as_ref().map(|execution| execution.job)
+            != Some(candidate.result_job)
+        || model.selected_source_row() != Some(candidate.source_row)
+        || model.selected_column != candidate.result_column
+        || model.last_sql.as_deref() != Some(candidate.source_sql.as_str())
+    {
+        return false;
+    }
+    model.visible_result().is_some_and(|set| {
+        model
+            .result_grid
+            .visible_columns(set.columns.len())
+            .contains(&candidate.result_column)
+            && set
+                .rows
+                .get(candidate.source_row)
+                .and_then(|row| row.get(candidate.result_column))
+                .is_some()
+    })
+}
+
+/// Starts an explicit refresh from the retained result source.
+fn begin_refresh_result(model: &mut Model) -> Vec<Effect> {
+    let source = match crate::app::discovery::retained_result_refresh_source(model) {
+        Ok(source) => source,
+        Err(reason) => {
+            model.refresh_notice = Some(reason);
+            return Vec::new();
+        }
+    };
+
+    // Keep this marker through the existing named-parameter prompt. It is
+    // cleared when the prompt is dismissed or when execution starts, so a
+    // later ordinary run cannot inherit refresh semantics.
+    model.refresh_pending = true;
+    model.refresh_notice = Some(
+        "Refreshing the retained result; the editor is unchanged and nothing is sent until any parameters are entered."
+            .to_owned(),
+    );
+    let effects = start(model, source, None);
+    if model.parameter_prompt.is_none() && effects.is_empty() {
+        model.refresh_pending = false;
+        model.refresh_notice =
+            Some("The retained result refresh could not be started; nothing was sent.".to_owned());
+    }
+    effects
+}
+
+/// Starts the value-free source analysis and live metadata lookup for a cell.
+fn begin_cell_update(model: &mut Model) -> Vec<Effect> {
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.visible_result().is_none()
+    {
+        model.cell_update_notice =
+            Some("Focus Results on a retained cell before generating an UPDATE.".to_owned());
+        return Vec::new();
+    }
+    if model.environment().is_production() {
+        model.cell_update_notice = Some(
+            "Cell updates are refused on production-classified connections; nothing was sent."
+                .to_owned(),
+        );
+        return Vec::new();
+    }
+    if model.connection.info().is_some_and(|info| info.read_only) {
+        model.cell_update_notice =
+            Some("Cell updates are refused on a read-only session; nothing was sent.".to_owned());
+        return Vec::new();
+    }
+    if !model.connection.is_usable() {
+        model.cell_update_notice = Some(
+            "The connection is not usable; nothing was sent. Reconnect before generating an UPDATE."
+                .to_owned(),
+        );
+        return Vec::new();
+    }
+    if model.transaction == crate::query::result::TransactionState::Failed {
+        model.cell_update_notice =
+            Some("The transaction is failed; recover it before generating an UPDATE.".to_owned());
+        return Vec::new();
+    }
+
+    let Some(result_job) = model.last_execution.as_ref().map(|execution| execution.job) else {
+        model.cell_update_notice =
+            Some("There is no retained execution to update from.".to_owned());
+        return Vec::new();
+    };
+    let Some(source_row) = model.selected_source_row() else {
+        model.cell_update_notice =
+            Some("Select a retained result row before generating an UPDATE.".to_owned());
+        return Vec::new();
+    };
+    let Some(source_sql) = model.last_sql.clone() else {
+        model.cell_update_notice = Some(
+            "The retained result has no SQL source, so a safe UPDATE cannot be generated."
+                .to_owned(),
+        );
+        return Vec::new();
+    };
+    let Some(set) = model.visible_result() else {
+        model.cell_update_notice = Some("There is no retained result to update from.".to_owned());
+        return Vec::new();
+    };
+    let visible = model.result_grid.visible_columns(set.columns.len());
+    if !visible.contains(&model.selected_column)
+        || set
+            .rows
+            .get(source_row)
+            .and_then(|row| row.get(model.selected_column))
+            .is_none()
+    {
+        model.cell_update_notice =
+            Some("Select a visible result cell before generating an UPDATE.".to_owned());
+        return Vec::new();
+    }
+    let source =
+        match crate::query::parse_update_source(&source_sql, &set.columns, model.selected_column) {
+            Ok(source) => source,
+            Err(error) => {
+                model.cell_update_notice = Some(error.to_string());
+                return Vec::new();
+            }
+        };
+    let request = model.allocate_update_request();
+    let candidate = UpdateCandidate {
+        result_job,
+        source_row,
+        result_column: model.selected_column,
+        source_sql,
+    };
+    model.update_lookup = Some(UpdateLookup {
+        request,
+        candidate,
+        source: source.clone(),
+    });
+    model.cell_update_notice = Some(format!(
+        "Reading primary-key metadata for {}.{}.",
+        crate::postgres::metadata::quote_identifier(
+            source.relation.schema.as_deref().unwrap_or("search_path")
+        ),
+        crate::postgres::metadata::quote_identifier(&source.relation.relation)
+    ));
+    vec![Effect::LoadUpdateTarget {
+        request,
+        relation: source.relation,
+    }]
+}
+
+/// Applies a live metadata response to the still-current update candidate.
+fn finish_update_target(
+    model: &mut Model,
+    request: u64,
+    result: Result<crate::postgres::metadata::UpdateRelation, crate::diagnostics::Diagnostic>,
+) -> Vec<Effect> {
+    if model
+        .update_lookup
+        .as_ref()
+        .is_none_or(|lookup| lookup.request != request)
+    {
+        return Vec::new();
+    }
+    let lookup = model
+        .update_lookup
+        .take()
+        .expect("checked update lookup identity");
+    if !update_candidate_is_current(model, &lookup.candidate) {
+        model.cell_update_notice =
+            Some("The result or selection changed; the cell update was discarded.".to_owned());
+        return Vec::new();
+    }
+    let relation = match result {
+        Ok(relation) => relation,
+        Err(error) => {
+            model.cell_update_notice = Some(format!(
+                "Cell update metadata is unavailable: {}",
+                error.headline
+            ));
+            return Vec::new();
+        }
+    };
+    if !matches!(
+        relation.kind,
+        crate::postgres::metadata::ObjectKind::Table
+            | crate::postgres::metadata::ObjectKind::PartitionedTable
+    ) {
+        model.cell_update_notice = Some(format!(
+            "Cell updates are supported only for ordinary or partitioned tables, not {}.",
+            relation.kind.singular()
+        ));
+        return Vec::new();
+    }
+    if !relation.readable {
+        model.cell_update_notice = Some(
+            "The current role can no longer read the resolved relation; nothing was sent."
+                .to_owned(),
+        );
+        return Vec::new();
+    }
+    if !relation.writable {
+        model.cell_update_notice = Some(
+            "The current role cannot UPDATE the resolved relation; nothing was sent.".to_owned(),
+        );
+        return Vec::new();
+    }
+    model.update_prompt = Some(UpdatePrompt::new(lookup.candidate, lookup.source, relation));
+    model.cell_update_notice = None;
+    Vec::new()
+}
+
+/// Starts a plain plan immediately or stages an analyzed plan for confirmation.
+fn begin_plan(model: &mut Model, analyze: bool) -> Vec<Effect> {
+    if !model.connection.is_usable()
+        || model.phase.is_busy()
+        || model.transaction == crate::query::result::TransactionState::Failed
+    {
+        return Vec::new();
+    }
+    let Some(source) = error_location::source_at_cursor(model.editor.text(), model.editor.cursor())
+    else {
+        return Vec::new();
+    };
+    let sql = model.editor.text()[source.start..source.end]
+        .trim()
+        .to_owned();
+    if sql.is_empty() || is_explain_statement(&sql) {
+        return Vec::new();
+    }
+    let parsed = statements::split(&sql);
+    if parsed.len() != 1 {
+        return Vec::new();
+    }
+    let impact = crate::query::classify_all(&parsed);
+    if analyze {
+        let required = model
+            .connection
+            .info()
+            .map_or_else(String::new, |info| info.database.clone());
+        model.pending_plan = Some(crate::app::model::PendingPlan {
+            sql,
+            impact,
+            typed: String::new(),
+            required,
+        });
+        return Vec::new();
+    }
+    start_plan(model, sql, false, impact)
+}
+
+/// Starts a plan request after its safety gate has been satisfied.
+fn start_plan(
+    model: &mut Model,
+    sql: String,
+    analyzed: bool,
+    _impact: crate::query::Impact,
+) -> Vec<Effect> {
+    if !model.connection.is_usable()
+        || model.phase.is_busy()
+        || model.transaction == crate::query::result::TransactionState::Failed
+    {
+        return Vec::new();
+    }
+    let parsed = statements::split(&sql);
+    if parsed.len() != 1 || is_explain_statement(&sql) {
+        return Vec::new();
+    }
+    let job = model.allocate_job();
+    model.plan = crate::app::PlanView::loading(job, analyzed);
+    model.pending_copy = None;
+    model.clipboard_notice = None;
+    model.update_lookup = None;
+    model.update_prompt = None;
+    model.pending_update = None;
+    model.cell_update_notice = None;
+    model.refresh_notice = None;
+    model.running_sql = None;
+    model.running_parameterized = false;
+    model.running_cell_update = false;
+    model.running_refresh = false;
+    model.refresh_pending = false;
+    model.running_editor_revision = None;
+    model.running_source = None;
+    model.focus = Focus::Results;
+    model.phase = QueryPhase::Running { job, statements: 1 };
+    model.running_for = Some(std::time::Duration::ZERO);
+    model.error = None;
+    clear_error_location(model);
+    vec![Effect::Explain {
+        job,
+        sql,
+        analyze: analyzed,
+    }]
+}
+
+/// Completes a plan request without touching ordinary result or history state.
+fn finish_plan(model: &mut Model, execution: crate::app::PlanExecution) -> Vec<Effect> {
+    if model.phase.job() != Some(execution.job) || model.plan.job() != Some(execution.job) {
+        return Vec::new();
+    }
+    model.phase = QueryPhase::Idle;
+    model.running_for = None;
+    model.transaction = execution.transaction;
+    model.focus = Focus::Results;
+
+    if execution.connection_lost {
+        if let Some(info) = model.connection.info() {
+            model.connection = ConnectionState::Lost {
+                info: Box::new(info.clone()),
+            };
+        }
+        model.plan.failed(
+            execution.analyzed,
+            "the connection was lost while reading the query plan",
+            "reconnect and check the session before trying again; nothing was retried",
+        );
+        return Vec::new();
+    }
+
+    match execution.result {
+        Ok(document) => model.plan.ready(document),
+        Err(error) => model.plan.failed(
+            execution.analyzed,
+            error.headline,
+            error
+                .next_action
+                .unwrap_or_else(|| "correct the statement, then try the plan again".to_owned()),
+        ),
+    }
+    Vec::new()
+}
+
+/// Whether the statement is already a generated or user-authored EXPLAIN.
+fn is_explain_statement(sql: &str) -> bool {
+    let uncommented = statements::strip_comments(sql);
+    uncommented
+        .split_whitespace()
+        .next()
+        .is_some_and(|word| word.eq_ignore_ascii_case("explain"))
+}
+
 /// Starts an execution, refusing when there is nothing to run or nowhere to run
 /// it, and holding it back when the target is production and it is not a read.
-fn run(model: &mut Model, sql: String) -> Vec<Effect> {
+fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
     }
@@ -1020,28 +2286,104 @@ fn run(model: &mut Model, sql: String) -> Vec<Effect> {
             impact,
             typed: String::new(),
             required,
+            source,
         });
         return Vec::new();
     }
 
-    start(model, sql)
+    start(model, sql, source)
 }
 
 /// Begins an execution that has already been allowed.
-fn start(model: &mut Model, sql: String) -> Vec<Effect> {
+fn start(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
+    if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
     let parsed = statements::split(&sql);
     if parsed.is_empty() {
         return Vec::new();
     }
+    if !model.refresh_pending {
+        model.refresh_notice = None;
+    }
+    let template = match crate::query::discover_parameters(&sql) {
+        Ok(template) => template,
+        Err(error) => {
+            model.error = Some(error.diagnostic("discovering named parameters"));
+            clear_error_location(model);
+            return Vec::new();
+        }
+    };
+    if !template.is_empty() {
+        model.parameter_prompt = Some(ParameterPrompt::new(sql, source, template.names().to_vec()));
+        model.error = None;
+        clear_error_location(model);
+        return Vec::new();
+    }
+    start_with_parameters(model, sql, source, None)
+}
+
+/// Begins an execution after a parameter prompt has supplied complete values.
+fn start_parameterized(
+    model: &mut Model,
+    sql: String,
+    source: Option<StatementSource>,
+    parameters: crate::query::ParameterBindings,
+) -> Vec<Effect> {
+    start_with_parameters(model, sql, source, Some(parameters))
+}
+
+/// Begins an ordinary or parameterized execution after all local gates pass.
+fn start_with_parameters(
+    model: &mut Model,
+    sql: String,
+    source: Option<StatementSource>,
+    parameters: Option<crate::query::ParameterBindings>,
+) -> Vec<Effect> {
+    if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
+    let parsed = statements::split(&sql);
+    if parsed.is_empty() {
+        return Vec::new();
+    }
+    let refreshing = model.refresh_pending;
+    model.refresh_pending = false;
     let job = model.allocate_job();
+    model.plan.clear();
+    model.pending_plan = None;
+    model.pending_copy = None;
+    model.update_lookup = None;
+    model.update_prompt = None;
+    model.pending_update = None;
+    model.cell_update_notice = None;
+    model.refresh_notice = refreshing.then(|| {
+        "Refreshing the retained result; the editor is unchanged and the request will run once."
+            .to_owned()
+    });
+    model.clipboard_notice = None;
+    model.parameter_prompt = None;
     model.running_sql = Some(sql.clone());
+    model.running_parameterized = parameters.is_some();
+    model.running_cell_update = false;
+    model.running_refresh = refreshing;
+    model.running_editor_revision = Some(model.editor.revision());
+    model.running_source = source;
     model.phase = QueryPhase::Running {
         job,
         statements: parsed.len(),
     };
     model.running_for = Some(std::time::Duration::ZERO);
     model.error = None;
-    vec![Effect::Execute { job, sql }]
+    clear_error_location(model);
+    match parameters {
+        Some(parameters) => vec![Effect::ExecuteParameterized {
+            job,
+            sql,
+            parameters,
+        }],
+        None => vec![Effect::Execute { job, sql }],
+    }
 }
 
 fn move_selection(model: &mut Model, direction: Direction) {
@@ -1059,23 +2401,316 @@ fn move_selection(model: &mut Model, direction: Direction) {
             Direction::Down => model.editor.move_down(),
         },
         Focus::Results => {
-            let rows = model.filtered_rows().len();
-            let columns = model.visible_result().map_or(0, |set| set.columns.len());
+            if model.plan.document().is_some() {
+                match direction {
+                    Direction::Up => model.plan.move_selection(-1),
+                    Direction::Down => model.plan.move_selection(1),
+                    Direction::Left | Direction::Right => {}
+                }
+                return;
+            }
+            let rows = model.displayed_rows().len();
+            let columns = model.visible_result().map_or_else(Vec::new, |set| {
+                model.result_grid.visible_columns(set.columns.len())
+            });
             match direction {
                 Direction::Up => model.selected_row = model.selected_row.saturating_sub(1),
                 Direction::Down => {
                     model.selected_row = (model.selected_row + 1).min(rows.saturating_sub(1));
                 }
                 Direction::Left => {
-                    model.selected_column = model.selected_column.saturating_sub(1);
+                    move_result_column(model, &columns, -1);
                 }
                 Direction::Right => {
-                    model.selected_column =
-                        (model.selected_column + 1).min(columns.saturating_sub(1));
+                    move_result_column(model, &columns, 1);
                 }
             }
         }
     }
+}
+
+/// Moves through the visible source columns, keeping the selected column's
+/// source identity intact when hidden columns create gaps.
+fn move_result_column(model: &mut Model, columns: &[usize], delta: isize) {
+    if columns.is_empty() {
+        model.selected_column = 0;
+        model.result_grid.horizontal_start = 0;
+        return;
+    }
+    let current = columns
+        .iter()
+        .position(|index| *index == model.selected_column)
+        .unwrap_or(0);
+    let last = isize::try_from(columns.len().saturating_sub(1)).unwrap_or(0);
+    let next = (isize::try_from(current).unwrap_or(0) + delta).clamp(0, last);
+    let next = usize::try_from(next).unwrap_or(0);
+    model.selected_column = columns[next];
+    model.result_grid.horizontal_start = next;
+}
+
+/// The visible source column the grid controls should act on.
+fn selected_grid_column(model: &Model) -> Option<usize> {
+    let set = model.visible_result()?;
+    let visible = model.result_grid.visible_columns(set.columns.len());
+    visible
+        .iter()
+        .copied()
+        .find(|index| *index == model.selected_column)
+        .or_else(|| visible.first().copied())
+}
+
+/// Opens the named, contextual result-grid controls surface.
+fn open_result_controls(model: &mut Model) -> Vec<Effect> {
+    let Some(set) = model.visible_result() else {
+        model.result_grid.note = Some("Run a query with rows before opening grid controls.".into());
+        return Vec::new();
+    };
+    if model.focus != Focus::Results {
+        model.result_grid.note = Some("Focus Results before opening result grid controls.".into());
+        return Vec::new();
+    }
+    if set.columns.is_empty() {
+        model.result_grid.note = Some("This result has no columns to shape.".into());
+        return Vec::new();
+    }
+    model.palette = Some(crate::app::palette::Palette::over_result_controls(
+        grid_control_entries(model),
+    ));
+    Vec::new()
+}
+
+/// Applies one view-only grid command and never returns an I/O effect.
+fn apply_grid_command(model: &mut Model, command: GridCommand) -> Vec<Effect> {
+    let Some(column_count) = model.visible_result().map(|set| set.columns.len()) else {
+        model.result_grid.note = Some("There is no retained result to change.".into());
+        return Vec::new();
+    };
+    if column_count == 0 {
+        model.result_grid.note = Some("This result has no columns to shape.".into());
+        return Vec::new();
+    }
+
+    match command {
+        GridCommand::ChooseColumns => {
+            model.palette = Some(crate::app::palette::Palette::over_result_columns(
+                result_column_entries(model),
+            ));
+        }
+        GridCommand::SortSelected => {
+            let Some(column) = selected_grid_column(model) else {
+                model.result_grid.note = Some("There is no visible result column to sort.".into());
+                return Vec::new();
+            };
+            let selected_source_row = model.selected_source_row();
+            model.result_grid.toggle_sort(column);
+            restore_selected_source_row(model, selected_source_row);
+        }
+        GridCommand::WidenSelected | GridCommand::NarrowSelected => {
+            let Some(column) = selected_grid_column(model) else {
+                model.result_grid.note =
+                    Some("There is no visible result column to resize.".into());
+                return Vec::new();
+            };
+            let automatic = model
+                .visible_result()
+                .map_or(crate::app::grid::MIN_COLUMN_WIDTH, |set| {
+                    crate::app::grid::automatic_column_width(set, column)
+                });
+            let step = isize::try_from(crate::app::grid::COLUMN_WIDTH_STEP).unwrap_or(4);
+            let delta = if matches!(command, GridCommand::WidenSelected) {
+                step
+            } else {
+                -step
+            };
+            let _ = model.result_grid.adjust_width(column, automatic, delta);
+        }
+        GridCommand::ToggleTypes => {
+            let has_types = model
+                .visible_result()
+                .is_some_and(|set| set.column_types.iter().any(Option::is_some));
+            model.result_grid.show_types = !model.result_grid.show_types;
+            if model.result_grid.show_types && !has_types {
+                model.result_grid.note = Some(
+                    "Type information is unavailable for this result; values are not inferred."
+                        .into(),
+                );
+            } else {
+                model.result_grid.note = None;
+            }
+        }
+        GridCommand::ToggleFreezeFirst => {
+            if model.result_grid.visible_columns(column_count).is_empty() {
+                model.result_grid.note =
+                    Some("There is no visible result column to freeze.".into());
+            } else {
+                model.result_grid.freeze_first = !model.result_grid.freeze_first;
+                model.result_grid.note = None;
+            }
+        }
+        GridCommand::Reset => {
+            let selected_source_row = model.selected_source_row();
+            model.result_grid.reset_view();
+            restore_selected_source_row(model, selected_source_row);
+        }
+    }
+    Vec::new()
+}
+
+/// Toggles a source column chosen from the searchable chooser.
+fn toggle_result_column(model: &mut Model, index: usize) {
+    let Some(set) = model.visible_result() else {
+        model.result_grid.note = Some("There is no retained result to change.".into());
+        return;
+    };
+    let count = set.columns.len();
+    let before = model.result_grid.visible_columns(count);
+    let was_hidden = model.result_grid.hidden_columns.contains(&index);
+    if !model.result_grid.toggle_column(index, count) {
+        return;
+    }
+    let after = model.result_grid.visible_columns(count);
+    if was_hidden {
+        // Restoring a column makes it the thing the user is looking for.
+        model.selected_column = index;
+        model.result_grid.horizontal_start = after
+            .iter()
+            .position(|candidate| *candidate == index)
+            .unwrap_or(0);
+        return;
+    }
+    if !after.contains(&model.selected_column) {
+        let old_position = before
+            .iter()
+            .position(|candidate| *candidate == model.selected_column)
+            .unwrap_or(0);
+        let new_position = old_position.min(after.len().saturating_sub(1));
+        model.selected_column = after[new_position];
+        model.result_grid.horizontal_start = new_position;
+    }
+}
+
+/// Restores the selected source row after a view transition changes positions.
+fn restore_selected_source_row(model: &mut Model, source_row: Option<usize>) {
+    let rows = model.displayed_rows();
+    model.selected_row = match source_row
+        .and_then(|source| rows.iter().position(|candidate| *candidate == source))
+    {
+        Some(position) => position,
+        None => model.selected_row.min(rows.len().saturating_sub(1)),
+    };
+}
+
+/// Palette entries for the current grid's local actions.
+fn grid_control_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+    let Some(set) = model.visible_result() else {
+        return Vec::new();
+    };
+    let selected = selected_grid_column(model).unwrap_or(0);
+    let selected_name = set.columns.get(selected).map_or_else(
+        || "none".to_owned(),
+        |name| crate::query::value::sanitize_for_display(name),
+    );
+    let sort_detail = match model.result_grid.sort {
+        Some(sort) if sort.column == selected => {
+            format!("{} on column {}", sort.direction.label(), selected + 1)
+        }
+        Some(sort) => format!(
+            "{} on column {}; selected column is {}",
+            sort.direction.label(),
+            sort.column + 1,
+            selected + 1
+        ),
+        None => "original server order".to_owned(),
+    };
+    let types = if model.result_grid.show_types {
+        "shown"
+    } else {
+        "hidden"
+    };
+    let freeze = if model.result_grid.freeze_first {
+        "on"
+    } else {
+        "off"
+    };
+    let selected_detail = format!("selected column {}: {selected_name}", selected + 1);
+    vec![
+        PaletteEntry {
+            label: "Sort selected column".into(),
+            detail: sort_detail,
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::SortSelected),
+        },
+        PaletteEntry {
+            label: "Choose visible columns".into(),
+            detail: format!("{} source columns", set.columns.len()),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::ChooseColumns),
+        },
+        PaletteEntry {
+            label: "Widen selected column".into(),
+            detail: selected_detail.clone(),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::WidenSelected),
+        },
+        PaletteEntry {
+            label: "Narrow selected column".into(),
+            detail: selected_detail,
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::NarrowSelected),
+        },
+        PaletteEntry {
+            label: "Show or hide type labels".into(),
+            detail: format!("currently {types}"),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::ToggleTypes),
+        },
+        PaletteEntry {
+            label: "Freeze first visible column".into(),
+            detail: format!("currently {freeze}"),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::ToggleFreezeFirst),
+        },
+        PaletteEntry {
+            label: "Reset result grid view".into(),
+            detail: "automatic widths, shown columns, original order".into(),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::Reset),
+        },
+    ]
+}
+
+/// Palette entries for source columns, with duplicate labels kept distinct.
+fn result_column_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+    let Some(set) = model.visible_result() else {
+        return Vec::new();
+    };
+    set.columns
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let visibility = if model.result_grid.hidden_columns.contains(&index) {
+                "hidden"
+            } else {
+                "shown"
+            };
+            let type_name = set.column_type(index).map_or_else(
+                || "type unavailable".to_owned(),
+                crate::query::value::sanitize_for_display,
+            );
+            PaletteEntry {
+                label: format!(
+                    "Column {}: {}",
+                    index + 1,
+                    crate::query::value::sanitize_for_display(name)
+                ),
+                detail: format!("{visibility}  {type_name}"),
+                group: "Result columns",
+                command: PaletteCommand::ResultColumn(index),
+            }
+        })
+        .collect()
 }
 
 /// Resolves the second key of a chord.
@@ -1120,15 +2755,34 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.palette = None;
             match chosen.map(|entry| entry.command) {
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::ConnectionDetails) => {
+                    model.connection_details = true;
+                    Vec::new()
+                }
+                Some(crate::app::palette::PaletteCommand::ConnectProfile(profile)) => {
+                    begin_connection(model, profile)
+                }
+                Some(crate::app::palette::PaletteCommand::ChooseExportFormat(format)) => {
+                    begin_export_format(model, format)
+                }
                 Some(crate::app::palette::PaletteCommand::Open(name)) => {
                     model.loaded_query = Some(name.clone());
                     vec![Effect::LoadQuery { name }]
                 }
                 Some(crate::app::palette::PaletteCommand::Insert(text)) => {
                     model.focus = Focus::Editor;
-                    for ch in text.chars() {
-                        model.editor.insert(ch);
-                    }
+                    edit_editor(model, |editor| {
+                        for ch in text.chars() {
+                            editor.insert(ch);
+                        }
+                    });
+                    Vec::new()
+                }
+                Some(crate::app::palette::PaletteCommand::Grid(command)) => {
+                    apply_grid_command(model, command)
+                }
+                Some(crate::app::palette::PaletteCommand::ResultColumn(index)) => {
+                    toggle_result_column(model, index);
                     Vec::new()
                 }
                 None => Vec::new(),
@@ -1147,6 +2801,38 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.should_quit = true;
             vec![Effect::Quit]
         }
+        _ => Vec::new(),
+    }
+}
+
+/// Handles input while the read-only connection trust surface is open.
+///
+/// The panel is intentionally a quiet inspection state. Typing and navigation
+/// are swallowed so a key cannot mutate an editor or selection hidden beneath
+/// it; Escape closes one layer, and the existing quit/palette paths remain
+/// available without requiring a second dismissal.
+fn connection_details_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ToggleHelp => {
+            model.connection_details = false;
+            Vec::new()
+        }
+        Action::OpenPalette => {
+            model.connection_details = false;
+            model.palette = Some(crate::app::palette::Palette::over_commands(
+                palette_entries(model),
+                crate::app::discovery::palette_note(model),
+            ));
+            Vec::new()
+        }
+        Action::Quit => {
+            model.connection_details = false;
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        // A trust panel must not leak keystrokes into the hidden editor.
+        Action::Insert(_) | Action::Backspace => Vec::new(),
+        // Other actions are deliberately ignored until the panel is closed.
         _ => Vec::new(),
     }
 }
@@ -1215,9 +2901,11 @@ fn objects_action(model: &mut Model, action: &Action) -> Option<Vec<Effect>> {
             match insertable {
                 Some(name) => {
                     model.focus = Focus::Editor;
-                    for ch in name.chars() {
-                        model.editor.insert(ch);
-                    }
+                    edit_editor(model, |editor| {
+                        for ch in name.chars() {
+                            editor.insert(ch);
+                        }
+                    });
                     Some(Vec::new())
                 }
                 None => Some(expand_selected(model)),
@@ -1265,43 +2953,224 @@ fn expand_selected(model: &mut Model) -> Vec<Effect> {
     }
 }
 
-/// The entries the palette offers: every command, then every loaded object.
+/// Builds the rows for the searchable connection picker.
+fn connection_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+
+    let mut entries = vec![PaletteEntry {
+        label: "Use default connection settings".to_owned(),
+        detail: "CLI, service file, environment and built-in defaults; no profile selected"
+            .to_owned(),
+        group: "Default",
+        command: PaletteCommand::ConnectProfile(None),
+    }];
+    entries.extend(
+        model
+            .connection_profiles
+            .iter()
+            .map(|profile| PaletteEntry {
+                label: profile.name.clone(),
+                detail: profile.detail(),
+                group: "Profiles",
+                command: PaletteCommand::ConnectProfile(Some(profile.name.clone())),
+            }),
+    );
+    entries
+}
+
+/// Clears facts belonging to the old server and starts one deliberate route.
+///
+/// The editor and local reading preferences survive a switch. Resolved targets
+/// and credentials do not enter this function: the runtime receives only the
+/// selected profile name and owns those values outside the model.
+fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
+    if model.phase.is_busy() || matches!(model.connection, ConnectionState::Connecting) {
+        return Vec::new();
+    }
+    let summary = profile.as_deref().and_then(|name| {
+        model
+            .connection_profiles
+            .iter()
+            .find(|item| item.name == name)
+    });
+    model.credential_provider = summary.and_then(|item| item.auth.clone());
+    model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
+    model.connection = ConnectionState::Connecting;
+    model.phase = QueryPhase::Idle;
+    model.last_execution = None;
+    model.last_elapsed = None;
+    model.running_for = None;
+    model.running_sql = None;
+    model.running_parameterized = false;
+    model.running_cell_update = false;
+    model.running_refresh = false;
+    model.refresh_pending = false;
+    model.running_editor_revision = None;
+    model.running_source = None;
+    model.notices.clear();
+    model.transaction = crate::query::result::TransactionState::Unknown;
+    model.error = None;
+    model.error_expanded = false;
+    clear_error_location(model);
+    model.password_prompt = None;
+    model.pending_run = None;
+    model.pending_plan = None;
+    model.pending_copy = None;
+    model.update_lookup = None;
+    model.update_prompt = None;
+    model.pending_update = None;
+    model.cell_update_notice = None;
+    model.refresh_notice = None;
+    model.clipboard_notice = None;
+    model.inspector = None;
+    model.definition = None;
+    model.pending_dependencies = None;
+    model.connection_details = false;
+    model.result_filter.clear();
+    model.result_filtering = false;
+    model.selected_row = 0;
+    model.selected_column = 0;
+    model.result_grid.reset_for_result(&[]);
+    model.plan.clear();
+    model.tree.reset_for_connection();
+    model.completion.reset_for_connection();
+    model.metadata_link = crate::app::model::MetadataLink::Shared;
+    model.focus = Focus::Editor;
+    vec![Effect::ConnectProfile { profile }]
+}
+
+fn export_format_entries() -> Vec<crate::app::palette::PaletteEntry> {
+    use crate::app::palette::{PaletteCommand, PaletteEntry};
+
+    [
+        ExportFormat::Csv,
+        ExportFormat::Tsv,
+        ExportFormat::Json,
+        ExportFormat::Ndjson,
+        ExportFormat::Markdown,
+    ]
+    .into_iter()
+    .map(|format| PaletteEntry {
+        label: format.label().to_owned(),
+        detail: format!(
+            "{}; suggested extension {}",
+            format.description(),
+            format.extension()
+        ),
+        group: "Formats",
+        command: PaletteCommand::ChooseExportFormat(format),
+    })
+    .collect()
+}
+
+fn export_note(model: &Model, set: &crate::query::result::ResultSet, matching: usize) -> String {
+    if set.is_truncated() || !model.result_filter.trim().is_empty() {
+        format!(
+            "{matching} row(s) ready: this is what is on screen, not the {} the server returned. Choose a format; --output writes the full result.",
+            set.rows_seen
+        )
+    } else {
+        format!(
+            "{matching} row(s) ready from the retained result. Choose a format before naming the destination."
+        )
+    }
+}
+
+fn begin_export_format(model: &mut Model, format: ExportFormat) -> Vec<Effect> {
+    let Some(note) = (|| {
+        let set = model.visible_result()?;
+        let matching = model.filtered_rows().len();
+        (matching > 0).then(|| export_note(model, set, matching))
+    })() else {
+        return Vec::new();
+    };
+    model.name_prompt = Some(crate::app::model::NamePrompt::for_export(format, note));
+    Vec::new()
+}
+
+/// The entries the palette offers: applicable commands, useful chord fallbacks,
+/// then every loaded object.
 fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
     use crate::app::palette::{PaletteCommand, PaletteEntry};
-    let keymap = crate::ui::keymap::Keymap::new();
-    let mut entries: Vec<PaletteEntry> = keymap
-        .bindings()
-        .iter()
-        .filter(|binding| {
-            // Movement and typing are not commands anyone looks up in a palette.
-            !matches!(
-                binding.action,
-                Action::Move(_) | Action::Insert(_) | Action::Backspace | Action::Activate
-            )
-        })
-        .map(|binding| PaletteEntry {
-            label: binding.description.to_owned(),
-            detail: binding.key_label(),
-            group: "Command",
-            command: PaletteCommand::Run(binding.action.clone()),
-        })
-        .collect();
-    entries.dedup_by(|a, b| a.label == b.label);
+    // Unit models are intentionally constructible without the interactive
+    // runtime. Their empty snapshot uses the built-in keymap only as a test
+    // compatibility fallback; the live model always carries the configured
+    // snapshot supplied by `cli::interactive`.
+    let snapshot = if model.keymap_snapshot.is_empty() {
+        crate::ui::keymap::Keymap::new().snapshot()
+    } else {
+        model.keymap_snapshot.clone()
+    };
+    let mut entries: Vec<PaletteEntry> = vec![PaletteEntry {
+        label: "Connection and auth details".to_owned(),
+        detail: format!(
+            "{}; trust, transport, and cloud identity",
+            model.connection.label()
+        ),
+        group: "Session",
+        command: PaletteCommand::ConnectionDetails,
+    }];
+
+    // A command appears once even when several active keys invoke it. The
+    // detail keeps every active direct key, with configured replacements first.
+    for action in crate::app::discovery::palette_actions(model) {
+        let bindings: Vec<&crate::app::discovery::KeyBindingSnapshot> = snapshot
+            .bindings
+            .iter()
+            .filter(|binding| binding.action == action)
+            .collect();
+        let Some(first) = bindings.first() else {
+            continue;
+        };
+        let label = first.description.clone();
+        let mut keys: Vec<&str> = Vec::new();
+        for binding in &bindings {
+            if !keys.contains(&binding.key.as_str()) {
+                keys.push(binding.key.as_str());
+            }
+        }
+        entries.push(PaletteEntry {
+            label,
+            detail: keys.join(" / "),
+            group: crate::app::discovery::palette_group(&action),
+            command: PaletteCommand::Run(action),
+        });
+    }
 
     // Chords are commands too. Someone who cannot remember the second key should
-    // still be able to reach the thing by typing its name.
-    for (key, action, description) in crate::ui::keymap::CHORDS {
+    // still be able to reach the thing by typing its name. Unavailable chord
+    // actions remain visible with an explicit prerequisite rather than a
+    // selectable row that appears to do nothing.
+    for chord in &snapshot.chords {
         if entries
             .iter()
-            .any(|entry| entry.command == PaletteCommand::Run(action.clone()))
+            .any(|entry| entry.command == PaletteCommand::Run(chord.action.clone()))
         {
             continue;
         }
+        let prefix = snapshot.prefix.as_deref().unwrap_or("Ctrl+K");
+        let detail = if crate::app::discovery::action_is_available(model, &chord.action) {
+            format!("{prefix} {}", chord.key)
+        } else {
+            format!(
+                "{prefix} {}; {}",
+                chord.key,
+                crate::app::discovery::action_prerequisite(model, &chord.action)
+                    .unwrap_or_else(|| "not useful in this state".to_owned())
+            )
+        };
+        let label = if chord.action == Action::OpenConnectionPicker
+            && model.connection_profiles.is_empty()
+        {
+            "Add a profile in config.toml".to_owned()
+        } else {
+            chord.description.clone()
+        };
         entries.push(PaletteEntry {
-            label: (*description).to_owned(),
-            detail: format!("Ctrl+K {key}"),
-            group: "Command",
-            command: PaletteCommand::Run(action.clone()),
+            label,
+            detail,
+            group: crate::app::discovery::palette_group(&chord.action),
+            command: PaletteCommand::Run(chord.action.clone()),
         });
     }
 
@@ -1314,7 +3183,7 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
             entries.push(PaletteEntry {
                 label: row.label.clone(),
                 detail: format!("{} {}", kind.singular(), sql),
-                group: "Object",
+                group: "Objects",
                 command: PaletteCommand::Insert(sql),
             });
         }
@@ -1330,6 +3199,7 @@ mod tests {
     use crate::postgres::{SessionInfo, TlsState};
     use crate::query::result::{Execution, JobId, ResultSet, StatementResult};
     use crate::query::value::Cell;
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
     fn session() -> Box<SessionInfo> {
@@ -1373,6 +3243,771 @@ mod tests {
         })
     }
 
+    fn failed_execution(job: JobId, error: Diagnostic) -> Box<Execution> {
+        Box::new(Execution {
+            job,
+            statements: Vec::new(),
+            status: ExecutionStatus::Failed,
+            elapsed: Duration::from_millis(6),
+            error: Some(error),
+            transaction: crate::query::result::TransactionState::Autocommit,
+        })
+    }
+
+    fn copy_model(rows: Vec<Vec<Cell>>) -> Model {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        let mut set = ResultSet::new(vec!["id".into(), "value".into()], 100);
+        for row in rows {
+            set.push(row);
+        }
+        model.last_execution = Some(Execution {
+            job: JobId(7),
+            statements: vec![StatementResult {
+                result_set: Some(set),
+                rows_affected: None,
+                elapsed: Duration::from_millis(1),
+                notices: Vec::new(),
+            }],
+            status: ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(1),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+        });
+        model
+            .result_grid
+            .reset_for_result(&model.visible_result().expect("result").columns.clone());
+        model.selected_column = 1;
+        model
+    }
+
+    fn update_relation() -> crate::postgres::metadata::UpdateRelation {
+        crate::postgres::metadata::UpdateRelation {
+            schema: "public".into(),
+            relation: "orders".into(),
+            kind: crate::postgres::metadata::ObjectKind::Table,
+            readable: true,
+            writable: true,
+            columns: vec![
+                crate::postgres::metadata::ColumnInfo {
+                    name: "order_id".into(),
+                    data_type: "integer".into(),
+                    nullable: false,
+                    primary_key: true,
+                    default: None,
+                },
+                crate::postgres::metadata::ColumnInfo {
+                    name: "note".into(),
+                    data_type: "text".into(),
+                    nullable: true,
+                    primary_key: false,
+                    default: None,
+                },
+            ],
+        }
+    }
+
+    fn cell_update_model() -> Model {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        model.last_sql = Some("SELECT order_id, note FROM public.orders".into());
+        let mut set = ResultSet::new(vec!["order_id".into(), "note".into()], 100);
+        set.push(vec![Cell::Text("7".into()), Cell::Text("old".into())]);
+        model.last_execution = Some(Execution {
+            job: JobId(77),
+            statements: vec![StatementResult {
+                result_set: Some(set),
+                rows_affected: None,
+                elapsed: Duration::from_millis(1),
+                notices: Vec::new(),
+            }],
+            status: ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(1),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+        });
+        model
+            .result_grid
+            .reset_for_result(&model.visible_result().expect("result").columns.clone());
+        model.selected_column = 1;
+        model
+    }
+
+    fn refresh_model(sql: &str) -> Model {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        model
+            .editor
+            .set_text("SELECT editor_buffer FROM somewhere;");
+        model.last_sql = Some(sql.to_owned());
+        model.last_execution = Some(*execution(JobId(7), ExecutionStatus::Succeeded, &["old"]));
+        model
+    }
+
+    #[test]
+    fn refreshing_uses_the_retained_source_and_leaves_the_editor_unchanged() {
+        let mut model = refresh_model("SELECT value FROM orders;");
+        let before_text = model.editor.text().to_owned();
+        let before_revision = model.editor.revision();
+
+        let effects = update(&mut model, Message::Action(Action::RefreshResult));
+
+        assert_eq!(
+            effects,
+            vec![Effect::Execute {
+                job: JobId(1),
+                sql: "SELECT value FROM orders;".to_owned(),
+            }]
+        );
+        assert!(model.running_refresh);
+        assert!(
+            model
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("Refreshing the retained result"))
+        );
+        assert_eq!(model.editor.text(), before_text);
+        assert_eq!(model.editor.revision(), before_revision);
+
+        let effects = update(
+            &mut model,
+            Message::ExecutionFinished(execution(JobId(1), ExecutionStatus::Succeeded, &["fresh"])),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::RecordHistory { sql, .. }] if sql == "SELECT value FROM orders;"
+        ));
+        assert!(!model.running_refresh);
+        assert_eq!(
+            model.visible_result().expect("refreshed result").rows[0][0].display(),
+            "fresh"
+        );
+        assert!(
+            model
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("refreshed once"))
+        );
+        assert_eq!(model.editor.text(), before_text);
+        assert_eq!(model.editor.revision(), before_revision);
+    }
+
+    #[test]
+    fn refreshing_parameterized_source_prompts_again_before_sending() {
+        let mut model = refresh_model("SELECT :value AS value, :other AS other;");
+        let before_text = model.editor.text().to_owned();
+
+        assert!(update(&mut model, Message::Action(Action::RefreshResult)).is_empty());
+        assert!(model.parameter_prompt.is_some());
+        assert!(model.refresh_pending);
+        for character in "synthetic-secret".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(
+            model.parameter_prompt.is_some(),
+            "the second value is still due"
+        );
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::ExecuteParameterized { job: JobId(1), sql, parameters }]
+                if sql == "SELECT :value AS value, :other AS other;"
+                    && parameters.names() == vec!["value", "other"]
+        ));
+        assert!(!model.refresh_pending);
+        assert!(model.running_refresh);
+        assert_eq!(model.editor.text(), before_text);
+        assert!(!format!("{effects:?}").contains("synthetic-secret"));
+
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(JobId(1), ExecutionStatus::Succeeded, &["fresh"])),
+        );
+        assert!(!model.running_refresh);
+        assert!(update(&mut model, Message::Action(Action::RefreshResult)).is_empty());
+        assert!(
+            model.parameter_prompt.is_some(),
+            "refresh prompts on every run"
+        );
+    }
+
+    #[test]
+    fn refreshing_never_replays_multiple_or_write_classified_sources() {
+        for sql in [
+            "SELECT value FROM orders; SELECT other FROM orders;",
+            "UPDATE orders SET value = 'changed';",
+            "DROP TABLE orders;",
+            "DO $$ BEGIN PERFORM 1; END $$;",
+        ] {
+            let mut model = refresh_model(sql);
+            let before = model.last_execution.clone();
+            let effects = update(&mut model, Message::Action(Action::RefreshResult));
+            assert!(effects.is_empty(), "{sql}");
+            assert_eq!(model.last_execution, before, "{sql}");
+            assert!(!model.refresh_pending, "{sql}");
+            assert!(
+                model
+                    .refresh_notice
+                    .as_deref()
+                    .is_some_and(|notice| !notice.is_empty()),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn refreshing_a_zero_row_result_is_still_an_explicit_read() {
+        let mut model = refresh_model("SELECT value FROM orders;");
+        model.last_execution = Some(Execution {
+            job: JobId(7),
+            statements: vec![StatementResult {
+                result_set: Some(ResultSet::new(vec!["value".into()], 100)),
+                rows_affected: None,
+                elapsed: Duration::from_millis(1),
+                notices: Vec::new(),
+            }],
+            status: ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(1),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+        });
+
+        let effects = update(&mut model, Message::Action(Action::RefreshResult));
+        assert!(matches!(effects.as_slice(), [Effect::Execute { .. }]));
+    }
+
+    #[test]
+    fn refresh_refusals_preserve_the_retained_result_and_editor() {
+        let mut no_result = connected();
+        no_result.focus = Focus::Results;
+        no_result.editor.set_text("SELECT editor_only;");
+        let before_editor = no_result.editor.text().to_owned();
+        assert!(update(&mut no_result, Message::Action(Action::RefreshResult)).is_empty());
+        assert_eq!(no_result.editor.text(), before_editor);
+        assert!(
+            no_result
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("completed retained result"))
+        );
+
+        let mut busy = refresh_model("SELECT value FROM orders;");
+        busy.phase = QueryPhase::Running {
+            job: JobId(99),
+            statements: 1,
+        };
+        let before_result = busy.last_execution.clone();
+        assert!(update(&mut busy, Message::Action(Action::RefreshResult)).is_empty());
+        assert_eq!(busy.last_execution, before_result);
+        assert!(
+            busy.refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("current query"))
+        );
+
+        let mut plan = refresh_model("SELECT value FROM orders;");
+        plan.plan = crate::app::PlanView::loading(JobId(99), false);
+        let before_result = plan.last_execution.clone();
+        assert!(update(&mut plan, Message::Action(Action::RefreshResult)).is_empty());
+        assert_eq!(plan.last_execution, before_result);
+        assert!(
+            plan.refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("query plan"))
+        );
+
+        let mut failed_transaction = refresh_model("SELECT value FROM orders;");
+        failed_transaction.transaction = crate::query::result::TransactionState::Failed;
+        let before_result = failed_transaction.last_execution.clone();
+        assert!(
+            update(
+                &mut failed_transaction,
+                Message::Action(Action::RefreshResult)
+            )
+            .is_empty()
+        );
+        assert_eq!(failed_transaction.last_execution, before_result);
+        assert!(
+            failed_transaction
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("failed transaction"))
+        );
+
+        let mut lost = refresh_model("SELECT value FROM orders;");
+        update(&mut lost, Message::ConnectionLost);
+        let before_result = lost.last_execution.clone();
+        assert!(update(&mut lost, Message::Action(Action::RefreshResult)).is_empty());
+        assert_eq!(lost.last_execution, before_result);
+        assert!(
+            lost.refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("reconnect"))
+        );
+    }
+
+    #[test]
+    fn a_refresh_parameter_error_clears_refresh_intent_before_the_next_run() {
+        let mut model = refresh_model("SELECT :value AS value;");
+        assert!(update(&mut model, Message::Action(Action::RefreshResult)).is_empty());
+        update(&mut model, Message::Action(Action::Insert('\0')));
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(model.parameter_prompt.is_none());
+        assert!(!model.refresh_pending);
+        assert!(!model.running_refresh);
+        assert!(
+            model
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("refused before sending"))
+        );
+
+        model.focus = Focus::Editor;
+        model.editor.set_text("SELECT 1;");
+        assert!(matches!(
+            update(&mut model, Message::Action(Action::RunBuffer)).as_slice(),
+            [Effect::Execute { sql, .. }] if sql == "SELECT 1;"
+        ));
+        assert!(!model.running_refresh);
+    }
+
+    #[test]
+    fn passive_result_actions_do_not_refresh_or_replay_the_source() {
+        for action in [
+            Action::FocusNext,
+            Action::ToggleExpandedRow,
+            Action::ToggleInspector,
+            Action::OpenResultControls,
+            Action::StartFilter,
+        ] {
+            let mut model = refresh_model("SELECT value FROM orders;");
+            let before = model.last_execution.clone();
+            let effects = update(&mut model, Message::Action(action.clone()));
+            assert!(
+                !effects.iter().any(|effect| matches!(
+                    effect,
+                    Effect::Execute { .. } | Effect::ExecuteParameterized { .. }
+                )),
+                "{action:?} emitted query work: {effects:?}"
+            );
+            assert_eq!(model.last_execution, before, "{action:?}");
+            assert!(!model.running_refresh, "{action:?}");
+        }
+
+        let mut resized = refresh_model("SELECT value FROM orders;");
+        let before = resized.last_execution.clone();
+        assert!(update(&mut resized, Message::Resized(160, 40)).is_empty());
+        assert_eq!(resized.last_execution, before);
+        assert!(!resized.running_refresh);
+    }
+
+    #[test]
+    fn refresh_cancellation_has_one_outcome_and_no_automatic_retry() {
+        let mut model = refresh_model("SELECT value FROM orders;");
+        assert!(matches!(
+            update(&mut model, Message::Action(Action::RefreshResult)).as_slice(),
+            [Effect::Execute { job: JobId(1), .. }]
+        ));
+        assert_eq!(
+            update(&mut model, Message::Action(Action::Cancel)),
+            vec![Effect::Cancel { job: JobId(1) }]
+        );
+        let effects = update(
+            &mut model,
+            Message::ExecutionFinished(execution(JobId(1), ExecutionStatus::Cancelled, &[])),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::RecordHistory { sql, .. }] if sql == "SELECT value FROM orders;"
+        ));
+        assert!(!model.running_refresh);
+        assert!(
+            model
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("cancelled"))
+        );
+        let before = model.last_execution.clone();
+        assert!(update(&mut model, Message::Resized(160, 40)).is_empty());
+        assert_eq!(model.last_execution, before);
+        assert!(!model.running_refresh);
+    }
+
+    #[test]
+    fn refresh_connection_loss_keeps_the_old_snapshot_and_reports_unknown() {
+        let mut model = refresh_model("SELECT value FROM orders;");
+        assert!(matches!(
+            update(&mut model, Message::Action(Action::RefreshResult)).as_slice(),
+            [Effect::Execute { job: JobId(1), .. }]
+        ));
+        let before = model.last_execution.clone();
+        assert!(update(&mut model, Message::ConnectionLost).is_empty());
+        assert_eq!(model.last_execution, before);
+        assert_eq!(model.phase, QueryPhase::Idle);
+        assert!(!model.running_refresh);
+        assert!(
+            model
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("outcome is unknown"))
+        );
+    }
+
+    #[test]
+    fn editing_the_buffer_during_refresh_does_not_change_the_retained_source() {
+        let mut model = refresh_model("SELECT value FROM orders;");
+        let effects = update(&mut model, Message::Action(Action::RefreshResult));
+        assert!(
+            matches!(effects.as_slice(), [Effect::Execute { job: JobId(1), sql }] if sql == "SELECT value FROM orders;")
+        );
+
+        model.focus = Focus::Editor;
+        update(&mut model, Message::Action(Action::Insert('X')));
+        assert_eq!(model.editor.text(), "SELECT editor_buffer FROM somewhere;X");
+
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(JobId(1), ExecutionStatus::Succeeded, &["fresh"])),
+        );
+        assert_eq!(model.last_sql.as_deref(), Some("SELECT value FROM orders;"));
+        assert_eq!(
+            model.visible_result().expect("refreshed result").rows[0][0],
+            Cell::Text("fresh".into())
+        );
+        assert_eq!(model.editor.text(), "SELECT editor_buffer FROM somewhere;X");
+    }
+
+    #[test]
+    fn connection_loss_discards_server_prompts_but_keeps_local_copy_available() {
+        let mut parameter = connected();
+        parameter.editor.set_text("SELECT :value;");
+        assert!(update(&mut parameter, Message::Action(Action::RunBuffer)).is_empty());
+        assert!(parameter.parameter_prompt.is_some());
+        update(&mut parameter, Message::ConnectionLost);
+        assert!(parameter.parameter_prompt.is_none());
+        assert!(update(&mut parameter, Message::Action(Action::RunBuffer)).is_empty());
+
+        let mut refreshing = refresh_model("SELECT :value;");
+        assert!(update(&mut refreshing, Message::Action(Action::RefreshResult)).is_empty());
+        assert!(refreshing.parameter_prompt.is_some());
+        assert!(refreshing.refresh_pending);
+        update(&mut refreshing, Message::ConnectionLost);
+        assert!(refreshing.parameter_prompt.is_none());
+        assert!(!refreshing.refresh_pending);
+        assert!(!refreshing.running_refresh);
+        assert!(
+            refreshing
+                .refresh_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("outcome is unknown"))
+        );
+
+        let mut production = connected();
+        let mut info = session();
+        info.environment = Environment::Production;
+        update(&mut production, Message::Connected(info));
+        production.editor.set_text("UPDATE orders SET value = 0;");
+        assert!(update(&mut production, Message::Action(Action::RunBuffer)).is_empty());
+        assert!(production.pending_run.is_some());
+        update(&mut production, Message::ConnectionLost);
+        assert!(production.pending_run.is_none());
+        assert!(update(&mut production, Message::Action(Action::RunBuffer)).is_empty());
+
+        let mut plan = connected();
+        plan.editor.set_text("SELECT 1;");
+        assert!(update(&mut plan, Message::Action(Action::AnalyzePlan)).is_empty());
+        assert!(plan.pending_plan.is_some());
+        update(&mut plan, Message::ConnectionLost);
+        assert!(plan.pending_plan.is_none());
+        assert!(update(&mut plan, Message::Action(Action::RunBuffer)).is_empty());
+
+        let mut cell_update = cell_update_model();
+        let update_effects = update(
+            &mut cell_update,
+            Message::Action(Action::GenerateCellUpdate),
+        );
+        let [Effect::LoadUpdateTarget { request, .. }] = update_effects.as_slice() else {
+            panic!("expected an update metadata effect");
+        };
+        let request = *request;
+        update(&mut cell_update, Message::ConnectionLost);
+        assert!(cell_update.update_lookup.is_none());
+        assert!(cell_update.update_prompt.is_none());
+        assert!(cell_update.pending_update.is_none());
+        assert!(
+            cell_update
+                .cell_update_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("no cell update was retried"))
+        );
+        update(
+            &mut cell_update,
+            Message::UpdateTargetLoaded {
+                request,
+                result: Box::new(Ok(update_relation())),
+            },
+        );
+        assert!(cell_update.update_prompt.is_none());
+
+        let mut copy = copy_model(vec![vec![
+            Cell::Text("7".into()),
+            Cell::Text("retained".into()),
+        ]]);
+        copy.clipboard_osc52 = true;
+        assert!(update(&mut copy, Message::Action(Action::CopyValue)).is_empty());
+        assert!(copy.pending_copy.is_some());
+        update(&mut copy, Message::ConnectionLost);
+        let effects = update(&mut copy, Message::Action(Action::Activate));
+        assert!(matches!(effects.as_slice(), [Effect::CopyValue { .. }]));
+    }
+
+    #[test]
+    fn connection_loss_clears_running_identity_before_the_late_execution_result() {
+        let mut model = connected();
+        model.editor.set_text("SELECT new_value;");
+        model.last_sql = Some("SELECT old_value;".into());
+        model.last_execution = Some(*execution(JobId(9), ExecutionStatus::Succeeded, &["old"]));
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let [Effect::Execute { job, .. }] = effects.as_slice() else {
+            panic!("expected an execute effect: {effects:?}");
+        };
+        let job = *job;
+        let retained = model.last_execution.clone();
+
+        update(&mut model, Message::ConnectionLost);
+        assert_eq!(model.phase, QueryPhase::Idle);
+        assert_eq!(
+            model.transaction,
+            crate::query::result::TransactionState::Unknown
+        );
+        assert!(model.running_sql.is_none());
+        assert!(!model.running_parameterized);
+        assert!(!model.running_cell_update);
+        assert!(model.running_editor_revision.is_none());
+        assert_eq!(model.last_execution, retained);
+
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::ConnectionLost, &[])),
+        );
+        assert_eq!(model.last_execution, retained);
+        assert_eq!(model.phase, QueryPhase::Idle);
+        assert!(model.running_sql.is_none());
+    }
+
+    #[test]
+    fn cell_update_completion_does_not_start_a_refresh() {
+        let mut model = refresh_model("SELECT value FROM orders;");
+        model.running_cell_update = true;
+        model.running_sql = Some("UPDATE orders SET value = $1 WHERE id = $2".into());
+        model.phase = QueryPhase::Running {
+            job: JobId(1),
+            statements: 1,
+        };
+        let effects = update(
+            &mut model,
+            Message::ExecutionFinished(execution(
+                JobId(1),
+                ExecutionStatus::Succeeded,
+                &["ignored"],
+            )),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::RecordHistory { sql, .. }] if sql.starts_with("UPDATE orders")
+        ));
+        assert!(!model.running_refresh);
+        assert!(!model.refresh_pending);
+        assert!(model.refresh_notice.is_none());
+        assert_eq!(model.last_sql.as_deref(), Some("SELECT value FROM orders;"));
+    }
+
+    fn connection_profiles() -> Vec<crate::app::ConnectionProfileSummary> {
+        crate::app::connection_picker::summaries(
+            &BTreeMap::from([
+                (
+                    "orders-dev".to_owned(),
+                    crate::config::schema::Profile {
+                        host: Some("127.0.0.1".to_owned()),
+                        port: Some(55432),
+                        dbname: Some("ignatius_demo".to_owned()),
+                        user: Some("ignatius_test".to_owned()),
+                        sslmode: Some("disable".to_owned()),
+                        environment: Some("development".to_owned()),
+                        description: Some("safe local fixtures".to_owned()),
+                        ..crate::config::schema::Profile::default()
+                    },
+                ),
+                (
+                    "orders-prod".to_owned(),
+                    crate::config::schema::Profile {
+                        host: Some("db.example.net".to_owned()),
+                        dbname: Some("orders".to_owned()),
+                        user: Some("app".to_owned()),
+                        sslmode: Some("verify-full".to_owned()),
+                        environment: Some("production".to_owned()),
+                        read_only: true,
+                        auth: Some("entra".to_owned()),
+                        ..crate::config::schema::Profile::default()
+                    },
+                ),
+            ]),
+            &BTreeMap::new(),
+        )
+    }
+
+    #[test]
+    fn the_connection_picker_is_searchable_without_preselecting_a_route() {
+        let mut model = Model::new(100);
+        model.editor.set_text("SELECT 1;");
+        model.connection_profiles = connection_profiles();
+
+        assert!(update(&mut model, Message::Action(Action::OpenConnectionPicker)).is_empty());
+        let picker = model.palette.as_ref().expect("connection picker");
+        assert_eq!(picker.purpose, crate::app::palette::Purpose::Connections);
+        assert_eq!(picker.entries.len(), 3);
+        assert_eq!(picker.selected, 0);
+        assert_eq!(model.connection, ConnectionState::Disconnected);
+        assert_eq!(model.editor.text(), "SELECT 1;");
+
+        for ch in "read-only".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        assert_eq!(
+            model
+                .palette
+                .as_ref()
+                .expect("picker remains open")
+                .selected_entry()
+                .expect("read-only profile")
+                .label,
+            "orders-prod"
+        );
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(model.palette.is_none());
+        assert_eq!(model.connection, ConnectionState::Disconnected);
+        assert_eq!(model.editor.text(), "SELECT 1;");
+    }
+
+    #[test]
+    fn the_connection_picker_is_reachable_from_the_general_palette() {
+        let mut model = connected();
+        model.connection_profiles = connection_profiles();
+
+        update(&mut model, Message::Action(Action::OpenPalette));
+        let palette = model.palette.as_mut().expect("command palette");
+        palette.query = "choose".to_owned();
+        assert_eq!(
+            palette
+                .selected_entry()
+                .expect("connection command")
+                .command,
+            crate::app::palette::PaletteCommand::Run(Action::OpenConnectionPicker)
+        );
+
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(
+            model.palette.as_ref().expect("connection picker").purpose,
+            crate::app::palette::Purpose::Connections
+        );
+    }
+
+    #[test]
+    fn choosing_a_profile_emits_only_its_name_and_clears_server_facts() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        model.connection_profiles = connection_profiles();
+        model.last_execution = Some(*execution(
+            JobId(9),
+            ExecutionStatus::Succeeded,
+            &["retained"],
+        ));
+        model.error_location_note = Some("server position 4".to_owned());
+        model.result_grid.show_types = false;
+        model.result_grid.freeze_first = true;
+
+        update(&mut model, Message::Action(Action::OpenConnectionPicker));
+        for ch in "orders-prod".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        let effects = update(&mut model, Message::Action(Action::Activate));
+
+        assert_eq!(
+            effects,
+            vec![Effect::ConnectProfile {
+                profile: Some("orders-prod".to_owned()),
+            }]
+        );
+        assert_eq!(model.connection, ConnectionState::Connecting);
+        assert_eq!(model.credential_provider.as_deref(), Some("entra"));
+        assert_eq!(model.editor.text(), "SELECT 1;");
+        assert!(model.last_execution.is_none());
+        assert!(model.tree.roots.is_empty());
+        assert!(matches!(
+            model.completion.catalog,
+            crate::app::completion::CatalogStatus::NotLoaded
+        ));
+        assert!(model.error_location_note.is_none());
+        assert!(model.pending_copy.is_none());
+        assert!(!model.result_grid.show_types);
+        assert!(model.result_grid.freeze_first);
+        assert!(model.palette.is_none());
+    }
+
+    #[test]
+    fn choosing_default_settings_clears_profile_identity() {
+        let mut model = Model::new(100);
+        model.connection_profiles = connection_profiles();
+        model.credential_provider = Some("entra".to_owned());
+
+        update(&mut model, Message::Action(Action::OpenConnectionPicker));
+        let effects = update(&mut model, Message::Action(Action::Activate));
+
+        assert_eq!(effects, vec![Effect::ConnectProfile { profile: None }]);
+        assert_eq!(model.connection, ConnectionState::Connecting);
+        assert!(model.credential_provider.is_none());
+    }
+
+    #[test]
+    fn a_busy_session_cannot_open_the_connection_picker() {
+        let mut model = connected();
+        model.connection_profiles = connection_profiles();
+        model.phase = QueryPhase::Running {
+            job: JobId(3),
+            statements: 1,
+        };
+
+        assert!(!crate::app::discovery::action_is_available(
+            &model,
+            &Action::OpenConnectionPicker
+        ));
+        assert!(update(&mut model, Message::Action(Action::OpenConnectionPicker)).is_empty());
+        assert!(model.palette.is_none());
+        assert!(model.phase.is_busy());
+    }
+
+    fn completion_catalog() -> crate::query::completion::CompletionCatalog {
+        crate::query::completion::CompletionCatalog {
+            objects: vec![crate::query::completion::CatalogObject {
+                kind: crate::query::completion::CatalogObjectKind::Table,
+                schema: "public".into(),
+                name: "orders".into(),
+                readable: true,
+                detail: None,
+            }],
+            relations: vec![crate::query::completion::CatalogRelation {
+                schema: "public".into(),
+                name: "orders".into(),
+                columns: vec![crate::query::completion::CatalogColumn {
+                    name: "order_id".into(),
+                    data_type: "bigint".into(),
+                }],
+            }],
+        }
+    }
+
     #[test]
     fn running_a_buffer_starts_one_job_and_asks_for_execution() {
         let mut model = connected();
@@ -1392,6 +4027,123 @@ mod tests {
             }
         );
         assert!(model.phase.is_busy());
+    }
+
+    #[test]
+    fn completion_acceptance_is_explicit_quoted_and_undoable_once() {
+        let mut model = connected();
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: completion_catalog(),
+            loaded_at: "2026-09-04 10:00:00 +02:00".into(),
+        };
+        model.editor.set_text("SELECT * FROM ord");
+        let before = model.editor.text().to_owned();
+
+        assert!(update(&mut model, Message::Action(Action::Complete)).is_empty());
+        assert_eq!(model.editor.text(), before, "opening never edits SQL");
+        assert!(model.completion.menu.is_some());
+
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.editor.text(), "SELECT * FROM \"orders\"");
+        assert!(model.completion.menu.is_none());
+
+        update(&mut model, Message::Action(Action::Undo));
+        assert_eq!(model.editor.text(), before);
+    }
+
+    #[test]
+    fn dismissing_completion_leaves_the_buffer_and_cursor_exactly_unchanged() {
+        let mut model = connected();
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: completion_catalog(),
+            loaded_at: "snapshot".into(),
+        };
+        model.editor.set_text("SELECT * FROM ord");
+        let cursor = model.editor.cursor();
+        let text = model.editor.text().to_owned();
+        update(&mut model, Message::Action(Action::Complete));
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert_eq!(model.editor.text(), text);
+        assert_eq!(model.editor.cursor(), cursor);
+        assert!(model.completion.menu.is_none());
+    }
+
+    #[test]
+    fn automatic_completion_off_keeps_the_same_buffer_as_completion_on() {
+        for (prefix, typed) in [
+            ("SELECT * FROM ", "ord"),
+            ("SELECT ", "co"),
+            ("SELECT * FROM orders o WHERE o.", "to"),
+            ("WITH recent AS (SELECT 1) SELECT * FROM ", "rec"),
+        ] {
+            let mut on = connected();
+            let mut off = connected();
+            on.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+                catalog: completion_catalog(),
+                loaded_at: "snapshot".into(),
+            };
+            off.completion = on.completion.clone();
+            off.completion.enabled = false;
+            on.editor.set_text(prefix);
+            off.editor.set_text(prefix);
+
+            for character in typed.chars() {
+                update(&mut on, Message::Action(Action::Insert(character)));
+                update(&mut off, Message::Action(Action::Insert(character)));
+                assert_eq!(on.editor.text(), off.editor.text(), "prefix {prefix:?}");
+            }
+            assert_eq!(on.editor.text(), off.editor.text());
+            // Exact, unambiguous words deliberately suppress automatic menus;
+            // the invariant here is that disabling them never changes editing.
+            assert!(off.completion.menu.is_none());
+        }
+    }
+
+    #[test]
+    fn automatic_completion_does_not_capture_enter_after_an_exact_keyword() {
+        let mut model = connected();
+        for character in "SELECT".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+
+        assert!(model.completion.menu.is_none());
+        update(&mut model, Message::Action(Action::Activate));
+
+        assert_eq!(model.editor.text(), "SELECT\n");
+    }
+
+    #[test]
+    fn a_late_completion_catalogue_cannot_replace_a_newer_reload() {
+        let mut model = connected();
+        let first = update(&mut model, Message::Action(Action::ReloadObjects));
+        let first_request = first
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadCompletionCatalog { request } => Some(*request),
+                _ => None,
+            })
+            .expect("completion request");
+        let second = update(&mut model, Message::Action(Action::ReloadObjects));
+        let second_request = second
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadCompletionCatalog { request } => Some(*request),
+                _ => None,
+            })
+            .expect("second completion request");
+        assert_ne!(first_request, second_request);
+
+        update(
+            &mut model,
+            Message::CompletionLoaded {
+                request: first_request,
+                loaded_at: "old".into(),
+                result: Box::new(Ok(completion_catalog())),
+            },
+        );
+        assert!(
+            matches!(model.completion.catalog, crate::app::completion::CatalogStatus::Loading { request } if request == second_request)
+        );
     }
 
     #[test]
@@ -1550,6 +4302,7 @@ mod tests {
         );
         assert!(matches!(model.connection, ConnectionState::Lost { .. }));
         assert!(!model.connection.is_usable());
+        assert!(model.cell_update_notice.is_none());
     }
 
     #[test]
@@ -1562,6 +4315,300 @@ mod tests {
             panic!("expected execute");
         };
         assert_eq!(sql, "SELECT 3");
+    }
+
+    #[test]
+    fn named_parameters_prompt_once_in_order_without_editing_the_template() {
+        let mut model = connected();
+        let template = "SELECT :customer_id, :customer_id, :status;";
+        model.editor.set_text(template);
+
+        assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+        let prompt = model.parameter_prompt.as_ref().expect("first prompt");
+        assert_eq!(prompt.names, ["customer_id", "status"]);
+        assert_eq!(prompt.active_name(), Some("customer_id"));
+        assert_eq!(model.editor.text(), template);
+        assert_eq!(model.phase, QueryPhase::Idle);
+
+        for character in "42".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert_eq!(
+            model
+                .parameter_prompt
+                .as_ref()
+                .and_then(|prompt| prompt.active_name()),
+            Some("status")
+        );
+
+        for character in "open; -- not syntax".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let [
+            Effect::ExecuteParameterized {
+                job,
+                sql,
+                parameters,
+            },
+        ] = effects.as_slice()
+        else {
+            panic!("expected one parameterized effect: {effects:?}");
+        };
+        assert_eq!(sql, template);
+        assert_eq!(model.phase.job(), Some(*job));
+        assert!(model.running_parameterized);
+        assert!(model.parameter_prompt.is_none());
+        assert_eq!(parameters.names(), vec!["customer_id", "status"]);
+        let debug = format!("{effects:?}");
+        assert!(!debug.contains("open; -- not syntax"));
+        assert_eq!(model.editor.text(), template);
+    }
+
+    #[test]
+    fn cancelling_a_parameter_prompt_sends_nothing_and_keeps_the_template_ready() {
+        let mut model = connected();
+        let template = "SELECT :secret;";
+        model.editor.set_text(template);
+        update(&mut model, Message::Action(Action::RunBuffer));
+        update(&mut model, Message::Action(Action::Insert('x')));
+        assert!(update(&mut model, Message::Action(Action::Cancel)).is_empty());
+
+        assert!(model.parameter_prompt.is_none());
+        assert_eq!(model.phase, QueryPhase::Idle);
+        assert_eq!(model.editor.text(), template);
+        assert!(model.history.is_empty());
+    }
+
+    #[test]
+    fn an_empty_parameter_is_accepted_and_nul_is_refused_before_an_effect() {
+        let mut empty = connected();
+        empty.editor.set_text("SELECT :value;");
+        update(&mut empty, Message::Action(Action::RunBuffer));
+        let effects = update(&mut empty, Message::Action(Action::Activate));
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::ExecuteParameterized { parameters, .. }] if parameters.names() == vec!["value"]
+        ));
+
+        let mut nul = connected();
+        nul.editor.set_text("SELECT :value;");
+        update(&mut nul, Message::Action(Action::RunBuffer));
+        update(&mut nul, Message::Action(Action::Insert('\0')));
+        assert!(update(&mut nul, Message::Action(Action::Activate)).is_empty());
+        assert!(nul.parameter_prompt.is_none());
+        let error = nul.error.as_ref().expect("NUL diagnostic");
+        assert!(error.headline.contains(":value"));
+        assert!(!error.headline.contains("never"));
+    }
+
+    #[test]
+    fn parameterized_server_positions_are_not_mapped_to_template_carets() {
+        let mut model = connected();
+        let template = "SELECT :value FROM orders;";
+        model.editor.set_text(template);
+        update(&mut model, Message::Action(Action::RunBuffer));
+        update(&mut model, Message::Action(Action::Insert('x')));
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let job = match effects.as_slice() {
+            [Effect::ExecuteParameterized { job, .. }] => *job,
+            other => panic!("expected parameterized execution: {other:?}"),
+        };
+        let cursor = model.editor.cursor();
+        update(
+            &mut model,
+            Message::ExecutionFinished(failed_execution(
+                job,
+                Diagnostic::new(DiagnosticKind::Query, "syntax error", "running statement 1")
+                    .in_statement(1)
+                    .at_position(17),
+            )),
+        );
+        assert!(model.error_location.is_none());
+        assert!(
+            model
+                .error_location_note
+                .as_deref()
+                .is_some_and(|note| note.contains("expanded request"))
+        );
+        assert_eq!(model.editor.cursor(), cursor);
+    }
+
+    fn plan_document(analyzed: bool) -> crate::query::PlanDocument {
+        crate::query::PlanDocument::parse(
+            r#"[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Startup Cost":0,"Total Cost":4,"Plan Rows":2,"Actual Rows":2,"Actual Total Time":0.4,"Actual Loops":1},"Planning Time":0.2,"Execution Time":0.7}]"#,
+            analyzed,
+        )
+        .expect("plan fixture")
+    }
+
+    fn plan_finished(
+        job: JobId,
+        analyzed: bool,
+        result: Result<crate::query::PlanDocument, Diagnostic>,
+    ) -> Box<crate::app::PlanExecution> {
+        Box::new(crate::app::PlanExecution {
+            job,
+            analyzed,
+            elapsed: Duration::from_millis(2),
+            transaction: crate::query::result::TransactionState::Autocommit,
+            result,
+            connection_lost: false,
+        })
+    }
+
+    #[test]
+    fn a_plain_plan_uses_only_the_statement_under_the_cursor() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;\nSELECT 2;");
+        let effects = update(&mut model, Message::Action(Action::ExplainPlan));
+        let Effect::Explain { job, sql, analyze } = &effects[0] else {
+            panic!("expected a plan effect, got {effects:?}");
+        };
+        assert_eq!(sql, "SELECT 2");
+        assert!(!analyze);
+        assert_eq!(model.phase.job(), Some(*job));
+        assert!(model.plan.is_loading());
+        assert!(
+            model.running_sql.is_none(),
+            "plans are not history candidates"
+        );
+    }
+
+    #[test]
+    fn analyze_plan_waits_for_explicit_confirmation_and_cancel_sends_no_sql() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        assert!(update(&mut model, Message::Action(Action::AnalyzePlan)).is_empty());
+        assert!(model.pending_plan.is_some());
+        assert_eq!(model.phase, QueryPhase::Idle);
+
+        assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+        assert!(model.pending_plan.is_none());
+        assert_eq!(model.phase, QueryPhase::Idle);
+    }
+
+    #[test]
+    fn confirmed_analyze_plan_executes_once_and_never_records_the_generated_sql() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        update(&mut model, Message::Action(Action::AnalyzePlan));
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let Effect::Explain { job, sql, analyze } = &effects[0] else {
+            panic!("expected analyze effect, got {effects:?}");
+        };
+        assert_eq!(sql, "SELECT 1");
+        assert!(*analyze);
+        assert!(model.pending_plan.is_none());
+        assert_eq!(model.phase.job(), Some(*job));
+        assert!(model.running_sql.is_none());
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::RecordHistory { .. }))
+        );
+    }
+
+    #[test]
+    fn a_plan_completion_preserves_the_retained_ordinary_result_and_history() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        model.last_execution = Some(*execution(
+            JobId(99),
+            ExecutionStatus::Succeeded,
+            &["retained"],
+        ));
+        model.history.push(crate::history::Entry::now(
+            "target",
+            "orders",
+            "local",
+            "SELECT retained",
+            crate::history::Outcome::Succeeded,
+            Duration::from_millis(1),
+        ));
+        let before = model.last_execution.clone();
+        let history_before = model.history.clone();
+        update(&mut model, Message::Action(Action::ExplainPlan));
+        let job = model.phase.job().expect("plan job");
+        update(
+            &mut model,
+            Message::PlanFinished(plan_finished(job, false, Ok(plan_document(false)))),
+        );
+        assert!(matches!(
+            model.plan.status,
+            crate::app::PlanStatus::Ready(_)
+        ));
+        assert_eq!(model.last_execution, before);
+        assert_eq!(model.history, history_before);
+        assert_eq!(model.plan.selected_path, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn stale_plan_completion_cannot_replace_the_current_plan_job() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        update(&mut model, Message::Action(Action::ExplainPlan));
+        let job = model.phase.job().expect("plan job");
+        let stale = JobId(job.0 + 1);
+        update(
+            &mut model,
+            Message::PlanFinished(plan_finished(stale, false, Ok(plan_document(false)))),
+        );
+        assert_eq!(model.phase.job(), Some(job));
+        assert!(model.plan.is_loading());
+    }
+
+    #[test]
+    fn plan_navigation_and_dismissal_are_local_and_restore_the_prior_view() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        model.last_execution = Some(*execution(JobId(9), ExecutionStatus::Succeeded, &["old"]));
+        update(&mut model, Message::Action(Action::ExplainPlan));
+        let job = model.phase.job().expect("plan job");
+        update(
+            &mut model,
+            Message::PlanFinished(plan_finished(job, false, Ok(plan_document(false)))),
+        );
+        model.focus = Focus::Results;
+        assert!(update(&mut model, Message::Action(Action::Move(Direction::Down))).is_empty());
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(
+            model.plan.collapsed.is_empty(),
+            "leaf activation is local and harmless"
+        );
+        assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+        assert!(!model.plan.is_visible());
+        assert_eq!(
+            model.visible_result().expect("retained result").rows[0][0],
+            Cell::Text("old".into())
+        );
+    }
+
+    #[test]
+    fn a_visible_plan_keeps_ordinary_result_controls_behind_it() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        model.last_execution = Some(*execution(JobId(9), ExecutionStatus::Succeeded, &["old"]));
+        model.expanded_row = false;
+        update(&mut model, Message::Action(Action::ExplainPlan));
+        let job = model.phase.job().expect("plan job");
+        update(
+            &mut model,
+            Message::PlanFinished(plan_finished(job, false, Ok(plan_document(false)))),
+        );
+        model.focus = Focus::Results;
+
+        assert!(update(&mut model, Message::Action(Action::StartFilter)).is_empty());
+        assert!(!model.result_filtering);
+        assert!(update(&mut model, Message::Action(Action::OpenResultControls)).is_empty());
+        assert!(model.palette.is_none());
+        assert!(update(&mut model, Message::Action(Action::ExportRows)).is_empty());
+        assert!(model.name_prompt.is_none());
+        assert!(update(&mut model, Message::Action(Action::ToggleExpandedRow)).is_empty());
+        assert!(!model.expanded_row);
+        assert!(update(&mut model, Message::Action(Action::ToggleInspector)).is_empty());
+        assert!(model.inspector.is_none());
     }
 
     #[test]
@@ -1883,7 +4930,14 @@ mod tests {
         model.sidebar_visible = false;
 
         let effects = update(&mut model, Message::Action(Action::ToggleSidebar));
-        assert_eq!(effects, vec![Effect::LoadSchemas], "showing it loads it");
+        assert_eq!(
+            effects,
+            vec![
+                Effect::LoadSchemas,
+                Effect::LoadCompletionCatalog { request: 1 },
+            ],
+            "showing it loads the tree and one schema snapshot"
+        );
         assert!(model.sidebar_visible);
 
         update(
@@ -2123,8 +5177,20 @@ mod tests {
     fn writing_the_rows_on_screen_says_how_many_that_is_and_what_it_is_not() {
         let mut model = with_rows(&["alpha", "beta", "gamma"]);
         update(&mut model, Message::Action(Action::ExportRows));
+        let palette = model.palette.as_ref().expect("a format palette");
+        assert_eq!(palette.purpose, crate::app::palette::Purpose::ExportFormats);
+        assert_eq!(palette.entries.len(), 5);
+        assert!(
+            palette
+                .context_note
+                .as_deref()
+                .is_some_and(|note| note.contains("3 row(s)"))
+        );
+        update(&mut model, Message::Action(Action::Activate));
         let prompt = model.name_prompt.as_ref().expect("a prompt");
         assert_eq!(prompt.purpose, crate::app::model::NamePurpose::ExportRows);
+        assert_eq!(prompt.export_format, Some(ExportFormat::Csv));
+        assert!(prompt.subject.contains("CSV"), "{}", prompt.subject);
         assert!(prompt.note.contains("3 row(s)"), "{}", prompt.note);
         assert!(
             !prompt.note.contains("not the"),
@@ -2143,6 +5209,9 @@ mod tests {
             set.cap = 3;
         }
         update(&mut model, Message::Action(Action::ExportRows));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+        update(&mut model, Message::Action(Action::Activate));
         let note = &model.name_prompt.as_ref().expect("a prompt").note;
         assert!(note.contains("what is on screen"), "{note}");
         assert!(note.contains("500"), "{note}");
@@ -2156,7 +5225,10 @@ mod tests {
         }
         let effects = update(&mut model, Message::Action(Action::Activate));
         match effects.as_slice() {
-            [Effect::ExportRows { path }] => assert_eq!(path, "rows.csv"),
+            [Effect::ExportRows { path, format }] => {
+                assert_eq!(path, "rows.csv");
+                assert_eq!(*format, ExportFormat::Json);
+            }
             other => panic!("expected one export, got {other:?}"),
         }
     }
@@ -2660,6 +5732,157 @@ mod tests {
         assert!(model.help_open, "the chosen command actually ran");
     }
 
+    #[test]
+    fn the_general_palette_is_contextual_and_uses_the_active_key_snapshot() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        let mut keys = std::collections::BTreeMap::new();
+        keys.insert(
+            "run-buffer".to_owned(),
+            crate::config::schema::KeySpec::One("f2".to_owned()),
+        );
+        let keymap = crate::ui::keymap::Keymap::from_config(&keys).expect("valid keymap");
+        model.keymap_snapshot = keymap.snapshot();
+
+        let effects = update(&mut model, Message::Action(Action::OpenPalette));
+        assert!(effects.is_empty(), "opening is presentation-only");
+        let palette = model.palette.as_ref().expect("open");
+        assert_eq!(palette.purpose, crate::app::palette::Purpose::Commands);
+        let run = palette
+            .entries
+            .iter()
+            .find(|entry| entry.label == "Run the whole buffer")
+            .expect("run command");
+        assert_eq!(run.detail, "F2");
+        assert_eq!(run.group, "Editor");
+        assert!(
+            palette
+                .context_note
+                .as_deref()
+                .is_some_and(|note| note.contains("Focus: Editor"))
+        );
+
+        for ch in "run".chars() {
+            assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+        }
+        assert_eq!(
+            model
+                .palette
+                .as_ref()
+                .expect("still open")
+                .selected_entry()
+                .expect("run match")
+                .detail,
+            "F2"
+        );
+    }
+
+    #[test]
+    fn unavailable_palette_searches_explain_their_prerequisite() {
+        let mut disconnected = Model::new(100);
+        update(&mut disconnected, Message::Action(Action::OpenPalette));
+        let palette = disconnected.palette.as_mut().expect("open");
+        for ch in "run".chars() {
+            palette.push(ch);
+        }
+        assert!(
+            !palette.matches().iter().any(|entry| {
+                entry.label == "Run the whole buffer"
+                    || entry.label == "Run the statement at the cursor"
+            }),
+            "run actions are not actionable yet"
+        );
+        assert!(
+            palette
+                .context_note
+                .as_deref()
+                .is_some_and(|note| note.contains("Connect before running SQL")),
+            "the missing prerequisite is visible"
+        );
+
+        let mut no_rows = connected();
+        no_rows.focus = Focus::Results;
+        update(&mut no_rows, Message::Action(Action::OpenPalette));
+        let palette = no_rows.palette.as_mut().expect("open");
+        for ch in "inspect".chars() {
+            palette.push(ch);
+        }
+        let entry = palette.selected_entry().expect("inspect explanation");
+        assert!(entry.detail.contains("retained result rows"), "{entry:?}");
+    }
+
+    #[test]
+    fn opening_searching_and_dismissing_discovery_has_no_model_side_effect() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        let before = (
+            model.editor.text().to_owned(),
+            model.focus,
+            model.selected_row,
+            model.selected_column,
+            model.connection.clone(),
+            model.history.clone(),
+            model.last_execution.clone(),
+        );
+        assert!(update(&mut model, Message::Action(Action::OpenPalette)).is_empty());
+        for ch in "result".chars() {
+            assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+        }
+        assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+        assert_eq!(model.editor.text(), before.0);
+        assert_eq!(model.focus, before.1);
+        assert_eq!(model.selected_row, before.2);
+        assert_eq!(model.selected_column, before.3);
+        assert_eq!(model.connection, before.4);
+        assert_eq!(model.history, before.5);
+        assert_eq!(model.last_execution, before.6);
+    }
+
+    #[test]
+    fn connection_details_are_reachable_by_plain_language_and_are_read_only() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1");
+        update(&mut model, Message::Action(Action::OpenPalette));
+
+        for ch in "connection".chars() {
+            update(&mut model, Message::Action(Action::Insert(ch)));
+        }
+        let palette = model.palette.as_ref().expect("palette open");
+        assert_eq!(
+            palette
+                .matches()
+                .first()
+                .expect("connection command match")
+                .label,
+            "Connection and auth details"
+        );
+
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.connection_details, "the trust surface opened");
+        assert!(model.palette.is_none(), "the palette peeled away");
+
+        // Inspection must not leak input to the editor or alter selection.
+        let editor = model.editor.text().to_owned();
+        let selected = (model.selected_row, model.selected_column);
+        for action in [
+            Action::Insert('D'),
+            Action::Backspace,
+            Action::Move(Direction::Down),
+            Action::RunBuffer,
+        ] {
+            assert!(
+                update(&mut model, Message::Action(action.clone())).is_empty(),
+                "a read-only panel emitted an effect for {action:?}"
+            );
+        }
+        assert_eq!(model.editor.text(), editor);
+        assert_eq!((model.selected_row, model.selected_column), selected);
+
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(!model.connection_details, "Escape closes only the panel");
+        assert_eq!(model.editor.text(), "SELECT 1");
+    }
+
     /// A model holding a result of several rows, focused on it.
     fn with_rows(rows: &[&str]) -> Model {
         let mut model = connected();
@@ -2675,6 +5898,236 @@ mod tests {
         );
         model.focus = Focus::Results;
         model
+    }
+
+    fn with_grid(columns: &[&str], rows: &[&[Cell]]) -> Model {
+        let mut model = connected();
+        model.size = (120, 40);
+        let mut set = ResultSet::new(columns.iter().map(|c| (*c).to_owned()).collect(), 100);
+        for row in rows {
+            set.push((*row).to_vec());
+        }
+        let signature = set.columns.clone();
+        model.last_execution = Some(Execution {
+            job: JobId(1),
+            statements: vec![StatementResult {
+                result_set: Some(set),
+                rows_affected: Some(rows.len() as u64),
+                elapsed: Duration::from_millis(5),
+                notices: Vec::new(),
+            }],
+            status: ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(6),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+        });
+        model.result_grid.reset_for_result(&signature);
+        model.focus = Focus::Results;
+        model
+    }
+
+    #[test]
+    fn grid_sort_is_local_keeps_the_selected_record_and_emits_no_effect() {
+        let mut model = with_grid(
+            &["id", "amount"],
+            &[
+                &[Cell::Text("first".into()), Cell::Text("30".into())],
+                &[Cell::Text("second".into()), Cell::Text("10".into())],
+                &[Cell::Text("third".into()), Cell::Null],
+            ],
+        );
+        model.selected_column = 1;
+        model.selected_row = 0;
+        assert_eq!(model.selected_source_row(), Some(0));
+
+        for expected in [
+            (
+                Some(crate::app::grid::SortDirection::Ascending),
+                vec![1, 0, 2],
+            ),
+            (
+                Some(crate::app::grid::SortDirection::Descending),
+                vec![0, 1, 2],
+            ),
+            (None, vec![0, 1, 2]),
+        ] {
+            assert!(
+                update(&mut model, Message::Action(Action::OpenResultControls)).is_empty(),
+                "view controls must not execute SQL"
+            );
+            let palette = model.palette.as_mut().expect("grid controls");
+            palette.query = "sort".into();
+            assert!(
+                update(&mut model, Message::Action(Action::Activate)).is_empty(),
+                "sorting is a view transition"
+            );
+            assert_eq!(
+                model.result_grid.sort.map(|sort| sort.direction),
+                expected.0
+            );
+            assert_eq!(model.displayed_rows(), expected.1);
+            assert_eq!(model.selected_source_row(), Some(0));
+        }
+
+        let set = model.visible_result().expect("result");
+        assert_eq!(set.rows[0][1], Cell::Text("30".into()));
+    }
+
+    #[test]
+    fn the_column_chooser_uses_source_positions_and_keeps_one_column_visible() {
+        let mut model = with_grid(
+            &["id", "name", "name"],
+            &[&[
+                Cell::Text("1".into()),
+                Cell::Text("left".into()),
+                Cell::Text("right".into()),
+            ]],
+        );
+
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        model.palette.as_mut().expect("controls").query = "visible".into();
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(
+            model.palette.as_ref().expect("column chooser").purpose,
+            crate::app::palette::Purpose::ResultColumns
+        );
+        let labels: Vec<_> = model
+            .palette
+            .as_ref()
+            .expect("column chooser")
+            .entries
+            .iter()
+            .map(|entry| entry.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            vec!["Column 1: id", "Column 2: name", "Column 3: name"]
+        );
+
+        let palette = model.palette.as_mut().expect("column chooser");
+        palette.query = "Column 2".into();
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.result_grid.visible_columns(3), vec![0, 2]);
+        assert_eq!(
+            model.selected_column, 0,
+            "hiding an unselected column leaves selection"
+        );
+
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        model.palette.as_mut().expect("controls").query = "visible".into();
+        update(&mut model, Message::Action(Action::Activate));
+        model.palette.as_mut().expect("column chooser").query = "Column 3".into();
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.result_grid.visible_columns(3), vec![0]);
+
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        model.palette.as_mut().expect("controls").query = "visible".into();
+        update(&mut model, Message::Action(Action::Activate));
+        model.palette.as_mut().expect("column chooser").query = "Column 1".into();
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.result_grid.visible_columns(3), vec![0]);
+        assert!(
+            model
+                .result_grid
+                .note
+                .as_deref()
+                .is_some_and(|note| note.contains("one result column")),
+            "the final visible column cannot be hidden"
+        );
+
+        // The duplicate `name` entries remain distinct and the hidden ones can
+        // be restored by their source position.
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        model.palette.as_mut().expect("controls").query = "visible".into();
+        update(&mut model, Message::Action(Action::Activate));
+        model.palette.as_mut().expect("column chooser").query = "Column 2".into();
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.result_grid.visible_columns(3), vec![0, 1]);
+        assert_eq!(
+            model.selected_column, 1,
+            "restoring selects that source column"
+        );
+
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        model.palette.as_mut().expect("controls").query = "visible".into();
+        update(&mut model, Message::Action(Action::Activate));
+        model.palette.as_mut().expect("column chooser").query = "Column 3".into();
+        update(&mut model, Message::Action(Action::Activate));
+        assert_eq!(model.result_grid.visible_columns(3), vec![0, 1, 2]);
+        assert_eq!(
+            model.selected_column, 2,
+            "restoring selects the other duplicate"
+        );
+    }
+
+    #[test]
+    fn grid_controls_reset_and_new_results_clear_shape_but_keep_preferences() {
+        let mut model = with_grid(
+            &["id", "label"],
+            &[
+                &[Cell::Text("1".into()), Cell::Text("one".into())],
+                &[Cell::Text("2".into()), Cell::Text("two".into())],
+            ],
+        );
+        model.result_grid.show_types = false;
+        model.result_grid.freeze_first = true;
+        model.result_grid.toggle_sort(1);
+        model.result_grid.toggle_column(0, 2);
+        let _ = model.result_grid.adjust_width(1, 10, 4);
+        model.result_grid.horizontal_start = 1;
+
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        model.palette.as_mut().expect("controls").query = "reset".into();
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(model.result_grid.sort.is_none());
+        assert!(model.result_grid.hidden_columns.is_empty());
+        assert!(model.result_grid.widths.is_empty());
+        assert_eq!(model.result_grid.horizontal_start, 0);
+        assert!(!model.result_grid.show_types);
+        assert!(model.result_grid.freeze_first);
+
+        model.editor.set_text("SELECT 2;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let Effect::Execute { job, .. } = effects[0] else {
+            panic!("expected execute effect");
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(execution(job, ExecutionStatus::Succeeded, &["new"])),
+        );
+        assert!(model.result_grid.sort.is_none());
+        assert!(model.result_grid.hidden_columns.is_empty());
+        assert!(model.result_grid.widths.is_empty());
+        assert!(!model.result_grid.show_types);
+        assert!(model.result_grid.freeze_first);
+        assert_eq!(model.result_grid.columns_signature, vec!["value"]);
+    }
+
+    #[test]
+    fn result_grid_controls_are_safe_without_rows_or_without_results_focus() {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        assert!(update(&mut model, Message::Action(Action::OpenResultControls)).is_empty());
+        assert!(model.palette.is_none());
+        assert!(
+            model
+                .result_grid
+                .note
+                .as_deref()
+                .is_some_and(|note| note.contains("Run a query"))
+        );
+
+        let mut model = with_rows(&["one"]);
+        model.focus = Focus::Editor;
+        update(&mut model, Message::Action(Action::OpenResultControls));
+        assert!(model.palette.is_none());
+        assert!(
+            model
+                .result_grid
+                .note
+                .as_deref()
+                .is_some_and(|note| note.contains("Focus Results"))
+        );
     }
 
     #[test]
@@ -3466,11 +6919,704 @@ mod tests {
     }
 
     #[test]
+    fn a_valid_server_position_focuses_the_editor_without_editing_sql_or_history() {
+        let mut model = connected();
+        let sql = "SELECT 1;\nSELECT café FROM orders WHERE id = 0;";
+        model.editor.set_text(sql);
+        model.editor.set_cursor(0);
+        let can_undo = model.editor.can_undo();
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let job = match effects.as_slice() {
+            [Effect::Execute { job, .. }] => *job,
+            other => panic!("expected execute effect, got {other:?}"),
+        };
+        let diagnostic = Diagnostic::new(
+            DiagnosticKind::Query,
+            "syntax error at or near orders",
+            "running statement 2",
+        )
+        .in_statement(2)
+        .at_position(19);
+        update(
+            &mut model,
+            Message::ExecutionFinished(failed_execution(job, diagnostic)),
+        );
+
+        let location = model.error_location.as_ref().expect("location mapped");
+        assert_eq!(location.statement_number, 2);
+        assert_eq!((location.line, location.column), (2, 19));
+        assert_eq!(model.editor.cursor(), location.cursor);
+        assert_eq!(model.focus, Focus::Editor);
+        assert_eq!(model.editor.text(), sql);
+        assert_eq!(model.editor.can_undo(), can_undo);
+        assert!(model.error_location_note.is_none());
+    }
+
+    #[test]
+    fn formatting_is_local_one_undoable_edit_and_preserves_the_logical_cursor() {
+        let mut model = Model::new(100);
+        let source = "select o.id,o.total from orders o where o.total>0;";
+        let source_cursor = source.find("total>0").expect("token") + "total".len();
+        model.editor = crate::app::editor::Editor::with_text(source);
+        model.editor.set_cursor(source_cursor);
+
+        let effects = update(&mut model, Message::Action(Action::FormatBuffer));
+
+        assert!(effects.is_empty(), "formatting must not create effects");
+        assert_eq!(
+            model.editor.text(),
+            "select o.id,\n  o.total\nfrom orders o\nwhere o.total > 0;"
+        );
+        let formatted_cursor = model.editor.cursor();
+        assert_eq!(
+            model.format_notice,
+            Some(crate::app::model::FormatNotice::Applied {
+                before_lines: 1,
+                after_lines: 4
+            })
+        );
+        assert!(model.editor.can_undo());
+
+        update(&mut model, Message::Action(Action::Undo));
+        assert_eq!(model.editor.text(), source);
+        assert_eq!(model.editor.cursor(), source_cursor);
+        assert_ne!(formatted_cursor, source_cursor);
+        assert!(model.format_notice.is_none());
+
+        update(&mut model, Message::Action(Action::Redo));
+        assert_eq!(
+            model.editor.text(),
+            "select o.id,\n  o.total\nfrom orders o\nwhere o.total > 0;"
+        );
+        assert_eq!(model.editor.cursor(), formatted_cursor);
+    }
+
+    #[test]
+    fn formatting_needs_no_connection_and_refuses_without_editing_unsafe_input() {
+        let mut model = Model::new(100);
+        model.editor = crate::app::editor::Editor::with_text("SELECT 'unfinished");
+        let revision = model.editor.revision();
+        let cursor = model.editor.cursor();
+
+        assert!(update(&mut model, Message::Action(Action::FormatBuffer)).is_empty());
+        assert_eq!(model.editor.text(), "SELECT 'unfinished");
+        assert_eq!(model.editor.revision(), revision);
+        assert_eq!(model.editor.cursor(), cursor);
+        assert!(matches!(
+            model.format_notice,
+            Some(crate::app::model::FormatNotice::Refused { .. })
+        ));
+        assert!(
+            model
+                .format_notice
+                .as_ref()
+                .expect("format notice")
+                .message()
+                .contains("Close it")
+        );
+
+        let mut empty = Model::new(100);
+        empty.editor = crate::app::editor::Editor::with_text(" \n\t");
+        update(&mut empty, Message::Action(Action::FormatBuffer));
+        assert_eq!(empty.editor.text(), " \n\t");
+        assert_eq!(
+            empty.format_notice,
+            Some(crate::app::model::FormatNotice::Empty)
+        );
+        assert!(!empty.editor.can_undo());
+
+        let mut comments = Model::new(100);
+        comments.editor = crate::app::editor::Editor::with_text("-- only a note");
+        update(&mut comments, Message::Action(Action::FormatBuffer));
+        assert_eq!(comments.editor.text(), "-- only a note");
+        assert_eq!(
+            comments.format_notice,
+            Some(crate::app::model::FormatNotice::Empty)
+        );
+    }
+
+    #[test]
+    fn formatting_invalidates_a_visible_server_location_but_not_when_nothing_changes() {
+        let mut model = Model::new(100);
+        model.editor = crate::app::editor::Editor::with_text("SELECT 1 FROM t;");
+        model.error_location = Some(crate::query::error_location::ErrorLocation {
+            cursor: 7,
+            token: None,
+            line: 1,
+            column: 8,
+            statement_number: 1,
+            character: 8,
+        });
+        update(&mut model, Message::Action(Action::FormatBuffer));
+        assert!(model.error_location.is_none());
+        assert!(
+            model
+                .error_location_note
+                .as_deref()
+                .is_some_and(|note| note.contains("previous submission"))
+        );
+
+        let mut unchanged = Model::new(100);
+        unchanged.editor = crate::app::editor::Editor::with_text("SELECT 1\nFROM t;");
+        let revision = unchanged.editor.revision();
+        update(&mut unchanged, Message::Action(Action::FormatBuffer));
+        assert_eq!(unchanged.editor.revision(), revision);
+        assert_eq!(unchanged.editor.text(), "SELECT 1\nFROM t;");
+        assert_eq!(
+            unchanged.format_notice,
+            Some(crate::app::model::FormatNotice::AlreadyFormatted)
+        );
+    }
+
+    #[test]
+    fn run_statement_maps_back_to_its_original_buffer_ordinal() {
+        let mut model = connected();
+        let sql = "SELECT 1;\nSELECT café FROM orders;";
+        model.editor.set_text(sql);
+        model.editor.set_cursor(sql.len());
+        let effects = update(&mut model, Message::Action(Action::RunStatement));
+        let (job, sent) = match effects.as_slice() {
+            [Effect::Execute { job, sql }] => (*job, sql.as_str()),
+            other => panic!("expected execute effect, got {other:?}"),
+        };
+        assert_eq!(sent, "SELECT café FROM orders");
+        let diagnostic = Diagnostic::new(
+            DiagnosticKind::Query,
+            "syntax error at or near orders",
+            "running statement 1",
+        )
+        .in_statement(1)
+        .at_position(19);
+        update(
+            &mut model,
+            Message::ExecutionFinished(failed_execution(job, diagnostic)),
+        );
+        assert_eq!(
+            model
+                .error_location
+                .as_ref()
+                .map(|location| location.statement_number),
+            Some(2)
+        );
+        assert_eq!(model.editor.text(), sql);
+    }
+
+    #[test]
+    fn missing_or_out_of_range_positions_leave_the_existing_caret_alone() {
+        for diagnostic in [
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "permission denied",
+                "running statement 1",
+            )
+            .in_statement(1),
+            Diagnostic::new(DiagnosticKind::Query, "bad position", "running statement 1")
+                .in_statement(1)
+                .at_position(999),
+        ] {
+            let mut model = connected();
+            model.editor.set_text("SELECT 1;");
+            model.editor.set_cursor(3);
+            let before = model.editor.cursor();
+            let effects = update(&mut model, Message::Action(Action::RunBuffer));
+            let job = match effects.as_slice() {
+                [Effect::Execute { job, .. }] => *job,
+                other => panic!("expected execute effect, got {other:?}"),
+            };
+            update(
+                &mut model,
+                Message::ExecutionFinished(failed_execution(job, diagnostic)),
+            );
+            assert_eq!(model.editor.cursor(), before);
+            assert!(model.error_location.is_none());
+            assert!(
+                model
+                    .error_location_note
+                    .as_deref()
+                    .is_some_and(|note| note.contains("position") || note.contains("reported"))
+            );
+        }
+    }
+
+    #[test]
+    fn an_error_from_a_changed_buffer_is_not_applied_to_the_new_text() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        let before = model.editor.cursor();
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let job = match effects.as_slice() {
+            [Effect::Execute { job, .. }] => *job,
+            other => panic!("expected execute effect, got {other:?}"),
+        };
+        update(&mut model, Message::Action(Action::Insert('x')));
+        assert_ne!(model.editor.revision(), 0);
+        update(
+            &mut model,
+            Message::ExecutionFinished(failed_execution(
+                job,
+                Diagnostic::new(DiagnosticKind::Query, "bad syntax", "running statement 1")
+                    .in_statement(1)
+                    .at_position(1),
+            )),
+        );
+        assert!(model.error_location.is_none());
+        assert!(
+            model
+                .error_location_note
+                .as_deref()
+                .is_some_and(|note| note.contains("previous submission"))
+        );
+        assert_eq!(model.editor.cursor(), before + 1);
+    }
+
+    #[test]
+    fn editing_after_a_mapped_error_removes_its_marker_and_says_why() {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let job = match effects.as_slice() {
+            [Effect::Execute { job, .. }] => *job,
+            other => panic!("expected execute effect, got {other:?}"),
+        };
+        update(
+            &mut model,
+            Message::ExecutionFinished(failed_execution(
+                job,
+                Diagnostic::new(DiagnosticKind::Query, "bad syntax", "running statement 1")
+                    .in_statement(1)
+                    .at_position(1),
+            )),
+        );
+        assert!(model.error_location.is_some());
+        update(&mut model, Message::Action(Action::Insert('x')));
+        assert!(model.error_location.is_none());
+        assert!(
+            model
+                .error_location_note
+                .as_deref()
+                .is_some_and(|note| note.contains("previous submission"))
+        );
+    }
+
+    #[test]
     fn a_new_run_clears_the_previous_error() {
         let mut model = connected();
         model.error = Some(Diagnostic::new(DiagnosticKind::Query, "old", "running"));
         model.editor.set_text("SELECT 1;");
         update(&mut model, Message::Action(Action::RunBuffer));
         assert!(model.error.is_none());
+    }
+
+    #[test]
+    fn copy_is_off_by_default_and_explains_the_opt_in_without_an_effect() {
+        let mut model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("secret".into()),
+        ]]);
+
+        let effects = update(&mut model, Message::Action(Action::CopyValue));
+
+        assert!(effects.is_empty());
+        assert!(model.pending_copy.is_none());
+        assert_eq!(
+            model.clipboard_notice,
+            Some(crate::app::model::ClipboardNotice::Disabled)
+        );
+        assert!(
+            model
+                .clipboard_notice
+                .as_ref()
+                .expect("notice")
+                .message()
+                .contains("[clipboard] osc52 = true")
+        );
+    }
+
+    #[test]
+    fn copy_confirmation_contains_only_identity_and_enter_creates_one_redacted_effect() {
+        let mut model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("secret".into()),
+        ]]);
+        model.clipboard_osc52 = true;
+
+        assert!(update(&mut model, Message::Action(Action::CopyValue)).is_empty());
+        let pending = model.pending_copy.expect("confirmation");
+        assert_eq!(pending.result_job, JobId(7));
+        assert_eq!(pending.source_row, 0);
+        assert_eq!(pending.column, 1);
+        assert_eq!(pending.bytes, 6);
+        assert_eq!(pending.characters, 6);
+        assert!(
+            !format!("{model:?}").contains("secret"),
+            "the model should not duplicate the raw value"
+        );
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(model.pending_copy.is_none());
+        let [Effect::CopyValue { payload }] = effects.as_slice() else {
+            panic!("expected one copy effect, got {effects:?}");
+        };
+        assert_eq!(payload.len(), 6);
+        assert_eq!(payload.characters(), 6);
+        assert!(!format!("{effects:?}").contains("secret"));
+        assert_eq!(payload.clone().into_inner(), "secret");
+    }
+
+    #[test]
+    fn copy_cancel_sends_nothing_and_keeps_the_result_selection() {
+        let mut model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("value".into()),
+        ]]);
+        model.clipboard_osc52 = true;
+        model.selected_row = 0;
+        model.selected_column = 1;
+
+        update(&mut model, Message::Action(Action::CopyValue));
+        let effects = update(&mut model, Message::Action(Action::Cancel));
+
+        assert!(effects.is_empty());
+        assert!(model.pending_copy.is_none());
+        assert_eq!((model.selected_row, model.selected_column), (0, 1));
+        assert!(model.last_execution.is_some());
+    }
+
+    #[test]
+    fn copy_distinguishes_null_and_refuses_values_over_the_client_bound() {
+        let mut null_model = copy_model(vec![vec![Cell::Text("1".into()), Cell::Null]]);
+        null_model.clipboard_osc52 = true;
+        assert!(update(&mut null_model, Message::Action(Action::CopyValue)).is_empty());
+        assert_eq!(
+            null_model.clipboard_notice,
+            Some(crate::app::model::ClipboardNotice::Null)
+        );
+
+        let mut large_model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("x".repeat(crate::clipboard::MAX_OSC52_BYTES + 1)),
+        ]]);
+        large_model.clipboard_osc52 = true;
+        assert!(update(&mut large_model, Message::Action(Action::CopyValue)).is_empty());
+        assert!(matches!(
+            large_model.clipboard_notice,
+            Some(crate::app::model::ClipboardNotice::TooLarge { bytes })
+                if bytes == crate::clipboard::MAX_OSC52_BYTES + 1
+        ));
+        assert!(large_model.pending_copy.is_none());
+    }
+
+    #[test]
+    fn stale_copy_confirmation_sends_nothing_when_selection_or_result_changes() {
+        let mut model = copy_model(vec![
+            vec![Cell::Text("1".into()), Cell::Text("first".into())],
+            vec![Cell::Text("2".into()), Cell::Text("second".into())],
+        ]);
+        model.clipboard_osc52 = true;
+        update(&mut model, Message::Action(Action::CopyValue));
+        model.selected_row = 1;
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+
+        assert!(effects.is_empty());
+        assert_eq!(
+            model.clipboard_notice,
+            Some(crate::app::model::ClipboardNotice::Stale)
+        );
+    }
+
+    #[test]
+    fn filtered_copy_keeps_the_retained_source_row_identity() {
+        let mut model = copy_model(vec![
+            vec![Cell::Text("1".into()), Cell::Text("first".into())],
+            vec![Cell::Text("2".into()), Cell::Text("second".into())],
+        ]);
+        model.clipboard_osc52 = true;
+        model.result_filter = "second".into();
+
+        update(&mut model, Message::Action(Action::CopyValue));
+        assert_eq!(
+            model
+                .pending_copy
+                .as_ref()
+                .map(|candidate| candidate.source_row),
+            Some(1)
+        );
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let [Effect::CopyValue { payload }] = effects.as_slice() else {
+            panic!("expected a copy effect, got {effects:?}");
+        };
+        assert_eq!(payload.clone().into_inner(), "second");
+    }
+
+    #[test]
+    fn inspector_copy_uses_the_underlying_results_selection() {
+        let mut model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("from inspector".into()),
+        ]]);
+        model.clipboard_osc52 = true;
+        model.inspector = Some(crate::app::inspect::Inspector::new());
+
+        update(&mut model, Message::Action(Action::CopyValue));
+
+        assert!(model.pending_copy.is_some());
+        assert!(update(&mut model, Message::Action(Action::Insert('x'))).is_empty());
+        assert!(model.pending_copy.is_some());
+    }
+
+    #[test]
+    fn a_successful_copy_reports_only_bytes_and_unconfirmed_acceptance() {
+        let mut model = copy_model(vec![vec![Cell::Text("1".into()), Cell::Text("hé".into())]]);
+
+        update(
+            &mut model,
+            Message::ClipboardSent {
+                bytes: 3,
+                characters: 2,
+            },
+        );
+
+        let notice = model.clipboard_notice.expect("notice");
+        assert_eq!(
+            notice,
+            crate::app::model::ClipboardNotice::Sent {
+                bytes: 3,
+                characters: 2
+            }
+        );
+        assert!(notice.message().contains("acceptance is unconfirmed"));
+        assert!(!notice.message().contains("hé"));
+    }
+
+    #[test]
+    fn cell_update_reads_metadata_then_reviews_and_sends_one_parameterized_effect() {
+        let mut model = cell_update_model();
+        let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+        let [Effect::LoadUpdateTarget { request, relation }] = effects.as_slice() else {
+            panic!("expected metadata lookup, got {effects:?}");
+        };
+        assert_eq!(relation.schema.as_deref(), Some("public"));
+        assert_eq!(relation.relation, "orders");
+        assert!(model.update_prompt.is_none());
+        assert!(model.pending_update.is_none());
+
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request: *request,
+                result: Box::new(Ok(update_relation())),
+            },
+        );
+        assert!(model.update_prompt.is_some());
+
+        for character in "new note".chars() {
+            assert!(update(&mut model, Message::Action(Action::Insert(character))).is_empty());
+        }
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        let pending = model.pending_update.as_ref().expect("review");
+        assert!(pending.plan.sql_template.contains(":__ignatius_new_value"));
+        assert!(pending.plan.sql_template.contains("order_id"));
+        assert!(
+            pending
+                .plan
+                .bound_sql()
+                .expect("review statement")
+                .contains("new note")
+        );
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let [
+            Effect::ExecuteParameterized {
+                job,
+                sql,
+                parameters,
+            },
+        ] = effects.as_slice()
+        else {
+            panic!("expected one parameterized update, got {effects:?}");
+        };
+        assert_eq!(*job, JobId(1));
+        assert_eq!(sql, &pending_template());
+        assert_eq!(
+            parameters.names(),
+            &["__ignatius_new_value", "__ignatius_key_0"]
+        );
+        assert!(model.pending_update.is_none());
+        assert!(model.running_cell_update);
+    }
+
+    fn pending_template() -> String {
+        "UPDATE \"public\".\"orders\" SET \"note\" = :__ignatius_new_value WHERE \"order_id\" = :__ignatius_key_0".into()
+    }
+
+    #[test]
+    fn cell_update_cancel_sends_nothing_and_production_is_refused_before_metadata() {
+        let mut model = cell_update_model();
+        let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::LoadUpdateTarget { .. }]
+        ));
+        let request = model.update_lookup.as_ref().expect("lookup").request;
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request,
+                result: Box::new(Ok(update_relation())),
+            },
+        );
+        update(&mut model, Message::Action(Action::Activate));
+        assert!(model.pending_update.is_some());
+        assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+        assert!(model.pending_update.is_none());
+        assert_eq!(model.phase, QueryPhase::Idle);
+
+        let mut production = cell_update_model();
+        let mut info = *session();
+        info.environment = Environment::Production;
+        update(&mut production, Message::Connected(Box::new(info)));
+        let effects = update(&mut production, Message::Action(Action::GenerateCellUpdate));
+        assert!(effects.is_empty());
+        assert!(production.update_lookup.is_none());
+        assert!(
+            production
+                .cell_update_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("production"))
+        );
+    }
+
+    #[test]
+    fn cell_update_refuses_non_table_and_privilege_targets_before_value_input() {
+        for (relation, expected) in [
+            (
+                {
+                    let mut relation = update_relation();
+                    relation.kind = crate::postgres::metadata::ObjectKind::View;
+                    relation
+                },
+                "ordinary or partitioned tables",
+            ),
+            (
+                {
+                    let mut relation = update_relation();
+                    relation.readable = false;
+                    relation
+                },
+                "can no longer read",
+            ),
+            (
+                {
+                    let mut relation = update_relation();
+                    relation.writable = false;
+                    relation
+                },
+                "cannot UPDATE",
+            ),
+        ] {
+            let mut model = cell_update_model();
+            let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+            let request = match effects.as_slice() {
+                [Effect::LoadUpdateTarget { request, .. }] => *request,
+                other => panic!("expected metadata lookup, got {other:?}"),
+            };
+            update(
+                &mut model,
+                Message::UpdateTargetLoaded {
+                    request,
+                    result: Box::new(Ok(relation)),
+                },
+            );
+            assert!(model.update_prompt.is_none());
+            assert!(model.pending_update.is_none());
+            assert!(
+                model
+                    .cell_update_notice
+                    .as_deref()
+                    .is_some_and(|notice| notice.contains(expected)),
+                "notice {:?} did not contain {expected:?}",
+                model.cell_update_notice
+            );
+        }
+
+        let mut read_only = cell_update_model();
+        let mut info = *session();
+        info.read_only = true;
+        update(&mut read_only, Message::Connected(Box::new(info)));
+        assert!(update(&mut read_only, Message::Action(Action::GenerateCellUpdate)).is_empty());
+        assert!(read_only.update_lookup.is_none());
+        assert!(read_only.update_prompt.is_none());
+        assert!(
+            read_only
+                .cell_update_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("read-only"))
+        );
+    }
+
+    #[test]
+    fn a_late_update_metadata_response_cannot_replace_a_changed_selection() {
+        let mut model = cell_update_model();
+        let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+        let request = match effects.as_slice() {
+            [Effect::LoadUpdateTarget { request, .. }] => *request,
+            other => panic!("expected lookup, got {other:?}"),
+        };
+        model.selected_row = 1;
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request,
+                result: Box::new(Ok(update_relation())),
+            },
+        );
+        assert!(model.update_prompt.is_none());
+        assert!(model.pending_update.is_none());
+        assert!(
+            model
+                .cell_update_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("changed"))
+        );
+    }
+
+    #[test]
+    fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select() {
+        let mut model = cell_update_model();
+        let snapshot = model.last_execution.clone();
+        let source_sql = model.last_sql.clone();
+        let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+        let request = match effects.as_slice() {
+            [Effect::LoadUpdateTarget { request, .. }] => *request,
+            other => panic!("expected lookup, got {other:?}"),
+        };
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request,
+                result: Box::new(Ok(update_relation())),
+            },
+        );
+        update(&mut model, Message::Action(Action::Activate));
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let job = match effects.as_slice() {
+            [Effect::ExecuteParameterized { job, .. }] => *job,
+            other => panic!("expected generated update, got {other:?}"),
+        };
+        let execution = execution(job, ExecutionStatus::Succeeded, &[]);
+        let effects = update(&mut model, Message::ExecutionFinished(execution));
+        assert!(effects.iter().all(|effect| !matches!(
+            effect,
+            Effect::Execute { .. } | Effect::ExecuteParameterized { .. }
+        )));
+        assert_eq!(model.last_execution, snapshot);
+        assert_eq!(model.last_sql, source_sql);
+        assert!(model.visible_result().is_some());
+        assert!(model.cell_update_notice.as_deref().is_some_and(|notice| {
+            notice.contains("0 row(s) affected")
+                && notice.contains("snapshot")
+                && notice.contains("again")
+        }));
     }
 }

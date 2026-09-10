@@ -85,6 +85,66 @@ pub struct SqlPosition {
     pub character: u32,
 }
 
+/// Database object facts supplied by PostgreSQL for a diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObjectContext {
+    /// Schema supplied by the server, when present.
+    pub schema: Option<String>,
+    /// Relation or table supplied by the server, when present.
+    pub table: Option<String>,
+    /// Column supplied by the server, when present.
+    pub column: Option<String>,
+    /// Constraint supplied by the server, when present.
+    pub constraint: Option<String>,
+}
+
+impl ObjectContext {
+    /// Builds context from PostgreSQL fields, keeping absent fields absent.
+    #[must_use]
+    pub fn from_server_fields(
+        schema: Option<&str>,
+        table: Option<&str>,
+        column: Option<&str>,
+        constraint: Option<&str>,
+    ) -> Option<Self> {
+        let context = Self {
+            schema: redact_optional(schema),
+            table: redact_optional(table),
+            column: redact_optional(column),
+            constraint: redact_optional(constraint),
+        };
+        (context.schema.is_some()
+            || context.table.is_some()
+            || context.column.is_some()
+            || context.constraint.is_some())
+        .then_some(context)
+    }
+
+    fn plain_summary(&self) -> String {
+        let mut fields = Vec::new();
+        for (label, value) in [
+            ("schema", self.schema.as_deref()),
+            ("table", self.table.as_deref()),
+            ("column", self.column.as_deref()),
+            ("constraint", self.constraint.as_deref()),
+        ] {
+            if let Some(value) = value {
+                fields.push(format!(
+                    "{label} {}",
+                    crate::query::value::sanitize_for_display(value)
+                ));
+            }
+        }
+        fields.join(", ")
+    }
+}
+
+fn redact_optional(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    let value = redact_text(value);
+    (!value.is_empty()).then_some(value)
+}
+
 /// A failure described in layers, from human headline to server detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -102,6 +162,10 @@ pub struct Diagnostic {
     pub technical: Vec<TechnicalField>,
     /// Position in the submitted SQL, when the server reported one.
     pub position: Option<SqlPosition>,
+    /// One-based statement ordinal in the submitted buffer, when known.
+    pub statement_number: Option<usize>,
+    /// Structured database object facts, when PostgreSQL supplied any.
+    pub object: Option<ObjectContext>,
 }
 
 impl Diagnostic {
@@ -120,6 +184,8 @@ impl Diagnostic {
             next_action: None,
             technical: Vec::new(),
             position: None,
+            statement_number: None,
+            object: None,
         }
     }
 
@@ -163,6 +229,22 @@ impl Diagnostic {
         self
     }
 
+    /// Records the statement ordinal associated with this diagnostic.
+    #[must_use]
+    pub fn in_statement(mut self, statement_number: usize) -> Self {
+        if statement_number > 0 {
+            self.statement_number = Some(statement_number);
+        }
+        self
+    }
+
+    /// Adds structured PostgreSQL object context.
+    #[must_use]
+    pub fn object_context(mut self, object: ObjectContext) -> Self {
+        self.object = Some(object);
+        self
+    }
+
     /// Exit code this diagnostic maps to.
     #[must_use]
     pub const fn exit_code(&self) -> ExitCode {
@@ -179,6 +261,21 @@ impl Diagnostic {
         let mut out = String::new();
         out.push_str(&format!("{}: {}\n", self.kind.label(), self.headline));
         out.push_str(&format!("  While: {}\n", self.attempted));
+        if let Some(statement_number) = self.statement_number {
+            if let Some(position) = self.position {
+                out.push_str(&format!(
+                    "  Position: statement {statement_number}, character {}\n",
+                    position.character
+                ));
+            } else {
+                out.push_str(&format!("  Statement: {statement_number}\n"));
+            }
+        } else if let Some(position) = self.position {
+            out.push_str(&format!("  Position: character {}\n", position.character));
+        }
+        if let Some(object) = &self.object {
+            out.push_str(&format!("  Object: {}\n", object.plain_summary()));
+        }
         if let Some(cause) = &self.likely_cause {
             out.push_str(&format!("  Likely cause: {cause}\n"));
         }
@@ -210,6 +307,13 @@ impl Diagnostic {
             "likely_cause": self.likely_cause,
             "next_action": self.next_action,
             "position": self.position.map(|p| p.character),
+            "statement_number": self.statement_number,
+            "object": self.object.as_ref().map(|object| serde_json::json!({
+                "schema": object.schema.as_deref().map(crate::query::value::sanitize_for_display),
+                "table": object.table.as_deref().map(crate::query::value::sanitize_for_display),
+                "column": object.column.as_deref().map(crate::query::value::sanitize_for_display),
+                "constraint": object.constraint.as_deref().map(crate::query::value::sanitize_for_display),
+            })),
             "technical": self.technical.iter()
                 .map(|f| serde_json::json!({ "label": f.label, "value": f.value }))
                 .collect::<Vec<_>>(),
@@ -331,6 +435,45 @@ mod tests {
         let full = d.render_plain(true);
         assert!(full.contains("SQLSTATE: 42P01"));
         assert!(full.contains("Detail: no such table"));
+    }
+
+    #[test]
+    fn object_context_keeps_server_fields_structured_and_redacted() {
+        let secret = "hunter2-not-a-real-password";
+        let object = ObjectContext::from_server_fields(
+            Some("public"),
+            Some("orders"),
+            Some("customer_id"),
+            Some(&format!("postgres://u:{secret}@h/c")),
+        )
+        .expect("at least one object field");
+        let diagnostic = Diagnostic::new(DiagnosticKind::Query, "constraint failed", "running")
+            .in_statement(2)
+            .at_position(19)
+            .object_context(object);
+
+        let plain = diagnostic.render_plain(true);
+        assert!(
+            plain.contains("Position: statement 2, character 19"),
+            "{plain}"
+        );
+        assert!(plain.contains("Object: schema public, table orders, column customer_id"));
+        assert!(!plain.contains(secret), "{plain}");
+        let json = diagnostic.to_json();
+        assert_eq!(json["statement_number"], 2);
+        assert_eq!(json["position"], 19);
+        assert_eq!(json["object"]["schema"], "public");
+        assert!(!json.to_string().contains(secret));
+    }
+
+    #[test]
+    fn absent_object_fields_are_not_invented() {
+        let object = ObjectContext::from_server_fields(None, Some("orders"), None, None)
+            .expect("table is enough");
+        assert_eq!(object.schema, None);
+        assert_eq!(object.table.as_deref(), Some("orders"));
+        assert_eq!(object.column, None);
+        assert_eq!(object.constraint, None);
     }
 
     #[test]

@@ -101,16 +101,125 @@ Errors are layered on purpose:
 ```text
 Query error: relation "orders" does not exist
   While: running statement 1
+  Position: statement 1, character 15
+  Location: statement 1, line 2, column 5
+     2 | FROM orders
+       |     ^
   Likely cause: the relation is not visible under the current search_path
   Next: qualify it with a schema, or check search_path in the status bar
   Details: 3 field(s) available, re-run with --verbose
 ```
 
 The headline is the server's own message. `While` is what the client was doing.
+`Position` preserves PostgreSQL's one-based character coordinate and `Location`
+is the mapped editor coordinate when the submitted statement and buffer still
+match. The source excerpt is sanitized and line-oriented; a missing, internal,
+rewritten, or stale position is reported as unavailable rather than estimated.
 `Likely cause` appears only when the SQLSTATE is one where a plain-language cause
 can be stated honestly; it is omitted rather than guessed. `--verbose`, or Ctrl+D
 in the client, expands SQLSTATE, severity, detail, hint, schema, table, column,
-constraint and routine as the server sent them.
+constraint and routine as the server sent them. Constraint object context is
+shown before that expandable section, and JSON retains the numeric position,
+statement number, object fields, and technical array without embedding SQL.
+
+## Reading and reporting a result-grid view
+
+The interactive result grid is a local view over retained rows. Its sort is
+labelled `local` and says `retained rows only`; it never means PostgreSQL added
+an `ORDER BY`, and it never fetches another page. A filtered or truncated result
+continues to state what was retained and what the server returned.
+
+`Ctrl+K g` opens the controls when Results has focus. The searchable chooser can
+hide or restore source columns, adjust a bounded width, show server-described
+type labels, freeze the first visible column, or reset the view. Duplicate names
+are identified by source position. If a type description fails or is only
+available for some columns, the grid says `unavailable` or `partial`; it does
+not infer a type from displayed text.
+
+If a result looks wrong after using these controls, press Reset before reporting
+it and include the visible state words, terminal size, glyph tier, and whether
+the result was filtered or truncated. The view does not alter plain, JSON,
+streaming export, history, or editor behaviour, so report a scripted-output
+problem separately from a grid-layout problem.
+
+## Reading a cell-update refusal or review
+
+`Ctrl+K u` is interactive-only and intentionally supports a narrow source shape:
+one direct single-table `SELECT` with its primary-key columns projected. The
+client resolves the live relation in the session search path and checks table
+kind, read privilege, update privilege and server read-only posture. Joins,
+expressions, CTEs, set operations, views, missing or NULL key values,
+primary-key cells, production-classified connections and oversized generated
+statements are refused before a write effect.
+
+The replacement prompt is not a write. The following review shows the exact
+bound `UPDATE` and says whether anything has been sent. Only Enter on that
+review emits one parameterized update; Esc emits none. The prior result remains
+a snapshot and is not refreshed automatically. If the result or selection
+changes while metadata is loading or review is open, the candidate is discarded
+as stale. Run the original `SELECT` again deliberately after a successful
+update.
+
+## Reading a retained-result refresh outcome
+
+`F6` is the portable direct key for an interactive convenience over the source
+attached to the completed result. `Ctrl+Shift+R` is an additional alias when
+the terminal preserves enhanced modifier reporting. It is offered only for one retained, read-classified
+statement with Results focused, an idle usable connection and a non-failed
+transaction. The current editor buffer is not used. Multi-statement, write,
+structural, destructive and unrecognised sources are refused before any
+execution effect.
+
+Named parameters are prompted again and their previous values are not reused.
+The Results title says `Refreshing retained result` while the request is in
+flight. The completion notice identifies success, cancellation, failure or an
+unknown connection outcome, and says that nothing was retried. A successful
+refresh replaces the result through the ordinary execution lifecycle and keeps
+only the safe template subject to the usual history rules. Focus changes,
+filtering, sorting, layout controls, reconnect and a prior outcome do not
+trigger refresh.
+
+## Reading a query plan
+
+The plan pane is a structured PostgreSQL `EXPLAIN` response, not ordinary query
+output. Plain `EXPLAIN` is labelled `estimate only`: planner costs are cost
+units, not milliseconds, and the target statement is not executed. The summary
+shows planning time when supplied and says `not measured` for execution time.
+
+`EXPLAIN ANALYZE` is different by design. The confirmation says that the target
+will execute, that side effects are possible, and that the client will not
+automatically roll it back. After confirmation, actual rows, actual startup and total time
+are shown only when PostgreSQL supplies them. Loop counts are shown when supplied too. Rows
+and node times are per-loop values where PostgreSQL reports loops; the plan
+labels an estimate mismatch when observed rows differ by at least 10x.
+
+The attention marker says whether it uses estimated cost or measured time. A
+plan that cannot be parsed, exceeds the 1 MiB response or 500-node display
+bound, loses its connection, or fails on the server is shown as unavailable or
+truncated, never as a successful plan. Esc closes a completed failure or plan
+and restores the prior ordinary result without rerunning it. If a connection is
+lost during analysis, treat the statement's outcome as potentially unknown and
+check the session before retrying.
+
+## Reading guided discovery
+
+The first frame and empty panes are state-specific. `Not connected`, `Connecting`,
+`Connection lost`, `Connection failed`, `Ready`, `No rows returned`, filtered
+empty and failed-transaction wording are different facts, not interchangeable
+empty messages. Each surface names a safe next action or says why none is
+available yet.
+
+The footer is a bounded contextual hint rail with no more than five complete
+action/key pairs. Keys come from the active configuration, not from this
+document's defaults. The command palette identifies itself, searches by intent,
+and retains a prerequisite for actions that cannot act in the current state.
+
+Discovery is interactive presentation only. Opening, searching, rendering or
+dismissing it does not execute SQL, reload catalogue data, write files, record
+history, transfer clipboard data, or create persisted onboarding state. A report
+that mentions changed stdout, stderr, JSON, export, history or terminal
+restoration belongs to the existing scripted or terminal contract, not to
+guided discovery.
 
 ## Exit codes
 
