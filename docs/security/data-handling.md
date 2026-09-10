@@ -269,6 +269,23 @@ Parameterized statements log only the job id and the character count of the
 original template. The expanded SQL and all prompted values are deliberately
 outside the logging descriptor.
 
+## Redaction boundary
+
+One implementation (`diagnostics::redaction`) processes every displayable string
+that may carry a credential: connection URIs, libpq keyword/value strings,
+environment and argument renderings, provider standard error, and complete log
+events. It recognises URI userinfo passwords, the values of libpq secret
+keywords, inline `Authorization` and `Proxy-Authorization` header values
+including quoted and repr-style forms, and bare `Bearer` tokens of at least
+sixteen bytes. A known authorization scheme (`Bearer`, `Basic`, `Digest`,
+`Negotiate`, `NTLM`) stays visible because it is not the secret.
+
+It cannot recognise a password that appears as bare prose, an unusual
+credential format, a credential folded onto a header continuation line, or a
+secret split across writes. Callers therefore must never place a bare secret
+into a message and must not build a second redaction path; there is exactly
+one, and a divergence between two would be a leak.
+
 ## In memory
 
 - Passwords are held in `secrecy::SecretString`, which does not print itself and
