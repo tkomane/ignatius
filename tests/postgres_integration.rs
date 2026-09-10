@@ -263,6 +263,313 @@ fn a_result_cell_plan_updates_the_selected_primary_key_row_only_when_executed() 
     );
 }
 
+/// Reads one retained source, then resolves live metadata and plans the same
+/// conservative update the interactive reducer would, using only the public
+/// helpers. Live tests can therefore execute the exact reviewed statement.
+fn plan_live_cell_update(
+    fx: &Fixture,
+    source_sql: &str,
+    relation: &str,
+    selected_result_column: usize,
+    selected_row: usize,
+    replacement: &str,
+) -> (
+    ignatius::postgres::metadata::UpdateRelation,
+    ignatius::query::UpdatePlan,
+) {
+    let selected = fx.block_on(fx.session.execute(source_sql, 10, JobId(900)));
+    assert_eq!(selected.status, ExecutionStatus::Succeeded, "{selected:?}");
+    let set = selected.statements[0]
+        .result_set
+        .as_ref()
+        .expect("source rows");
+    let row = set.rows.get(selected_row).expect("selected source row");
+    let source =
+        ignatius::query::parse_update_source(source_sql, &set.columns, selected_result_column)
+            .expect("direct source");
+    let metadata = fx
+        .block_on(fx.session.update_relation(None, relation))
+        .expect("search-path relation metadata");
+    assert_eq!(
+        metadata.kind,
+        ignatius::postgres::metadata::ObjectKind::Table,
+        "the planner is only offered ordinary tables"
+    );
+    let columns = metadata
+        .columns
+        .iter()
+        .map(|column| ignatius::query::UpdateColumn {
+            name: column.name.clone(),
+            primary_key: column.primary_key,
+        })
+        .collect::<Vec<_>>();
+    let plan = ignatius::query::plan_update(
+        &source,
+        &metadata.schema,
+        &metadata.relation,
+        &set.columns,
+        row,
+        &columns,
+        replacement,
+    )
+    .expect("safe update plan");
+    (metadata, plan)
+}
+
+/// Opens a second session to the same server and database, the way the
+/// object-tree multi-connection test does, so a test can change a row between
+/// planning and execution.
+fn peer_session(fx: &Fixture, uri: &str) -> session::Session {
+    let config = Config::default();
+    let target = resolve(
+        Some(uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+    fx.block_on(session::connect(&target, Duration::ZERO))
+        .expect("the second session connects")
+}
+
+#[test]
+fn a_composite_quoted_primary_key_plan_updates_only_the_selected_row() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE cell_update_composite ( \
+             tenant integer, \
+             \"Item Code\" text, \
+             note text, \
+             PRIMARY KEY (tenant, \"Item Code\") \
+         ); \
+         INSERT INTO cell_update_composite VALUES \
+             (1, 'A-1', 'first'), \
+             (1, 'B-2', 'second'), \
+             (2, 'A-1', 'third'); \
+         SET search_path TO pg_temp",
+        100,
+        JobId(303),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = "SELECT tenant, \"Item Code\", note FROM cell_update_composite \
+                      ORDER BY tenant, \"Item Code\"";
+    let (relation, plan) = plan_live_cell_update(
+        &fx,
+        source_sql,
+        "cell_update_composite",
+        2,
+        1,
+        "after-composite",
+    );
+
+    assert!(relation.readable);
+    assert!(relation.writable);
+    let key_columns = relation
+        .columns
+        .iter()
+        .filter(|column| column.primary_key)
+        .map(|column| column.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        key_columns,
+        vec!["tenant", "Item Code"],
+        "primary-key metadata is returned in catalogue order"
+    );
+
+    assert_eq!(
+        plan.key_columns,
+        vec!["tenant".to_owned(), "Item Code".to_owned()]
+    );
+    let tenant_predicate = plan
+        .sql_template
+        .find("WHERE \"tenant\" = :__ignatius_key_0")
+        .expect("first key predicate");
+    let item_code_predicate = plan
+        .sql_template
+        .find("\"Item Code\" = :__ignatius_key_1")
+        .expect("quoted mixed-case key predicate");
+    assert!(
+        tenant_predicate < item_code_predicate,
+        "key predicates follow primary-key metadata order: {}",
+        plan.sql_template
+    );
+
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(304),
+    ));
+    assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
+    assert_eq!(applied.statements[0].rows_affected, Some(1));
+
+    let after = fx.block_on(fx.session.execute(
+        "SELECT tenant, \"Item Code\", note FROM cell_update_composite \
+         ORDER BY tenant, \"Item Code\"",
+        10,
+        JobId(305),
+    ));
+    let rows = after.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows after the update")
+        .rows
+        .clone();
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                Cell::Text("1".into()),
+                Cell::Text("A-1".into()),
+                Cell::Text("first".into())
+            ],
+            vec![
+                Cell::Text("1".into()),
+                Cell::Text("B-2".into()),
+                Cell::Text("after-composite".into())
+            ],
+            vec![
+                Cell::Text("2".into()),
+                Cell::Text("A-1".into()),
+                Cell::Text("third".into())
+            ],
+        ],
+        "only the selected composite row may change"
+    );
+}
+
+#[test]
+fn review_does_not_lock_the_row_a_concurrent_delete_reports_zero_rows() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let table = "cell_update_concurrent_delete";
+    let setup = fx.block_on(fx.session.execute(
+        &format!(
+            "DROP TABLE IF EXISTS {table}; \
+             CREATE TABLE {table} (id integer PRIMARY KEY, note text); \
+             INSERT INTO {table} VALUES (1, 'before'), (2, 'other')"
+        ),
+        100,
+        JobId(306),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = format!("SELECT id, note FROM {table} ORDER BY id");
+    let (_relation, plan) = plan_live_cell_update(&fx, &source_sql, table, 1, 0, "after");
+
+    let peer = peer_session(&fx, &uri);
+    let deleted =
+        fx.block_on(peer.execute(&format!("DELETE FROM {table} WHERE id = 1"), 10, JobId(307)));
+    assert_eq!(deleted.status, ExecutionStatus::Succeeded, "{deleted:?}");
+    assert_eq!(deleted.statements[0].rows_affected, Some(1));
+
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(308),
+    ));
+    assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
+    assert_eq!(
+        applied.statements[0].rows_affected,
+        Some(0),
+        "a row deleted after review must be reported as zero rows affected"
+    );
+
+    let remaining = fx.block_on(fx.session.execute(
+        &format!("SELECT id, note FROM {table} ORDER BY id"),
+        10,
+        JobId(309),
+    ));
+    let rows = remaining.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows after the reviewed update")
+        .rows
+        .clone();
+    assert_eq!(
+        rows,
+        vec![vec![Cell::Text("2".into()), Cell::Text("other".into())]],
+        "the reviewed update must not recreate or alter any other row"
+    );
+
+    let cleanup = fx.block_on(
+        fx.session
+            .execute(&format!("DROP TABLE {table}"), 10, JobId(310)),
+    );
+    assert_eq!(cleanup.status, ExecutionStatus::Succeeded, "{cleanup:?}");
+}
+
+#[test]
+fn review_does_not_lock_the_row_a_concurrent_change_is_overwritten() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let table = "cell_update_concurrent_change";
+    let setup = fx.block_on(fx.session.execute(
+        &format!(
+            "DROP TABLE IF EXISTS {table}; \
+             CREATE TABLE {table} (id integer PRIMARY KEY, note text); \
+             INSERT INTO {table} VALUES (1, 'before'), (2, 'other')"
+        ),
+        100,
+        JobId(311),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = format!("SELECT id, note FROM {table} ORDER BY id");
+    let (_relation, plan) = plan_live_cell_update(&fx, &source_sql, table, 1, 0, "reviewed-value");
+
+    let peer = peer_session(&fx, &uri);
+    let changed = fx.block_on(peer.execute(
+        &format!("UPDATE {table} SET note = 'concurrent-sentinel' WHERE id = 1"),
+        10,
+        JobId(312),
+    ));
+    assert_eq!(changed.status, ExecutionStatus::Succeeded, "{changed:?}");
+    assert_eq!(changed.statements[0].rows_affected, Some(1));
+
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(313),
+    ));
+    assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
+    assert_eq!(
+        applied.statements[0].rows_affected,
+        Some(1),
+        "the reviewed statement matches the row and overwrites the concurrent change"
+    );
+
+    let after = fx.block_on(fx.session.execute(
+        &format!("SELECT id, note FROM {table} ORDER BY id"),
+        10,
+        JobId(314),
+    ));
+    let rows = after.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows after the reviewed update")
+        .rows
+        .clone();
+    assert_eq!(
+        rows,
+        vec![
+            vec![Cell::Text("1".into()), Cell::Text("reviewed-value".into())],
+            vec![Cell::Text("2".into()), Cell::Text("other".into())],
+        ],
+        "the concurrent non-key change is overwritten, not detected"
+    );
+
+    let cleanup = fx.block_on(
+        fx.session
+            .execute(&format!("DROP TABLE {table}"), 10, JobId(315)),
+    );
+    assert_eq!(cleanup.status, ExecutionStatus::Succeeded, "{cleanup:?}");
+}
+
 #[test]
 fn update_relation_reports_view_kind_for_the_interactive_refusal() {
     let uri = target_or_skip!();
@@ -1056,6 +1363,59 @@ fn a_restricted_role_can_still_connect_and_read_what_it_is_granted() {
             .technical
             .iter()
             .find(|f| f.label == "SQLSTATE")
+            .expect("SQLSTATE")
+            .value,
+        "42501",
+        "permission denied is reported as itself"
+    );
+    assert!(
+        error.likely_cause.is_some(),
+        "a permission error explains itself"
+    );
+}
+
+#[test]
+fn a_restricted_role_reads_orders_but_the_server_refuses_a_generated_update() {
+    let uri = target_or_skip!();
+    // Rebuild the URI for the restricted role defined in docker/init/01-demo.sql.
+    let Some((prefix, rest)) = uri.split_once("://") else {
+        panic!("expected a URI");
+    };
+    let Some((_, host_and_db)) = rest.split_once('@') else {
+        eprintln!("skipping: the test URI has no userinfo to replace");
+        return;
+    };
+    let restricted =
+        format!("{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}");
+    let fx = fixture(&restricted);
+
+    let source_sql = "SELECT order_id, note FROM orders ORDER BY order_id";
+    let (relation, plan) =
+        plan_live_cell_update(&fx, source_sql, "orders", 1, 0, "refused-by-privilege");
+    assert!(relation.readable, "the role was granted SELECT on orders");
+    assert!(
+        !relation.writable,
+        "the role was not granted UPDATE, and metadata must say so"
+    );
+
+    let execution = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(1),
+    ));
+    assert_eq!(execution.status, ExecutionStatus::Failed);
+    let error = execution.error.expect("privilege diagnostic");
+    assert_eq!(
+        error.kind,
+        ignatius::diagnostics::DiagnosticKind::Query,
+        "a server refusal is the existing Query diagnostic"
+    );
+    assert_eq!(
+        error
+            .technical
+            .iter()
+            .find(|field| field.label == "SQLSTATE")
             .expect("SQLSTATE")
             .value,
         "42501",
