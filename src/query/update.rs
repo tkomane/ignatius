@@ -352,6 +352,11 @@ struct ParsedRelation {
 
 fn parse_relation(tokens: &[Token], from: usize) -> Result<ParsedRelation, UpdateRefusal> {
     let mut index = from + 1;
+    if word_at(tokens, index).is_some_and(|word| word.eq_ignore_ascii_case("only")) {
+        return Err(UpdateRefusal::UnsupportedSource(
+            "FROM ONLY is not editable through a result cell because an update can reach inherited rows",
+        ));
+    }
     let Some(first) = identifier_at(tokens, index) else {
         return Err(UpdateRefusal::UnsupportedSource(
             "FROM must name one base relation",
@@ -790,6 +795,37 @@ mod tests {
         assert_eq!(source.relation.schema.as_deref(), Some("public"));
         assert_eq!(source.relation.relation, "orders");
         assert_eq!(source.target_column, "order_id");
+    }
+
+    #[test]
+    fn from_only_is_refused_without_breaking_a_quoted_only_relation() {
+        for sql in [
+            "SELECT id, note FROM ONLY orders",
+            "SELECT id, note FROM ONLY public.orders",
+            "SELECT id, note FROM ONLY orders AS o",
+            "SELECT id, note FROM ONLY orders o",
+            "SELECT id, note FROM ONLY (public.orders)",
+        ] {
+            assert_eq!(
+                parse_source(sql, &["id".into(), "note".into()], 0),
+                Err(UpdateRefusal::UnsupportedSource(
+                    "FROM ONLY is not editable through a result cell because an update can reach inherited rows"
+                )),
+                "{sql} must be refused as FROM ONLY"
+            );
+        }
+
+        let quoted = source("SELECT id, note FROM \"only\"", &["id", "note"], 0);
+        assert_eq!(quoted.relation.schema, None);
+        assert_eq!(quoted.relation.relation, "only");
+
+        for (sql, relation) in [
+            ("SELECT id, note FROM onlys", "onlys"),
+            ("SELECT id, note FROM only_t", "only_t"),
+        ] {
+            let accepted = source(sql, &["id", "note"], 0);
+            assert_eq!(accepted.relation.relation, relation, "{sql} is not ONLY");
+        }
     }
 
     #[test]

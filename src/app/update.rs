@@ -7417,13 +7417,8 @@ mod tests {
         let pending = model.pending_update.as_ref().expect("review");
         assert!(pending.plan.sql_template.contains(":__ignatius_new_value"));
         assert!(pending.plan.sql_template.contains("order_id"));
-        assert!(
-            pending
-                .plan
-                .bound_sql()
-                .expect("review statement")
-                .contains("new note")
-        );
+        let reviewed = pending.plan.bound_sql().expect("review statement");
+        assert!(reviewed.contains("new note"));
 
         let effects = update(&mut model, Message::Action(Action::Activate));
         let [
@@ -7441,6 +7436,14 @@ mod tests {
         assert_eq!(
             parameters.names(),
             &["__ignatius_new_value", "__ignatius_key_0"]
+        );
+        let independently_bound = crate::query::discover_parameters(sql)
+            .expect("the emitted template is discoverable")
+            .bind(sql, parameters)
+            .expect("the emitted bindings complete the emitted template");
+        assert_eq!(
+            independently_bound, reviewed,
+            "the statement that executes must be the statement that was reviewed"
         );
         assert!(model.pending_update.is_none());
         assert!(model.running_cell_update);

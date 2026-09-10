@@ -119,6 +119,8 @@ generated update and verify exactly one row changes only after confirmation.
 - A bare relation name is resolved by PostgreSQL using the current session's
   search path. The resolved schema and relation are shown before confirmation.
 - A schema-qualified relation is accepted and is resolved exactly.
+- `FROM ONLY` is refused because an update without `ONLY` can reach inherited
+  rows, and `UPDATE ONLY` support is deferred.
 - `SELECT *` is accepted only when the returned result columns uniquely match
   the live relation metadata. Explicit direct projections may use a simple
   output alias, but the selected result column must still map to one source
