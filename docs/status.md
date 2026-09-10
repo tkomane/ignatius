@@ -50,6 +50,37 @@ record. `Cargo.toml` named `github.com/tshiamo/ignatius` in its
 at `tkomane/ignatius`, and a later move of accounts can update the one field
 again.
 
+## W04 privacy probes and provider redaction fix - 2026-09-11
+
+The W04 runtime-privacy probes found a real leak, and the fix ships with its
+reproduction. A provider program that writes `Authorization: Bearer <token>` to
+standard error produced a diagnostic in which the token survived, because the
+single redaction implementation recognised URI userinfo and libpq keyword/value
+secrets but not HTTP authorization headers. The redactor now covers inline
+`Authorization` and `Proxy-Authorization` values (unquoted, quoted and
+repr-style), keeps a known scheme visible, and removes bare bearer tokens.
+Overlapping matches are merged, so a shorter match cannot leave a tail behind.
+`docs/security/data-handling.md` gained the explicit redaction boundary, and
+the threat-model row names the covered shapes and the residual folded or
+unusual-shape limit.
+
+Three probes accompany it: a live `IGNATIUS_LOG=debug` run with a named
+parameter proves the expanded value reaches neither the log nor stderr; a
+provider that never answers proves the timeout path yields a Connection
+diagnostic; and the provider stderr regression test proves the redacted reason
+survives rather than being dropped.
+
+| Gate at the final source | Result |
+| --- | --- |
+| `cargo test --locked --lib diagnostics::redaction` | 15 passed |
+| `cargo test --locked --lib connection::cloud` | 16 passed |
+| `cargo test --locked --test cli_contract debug_logging_never_captures` | 2 passed, live against PostgreSQL 18.4 |
+| `cargo --locked xtask verify` | Pass; full suite, plain and TLS database gates, one Unix-socket skip |
+
+Not proven: the packaged-candidate repeat (W12), the panic path, the generated
+update and refresh or clipboard log audits, and any non-macOS platform. No
+product behaviour changed outside the redactor.
+
 ## W01 reconciliation and W03 reviewed-write evidence - 2026-09-10
 
 **Baseline.** The working tree was clean at `247d1c7` and 21 commits behind
@@ -1372,9 +1403,10 @@ evidence dependencies, not reasons to reopen those decisions.
    smallest design that satisfies "never silently bind under incompatible
    semantics". A specification change comes first. Also collect live TUI
    evidence for the update review and run the new evidence on PostgreSQL 14-17.
-3. **W04:** add the missing runtime privacy probes: `IGNATIUS_LOG=debug` with
-   parameter expansion, provider stderr redaction, the generated update bound
-   SQL, refresh, clipboard confirmation and the panic path.
+3. **W04:** the parameter-expansion, provider stderr and provider timeout
+   probes are done, along with the authorization-header redaction fix they
+   found. The generated update bound-SQL log audit, refresh, clipboard
+   confirmation and the panic path remain.
 4. **W05:** run the current source against the PostgreSQL 14-18 matrix with
    plain and TLS fixtures and a real Linux socket; the Unix-socket gate is still
    a skip on this machine.
