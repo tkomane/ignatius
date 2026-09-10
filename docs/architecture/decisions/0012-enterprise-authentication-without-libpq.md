@@ -18,9 +18,9 @@ reading that phrase as GSSAPI, Kerberos and Windows SSPI, because that is what
 libpq means by it.
 
 On 2026-08-16 the owner named the actual requirement: Microsoft Entra ID
-authentication against Azure Database for PostgreSQL Flexible Server, for the
-COI application. That is a different mechanism from the one this project has
-been costing.
+authentication against Azure Database for PostgreSQL Flexible Server, for a
+production application. That is a different mechanism from the one this project
+has been costing.
 
 ## The finding
 
