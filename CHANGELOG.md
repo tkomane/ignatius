@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: provider error output now redacts inline HTTP authorization header
+  values, including quoted and repr-style forms, and bare bearer tokens before
+  they can reach a diagnostic or log. A provider stderr probe showed that
+  `Authorization: Bearer <token>` survived the single redaction implementation;
+  the missing shape was added rather than a second redactor.
 - Improved: Results now offers an explicit retained-result refresh through
   portable `F6`, an enhanced-terminal `Ctrl+Shift+R` alias, the command palette
   and its contextual footer. It reuses the
