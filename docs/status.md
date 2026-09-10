@@ -126,6 +126,14 @@ only), live cloud-provider authentication, and anything release-related. The
 changes are committed on the `w03-reviewed-write-evidence` branch for
 integration; no tag, signing, release or publication was performed.
 
+**Integration state.** The branch is pushed and pull request 4 is open. On
+2026-09-10 GitHub refused to start every hosted job for this revision and for
+the scheduled `main` run, reporting that the account spending limit must be
+increased (run `34535254783`). No hosted evidence exists for this revision, so
+the pull request stays open rather than being merged on local evidence alone.
+The local `cargo --locked xtask verify` result above, with the disposable
+database running, remains the strongest evidence at this revision.
+
 ## Agent planning handoff - 2026-09-04
 
 The [roadmap](product/roadmap.md) now defines the path from the local feature
