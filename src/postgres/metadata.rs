@@ -192,16 +192,29 @@ pub struct ColumnInfo {
     pub default: Option<String>,
 }
 
-/// Quotes an identifier for safe inclusion in SQL.
+/// The live relation facts required before a result-cell update can be planned.
 ///
-/// PostgreSQL doubles an embedded quote inside a quoted identifier. Quoting
-/// unconditionally is deliberate: it is correct for reserved words, mixed case,
-/// and names containing anything at all, and it never needs a judgement call
-/// about which names are "safe".
-#[must_use]
-pub fn quote_identifier(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
+/// The relation name is resolved in the same session that will execute the
+/// generated statement. That matters for an unqualified source query: the
+/// session's effective `search_path`, not the client's assumptions, decides
+/// which relation is addressed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateRelation {
+    /// The schema selected by PostgreSQL.
+    pub schema: String,
+    /// The relation name exactly as stored by PostgreSQL.
+    pub relation: String,
+    /// The live relation kind.
+    pub kind: ObjectKind,
+    /// Whether the current role may select from it.
+    pub readable: bool,
+    /// Whether the current role may update it.
+    pub writable: bool,
+    /// Columns and primary-key membership in catalogue order.
+    pub columns: Vec<ColumnInfo>,
 }
+
+pub use crate::query::identifiers::quote_identifier;
 
 /// Lists schemas the current role may use, with counts by kind.
 ///
@@ -377,6 +390,192 @@ pub async fn columns(
             default: row.get::<_, Option<String>>("default_expression"),
         })
         .collect())
+}
+
+/// Resolves one source relation and reads the permission and key facts needed
+/// for a generated cell update.
+///
+/// Schema and relation names are data throughout this query. In particular,
+/// an unqualified relation is matched against the session's effective
+/// `current_schemas(false)` in search-path order, while a qualified relation
+/// is matched exactly. No name is interpolated into catalogue SQL.
+pub async fn update_relation(
+    client: &Client,
+    schema: Option<&str>,
+    relation: &str,
+) -> Result<UpdateRelation, Diagnostic> {
+    const RELATION: &str = "SELECT n.nspname::text AS schema, \
+         c.relname::text AS relation, c.relkind::text AS relkind, \
+         has_table_privilege(c.oid, 'SELECT') AS readable, \
+         has_table_privilege(c.oid, 'UPDATE') AS writable \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE c.relname = $1 \
+           AND (($2::text IS NOT NULL AND n.nspname = $2) \
+             OR ($2::text IS NULL AND n.nspname = ANY(pg_catalog.current_schemas(false)))) \
+         ORDER BY CASE WHEN $2::text IS NULL \
+                      THEN pg_catalog.array_position(pg_catalog.current_schemas(false), n.nspname) \
+                      ELSE 0 END, n.nspname \
+         LIMIT 1";
+
+    let schema_value = schema.map(str::to_owned);
+    let row = client
+        .query_opt(RELATION, &[&relation, &schema_value])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?
+        .ok_or_else(|| {
+            let qualified = schema.map_or_else(
+                || format!("unqualified relation {relation:?}"),
+                |schema| {
+                    format!(
+                        "{}.{}",
+                        quote_identifier(schema),
+                        quote_identifier(relation)
+                    )
+                },
+            );
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                format!("could not resolve {qualified} for a cell update"),
+                "reading update target metadata",
+            )
+            .likely_cause("the relation is gone, outside the session search path, or not visible")
+            .next_action("refresh the result and check the relation name and privileges")
+        })?;
+
+    let relkind: String = row.get("relkind");
+    let kind = ObjectKind::from_relkind(&relkind).ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Query,
+            "the selected relation kind cannot be updated from a result cell",
+            "reading update target metadata",
+        )
+        .likely_cause(format!("PostgreSQL reported relkind {relkind:?}"))
+        .next_action("edit an ordinary or partitioned table result instead")
+    })?;
+    let resolved_schema: String = row.get("schema");
+    let resolved_relation: String = row.get("relation");
+    let columns = columns(client, &resolved_schema, &resolved_relation).await?;
+
+    Ok(UpdateRelation {
+        schema: resolved_schema,
+        relation: resolved_relation,
+        kind,
+        readable: row.get("readable"),
+        writable: row.get("writable"),
+        columns,
+    })
+}
+
+/// Reads the relation and function names used by local completion in one
+/// snapshot. The query shapes are fixed and every value that comes from the
+/// server is returned as data; no identifier is interpolated into catalogue
+/// SQL. This is intentionally a separate read from the tree counts: the tree
+/// can remain useful if a server role permits one metadata query but not the
+/// other, and completion can say which snapshot it actually has.
+pub async fn completion_catalog(
+    client: &Client,
+) -> Result<crate::query::completion::CompletionCatalog, Diagnostic> {
+    use crate::query::completion::{
+        CatalogColumn, CatalogObject, CatalogObjectKind, CatalogRelation,
+    };
+
+    const RELATIONS: &str = "SELECT n.nspname::text AS schema, \
+         c.relname::text AS name, c.relkind::text AS relkind, \
+         has_table_privilege(c.oid, 'SELECT') AS readable \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
+           AND c.relkind::text = ANY($1) \
+         ORDER BY n.nspname, c.relname, c.relkind";
+    const FUNCTIONS: &str = "SELECT n.nspname::text AS schema, \
+         p.proname::text AS name, pg_get_function_result(p.oid)::text AS returns, \
+         has_function_privilege(p.oid, 'EXECUTE') AS readable \
+         FROM pg_catalog.pg_proc p \
+         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+         WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
+         ORDER BY n.nspname, p.proname, p.oid";
+    const COLUMNS: &str = "SELECT n.nspname::text AS schema, c.relname::text AS relation, \
+         a.attname::text AS name, format_type(a.atttypid, a.atttypmod)::text AS data_type, \
+         a.attnum::int4 AS position \
+         FROM pg_catalog.pg_attribute a \
+         JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
+           AND c.relkind::text = ANY($1) \
+           AND a.attnum > 0 AND NOT a.attisdropped \
+         ORDER BY n.nspname, c.relname, a.attnum";
+
+    let relkinds = ["r", "v", "m", "S", "f", "p"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    let relation_rows = client
+        .query(RELATIONS, &[&relkinds])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let function_rows = client
+        .query(FUNCTIONS, &[])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let column_rows = client
+        .query(COLUMNS, &[&relkinds])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+
+    let mut objects = relation_rows
+        .iter()
+        .filter_map(|row| {
+            let kind = CatalogObjectKind::from_relkind(row.get::<_, String>("relkind").as_str())?;
+            Some(CatalogObject {
+                kind,
+                schema: row.get("schema"),
+                name: row.get("name"),
+                readable: row.get("readable"),
+                detail: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    objects.extend(function_rows.iter().map(|row| {
+        CatalogObject {
+            kind: CatalogObjectKind::Function,
+            schema: row.get("schema"),
+            name: row.get("name"),
+            readable: row.get("readable"),
+            detail: row
+                .get::<_, Option<String>>("returns")
+                .map(|returns| format!("returns {returns}")),
+        }
+    }));
+
+    let mut relations = Vec::<CatalogRelation>::new();
+    for row in &column_rows {
+        let schema: String = row.get("schema");
+        let name: String = row.get("relation");
+        let Some(relation) = relations
+            .iter_mut()
+            .find(|relation| relation.schema == schema && relation.name == name)
+        else {
+            relations.push(CatalogRelation {
+                schema: schema.clone(),
+                name: name.clone(),
+                columns: Vec::new(),
+            });
+            let relation = relations.last_mut().expect("just pushed");
+            relation.columns.push(CatalogColumn {
+                name: row.get("name"),
+                data_type: row.get("data_type"),
+            });
+            continue;
+        };
+        relation.columns.push(CatalogColumn {
+            name: row.get("name"),
+            data_type: row.get("data_type"),
+        });
+    }
+
+    Ok(crate::query::completion::CompletionCatalog { objects, relations })
 }
 
 /// Lists the indexes on a relation.

@@ -16,6 +16,7 @@
 //! - Motion is optional. With `ui.reduced-motion` every indicator becomes static
 //!   text that says the same thing.
 
+use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::{Glyphs, Icon};
@@ -51,6 +52,15 @@ impl Presentation {
 
     fn icon(&self, icon: Icon) -> String {
         self.glyphs.prefix(icon)
+    }
+}
+
+/// A visible text cursor that belongs to the selected glyph tier.
+fn input_cursor(presentation: &Presentation) -> &'static str {
+    if presentation.glyphs.is_ascii() {
+        "|"
+    } else {
+        "\u{2588}"
     }
 }
 
@@ -97,6 +107,9 @@ pub fn render(
 
     // Overlays are drawn in the order Esc peels them, so the topmost one is
     // always the one a keypress will act on.
+    if model.completion.menu.is_some() {
+        render_completion(model, presentation, area, buf);
+    }
     if model.help_open {
         render_help(keymap, presentation, area, buf);
     }
@@ -109,11 +122,29 @@ pub fn render(
     if let Some(palette) = &model.palette {
         render_palette(palette, presentation, area, buf);
     }
+    if model.connection_details {
+        render_connection_details(model, presentation, area, buf);
+    }
     if model.prefix_pending {
-        render_chords(presentation, area, buf);
+        render_chords(keymap, presentation, area, buf);
     }
     if let Some(pending) = &model.pending_run {
         render_confirmation(model, pending, presentation, area, buf);
+    }
+    if let Some(pending) = &model.pending_plan {
+        render_plan_confirmation(model, pending, presentation, area, buf);
+    }
+    if let Some(pending) = &model.pending_copy {
+        render_copy_confirmation(model, pending, presentation, area, buf);
+    }
+    if let Some(pending) = &model.pending_update {
+        render_update_review(pending, presentation, area, buf);
+    }
+    if let Some(prompt) = &model.update_prompt {
+        render_update_value_prompt(prompt, presentation, area, buf);
+    }
+    if let Some(prompt) = &model.parameter_prompt {
+        render_parameter_prompt(prompt, presentation, area, buf);
     }
     if let Some(prompt) = &model.name_prompt {
         render_name_prompt(prompt, presentation, area, buf);
@@ -158,7 +189,7 @@ fn render_name_prompt(
                 sanitize_for_display(&prompt.typed),
                 theme.style(Token::Focus),
             ),
-            Span::styled("\u{2588}", theme.style(Token::Focus)),
+            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
         ]),
         Line::from(""),
         Line::from(Span::styled(
@@ -172,6 +203,74 @@ fn render_name_prompt(
         .block(pane_block(
             format!(
                 " {}Save  Enter to save, Esc to cancel ",
+                presentation.icon(Icon::Editor)
+            ),
+            true,
+            presentation,
+        ))
+        .render(box_area, buf);
+}
+
+/// Asks for one named value without changing the SQL editor underneath.
+fn render_parameter_prompt(
+    prompt: &crate::app::model::ParameterPrompt,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(84);
+    let height = 11.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let dot = if presentation.glyphs.is_ascii() {
+        "*"
+    } else {
+        "\u{2022}"
+    };
+    let name = prompt
+        .active_name()
+        .map_or_else(|| "unknown".to_owned(), sanitize_for_display);
+    let progress = format!(
+        "Parameter {} of {}: :{name}",
+        prompt.active_index() + 1,
+        prompt.total()
+    );
+    let value = if prompt.typed_length() == 0 {
+        "(empty)".to_owned()
+    } else {
+        dot.repeat(prompt.typed_length())
+    };
+    let lines = vec![
+        Line::from(Span::styled(progress, theme.style(Token::Focus))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Value: ", theme.style(Token::Text)),
+            Span::styled(value, theme.style(Token::Focus)),
+            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "The answer is literal text data. Quotes, punctuation and newlines stay data; empty text is valid.",
+            theme.style(Token::Muted),
+        )),
+        Line::from(Span::styled(
+            "The SQL template stays unchanged and prompted values are kept nowhere in history.",
+            theme.style(Token::Muted),
+        )),
+    ];
+
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .block(pane_block(
+            format!(
+                " {}Parameter  Enter to accept, Esc to cancel ",
                 presentation.icon(Icon::Editor)
             ),
             true,
@@ -220,7 +319,7 @@ fn render_password_prompt(
         Line::from(vec![
             Span::styled("Password: ", theme.style(Token::Text)),
             Span::styled(dot.repeat(prompt.length()), theme.style(Token::Focus)),
-            Span::styled("\u{2588}", theme.style(Token::Focus)),
+            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
         ]),
         Line::from(""),
         Line::from(Span::styled(
@@ -313,7 +412,7 @@ fn render_confirmation(
                     Token::Text
                 }),
             ),
-            Span::styled("\u{2588}", theme.style(Token::Focus)),
+            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
         ]));
     } else {
         lines.push(Line::from(Span::styled(
@@ -330,6 +429,331 @@ fn render_confirmation(
     Paragraph::new(lines)
         .block(pane_block(
             " Confirm  Esc to cancel ".to_owned(),
+            true,
+            presentation,
+        ))
+        .wrap(Wrap { trim: true })
+        .render(box_area, buf);
+}
+
+/// Explains the one-shot side effect before EXPLAIN ANALYZE is sent.
+fn render_plan_confirmation(
+    model: &Model,
+    pending: &crate::app::model::PendingPlan,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(84);
+    let height = 14.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let target = model
+        .connection
+        .info()
+        .map_or_else(|| "this database".to_owned(), |info| info.target.clone());
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "EXPLAIN ANALYZE will execute the statement to measure it.",
+            theme.style(Token::Danger),
+        )),
+        Line::from(Span::styled(
+            "Side effects are possible. This client will not automatically roll it back.",
+            theme.style(Token::Warning),
+        )),
+        Line::from(Span::styled(
+            format!("Target: {}", safe_plan_text(&target)),
+            theme.style(Token::Muted),
+        )),
+        Line::from(""),
+    ];
+    for line in pending.sql.lines().take(4) {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", safe_plan_text(line)),
+            theme.style(Token::Muted),
+        )));
+    }
+    lines.push(Line::from(""));
+    if pending.impact.needs_typed_confirmation() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "Type the database name to continue: {}",
+                safe_plan_text(&pending.required)
+            ),
+            theme.style(Token::Warning),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled("  ", theme.style(Token::Text)),
+            Span::styled(
+                safe_plan_text(&pending.typed),
+                theme.style(if pending.is_satisfied() {
+                    Token::Success
+                } else {
+                    Token::Text
+                }),
+            ),
+            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Enter to execute once and measure it. Esc to cancel.",
+            theme.style(Token::Info),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "Classification is advisory: database permissions remain the real control.",
+        theme.style(Token::Muted),
+    )));
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            " Confirm analyzed plan  Esc to cancel ".to_owned(),
+            true,
+            presentation,
+        ))
+        .wrap(Wrap { trim: true })
+        .render(box_area, buf);
+}
+
+/// Asks before a result value leaves through the terminal.
+///
+/// The candidate contains only location and size metadata. Looking up the
+/// column name here is safe display metadata; the value itself is intentionally
+/// never rendered in this overlay.
+fn render_copy_confirmation(
+    model: &Model,
+    pending: &crate::app::model::PendingCopy,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(84);
+    let height = 11.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let column = model
+        .visible_result()
+        .and_then(|set| set.columns.get(pending.column))
+        .map_or_else(
+            || format!("column {}", pending.column + 1),
+            |name| {
+                format!(
+                    "column {} ({})",
+                    pending.column + 1,
+                    sanitize_for_display(name)
+                )
+            },
+        );
+    let target = model.connection.info().map_or_else(
+        || "this terminal".to_owned(),
+        |info| safe_plan_text(&info.target),
+    );
+    let lines = vec![
+        Line::from(Span::styled(
+            "Send one selected text value through the terminal?",
+            theme.style(Token::Warning),
+        )),
+        Line::from(Span::styled(
+            format!("Cell: row {}, {column}", pending.source_row + 1),
+            theme.style(Token::Text),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "Size: {} UTF-8 bytes, {} characters",
+                pending.bytes, pending.characters
+            ),
+            theme.style(Token::Info),
+        )),
+        Line::from(Span::styled(
+            format!("Path: {target} -> terminal clipboard sequence"),
+            theme.style(Token::Muted),
+        )),
+        Line::from(Span::styled(
+            "The terminal, SSH path, or multiplexer may observe or retain it.",
+            theme.style(Token::Danger),
+        )),
+        Line::from(Span::styled(
+            "Ignatius writes only; it never reads or clears the clipboard.",
+            theme.style(Token::Muted),
+        )),
+        Line::from(Span::styled(
+            "Terminal acceptance is unconfirmed: this client can only know its write and flush.",
+            theme.style(Token::Muted),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter to send once. Esc to cancel.",
+            theme.style(Token::Info),
+        )),
+    ];
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            " Confirm copy  Esc to cancel ".to_owned(),
+            true,
+            presentation,
+        ))
+        .wrap(Wrap { trim: true })
+        .render(box_area, buf);
+}
+
+/// Collects the replacement before showing the exact generated statement.
+fn render_update_value_prompt(
+    prompt: &crate::app::model::UpdatePrompt,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(92);
+    let height = 12.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let relation = format!(
+        "{}.{}",
+        sanitize_for_display(&prompt.relation.schema),
+        sanitize_for_display(&prompt.relation.relation)
+    );
+    let replacement = if prompt.typed_length() == 0 {
+        "(empty string)".to_owned()
+    } else {
+        sanitize_for_display(prompt.replacement())
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(
+                "Target: {relation}.{}",
+                sanitize_for_display(&prompt.source.target_column)
+            ),
+            theme.style(Token::Focus),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "Selected result row {}, column {}",
+                prompt.candidate.source_row + 1,
+                prompt.candidate.result_column + 1
+            ),
+            theme.style(Token::Muted),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Replacement: ", theme.style(Token::Text)),
+            Span::styled(replacement, theme.style(Token::Focus)),
+            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "The replacement is literal text. Empty text is valid; NULL is not a shorthand here.",
+            theme.style(Token::Muted),
+        )),
+        Line::from(Span::styled(
+            "Enter reviews one generated UPDATE. Nothing is sent at this step.",
+            theme.style(Token::Info),
+        )),
+    ];
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            " Edit result cell  Enter to review, Esc to cancel ".to_owned(),
+            true,
+            presentation,
+        ))
+        .wrap(Wrap { trim: true })
+        .render(box_area, buf);
+}
+
+/// Shows the literal-bound statement immediately before the one write effect.
+fn render_update_review(
+    pending: &crate::app::model::PendingUpdate,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let width = area.width.saturating_sub(6).min(104);
+    let height = 17.min(area.height.saturating_sub(2));
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let bound = pending
+        .plan
+        .bound_sql()
+        .map(|sql| sanitize_for_display(&sql))
+        .unwrap_or_else(|_| "The generated statement could not be rendered for review.".into());
+    let keys = if pending.plan.key_columns.is_empty() {
+        "none".to_owned()
+    } else {
+        pending
+            .plan
+            .key_columns
+            .iter()
+            .map(|name| sanitize_for_display(name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "Review generated UPDATE",
+            theme.style(Token::Warning),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "Target: {}.{}; column: {}",
+                sanitize_for_display(&pending.relation.schema),
+                sanitize_for_display(&pending.relation.relation),
+                sanitize_for_display(&pending.plan.target_column)
+            ),
+            theme.style(Token::Text),
+        )),
+        Line::from(Span::styled(
+            format!("Primary-key identity: {keys}"),
+            theme.style(Token::Muted),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Exact bound statement:",
+            theme.style(Token::Header),
+        )),
+        Line::from(Span::styled(bound, theme.style(Token::Text))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Nothing has been sent yet. Enter runs this UPDATE once; Esc cancels.",
+            theme.style(Token::Info),
+        )),
+        Line::from(Span::styled(
+            "The prior SELECT is a snapshot and will not be rerun automatically.",
+            theme.style(Token::Muted),
+        )),
+    ];
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            " Confirm cell update  Esc to cancel ".to_owned(),
             true,
             presentation,
         ))
@@ -379,6 +803,140 @@ fn body_area(area: Rect) -> Rect {
     body
 }
 
+/// The editor's content rectangle in the current layout.
+fn editor_content_area(model: &Model, presentation: &Presentation, area: Rect) -> Rect {
+    let editor = match layout_mode(area) {
+        LayoutMode::Compact => body_area(area),
+        LayoutMode::Full => main_panes(body_area(area), model.sidebar_visible).0,
+        LayoutMode::TooSmall => area,
+    };
+    pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor)
+}
+
+/// Draws the local completion menu next to the editor caret.
+///
+/// This is deliberately a static overlay. Completion is frequent keyboard
+/// feedback, not a transition that needs to take attention away from the text
+/// being written. The status lines carry the catalogue facts that colour or an
+/// icon must never be asked to carry alone.
+fn render_completion(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+    let Some(menu) = &model.completion.menu else {
+        return;
+    };
+    if layout_mode(area) == LayoutMode::TooSmall || area.width < 12 || area.height < 5 {
+        return;
+    }
+
+    let inner = editor_content_area(model, presentation, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let (line, column) = model.editor.position();
+    let gutter = model.editor.line_count().to_string().len().max(2);
+    let offset = (line.saturating_sub(1)).saturating_sub((inner.height as usize).saturating_sub(1));
+    let cursor_y = inner
+        .y
+        .saturating_add(u16::try_from(line.saturating_sub(1).saturating_sub(offset)).unwrap_or(0))
+        .min(inner.y.saturating_add(inner.height.saturating_sub(1)));
+    let cursor_x = inner
+        .x
+        .saturating_add(u16::try_from(gutter + column + 1).unwrap_or(u16::MAX))
+        .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
+
+    let unicode = !presentation.glyphs.is_ascii();
+    let safe_names = menu
+        .result
+        .candidates
+        .iter()
+        .map(|candidate| sanitize_for_display(&candidate.label))
+        .collect::<Vec<_>>();
+    let name_width = safe_names
+        .iter()
+        .map(|name| display_width(name))
+        .max()
+        .unwrap_or(12)
+        .clamp(12, 28);
+    let max_width = area.width.saturating_sub(2).max(12);
+    let desired_width = u16::try_from(name_width + 44).unwrap_or(max_width);
+    let width = desired_width.clamp(28, 78).min(max_width);
+    let desired_height = u16::try_from(menu.result.candidates.len() + 7).unwrap_or(16);
+    let max_height = area.height.saturating_sub(1).max(5);
+    let height = desired_height.clamp(5, 20).min(max_height);
+
+    let right = area.x.saturating_add(area.width);
+    let left_limit = right.saturating_sub(width).max(area.x);
+    let x = cursor_x.saturating_sub(1).clamp(area.x, left_limit);
+    let below = cursor_y.saturating_add(1);
+    let bottom = area.y.saturating_add(area.height);
+    let y = if below.saturating_add(height) <= bottom {
+        below
+    } else {
+        cursor_y.saturating_sub(height).max(area.y)
+    };
+    let popup = Rect::new(x, y, width, height);
+    ratatui::widgets::Clear.render(popup, buf);
+
+    let content_width = width.saturating_sub(2) as usize;
+    let label_width = name_width.min(content_width.saturating_sub(8));
+    let mut lines = vec![Line::from(Span::styled(
+        sanitize_for_display(&menu.result.scope.label()),
+        presentation.theme.style(Token::Muted),
+    ))];
+    for (index, candidate) in menu.result.candidates.iter().enumerate() {
+        let marker = if index == menu.selected {
+            if unicode { "▸" } else { ">" }
+        } else {
+            " "
+        };
+        let name = truncate_to_width(&safe_names[index], label_width, unicode);
+        let name = pad_to_width(&name, label_width);
+        let detail = truncate_to_width(
+            &sanitize_for_display(&candidate.plain_detail()),
+            content_width.saturating_sub(label_width + 5),
+            unicode,
+        );
+        let text = truncate_to_width(
+            &format!("{marker} {name}  {detail}"),
+            content_width,
+            unicode,
+        );
+        let style = if index == menu.selected {
+            presentation.theme.style(Token::Selection)
+        } else {
+            presentation.theme.style(Token::Text)
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
+    if menu.result.candidates.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No candidates for this position.",
+            presentation.theme.style(Token::Warning),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Showing {} of {} matching candidates ({} available).",
+            menu.result.candidates.len(),
+            menu.result.matching_count,
+            menu.result.total_count
+        ),
+        presentation.theme.style(Token::Muted),
+    )));
+    lines.push(Line::from(Span::styled(
+        sanitize_for_display(&model.completion.catalog.message()),
+        presentation.theme.style(Token::Info),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Enter accepts, Esc cancels, Up/Down moves.",
+        presentation.theme.style(Token::Muted),
+    )));
+
+    Paragraph::new(lines)
+        .block(pane_block(" Complete ".to_owned(), true, presentation))
+        .wrap(Wrap { trim: true })
+        .render(popup, buf);
+}
+
 /// How many lines of SQL are on screen at a terminal size.
 #[must_use]
 pub fn editor_page(size: (u16, u16)) -> usize {
@@ -399,13 +957,15 @@ pub fn editor_page(size: (u16, u16)) -> usize {
 pub fn results_page(size: (u16, u16)) -> usize {
     let area = Rect::new(0, 0, size.0, size.1);
     match layout_mode(area) {
-        LayoutMode::Compact => (body_area(area).height as usize).saturating_sub(4).max(1),
+        LayoutMode::Compact => (body_area(area).height as usize).saturating_sub(6).max(1),
         LayoutMode::TooSmall => 1,
         LayoutMode::Full => {
             let (_, results) = main_panes(body_area(area), false);
-            // Two rows of the pane are the border, two more the header and its
-            // rule, which is what the grid itself reserves.
-            (results.height as usize).saturating_sub(4).max(1)
+            // Two rows of the pane are the border. The grid reserves a compact
+            // state toolbar, a breathing line, the header, its optional type
+            // row, and its rule. Keeping one extra row reserved means paging
+            // never advances past what a metadata-bearing grid can show.
+            (results.height as usize).saturating_sub(6).max(1)
         }
     }
 }
@@ -430,19 +990,19 @@ fn render_full(
         let width = sidebar_width(body.width);
         let [sidebar, _] =
             Layout::horizontal([Constraint::Length(width), Constraint::Min(30)]).areas(body);
-        render_objects(model, presentation, sidebar, buf);
+        render_objects(model, keymap, presentation, sidebar, buf);
     }
 
     let (editor, results) = main_panes(body, model.sidebar_visible);
 
     render_header(model, presentation, header, buf);
-    render_editor(model, presentation, editor, buf);
+    render_editor(model, keymap, presentation, editor, buf);
     if model.transaction == crate::query::result::TransactionState::Failed {
-        render_results(model, presentation, results, buf);
+        render_results(model, keymap, presentation, results, buf);
     } else if let Some(error) = &model.error {
         render_error(model, error, presentation, results, buf);
     } else {
-        render_results(model, presentation, results, buf);
+        render_results(model, keymap, presentation, results, buf);
     }
     render_footer(model, keymap, presentation, footer, buf);
 }
@@ -464,14 +1024,21 @@ fn render_compact(
 
     render_compact_header(model, presentation, header, buf);
     if model.transaction == crate::query::result::TransactionState::Failed {
-        render_results(model, presentation, body, buf);
+        render_results(model, keymap, presentation, body, buf);
     } else if let Some(error) = &model.error {
-        render_error(model, error, presentation, body, buf);
+        // Keep the source visible while the error is being read. This is the
+        // compact equivalent of an editor and diagnostic split, so a valid
+        // location feels like navigation rather than a modal interruption.
+        let error_height = body.height.saturating_sub(4).clamp(2, 8);
+        let [error_area, editor_area] =
+            Layout::vertical([Constraint::Length(error_height), Constraint::Min(1)]).areas(body);
+        render_error(model, error, presentation, error_area, buf);
+        render_editor(model, keymap, presentation, editor_area, buf);
     } else {
         match model.focus {
-            Focus::Editor => render_editor(model, presentation, body, buf),
-            Focus::Results => render_results(model, presentation, body, buf),
-            Focus::Objects => render_objects(model, presentation, body, buf),
+            Focus::Editor => render_editor(model, keymap, presentation, body, buf),
+            Focus::Results => render_results(model, keymap, presentation, body, buf),
+            Focus::Objects => render_objects(model, keymap, presentation, body, buf),
         }
     }
     render_footer(model, keymap, presentation, footer, buf);
@@ -576,7 +1143,11 @@ fn render_header(model: &Model, presentation: &Presentation, area: Rect, buf: &m
             theme.style(Token::Border),
         ));
         spans.push(Span::styled(
-            format!("{}[auth: {provider}]", presentation.icon(Icon::Info)),
+            format!(
+                "{}[auth: {}]",
+                presentation.icon(Icon::Info),
+                sanitize_for_display(provider)
+            ),
             theme.style(Token::Info),
         ));
     }
@@ -679,7 +1250,11 @@ fn render_compact_header(model: &Model, presentation: &Presentation, area: Rect,
             Span::styled(label, theme.style(Token::EnvironmentNonProduction))
         },
         Span::styled(
-            format!("{}{database}", presentation.icon(Icon::Database)),
+            format!(
+                "{}{database} ({})",
+                presentation.icon(Icon::Database),
+                model.connection.label()
+            ),
             theme.style(Token::Text),
         ),
         Span::styled(
@@ -696,7 +1271,13 @@ fn render_compact_header(model: &Model, presentation: &Presentation, area: Rect,
 
 // ------------------------------------------------------------------- editor
 
-fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+fn render_editor(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Editor;
     let (line, column) = model.editor.position();
@@ -720,11 +1301,77 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
 
     let text = model.editor.text();
     if text.is_empty() {
-        Paragraph::new(Line::from(Span::styled(
-            "Type SQL here, then press Ctrl+R to run it.",
-            theme.style(Token::Muted),
-        )))
-        .render(inner, buf);
+        let ctx = crate::app::discovery::context(model);
+        let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
+        let help_key = action_key_label(keymap, &crate::app::Action::ToggleHelp);
+        let mut lines = Vec::new();
+        match ctx.connection {
+            crate::app::discovery::ConnectionPosture::Disconnected => {
+                lines.push(Line::from(Span::styled(
+                    "Connection required",
+                    theme.style(Token::Warning),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "Connect before running SQL. Results appear after a query.",
+                    theme.style(Token::Muted),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("{palette_key} Command palette shows available actions."),
+                    theme.style(Token::Info),
+                )));
+            }
+            crate::app::discovery::ConnectionPosture::Connecting => {
+                lines.push(Line::from(Span::styled(
+                    "Connecting",
+                    theme.style(Token::Info),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "The editor is ready. Wait for the connection before running SQL.",
+                    theme.style(Token::Muted),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("{help_key} Help explains the keyboard while it connects."),
+                    theme.style(Token::Info),
+                )));
+            }
+            crate::app::discovery::ConnectionPosture::Connected => {
+                let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
+                lines.push(Line::from(Span::styled(
+                    "Start here",
+                    theme.style(Token::Focus),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "Type SQL in this editor.",
+                    theme.style(Token::Text),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("{run_key} Run the buffer once SQL is ready."),
+                    theme.style(Token::Info),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("{palette_key} Command palette answers what else is possible."),
+                    theme.style(Token::Muted),
+                )));
+            }
+            crate::app::discovery::ConnectionPosture::Lost
+            | crate::app::discovery::ConnectionPosture::Failed => {
+                lines.push(Line::from(Span::styled(
+                    ctx.connection.label(),
+                    theme.style(Token::Danger),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "Reconnect before running SQL. Results remain from the last known query.",
+                    theme.style(Token::Muted),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("{palette_key} Command palette shows safe actions."),
+                    theme.style(Token::Info),
+                )));
+            }
+        }
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .render(inner, buf);
         return;
     }
 
@@ -743,6 +1390,7 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
     // Colouring is decoration over the same bytes, so it is computed from the
     // buffer here rather than stored anywhere.
     let syntax = crate::query::highlight::tokens(text);
+    let error_location = model.error_location.as_ref();
     // The statement Ctrl+T would run, marked in the gutter. Knowing which one
     // that is before pressing the key is the point.
     let current = crate::query::statements::statement_at(text, model.editor.cursor());
@@ -767,6 +1415,19 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
         let in_statement = current
             .as_ref()
             .is_some_and(|s| start < s.end.max(s.start + 1) && start + source.len() >= s.start);
+        let error_line = error_location.is_some_and(|location| location.line == number);
+        let line_marker = if error_line {
+            "!"
+        } else if in_statement {
+            marker
+        } else {
+            " "
+        };
+        let line_marker_token = if error_line {
+            Token::Danger
+        } else {
+            Token::Focus
+        };
         let mut spans = vec![
             Span::styled(
                 format!("{number:>gutter$} "),
@@ -776,10 +1437,7 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
                     Token::Muted
                 }),
             ),
-            Span::styled(
-                if in_statement { marker } else { " " },
-                theme.style(Token::Focus),
-            ),
+            Span::styled(line_marker, theme.style(line_marker_token)),
         ];
 
         // Styles are decided per character and then merged into runs, because a
@@ -792,8 +1450,16 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
             // cursor is hidden while the alternate screen is in use. Without it
             // the editor would have no visible caret at all.
             let is_cursor = focused && number == cursor_line && column + 1 == cursor_column;
+            let in_error_token = error_location
+                .and_then(|location| location.token.as_ref())
+                .is_some_and(|token| {
+                    let offset = start + byte;
+                    token.start <= offset && offset < token.end
+                });
             let style = if is_cursor {
                 theme.style(Token::Selection)
+            } else if in_error_token {
+                theme.style(Token::Danger)
             } else {
                 theme.style(syntax_token(crate::query::highlight::kind_at(
                     &syntax,
@@ -822,6 +1488,15 @@ fn render_editor(model: &Model, presentation: &Presentation, area: Rect, buf: &m
     Paragraph::new(rendered).render(inner, buf);
 }
 
+/// Returns the active key for a discovery prompt, or a plain action label when
+/// a test model has not been attached to a runtime keymap yet.
+fn action_key_label(keymap: &Keymap, action: &crate::app::Action) -> String {
+    keymap
+        .contextual_hint(action)
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| "the command palette".to_owned())
+}
+
 /// The theme token that draws a syntax kind.
 const fn syntax_token(kind: crate::query::highlight::TokenKind) -> Token {
     use crate::query::highlight::TokenKind as Kind;
@@ -837,12 +1512,430 @@ const fn syntax_token(kind: crate::query::highlight::TokenKind) -> Token {
 
 // ------------------------------------------------------------------ results
 
-fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+/// Renders the plan surface over the Results pane without changing the retained
+/// ordinary execution underneath it.
+fn render_plan(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let focused = model.focus == Focus::Results;
+    let title = match &model.plan.status {
+        crate::app::PlanStatus::Loading { analyzed: true, .. } => " Plan  Measuring ",
+        crate::app::PlanStatus::Loading {
+            analyzed: false, ..
+        } => " Plan  Reading estimate ",
+        crate::app::PlanStatus::Ready(document) if document.analyzed => " Plan  EXPLAIN ANALYZE ",
+        crate::app::PlanStatus::Ready(_) => " Plan  EXPLAIN ",
+        crate::app::PlanStatus::Failed { analyzed: true, .. } => " Plan  Analysis failed ",
+        crate::app::PlanStatus::Failed {
+            analyzed: false, ..
+        } => " Plan  Plan failed ",
+        crate::app::PlanStatus::Hidden => " Plan ",
+    };
+    let block = pane_block(
+        format!("{}{}", presentation.icon(Icon::Info), title),
+        focused,
+        presentation,
+    );
+    let inner = block.inner(area);
+    block.render(area, buf);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    match &model.plan.status {
+        crate::app::PlanStatus::Loading { analyzed, .. } => {
+            let lines = if *analyzed {
+                vec![
+                    Line::from(Span::styled(
+                        "Measuring the statement once with EXPLAIN ANALYZE.",
+                        theme.style(Token::Warning),
+                    )),
+                    Line::from(Span::styled(
+                        format!(
+                            "{} cancels the request; the statement may still be running.",
+                            action_key_label(keymap, &crate::app::Action::Cancel)
+                        ),
+                        theme.style(Token::Info),
+                    )),
+                ]
+            } else {
+                vec![
+                    Line::from(Span::styled(
+                        "Reading the planner estimate. The target statement is not executed.",
+                        theme.style(Token::Info),
+                    )),
+                    Line::from(Span::styled(
+                        format!(
+                            "{} cancels the request.",
+                            action_key_label(keymap, &crate::app::Action::Cancel)
+                        ),
+                        theme.style(Token::Muted),
+                    )),
+                ]
+            };
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .render(inner, buf);
+        }
+        crate::app::PlanStatus::Failed {
+            analyzed,
+            headline,
+            next_action,
+        } => {
+            let mut lines = vec![Line::from(Span::styled(
+                if *analyzed {
+                    "No successful analyzed plan is available."
+                } else {
+                    "No successful plan is available."
+                },
+                theme.style(Token::Danger),
+            ))];
+            lines.push(Line::from(Span::styled(
+                safe_plan_text(headline),
+                theme.style(Token::Danger),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("Next: {}", safe_plan_text(next_action)),
+                theme.style(Token::Info),
+            )));
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .render(inner, buf);
+        }
+        crate::app::PlanStatus::Ready(document) => {
+            render_ready_plan(document, &model.plan, presentation, inner, buf);
+        }
+        crate::app::PlanStatus::Hidden => {}
+    }
+}
+
+fn render_ready_plan(
+    document: &crate::query::PlanDocument,
+    view: &crate::app::PlanView,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let summary = plan_summary(document);
+    if area.height < 3 {
+        Paragraph::new(Line::from(Span::styled(
+            truncate_to_width(
+                &summary,
+                area.width as usize,
+                !presentation.glyphs.is_ascii(),
+            ),
+            presentation.theme.style(Token::Info),
+        )))
+        .render(area, buf);
+        return;
+    }
+
+    if area.height >= 8 {
+        let detail_height = 5.min(area.height.saturating_sub(3));
+        let tree_height = area.height.saturating_sub(2 + detail_height);
+        let [summary_area, tree_area, detail_area] = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(tree_height),
+            Constraint::Length(detail_height),
+        ])
+        .areas(area);
+        render_plan_summary(&summary, document, presentation, summary_area, buf);
+        render_plan_tree(document, view, presentation, tree_area, buf);
+        render_plan_detail(document, view, presentation, detail_area, buf);
+    } else {
+        let [summary_area, tree_area] =
+            Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
+        render_plan_summary(&summary, document, presentation, summary_area, buf);
+        render_plan_tree(document, view, presentation, tree_area, buf);
+    }
+}
+
+fn render_plan_summary(
+    summary: &str,
+    document: &crate::query::PlanDocument,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let mut lines = vec![Line::from(Span::styled(
+        truncate_to_width(
+            summary,
+            area.width as usize,
+            !presentation.glyphs.is_ascii(),
+        ),
+        presentation.theme.style(Token::Info),
+    ))];
+    let attention = document.has_attention().then(|| {
+        document.root.at_path(&document.attention_path).map_or_else(
+            || "unavailable".to_owned(),
+            |node| safe_plan_text(&node.node_type),
+        )
+    });
+    lines.push(Line::from(Span::styled(
+        attention.map_or_else(
+            || "Attention: unavailable".to_owned(),
+            |node| {
+                format!(
+                    "Attention: {} ({})",
+                    node,
+                    document.attention_basis().label()
+                )
+            },
+        ),
+        presentation.theme.style(Token::Warning),
+    )));
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .render(area, buf);
+}
+
+fn render_plan_tree(
+    document: &crate::query::PlanDocument,
+    view: &crate::app::PlanView,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let paths = view.visible_paths();
+    if paths.is_empty() {
+        return;
+    }
+    let selected = paths
+        .iter()
+        .position(|path| path == &view.selected_path)
+        .unwrap_or(0);
+    let height = usize::from(area.height);
+    let start = selected
+        .saturating_sub(height / 2)
+        .min(paths.len().saturating_sub(height));
+    let end = (start + height).min(paths.len());
+    let mut lines = Vec::with_capacity(end.saturating_sub(start));
+    for path in paths.iter().take(end).skip(start) {
+        let Some(node) = document.root.at_path(path) else {
+            continue;
+        };
+        let selected = path == &view.selected_path;
+        let mut text = plan_node_text(
+            document,
+            node,
+            path,
+            view.collapsed.contains(path),
+            selected,
+            !presentation.glyphs.is_ascii(),
+        );
+        text = truncate_to_width(&text, area.width as usize, !presentation.glyphs.is_ascii());
+        let line = Line::from(Span::styled(
+            text,
+            if selected {
+                presentation.theme.style(Token::Selection)
+            } else if document.is_attention_path(path) {
+                presentation.theme.style(Token::Warning)
+            } else {
+                presentation.theme.style(Token::Text)
+            },
+        ));
+        lines.push(line);
+    }
+    Paragraph::new(lines).render(area, buf);
+}
+
+fn render_plan_detail(
+    document: &crate::query::PlanDocument,
+    view: &crate::app::PlanView,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let Some(node) = view.selected_node() else {
+        return;
+    };
+    let mut lines = vec![Line::from(Span::styled(
+        format!(
+            "Selected: {}  ({}/{})",
+            safe_plan_text(&node.node_type),
+            view.visible_paths()
+                .iter()
+                .position(|path| path == &view.selected_path)
+                .map_or(1, |index| index + 1),
+            view.visible_paths().len()
+        ),
+        presentation.theme.style(Token::Header),
+    ))];
+    lines.push(Line::from(Span::styled(
+        plan_metrics(node, document.analyzed),
+        presentation.theme.style(Token::Text),
+    )));
+    if node.estimate_mismatch() {
+        lines.push(Line::from(Span::styled(
+            "Estimate mismatch: observed rows differ by at least 10x.",
+            presentation.theme.style(Token::Warning),
+        )));
+    }
+    for fact in node.facts.iter().take(2) {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{}: {}",
+                safe_plan_text(&fact.label),
+                safe_plan_text(&fact.value)
+            ),
+            presentation.theme.style(Token::Muted),
+        )));
+    }
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .render(area, buf);
+}
+
+fn plan_summary(document: &crate::query::PlanDocument) -> String {
+    let mode = if document.analyzed {
+        "EXPLAIN ANALYZE"
+    } else {
+        "EXPLAIN estimate only"
+    };
+    let planning = document
+        .planning_time_ms
+        .map_or_else(|| "not supplied".to_owned(), format_ms);
+    let execution = if document.analyzed {
+        document
+            .execution_time_ms
+            .map_or_else(|| "not supplied".to_owned(), format_ms)
+    } else {
+        "not measured".to_owned()
+    };
+    let bounded = if document.truncated {
+        "; view truncated at client bound"
+    } else {
+        ""
+    };
+    format!(
+        "{mode}; {} node(s); planning {planning}; execution {execution}{bounded}",
+        document.node_count
+    )
+}
+
+fn plan_node_text(
+    document: &crate::query::PlanDocument,
+    node: &crate::query::PlanNode,
+    path: &[usize],
+    collapsed: bool,
+    selected: bool,
+    unicode: bool,
+) -> String {
+    let marker = if selected { ">" } else { " " };
+    let branch = if node.children.is_empty() {
+        "  "
+    } else if collapsed {
+        "[-]"
+    } else if unicode {
+        "└─"
+    } else {
+        "+-"
+    };
+    let depth = path.len().min(10);
+    let indent = if path.len() > depth {
+        format!("{}... ", "  ".repeat(depth))
+    } else {
+        "  ".repeat(depth)
+    };
+    let subject = node_subject(node);
+    let attention = if document.is_attention_path(path) {
+        format!(" [attention: {}]", document.attention_basis().label())
+    } else {
+        String::new()
+    };
+    let mismatch = if node.estimate_mismatch() {
+        " [estimate mismatch]"
+    } else {
+        ""
+    };
+    format!(
+        "{marker}{indent}{branch} {} | {}{}{}",
+        safe_plan_text(&subject),
+        plan_metrics(node, document.analyzed),
+        attention,
+        mismatch
+    )
+}
+
+fn node_subject(node: &crate::query::PlanNode) -> String {
+    match (&node.relation, &node.index) {
+        (Some(relation), Some(index)) => format!("{} {} via {}", node.node_type, relation, index),
+        (Some(relation), None) => format!("{} {}", node.node_type, relation),
+        (None, Some(index)) => format!("{} via {}", node.node_type, index),
+        (None, None) => node.node_type.clone(),
+    }
+}
+
+fn plan_metrics(node: &crate::query::PlanNode, analyzed: bool) -> String {
+    let rows = number_or(node.plan_rows, "not supplied");
+    let width = number_or(node.plan_width, "not supplied");
+    let startup_cost = number_or(node.startup_cost, "not supplied");
+    let total_cost = number_or(node.total_cost, "not supplied");
+    let cost = format!("cost {startup_cost}..{total_cost} cost units");
+    if !analyzed {
+        return format!("est rows {rows}; width {width}; {cost}");
+    }
+    let actual_rows = number_or(node.actual_rows, "not measured");
+    let startup_time = node
+        .actual_startup_time
+        .map_or_else(|| "not measured".to_owned(), format_ms);
+    let total_time = node
+        .actual_total_time
+        .map_or_else(|| "not measured".to_owned(), format_ms);
+    let loops = number_or(node.actual_loops, "not measured");
+    format!(
+        "est rows {rows}; width {width}; actual rows {actual_rows}; actual startup {startup_time}; \
+         actual total {total_time}/loop; loops {loops}; {cost}"
+    )
+}
+
+fn number_or(value: Option<f64>, missing: &str) -> String {
+    value.map_or_else(|| missing.to_owned(), format_number)
+}
+
+fn format_number(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+fn format_ms(value: f64) -> String {
+    format!("{value:.2} ms")
+}
+
+fn safe_plan_text(value: &str) -> String {
+    sanitize_for_display(&crate::diagnostics::redact_text(value))
+}
+
+fn render_results(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if model.plan.is_visible() {
+        render_plan(model, keymap, presentation, area, buf);
+        return;
+    }
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Results;
 
     let Some(execution) = &model.last_execution else {
-        render_results_placeholder(model, presentation, focused, area, buf);
+        render_results_placeholder(model, keymap, presentation, focused, area, buf);
         return;
     };
 
@@ -895,10 +1988,15 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
         .statements
         .first()
         .map_or_else(|| execution.status.label().to_owned(), |s| s.summary());
+    let status = if model.running_refresh {
+        "Refreshing retained result".to_owned()
+    } else {
+        execution.status.label().to_owned()
+    };
     let mut title = format!(
         " {}Results  {}  {} ",
         presentation.icon(Icon::Rows),
-        execution.status.label(),
+        status,
         summary
     );
     // What the filter admits is stated in full: how many match, of how many are
@@ -909,12 +2007,16 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
     }
     if model.result_filtering {
         title.push_str(&format!(
-            "[filter: {}\u{2588}] ",
-            sanitize_for_display(&model.result_filter)
+            "[filter: {}{}] ",
+            sanitize_for_display(&model.result_filter),
+            input_cursor(presentation)
         ));
     }
     if focused {
-        title.push_str("[focused] ");
+        title.push_str(&format!(
+            "[focused] [{} grid controls] ",
+            action_key_label(keymap, &crate::app::Action::OpenResultControls)
+        ));
     }
 
     let block = pane_block(title, focused, presentation);
@@ -932,11 +2034,23 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
                 .collect::<Vec<_>>()
                 .join("; ")
         };
-        Paragraph::new(Line::from(vec![
+        let mut lines = vec![Line::from(vec![
             Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
             Span::styled(text, theme.style(Token::Text)),
-        ]))
-        .render(inner, buf);
+        ])];
+        if let Some(notice) = &model.cell_update_notice {
+            lines.push(Line::from(Span::styled(
+                sanitize_for_display(notice),
+                theme.style(Token::Warning),
+            )));
+        }
+        if let Some(notice) = &model.refresh_notice {
+            lines.push(Line::from(Span::styled(
+                sanitize_for_display(notice),
+                theme.style(Token::Info),
+            )));
+        }
+        Paragraph::new(lines).render(inner, buf);
         return;
     };
 
@@ -947,7 +2061,7 @@ fn render_results(model: &Model, presentation: &Presentation, area: Rect, buf: &
     if model.expanded_row {
         render_expanded_row(model, set, presentation, inner, buf);
     } else {
-        render_grid(model, set, presentation, focused, inner, buf);
+        render_grid(model, set, keymap, presentation, focused, inner, buf);
     }
 }
 
@@ -975,11 +2089,13 @@ fn render_expanded_row(
     let row = model
         .selected_source_row()
         .unwrap_or_else(|| model.selected_row.min(set.rows.len().saturating_sub(1)));
-    let fields = crate::app::inspect::expand_row(
+    let visible_columns = model.result_grid.visible_columns(set.columns.len());
+    let fields = crate::app::inspect::expand_row_columns(
         set,
         row,
         area.width as usize,
         !presentation.glyphs.is_ascii(),
+        &visible_columns,
     );
 
     let mut lines = vec![Line::from(vec![
@@ -1005,7 +2121,11 @@ fn render_expanded_row(
 
     // The selected column is marked here for the same reason it is in the grid:
     // Enter acts on it, so which one it is has to be visible.
-    let selected = model.selected_column.min(fields.len().saturating_sub(1));
+    let selected = visible_columns
+        .iter()
+        .position(|index| *index == model.selected_column)
+        .unwrap_or(0)
+        .min(fields.len().saturating_sub(1));
     let visible = (area.height as usize).saturating_sub(1);
     let offset = selected.saturating_sub(visible.saturating_sub(1));
     for (index, field) in fields.iter().enumerate().skip(offset).take(visible) {
@@ -1312,6 +2432,7 @@ fn render_inspector(
 
 fn render_results_placeholder(
     model: &Model,
+    keymap: &Keymap,
     presentation: &Presentation,
     focused: bool,
     area: Rect,
@@ -1329,24 +2450,92 @@ fn render_results_placeholder(
     // While a query is in flight this is where the activity indicator lives, so
     // the user is looking at the place the answer will appear.
     if model.phase.is_busy() {
-        Paragraph::new(running_lines(model, presentation)).render(inner, buf);
+        Paragraph::new(running_lines(model, keymap, presentation)).render(inner, buf);
         return;
     }
 
-    let hint = if model.connection.is_usable() {
-        "No query has run yet. Press Ctrl+R to run the buffer."
-    } else {
-        "Not connected. Results appear here once a query runs."
-    };
-    Paragraph::new(Line::from(vec![
-        Span::styled(presentation.icon(Icon::Info), theme.style(Token::Muted)),
-        Span::styled(hint, theme.style(Token::Muted)),
-    ]))
-    .render(inner, buf);
+    let ctx = crate::app::discovery::context(model);
+    let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
+    let mut lines = Vec::new();
+    match ctx.connection {
+        crate::app::discovery::ConnectionPosture::Disconnected => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    presentation.icon(Icon::Warning),
+                    theme.style(Token::Warning),
+                ),
+                Span::styled(" Connection required.", theme.style(Token::Warning)),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "Connect before running SQL. Results appear here after a query.",
+                theme.style(Token::Muted),
+            )));
+        }
+        crate::app::discovery::ConnectionPosture::Connecting => {
+            lines.push(Line::from(vec![
+                Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
+                Span::styled(" Waiting for the connection.", theme.style(Token::Text)),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "Results will appear here after a query finishes.",
+                theme.style(Token::Muted),
+            )));
+        }
+        crate::app::discovery::ConnectionPosture::Connected => {
+            let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
+            lines.push(Line::from(vec![
+                Span::styled(presentation.icon(Icon::Info), theme.style(Token::Muted)),
+                Span::styled(" No query has run yet.", theme.style(Token::Text)),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("{run_key} Run the buffer after entering SQL."),
+                theme.style(Token::Info),
+            )));
+        }
+        crate::app::discovery::ConnectionPosture::Lost
+        | crate::app::discovery::ConnectionPosture::Failed => {
+            lines.push(Line::from(vec![
+                Span::styled(presentation.icon(Icon::Warning), theme.style(Token::Danger)),
+                Span::styled(
+                    format!(" {}.", ctx.connection.label()),
+                    theme.style(Token::Danger),
+                ),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "Reconnect before running SQL. Existing results remain a snapshot.",
+                theme.style(Token::Muted),
+            )));
+        }
+    }
+    if let Some(notice) = &model.clipboard_notice {
+        lines.push(Line::from(Span::styled(
+            notice.message(),
+            theme.style(Token::Warning),
+        )));
+    }
+    if let Some(notice) = &model.cell_update_notice {
+        lines.push(Line::from(Span::styled(
+            sanitize_for_display(notice),
+            theme.style(Token::Warning),
+        )));
+    }
+    if let Some(notice) = &model.refresh_notice {
+        lines.push(Line::from(Span::styled(
+            sanitize_for_display(notice),
+            theme.style(Token::Info),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        format!("{palette_key} Command palette shows safe next actions."),
+        theme.style(Token::Muted),
+    )));
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .render(inner, buf);
 }
 
 /// The activity indicator: a moving frame, a word, and an honest elapsed time.
-fn running_lines<'a>(model: &Model, presentation: &Presentation) -> Vec<Line<'a>> {
+fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation) -> Vec<Line<'a>> {
     let theme = &presentation.theme;
     let elapsed = model.running_for.unwrap_or_default();
     let seconds = elapsed.as_secs_f64();
@@ -1358,6 +2547,7 @@ fn running_lines<'a>(model: &Model, presentation: &Presentation) -> Vec<Line<'a>
     };
     let word = match model.phase {
         QueryPhase::CancellationRequested { .. } => "Cancellation requested",
+        _ if model.running_refresh => "Refreshing retained result",
         _ => "Running",
     };
 
@@ -1381,13 +2571,17 @@ fn running_lines<'a>(model: &Model, presentation: &Presentation) -> Vec<Line<'a>
         )));
     }
 
+    let cancellation = match model.phase {
+        QueryPhase::CancellationRequested { .. } => {
+            "The server has been asked to stop. It may still be running.".to_owned()
+        }
+        _ => format!(
+            "{} asks the server to cancel.",
+            action_key_label(keymap, &crate::app::Action::Cancel)
+        ),
+    };
     lines.push(Line::from(Span::styled(
-        match model.phase {
-            QueryPhase::CancellationRequested { .. } => {
-                "The server has been asked to stop. It may still be running.".to_owned()
-            }
-            _ => "Ctrl+C asks the server to cancel.".to_owned(),
-        },
+        cancellation,
         theme.style(Token::Muted),
     )));
 
@@ -1398,6 +2592,7 @@ fn running_lines<'a>(model: &Model, presentation: &Presentation) -> Vec<Line<'a>
 fn render_grid(
     model: &Model,
     set: &crate::query::result::ResultSet,
+    keymap: &Keymap,
     presentation: &Presentation,
     focused: bool,
     area: Rect,
@@ -1406,44 +2601,186 @@ fn render_grid(
     let theme = &presentation.theme;
     let rule = presentation.glyphs.column_rule();
 
-    // The filter narrows which rows are drawn and nothing else: the numbers in
-    // the gutter stay the row's own, so a filtered view still says where each
-    // row is in the result.
-    let rows = model.filtered_rows();
-    let visible_rows = (area.height as usize).saturating_sub(2).max(1);
+    // The filter and local sort produce source-row indices. The numbers in the
+    // gutter stay those rows' own, so a sorted or filtered view still says where
+    // each row is in the server result.
+    let rows = model.displayed_rows();
+    let has_type_row = model.result_grid.show_types && set.column_types.iter().any(Option::is_some);
+    let header_rows = 5 + usize::from(has_type_row);
+    let visible_rows = (area.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (area.width as usize).saturating_sub(usize::from(needs_scrollbar));
 
-    // Keep the selection on screen. The window moves; rows never reorder.
+    // Keep the selection on screen. The window moves; rows never reorder, and
+    // hidden columns leave source positions untouched.
     let offset = model
         .selected_row
         .saturating_sub(visible_rows.saturating_sub(1));
     let gutter = set.rows.len().max(1).to_string().len().max(2);
-
+    let available = grid_width.saturating_sub(gutter + 1);
+    let automatic_widths: Vec<usize> = (0..set.columns.len())
+        .map(|index| grid::automatic_column_width(set, index))
+        .collect();
+    let widths: Vec<usize> = automatic_widths
+        .iter()
+        .enumerate()
+        .map(|(index, automatic)| model.result_grid.width_for(index, *automatic))
+        .collect();
+    let visible_columns = model.result_grid.visible_columns(set.columns.len());
+    let selected_column = visible_columns
+        .iter()
+        .copied()
+        .find(|index| *index == model.selected_column)
+        .or_else(|| visible_columns.first().copied());
+    let window = grid::column_window(
+        &visible_columns,
+        selected_column.unwrap_or(0),
+        &widths,
+        available,
+        model.result_grid.freeze_first,
+        model.result_grid.horizontal_start,
+    );
     let alignment = column_alignment(set);
-    let widths = column_widths(set, grid_width.saturating_sub(gutter + 1));
 
-    let mut lines: Vec<Line> = Vec::with_capacity(visible_rows + 2);
+    let selected_label = selected_column
+        .and_then(|index| set.columns.get(index))
+        .map_or_else(|| "none".to_owned(), |name| sanitize_for_display(name));
+    let selected_number = selected_column.map_or(0, |index| index + 1);
+    let order_label = model.result_grid.sort.map_or_else(
+        || "order: server".to_owned(),
+        |sort| {
+            format!(
+                "order: local {} on column {} (retained rows only)",
+                sort.direction.label(),
+                sort.column + 1
+            )
+        },
+    );
+    let columns_label = format!(
+        "shown {}/{} columns",
+        visible_columns.len(),
+        set.columns.len()
+    );
+    let type_count = set
+        .column_types
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    let type_label = if !model.result_grid.show_types {
+        "types: hidden"
+    } else if type_count == 0 {
+        "types: unavailable"
+    } else if type_count == set.columns.len() {
+        "types: available"
+    } else {
+        "types: partial, some unavailable"
+    };
+    let freeze_label = if model.result_grid.freeze_first {
+        "freeze first: on"
+    } else {
+        "freeze first: off"
+    };
+    let controls_key = action_key_label(keymap, &crate::app::Action::OpenResultControls);
+    let controls_label = if focused {
+        format!("{controls_key} grid controls")
+    } else {
+        format!("focus Results, then {controls_key} for controls")
+    };
+
+    let mut lines: Vec<Line> = Vec::with_capacity(visible_rows + header_rows);
+    lines.push(Line::from(Span::styled(
+        truncate_to_width(
+            &format!("{order_label} | selected column {selected_number}: {selected_label}"),
+            grid_width,
+            !presentation.glyphs.is_ascii(),
+        ),
+        theme.style(Token::Info),
+    )));
+    let state_line = format!("{columns_label} | {type_label} | {freeze_label} | {controls_label}");
+    lines.push(Line::from(Span::styled(
+        truncate_to_width(&state_line, grid_width, !presentation.glyphs.is_ascii()),
+        theme.style(Token::Muted),
+    )));
+    let clipboard_note = model
+        .clipboard_notice
+        .as_ref()
+        .map(|notice| notice.message());
+    if let Some(note) = model
+        .cell_update_notice
+        .as_deref()
+        .or(clipboard_note.as_deref())
+        .or(model.refresh_notice.as_deref())
+        .or(model.result_grid.note.as_deref())
+    {
+        lines.push(Line::from(Span::styled(
+            truncate_to_width(
+                &sanitize_for_display(note),
+                grid_width,
+                !presentation.glyphs.is_ascii(),
+            ),
+            theme.style(Token::Warning),
+        )));
+    } else {
+        // Keep the row/header offsets deterministic even when there is no
+        // limitation note. The blank line gives a little breathing room between
+        // state and values, like a compact GUI toolbar.
+        lines.push(Line::from(""));
+    }
 
     let mut header_spans = vec![Span::styled(
         format!("{} ", " ".repeat(gutter)),
         theme.style(Token::Muted),
     )];
-    for (index, (name, width)) in set.columns.iter().zip(&widths).enumerate() {
-        if index > 0 {
+    for (position, index) in window.iter().enumerate() {
+        if position > 0 {
             header_spans.push(Span::styled(format!("{rule} "), theme.style(Token::Border)));
         }
+        let name = set.columns.get(*index).map_or("unknown", String::as_str);
+        let width = widths
+            .get(*index)
+            .copied()
+            .unwrap_or(grid::MIN_COLUMN_WIDTH);
         let text = truncate_to_width(
             &sanitize_for_display(name),
-            *width,
+            width,
             !presentation.glyphs.is_ascii(),
         );
+        let header_style = if Some(*index) == selected_column {
+            theme.style(Token::Selection)
+        } else {
+            theme.style(Token::Header)
+        };
         header_spans.push(Span::styled(
-            format!("{} ", pad_to_width(&text, *width)),
-            theme.style(Token::Header),
+            format!("{} ", pad_to_width(&text, width)),
+            header_style,
         ));
     }
     lines.push(Line::from(header_spans));
+
+    if has_type_row {
+        let mut type_spans = vec![Span::styled(
+            format!("{} ", " ".repeat(gutter)),
+            theme.style(Token::Muted),
+        )];
+        for (position, index) in window.iter().enumerate() {
+            if position > 0 {
+                type_spans.push(Span::styled(format!("{rule} "), theme.style(Token::Border)));
+            }
+            let width = widths
+                .get(*index)
+                .copied()
+                .unwrap_or(grid::MIN_COLUMN_WIDTH);
+            let type_name = set
+                .column_type(*index)
+                .map_or_else(|| "unavailable".to_owned(), sanitize_for_display);
+            let text = truncate_to_width(&type_name, width, !presentation.glyphs.is_ascii());
+            type_spans.push(Span::styled(
+                format!("{} ", pad_to_width(&text, width)),
+                theme.style(Token::Muted),
+            ));
+        }
+        lines.push(Line::from(type_spans));
+    }
 
     let rule_char = if presentation.glyphs.is_ascii() {
         "-"
@@ -1468,28 +2805,38 @@ fn render_grid(
             cell_style(theme, Token::Muted, selected, striped),
         )];
 
-        for (index, (cell, width)) in row.iter().zip(&widths).enumerate() {
-            if index > 0 {
+        for (column_position, index) in window.iter().enumerate() {
+            if column_position > 0 {
                 spans.push(Span::styled(
                     format!("{rule} "),
                     cell_style(theme, Token::Border, selected, striped),
                 ));
             }
+            let width = widths
+                .get(*index)
+                .copied()
+                .unwrap_or(grid::MIN_COLUMN_WIDTH);
+            let Some(cell) = row.get(*index) else {
+                spans.push(Span::styled(
+                    format!("{} ", pad_to_width("[missing]", width)),
+                    cell_style(theme, Token::Warning, selected, striped),
+                ));
+                continue;
+            };
             let token = if cell.is_null() {
                 Token::NullValue
             } else {
                 Token::Text
             };
             let rendered =
-                truncate_to_width(&cell.display(), *width, !presentation.glyphs.is_ascii());
-            let padded = if alignment.get(index).copied().unwrap_or(false) {
-                // Right-aligned by the shape of the value, not by its type: the
-                // simple query protocol reports no type information, so this is
-                // a reading aid and is never described as type-aware.
+                truncate_to_width(&cell.display(), width, !presentation.glyphs.is_ascii());
+            let padded = if alignment.get(*index).copied().unwrap_or(false) {
+                // Right-aligned by the shape of the value, not by its type. This
+                // remains a reading aid and is never described as type-aware.
                 let pad = width.saturating_sub(display_width(&rendered));
                 format!("{}{rendered} ", " ".repeat(pad))
             } else {
-                format!("{} ", pad_to_width(&rendered, *width))
+                format!("{} ", pad_to_width(&rendered, width))
             };
             spans.push(Span::styled(
                 padded,
@@ -1506,14 +2853,18 @@ fn render_grid(
         lines.push(line);
     }
 
-    if rows.is_empty() && !model.result_filter.trim().is_empty() {
-        lines.push(Line::from(Span::styled(
+    if rows.is_empty() {
+        let message = if model.result_filter.trim().is_empty() {
+            "No rows returned. Edit the SQL or use the command palette for the next action."
+                .to_owned()
+        } else {
             format!(
-                "No retained row contains {:?}. Esc clears the filter.",
-                sanitize_for_display(&model.result_filter)
-            ),
-            theme.style(Token::Muted),
-        )));
+                "No retained row contains {:?}. {} clears the filter.",
+                sanitize_for_display(&model.result_filter),
+                action_key_label(keymap, &crate::app::Action::Dismiss)
+            )
+        };
+        lines.push(Line::from(Span::styled(message, theme.style(Token::Muted))));
     }
 
     Paragraph::new(lines).render(area, buf);
@@ -1526,9 +2877,11 @@ fn render_grid(
             presentation,
             Rect {
                 x: area.x + area.width.saturating_sub(1),
-                y: area.y + 2,
+                y: area.y + u16::try_from(header_rows).unwrap_or(u16::MAX),
                 width: 1,
-                height: area.height.saturating_sub(2),
+                height: area
+                    .height
+                    .saturating_sub(u16::try_from(header_rows).unwrap_or(u16::MAX)),
             },
             buf,
         );
@@ -1605,57 +2958,15 @@ fn column_alignment(set: &crate::query::result::ResultSet) -> Vec<bool> {
         .collect()
 }
 
-/// Shares the available width between columns, giving every column something.
-fn column_widths(set: &crate::query::result::ResultSet, available: usize) -> Vec<usize> {
-    let count = set.columns.len();
-    if count == 0 {
-        return Vec::new();
-    }
-    let mut widths: Vec<usize> = set
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            let widest_value = set
-                .rows
-                .iter()
-                .filter_map(|row| row.get(i))
-                .map(|cell| display_width(&cell.display()))
-                .max()
-                .unwrap_or(0);
-            display_width(&sanitize_for_display(name))
-                .max(widest_value)
-                .max(3)
-        })
-        .collect();
-
-    // Each column carries a trailing space, and every column after the first
-    // carries a rule and a space as well.
-    let overhead = count + (count.saturating_sub(1) * 2);
-    let total: usize = widths.iter().sum::<usize>() + overhead;
-    if total > available && available > overhead {
-        let budget = available - overhead;
-        let current: usize = widths.iter().sum();
-        if current > 0 {
-            #[allow(clippy::cast_precision_loss)]
-            let scale = budget as f64 / current as f64;
-            for width in &mut widths {
-                #[allow(
-                    clippy::cast_possible_truncation,
-                    clippy::cast_sign_loss,
-                    clippy::cast_precision_loss
-                )]
-                let scaled = ((*width as f64) * scale).floor() as usize;
-                *width = scaled.max(3);
-            }
-        }
-    }
-    widths
-}
-
 // ------------------------------------------------------------------ objects
 
-fn render_objects(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+fn render_objects(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Objects;
 
@@ -1699,10 +3010,12 @@ fn render_objects(model: &Model, presentation: &Presentation, area: Rect, buf: &
                 theme.style(Token::Danger),
             )),
             Line::from(Span::styled(
-                error
-                    .next_action
-                    .clone()
-                    .unwrap_or_else(|| "Ctrl+K r reloads the tree.".to_owned()),
+                error.next_action.clone().unwrap_or_else(|| {
+                    format!(
+                        "{} Reload the object tree when the connection is usable.",
+                        action_key_label(keymap, &crate::app::Action::ReloadObjects)
+                    )
+                }),
                 theme.style(Token::Muted),
             )),
         ])
@@ -1739,7 +3052,11 @@ fn render_objects(model: &Model, presentation: &Presentation, area: Rect, buf: &
                 "\u{2315}"
             },
             model.tree.filter,
-            if model.tree.filtering { "\u{2588}" } else { "" }
+            if model.tree.filtering {
+                input_cursor(presentation)
+            } else {
+                ""
+            }
         );
         let [filter_area, rest] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
@@ -1756,13 +3073,40 @@ fn render_objects(model: &Model, presentation: &Presentation, area: Rect, buf: &
     }
 
     if rows.is_empty() {
-        let message = if model.tree.filter.is_empty() {
-            "Nothing here yet. Ctrl+K r reloads."
+        let lines = if model.tree.filter.is_empty() {
+            if model.connection.is_usable() {
+                vec![
+                    "No object rows are loaded yet.".to_owned(),
+                    format!(
+                        "{} Reload the object tree.",
+                        action_key_label(keymap, &crate::app::Action::ReloadObjects)
+                    ),
+                ]
+            } else {
+                vec![
+                    "Object tree unavailable until connected.".to_owned(),
+                    "Connect first; object names appear here after reload.".to_owned(),
+                ]
+            }
         } else {
-            "No object matches this filter."
+            vec![
+                "No object matches this filter.".to_owned(),
+                format!("Searched {:?}.", sanitize_for_display(&model.tree.filter)),
+                format!(
+                    "{} or {} clears the filter.",
+                    action_key_label(keymap, &crate::app::Action::Dismiss),
+                    action_key_label(keymap, &crate::app::Action::StartFilter)
+                ),
+            ]
         };
-        Paragraph::new(Line::from(Span::styled(message, theme.style(Token::Muted))))
-            .render(body, buf);
+        Paragraph::new(
+            lines
+                .into_iter()
+                .map(|line| Line::from(Span::styled(line, theme.style(Token::Muted))))
+                .collect::<Vec<_>>(),
+        )
+        .wrap(Wrap { trim: true })
+        .render(body, buf);
         return;
     }
 
@@ -1902,14 +3246,38 @@ fn render_palette(
             sanitize_for_display(&palette.query),
             theme.style(Token::Text),
         ),
-        Span::styled("\u{2588}", theme.style(Token::Focus)),
+        Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
         Span::styled(
             format!("   {} match(es)", matches.len()),
             theme.style(Token::Muted),
         ),
     ])];
 
-    let visible = (height as usize).saturating_sub(3);
+    let note_lines: Vec<String> = palette
+        .context_note
+        .as_deref()
+        .map(|note| {
+            note.split(". ")
+                .map(|part| {
+                    if part.ends_with('.') {
+                        part.to_owned()
+                    } else {
+                        format!("{part}.")
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    lines.extend(note_lines.iter().map(|note| {
+        Line::from(Span::styled(
+            format!(" {}", sanitize_for_display(note)),
+            theme.style(Token::Muted),
+        ))
+    }));
+
+    let visible = (height as usize)
+        .saturating_sub(3 + note_lines.len())
+        .max(1);
     let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
     for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
         let selected = index == palette.selected;
@@ -1966,13 +3334,260 @@ fn render_palette(
         .render(palette_area, buf);
 }
 
+// ------------------------------------------------------ connection details
+
+/// Shows the connection's trust boundary without performing any work.
+///
+/// This is intentionally a read-only surface rather than a settings dialog.
+/// It explains the facts that are easy to compress too far in the header - in
+/// particular which cloud tool supplied a credential and what TLS actually
+/// guarantees - while making it impossible to refresh or mutate anything by
+/// opening it.
+fn render_connection_details(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    // A terminal has no alpha compositing. Clearing and filling the backdrop
+    // gives the modal the same focus separation as a scrim without leaving
+    // stale text visible around its edges, including in no-colour mode.
+    ratatui::widgets::Clear.render(area, buf);
+    Block::new().style(theme.stripe()).render(area, buf);
+
+    let width = area.width.saturating_sub(6).min(96);
+    let height = area.height.saturating_sub(4).min(30);
+    if width < 28 || height < 8 {
+        Paragraph::new(Line::from(Span::styled(
+            "Connection details need a larger terminal. Esc closes.",
+            theme.style(Token::Text),
+        )))
+        .block(pane_block(
+            " Connection details ".to_owned(),
+            true,
+            presentation,
+        ))
+        .render(area, buf);
+        return;
+    }
+
+    let box_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    ratatui::widgets::Clear.render(box_area, buf);
+    let panel_style = if theme.color {
+        Style::default().bg(theme.rgb(Token::Surface).into())
+    } else {
+        Style::default()
+    };
+
+    let connection_state = match &model.connection {
+        crate::app::model::ConnectionState::Disconnected => "Not connected".to_owned(),
+        crate::app::model::ConnectionState::Connecting => "Connecting".to_owned(),
+        crate::app::model::ConnectionState::Connected(_) => "Connected".to_owned(),
+        crate::app::model::ConnectionState::Lost { .. } => "Connection lost".to_owned(),
+        crate::app::model::ConnectionState::Failed(_) => "Connection failed".to_owned(),
+    };
+    let target = model
+        .connection
+        .info()
+        .map_or_else(|| model.connection.label(), |info| info.target.clone());
+    let database = model.connection.info().map_or_else(
+        || "unknown until connected".to_owned(),
+        |info| info.database.clone(),
+    );
+    let user = model.connection.info().map_or_else(
+        || "unknown until connected".to_owned(),
+        |info| info.user.clone(),
+    );
+    let environment = model.environment().label();
+    let posture = model.connection.info().map_or_else(
+        || "unknown until connected".to_owned(),
+        |info| info.posture().to_owned(),
+    );
+
+    let mut lines = vec![Line::from(Span::styled(
+        "A calm, explicit view of what this session can reach.",
+        theme.style(Token::Muted),
+    ))];
+    push_details_section(&mut lines, "Connection", theme);
+    push_detail(
+        &mut lines,
+        "State",
+        connection_state,
+        theme.style(Token::Text),
+    );
+    push_detail(&mut lines, "Target", target, theme.style(Token::Text));
+    push_detail(&mut lines, "Database", database, theme.style(Token::Text));
+    push_detail(&mut lines, "Role", user, theme.style(Token::Text));
+    push_detail(
+        &mut lines,
+        "Environment",
+        environment,
+        if model.environment().is_production() {
+            theme.style(Token::EnvironmentProduction)
+        } else {
+            theme.style(Token::EnvironmentNonProduction)
+        },
+    );
+    push_detail(&mut lines, "Posture", posture, theme.style(Token::Info));
+
+    push_details_section(&mut lines, "Transport", theme);
+    if let Some(info) = model.connection.info() {
+        push_detail(
+            &mut lines,
+            "TLS",
+            info.tls.label(),
+            theme.style(if info.tls.is_encrypted() {
+                Token::Success
+            } else {
+                Token::Warning
+            }),
+        );
+        push_detail(
+            &mut lines,
+            "Guarantee",
+            info.tls.description(),
+            theme.style(Token::Text),
+        );
+    } else {
+        push_detail(
+            &mut lines,
+            "TLS",
+            "unknown until the server responds".to_owned(),
+            theme.style(Token::Muted),
+        );
+    }
+    if let Some(provider) = &model.credential_presentation {
+        push_detail(
+            &mut lines,
+            "Provider rule",
+            provider.transport.clone(),
+            theme.style(Token::Info),
+        );
+    }
+
+    push_details_section(&mut lines, "Authentication", theme);
+    if let Some(provider) = &model.credential_presentation {
+        push_detail(
+            &mut lines,
+            "Provider",
+            provider.display_name.clone(),
+            theme.style(Token::Info),
+        );
+        push_detail(
+            &mut lines,
+            "Configured name",
+            provider.name.clone(),
+            theme.style(Token::Muted),
+        );
+        push_detail(
+            &mut lines,
+            "Credential source",
+            format!("{} via {}", provider.invocation, provider.command_name),
+            theme.style(Token::Text),
+        );
+        push_detail(
+            &mut lines,
+            "Output",
+            provider.extraction.clone(),
+            theme.style(Token::Muted),
+        );
+        push_detail(
+            &mut lines,
+            "Lifetime",
+            provider.lifetime.clone(),
+            theme.style(Token::Text),
+        );
+        push_detail(
+            &mut lines,
+            "Safety",
+            "token is not shown, stored, logged, or written".to_owned(),
+            theme.style(Token::Success),
+        );
+        push_detail(
+            &mut lines,
+            "If it fails",
+            provider.remedy.clone(),
+            theme.style(Token::Info),
+        );
+    } else if let Some(provider) = &model.credential_provider {
+        // This can only occur for a provider whose metadata could not be
+        // resolved. Keep the name visible, but do not invent a cloud identity or
+        // echo an arbitrary configured command.
+        push_detail(
+            &mut lines,
+            "Provider",
+            format!("configured provider {provider:?}"),
+            theme.style(Token::Warning),
+        );
+        push_detail(
+            &mut lines,
+            "Safety",
+            "cloud token route selected; provider details unavailable".to_owned(),
+            theme.style(Token::Warning),
+        );
+    } else {
+        push_detail(
+            &mut lines,
+            "Cloud identity",
+            "No cloud token was requested for this session".to_owned(),
+            theme.style(Token::Muted),
+        );
+        push_detail(
+            &mut lines,
+            "Password routes",
+            "connection string, environment, .pgpass, or an interactive prompt".to_owned(),
+            theme.style(Token::Text),
+        );
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Opening this view performs no refresh, network request, or mutation.  Esc closes.",
+        theme.style(Token::Muted),
+    )));
+
+    Paragraph::new(lines)
+        .block(pane_block(
+            format!(
+                " {}Connection details  Esc to close ",
+                presentation.icon(Icon::Info)
+            ),
+            true,
+            presentation,
+        ))
+        .style(panel_style)
+        .wrap(Wrap { trim: true })
+        .render(box_area, buf);
+}
+
+fn push_details_section(lines: &mut Vec<Line<'static>>, title: &str, theme: &Theme) {
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        title.to_owned(),
+        theme.style(Token::Header),
+    )));
+}
+
+fn push_detail(lines: &mut Vec<Line<'static>>, label: &str, value: String, style: Style) {
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {label:<18}"), style.add_modifier(Modifier::BOLD)),
+        Span::styled(sanitize_for_display(&value), style),
+    ]));
+}
+
 // ------------------------------------------------------------------- chords
 
 /// The popup that appears while a chord is waiting for its second key.
 ///
 /// Nothing here is on a timer: the reducer reads no clock, and a popup that
 /// vanishes on its own is a popup that vanishes while being read.
-fn render_chords(presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+fn render_chords(keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
     let theme = &presentation.theme;
     let chords = crate::ui::keymap::CHORDS;
     let width = area.width.saturating_sub(8).min(60);
@@ -1998,8 +3613,12 @@ fn render_chords(presentation: &Presentation, area: Rect, buf: &mut Buffer) {
         })
         .collect();
 
+    let prefix = keymap
+        .contextual_hint(&crate::app::Action::BeginPrefix)
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| "Ctrl+K".to_owned());
     Paragraph::new(lines)
-        .block(pane_block(" Ctrl+K  then ".to_owned(), true, presentation))
+        .block(pane_block(format!(" {prefix}  then "), true, presentation))
         .render(chord_area, buf);
 }
 
@@ -2015,51 +3634,97 @@ fn render_error(
     let theme = &presentation.theme;
     let block = pane_block(
         format!(" {}{} ", presentation.icon(Icon::Error), error.kind.label()),
-        model.focus == Focus::Results,
+        false,
         presentation,
     );
 
     let mut lines = vec![
         Line::from(Span::styled(
-            error.headline.clone(),
+            sanitize_for_display(&error.headline),
             theme.style(Token::Danger),
         )),
         Line::from(Span::styled(
-            format!("While: {}", error.attempted),
+            format!("While: {}", sanitize_for_display(&error.attempted)),
             theme.style(Token::Muted),
         )),
     ];
+    if let Some(object) = &error.object {
+        let facts = object_context_text(object);
+        lines.push(Line::from(Span::styled(
+            format!("Object context: {facts}"),
+            theme.style(Token::Text),
+        )));
+        lines.push(Line::from(Span::styled(
+            catalogue_note(model, object),
+            theme.style(Token::Muted),
+        )));
+    }
+    if let Some(location) = &model.error_location {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "Location: statement {}, line {}, column {}",
+                location.statement_number, location.line, location.column
+            ),
+            theme.style(Token::Info),
+        )));
+        if let Some(marker) =
+            crate::query::error_location::render_marker(model.editor.text(), location)
+        {
+            for line in marker.lines() {
+                lines.push(Line::from(Span::styled(
+                    line.to_owned(),
+                    theme.style(Token::Warning),
+                )));
+            }
+        }
+    } else if let Some(note) = &model.error_location_note {
+        lines.push(Line::from(Span::styled(
+            format!("Location: {}", sanitize_for_display(note)),
+            theme.style(Token::Warning),
+        )));
+    } else if let Some(position) = error.position {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "Location: unavailable for server character {}.",
+                position.character
+            ),
+            theme.style(Token::Warning),
+        )));
+    } else if let Some(statement_number) = error.statement_number {
+        lines.push(Line::from(Span::styled(
+            format!("Statement: {statement_number}"),
+            theme.style(Token::Info),
+        )));
+    }
     if let Some(cause) = &error.likely_cause {
         lines.push(Line::from(vec![
             Span::styled(
                 presentation.icon(Icon::Warning),
                 theme.style(Token::Warning),
             ),
-            Span::styled(format!("Likely cause: {cause}"), theme.style(Token::Text)),
+            Span::styled(
+                format!("Likely cause: {}", sanitize_for_display(cause)),
+                theme.style(Token::Text),
+            ),
         ]));
     }
     if let Some(action) = &error.next_action {
         lines.push(Line::from(vec![
             Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
-            Span::styled(format!("Next: {action}"), theme.style(Token::Info)),
+            Span::styled(
+                format!("Next: {}", sanitize_for_display(action)),
+                theme.style(Token::Info),
+            ),
         ]));
-    }
-    if let Some(position) = error.position
-        && let Some(marker) =
-            crate::diagnostics::render_position_marker(model.editor.text(), position)
-    {
-        for line in marker.lines() {
-            lines.push(Line::from(Span::styled(
-                line.to_owned(),
-                theme.style(Token::Warning),
-            )));
-        }
     }
     if model.error_expanded {
         for field in &error.technical {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<12}", field.label), theme.style(Token::Muted)),
-                Span::styled(field.value.clone(), theme.style(Token::Text)),
+                Span::styled(
+                    format!("  {:<12}", sanitize_for_display(&field.label)),
+                    theme.style(Token::Muted),
+                ),
+                Span::styled(sanitize_for_display(&field.value), theme.style(Token::Text)),
             ]));
         }
     } else if !error.technical.is_empty() {
@@ -2076,6 +3741,82 @@ fn render_error(
         .block(block)
         .wrap(Wrap { trim: true })
         .render(area, buf);
+}
+
+fn object_context_text(object: &crate::diagnostics::ObjectContext) -> String {
+    let mut facts = Vec::new();
+    match (object.schema.as_deref(), object.table.as_deref()) {
+        (Some(schema), Some(table)) => facts.push(format!(
+            "relation {}.{}",
+            quoted_object(schema),
+            quoted_object(table)
+        )),
+        (None, Some(table)) => facts.push(format!("table {}", quoted_object(table))),
+        (Some(schema), None) => facts.push(format!("schema {}", quoted_object(schema))),
+        (None, None) => {}
+    }
+    if let Some(column) = object.column.as_deref() {
+        facts.push(format!("column {}", quoted_object(column)));
+    }
+    if let Some(constraint) = object.constraint.as_deref() {
+        facts.push(format!("constraint {}", quoted_object(constraint)));
+    }
+    if facts.is_empty() {
+        "server supplied no named object fields".to_owned()
+    } else {
+        facts.join(", ")
+    }
+}
+
+fn quoted_object(value: &str) -> String {
+    sanitize_for_display(&crate::query::quote_identifier(value))
+}
+
+fn catalogue_note(model: &Model, object: &crate::diagnostics::ObjectContext) -> String {
+    let Some(table) = object.table.as_deref() else {
+        return "Catalogue: cannot match without a server-supplied relation; no catalogue-derived claim."
+            .to_owned();
+    };
+    let Some(catalog) = model.completion.catalog() else {
+        return format!(
+            "Catalogue: {}; no catalogue-derived claim.",
+            sanitize_for_display(&model.completion.catalog.message())
+        );
+    };
+    let relation = object.schema.as_deref().map_or_else(
+        || {
+            let matches = catalog.relations_named(table);
+            (matches.len() == 1).then(|| matches[0])
+        },
+        |schema| catalog.relation(Some(schema), table),
+    );
+    let Some(relation) = relation else {
+        return format!(
+            "Catalogue: snapshot does not uniquely match relation {}; no catalogue-derived claim.",
+            quoted_object(table)
+        );
+    };
+    let Some(column) = object.column.as_deref() else {
+        return format!(
+            "Catalogue: matched relation {}. No column type was inferred.",
+            quoted_object(&relation.name)
+        );
+    };
+    let Some(catalogue_column) = relation
+        .columns
+        .iter()
+        .find(|candidate| candidate.name == column)
+    else {
+        return format!(
+            "Catalogue: matched relation but not column {}; no column type was inferred.",
+            quoted_object(column)
+        );
+    };
+    format!(
+        "Catalogue: matched relation and column {}; type {}.",
+        quoted_object(&catalogue_column.name),
+        sanitize_for_display(&catalogue_column.data_type)
+    )
 }
 
 // ------------------------------------------------------------------- footer
@@ -2122,7 +3863,8 @@ fn render_footer(
         theme.style(transaction_token),
     ));
 
-    if let Some(info) = model.connection.info() {
+    let showing_format_notice = model.format_notice.is_some();
+    if let Some(info) = model.connection.info().filter(|_| !showing_format_notice) {
         spans.push(Span::styled(
             format!(
                 "{}{} ",
@@ -2133,12 +3875,78 @@ fn render_footer(
         ));
     }
 
-    for (key, label) in keymap.hints() {
+    // The footer is a rail, not a second help page. Its candidates are derived
+    // from focus and state, while the keymap supplies the exact active key.
+    // Stop before the next complete pair would be clipped so every shown hint
+    // retains both its key and its meaning in a narrow terminal.
+    let mut used = display_width(&status) + display_width(model.transaction.label()) + 2;
+    if let Some(info) = model.connection.info().filter(|_| !showing_format_notice) {
+        used += display_width(&info.search_path) + 2;
+    }
+
+    // A formatting result is transient feedback for the editor. Give it the
+    // rail before contextual hints so a refusal or a successful edit cannot be
+    // hidden behind the next action label.
+    if let Some(notice) = &model.format_notice {
+        let token = if matches!(notice, crate::app::model::FormatNotice::Refused { .. }) {
+            Token::Warning
+        } else {
+            Token::Info
+        };
+        let remaining = usize::from(area.width).saturating_sub(used + 1);
+        let full = notice.message();
+        let compact = match notice {
+            crate::app::model::FormatNotice::Applied { .. } => "Formatted SQL",
+            crate::app::model::FormatNotice::AlreadyFormatted => "already formatted",
+            crate::app::model::FormatNotice::Empty => "no SQL to format",
+            crate::app::model::FormatNotice::Refused { .. } => "Format skipped",
+        };
+        let message = if display_width(&full) <= remaining {
+            full
+        } else {
+            truncate_to_width(compact, remaining, !presentation.glyphs.is_ascii())
+        };
+        if !message.is_empty() {
+            spans.push(Span::styled(format!(" {message}"), theme.style(token)));
+        }
+        Paragraph::new(Line::from(spans)).render(area, buf);
+        return;
+    }
+
+    if let Some(notice) = &model.cell_update_notice {
+        let remaining = usize::from(area.width).saturating_sub(used + 1);
+        let full = sanitize_for_display(notice);
+        let message = if display_width(&full) <= remaining {
+            full
+        } else {
+            truncate_to_width(
+                "Cell update status",
+                remaining,
+                !presentation.glyphs.is_ascii(),
+            )
+        };
+        if !message.is_empty() {
+            spans.push(Span::styled(
+                format!(" {message}"),
+                theme.style(Token::Warning),
+            ));
+        }
+    }
+
+    for action in crate::app::discovery::hint_actions(model) {
+        let Some((key, label)) = keymap.contextual_hint(&action) else {
+            continue;
+        };
+        let segment_width = display_width(&key) + display_width(label) + 3;
+        if used.saturating_add(segment_width) > usize::from(area.width) {
+            break;
+        }
         spans.push(Span::styled(
             format!(" {key} "),
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(label, theme.style(Token::Muted)));
+        used += segment_width;
     }
 
     Paragraph::new(Line::from(spans)).render(area, buf);
@@ -2175,14 +3983,18 @@ fn render_help(keymap: &Keymap, presentation: &Presentation, area: Rect, buf: &m
 
     // The chords belong here too. Reading help and still not knowing how to
     // reach half the interface is the failure this overlay exists to prevent.
+    let prefix = keymap
+        .contextual_hint(&crate::app::Action::BeginPrefix)
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| "Ctrl+K".to_owned());
     lines.push(Line::from(Span::styled(
-        "Ctrl+K then:",
+        format!("{prefix} then:"),
         theme.style(Token::Muted),
     )));
     for (key, _, description) in crate::ui::keymap::CHORDS {
         lines.push(Line::from(vec![
             Span::styled(
-                format!(" {:<12}", format!("Ctrl+K {key}")),
+                format!(" {:<12}", format!("{prefix} {key}")),
                 theme.style(Token::Focus).add_modifier(Modifier::BOLD),
             ),
             Span::styled(*description, theme.style(Token::Text)),
@@ -2293,6 +4105,45 @@ mod tests {
         model
     }
 
+    #[test]
+    fn completion_menu_is_cursor_adjacent_and_readable_in_ascii_mode() {
+        let mut model = connected_model(Environment::Local);
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: crate::query::completion::CompletionCatalog {
+                objects: vec![crate::query::completion::CatalogObject {
+                    kind: crate::query::completion::CatalogObjectKind::Table,
+                    schema: "public".into(),
+                    name: "orders".into(),
+                    readable: true,
+                    detail: None,
+                }],
+                relations: Vec::new(),
+            },
+            loaded_at: "2026-09-04 10:00:00 +02:00".into(),
+        };
+        model.editor.set_text("SELECT * FROM ord");
+        crate::app::update::update(
+            &mut model,
+            crate::app::Message::Action(crate::app::Action::Complete),
+        );
+
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            100,
+            30,
+        );
+        assert!(text.contains("Complete"), "{text}");
+        assert!(text.contains("orders"), "{text}");
+        assert!(text.contains("table"), "{text}");
+        assert!(text.contains("Enter accepts"), "{text}");
+        assert!(
+            text.is_ascii(),
+            "ASCII mode must not need Unicode: {text:?}"
+        );
+    }
+
     fn with_rows(model: &mut Model, columns: &[&str], rows: &[&[Cell]]) {
         let mut set = ResultSet::new(columns.iter().map(|c| (*c).to_owned()).collect(), 100);
         for row in rows {
@@ -2314,6 +4165,120 @@ mod tests {
         });
     }
 
+    fn update_relation() -> crate::postgres::metadata::UpdateRelation {
+        crate::postgres::metadata::UpdateRelation {
+            schema: "public".into(),
+            relation: "orders".into(),
+            kind: crate::postgres::metadata::ObjectKind::Table,
+            readable: true,
+            writable: true,
+            columns: vec![
+                crate::postgres::metadata::ColumnInfo {
+                    name: "order_id".into(),
+                    data_type: "integer".into(),
+                    nullable: false,
+                    primary_key: true,
+                    default: None,
+                },
+                crate::postgres::metadata::ColumnInfo {
+                    name: "note".into(),
+                    data_type: "text".into(),
+                    nullable: true,
+                    primary_key: false,
+                    default: None,
+                },
+            ],
+        }
+    }
+
+    fn update_candidate() -> crate::app::model::UpdateCandidate {
+        crate::app::model::UpdateCandidate {
+            result_job: JobId(1),
+            source_row: 0,
+            result_column: 1,
+            source_sql: "SELECT order_id, note FROM public.orders".into(),
+        }
+    }
+
+    fn update_source() -> crate::query::UpdateSource {
+        crate::query::parse_update_source(
+            "SELECT order_id, note FROM public.orders",
+            &["order_id".into(), "note".into()],
+            1,
+        )
+        .expect("direct update source")
+    }
+
+    fn update_plan() -> crate::query::UpdatePlan {
+        crate::query::plan_update(
+            &update_source(),
+            "public",
+            "orders",
+            &["order_id".into(), "note".into()],
+            &[Cell::Text("7".into()), Cell::Text("old".into())],
+            &[
+                crate::query::UpdateColumn {
+                    name: "order_id".into(),
+                    primary_key: true,
+                },
+                crate::query::UpdateColumn {
+                    name: "note".into(),
+                    primary_key: false,
+                },
+            ],
+            "new note",
+        )
+        .expect("update plan")
+    }
+
+    #[test]
+    fn cell_update_value_prompt_names_literal_semantics_and_review_boundary() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        model.last_sql = Some("SELECT order_id, note FROM public.orders".into());
+        with_rows(
+            &mut model,
+            &["order_id", "note"],
+            &[&[Cell::Text("7".into()), Cell::Text("old".into())]],
+        );
+        model.update_prompt = Some(crate::app::model::UpdatePrompt::new(
+            update_candidate(),
+            update_source(),
+            update_relation(),
+        ));
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("Edit result cell"), "{text}");
+        assert!(text.contains("Replacement"), "{text}");
+        assert!(text.contains("empty string"), "{text}");
+        assert!(text.contains("literal text"), "{text}");
+        assert!(text.contains("Nothing is sent"), "{text}");
+    }
+
+    #[test]
+    fn cell_update_review_shows_the_exact_bound_statement_and_no_send_claim() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        model.last_sql = Some("SELECT order_id, note FROM public.orders".into());
+        with_rows(
+            &mut model,
+            &["order_id", "note"],
+            &[&[Cell::Text("7".into()), Cell::Text("old".into())]],
+        );
+        let plan = update_plan();
+        model.pending_update = Some(crate::app::model::PendingUpdate {
+            candidate: update_candidate(),
+            relation: update_relation(),
+            plan,
+        });
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("Review generated UPDATE"), "{text}");
+        assert!(text.contains("Exact bound statement"), "{text}");
+        assert!(text.contains("UPDATE \"public\".\"orders\""), "{text}");
+        assert!(text.contains("new note"), "{text}");
+        assert!(text.contains("Nothing has been sent yet"), "{text}");
+        assert!(text.contains("will not be rerun automatically"), "{text}");
+    }
+
     #[test]
     fn the_full_layout_shows_connection_environment_tls_and_hints() {
         let model = connected_model(Environment::Local);
@@ -2331,7 +4296,10 @@ mod tests {
         assert!(text.contains("Results"));
         assert!(text.contains("Ready"));
         assert!(text.contains("Ctrl+R"), "the run key must be discoverable");
-        assert!(text.contains("Ctrl+Q"), "quitting must be discoverable");
+        assert!(
+            text.contains("Ctrl+P"),
+            "the command palette must be discoverable"
+        );
     }
 
     #[test]
@@ -2459,6 +4427,316 @@ mod tests {
             number_at < value_at,
             "the row number must precede the row: {grid_line:?}"
         );
+    }
+
+    #[test]
+    fn copy_confirmation_names_the_cell_and_size_without_rendering_the_value() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        model.clipboard_osc52 = true;
+        with_rows(
+            &mut model,
+            &["id", "secret_note"],
+            &[&[
+                Cell::Text("1".into()),
+                Cell::Text("sensitive-result".into()),
+            ]],
+        );
+        model.selected_column = 1;
+        crate::app::update::update(
+            &mut model,
+            crate::app::Message::Action(crate::app::Action::CopyValue),
+        );
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("Confirm copy"), "{text}");
+        assert!(text.contains("Cell: row 1"), "{text}");
+        assert!(text.contains("column 2 (secret_note)"), "{text}");
+        assert!(text.contains("16 UTF-8 bytes, 16 characters"), "{text}");
+        assert!(text.contains("terminal clipboard sequence"), "{text}");
+        assert!(
+            text.contains("never reads or clears the clipboard"),
+            "{text}"
+        );
+        assert!(text.contains("acceptance is unconfirmed"), "{text}");
+        assert!(text.contains("Enter to send once"), "{text}");
+        assert!(
+            !text.contains("sensitive-result"),
+            "the confirmation must not display the raw value: {text}"
+        );
+
+        let ascii = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            120,
+            34,
+        );
+        assert!(ascii.is_ascii(), "{ascii:?}");
+        assert!(ascii.contains("Confirm copy"), "{ascii}");
+        assert!(ascii.contains("16 UTF-8 bytes"), "{ascii}");
+    }
+
+    #[test]
+    fn clipboard_outcomes_are_visible_without_claiming_acceptance() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(
+            &mut model,
+            &["id", "value"],
+            &[&[Cell::Text("1".into()), Cell::Text("ready".into())]],
+        );
+        for (notice, needle) in [
+            (crate::app::model::ClipboardNotice::Disabled, "Copy is off"),
+            (
+                crate::app::model::ClipboardNotice::Null,
+                "SQL NULL has no text value",
+            ),
+            (
+                crate::app::model::ClipboardNotice::TooLarge { bytes: 2_000_000 },
+                "over the 1 MiB copy limit",
+            ),
+            (
+                crate::app::model::ClipboardNotice::Stale,
+                "selected result changed",
+            ),
+            (
+                crate::app::model::ClipboardNotice::Sent {
+                    bytes: 5,
+                    characters: 5,
+                },
+                "clipboard acceptance is unconfirm",
+            ),
+        ] {
+            model.clipboard_notice = Some(notice.clone());
+            let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+            assert!(text.contains(needle), "{notice:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn format_outcomes_are_visible_in_the_editor_status_rail() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Editor;
+        for (notice, needle) in [
+            (
+                crate::app::model::FormatNotice::Applied {
+                    before_lines: 1,
+                    after_lines: 4,
+                },
+                "Formatted SQL",
+            ),
+            (
+                crate::app::model::FormatNotice::AlreadyFormatted,
+                "already formatted",
+            ),
+            (crate::app::model::FormatNotice::Empty, "no SQL to format"),
+            (
+                crate::app::model::FormatNotice::Refused {
+                    message: "Format skipped: close the string literal and try again.".into(),
+                },
+                "Format skipped",
+            ),
+        ] {
+            model.format_notice = Some(notice);
+            for (presentation, width, height) in [
+                (rich(), 120, 30),
+                (
+                    presentation(ThemeChoice::Dark, true, GlyphTier::Unicode),
+                    60,
+                    20,
+                ),
+                (
+                    presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+                    40,
+                    12,
+                ),
+                (
+                    Presentation::new(
+                        Theme::new(ThemeChoice::HighContrast, false),
+                        Glyphs::new(GlyphTier::Ascii),
+                        true,
+                    ),
+                    40,
+                    12,
+                ),
+            ] {
+                let text = render_to_string(&model, &Keymap::new(), &presentation, width, height);
+                assert!(text.contains(needle), "{needle}: {text}");
+                if width == 40 {
+                    assert!(
+                        text.is_ascii(),
+                        "ASCII format notice leaked glyphs: {text:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn result_grid_shows_truthful_types_and_unavailable_metadata() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(
+            &mut model,
+            &["id", "label", "payload"],
+            &[&[
+                Cell::Text("7".into()),
+                Cell::Text("ready".into()),
+                Cell::Null,
+            ]],
+        );
+        model.last_execution.as_mut().expect("execution").statements[0]
+            .result_set
+            .as_mut()
+            .expect("result")
+            .set_column_types(vec![Some("int4".into()), Some("text".into()), None]);
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("int4"), "the available type is shown: {text}");
+        assert!(text.contains("text"), "the second type is shown: {text}");
+        assert!(
+            text.contains("unavailable"),
+            "missing metadata is named rather than inferred: {text}"
+        );
+        assert!(
+            text.contains("types: partial"),
+            "the state is explicit: {text}"
+        );
+    }
+
+    #[test]
+    fn result_grid_wide_views_keep_source_identity_and_degrade_to_ascii() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(
+            &mut model,
+            &["id", "hidden", "name", "unused", "amount", "status"],
+            &[
+                &[
+                    Cell::Text("1".into()),
+                    Cell::Text("secret".into()),
+                    Cell::Text("Ada".into()),
+                    Cell::Text("discard".into()),
+                    Cell::Text("9007199254740993".into()),
+                    Cell::Text("ready".into()),
+                ],
+                &[
+                    Cell::Text("2".into()),
+                    Cell::Text("secret-2".into()),
+                    Cell::Text("Grace".into()),
+                    Cell::Text("discard-2".into()),
+                    Cell::Text("9007199254740992".into()),
+                ],
+            ],
+        );
+        model.last_execution.as_mut().expect("execution").statements[0]
+            .result_set
+            .as_mut()
+            .expect("result")
+            .set_column_types(vec![
+                Some("int4".into()),
+                None,
+                Some("text".into()),
+                None,
+                Some("numeric".into()),
+                Some("text".into()),
+            ]);
+        assert!(model.result_grid.toggle_column(1, 6));
+        assert!(model.result_grid.toggle_column(3, 6));
+        model.result_grid.freeze_first = true;
+        model.selected_column = 5;
+
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            180,
+            24,
+        );
+        assert!(
+            text.is_ascii(),
+            "ASCII mode must be entirely ASCII: {text:?}"
+        );
+        assert!(
+            text.contains("shown 4/6 columns"),
+            "hidden count is visible: {text}"
+        );
+        assert!(
+            text.contains("freeze first: on"),
+            "freeze state is visible: {text}"
+        );
+        assert!(
+            text.contains("Ctrl+K g"),
+            "the control path is visible: {text}"
+        );
+        assert!(
+            text.contains("status"),
+            "the selected source column is reachable: {text}"
+        );
+        assert!(
+            !text.contains("secret"),
+            "a hidden source column was drawn: {text}"
+        );
+        assert!(
+            !text.contains("discard"),
+            "another hidden source column was drawn: {text}"
+        );
+        assert!(
+            text.contains("[missing]"),
+            "a short row is marked as missing rather than shifted: {text}"
+        );
+
+        let narrow = render_to_string(&model, &Keymap::new(), &rich(), 80, 24);
+        assert!(
+            narrow.contains("status"),
+            "a narrow window still reaches the selected column: {narrow}"
+        );
+    }
+
+    #[test]
+    fn hostile_type_labels_cannot_emit_terminal_controls() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(&mut model, &["\x1b[31mname"], &[&[Cell::Text("ok".into())]]);
+        model.last_execution.as_mut().expect("execution").statements[0]
+            .result_set
+            .as_mut()
+            .expect("result")
+            .set_column_types(vec![Some("text\x1b[2J".into())]);
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            100,
+            24,
+        );
+        assert!(!text.contains('\x1b'), "terminal control reached the grid");
+    }
+
+    #[test]
+    fn result_outcomes_keep_failure_cancellation_and_connection_loss_distinct() {
+        for (status, expected) in [
+            (ExecutionStatus::Failed, "Failed"),
+            (ExecutionStatus::Cancelled, "Query cancelled by server"),
+            (
+                ExecutionStatus::ConnectionLost,
+                "Connection lost - query outcome unknown",
+            ),
+        ] {
+            let mut model = connected_model(Environment::Local);
+            model.focus = Focus::Results;
+            model.last_execution = Some(Execution {
+                job: JobId(1),
+                statements: Vec::new(),
+                status,
+                elapsed: Duration::from_millis(1),
+                error: None,
+                transaction: crate::query::result::TransactionState::Autocommit,
+            });
+            let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 24);
+            assert!(text.contains(expected), "{expected} missing from {text}");
+        }
     }
 
     #[test]
@@ -2810,6 +5088,34 @@ mod tests {
     }
 
     #[test]
+    fn the_parameter_prompt_shows_progress_literal_semantics_and_only_a_mask() {
+        let mut model = connected_model(Environment::Local);
+        let mut prompt = crate::app::model::ParameterPrompt::new(
+            "SELECT :customer_id;".into(),
+            None,
+            vec!["customer_id".into(), "status".into()],
+        );
+        for character in "secret-marker".chars() {
+            prompt.push(character);
+        }
+        model.parameter_prompt = Some(prompt);
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 110, 30);
+        assert!(text.contains("Parameter 1 of 2: :customer_id"), "{text}");
+        assert!(text.contains("literal text data"), "{text}");
+        assert!(text.contains("text is valid"), "{text}");
+        assert!(text.contains("Enter to accept"), "{text}");
+        assert!(
+            !text.contains("secret-marker"),
+            "the value was rendered: {text}"
+        );
+        assert!(
+            text.contains("•••••••••••••") || text.contains("*************"),
+            "the value is represented only by a mask: {text}"
+        );
+    }
+
+    #[test]
     fn the_header_says_when_the_tree_could_not_get_its_own_connection() {
         let mut model = connected_model(Environment::Local);
         // The normal case needs no announcement.
@@ -2881,6 +5187,40 @@ mod tests {
             text.contains("mention a credential are never recorded"),
             "the rule is stated where someone looks for a missing statement: {text}"
         );
+    }
+
+    #[test]
+    fn the_command_palette_names_context_and_recovers_from_no_matches() {
+        let mut model = connected_model(Environment::Local);
+        model.palette = Some(crate::app::palette::Palette::over_commands(
+            vec![crate::app::palette::PaletteEntry {
+                label: "Run the whole buffer".to_owned(),
+                detail: "Ctrl+R".to_owned(),
+                group: "Editor",
+                command: crate::app::palette::PaletteCommand::Run(crate::app::Action::RunBuffer),
+            }],
+            "Focus: Editor. Type to search; Esc closes.",
+        ));
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+        assert!(text.contains("Command palette"), "{text}");
+        assert!(text.contains("Type to search"), "{text}");
+        assert!(text.contains("Editor"), "{text}");
+        assert!(text.contains("Run the whole buffer"), "{text}");
+
+        model.palette.as_mut().expect("open").query = "does-not-exist".into();
+        let ascii = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            80,
+            24,
+        );
+        assert!(
+            ascii.contains("No applicable command matches that"),
+            "{ascii}"
+        );
+        assert!(ascii.contains("Esc closes"), "{ascii}");
+        assert!(ascii.is_ascii(), "{ascii:?}");
     }
 
     #[test]
@@ -3070,6 +5410,69 @@ mod tests {
     }
 
     #[test]
+    fn a_retained_result_refresh_is_visible_and_ascii_safe_while_in_flight() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(&mut model, &["value"], &[&[Cell::Text("old".into())]]);
+        model.last_sql = Some("SELECT value FROM public.orders;".into());
+        model.phase = QueryPhase::Running {
+            job: JobId(2),
+            statements: 1,
+        };
+        model.running_refresh = true;
+        model.refresh_notice = Some(
+            "Refreshing the retained result; the editor is unchanged and nothing is sent until any parameters are entered.".into(),
+        );
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 30);
+        assert!(text.contains("Refreshing retained result"), "{text}");
+        assert!(text.contains("editor is unchanged"), "{text}");
+
+        let mut idle = model.clone();
+        idle.phase = QueryPhase::Idle;
+        idle.running_refresh = false;
+        let idle_text = render_to_string(&idle, &Keymap::new(), &rich(), 140, 30);
+        assert!(idle_text.contains("F6 Refresh"), "{idle_text}");
+
+        let ascii = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            140,
+            30,
+        );
+        assert!(
+            ascii.is_ascii(),
+            "refresh state leaked a non-ASCII glyph: {ascii:?}"
+        );
+        assert!(ascii.contains("Refreshing retained result"), "{ascii}");
+    }
+
+    #[test]
+    fn a_refused_retained_result_refresh_is_visible_in_a_narrow_ascii_layout() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(&mut model, &["value"], &[&[Cell::Text("old".into())]]);
+        model.refresh_notice = Some(
+            "Retained result refresh was refused: this source contains multiple statements.".into(),
+        );
+
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            60,
+            24,
+        );
+        assert!(text.contains("refresh"), "refusal is visible: {text}");
+        assert!(
+            text.is_ascii(),
+            "narrow refusal emitted non-ASCII: {text:?}"
+        );
+        assert!(!text.contains('\x1b'), "refusal emitted terminal controls");
+    }
+
+    #[test]
     fn reduced_motion_replaces_animation_with_the_same_words() {
         let mut model = connected_model(Environment::Local);
         model.phase = QueryPhase::Running {
@@ -3153,6 +5556,79 @@ mod tests {
     }
 
     #[test]
+    fn a_fresh_frame_names_connection_state_and_a_safe_next_action() {
+        let disconnected = Model::new(100);
+        let text = render_to_string(&disconnected, &Keymap::new(), &rich(), 80, 24);
+        assert!(text.contains("Connection required"), "{text}");
+        assert!(text.contains("Connect before running SQL"), "{text}");
+        assert!(text.contains("Command palette"), "{text}");
+        assert!(!text.contains("Run the buffer once SQL is ready"), "{text}");
+
+        let mut connected = connected_model(Environment::Local);
+        connected.editor.set_text("");
+        let text = render_to_string(&connected, &Keymap::new(), &rich(), 80, 24);
+        assert!(text.contains("Start here"), "{text}");
+        assert!(text.contains("Type SQL in this editor"), "{text}");
+        assert!(text.contains("Run the buffer once SQL is ready"), "{text}");
+        assert!(text.contains("Command palette"), "{text}");
+    }
+
+    #[test]
+    fn the_footer_changes_with_focus_and_uses_configured_keys() {
+        let mut keys = std::collections::BTreeMap::new();
+        keys.insert(
+            "run-buffer".to_owned(),
+            crate::config::schema::KeySpec::One("f2".to_owned()),
+        );
+        let keymap = Keymap::from_config(&keys).expect("valid configured keymap");
+        let mut model = connected_model(Environment::Local);
+        let editor = render_to_string(&model, &keymap, &rich(), 140, 30);
+        assert!(editor.contains("F2 Run"), "{editor}");
+        assert!(editor.contains("Palette"), "{editor}");
+
+        model.focus = Focus::Results;
+        with_rows(&mut model, &["id"], &[&[Cell::Text("1".into())]]);
+        let results = render_to_string(&model, &keymap, &rich(), 140, 30);
+        assert!(results.contains("Inspect"), "{results}");
+        assert!(results.contains("Filter"), "{results}");
+        assert!(results.contains("Grid controls"), "{results}");
+        assert!(
+            !results.contains("F2 Run"),
+            "editor-only run hint leaked: {results}"
+        );
+        let hint_count = ["Inspect", "Filter", "Grid controls", "Focus"]
+            .iter()
+            .filter(|label| results.contains(**label))
+            .count();
+        assert!(hint_count <= crate::app::discovery::MAX_CONTEXTUAL_HINTS);
+    }
+
+    #[test]
+    fn empty_and_filtered_results_keep_distinct_recovery_words() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        with_rows(&mut model, &["id"], &[]);
+        let empty = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(empty.contains("No rows returned"), "{empty}");
+        assert!(!empty.contains("No query has run yet"), "{empty}");
+
+        with_rows(&mut model, &["id"], &[&[Cell::Text("one".into())]]);
+        model.result_filter = "missing".into();
+        let filtered = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(filtered.contains("No retained row contains"), "{filtered}");
+        assert!(filtered.contains("Esc clears the filter"), "{filtered}");
+
+        let mut keys = std::collections::BTreeMap::new();
+        keys.insert(
+            "dismiss".to_owned(),
+            crate::config::schema::KeySpec::One("f8".to_owned()),
+        );
+        let configured = Keymap::from_config(&keys).expect("valid configured keymap");
+        let filtered = render_to_string(&model, &configured, &rich(), 120, 30);
+        assert!(filtered.contains("F8 clears the filter"), "{filtered}");
+    }
+
+    #[test]
     fn an_error_shows_headline_cause_and_next_action_before_technical_detail() {
         let mut model = connected_model(Environment::Local);
         model.error = Some(
@@ -3177,6 +5653,106 @@ mod tests {
         model.error_expanded = true;
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
         assert!(text.contains("42P01"), "expanding reveals SQLSTATE");
+    }
+
+    #[test]
+    fn a_mapped_error_marks_the_editor_line_and_keeps_the_source_visible() {
+        let mut model = connected_model(Environment::Local);
+        let sql = "SELECT 1;\nSELECT café FROM orders WHERE id = 0;";
+        model.editor.set_text(sql);
+        model.error = Some(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Query,
+                "syntax error at or near orders",
+                "running statement 2",
+            )
+            .in_statement(2)
+            .at_position(19),
+        );
+        model.error_location = crate::query::error_location::locate(
+            sql,
+            None,
+            2,
+            crate::diagnostics::SqlPosition { character: 19 },
+        );
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 32);
+        assert!(
+            text.contains("Location: statement 2, line 2, column 19"),
+            "{text}"
+        );
+        assert!(text.contains("SELECT café FROM orders"), "{text}");
+        assert!(
+            text.lines()
+                .any(|line| line.contains("!") && line.contains("SELECT café")),
+            "the error line has an explicit ASCII marker: {text}"
+        );
+
+        let compact = render_to_string(&model, &Keymap::new(), &rich(), 80, 20);
+        assert!(compact.contains("syntax error"), "{compact}");
+        assert!(
+            compact.contains("SELECT café"),
+            "compact mode hid the editor: {compact}"
+        );
+    }
+
+    #[test]
+    fn object_context_is_quoted_and_catalogue_claims_are_bounded_by_a_match() {
+        let mut model = connected_model(Environment::Local);
+        model.error = Some(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Query,
+                "duplicate key value violates unique constraint",
+                "running statement 1",
+            )
+            .in_statement(1)
+            .object_context(
+                crate::diagnostics::ObjectContext::from_server_fields(
+                    Some("public"),
+                    Some("orders"),
+                    Some("order_id"),
+                    Some("orders_pkey"),
+                )
+                .expect("object context"),
+            ),
+        );
+        model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+            catalog: crate::query::completion::CompletionCatalog {
+                objects: Vec::new(),
+                relations: vec![crate::query::completion::CatalogRelation {
+                    schema: "public".into(),
+                    name: "orders".into(),
+                    columns: vec![crate::query::completion::CatalogColumn {
+                        name: "order_id".into(),
+                        data_type: "bigint".into(),
+                    }],
+                }],
+            },
+            loaded_at: "2026-09-04 12:00:00 +02:00".into(),
+        };
+        let matched = render_to_string(&model, &Keymap::new(), &rich(), 140, 40);
+        assert!(
+            matched.contains(
+                "Object context: relation \"public\".\"orders\", column \"order_id\", constraint \"orders_pkey\""
+            ),
+            "{matched}"
+        );
+        assert!(
+            matched.contains("Catalogue: matched relation and column \"order_id\"; type bigint"),
+            "{matched}"
+        );
+
+        model.completion.catalog = crate::app::completion::CatalogStatus::Unavailable {
+            message: "permission denied".into(),
+        };
+        let unavailable = render_to_string(&model, &Keymap::new(), &rich(), 140, 40);
+        assert!(
+            unavailable.contains("Catalogue: Schema snapshot unavailable"),
+            "{unavailable}"
+        );
+        assert!(
+            unavailable.contains("catalogue-derived claim"),
+            "{unavailable}"
+        );
     }
 
     // -------------------------------------------------------- object tree
@@ -3291,6 +5867,7 @@ mod tests {
         let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
         assert!(text.contains("zzz"), "the filter text is visible: {text}");
         assert!(text.contains("No object matches this filter."), "{text}");
+        assert!(text.contains("Searched \"zzz\"."), "{text}");
     }
 
     #[test]
@@ -3404,6 +5981,221 @@ mod tests {
         assert!(text.contains("0 match(es)"), "{text}");
     }
 
+    #[test]
+    fn the_connection_picker_names_the_default_profile_and_secret_boundary() {
+        let mut model = connected_model(Environment::Local);
+        model.palette = Some(crate::app::palette::Palette::over_connections(vec![
+            crate::app::palette::PaletteEntry {
+                label: "Use default connection settings".into(),
+                detail: "ordinary resolution; no profile selected".into(),
+                group: "Default",
+                command: crate::app::palette::PaletteCommand::ConnectProfile(None),
+            },
+            crate::app::palette::PaletteEntry {
+                label: "orders-prod".into(),
+                detail: "db.example.net:5432 | orders | role app | read-only".into(),
+                group: "Profiles",
+                command: crate::app::palette::PaletteCommand::ConnectProfile(Some(
+                    "orders-prod".into(),
+                )),
+            },
+        ]));
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 34);
+        for expected in [
+            "Connection picker",
+            "Use default connection settings",
+            "orders-prod",
+            "Profiles",
+            "read-only",
+            "passwords",
+            "provider tokens",
+            "Enter to connect",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+
+        let plain = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::HighContrast, false, GlyphTier::Ascii),
+            140,
+            34,
+        );
+        assert!(plain.contains("Connection picker"), "{plain}");
+        assert!(plain.is_ascii(), "picker ASCII mode emitted non-ASCII");
+
+        let compact = render_to_string(&model, &Keymap::new(), &rich(), 80, 24);
+        assert!(compact.contains("Connection picker"), "{compact}");
+        let no_colour = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Unicode),
+            100,
+            24,
+        );
+        assert!(no_colour.contains("read-only"), "{no_colour}");
+        let reduced = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true),
+            Glyphs::new(GlyphTier::Unicode),
+            true,
+        );
+        let reduced_text = render_to_string(&model, &Keymap::new(), &reduced, 100, 24);
+        assert!(reduced_text.contains("Connection picker"), "{reduced_text}");
+    }
+
+    #[test]
+    fn the_export_palette_names_shapes_and_retained_row_scope() {
+        let mut model = connected_model(Environment::Local);
+        model.palette = Some(crate::app::palette::Palette::over_export_formats(
+            [
+                crate::app::model::ExportFormat::Csv,
+                crate::app::model::ExportFormat::Tsv,
+                crate::app::model::ExportFormat::Json,
+                crate::app::model::ExportFormat::Ndjson,
+                crate::app::model::ExportFormat::Markdown,
+            ]
+            .into_iter()
+            .map(|format| crate::app::palette::PaletteEntry {
+                label: format.label().to_owned(),
+                detail: format!("{}; {}", format.description(), format.extension()),
+                group: "Formats",
+                command: crate::app::palette::PaletteCommand::ChooseExportFormat(format),
+            })
+            .collect(),
+            "3 row(s) ready: retained rows on screen only; choose a shape before naming the destination.",
+        ));
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 34);
+        for expected in [
+            "Export format",
+            "retained rows on screen",
+            "CSV",
+            "TSV",
+            "JSON",
+            "NDJSON",
+            "Markdown",
+            "Enter to choose",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+
+        let compact = render_to_string(&model, &Keymap::new(), &rich(), 80, 24);
+        assert!(compact.contains("Export format"), "{compact}");
+        let plain = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::HighContrast, false, GlyphTier::Ascii),
+            100,
+            24,
+        );
+        assert!(
+            plain.is_ascii(),
+            "export palette emitted non-ASCII: {plain}"
+        );
+        assert!(plain.contains("retained rows on screen"), "{plain}");
+        let reduced = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true),
+            Glyphs::new(GlyphTier::Unicode),
+            true,
+        );
+        let reduced_text = render_to_string(&model, &Keymap::new(), &reduced, 100, 24);
+        assert!(reduced_text.contains("Export format"), "{reduced_text}");
+    }
+
+    #[test]
+    fn connection_details_explain_identity_transport_and_posture_without_secrets() {
+        let mut model = connected_model(Environment::Production);
+        model.credential_presentation = crate::connection::cloud::built_in()
+            .into_iter()
+            .find(|provider| provider.name == "entra")
+            .map(|provider| provider.presentation());
+        model.connection_details = true;
+
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 34);
+        for expected in [
+            "Connection details",
+            "Target",
+            "Database",
+            "Role",
+            "PROD",
+            "read-write",
+            "Microsoft Entra ID",
+            "az account get-access-token",
+            "TLS required",
+            "token is not shown, stored, logged, or written",
+            "Esc closes",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(
+            !text.contains("access-token --resource"),
+            "raw arguments leaked"
+        );
+
+        // The same facts survive the bare, no-colour presentation.
+        let plain = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::HighContrast, false, GlyphTier::Ascii),
+            140,
+            34,
+        );
+        for expected in ["Microsoft Entra ID", "TLS required", "read-write"] {
+            assert!(plain.contains(expected), "{expected:?} missing:\n{plain}");
+        }
+        assert!(
+            plain.is_ascii(),
+            "ASCII presentation emitted non-ASCII text"
+        );
+    }
+
+    #[test]
+    fn connection_details_never_guess_a_cloud_identity_for_password_sessions() {
+        let mut model = connected_model(Environment::Local);
+        model.connection_details = true;
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 34);
+        assert!(text.contains("No cloud token was requested"), "{text}");
+        assert!(
+            text.contains(".pgpass"),
+            "supported password routes are stated"
+        );
+        assert!(!text.contains("Microsoft Entra"), "identity was invented");
+    }
+
+    #[test]
+    fn connection_details_sanitise_custom_provider_display_text() {
+        let mut model = connected_model(Environment::Local);
+        model.credential_provider = Some("corp\x1b[31m".into());
+        model.credential_presentation = Some(
+            crate::connection::cloud::Provider {
+                name: "corp\x1b[31m".into(),
+                command: vec!["token\x1b[2J".into(), "--secret".into()],
+                extract: crate::connection::cloud::Extract::Raw,
+                timeout: std::time::Duration::from_secs(60),
+                remedy: "run corp login".into(),
+            }
+            .presentation(),
+        );
+        model.connection_details = true;
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            140,
+            34,
+        );
+        assert!(
+            !text.contains('\x1b'),
+            "escape reached the rendered terminal"
+        );
+        assert!(
+            text.contains("\\x1B[31m"),
+            "sanitised provider name is visible"
+        );
+        assert!(!text.contains("--secret"), "provider arguments leaked");
+    }
+
     // ------------------------------------------------------------ chords
 
     #[test]
@@ -3502,6 +6294,7 @@ mod tests {
             impact: crate::query::Impact::Destructive,
             typed: String::new(),
             required: "orders".into(),
+            source: None,
         });
 
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
@@ -3536,6 +6329,7 @@ mod tests {
             impact: crate::query::Impact::Write,
             typed: String::new(),
             required: "orders".into(),
+            source: None,
         });
         let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
         assert!(text.contains("Enter to run it"), "{text}");
@@ -3543,6 +6337,116 @@ mod tests {
             !text.contains("Type the database name"),
             "typing a word for every write would train people to type it"
         );
+    }
+
+    fn plan_model(analyzed: bool) -> Model {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        model.plan.ready(
+            crate::query::PlanDocument::parse(
+                r#"[{"Plan":{"Node Type":"Nested Loop","Startup Cost":0.1,"Total Cost":18.4,"Plan Rows":4,"Actual Rows":40,"Actual Total Time":12.0,"Actual Loops":2,"Plans":[{"Node Type":"Seq Scan","Relation Name":"orders","Startup Cost":0,"Total Cost":24,"Plan Rows":100,"Actual Rows":1000,"Actual Total Time":7.0,"Actual Loops":2,"Filter":"owner = 'demo'"},{"Node Type":"Index Scan","Relation Name":"items","Index Name":"items_order_idx","Plan Rows":4,"Actual Rows":4,"Actual Total Time":1.0,"Actual Loops":2}]},"Planning Time":0.3,"Execution Time":25.7}]"#,
+                analyzed,
+            )
+            .expect("plan fixture"),
+        );
+        model
+    }
+
+    #[test]
+    fn a_plain_plan_is_a_readable_tree_with_estimate_only_wording() {
+        let model = plan_model(false);
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("EXPLAIN"), "{text}");
+        assert!(text.contains("Nested Loop"), "{text}");
+        assert!(text.contains("Seq Scan orders"), "{text}");
+        assert!(text.contains("est rows"), "{text}");
+        assert!(text.contains("cost units"), "{text}");
+        assert!(
+            text.contains("not measured"),
+            "plain plans do not imply timing"
+        );
+        assert!(text.contains("Attention:"), "{text}");
+    }
+
+    #[test]
+    fn an_analyzed_plan_names_observed_metrics_loops_and_mismatch_basis() {
+        let model = plan_model(true);
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("EXPLAIN ANALYZE"), "{text}");
+        assert!(text.contains("actual rows"), "{text}");
+        assert!(text.contains("time"), "{text}");
+        assert!(text.contains("loops"), "{text}");
+        assert!(text.contains("Estimate mismatch"), "{text}");
+        assert!(text.contains("measured time"), "{text}");
+        assert!(text.contains("25.70 ms"), "{text}");
+    }
+
+    #[test]
+    fn plan_metrics_keep_width_and_startup_time_distinct_from_cost() {
+        let mut model = connected_model(Environment::Local);
+        model.focus = Focus::Results;
+        model.sidebar_visible = false;
+        let document = crate::query::PlanDocument::parse(
+            r#"[{"Plan":{"Node Type":"Result","Startup Cost":0.1,"Total Cost":2.5,"Plan Rows":3,"Plan Width":32,"Actual Startup Time":0.25,"Actual Total Time":1.5,"Actual Rows":3,"Actual Loops":2}}]"#,
+            true,
+        )
+        .expect("plan fixture");
+        let metrics = plan_metrics(&document.root, true);
+        model.plan.ready(document);
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
+        assert!(text.contains("width 32"), "{text}");
+        assert!(text.contains("actual startup 0.25 ms"), "{text}");
+        assert!(text.contains("actual total 1.50 ms/loop"), "{text}");
+        assert!(metrics.contains("cost 0.10..2.50 cost units"), "{metrics}");
+    }
+
+    #[test]
+    fn plan_text_survives_narrow_ascii_and_hostile_server_fields() {
+        let mut model = plan_model(false);
+        model.plan.ready(
+            crate::query::PlanDocument::parse(
+                r#"[{"Plan":{"Node Type":"Seq\nScan\u001b[31m","Relation Name":"orders","Filter":"password=hunter2-not-a-real-password"}}]"#,
+                false,
+            )
+            .expect("hostile plan fixture"),
+        );
+        let text = render_to_string(
+            &model,
+            &Keymap::new(),
+            &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+            60,
+            20,
+        );
+        assert!(
+            text.contains("Seq\\nScan"),
+            "control text is escaped: {text}"
+        );
+        assert!(
+            text.contains("[redacted]"),
+            "secret-shaped text is redacted: {text}"
+        );
+        for line in text.lines() {
+            assert!(
+                display_width(line.trim_end()) <= 60,
+                "line overflowed: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn analyze_confirmation_states_execution_and_side_effects_before_enter() {
+        let mut model = connected_model(Environment::Local);
+        model.pending_plan = Some(crate::app::model::PendingPlan {
+            sql: "SELECT do_work()".into(),
+            impact: crate::query::Impact::Read,
+            typed: String::new(),
+            required: String::new(),
+        });
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("will execute the statement"), "{text}");
+        assert!(text.contains("Side effects are possible"), "{text}");
+        assert!(text.contains("not automatically roll it back"), "{text}");
+        assert!(text.contains("Enter to execute once"), "{text}");
     }
 
     #[test]

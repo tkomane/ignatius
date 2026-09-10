@@ -1,5 +1,7 @@
 # Ignatius
 
+[![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
+
 A terminal-native PostgreSQL workbench: a full-screen client for exploring, and
 the same binary as a scriptable CLI for automating.
 
@@ -39,12 +41,14 @@ Everything the demo needs is synthetic and lives in `docker/dev.env`; no real
 database is ever required.
 
 In the client: **Ctrl+R** runs the buffer, **Ctrl+T** runs the statement at the
-cursor, **Ctrl+C** cancels, **F1** shows help, **Ctrl+Q** quits.
+cursor, **Ctrl+Space** opens schema completion, **Ctrl+C** cancels, **F1** shows
+help, **Ctrl+Q** quits.
 
 Navigation: **Ctrl+B** shows the object tree, **Tab** moves between panes,
 **Ctrl+P** opens the palette, and **Ctrl+K** lists the chords. In the tree,
 arrows navigate, `/` filters, and **Enter** puts the selected object's quoted
-name where you are writing SQL.
+name where you are writing SQL. Completion is local to the loaded schema: type
+normally, choose with the arrows, accept with **Enter**, or dismiss with **Esc**.
 
 The run keys are chords rather than function keys, because operating systems and
 assistants routinely claim `F5` before a terminal program sees it. `F5` and `F9`
@@ -61,6 +65,14 @@ or permanently, in `config.toml`:
 ```toml
 [ui]
 glyphs = "nerd-font"
+```
+
+Automatic schema completion is on by default. If you prefer a quiet editor,
+keep explicit **Ctrl+Space** and turn off only automatic popups:
+
+```toml
+[ui]
+completion = false
 ```
 
 It is never chosen automatically: whether your font carries the icon range cannot
@@ -103,6 +115,21 @@ One line in, one answer out. No alternate screen, no raw mode, nothing that only
 makes sense to an eye, so it works in `TERM=dumb`, stays in your scrollback, and
 can be driven by a pipe. The prompt carries the database, the production marker
 and the transaction state as words.
+
+Completion is explicit in plain mode and does not run a partial statement:
+
+```text
+orders => SELECT * FROM ord
+orders => \complete
+1  orders  table  public  readable
+orders => \use 1
+Completion inserted: orders
+orders => ;
+```
+
+Use `\complete [prefix]` to narrow the list and `\use <number|exact-name>` to
+accept one printed candidate. A schema snapshot is loaded once per session;
+loading, stale, unavailable, and bounded-list states are printed as words.
 
 ## Named connections
 
@@ -167,8 +194,9 @@ ignatius version --verbose      # version, revision, build identity, target
 There is no OS credential store by decision: password files remain compatible
 with `psql` and keep the binary dependency-light. GSSAPI, Kerberos and Windows
 SSPI are unsupported; the required Entra, AWS and Google Cloud routes use a
-short-lived token as the password over TLS. Copying a value through opt-in OSC
-52 remains planned. When a server asks for a password, both the full-screen
+short-lived token as the password over TLS. Copying a value through confirmed,
+opt-in OSC 52 is implemented locally; hand-terminal acceptance remains
+unverified. When a server asks for a password, both the full-screen
 client and plain mode prompt safely when a terminal is available; a script fails
 rather than waiting for input nobody can provide.
 `docs/support/compatibility.md` is the authoritative list, and the client tells
@@ -177,6 +205,8 @@ you at the point of use rather than failing quietly.
 ## Documentation
 
 - `docs/status.md` - what is done, what is verified, what is next
+- [Product roadmap](docs/product/roadmap.md) - milestones, evidence gates and agent assignments
+- [Agent playbook](docs/operations/agent-playbook.md) - ownership, architecture review and handoff
 - `docs/product/landscape.md` - the other tools, and why this one
 - `docs/architecture/decisions/` - why it is built this way
 - `docs/security/threat-model.md` - what is protected and what is not

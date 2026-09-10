@@ -4,6 +4,14 @@
 API and PyPI on that date; product facts for the commercial tools were read from
 their own sites. Anything not verified on that date is marked as unverified.
 
+**Planning note, 2026-09-04:** this is historical research, not a current
+competitor benchmark. The build/defer choices below predate later delivered
+features and closed ADRs. Use [the roadmap](roadmap.md) for present sequencing
+and [compatibility](../support/compatibility.md) for support claims. The
+[acceptance protocol](acceptance.md) requires observed comparison before
+claiming an experience advantage; no market or naming check was refreshed by
+this planning pass.
+
 The purpose of this document is to decide whether a new PostgreSQL client is
 worth building, and if so, which parts of it are actually differentiated. It is
 not a competitor takedown. Every tool below is maintained, several are excellent,

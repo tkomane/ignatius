@@ -194,6 +194,16 @@ mod tests {
     }
 
     #[test]
+    fn a_parameterized_descriptor_keeps_the_bound_value_out_of_logging() {
+        let template = "SELECT :value";
+        let bound = "SELECT E'synthetic-parameter-value'";
+        let desc = statement_descriptor(8, template);
+        assert_eq!(desc, "job=8 statement_chars=13");
+        assert!(!desc.contains(bound));
+        assert!(!desc.contains("synthetic-parameter-value"));
+    }
+
+    #[test]
     fn logging_excludes_dependencies_and_redacts_internal_events() {
         const SECRET: &str = "synthetic-log-secret";
         const DEPENDENCY_SQL: &str = "dependency-sql-marker";

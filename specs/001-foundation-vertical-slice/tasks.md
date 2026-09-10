@@ -76,7 +76,7 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T049 Operations documentation: local development, verification, release
 - [x] T050 CI workflow for macOS, Windows and Linux
 - [ ] T051 Verify on Windows 11 in Windows Terminal with PowerShell 7 (CI builds and tests it; nobody has used it)
-- [ ] T052 Verify on Linux, including the Unix socket path (CI builds and tests it; the socket path is untested)
+- [ ] T052 Verify on Linux, including the Unix socket path (automated socket evidence exists; full-screen Linux hand use remains unverified)
 - [x] T053 Extend the CI server matrix to PostgreSQL 14 through 18
 - [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8
 - [x] T055 Automated terminal-restoration test in CI (pty on Unix)
@@ -93,8 +93,8 @@ are independent of one another.
 
 ## Status
 
-Phases 1 to 7 are complete except the five open items above, which all require
-either a platform this session could not reach or CI infrastructure. They are
+Phases 1 to 7 are complete except the three open items above, which require
+platform hand evidence or the Windows ConPTY harness. They are
 carried in `docs/status.md` as the next actions.
 
 Partial T052 evidence on 2026-08-16: the focused
@@ -103,5 +103,8 @@ container against a real PostgreSQL Unix socket, executing `SELECT 1` through
 the production session path. The same pinned Linux container also passed 497
 library tests, all 38 CLI contract tests and all 3 Unix pty restoration tests.
 T052 remains unchecked because this is automated Linux evidence, not hand use
-of the full-screen client in a Linux terminal, and the shared CI workflow does
-not yet provide the socket fixture.
+of the full-screen client in a Linux terminal. The shared CI workflow now has
+the socket fixture: its execution passed at `52872ac` in
+[run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
+rechecked on 2026-09-04. That historical source result does not verify newer
+local features or complete the hand-use task.

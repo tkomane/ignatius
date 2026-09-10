@@ -6,9 +6,9 @@ signed, notarised or published until a real release proves it.
 
 ## Publishing options
 
-Nothing has been published. The repository has a private GitHub remote; these
-are the remaining routes in increasing order of commitment. Each row assumes
-the ones above it.
+Nothing has been published. The repository is public source at `tkomane/ignatius`
+since 2026-09-11; these are the remaining routes in increasing order of
+commitment. Each row assumes the ones above it.
 
 | Option | Effort | Ongoing cost | Reversible | Reaches | Needs first |
 | --- | --- | --- | --- | --- | --- |
@@ -20,10 +20,13 @@ the ones above it.
 | **F. Homebrew tap and Scoop** | Half a day each | A manifest update per release, forever | Yes: delete the tap | macOS and Windows users who expect a package manager | D, and a release cadence you can sustain |
 | **G. Homebrew core and Winget** | Days, plus review | Their standards, their timelines | Hard | Everyone | F, plus a user base that justifies it |
 
-**Current state: B. Move to C only once CI is green on all three platforms.**
-Publishing source before Windows and Linux have ever been run would
-invite issues about platforms nobody has tested, which is the fastest way to
-spend a weekend on someone else's environment.
+**Current state: C, entered on 2026-09-11 without its prerequisite being met.**
+The repository was made public to restore CI after the private Actions quota was
+exhausted. C expects green CI on all three platforms, and Windows is currently
+red on the active branch, so D onwards remains blocked. Publishing source before
+Windows and Linux have ever been run would invite issues about platforms nobody
+has tested, which is the fastest way to spend a weekend on someone else's
+environment.
 
 D onwards should wait for a real 0.1.0 with the compatibility matrix filled in.
 E in particular is one-way: a published crates.io version can be yanked but never

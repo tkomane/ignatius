@@ -8,7 +8,95 @@ source can generate user-facing notes.
 
 ## Unreleased
 
-No changes have been assigned to a version after the 0.1.0 candidate.
+- Improved: Results now offers an explicit retained-result refresh through
+  portable `F6`, an enhanced-terminal `Ctrl+Shift+R` alias, the command palette
+  and its contextual footer. It reuses the
+  exact source behind the completed result rather than the editable buffer,
+  refuses multi-statement and non-read-classified sources, prompts again for
+  named parameters, and reports the actual outcome without retry or passive
+  replay. The normal execution, history, cancellation, parameter privacy and
+  machine-output boundaries remain in force.
+- Improved: `Ctrl+K u` and the command palette can now prepare a reviewable
+  result-cell `UPDATE` for a conservative direct single-table `SELECT`. Live
+  primary-key and privilege metadata is resolved in the session, production
+  and read-only sessions refuse before replacement input, and the separate
+  review shows the exact bound statement before one parameterized execution.
+  Esc sends nothing, stale result identity is rejected, and the source result
+  is never rerun automatically. Printable `u`, scripted output and history
+  remain unchanged apart from the safe update template when it really runs.
+- Improved: named `:parameter` placeholders now prompt once per distinct name in
+  first-use order in both clients. The full-screen prompt shows progress and a
+  mask, plain mode keeps prompts on stderr without echo, and scripts can map
+  `--param-env NAME=VARIABLE` without putting secret values in arguments. Empty
+  text is valid, repeated names share one value, literal-safe binding refuses
+  NUL, and template SQL remains the only form kept in history or logs. Server
+  positions from the expanded request are reported as unavailable rather than
+  mapped to a misleading template caret.
+- Improved: interactive result export now opens a searchable save-as palette for
+  CSV, TSV, JSON, NDJSON and Markdown before asking for a path. It states the
+  retained and filtered row scope, never guesses from the filename extension,
+  and keeps the existing no-overwrite and partial-file boundaries. Scripts can
+  request explicit `--format insert --insert-table TABLE` output with quoted
+  identifiers, SQL NULL and escaped text literals; ambiguous columns, NUL text,
+  missing tables and `--no-header` are refused, and generated SQL is never
+  executed automatically.
+- Improved: when named profiles are configured, starting the interactive client
+  without a target opens a searchable connection picker with a default route
+  and safe profile hints. `Ctrl+K n` opens it again after a quiet session;
+  selecting a row resolves through the existing profile and credential routes,
+  while passwords, tokens and unknown profile fields stay out of the interface.
+  Switching clears old server facts and results but keeps the SQL buffer and
+  local reading preferences. Plain and scripted commands remain unchanged.
+- Improved: the SQL editor can format the complete pending buffer locally with
+  `Ctrl+Shift+F`, `Ctrl+K q`, the command palette, or plain-mode `\format`.
+  Clause and predicate layout is deterministic and idempotent, protected
+  strings, identifiers, dollar bodies and comments remain byte-for-byte exact,
+  and a changed buffer is one undoable edit with cursor recovery. Empty,
+  ambiguous and over-limit input stays untouched with a next action; formatting
+  never contacts PostgreSQL, writes history or files, or mixes with result
+  stdout.
+- Improved: `Ctrl+K c`, the cell inspector, and the command palette can now ask
+  before copying one retained text cell through an opt-in OSC 52 terminal write.
+  The confirmation shows row, column, and UTF-8 size without showing the value;
+  NULL, stale, oversized, disabled, and failed writes send nothing. Success
+  reports only bytes and characters written and flushed, with clipboard
+  acceptance unconfirmed. Printable `c`, machine output, history, export, and
+  SQL editing remain unchanged.
+- Improved: query plans are now a readable, bounded tree in the Results pane.
+  `Ctrl+K l` reads a structured estimate for the statement under the cursor;
+  `Ctrl+K a` explicitly confirms before `EXPLAIN ANALYZE` executes it. The view
+  distinguishes planner cost units from observed milliseconds, shows rows,
+  width, startup and total time and loops when supplied, marks estimate
+  mismatches and the attention basis, and restores the ordinary result without
+  adding generated SQL to history or machine output.
+- Improved: the first frame, empty panes and blocked states now explain a safe
+  next action. The footer follows focus with no more than five contextual hints,
+  uses configured keys, and keeps the command palette searchable by intent with
+  prerequisite wording for unavailable actions. Opening, searching and
+  dismissing discovery is presentation-only and does not change SQL, results,
+  history, files, metadata or scripted output.
+- Improved: the interactive result grid is now a workable local view. `Ctrl+K g`
+  opens searchable controls for stable retained-row sorting, source-column
+  visibility, bounded widths, optional server type labels, and a frozen first
+  visible column. Reset and new-result boundaries are explicit, selection keeps
+  its source-row identity, and narrow, ASCII, no-colour, partial-metadata, and
+  unavailable-type states remain readable. The view never rewrites or reruns
+  SQL, fetches another page, changes scripted output, or changes history.
+- Improved: query errors now map PostgreSQL statement-relative positions to a
+  UTF-8-safe editor caret and token marker, keep line and column visible in
+  words, and label stale or unmappable buffers instead of guessing. Constraint
+  failures promote server-supplied schema, relation, column, and constraint
+  context, while plain mode renders the same safe source excerpt and failed JSON
+  queries keep stdout empty with one structured diagnostic on stderr.
+- Improved: schema-aware completion now reads one PostgreSQL catalogue snapshot
+  with bounded visible lists for both the full-screen editor and plain mode. It offers
+  cursor-scoped tables, views, functions and columns through aliases, accepts
+  quoted identifiers in one undoable edit, keeps loading and stale states
+  truthful, and remains useful in ASCII, no-colour and screen-reader workflows.
+- Improved: the interactive palette now opens a read-only connection and auth
+  details surface. It names the target, environment, server posture, TLS
+  guarantee, and the safe cloud credential route for Entra, AWS, Google Cloud,
+  and configured providers without refreshing or displaying tokens.
 
 ## [0.1.0]
 
@@ -276,12 +364,16 @@ No changes have been assigned to a version after the 0.1.0 candidate.
 - GSSAPI, Kerberos and Windows SSPI are unsupported by decision. An OS
   credential store is rejected by ADR-0011; supported credential routes are a
   password file, environment injection, the connection string and the prompt.
-- Copying a selected value through opt-in OSC 52 is planned but not implemented.
+- Copying uses opt-in OSC 52 only. The client cannot verify terminal acceptance,
+  read or clear the destination clipboard, and the terminal, SSH path, or
+  multiplexer may observe or retain the value.
 - The driver reports a row count rather than the full command tag, so the
   interface says "3 rows affected" rather than "INSERT 0 3".
-- Export supports csv, tsv and ndjson. json, markdown and table need the whole
-  result before the first byte is correct, so they are refused for export rather
-  than quietly buffering the result they were meant to avoid holding.
+- `--output` supports csv, tsv, ndjson and explicit `insert` output. json,
+  markdown and table need the whole result before the first byte is correct, so
+  they are refused for streaming rather than quietly buffering the result they
+  were meant to avoid holding. INSERT still requires `--insert-table` and a
+  review before execution.
 - Release archives, manifests and evidence gates have a non-publishing workflow
   contract only. No hosted candidate run is retained, and nothing is signed,
   notarised or published.

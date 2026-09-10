@@ -8,17 +8,29 @@
 //! predictable more than it needs to be clever: a user who types the initials of
 //! a name expects that name first, every time.
 
+use crate::app::grid::GridCommand;
 use crate::app::message::Action;
+use crate::app::model::ExportFormat;
 
 /// What choosing an entry does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteCommand {
     /// Perform an action, exactly as a key binding would.
     Run(Action),
+    /// Open the read-only connection and authentication details surface.
+    ConnectionDetails,
+    /// Select a named profile or the default connection route.
+    ConnectProfile(Option<String>),
+    /// Select the shape for an interactive retained-row export.
+    ChooseExportFormat(ExportFormat),
     /// Insert text at the cursor, for example a qualified object name.
     Insert(String),
     /// Open a saved query by name, replacing the buffer.
     Open(String),
+    /// Apply a view-only result-grid command.
+    Grid(GridCommand),
+    /// Toggle one result source column by position.
+    ResultColumn(usize),
 }
 
 /// One entry.
@@ -54,11 +66,15 @@ pub struct Palette {
     /// The same widget searches commands, objects and past statements. Saying
     /// which is open is the difference between one overlay and three.
     pub purpose: Purpose,
+    /// Current focus and prerequisite guidance for the general command palette.
+    pub context_note: Option<String>,
 }
 
 /// What a palette is searching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Purpose {
+    /// Actions that can do useful work in the current context.
+    Commands,
     /// Commands and database objects.
     #[default]
     GoTo,
@@ -68,6 +84,14 @@ pub enum Purpose {
     Dependencies,
     /// Queries saved as files.
     SavedQueries,
+    /// View-only controls for the focused result grid.
+    ResultControls,
+    /// Source columns in the focused result grid.
+    ResultColumns,
+    /// Named profiles and the default connection route.
+    Connections,
+    /// File shapes for the retained interactive result.
+    ExportFormats,
 }
 
 impl Purpose {
@@ -75,12 +99,17 @@ impl Purpose {
     #[must_use]
     pub const fn title(self) -> &'static str {
         match self {
+            Self::Commands => " Command palette  Type to search, Enter to choose, Esc to cancel ",
             Self::GoTo => " Go to  Enter to choose, Esc to cancel ",
             Self::History => " History  Enter puts it in the editor, Esc to cancel ",
             Self::Dependencies => {
                 " Dependencies  Enter puts the name in the editor, Esc to cancel "
             }
             Self::SavedQueries => " Saved queries  Enter opens it, Esc to cancel ",
+            Self::ResultControls => " Result grid  Enter applies, Esc to cancel ",
+            Self::ResultColumns => " Result columns  Enter toggles, Esc to cancel ",
+            Self::Connections => " Connection picker  Enter to connect, Esc to cancel ",
+            Self::ExportFormats => " Export format  Enter to choose, Esc to cancel ",
         }
     }
 
@@ -88,10 +117,17 @@ impl Purpose {
     #[must_use]
     pub const fn empty_message(self) -> &'static str {
         match self {
+            Self::Commands => " No applicable command matches that.",
             Self::GoTo => " Nothing matches that.",
             Self::History => " No statement matches that.",
             Self::Dependencies => " Nothing here depends on it, and it depends on nothing here.",
             Self::SavedQueries => " Nothing is saved yet. Ctrl+K w saves what is in the editor.",
+            Self::ResultControls => " No result-grid controls are available here.",
+            Self::ResultColumns => " This result has no source columns.",
+            Self::Connections => {
+                " No named connections are configured. The default route remains available."
+            }
+            Self::ExportFormats => " No export formats are available.",
         }
     }
 
@@ -102,6 +138,9 @@ impl Purpose {
     #[must_use]
     pub const fn standing_note(self) -> Option<&'static str> {
         match self {
+            Self::Commands => {
+                Some("Ready actions are listed; unavailable chords explain their prerequisite.")
+            }
             Self::GoTo => None,
             Self::History => Some(" Statements that mention a credential are never recorded."),
             // The limit is stated where the answer is read. A dependency list
@@ -110,6 +149,18 @@ impl Purpose {
                 " Views and foreign keys only. What a function body reads is not recorded by PostgreSQL.",
             ),
             Self::SavedQueries => None,
+            Self::ResultControls => Some(
+                "These controls only change the current retained result view. They never rerun SQL.",
+            ),
+            Self::ResultColumns => {
+                Some("Enter toggles one source column. At least one column must remain shown.")
+            }
+            Self::Connections => Some(
+                "Profiles show safe hints only; passwords and provider tokens are never stored here. Choose the default row to use ordinary resolution.",
+            ),
+            Self::ExportFormats => Some(
+                "This writes retained rows only. Choose a shape before naming the destination; the file extension does not choose for you.",
+            ),
         }
     }
 }
@@ -124,6 +175,17 @@ impl Palette {
             selected: 0,
             loading: false,
             purpose: Purpose::GoTo,
+            context_note: None,
+        }
+    }
+
+    /// Opens the general command palette with context and prerequisite guidance.
+    #[must_use]
+    pub fn over_commands(entries: Vec<PaletteEntry>, context_note: impl Into<String>) -> Self {
+        Self {
+            purpose: Purpose::Commands,
+            context_note: Some(context_note.into()),
+            ..Self::new(entries)
         }
     }
 
@@ -150,6 +212,50 @@ impl Palette {
     pub fn over_saved_queries(entries: Vec<PaletteEntry>) -> Self {
         Self {
             purpose: Purpose::SavedQueries,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens the view-only result-grid controls.
+    #[must_use]
+    pub fn over_result_controls(entries: Vec<PaletteEntry>) -> Self {
+        Self {
+            purpose: Purpose::ResultControls,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens the searchable source-column chooser.
+    #[must_use]
+    pub fn over_result_columns(entries: Vec<PaletteEntry>) -> Self {
+        Self {
+            purpose: Purpose::ResultColumns,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens the searchable connection picker.
+    #[must_use]
+    pub fn over_connections(entries: Vec<PaletteEntry>) -> Self {
+        Self {
+            purpose: Purpose::Connections,
+            context_note: Some(
+                "Choose a named profile or the default connection settings. Selection resolves the route only after Enter."
+                    .to_owned(),
+            ),
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens the searchable retained-row export-format picker.
+    #[must_use]
+    pub fn over_export_formats(
+        entries: Vec<PaletteEntry>,
+        context_note: impl Into<String>,
+    ) -> Self {
+        Self {
+            purpose: Purpose::ExportFormats,
+            context_note: Some(context_note.into()),
             ..Self::new(entries)
         }
     }
@@ -450,5 +556,73 @@ mod tests {
         palette.push('語');
         palette.backspace();
         assert!(palette.selected_entry().is_some());
+    }
+
+    #[test]
+    fn result_grid_palettes_name_the_surface_and_search_their_entries() {
+        let mut controls = Palette::over_result_controls(vec![PaletteEntry {
+            label: "Sort selected column".into(),
+            detail: "original server order".into(),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::SortSelected),
+        }]);
+        assert!(controls.purpose.title().contains("Result grid"));
+        assert!(
+            controls
+                .purpose
+                .standing_note()
+                .expect("safety note")
+                .contains("never rerun")
+        );
+        controls.query = "sort".into();
+        assert_eq!(
+            controls.selected_entry().expect("sort").label,
+            "Sort selected column"
+        );
+
+        let mut columns = Palette::over_result_columns(vec![
+            PaletteEntry {
+                label: "Column 1: name".into(),
+                detail: "shown  text".into(),
+                group: "Result columns",
+                command: PaletteCommand::ResultColumn(0),
+            },
+            PaletteEntry {
+                label: "Column 2: name".into(),
+                detail: "hidden  type unavailable".into(),
+                group: "Result columns",
+                command: PaletteCommand::ResultColumn(1),
+            },
+        ]);
+        assert!(columns.purpose.title().contains("Result columns"));
+        assert!(
+            columns
+                .purpose
+                .standing_note()
+                .expect("column note")
+                .contains("one column")
+        );
+        columns.query = "Column 2".into();
+        let selected = columns.selected_entry().expect("second duplicate label");
+        assert_eq!(selected.label, "Column 2: name");
+        assert_eq!(selected.command, PaletteCommand::ResultColumn(1));
+        assert!(selected.detail.contains("hidden"));
+        assert!(selected.detail.contains("unavailable"));
+    }
+
+    #[test]
+    fn command_palette_names_search_and_prerequisite_guidance() {
+        let palette = Palette::over_commands(
+            vec![entry("Run the whole buffer")],
+            "Focus: Editor. Connect before running SQL. Type to search; Esc closes.",
+        );
+        assert_eq!(palette.purpose, Purpose::Commands);
+        assert!(palette.purpose.title().contains("Command palette"));
+        assert!(palette.purpose.title().contains("Type to search"));
+        assert_eq!(
+            palette.context_note.as_deref(),
+            Some("Focus: Editor. Connect before running SQL. Type to search; Esc closes.")
+        );
+        assert!(palette.purpose.empty_message().contains("applicable"));
     }
 }

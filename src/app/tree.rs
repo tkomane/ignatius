@@ -284,6 +284,21 @@ pub struct ObjectTree {
 }
 
 impl ObjectTree {
+    /// Clears server-derived state while preserving the request counter.
+    ///
+    /// A connection switch can leave a metadata task in flight. Keeping the
+    /// counter means any new request receives a different identity, so an old
+    /// answer cannot populate a newly selected connection's tree.
+    pub fn reset_for_connection(&mut self) {
+        self.roots.clear();
+        self.selected = 0;
+        self.filter.clear();
+        self.filtering = false;
+        self.loading = false;
+        self.error = None;
+        self.next_request = self.next_request.wrapping_add(1).max(1);
+    }
+
     /// Hands out the next request identity.
     pub fn allocate_request(&mut self) -> RequestId {
         self.next_request += 1;

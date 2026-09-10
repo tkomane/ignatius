@@ -1,19 +1,31 @@
 # Compatibility
 
-**Evidence reconciled on 2026-08-31.** This is the authoritative list of what
+**Evidence reconciled on 2026-09-04.** This is the authoritative list of what
 this build does and does not support. Where something is unsupported, the
 program says so at the point of use rather than failing quietly. Individual
 rows retain the date and evidence class that actually proved them.
 
 ## PostgreSQL server versions
 
-Supported window follows upstream: **14 through 18**, per
-<https://www.postgresql.org/support/versioning/> as read on 2026-08-15, where 18.6
-was current and 13 had already reached end of life.
+The repository's declared support window is **14 through 18**. Review the
+[upstream version policy](https://www.postgresql.org/support/versioning/)
+before a release or support-window change; this declaration does not assert
+which upstream minor version is current.
 
-**Tested: 14, 16 and 18**, by the integration suite in CI on Linux, and 18.4
-locally on macOS. Versions 15 and 17 are within the supported window but are not
-exercised, so they are expected to work rather than known to.
+**Hosted evidence: 14, 15, 16, 17 and 18**, through plain/TLS integration
+contracts on Linux at source `52872ac` in
+[CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
+whose executed jobs were rechecked on 2026-09-04. Its PostgreSQL 18 Unix-socket
+job also executed successfully. **Local evidence: PostgreSQL 18.4 on macOS**,
+including recorded later feature runs in `docs/status.md` with an unconfigured
+socket gate. The hosted baseline does not cover the newer local worktree;
+rerun the applicable matrix against the source to be released. Native Windows
+database and hand-terminal claims remain separate evidence requirements.
+
+The structured JSON `EXPLAIN` workflow follows the PostgreSQL 14-18 plan shape:
+one JSON envelope with a `Plan` root, ordered `Plans` children, planner cost
+fields, and optional analysis metrics. Unknown server fields are ignored rather
+than guessed. The local display is bounded at 1 MiB and 500 retained nodes.
 
 ## Authentication
 
@@ -132,6 +144,34 @@ as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
 `user`, `sslmode`, `environment`, `read-only`, `description` and `auth`, and nothing
 else. It never carries a password.
 
+## Interactive connection picker
+
+When profiles exist and the interactive client was started without a target,
+profile flag, route option, or safety option, the first frame opens a searchable
+picker. The first row is `Use default connection settings`; it uses the ordinary
+CLI, service-file, environment and built-in precedence. The remaining rows are
+the profiles in deterministic configuration order. Their detail is a bounded,
+display-only summary of known fields: location, database, role, TLS mode,
+environment, read-only posture, provider name, description and configuration
+validation. Unknown profile fields are not copied into the model or rendered.
+
+Reading or searching the picker performs no network call, provider command,
+metadata load, history write or configuration change. Enter sends only the
+selected profile name to the runtime, which reuses the existing profile resolver,
+target resolver and cloud-auth boundary. A profile with an invalid or secret-
+shaped field therefore fails through the existing diagnostic rather than being
+silently treated as the default route. Explicit targets and options retain the
+existing pre-terminal resolution path, so this is an interactive convenience,
+not a new connection precedence rule.
+
+`Ctrl+K n` opens the picker again after a connection is quiet. A running query,
+plan or connection attempt keeps the picker unavailable. After a selection the
+old server facts, retained result, object tree, completion catalogue, pending
+prompts and trust surface are cleared; the editor, type-label preference and
+frozen-first-column preference remain. Late work from the previous target is
+discarded by a runtime connection generation. Plain and scripted commands do
+not open or inherit this surface.
+
 ## Differences from `psql`
 
 This is not a `psql` replacement and does not claim meta-command compatibility.
@@ -148,6 +188,88 @@ Deliberate differences:
 - **On error, execution stops.** Statements after a failure do not run, and the
   results produced before it are still returned.
 - **No meta-commands.** No `\d`, `\dt` or `\copy` yet.
+
+## SQL buffer formatting
+
+The full-screen editor exposes local formatting through `Ctrl+Shift+F`,
+`Ctrl+K q`, and the command palette. Plain mode exposes the same operation as
+`\format` before the pending statement is terminated. The formatter is
+PostgreSQL-aware but intentionally lexical and conservative: major clauses,
+boolean predicates and eligible top-level lists receive deterministic,
+idempotent layout, while string literals, quoted identifiers, dollar-quoted
+bodies and comments retain their exact source bytes.
+
+A changed buffer is one undoable edit and the cursor is mapped to a UTF-8-safe
+logical position. Empty, comment-only, already formatted, malformed and
+over-limit input receives a value-free outcome; ambiguous or over-limit input
+is left untouched and names the next action. The source bound is 1 MiB of
+UTF-8 bytes. Formatting does not contact PostgreSQL, load metadata, write
+history or files, read the clipboard, or emit telemetry. In plain mode, the
+formatted buffer remains pending and interaction text goes to stderr, while
+stdout remains reserved for result data.
+
+## Prompted named parameters
+
+The full-screen and plain interactive clients support bounded named placeholders
+such as `:customer_id`. A placeholder is recognised only in executable SQL,
+outside strings, quoted identifiers, dollar-quoted bodies and comments; casts
+such as `value::text` and existing `$1` text remain unchanged. Up to 64 distinct
+names are accepted, in first-use order, and repeated occurrences share one
+answer.
+
+The full-screen prompt and plain mode ask for hidden values after any required
+production confirmation. Empty text is valid, values are treated as literal
+text data, and NUL is refused before the statement is sent. Values are escaped
+at the existing simple-query boundary without type inference. Non-interactive
+`query` never prompts: it requires one `--param-env NAME=VARIABLE` mapping per
+name, reads UTF-8 values from the environment, and validates the complete set
+before resolving a target. The template, not the answers, is retained in
+history and editor state. A server position after expansion is shown as
+technical information without a guessed template caret.
+
+## Reviewable cell-to-UPDATE
+
+The interactive client supports a deliberately narrow result-cell write flow.
+With Results focused, `Ctrl+K u` or the command palette accepts only a direct
+single-table `SELECT` with direct projections, optional aliases or `*`. The
+relation is resolved in the current session's search path, then PostgreSQL
+metadata supplies its kind, read and update privileges, columns and primary-key
+membership. Only ordinary and partitioned tables with all primary-key columns
+projected and non-NULL in the selected row are eligible; a primary-key cell is
+not an editable target.
+
+Joins, subqueries, CTEs, expressions, set operations, views, missing keys,
+read-only sessions and production-classified connections are refused. The
+replacement prompt accepts literal text, including empty text, and has a
+separate review step. The review shows the exact bound `UPDATE` and says that
+nothing has been sent. Enter emits one `ExecuteParameterized` effect; Esc emits
+none. The template can be recorded in history, but replacement and key values
+remain secret-bound until execution. The prior result is a snapshot and is not
+rerun automatically. The generated statement is bounded at 16 KiB after
+binding.
+
+## Explicit retained-result refresh
+
+The interactive client exposes `F6`, an enhanced-terminal `Ctrl+Shift+R` alias,
+the command palette and the contextual Results footer for one deliberate
+refresh of a completed result. Traditional terminals can encode
+`Ctrl+Shift+R` as `Ctrl+R`, so `F6` is the portable direct key.
+Refresh is available only with Results focused, a usable idle connection, a
+non-failed transaction, and a retained result whose source is exactly one
+read-classified statement. The retained source is used instead of the current
+editor buffer, so editing SQL after a result does not change what this action
+would send. Multi-statement, write, structural, destructive and unrecognised
+sources are refused. Classification is advisory and does not replace
+PostgreSQL permissions or a server read-only setting.
+
+Named parameters are prompted again with the existing masked prompt, and prior
+values are never reused. The request follows the ordinary execution, result,
+history, cancellation and diagnostic boundaries, produces at most one
+execution effect, and replaces the result only after the server responds. A
+zero-row result remains eligible when its result set and source are retained.
+Focus changes, filtering, sorting, layout controls, reconnect, cell-update
+completion and an earlier refresh outcome never start a request. Failures and
+connection loss are stated as actual or unknown outcomes without retry.
 
 ## Transaction state
 
@@ -177,12 +299,43 @@ as it can tell. **It is advisory and is described that way wherever it appears.*
 `--read-only` is the real control: it asks the server to refuse writes for the
 session, and PostgreSQL enforces it.
 
+## Query plans
+
+`Ctrl+K l`, or the command palette's `Explain plan`, asks for structured plain
+`EXPLAIN` for exactly the statement under the editor cursor. It does not execute
+that statement, write history, or change normal result and machine-output
+routes. The plan tree shows operation, relation or index context, estimated
+rows, row width, startup and total planner cost units, and safe known facts.
+
+`Ctrl+K a`, or `Analyze plan`, always asks for an explicit confirmation before
+sending `EXPLAIN ANALYZE`. Analysis executes in the current session and
+transaction, can have side effects, and is not automatically rolled back by
+the client. Existing PostgreSQL permissions, transaction state, production
+classification, and destructive database-name confirmation remain authoritative.
+Actual startup and total time, rows, and loops are displayed only when supplied;
+observed values are per-loop where PostgreSQL defines them. The slowest analyzed
+node is marked using measured time, while a plain plan uses estimated cost.
+
+Plan selection, expansion, collapse and dismissal are local presentation state.
+They do not issue another request, change the editor, alter the retained result,
+or add a history entry. A malformed, failed, connection-lost, or bounded plan
+response remains an unavailable or incomplete plan with a recovery action.
+
 ## Export
 
-`--output` streams a result into a file. Supported formats: **csv, tsv,
-ndjson**. json, markdown and the aligned table are refused, because each needs
-the whole result before its first byte is correct and buffering it would give up
-the bounded memory that makes an export worth having.
+`--output` streams a result into a file. Supported formats: **csv, tsv, ndjson
+and insert**. json, markdown and the aligned table are refused, because each
+needs the whole result before its first byte is correct and buffering it would
+give up the bounded memory that makes an export worth having.
+
+`--format insert` is deliberately explicit: it requires a non-empty
+`--insert-table TABLE` and rejects `--no-header`. The table and every result
+column are quoted as identifiers; NULL becomes SQL `NULL`; and every non-NULL
+cell is emitted as an escaped PostgreSQL text literal. The client does not infer
+source types. Duplicate column labels and NUL-containing text are refused
+before output, and multiple result sets become separate INSERT statements.
+`--insert-table` is refused with every other format. Review generated SQL before
+executing it; the client writes data and never executes the statements it emits.
 
 The destination is never written directly. Rows go to `<path>.partial`, which is
 flushed, synced and renamed only when the export completes, so a file at the
@@ -192,12 +345,103 @@ unless `--force` is given.
 An interrupted export exits 9, leaves the partial file, and reports how many rows
 reached it.
 
-`Ctrl+K e` in the client writes **what is on screen** to a comma-separated file:
-the rows the result kept, narrowed by the filter if one is on. That is smaller
-than what the query returned whenever the result was truncated, so the prompt
-says how many rows will be written and what the file will not contain before it
-writes anything. To write the whole result, run the statement with `--output`,
-which streams from the server and never holds it in memory.
+`Ctrl+K e` in the client writes **what is on screen** through a small
+save-as flow. A searchable format palette offers CSV, TSV, JSON, NDJSON and
+Markdown, names the retained and filtered row scope, and opens the path prompt
+only after a format is chosen. The selected format wins even when the path has
+no familiar extension; the client never guesses from the filename. No file is
+created while the palette is open or while the path is being edited. To write
+the whole result, run the statement with `--output`, which streams from the
+server and never holds it in memory.
+
+## Interactive clipboard copy
+
+`Ctrl+K c` copies one selected text cell from the retained interactive result.
+The action is also available from the cell inspector and command palette. It
+preserves source-row identity through local filtering and sorting, leaves
+printable `c` as editor input, and never reruns SQL.
+
+The route is opt-in: `[clipboard] osc52 = false` is the default, and
+`[clipboard] osc52 = true` permits the confirmed value to travel through the
+terminal as an OSC 52 write. Clipboard acceptance is unconfirmed after the
+write and flush. It never reads or clears the destination, and the
+terminal, SSH path, or multiplexer may observe or retain the value.
+
+SQL NULL, stale selections, values over 1 MiB of UTF-8 bytes, disabled or
+unsupported transport, and write failures send nothing and state the next
+action. Empty text is distinct from NULL and is copied as zero bytes. This is
+interactive-only: plain, CSV, TSV, JSON, NDJSON, history, export, and SQL
+editing do not emit OSC 52 sequences or inherit the copy action.
+
+## Interactive result grid
+
+Feature 014 adds a local result view without changing the query protocol or the
+scripted output contract. With Results focused, `Ctrl+K g` opens searchable
+controls for:
+
+- stable ascending or descending sorting of retained rows, with a cycle back to
+  original server order;
+- source-column visibility, including duplicate names identified by position;
+- bounded per-column widths and a frozen first visible column for wide results;
+- optional server-described type labels, with `unavailable` shown when the
+  description cannot be accepted; and
+- reset to automatic widths, all source columns, original order, and the initial
+  horizontal position.
+
+Sorting and column shaping never rewrite SQL, rerun a statement, fetch a page, or
+alter `ResultSet.rows`. The selected source row remains the selected record
+through a local reorder. Type labels are obtained after a successful row-bearing
+execution by a parse/describe request; a failed or mismatched description leaves
+values and success status unchanged. Partial metadata is represented as partial,
+not inferred from text.
+
+The local view is interactive-only. CSV, TSV, JSON, NDJSON, Markdown, table
+output, streaming export, history, and the editor continue to use server order,
+server values, and their existing contracts. The grid degrades to words and
+ASCII separators when colour or Unicode styling is unavailable.
+
+## SQL buffer formatting
+
+The interactive editor supports local formatting through `Ctrl+Shift+F`,
+`Ctrl+K q`, and the command palette. Plain mode exposes the same operation as
+`\\format` while a statement is pending. The formatter is lexical and
+conservative: it lays out major clauses, predicates, joins, and eligible lists,
+but never changes keyword case, literal bytes, quoted identifiers, dollar-body
+contents, comment contents, or SQL values. The output is deterministic and
+idempotent, and one Undo restores the complete prior buffer.
+
+Formatting is bounded to 1 MiB of UTF-8 source bytes. Empty, comment-only,
+already-formatted, malformed, and over-limit input is left untouched. An
+unterminated protected region or an over-limit buffer is refused with its kind,
+location or size, and a next action; raw SQL is not included in the message.
+The returned caret remains on a valid UTF-8 boundary and follows its token when
+layout changes.
+
+This operation is local-only. It does not execute SQL, contact PostgreSQL,
+write files, record history, transfer clipboard data, alter JSON, NDJSON, CSV,
+TSV, Markdown, table, or streaming export output, or add telemetry. In plain
+mode, a successful `\\format` preview is written to the message stream while
+stdout remains reserved for result data; the pending buffer is replaced only
+after formatting succeeds.
+
+## Guided discovery
+
+Feature 015 is a presentation layer over the existing interactive model. The
+first frame, empty and blocked states, contextual footer, and general command
+palette derive from current focus, connection, query, result, object and history
+state. The active configured keymap is the authority for every key shown; the
+footer is bounded to five complete pairs and the palette can search by intent.
+
+Discovery is not available as a plain-mode feature because plain mode already
+has its own line-oriented contract. It does not add telemetry, cloud calls,
+automatic queries or metadata reloads, clipboard transfers, or persisted
+onboarding state. Opening, searching, rendering and dismissing discovery leave
+SQL, result data, selection, connection, transaction and history unchanged.
+
+This slice does not change CSV, TSV, JSON, NDJSON, Markdown, table, streaming
+export, history, diagnostics, or terminal-restoration output. Automated rendering
+and reducer evidence is separate from hand use in Warp, Windows Terminal, Linux
+terminals and screen readers.
 
 ## Terminals
 

@@ -118,6 +118,8 @@ assert the exit code for both success and failure.
   being approximated.
 - The connection drops mid-statement, and the outcome is reported as unknown
   rather than as failure or success.
+- The connection drops while a server-bound confirmation or parameter prompt is
+  open; the pending operation is discarded, and no late completion can revive it.
 
 ## Requirements
 

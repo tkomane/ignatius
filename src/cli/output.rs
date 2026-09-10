@@ -10,7 +10,10 @@
 //! - NULL is encoded distinctly in every format, and how is documented per format.
 //! - Multiple result sets are always explicit. NDJSON, which cannot express them
 //!   unambiguously, refuses rather than guessing.
+//! - SQL INSERT output requires an explicit table, quotes identifiers, emits SQL
+//!   NULL or escaped text literals, and never executes what it writes.
 
+use crate::query::quote_identifier;
 use crate::query::result::{Execution, ResultSet};
 use crate::query::value::{Cell, display_width, pad_to_width, sanitize_for_display};
 use std::io::{self, Write};
@@ -32,13 +35,18 @@ pub enum Format {
     Ndjson,
     /// A Markdown pipe table.
     Markdown,
+    /// SQL INSERT statements with an explicit destination table.
+    Insert,
 }
 
 impl Format {
     /// Whether the format is meant for machines, which forbids decoration.
     #[must_use]
     pub const fn is_machine_readable(self) -> bool {
-        matches!(self, Self::Csv | Self::Tsv | Self::Json | Self::Ndjson)
+        matches!(
+            self,
+            Self::Csv | Self::Tsv | Self::Json | Self::Ndjson | Self::Insert
+        )
     }
 }
 
@@ -53,6 +61,8 @@ pub struct OutputOptions {
     pub null_encoding: String,
     /// Whether Unicode may be used for table borders.
     pub unicode: bool,
+    /// Destination table required by SQL INSERT output.
+    pub insert_table: Option<String>,
 }
 
 impl Default for OutputOptions {
@@ -62,14 +72,50 @@ impl Default for OutputOptions {
             header: true,
             null_encoding: String::new(),
             unicode: true,
+            insert_table: None,
         }
     }
 }
 
+/// Validates output options before a target or server is touched.
+pub fn validate_options(options: &OutputOptions) -> Result<(), crate::diagnostics::Diagnostic> {
+    if options.format == Format::Insert
+        && options
+            .insert_table
+            .as_deref()
+            .is_none_or(|table| table.trim().is_empty())
+    {
+        return Err(crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Usage,
+            "INSERT output needs a non-empty destination table",
+            "validating output options",
+        )
+        .next_action("pass --insert-table TABLE with --format insert"));
+    }
+    if options.format == Format::Insert && !options.header {
+        return Err(crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Usage,
+            "INSERT output cannot omit its column list",
+            "validating output options",
+        )
+        .likely_cause("--no-header would make the generated SQL depend on table column order")
+        .next_action("remove --no-header when using --format insert"));
+    }
+    if options.format != Format::Insert && options.insert_table.is_some() {
+        return Err(crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Usage,
+            "--insert-table is only valid with --format insert",
+            "validating output options",
+        )
+        .next_action("remove --insert-table, or choose --format insert"));
+    }
+    Ok(())
+}
+
 /// Writes an execution's results.
 ///
-/// Returns an error only for I/O failures and for the NDJSON multi-result case,
-/// which is a usage error rather than a data problem.
+/// Returns an error for I/O failures, invalid INSERT data, and the NDJSON
+/// multi-result case, which are usage errors rather than data problems.
 pub fn write_execution(
     out: &mut impl Write,
     execution: &Execution,
@@ -114,6 +160,7 @@ pub fn write_execution(
         Format::Csv => write_separated(out, &sets, ',', options),
         Format::Tsv => write_separated(out, &sets, '\t', options),
         Format::Markdown => write_markdown(out, &sets, options),
+        Format::Insert => write_insert(out, &sets, options),
         Format::Table => write_table(out, execution, options),
     }
 }
@@ -268,6 +315,128 @@ fn write_markdown(
     Ok(())
 }
 
+fn write_insert(
+    out: &mut impl Write,
+    sets: &[&ResultSet],
+    options: &OutputOptions,
+) -> io::Result<()> {
+    let table = options
+        .insert_table
+        .as_deref()
+        .ok_or_else(|| invalid_input("INSERT output needs a destination table"))?;
+    // Validate every result set before writing the first statement. A later
+    // duplicate label or NUL must not leave an earlier result set looking like
+    // a complete export on stdout.
+    for set in sets {
+        validate_insert_set(set)?;
+    }
+    let mut wrote_statement = false;
+    for set in sets {
+        for row in &set.rows {
+            if wrote_statement {
+                writeln!(out)?;
+            }
+            write_insert_row(out, table, &set.columns, row)?;
+            wrote_statement = true;
+        }
+    }
+    Ok(())
+}
+
+fn validate_insert_set(set: &ResultSet) -> io::Result<()> {
+    if set.columns.iter().any(String::is_empty) {
+        return Err(invalid_input(
+            "INSERT output cannot quote an empty column name",
+        ));
+    }
+    let mut names = std::collections::HashSet::with_capacity(set.columns.len());
+    if set.columns.iter().any(|name| !names.insert(name.as_str())) {
+        return Err(invalid_input(
+            "INSERT output refuses duplicate result column labels",
+        ));
+    }
+    for row in &set.rows {
+        validate_insert_row(&set.columns, row)?;
+    }
+    Ok(())
+}
+
+fn validate_insert_row(columns: &[String], row: &[Cell]) -> io::Result<()> {
+    if row.len() != columns.len() {
+        return Err(invalid_input(
+            "INSERT output found a row with the wrong column count",
+        ));
+    }
+    if row
+        .iter()
+        .any(|cell| matches!(cell, Cell::Text(text) if text.contains('\0')))
+    {
+        return Err(invalid_input(
+            "INSERT output cannot represent a NUL character in a text value",
+        ));
+    }
+    Ok(())
+}
+
+fn write_insert_row(
+    out: &mut impl Write,
+    table: &str,
+    columns: &[String],
+    row: &[Cell],
+) -> io::Result<()> {
+    validate_insert_row(columns, row)?;
+    let columns = columns
+        .iter()
+        .map(|name| quote_identifier(name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let values = row
+        .iter()
+        .map(insert_literal)
+        .collect::<io::Result<Vec<_>>>()?
+        .join(", ");
+    writeln!(
+        out,
+        "INSERT INTO {} ({columns}) VALUES ({values});",
+        quote_identifier(table)
+    )
+}
+
+fn insert_literal(cell: &Cell) -> io::Result<String> {
+    let Cell::Text(text) = cell else {
+        return Ok("NULL".to_owned());
+    };
+    if text.contains('\0') {
+        return Err(invalid_input(
+            "INSERT output cannot represent a NUL character in a text value",
+        ));
+    }
+
+    let mut literal = String::from("E'");
+    for ch in text.chars() {
+        match ch {
+            '\\' => literal.push_str("\\\\"),
+            '\'' => literal.push_str("\\'"),
+            '\n' => literal.push_str("\\n"),
+            '\r' => literal.push_str("\\r"),
+            '\t' => literal.push_str("\\t"),
+            '\u{08}' => literal.push_str("\\b"),
+            '\u{0c}' => literal.push_str("\\f"),
+            c if c.is_ascii_control() => {
+                use std::fmt::Write as _;
+                write!(&mut literal, "\\x{:02x}", c as u32).expect("String is writable");
+            }
+            c => literal.push(c),
+        }
+    }
+    literal.push('\'');
+    Ok(literal)
+}
+
+fn invalid_input(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
 impl OutputOptions {
     /// The NULL marker used where an empty cell would be ambiguous.
     fn null_encoding_or_marker(&self) -> String {
@@ -347,10 +516,11 @@ fn table_widths(set: &ResultSet) -> Vec<usize> {
 
 /// Writes rows one at a time, for export.
 ///
-/// Only the formats that need no wrapper can stream: CSV, TSV and NDJSON. JSON,
-/// Markdown and the aligned table all need the whole result before the first
-/// byte is correct, and buffering it would quietly give up the memory guarantee
-/// an export exists to keep. They are refused rather than silently downgraded.
+/// Only the formats that need no wrapper can stream: CSV, TSV, NDJSON and SQL
+/// INSERT. JSON, Markdown and the aligned table all need the whole result
+/// before the first byte is correct, and buffering it would quietly give up the
+/// memory guarantee an export exists to keep. They are refused rather than
+/// silently downgraded.
 #[derive(Debug)]
 pub struct StreamWriter {
     format: Format,
@@ -362,7 +532,10 @@ pub struct StreamWriter {
 impl StreamWriter {
     /// Creates a writer, or explains why this format cannot stream.
     pub fn new(options: OutputOptions) -> Result<Self, crate::diagnostics::Diagnostic> {
-        if !matches!(options.format, Format::Csv | Format::Tsv | Format::Ndjson) {
+        if !matches!(
+            options.format,
+            Format::Csv | Format::Tsv | Format::Ndjson | Format::Insert
+        ) {
             return Err(crate::diagnostics::Diagnostic::new(
                 crate::diagnostics::DiagnosticKind::Usage,
                 format!("{:?} cannot be written as a stream", options.format).to_lowercase(),
@@ -373,8 +546,9 @@ impl StreamWriter {
                  correct, and holding a large result in memory is exactly what an export \
                  avoids",
             )
-            .next_action("export as csv, tsv or ndjson"));
+            .next_action("export as csv, tsv, ndjson or insert with --insert-table"));
         }
+        validate_options(&options)?;
         Ok(Self {
             format: options.format,
             options,
@@ -386,6 +560,10 @@ impl StreamWriter {
     /// Records the column names and writes a header where the format has one.
     pub fn columns(&mut self, out: &mut impl Write, columns: Vec<String>) -> io::Result<()> {
         self.columns = columns;
+        if self.format == Format::Insert {
+            validate_insert_set(&ResultSet::new(self.columns.clone(), 0))?;
+            return Ok(());
+        }
         if !self.options.header || self.format == Format::Ndjson {
             return Ok(());
         }
@@ -400,6 +578,25 @@ impl StreamWriter {
 
     /// Writes one row.
     pub fn row(&mut self, out: &mut impl Write, row: &[Cell]) -> io::Result<()> {
+        if self.format == Format::Insert {
+            validate_insert_row(&self.columns, row)?;
+            if self.rows > 0 {
+                writeln!(out)?;
+            }
+            let result = write_insert_row(
+                out,
+                self.options
+                    .insert_table
+                    .as_deref()
+                    .ok_or_else(|| invalid_input("INSERT output needs a destination table"))?,
+                &self.columns,
+                row,
+            );
+            if result.is_ok() {
+                self.rows += 1;
+            }
+            return result;
+        }
         self.rows += 1;
         if self.format == Format::Ndjson {
             let object: serde_json::Map<String, serde_json::Value> = self
@@ -485,6 +682,21 @@ mod tests {
             execution,
             &OutputOptions {
                 format,
+                ..OutputOptions::default()
+            },
+        )
+        .expect("write");
+        String::from_utf8(out).expect("utf8")
+    }
+
+    fn render_insert(execution: &Execution) -> String {
+        let mut out = Vec::new();
+        write_execution(
+            &mut out,
+            execution,
+            &OutputOptions {
+                format: Format::Insert,
+                insert_table: Some("orders".into()),
                 ..OutputOptions::default()
             },
         )
@@ -579,9 +791,19 @@ mod tests {
 
     #[test]
     fn machine_formats_carry_no_decoration() {
-        for format in [Format::Csv, Format::Tsv, Format::Json, Format::Ndjson] {
+        for format in [
+            Format::Csv,
+            Format::Tsv,
+            Format::Json,
+            Format::Ndjson,
+            Format::Insert,
+        ] {
             assert!(format.is_machine_readable());
-            let text = render(format, &execution(vec![sample()]));
+            let text = if format == Format::Insert {
+                render_insert(&execution(vec![sample()]))
+            } else {
+                render(format, &execution(vec![sample()]))
+            };
             assert!(
                 !text.contains('\x1b'),
                 "{format:?} emitted an escape sequence"
@@ -625,6 +847,131 @@ mod tests {
     }
 
     #[test]
+    fn insert_quotes_identifiers_and_preserves_text_null_empty_and_controls() {
+        let mut set = ResultSet::new(vec!["id".into(), "note".into(), "empty".into()], 10);
+        set.push(vec![
+            Cell::Text("1".into()),
+            Cell::Text("O'Reilly \\path\n\tcafé".into()),
+            Cell::Text(String::new()),
+        ]);
+        set.push(vec![Cell::Null, Cell::Null, Cell::Text("done".into())]);
+        let text = render_insert(&execution(vec![set]));
+        assert!(
+            text.contains("INSERT INTO \"orders\" (\"id\", \"note\", \"empty\") VALUES"),
+            "{text}"
+        );
+        assert!(text.contains("E'1'"), "{text}");
+        assert!(text.contains("E'O\\'Reilly \\\\path\\n\\tcafé'"), "{text}");
+        assert!(
+            text.contains("E''"),
+            "empty text must not become SQL NULL: {text}"
+        );
+        assert!(text.contains("(NULL, NULL, E'done');"), "{text}");
+    }
+
+    #[test]
+    fn insert_quotes_hostile_table_and_column_names_without_interpolating_them() {
+        let mut set = ResultSet::new(vec!["note\"; DROP".into()], 10);
+        set.push(vec![Cell::Text("x'); DROP TABLE orders; --".into())]);
+        let mut out = Vec::new();
+        write_execution(
+            &mut out,
+            &execution(vec![set]),
+            &OutputOptions {
+                format: Format::Insert,
+                insert_table: Some("target\"; DROP TABLE orders; --".into()),
+                ..OutputOptions::default()
+            },
+        )
+        .expect("write");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(
+            text.starts_with(
+                "INSERT INTO \"target\"\"; DROP TABLE orders; --\" (\"note\"\"; DROP\") VALUES"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("E'x\\'); DROP TABLE orders; --'"), "{text}");
+    }
+
+    #[test]
+    fn insert_refuses_ambiguous_columns_and_nul_before_buffered_output() {
+        let mut duplicate = ResultSet::new(vec!["id".into(), "id".into()], 10);
+        duplicate.push(vec![Cell::Text("1".into()), Cell::Text("2".into())]);
+        let mut out = Vec::new();
+        let error = write_execution(
+            &mut out,
+            &execution(vec![duplicate]),
+            &OutputOptions {
+                format: Format::Insert,
+                insert_table: Some("orders".into()),
+                ..OutputOptions::default()
+            },
+        )
+        .expect_err("duplicate labels must refuse");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(out.is_empty(), "refusal must not write partial SQL");
+
+        let mut nul = ResultSet::new(vec!["note".into()], 10);
+        nul.push(vec![Cell::Text("bad\0value".into())]);
+        let mut out = Vec::new();
+        let error = write_execution(
+            &mut out,
+            &execution(vec![nul]),
+            &OutputOptions {
+                format: Format::Insert,
+                insert_table: Some("orders".into()),
+                ..OutputOptions::default()
+            },
+        )
+        .expect_err("NUL must refuse");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(out.is_empty(), "refusal must not write partial SQL");
+    }
+
+    #[test]
+    fn insert_validates_all_result_sets_before_writing_any_statement() {
+        let mut duplicate = ResultSet::new(vec!["id".into(), "id".into()], 10);
+        duplicate.push(vec![Cell::Text("1".into()), Cell::Text("2".into())]);
+        let mut out = Vec::new();
+        let error = write_execution(
+            &mut out,
+            &execution(vec![sample(), duplicate]),
+            &OutputOptions {
+                format: Format::Insert,
+                insert_table: Some("orders".into()),
+                ..OutputOptions::default()
+            },
+        )
+        .expect_err("a later ambiguous result set must refuse");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(out.is_empty(), "no earlier result set may leak to stdout");
+    }
+
+    #[test]
+    fn insert_options_refuse_implicit_or_headerless_destinations() {
+        for options in [
+            OutputOptions {
+                format: Format::Insert,
+                ..OutputOptions::default()
+            },
+            OutputOptions {
+                format: Format::Insert,
+                header: false,
+                insert_table: Some("orders".into()),
+                ..OutputOptions::default()
+            },
+        ] {
+            assert_eq!(
+                validate_options(&options)
+                    .expect_err("invalid INSERT options")
+                    .exit_code(),
+                crate::ExitCode::Usage
+            );
+        }
+    }
+
+    #[test]
     fn multiple_result_sets_are_separated_in_every_format_that_allows_them() {
         for format in [Format::Csv, Format::Tsv, Format::Markdown, Format::Table] {
             let text = render(format, &execution(vec![sample(), sample()]));
@@ -660,11 +1007,14 @@ mod tests {
     fn a_streamed_export_matches_what_the_buffered_writer_produces() {
         // The two paths must not drift: a script cannot care whether the rows
         // went through a file or through a pipe.
-        for format in [Format::Csv, Format::Tsv, Format::Ndjson] {
-            let options = OutputOptions {
+        for format in [Format::Csv, Format::Tsv, Format::Ndjson, Format::Insert] {
+            let mut options = OutputOptions {
                 format,
                 ..OutputOptions::default()
             };
+            if format == Format::Insert {
+                options.insert_table = Some("orders".into());
+            }
             let buffered = {
                 let mut out = Vec::new();
                 write_execution(&mut out, &execution(vec![sample()]), &options).expect("write");
@@ -688,6 +1038,28 @@ mod tests {
             assert_eq!(
                 buffered, streamed,
                 "{format:?} differs between the two paths"
+            );
+        }
+    }
+
+    #[test]
+    fn result_view_metadata_cannot_change_any_script_output() {
+        let plain = sample();
+        let mut described = sample();
+        assert!(described.set_column_types(vec![Some("int4".into()), Some("text".into()), None,]));
+
+        for format in [
+            Format::Table,
+            Format::Csv,
+            Format::Tsv,
+            Format::Json,
+            Format::Ndjson,
+            Format::Markdown,
+        ] {
+            assert_eq!(
+                render(format, &execution(vec![plain.clone()])),
+                render(format, &execution(vec![described.clone()])),
+                "the local result view must not alter {format:?} output"
             );
         }
     }
