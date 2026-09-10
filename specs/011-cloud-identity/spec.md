@@ -9,7 +9,7 @@ Live Entra/AWS/GCP accounts and native Windows provider-launch evidence remain
 open in `docs/support/compatibility.md`; synthetic provider evidence does not
 close those rows.
 
-**Input**: The owner's requirement of 2026-08-16 - connect to the COI
+**Input**: The owner's requirement of 2026-08-16 - connect to a production
 application's Azure Database for PostgreSQL, which authenticates with Microsoft
 Entra ID - followed by the instruction to implement Entra first but to build for
 a first-class experience across other cloud providers, because not everyone will
