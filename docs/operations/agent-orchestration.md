@@ -39,16 +39,16 @@ Delegation rules:
 
 ## Model routing
 
-Dated 2026-09-10. Only OpenCode Go is authorised in this environment:
-`opencode auth list` reports exactly one credential. There is no Zen key, no
-direct provider key, and no approved overage or auto-reload.
+Dated 2026-09-10. Routing assumes the OpenCode Go subscription; verify the
+working environment's credentials with `opencode auth list`. Do not assume a
+Zen key, a direct provider key, or an approved overage or auto-reload.
 
 | Role | Model | Variant | Rationale | Fallback |
 | --- | --- | --- | --- | --- |
-| Lead | `opencode-go/deepseek-v4.1-flash` | model default | Best effective value in measured use; off-peak $0.15/$0.60 per MTok | `opencode-go/glm-5.3` for ambiguous architecture |
+| Lead | `opencode-go/deepseek-v4.1-flash` | model default | Best effective value in measured use | `opencode-go/glm-5.3` for ambiguous architecture |
 | Explorer | `opencode-go/deepseek-v4.1-flash` | model default | Bounded, high-volume research; cheap enough to parallelise | `opencode-go/deepseek-v4-flash` (legacy alias; DeepSeek serves it as V4.1 Flash) |
-| Implementer | `opencode-go/deepseek-v4.1-flash` | model default | Bounded, specified slices; 4x usage promotion active (see below) | `opencode-go/glm-5.3` after a failure summary |
-| Reviewer | `opencode-go/glm-5.3` | model default | Independent family for adversarial review; $15 monthly bucket | `opencode-go/kimi-k2.7-code` ($60 bucket) |
+| Implementer | `opencode-go/deepseek-v4.1-flash` | model default | Bounded, specified slices | `opencode-go/glm-5.3` after a failure summary |
+| Reviewer | `opencode-go/glm-5.3` | model default | Independent family for adversarial review | `opencode-go/kimi-k2.7-code` |
 
 Notes:
 
@@ -59,8 +59,9 @@ Notes:
 - DeepSeek V4 Pro is not used for escalation: from 2026-09-14 06:00 SAST
   DeepSeek routes `deepseek-v4-pro` requests to V4.1 Flash and bills at the
   Flash price, so it cannot provide a stronger second opinion.
-- Do not route this private repository through a provider that was not already
-  authorised for it. The free Zen models are not authenticated here.
+- Do not route repository content through a provider that was not already
+  authorised for the work. Free-tier models are outside this routing unless the
+  operator authorises them.
 - Validated 2026-09-10: `explorer`, `implementer` and `reviewer` each loaded
   from `.opencode/agent/` and answered a smoke prompt, and the reviewer route
   resolved `opencode-go/glm-5.3`.
@@ -97,12 +98,10 @@ hand (2026-08-06, YCharts); the rate was not re-verified on 2026-09-10.
 | Direct DeepSeek | V4.1 Flash at the same off-peak/peak rates as Go, 1M context, thinking mode default, 2500 concurrency | Official; would be a new billing arrangement, not authorised |
 | ZAR equivalent | $10 = R163.00; a $60 bucket = R978.00; a $15 bucket = R244.50 | Indicative, at the assumed FX |
 
-Accounting distinction: the Go subscription is a fixed cash charge of
-$10/month. Model usage is metered in dollars against included allowance
-buckets; it is not additional cash until an overage route is deliberately
-enabled, which is not authorised here. Zen and direct API pricing are cash
-charges per token and are different arrangements, not alternative views of the
-Go allowance.
+Accounting distinction: a subscription allowance is not a cash charge. Model
+usage is metered in dollars against included allowance buckets; it becomes cash
+only if an overage route is deliberately enabled. Zen and direct API pricing
+are per-token cash arrangements, not alternative views of the same allowance.
 
 Refresh procedure: at session start, at a promotion expiry, or on a material
 availability change, re-open the sources above, record the date and any change
@@ -126,29 +125,21 @@ Dated 2026-09-10. Recorded from this session; update at handoff.
 
 ## Local container runtime note
 
-Docker Desktop was uninstalled on 2026-09-10 as a deliberate migration to a
-CLI-only runtime. Do not reinstall it or depend on Desktop-only tooling. The
-runtime is colima (Apple Virtualization.framework with virtiofs and Rosetta)
-driven by the Homebrew `docker` CLI; the active context is `colima`.
+On macOS workstations this project uses a CLI-only container runtime (colima
+with the Homebrew `docker` CLI) rather than Docker Desktop. Do not depend on
+Desktop-only tooling.
 
-- The daemon runs only while the VM is started. Check with `colima status`
-  (`dstatus`) and start with `colima start` (`dstart`); `colima stop` (`dstop`)
-  frees the 2 GB VM on this 8 GB host. Start the VM before any docker command
-  and retry once if a command fails while it is down.
+- The daemon runs only while the VM is started. Check with `colima status` and
+  start with `colima start` before any docker command; retry once if a command
+  fails while it is down.
 - The repository compose fixture works through the standard context with
   `cargo xtask db up`; no `DOCKER_HOST` or `DOCKER_CONFIG` override is needed.
-- After the migration the configured `credsStore: osxkeychain` had no helper
-  binary, so every image pull failed. `docker-credential-helper` was installed
-  with `brew install docker-credential-helper` on 2026-09-10 and anonymous
-  pulls now succeed. The workstation bootstrap at
-  `~/repos/.utility/env/brew-install.sh` should add that formula, or a fresh
-  machine will hit the same gap.
-- Do not use the removed `desktop-linux` context or the dangling
-  `/var/run/docker.sock` default context. Stale shells should run `hash -r`
-  and `unset DOCKER_HOST`.
+- If `credsStore: osxkeychain` is configured, install the
+  `docker-credential-helper` formula, or every image pull fails even for
+  public images.
+- Do not use a removed `desktop-linux` context or a dangling default socket.
+  Stale shells should run `hash -r` and `unset DOCKER_HOST`.
 - `cargo xtask db down` is `docker compose down -v` scoped to this repository's
   own disposable fixture, which is the prescribed teardown. Never run global
   volume prunes, and never run `down -v` against another project.
-- The workstation reference is the `docker-cli` skill at
-  `~/.agents/skills/docker-cli/SKILL.md`.
 
