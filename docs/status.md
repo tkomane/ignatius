@@ -1,8 +1,50 @@
 # Status
 
-**Updated: 2026-09-04.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-11.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Public repository and guardrails - 2026-09-11
+
+**Decision.** The owner made `tkomane/ignatius` public, for an operational
+reason: every CI job was rejected before it started because the private Actions
+quota was exhausted and the account's spending limit is zero. Public
+standard-runner minutes are free, and the previously blocked runs executed
+immediately after the change. `docs/operations/release.md` had deferred public
+source until CI was green on all three platforms; that prerequisite is not met
+(Windows is red on the active W03 branch), so this is an owner decision that
+overrides the deferred route, not completion of it.
+
+**Pre-publication audit.** The full 97-commit history was scanned with the same
+digest-pinned Gitleaks image CI uses: no leaks. No employer or client content,
+private keys, credential files or internal endpoints were found. The only
+credentials in the tree are the documented synthetic container fixtures. Commit
+metadata includes the owner's public commit address.
+
+**Enabled the same day.** Secret scanning and push protection, private
+vulnerability reporting, CodeQL default setup (auto-detected rust, python and
+actions; the setup API's explicit language list does not yet accept rust), an
+Actions allowlist with SHA-pinning required, approval for all external fork
+contributors, deletion of merged branches, a ruleset requiring a pull request
+and all 13 CI checks on `main` with resolved review threads, and a ruleset
+protecting `v*` tags from updates and deletion. The free plan does not include
+non-provider secret patterns or validity checks; those remain disabled.
+
+**Diagnosed and fixed: the Windows-only failure.** GitHub's Windows runner
+image sets `PGPASSWORD` machine-wide for its preinstalled PostgreSQL.
+`prepare_profile_target` read the process environment directly, so the picker
+test's `target.password.is_none()` assertion failed on Windows for a reason that
+had nothing to do with the profile under test. The picker body now takes an
+`EnvSnapshot`: production still reads the real environment, and the test supplies
+a fixed empty snapshot, matching the existing "resolution is a pure function"
+rule in `src/connection/target.rs`. Focused evidence on 2026-09-11: `cargo fmt
+--all --check`, workspace clippy with warnings denied, the three
+`cli::interactive::tests::a_picker` tests, the 15 documentation-match contracts
+and the 7 workflow contracts all pass locally. A fresh hosted Windows run is not
+yet recorded. `Cargo.toml` named `github.com/tshiamo/ignatius` in its
+`repository` field, which does not resolve to the public source; it now points
+at `tkomane/ignatius`, and a later move of accounts can update the one field
+again.
 
 ## Agent planning handoff - 2026-09-04
 
@@ -1203,8 +1245,10 @@ These are real and none of them is hidden anywhere else:
   in: a Linux clipboard crate needs a display that WSL does not have, and
   Windows Terminal implements the write half of OSC 52 and deliberately not the
   read half.
-- **Repository**: private, at `tkomane/ignatius`. Publishing beyond that is
-  deferred; the options are in `docs/operations/release.md`.
+- **Repository**: public at `tkomane/ignatius` since 2026-09-11, an owner
+  decision taken to restore CI after the private Actions quota was exhausted.
+  Route options remain in `docs/operations/release.md`; distribution beyond
+  source is still deferred.
 
 ## Decisions still pending
 
