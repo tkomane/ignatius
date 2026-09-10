@@ -46,6 +46,96 @@ yet recorded. `Cargo.toml` named `github.com/tshiamo/ignatius` in its
 at `tkomane/ignatius`, and a later move of accounts can update the one field
 again.
 
+## W01 reconciliation and W03 reviewed-write evidence - 2026-09-10
+
+**Baseline.** The working tree was clean at `247d1c7` and 21 commits behind
+`origin/main`; a fast-forward to `6df522e` ("Record main integration state")
+brought in the integrated chain for Features 012 through 024. Every task box in
+`specs/012-schema-completion/tasks.md` through
+`specs/024-retained-result-refresh/tasks.md` is checked, so the handoff that
+named schema completion as the next priority predates the merge. The active
+priorities are the delivery plan's W01 to W05 hardening packages, not a new
+feature. W01 reconciliation is complete for the source tree: `HEAD` is
+`6df522e`, the tree was clean before this session's changes, and the inherited
+evidence remains valid only for the revisions it names.
+
+**Fixed: `FROM ONLY` misresolved its relation.** `parse_relation` in
+`src/query/update.rs` accepted the keyword `ONLY` as the relation name for
+`SELECT ... FROM ONLY relation`, then took the real relation as its alias. With
+a relation named `only` on the search path, a generated cell update could be
+sent to that relation using row identity read from another table's result. The
+source is now refused with a truthful reason; a quoted relation named `"only"`
+still works. The new test was watched failing before the fix, and the
+independent review confirmed no other accepted shape regressed. The
+specification Edge Case, the compatibility wording, a checked T020 task and an
+Unreleased CHANGELOG fix record the behaviour.
+
+**W03 evidence: reviewed-write identity and truthfulness.** Four live tests
+against disposable PostgreSQL 18.4 prove a composite quoted primary key (two
+ordered predicates, exactly one intended row changed, neighbours untouched),
+that review does not lock a row (a concurrent delete reports zero rows; a
+concurrent non-key change is overwritten and reports one), and that
+`restricted_reader` metadata is readable but not writable while the server
+itself refuses the generated update with SQLSTATE 42501. A reducer assertion
+proves the emitted parameterized effect binds to exactly the reviewed
+`bound_sql`. The accepted concurrency semantics are documented in
+`compatibility.md`: no lock, no conflict detection, no retry, no rollback.
+
+| Gate at the final source | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked --lib query::update` | 10 passed |
+| `cargo test --locked --lib app::update` | 148 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 15 passed |
+| `cargo --locked xtask verify` | Pass; 995 workspace tests, 53 PostgreSQL integration tests live |
+| Unix-socket integration | Skip; `IGNATIUS_TEST_PG_SOCKET_URI` is not set |
+
+That verify run counted 995 workspace tests: 754 library, 3 archive helper, 51
+CLI contract, 4 cloud identity, 15 documentation matches, 3 editor contract, 2
+keymap contract, 1 native boundary, 3 password prompt, 53 PostgreSQL
+integration, 1 Unix-socket harness returning early (the separate semantic skip
+above), 80 release contract, 7 release notes, 2 release runtime, 1 release
+schema, 3 terminal restoration, 7 workflow contract and 5 xtask tests, plus 0
+documentation tests. No test failed.
+
+Environment: macOS 26.6.1 on Apple silicon, rustc and cargo 1.98.1 (Homebrew),
+image `postgres:18.4-alpine` digest
+`sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15`.
+The container fixture ran on the deliberate CLI-only colima runtime; Docker
+Desktop was uninstalled on 2026-09-10 and must not be reinstalled. A missing
+`docker-credential-osxkeychain` made the standard compose pull fail until
+`brew install docker-credential-helper` restored it. The standard path was then
+re-validated with `cargo xtask db up` and the focused live test, and the
+disposable services were removed with `cargo xtask db down`, after which
+`cargo xtask db status` reported `Not running.` The runtime rules and the
+colima lifecycle are recorded in `docs/operations/agent-orchestration.md`.
+
+**Orchestration.** Project-local roles (explorer, implementer, reviewer),
+routing, fallback and dated OpenCode Go offer observations are recorded in
+`docs/operations/agent-orchestration.md`, with a schema-only `opencode.json`
+and `.opencode/agent/` role files. Only OpenCode Go is authorised; no overage,
+auto-reload or new provider was enabled. Independent review of both slices
+found no blocking or substantive issues; minor observations are in the review
+returns. This session ran its workers on the default `deepseek-v4.1-flash`
+because agent-level model routing takes effect only after an opencode restart.
+
+**Not proven.** Manual terminal use of the new refusal, Windows and Linux hand
+checks, the Unix-socket route, PostgreSQL 14-17 for the new evidence (18.4
+only), live cloud-provider authentication, and anything release-related. The
+changes are committed on the `w03-reviewed-write-evidence` branch for
+integration; no tag, signing, release or publication was performed.
+
+**Integration state.** The repository became public on 2026-09-11 (owner
+decision; see the section above) and hosted CI started executing. The Windows
+job failed for an environment reason: the runner image sets `PGPASSWORD`
+machine-wide and the picker test read the process environment. Pull request 5
+isolated that test from ambient credentials, added the public repository
+guardrails and merged as `ba284f9`; this branch is rebased on it. Hosted checks
+for the rebased revision are recorded on pull request 4. The local
+`cargo --locked xtask verify` result above, with the disposable database
+running, remains the strongest local evidence.
+
 ## Agent planning handoff - 2026-09-04
 
 The [roadmap](product/roadmap.md) now defines the path from the local feature
@@ -1268,21 +1358,26 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W01:** review the combined local changes and existing Feature 024 evidence,
-   preserve all intended behaviours, and prepare a reproducible integration
-   baseline. Reuse matching results; rerun affected gates when code changes.
-2. **W02-W07/W10:** work through session/result identity, binding and reviewed
-   writes, runtime privacy, the current-source PostgreSQL matrix, native cloud
-   launch and terminal restoration, and measured resource/recovery boundaries.
-3. **W08-W09:** hand-verify the complete experience through Feature 024 on
-   macOS/Warp, native Windows, Linux and WSL; test VoiceOver/NVDA, real resize,
-   configured keys and opt-in clipboard paths. Run the first-use/daily-use
-   acceptance protocol, then fix observed blockers through scoped features.
-4. **W11/W13 can prepare independently:** resolve release trust, support,
-   naming and governance decisions before candidate freeze. Use controlled
-   cloud accounts only under explicit access authority; keep provider evidence
-   separate from the synthetic mechanism.
-5. **W12/W14:** complete Feature 008's exact candidate evidence, direct runtime
-   privacy and target install/rollback gates, then obtain and execute only the
-   owner's authorized release scope. T033/T035 remain open until their actual
-   requirements are met. Maintenance and evidence-led follow-up are W15/W16.
+1. **W02:** the reducer transition matrix is covered; no runtime test harness
+   exists for `event_loop`, so decide between a message-injection seam and
+   extended pty or live evidence before adding tests. Do not rewrite the state
+   architecture to make a harness convenient.
+2. **W03 continued:** decide the `standard_conforming_strings` boundary. The
+   bootstrap query already reads server facts once per session; reading the
+   setting there and refusing parameter binding when it is `off` is the
+   smallest design that satisfies "never silently bind under incompatible
+   semantics". A specification change comes first. Also collect live TUI
+   evidence for the update review and run the new evidence on PostgreSQL 14-17.
+3. **W04:** add the missing runtime privacy probes: `IGNATIUS_LOG=debug` with
+   parameter expansion, provider stderr redaction, the generated update bound
+   SQL, refresh, clipboard confirmation and the panic path.
+4. **W05:** run the current source against the PostgreSQL 14-18 matrix with
+   plain and TLS fixtures and a real Linux socket; the Unix-socket gate is still
+   a skip on this machine.
+5. **W06-W07:** blocked on a controlled cloud account and a Windows host; the
+   portable subprocess portions can proceed locally.
+6. **W08-W10:** hand-verify terminals, accessibility and daily use once the
+   relevant behaviour is stable; measure resource and recovery boundaries.
+7. **W11/W13:** prepare the release trust, support, naming and governance
+   decisions. **W12/W14:** assemble the candidate and obtain the owner's
+   decision. No release claim is earned by waiting.

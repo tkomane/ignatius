@@ -239,7 +239,9 @@ projected and non-NULL in the selected row are eligible; a primary-key cell is
 not an editable target.
 
 Joins, subqueries, CTEs, expressions, set operations, views, missing keys,
-read-only sessions and production-classified connections are refused. The
+read-only sessions and production-classified connections are refused. A
+`FROM ONLY` source is also refused because the generated statement would not
+carry `ONLY` and could reach inherited rows. The
 replacement prompt accepts literal text, including empty text, and has a
 separate review step. The review shows the exact bound `UPDATE` and says that
 nothing has been sent. Enter emits one `ExecuteParameterized` effect; Esc emits
@@ -247,6 +249,13 @@ none. The template can be recorded in history, but replacement and key values
 remain secret-bound until execution. The prior result is a snapshot and is not
 rerun automatically. The generated statement is bounded at 16 KiB after
 binding.
+
+The review is not a lock. It neither locks the row nor proves that the value read
+when the cell was selected is unchanged, and the generated statement matches only
+the primary key. A concurrent change to a non-key column is overwritten and a
+concurrent delete reports zero rows affected. Ignatius does not detect the
+conflict, retry the update, or silently roll back; the row count the server
+returns is the truthful outcome.
 
 ## Explicit retained-result refresh
 
