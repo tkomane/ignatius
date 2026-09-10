@@ -716,17 +716,26 @@ async fn prepare_profile_target(
     profile: Option<&str>,
     config: &Config,
 ) -> Result<ConnectionTarget, Diagnostic> {
+    prepare_profile_target_in(profile, config, &EnvSnapshot::from_process()).await
+}
+
+/// The body of [`prepare_profile_target`], with the environment passed in.
+///
+/// Tests supply a fixed snapshot so resolution never reads the machine's own
+/// `PGPASSWORD` or password file. Hosted Windows runners ship `PGPASSWORD` set
+/// for their preinstalled PostgreSQL, which made a no-password assertion fail
+/// for reasons that had nothing to do with the profile under test.
+async fn prepare_profile_target_in(
+    profile: Option<&str>,
+    config: &Config,
+    env: &EnvSnapshot,
+) -> Result<ConnectionTarget, Diagnostic> {
     let connection = ConnectionOptions {
         profile: profile.map(str::to_owned),
         ..ConnectionOptions::default()
     };
     let (requested, args) = crate::cli::resolve_target_and_profile(None, &connection, config)?;
-    let target = crate::connection::resolve(
-        requested,
-        &args,
-        &EnvSnapshot::from_process(),
-        &config.connection,
-    )?;
+    let target = crate::connection::resolve(requested, &args, env, &config.connection)?;
     if target.auth.is_none() {
         return Ok(target);
     }
@@ -1629,9 +1638,10 @@ mod tests {
         )
         .expect("profile config");
 
-        let target = prepare_profile_target(Some("orders-dev"), &config)
-            .await
-            .expect("resolve without opening a database");
+        let target =
+            prepare_profile_target_in(Some("orders-dev"), &config, &EnvSnapshot::default())
+                .await
+                .expect("resolve without opening a database");
         assert_eq!(
             target.safe_display(),
             "ignatius_test@127.0.0.1:55432/ignatius_demo"
@@ -1650,9 +1660,10 @@ mod tests {
         let config: Config = toml::from_str("[profiles.orders-dev]\nhost = \"127.0.0.1\"\n")
             .expect("profile config");
 
-        let error = prepare_profile_target(Some("orders-prod"), &config)
-            .await
-            .expect_err("unknown selection must not silently use defaults");
+        let error =
+            prepare_profile_target_in(Some("orders-prod"), &config, &EnvSnapshot::default())
+                .await
+                .expect_err("unknown selection must not silently use defaults");
         assert_eq!(error.kind, DiagnosticKind::Config);
         assert!(
             error
@@ -1674,9 +1685,10 @@ mod tests {
         )
         .expect("profile config");
 
-        let error = prepare_profile_target(Some("orders-local"), &config)
-            .await
-            .expect_err("cloud credentials may not cross an unencrypted route");
+        let error =
+            prepare_profile_target_in(Some("orders-local"), &config, &EnvSnapshot::default())
+                .await
+                .expect_err("cloud credentials may not cross an unencrypted route");
         assert!(
             error.headline.contains("encrypted") || error.headline.contains("TLS"),
             "the existing encryption gate should explain the refusal: {error:?}"
