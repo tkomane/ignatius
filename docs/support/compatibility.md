@@ -250,6 +250,13 @@ remain secret-bound until execution. The prior result is a snapshot and is not
 rerun automatically. The generated statement is bounded at 16 KiB after
 binding.
 
+The review is not a lock. It neither locks the row nor proves that the value read
+when the cell was selected is unchanged, and the generated statement matches only
+the primary key. A concurrent change to a non-key column is overwritten and a
+concurrent delete reports zero rows affected. Ignatius does not detect the
+conflict, retry the update, or silently roll back; the row count the server
+returns is the truthful outcome.
+
 ## Explicit retained-result refresh
 
 The interactive client exposes `F6`, an enhanced-terminal `Ctrl+Shift+R` alias,
