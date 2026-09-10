@@ -73,6 +73,10 @@ confirmation emits one parameterized execution effect.
   `cargo xtask db status`.
 - [x] T019 Mark the feature implemented only after evidence is recorded in
   `docs/status.md`, update all task checkboxes and verify normal-hyphen prose.
+- [x] T020 Fix the W03-discovered `FROM ONLY` source-analysis defect: an
+  unquoted `ONLY` modifier is refused with a truthful reason while a quoted
+  relation named `only` stays usable, with focused evidence in
+  `cargo test --locked --lib query::update`.
 
 ## Dependencies and execution order
 

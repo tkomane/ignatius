@@ -239,7 +239,9 @@ projected and non-NULL in the selected row are eligible; a primary-key cell is
 not an editable target.
 
 Joins, subqueries, CTEs, expressions, set operations, views, missing keys,
-read-only sessions and production-classified connections are refused. The
+read-only sessions and production-classified connections are refused. A
+`FROM ONLY` source is also refused because the generated statement would not
+carry `ONLY` and could reach inherited rows. The
 replacement prompt accepts literal text, including empty text, and has a
 separate review step. The review shows the exact bound `UPDATE` and says that
 nothing has been sent. Enter emits one `ExecuteParameterized` effect; Esc emits
