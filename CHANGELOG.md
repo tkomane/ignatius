@@ -97,6 +97,11 @@ source can generate user-facing notes.
   details surface. It names the target, environment, server posture, TLS
   guarantee, and the safe cloud credential route for Entra, AWS, Google Cloud,
   and configured providers without refreshing or displaying tokens.
+- Fixed: a cell update prepared from `SELECT ... FROM ONLY t` could be sent to
+  a different relation named `only` when one existed in the search path, using
+  row identity read from `t`'s result. A `FROM ONLY` source is now refused with
+  a clear reason, because the generated update would not carry `ONLY` and could
+  reach inherited rows. A quoted relation named `"only"` still works.
 
 ## [0.1.0]
 
