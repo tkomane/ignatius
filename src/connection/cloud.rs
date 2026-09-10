@@ -779,6 +779,78 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn a_provider_that_echoes_a_credential_shape_never_leaks_it_into_the_diagnostic() {
+        const SENTINEL: &str = "w04-sentinel-4f2a";
+        let provider = Provider {
+            name: "test".into(),
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!(
+                    "echo 'password={SENTINEL}' >&2; \
+                     echo 'Authorization: Bearer {SENTINEL}' >&2; exit 1"
+                ),
+            ],
+            extract: Extract::Raw,
+            timeout: DEFAULT_TIMEOUT,
+            remedy: "sign in".into(),
+        };
+        let error = fetch(&provider, &target(SslMode::Require))
+            .await
+            .expect_err("it failed");
+        assert_eq!(error.kind, DiagnosticKind::Authentication);
+
+        let mut displayable = vec![error.headline.clone(), error.attempted.clone()];
+        if let Some(cause) = &error.likely_cause {
+            displayable.push(cause.clone());
+        }
+        if let Some(action) = &error.next_action {
+            displayable.push(action.clone());
+        }
+        for field in &error.technical {
+            displayable.push(field.label.clone());
+            displayable.push(field.value.clone());
+        }
+        for text in displayable {
+            assert!(
+                !text.contains(SENTINEL),
+                "provider stderr leaked the sentinel into {text:?}"
+            );
+        }
+        let cause = error.likely_cause.as_deref().unwrap_or_default();
+        assert!(
+            cause.contains("[redacted]"),
+            "the provider's reason should survive redaction rather than be dropped: {cause:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_provider_that_never_answers_times_out_without_reading_its_output() {
+        let provider = Provider {
+            name: "test".into(),
+            command: vec!["/bin/sleep".into(), "3".into()],
+            extract: Extract::Raw,
+            timeout: Duration::from_secs(1),
+            remedy: "sign in".into(),
+        };
+        let error = fetch(&provider, &target(SslMode::Require))
+            .await
+            .expect_err("it hung");
+        assert_eq!(
+            error.kind,
+            DiagnosticKind::Connection,
+            "a timeout is a connection failure, not a rejected credential"
+        );
+        assert!(
+            error.headline.contains("did not answer within 1 seconds"),
+            "the provider's own timeout drives the path: {}",
+            error.headline
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn nothing_is_run_at_all_when_the_transport_would_allow_plain_text() {
         // The claim is not that the token is discarded. It is that the program
         // never ran, so there was never a token to discard.
