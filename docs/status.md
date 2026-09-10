@@ -126,13 +126,15 @@ only), live cloud-provider authentication, and anything release-related. The
 changes are committed on the `w03-reviewed-write-evidence` branch for
 integration; no tag, signing, release or publication was performed.
 
-**Integration state.** The branch is pushed and pull request 4 is open. On
-2026-09-10 GitHub refused to start every hosted job for this revision and for
-the scheduled `main` run, reporting that the account spending limit must be
-increased (run `34535254783`). No hosted evidence exists for this revision, so
-the pull request stays open rather than being merged on local evidence alone.
-The local `cargo --locked xtask verify` result above, with the disposable
-database running, remains the strongest evidence at this revision.
+**Integration state.** The repository became public on 2026-09-11 (owner
+decision; see the section above) and hosted CI started executing. The Windows
+job failed for an environment reason: the runner image sets `PGPASSWORD`
+machine-wide and the picker test read the process environment. Pull request 5
+isolated that test from ambient credentials, added the public repository
+guardrails and merged as `ba284f9`; this branch is rebased on it. Hosted checks
+for the rebased revision are recorded on pull request 4. The local
+`cargo --locked xtask verify` result above, with the disposable database
+running, remains the strongest local evidence.
 
 ## Agent planning handoff - 2026-09-04
 
