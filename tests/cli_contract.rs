@@ -951,6 +951,72 @@ mod with_server {
     }
 
     #[test]
+    fn debug_logging_never_captures_expanded_parameter_values() {
+        const SENTINEL: &str = "w04-sentinel-4f2a";
+        const VARIABLE: &str = "W04_EXPANSION_SENTINEL";
+        let uri = uri_or_skip!();
+        let dir = std::env::temp_dir().join(format!(
+            "ignatius-param-log-contract-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        let data_dir = dir.join("data");
+        let mapping = format!("sentinel={VARIABLE}");
+        let sql = "SELECT :sentinel AS value";
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", &data_dir)
+            .env("IGNATIUS_LOG", "debug")
+            .env(VARIABLE, SENTINEL)
+            .args([
+                "query",
+                &uri,
+                "-c",
+                sql,
+                "--param-env",
+                &mapping,
+                "--format",
+                "csv",
+            ])
+            .output()
+            .expect("run");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert_eq!(
+            stdout(&output),
+            format!("value\n{SENTINEL}\n"),
+            "the supplied value must appear as ordinary result data"
+        );
+
+        assert!(
+            !stderr(&output).contains(SENTINEL),
+            "expanded parameter value reached stderr: {}",
+            stderr(&output)
+        );
+
+        let log_path = data_dir.join("logs/ignatius.log");
+        let log = std::fs::read_to_string(&log_path).expect("read isolated log");
+        assert!(
+            log.contains("job=1 statement_chars="),
+            "the process wrote no value-free statement descriptor to {}: {log}",
+            log_path.display()
+        );
+        assert!(
+            !log.contains(SENTINEL),
+            "expanded parameter value reached the log: {log}"
+        );
+        assert!(
+            !log.contains("E'"),
+            "an escaped expanded literal reached the log: {log}"
+        );
+        assert!(
+            !log.contains("tokio_postgres"),
+            "dependency trace reached the log: {log}"
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn a_server_error_exits_with_the_query_code_and_keeps_stdout_clean() {
         let uri = uri_or_skip!();
         let output = binary()
