@@ -11,15 +11,17 @@ reason: every CI job was rejected before it started because the private Actions
 quota was exhausted and the account's spending limit is zero. Public
 standard-runner minutes are free, and the previously blocked runs executed
 immediately after the change. `docs/operations/release.md` had deferred public
-source until CI was green on all three platforms; that prerequisite is not met
-(Windows is red on the active W03 branch), so this is an owner decision that
-overrides the deferred route, not completion of it.
+source until CI was green on all three platforms; that prerequisite was not met
+at the time (the active W03 branch was red on Windows), so this is an owner
+decision that overrides the deferred route, not completion of it.
 
 **Pre-publication audit.** The full 97-commit history was scanned with the same
 digest-pinned Gitleaks image CI uses: no leaks. No employer or client content,
-private keys, credential files or internal endpoints were found. The only
-credentials in the tree are the documented synthetic container fixtures. Commit
-metadata includes the owner's public commit address.
+private keys, credential files or internal endpoints were found, but the scan
+missed one unexpanded internal acronym in three documents. It was generalised
+across those documents on 2026-09-11 so the tree carries no client identifier.
+The only credentials in the tree are the documented synthetic container
+fixtures. Commit metadata includes the owner's public commit address.
 
 **Enabled the same day.** Secret scanning and push protection, private
 vulnerability reporting, CodeQL default setup (auto-detected rust, python and
@@ -40,8 +42,10 @@ a fixed empty snapshot, matching the existing "resolution is a pure function"
 rule in `src/connection/target.rs`. Focused evidence on 2026-09-11: `cargo fmt
 --all --check`, workspace clippy with warnings denied, the three
 `cli::interactive::tests::a_picker` tests, the 15 documentation-match contracts
-and the 7 workflow contracts all pass locally. A fresh hosted Windows run is not
-yet recorded. `Cargo.toml` named `github.com/tshiamo/ignatius` in its
+and the 7 workflow contracts all pass locally. The first hosted Windows run for
+the branched revision passed on 2026-09-11 in 2m40s, and the merge's
+main-branch run passed as well; the check suite on pull request 4 is the
+record. `Cargo.toml` named `github.com/tshiamo/ignatius` in its
 `repository` field, which does not resolve to the public source; it now points
 at `tkomane/ignatius`, and a later move of accounts can update the one field
 again.
@@ -378,8 +382,8 @@ preview to stderr, and leaves result stdout unchanged.
 
 **Previous**: the four open decisions are closed, and the product has a
 direction rather than a finished roadmap. The owner named the real requirement
-on 2026-08-16 - Microsoft Entra ID against Azure Database for PostgreSQL, for
-the COI application - and it turns out not to need libpq at all: Entra
+on 2026-08-16 - Microsoft Entra ID against Azure Database for PostgreSQL, for a
+production application - and it turns out not to need libpq at all: Entra
 authenticates with a token presented as the password over TLS, which this
 adapter already does. ADR-0012 records that and supersedes ADR-0009. The
 credential store is rejected (ADR-0011), copy goes through OSC 52 opt-in
