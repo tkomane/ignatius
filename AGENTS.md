@@ -50,6 +50,10 @@ non-zero if any gate failed.
 Without a running database the integration tests skip and both xtask and the
 tests say so. A skip is not a pass: report it as a skip.
 
+Unit test modules live in a `tests.rs` file beside the module, never inline in a
+production file, so CodeQL's test-path exclusion keeps the scanner reading
+shipped code.
+
 ## Handling secrets
 
 - Never put a real credential in source, configuration, a test fixture, a commit
