@@ -1,0 +1,16 @@
+# CodeQL configuration for the advanced-setup workflow in
+# .github/workflows/codeql.yml.
+#
+# Test sources are excluded from analysis. Rust has no inline alert suppression
+# yet (github/codeql#21637), and the tests deliberately format password-like
+# values to prove they never reach output. The cleartext-logging query reports
+# those assertions as high-severity findings, which is noise that trains people
+# to ignore the dashboard.
+#
+# Keep unit test modules in a tests.rs file beside their module (for example
+# src/app/update/tests.rs) and integration tests in tests/, so this exclusion
+# keeps applying. Production code keeps the full query set.
+name: Ignatius CodeQL configuration
+paths-ignore:
+  - tests/**
+  - "**/tests.rs"
