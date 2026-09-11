@@ -31,6 +31,9 @@ first, so a failure is found in seconds rather than after a push.
   rather than restating the diff.
 - Tests beside the behaviour they prove. A test name should read as the claim it
   is making.
+- Unit test modules in a `tests.rs` file beside the module, not inline in a
+  production file: CodeQL excludes test paths from analysis, and the production
+  file is what the scanner should read.
 - Documentation and release notes updated in the same commit as the behaviour.
 - Nothing that weakens a constitutional principle. If a principle is genuinely
   wrong, amend it explicitly rather than routing around it.
