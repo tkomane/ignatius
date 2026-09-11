@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## CodeQL test exclusion and advanced setup - 2026-09-11
+
+CodeQL's default setup reported 32 high-severity `rust/cleartext-logging`
+findings, all on test assertions that deliberately format password-like values
+to prove they never reach output. Rust has no inline alert suppression yet
+(github/codeql#21637), and default setup cannot be configured for a user-owned
+repository, so the repository moved to advanced setup
+(`.github/workflows/codeql.yml`) with a configuration file
+(`.github/codeql/codeql-config.yml`) that ignores `tests/**` and `**/tests.rs`.
+
+The unit test modules moved out of `src/app/update.rs` and
+`src/connection/target.rs` into `tests.rs` files beside them so the exclusion
+covers them; production sources keep the full default query set. The existing
+32 findings are dismissed as test-only, and the first hosted run of the advanced
+workflow on the pull request is the proof that the noise is gone.
+
 ## Public repository and guardrails - 2026-09-11
 
 **Decision.** The owner made `tkomane/ignatius` public, for an operational
