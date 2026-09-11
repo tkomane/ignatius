@@ -41,6 +41,7 @@ results.
 | Dependency advisories and licences | `cargo deny check` in CI | Yes |
 | Secret scan | gitleaks in CI | Yes |
 | Release evidence scope | allowlist validation and scoped gitleaks scan in CI | Yes |
+| Code scanning | CodeQL advanced setup in CI, test sources excluded | Yes |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
 ## CI execution contract prepared on 2026-09-02
@@ -66,6 +67,17 @@ checks, source/evidence scans and generated-output checks. The scheduled-only
 fixture-drift job was skipped and is not included in those passes. This is
 historical main-source CI evidence, not verification of the newer local
 feature chain or of the separate release preflight and candidate artifacts.
+
+## Code scanning contract added on 2026-09-11
+
+CodeQL uses advanced setup rather than GitHub's default setup, because default
+setup cannot be configured for a user-owned repository and the analysis must
+keep test sources out. `.github/codeql/codeql-config.yml` ignores `tests/**` and
+`**/tests.rs`: Rust has no inline alert suppression yet (github/codeql#21637),
+and the tests deliberately format password-like values to prove they never
+reach output, which the cleartext-logging query reports as high severity.
+Production sources keep the full default query set. Unit test modules live in a
+`tests.rs` file beside their module, never inline in a production file.
 
 ## Local CI-hardening evidence recorded on 2026-09-02
 

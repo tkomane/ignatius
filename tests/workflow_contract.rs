@@ -289,10 +289,18 @@ fn workflows_are_read_only_bounded_and_do_not_use_privileged_pr_code() {
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .collect();
+        // CodeQL uploads SARIF, which requires the security-events scope. Every
+        // other workflow stays read-only.
+        let expected_permissions: &[&str] =
+            if path.file_name().and_then(|name| name.to_str()) == Some("codeql.yml") {
+                &["contents: read", "security-events: write"]
+            } else {
+                &["contents: read"]
+            };
         assert_eq!(
-            permission_entries,
-            ["contents: read"],
-            "{} must grant only read repository contents",
+            permission_entries.as_slice(),
+            expected_permissions,
+            "{} must grant only its reviewed scopes",
             path.display()
         );
         assert!(
