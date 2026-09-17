@@ -229,6 +229,52 @@ pub struct PlanExecution {
     pub connection_lost: bool,
 }
 
+/// Which mouse button produced an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    /// The primary button.
+    Left,
+    /// The secondary button.
+    Right,
+    /// The middle button.
+    Middle,
+}
+
+/// What a mouse event did.
+///
+/// This is the application's own vocabulary rather than the terminal library's,
+/// so the reducer never depends on a platform event type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseKind {
+    /// A button was pressed.
+    Down(MouseButton),
+    /// A button was released.
+    Up(MouseButton),
+    /// A button was held while the pointer moved.
+    Drag(MouseButton),
+    /// The pointer moved with no button held.
+    Moved,
+    /// The wheel scrolled down one notch.
+    ScrollDown,
+    /// The wheel scrolled up one notch.
+    ScrollUp,
+    /// The wheel scrolled left.
+    ScrollLeft,
+    /// The wheel scrolled right.
+    ScrollRight,
+}
+
+/// Modifier keys held during a mouse event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MouseModifiers {
+    /// Shift is held.
+    pub shift: bool,
+    /// Control is held.
+    pub control: bool,
+    /// Alt is held.
+    pub alt: bool,
+}
+
 /// Everything that can change the model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
@@ -236,6 +282,19 @@ pub enum Message {
     Action(Action),
     /// The terminal was resized.
     Resized(u16, u16),
+    /// A mouse event, with zero-based screen coordinates.
+    Mouse {
+        /// What the pointer did.
+        kind: MouseKind,
+        /// Screen column.
+        column: u16,
+        /// Screen row.
+        row: u16,
+        /// Modifiers held during the event.
+        modifiers: MouseModifiers,
+    },
+    /// Text pasted into the terminal.
+    Pasted(String),
     /// A connection attempt succeeded.
     Connected(Box<SessionInfo>),
     /// A connection attempt failed.
