@@ -372,6 +372,45 @@ the full width.
    omitted, the list remains complete, and the entry's detail remains
    reachable through the existing routes.
 
+### User Story 10 - The name materializes (Priority: P3)
+
+Someone launches the interactive client and, while the connection is being
+established, the product's identity mark sweeps into place over the painted
+shell: a block wordmark revealed left to right with a brief decode edge, an
+underline that fills like the existing meter, and the tagline appearing on
+the final frame. It costs nothing: the reveal rides the connecting wait,
+any key skips to the final frame, connection completion truncates it, and
+it never plays again during the session.
+
+**Why this priority**: Identity work that rewards the P1 stories' painted
+shell. It is the smallest piece of brand delight the constitution permits:
+motion that reflects a real wait, capped, skippable, and honest.
+
+**Independent Test**: Drive the connecting frames through the reducer at
+the existing tick and assert the sweep front advances by the pinned easing,
+any key or connection outcome jumps to the final frame, reduced motion
+renders the final frame from the first tick, and plain mode and machine
+output never contain banner bytes.
+
+**Acceptance Scenarios**:
+
+1. **Given** the interactive client is connecting at 64 columns or more,
+   **when** frames render, **then** the wordmark reveals left to right
+   with the decode edge and fills its underline, completing within the
+   pinned duration, and the connecting step wording remains visible
+   throughout.
+2. **Given** any key is pressed or the connection succeeds or fails,
+   **when** the next frame renders, **then** the banner is at its final
+   frame (or gone, if the connected layout replaces the frame), with no
+   residual animation.
+3. **Given** reduced motion is on, **then** the final frame shows
+   immediately and nothing animates; **given** colour is off or the ASCII
+   glyph tier is active, **then** the pinned ASCII variant renders with
+   meaning intact; **given** under 64 columns, the monogram variant; on
+   the too-small layout, no banner.
+4. **Given** a session is connected, **then** the banner never replays on
+   reconnect, refresh, resize or theme switch within the same process.
+
 ## Edge Cases
 
 - A paste while a masked prompt is open goes to that prompt as hidden input
@@ -515,6 +554,23 @@ the full width.
   preview MUST be omitted with the list complete and the content reachable
   through existing routes; every new surface in this feature MUST keep the
   existing narrow, compact and too-small layout guarantees.
+- **FR-2525**: The interactive client MUST render the pinned identity mark
+  during the pre-connection and connecting frames only, chosen by width
+  from the pinned variants, and MUST never emit it in plain mode, machine
+  output, logs or diagnostics.
+- **FR-2526**: The reveal MUST follow the pinned sweep (duration, easing,
+  decode edge, per-tier decode charsets), derive its progress from the
+  existing frame counter so the reducer reads no clock, complete or
+  truncate within 1.4 seconds of first render, and play at most once per
+  process.
+- **FR-2527**: Any key press and any connection outcome MUST truncate the
+  reveal to its final frame with the key still delivered to its normal
+  handler; reduced motion MUST render the final frame from the first tick.
+- **FR-2528**: Banner colour MUST come from theme-owned gradient anchors
+  through the colour-depth machinery: per-column ramp precomputed once,
+  identical on every row, quantized at 256, two flat bands at 16 colours,
+  modifiers only with colour off; the product name MUST remain readable at
+  every tier.
 
 ### Security and Compatibility Requirements
 
@@ -601,6 +657,10 @@ the full width.
   orient, and work a result, is repeatable in Ignatius without reaching
   for another tool; the acceptance protocol records the observed sample
   size honestly.
+- **SC-2509**: In every tested combination of glyph tier, colour depth,
+  reduced motion and width, the banner frames carry the product name
+  readably, zero banner bytes reach plain or machine output, and no
+  connecting frame is delayed by the reveal.
 
 ## Assumptions
 
@@ -621,7 +681,8 @@ the full width.
   design rationale, native text selection, is preserved through the Shift
   route and the documented opt-out.
 - Right-click context menus, session-persisted layout, theme plugins,
-  images, animation beyond the existing spinner and meter, and any
+  images, animation beyond the existing spinner, the meter and the US10
+  boot reveal, and any
   non-database network call are explicitly out of scope.
 - Double-click timing, drag thresholds, spacing tables, split minimums,
   the domain-to-colour map and the quantization tables are pinned in this

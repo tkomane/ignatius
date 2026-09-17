@@ -375,6 +375,44 @@ full-width fallback, narrow omission and zero fetching.
 
 **Checkpoint**: Choosing something shows what it is before Enter.
 
+## Phase 11b: User Story 10 - The name materializes (Priority: P3)
+
+**Goal**: An original ASCII identity mark in the README and a bounded boot
+reveal in the interactive client, over the connecting wait.
+
+**Independent Test**: Drive the connecting frames through the reducer at
+the existing tick and assert the pinned sweep and easing, any key or
+connection outcome jumping to the final frame, reduced motion rendering
+the final frame from the first tick, and plain mode and machine output
+never carrying banner bytes.
+
+### Tests for User Story 10
+
+- [ ] T052 [US10] Add failing tests first: reducer tests in
+  `src/app/update/tests.rs` for sweep progression (the easing values at
+  ticks 0, 6 and 12), skip-on-key with the key still delivered to its
+  normal handler, truncate on any connection outcome, once per process,
+  and reduced-motion final-first; and renderer tests in
+  `src/ui/widgets/banner/tests.rs` for the three pinned variants, the
+  per-tier decode charsets, no banner on the too-small layout, and no
+  banner bytes in plain mode or machine output.
+
+### Implementation for User Story 10
+
+- [ ] T053 [US10] Implement the banner art and the pure sweep functions in
+  `src/ui/widgets/banner.rs` (new file, not single-writer) and render it
+  from the connecting shell; the integrator routes the small reducer arm
+  and the once-per-process fact through `src/app/model.rs` and
+  `src/app/update.rs`; add the gradient anchors in `src/ui/theme.rs`
+  under the existing contrast tests. No new dependency.
+- [ ] T054 [US10] Add the ASCII-tier art to `README.md` under the CI
+  badge, replacing the current tagline paragraph, which moves below the
+  block; monochrome only, no screenshots or GIFs. `README.md` has no
+  parity test and is not `docs/design/`.
+
+**Checkpoint**: The name appears while the wait is real, and disappears
+when it is not.
+
 ## Phase 12: Polish and cross-cutting concerns
 
 - [ ] T046 Amend the narrative design documents in the same change as the
@@ -382,8 +420,13 @@ full-width fallback, narrow omission and zero fetching.
   elevation, colour depth, the superseded Feature 007 override note),
   `docs/design/terminal-compatibility.md` (mouse default and rationale,
   OSC 11, `COLORTERM` detection), `docs/design/icons-and-motion.md`
-  (capsule set), `docs/design/interaction-principles.md` (paste and mouse
-  paragraphs), `docs/design/information-architecture.md` (first frame,
+  (capsule set; the motion section changes from two moving things to
+  three, naming the boot reveal with its bounds and its reduced-motion
+  parity), `docs/design/interaction-principles.md` (paste and mouse
+  paragraphs; the avoided list entry "ASCII art on launch" becomes "ASCII
+  art on launch, except the bounded US10 identity reveal: connecting
+  frames only, 1.4 s cap, any-key skip, reduced-motion static, never in
+  plain mode"), `docs/design/information-architecture.md` (first frame,
   results range line, splits, overlay geometry) and the
   `docs/design/keymap.md` mouse verb table (its per-action key rows will
   already have landed with T022, T031 and T041).
@@ -416,7 +459,9 @@ full-width fallback, narrow omission and zero fetching.
   actions). Phase 9 follows Phase 2 only, but its T039 queues in the
   integrator lane. Phases 10 and 11 follow Phase 4.
 - T046-T048 land together after all behaviour is stable; T049 precedes
-  T050; T051 is last.
+  T050; T051 is last. US10 (T052-T054) follows Phases 4 and 6, the
+  colour-depth machinery and the connecting shell it builds on, and
+  precedes Polish; its design-document additions ride T046.
 
 ## Parallel opportunities
 
@@ -440,7 +485,10 @@ second SQL source of truth anywhere in this feature.
 ## Worker assignment blocks
 
 Pre-filled per the playbook shape. The lead fills `Source revision` at
-assignment time. External actions authorized: none, for every block.
+assignment time. External actions already authorized: the owner granted
+the lead branch, commit, push, pull-request and auto-merge authority for
+this feature on 2026-09-18; implementers perform no git actions and every
+block below records that lead-only grant.
 
 ### Foundational (integrator)
 
@@ -459,6 +507,7 @@ Commands and environment needed: cargo fmt --all -- --check;
   cargo clippy --locked --workspace --all-targets --all-features -- -D warnings;
   cargo test --locked --lib ui::layout; cargo test --locked --lib app::update;
   cargo test --locked --lib ui::widgets.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: all listed commands green with pre-existing tests
   unchanged; do NOT run xtask verify, db fixtures, git commit, or edit
   docs/design/*.
@@ -480,6 +529,7 @@ Commands and environment needed:
   cargo test --locked --lib app::editor;
   cargo test --locked --lib app::update::tests::paste;
   cargo test --locked --lib ui::widgets::footer.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -502,6 +552,7 @@ Acceptance scenarios / existing requirement and task IDs: FR-2503..2506,
 Commands and environment needed: cargo test --locked --lib ui::theme;
   cargo test --locked --lib ui::terminal; cargo test --locked --lib config;
   cargo test --locked --lib ui::layout; cargo test --locked --lib diagnostics.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -522,6 +573,7 @@ Acceptance scenarios / existing requirement and task IDs: FR-2507..2509,
 Commands and environment needed: cargo test --locked --lib app::grid;
   cargo test --locked --lib ui::widgets::results;
   cargo test --locked --lib ui::keymap.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -544,6 +596,7 @@ Commands and environment needed:
   cargo test --locked --lib app::update::tests::connecting;
   cargo test --locked --lib ui::widgets::header;
   cargo test --locked --lib ui::widgets::objects.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -567,6 +620,7 @@ Commands and environment needed: cargo test --locked --lib config;
   cargo test --locked --lib ui::theme;
   cargo test --locked --lib app::update::tests::theme;
   cargo test --locked --lib diagnostics; cargo test --locked --lib ui::layout.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -588,6 +642,7 @@ Acceptance scenarios / existing requirement and task IDs: FR-2517..2519,
 Commands and environment needed:
   cargo test --locked --lib app::update::tests::mouse;
   cargo test --locked --lib ui::terminal; cargo test --locked --lib config.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing,
   including the mouse-off run; the standing prohibitions apply.
 ```
@@ -611,6 +666,7 @@ Commands and environment needed:
   cargo test --locked --lib app::update::tests::split;
   cargo test --locked --lib ui::layout; cargo test --locked --lib config;
   cargo test --locked --lib ui::keymap.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -630,6 +686,30 @@ Acceptance scenarios / existing requirement and task IDs: FR-2522..2524;
   T042-T045.
 Commands and environment needed: cargo test --locked --lib ui::widgets;
   cargo test --locked --lib app::palette; cargo test --locked --lib ui::theme.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
+Stopping condition: named tests green after being watched failing; the
+  standing prohibitions apply.
+```
+
+### US10 banner (worker + integrator for T053's model and update arms)
+
+```text
+Package / full feature slug / outcome IDs: W09 / 025-gui-grade-experience / O2, O3
+Problem and expected user-visible result: an original ASCII identity mark in
+  the README and a bounded boot reveal in the interactive client.
+Owned paths and shared-file coordinator: src/ui/widgets/banner.rs,
+  src/ui/theme.rs, README.md; coordinator: integrator for src/app/model.rs,
+  src/app/update.rs.
+Dependencies and explicit non-goals: after Phases 4 and 6; no new dependency
+  (no tachyonfx), no replay, no bare-command banner, no colour in the README
+  block, no new bindable action.
+Acceptance scenarios / existing requirement and task IDs: FR-2525..FR-2528,
+  SC-2509; T052-T054; contracts/banner.md.
+Commands and environment needed:
+  cargo test --locked --lib ui::widgets::banner;
+  cargo test --locked --lib app::update::tests::banner;
+  cargo test --locked --lib ui::theme.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: named tests green after being watched failing; the
   standing prohibitions apply.
 ```
@@ -651,6 +731,7 @@ Acceptance scenarios / existing requirement and task IDs: SEC-2508;
 Commands and environment needed: the quickstart focused set;
   cargo --locked xtask db up; cargo --locked xtask verify;
   cargo xtask db down; cargo xtask db status.
+External actions already authorized: lead-only branch/commit/push/PR/auto-merge grant dated 2026-09-18; implementers perform no git actions.
 Stopping condition: verifier green with skips reported as skips; evidence
   recorded in docs/status.md before boxes are checked.
 ```
