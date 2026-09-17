@@ -1,8 +1,35 @@
 # Status
 
-**Updated: 2026-09-17.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-18.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Feature 025 Phase 2 foundational extraction - 2026-09-18
+
+Phase 2 (T002-T009) of `specs/025-gui-grade-experience/` is implemented on the
+`025-gui-grade-experience` branch and submitted as its own pull request before
+any later phase starts. The 6,553-line `src/ui/layout.rs` became seven per-pane
+widget modules under `src/ui/widgets/`; `layout.rs` keeps the orchestrator role
+plus the paging and viewport helpers. A pure
+`region_at(model, area, column, row)` returns `Region` values derived from the
+same layout arithmetic the renderers use. `Presentation` is model state built
+in `src/cli/interactive.rs` at startup, and `Message::Mouse` and
+`Message::Pasted` are translated from terminal events into exhaustive inert
+reducer arms. No rendered output changed.
+
+| Field | Record |
+| --- | --- |
+| Claim | T002-T009 (structure only): the extraction is behaviour-preserving and the hit regions agree with what is drawn |
+| Source | `025-gui-grade-experience` branch, verified before the Phase 2 commit; based on `origin/main` 66e28cd |
+| Environment | macOS 26.6.1 arm64, Homebrew Rust/Cargo 1.98.1 |
+| Method | `cargo fmt --all -- --check`; workspace clippy with warnings denied; `cargo test --locked --lib ui::layout`, `--lib app::update`, `--lib ui::widgets`, `--test documentation_matches_the_build`; the independent reviewer diffed every moved function against `git show 66e28cd:src/ui/layout.rs` and re-ran the focused sets |
+| Result | Focused: 87 layout, 148 app::update, 15 widgets and 15 documentation-parity tests pass; clippy clean; every moved function byte-identical apart from visibility and path qualification. Review found one substantive hit-region defect (a filtered tree's rows were off by one in `src/ui/widgets/mod.rs`); it was fixed with the regression test watched failing first, and the review then accepted the extraction |
+| Scope | Proves the extraction changed no rendered output in the render-to-string suites and that `region_at` matches the drawing arithmetic in both layout modes. Does not prove live terminal rendering, mouse behaviour (nothing consumes `region_at` until US6), or any later story |
+| Retention | This section, the `025-gui-grade-experience` pull request, and the commit that carries it |
+
+The full `cargo --locked xtask verify` was not run in this phase; the Phase 12
+verifier run is the full-suite and live evidence gate. Unix-socket, Windows
+input and live-terminal claims remain unverified.
 
 ## Feature 025 GUI-grade experience: specified, not implemented - 2026-09-17
 

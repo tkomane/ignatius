@@ -53,7 +53,7 @@ advice:
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirm `specs/025-gui-grade-experience/` is active in
+- [x] T001 Confirm `specs/025-gui-grade-experience/` is active in
   `.specify/feature.json` and that its specification, plan, research,
   data-model, contracts and quickstart agree on one painted, mouse-capable,
   theme-owning interactive experience with keyboard parity throughout.
@@ -64,34 +64,34 @@ advice:
 regions, presentation becomes model state, and mouse and paste events
 arrive as inert messages. Behaviour is identical before and after.
 
-- [ ] T002 Create `src/ui/widgets/mod.rs` and move the header and footer
+- [x] T002 Create `src/ui/widgets/mod.rs` and move the header and footer
   renderers from `src/ui/layout.rs` into `src/ui/widgets/header.rs` and
   `src/ui/widgets/footer.rs` wholesale, wiring `layout.rs` to call them;
   no rendered output changes.
-- [ ] T003 Move the editor and completion renderers into
+- [x] T003 Move the editor and completion renderers into
   `src/ui/widgets/editor.rs` and the object tree renderer into
   `src/ui/widgets/objects.rs`; no rendered output changes.
-- [ ] T004 Move the grid, inspector, expanded-row and results renderers
+- [x] T004 Move the grid, inspector, expanded-row and results renderers
   into `src/ui/widgets/results.rs`; no rendered output changes.
-- [ ] T005 Move the palette and connection-details renderers into
+- [x] T005 Move the palette and connection-details renderers into
   `src/ui/widgets/palette.rs` and the prompt, confirmation, plan and
   definition renderers into `src/ui/widgets/overlays.rs`, leaving
   `src/ui/layout.rs` as the orchestrator that owns `Presentation`,
   `LayoutMode`, `render`, `main_panes`, `body_area`, `render_to_string`
   and `buffer_to_string`; no rendered output changes.
-- [ ] T006 Add `Region` and the pure
+- [x] T006 Add `Region` and the pure
   `region_at(model, area, col, row) -> Option<Region>` in
   `src/ui/widgets/mod.rs`, derived from the same layout arithmetic the
   renderers use, with unit tests for every region kind, boundaries and
   misses at both layout modes.
-- [ ] T007 Move `Presentation` into `Model` in `src/app/model.rs`,
+- [x] T007 Move `Presentation` into `Model` in `src/app/model.rs`,
   constructing it in `src/cli/interactive.rs` at startup and threading it
   from the model through `src/ui/layout.rs`; no behaviour changes.
-- [ ] T008 Add `Message::Mouse { kind, column, row, modifiers }` and
+- [x] T008 Add `Message::Mouse { kind, column, row, modifiers }` and
   `Message::Pasted(String)` in `src/app/message.rs`, translate
   `Event::Mouse` and `Event::Paste` in `src/cli/interactive.rs`, and add
   exhaustive inert arms in `src/app/update.rs`; no behaviour changes.
-- [ ] T009 Gate: `cargo fmt --all -- --check`, workspace clippy with
+- [x] T009 Gate: `cargo fmt --all -- --check`, workspace clippy with
   warnings denied, and the full pre-existing `ui::layout`, `app::update`
   and parity test sets pass unchanged at the new module layout; the
   independent reviewer accepts the extraction before any later phase
