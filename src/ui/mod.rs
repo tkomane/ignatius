@@ -9,6 +9,7 @@ pub mod keymap;
 pub mod layout;
 pub mod terminal;
 pub mod theme;
+pub mod widgets;
 
 pub use glyphs::{GlyphTier, Glyphs, Icon};
 pub use keymap::{Binding, Keymap};

@@ -183,12 +183,12 @@ async fn event_loop(
             GlyphMode::NerdFont => GlyphTier::Nerd,
         }
     });
-    let ui = layout::Presentation::new(
+    let mut model = Model::new(config.query.max_buffered_rows);
+    model.presentation = layout::Presentation::new(
         Theme::new(config.ui.theme, presentation.color),
         crate::ui::Glyphs::new(tier),
         config.ui.reduced_motion,
     );
-    let mut model = Model::new(config.query.max_buffered_rows);
     model.keymap_snapshot = keymap.snapshot();
     let configured_providers = crate::cli::auth_providers(&config).unwrap_or_default();
     let providers = crate::connection::cloud::registry(&configured_providers);
@@ -272,7 +272,7 @@ async fn event_loop(
             .unwrap_or_default(),
     ));
 
-    draw(&mut terminal, &model, &keymap, &ui)?;
+    draw(&mut terminal, &model, &keymap)?;
 
     while let Some(message) = rx.recv().await {
         let effects = update(&mut model, message);
@@ -503,7 +503,7 @@ async fn event_loop(
             let _ = activity.send(None);
         }
 
-        draw(&mut terminal, &model, &keymap, &ui)?;
+        draw(&mut terminal, &model, &keymap)?;
     }
 
     Ok(ExitCode::Success)
@@ -599,12 +599,11 @@ fn draw(
     terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
     model: &Model,
     keymap: &Keymap,
-    ui: &layout::Presentation,
 ) -> Result<(), Diagnostic> {
     terminal
         .draw(|frame| {
             let area = frame.area();
-            layout::render(model, keymap, ui, area, frame.buffer_mut());
+            layout::render(model, keymap, area, frame.buffer_mut());
         })
         .map(|_| ())
         .map_err(|err| {
@@ -640,6 +639,26 @@ fn spawn_input_thread(
                             return;
                         }
                     }
+                    // The terminal's event vocabulary stops here: the reducer
+                    // sees only the application's own mouse and paste messages.
+                    // Capture is not enabled by this translation, so these
+                    // events stay absent until the mouse phase asks for them.
+                    Ok(Event::Mouse(mouse)) => {
+                        let message = Message::Mouse {
+                            kind: mouse_kind(mouse.kind),
+                            column: mouse.column,
+                            row: mouse.row,
+                            modifiers: mouse_modifiers(mouse.modifiers),
+                        };
+                        if tx.send(message).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(Event::Paste(text)) => {
+                        if tx.send(Message::Pasted(text)).is_err() {
+                            return;
+                        }
+                    }
                     Ok(_) => {}
                     Err(_) => return,
                 },
@@ -648,6 +667,36 @@ fn spawn_input_thread(
             }
         }
     });
+}
+
+/// Translates a terminal mouse action into the application's vocabulary.
+fn mouse_kind(kind: event::MouseEventKind) -> crate::app::message::MouseKind {
+    use crate::app::message::{MouseButton, MouseKind};
+    use crossterm::event::{MouseButton as TerminalButton, MouseEventKind};
+    let translate = |button: TerminalButton| match button {
+        TerminalButton::Left => MouseButton::Left,
+        TerminalButton::Right => MouseButton::Right,
+        TerminalButton::Middle => MouseButton::Middle,
+    };
+    match kind {
+        MouseEventKind::Down(button) => MouseKind::Down(translate(button)),
+        MouseEventKind::Up(button) => MouseKind::Up(translate(button)),
+        MouseEventKind::Drag(button) => MouseKind::Drag(translate(button)),
+        MouseEventKind::Moved => MouseKind::Moved,
+        MouseEventKind::ScrollDown => MouseKind::ScrollDown,
+        MouseEventKind::ScrollUp => MouseKind::ScrollUp,
+        MouseEventKind::ScrollLeft => MouseKind::ScrollLeft,
+        MouseEventKind::ScrollRight => MouseKind::ScrollRight,
+    }
+}
+
+/// Translates terminal modifier bits into the application's mouse modifiers.
+fn mouse_modifiers(modifiers: event::KeyModifiers) -> crate::app::message::MouseModifiers {
+    crate::app::message::MouseModifiers {
+        shift: modifiers.contains(event::KeyModifiers::SHIFT),
+        control: modifiers.contains(event::KeyModifiers::CONTROL),
+        alt: modifiers.contains(event::KeyModifiers::ALT),
+    }
 }
 
 /// Turns a termination signal into an ordinary quit, so the terminal is restored.

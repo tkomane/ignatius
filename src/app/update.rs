@@ -29,6 +29,11 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.size = (columns, rows);
             Vec::new()
         }
+        // Mouse and paste are translated by the runtime but deliberately inert
+        // until their behaviour phases land: no state change, no effect, no
+        // notice, so adding the input boundary changes nothing on screen.
+        Message::Mouse { .. } => Vec::new(),
+        Message::Pasted(_) => Vec::new(),
         Message::Connected(info) => {
             model.connection = ConnectionState::Connected(info);
             model.error = None;

@@ -780,6 +780,54 @@ impl FormatNotice {
     }
 }
 
+/// How the interface is being presented.
+///
+/// The active theme, glyph tier and reduced-motion choice live here rather than
+/// in the runtime so a presentation change is an ordinary message with an
+/// ordinary next frame. The renderer holds no copy.
+#[derive(Debug, Clone)]
+pub struct Presentation {
+    /// Palette and whether colour may be emitted.
+    pub theme: crate::ui::theme::Theme,
+    /// Which icons and box characters may be drawn.
+    pub glyphs: crate::ui::glyphs::Glyphs,
+    /// When true, indicators are static text rather than animation.
+    pub reduced_motion: bool,
+}
+
+impl Presentation {
+    /// Builds a presentation.
+    #[must_use]
+    pub const fn new(
+        theme: crate::ui::theme::Theme,
+        glyphs: crate::ui::glyphs::Glyphs,
+        reduced_motion: bool,
+    ) -> Self {
+        Self {
+            theme,
+            glyphs,
+            reduced_motion,
+        }
+    }
+
+    pub(crate) fn icon(&self, icon: crate::ui::glyphs::Icon) -> String {
+        self.glyphs.prefix(icon)
+    }
+}
+
+impl Default for Presentation {
+    /// A monochrome Unicode presentation, so a model built by a test still
+    /// renders. The runtime always replaces this from configuration and
+    /// detection at startup.
+    fn default() -> Self {
+        Self {
+            theme: crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, false),
+            glyphs: crate::ui::glyphs::Glyphs::new(crate::ui::glyphs::GlyphTier::Unicode),
+            reduced_motion: false,
+        }
+    }
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
@@ -790,6 +838,8 @@ pub struct Model {
     /// This is a configuration snapshot supplied by the interactive runtime,
     /// not a second source of key resolution and not persisted onboarding state.
     pub keymap_snapshot: KeymapSnapshot,
+    /// How the interface is presented: theme, glyph tier and reduced motion.
+    pub presentation: Presentation,
     /// The SQL buffer.
     pub editor: Editor,
     /// Schema-aware completion state and its catalogue snapshot.
