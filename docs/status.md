@@ -1,8 +1,54 @@
 # Status
 
-**Updated: 2026-09-11.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-17.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Feature 025 GUI-grade experience: specified, not implemented - 2026-09-17
+
+The owner reported abandoning Ignatius for the VS Code Azure PostgreSQL
+extension during real work against an Azure PostgreSQL database on
+2026-09-17 because the extension was cleaner and simpler. That observation,
+recorded honestly as sample size one, is the W09 observed-friction evidence
+behind `specs/025-gui-grade-experience/`: a complete specification, plan,
+research record, data model, four pinned-value contracts, quickstart and a
+worker-decomposed task list, authored on the `025-gui-grade-experience`
+branch. The feature covers painted surfaces with a three-level elevation
+ladder and a colour-depth tier, user-owned and runtime-switchable themes
+with a truthful OSC 11 `auto`, a workable results grid, named connecting
+steps under a fully painted first frame, first-class mouse support with
+full keyboard parity, movable and zoomable panes with a density setting,
+quiet threshold-gated chrome, palette previews, and the paste fix. It links
+to outcomes O2 and O3 and journeys J1, J2 and J3. `.specify/feature.json`
+now names the 025 directory.
+
+One defect was confirmed by code reading during specification: bracketed
+paste is enabled (`src/ui/terminal.rs`) but no `Event::Paste` consumer
+exists (`src/cli/interactive.rs` drops it), so pasting into the full-screen
+client does nothing. Live terminal behaviour was not exercised; the finding
+is from reading, and the fix is specified as User Story 1, not applied.
+
+The task list is decomposed for the OpenCode multiagent setup in
+`docs/operations/agent-orchestration.md`: a serialized foundational
+extraction of `src/ui/layout.rs` into widget modules gates everything, the
+five single-writer files route through one integrator lane, each slice
+carries a pre-filled assignment block with owned paths, focused commands
+and stopping conditions, and design-document amendments land with the
+behaviour (keymap rows in the same change as their actions; narrative
+documents in the Polish phase). Implementation has not started; no
+application source or design document changed.
+
+Design research was performed on 2026-09-17 by web reading, one pass per
+source with citations and stated gaps, recorded in the feature's
+`research.md`. Verification of this documentation-only change: the working
+tree diff touches only the 025 specification directory,
+`.specify/feature.json` and this file; the documentation-parity suite was
+run against the unchanged design documents. The application test suite was
+not rerun, no database fixture was started, and `cargo xtask verify` was
+not run. The specification was committed on the `025-gui-grade-experience`
+branch and submitted through the ordinary pull-request gate on 2026-09-17
+at the owner's request; no tag, signing, release or publication was
+performed.
 
 ## CodeQL test exclusion and advanced setup - 2026-09-11
 
