@@ -19,6 +19,13 @@
 /// history cannot outgrow the buffer by an unlimited factor.
 const HISTORY_LIMIT: usize = 200;
 
+/// The largest paste the editor accepts, in bytes.
+///
+/// A paste is not typed input: it arrives all at once, and an accidental
+/// clipboard of a whole document should be refused with a named reason rather
+/// than frozen into the buffer and its history. The bound is one mebibyte.
+pub const PASTE_LIMIT_BYTES: usize = 1_048_576;
+
 /// What kind of change was last made, so a run of typing folds into one undo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EditKind {
@@ -256,6 +263,35 @@ impl Editor {
         self.cursor = range.start + replacement.len();
         self.last_insert_was_space = replacement.chars().last().is_some_and(char::is_whitespace);
         self.after_edit();
+    }
+
+    /// Inserts pasted text at the cursor as one non-coalesced undo step.
+    ///
+    /// Pasted text is typed text that arrived all at once. CRLF and CR line
+    /// endings become LF so a query copied on Windows reads the same here, and
+    /// the whole paste is a single edit so one undo takes back exactly what
+    /// appeared. A paste over [`PASTE_LIMIT_BYTES`], or one that is empty after
+    /// normalisation, is refused without touching the buffer, the cursor, the
+    /// revision or the undo history.
+    ///
+    /// Returns whether the text was inserted.
+    pub fn insert_paste(&mut self, text: &str) -> bool {
+        if text.len() > PASTE_LIMIT_BYTES {
+            return false;
+        }
+        let normalised = normalise_line_endings(text);
+        if normalised.is_empty() {
+            return false;
+        }
+        self.record(EditKind::Insert, false);
+        self.last_insert_was_space = normalised.chars().last().is_some_and(char::is_whitespace);
+        self.text.insert_str(self.cursor, &normalised);
+        self.cursor += normalised.len();
+        // The paste is one step and the run it starts ends here, so typing after
+        // it is a step of its own rather than being folded back into the paste.
+        self.end_undo_run();
+        self.after_edit();
+        true
     }
 
     /// Takes back the last change.
@@ -558,437 +594,25 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_' || ch == '$'
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn typed(text: &str) -> Editor {
-        let mut editor = Editor::default();
-        for ch in text.chars() {
-            if ch == '\n' {
-                editor.insert_newline();
-            } else {
-                editor.insert(ch);
+/// Turns CRLF and lone CR into LF without touching any other character.
+fn normalise_line_endings(text: &str) -> String {
+    if !text.contains('\r') {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
             }
-        }
-        editor
-    }
-
-    #[test]
-    fn completion_replacement_is_one_undoable_edit() {
-        let mut editor = Editor::with_text("SELECT ord");
-        editor.replace_range(7..10, "\"orders\"");
-        assert_eq!(editor.text(), "SELECT \"orders\"");
-        assert_eq!(editor.cursor(), "SELECT \"orders\"".len());
-        assert!(editor.is_modified());
-
-        editor.undo();
-        assert_eq!(editor.text(), "SELECT ord");
-        assert_eq!(editor.cursor(), "SELECT ord".len());
-        assert!(!editor.can_undo());
-    }
-
-    #[test]
-    fn completion_replacement_preserves_utf8_boundaries() {
-        let mut editor = Editor::with_text("SELECT café");
-        let start = "SELECT ".len();
-        editor.replace_range(start..editor.text().len(), "\"café\"");
-        assert_eq!(editor.text(), "SELECT \"café\"");
-        assert_eq!(editor.cursor(), editor.text().len());
-    }
-
-    #[test]
-    fn formatted_buffer_replacement_is_one_edit_with_cursor_recovery() {
-        let source = "select café,total from orders where total>0;";
-        let source_cursor = source.find("total>0").expect("token") + "total".len();
-        let mut editor = Editor::with_text(source);
-        editor.set_cursor(source_cursor);
-        let formatted = crate::query::format_sql(source, source_cursor).expect("format");
-
-        editor.replace_range(0..source.len(), &formatted.text);
-        editor.set_cursor(formatted.cursor);
-        assert!(editor.is_modified());
-        assert!(editor.can_undo());
-        assert!(editor.text().is_char_boundary(editor.cursor()));
-
-        editor.undo();
-        assert_eq!(editor.text(), source);
-        assert_eq!(editor.cursor(), source_cursor);
-        assert!(!editor.can_undo());
-        editor.redo();
-        assert_eq!(editor.text(), formatted.text);
-        assert_eq!(editor.cursor(), formatted.cursor);
-    }
-
-    #[test]
-    fn formatted_cursor_fixtures_stay_on_ascii_and_unicode_character_boundaries() {
-        for (source, token, inside) in [
-            ("select total from orders;", "total", "tot"),
-            ("select café from orders;", "café", "ca"),
-        ] {
-            let source_cursor = source.find(token).expect("token") + inside.len();
-            let formatted = crate::query::format_sql(source, source_cursor).expect("format");
-            let mut editor = Editor::with_text(source);
-            editor.set_cursor(source_cursor);
-            editor.replace_range(0..source.len(), &formatted.text);
-            editor.set_cursor(formatted.cursor);
-            assert!(editor.text().is_char_boundary(editor.cursor()));
-            assert!(editor.cursor() <= editor.text().len());
+            out.push('\n');
+        } else {
+            out.push(ch);
         }
     }
-
-    #[test]
-    fn a_noop_format_replacement_does_not_change_revision_or_history() {
-        let source = "SELECT 1\nFROM orders;";
-        let mut editor = Editor::with_text(source);
-        editor.set_cursor(4);
-        let revision = editor.revision();
-        let cursor = editor.cursor();
-        editor.replace_range(0..source.len(), source);
-        assert_eq!(editor.revision(), revision);
-        assert_eq!(editor.cursor(), cursor);
-        assert!(!editor.can_undo());
-        assert!(!editor.is_modified());
-    }
-
-    #[test]
-    fn text_revision_changes_for_edits_but_not_cursor_positioning() {
-        let mut editor = Editor::with_text("SELECT café");
-        let initial = editor.revision();
-        editor.set_cursor("SELECT ".len() + "caf".len());
-        assert_eq!(editor.revision(), initial);
-        assert!(!editor.is_modified());
-        assert!(!editor.can_undo());
-
-        editor.insert('!');
-        assert_eq!(editor.revision(), initial + 1);
-        editor.undo();
-        assert_eq!(editor.revision(), initial + 2);
-        editor.redo();
-        assert_eq!(editor.revision(), initial + 3);
-    }
-
-    #[test]
-    fn cursor_setter_clamps_invalid_offsets_without_splitting_utf8() {
-        let mut editor = Editor::with_text("café");
-        editor.set_cursor(4);
-        assert_eq!(
-            editor.cursor(),
-            3,
-            "the caret backs up to a character boundary"
-        );
-        editor.set_cursor(999);
-        assert_eq!(editor.cursor(), editor.text().len());
-    }
-
-    #[test]
-    fn vertical_movement_keeps_the_column_it_started_from() {
-        // The behaviour every editor has and every text field lacks: passing
-        // through a short line must not forget where the cursor was.
-        let mut editor = Editor::with_text("SELECT customer_id\nFROM x\nWHERE total > 100");
-        editor.move_buffer_start();
-        for _ in 0..15 {
-            editor.move_right();
-        }
-        assert_eq!(editor.position(), (1, 16));
-
-        editor.move_down();
-        assert_eq!(editor.position(), (2, 7), "the short line clamps");
-        editor.move_down();
-        assert_eq!(
-            editor.position(),
-            (3, 16),
-            "and the column comes back on a line long enough for it"
-        );
-
-        editor.move_up();
-        editor.move_up();
-        assert_eq!(editor.position(), (1, 16));
-    }
-
-    #[test]
-    fn vertical_movement_stops_at_the_ends_rather_than_doing_nothing() {
-        let mut editor = Editor::with_text("one\ntwo");
-        editor.move_buffer_start();
-        editor.move_right();
-        editor.move_up();
-        assert_eq!(editor.cursor(), 0, "up on the first line goes to the start");
-
-        editor.move_buffer_end();
-        editor.move_left();
-        editor.move_down();
-        assert_eq!(
-            editor.cursor(),
-            editor.text().len(),
-            "down on the last line goes to the end"
-        );
-    }
-
-    #[test]
-    fn line_and_buffer_keys_land_where_they_say() {
-        let mut editor = Editor::with_text("SELECT 1\nFROM orders\nWHERE id = 2");
-        editor.move_buffer_start();
-        editor.move_down();
-        editor.move_line_end();
-        assert_eq!(editor.position(), (2, 12));
-        editor.move_line_start();
-        assert_eq!(editor.position(), (2, 1));
-        editor.move_buffer_end();
-        assert_eq!(editor.position(), (3, 13));
-        editor.move_buffer_start();
-        assert_eq!(editor.position(), (1, 1));
-    }
-
-    #[test]
-    fn word_movement_treats_identifiers_and_punctuation_as_separate_words() {
-        let mut editor = Editor::with_text("SELECT orders.customer_id FROM t");
-        editor.move_buffer_start();
-
-        editor.move_word_right();
-        assert_eq!(editor.position().1, 7, "past SELECT");
-        editor.move_word_right();
-        assert_eq!(editor.position().1, 14, "past orders");
-        editor.move_word_right();
-        assert_eq!(editor.position().1, 15, "past the dot on its own");
-        editor.move_word_right();
-        assert_eq!(editor.position().1, 26, "past customer_id");
-
-        editor.move_word_left();
-        assert_eq!(editor.position().1, 15, "back to the start of customer_id");
-        editor.move_word_left();
-        assert_eq!(editor.position().1, 14);
-        editor.move_word_left();
-        assert_eq!(editor.position().1, 8, "back to the start of orders");
-    }
-
-    #[test]
-    fn word_movement_stops_at_the_ends() {
-        let mut editor = Editor::with_text("word");
-        editor.move_buffer_start();
-        editor.move_word_left();
-        assert_eq!(editor.cursor(), 0);
-        editor.move_buffer_end();
-        editor.move_word_right();
-        assert_eq!(editor.cursor(), 4);
-
-        let mut empty = Editor::default();
-        empty.move_word_left();
-        empty.move_word_right();
-        empty.move_up();
-        empty.move_down();
-        assert_eq!(empty.cursor(), 0, "an empty buffer survives every key");
-    }
-
-    #[test]
-    fn a_new_line_keeps_the_indentation_of_the_one_it_left() {
-        let mut editor = typed("SELECT 1\n    FROM orders");
-        editor.insert_newline();
-        editor.insert('W');
-        assert_eq!(
-            editor.text(),
-            "SELECT 1\n    FROM orders\n    W",
-            "indented SQL that loses its indent is SQL people stop indenting"
-        );
-
-        // Splitting a line in the middle copies only the indentation before the
-        // cursor, so no leading space is invented.
-        let mut editor = Editor::with_text("  abc");
-        editor.move_buffer_start();
-        editor.move_right();
-        editor.insert_newline();
-        assert_eq!(
-            editor.text(),
-            " \n  abc",
-            "only the indent before the cursor is copied; the rest of the line \
-             keeps its own characters"
-        );
-    }
-
-    #[test]
-    fn deleting_forwards_backwards_and_by_word_all_respect_characters() {
-        let mut editor = Editor::with_text("SELECT héllo 日本;");
-        editor.move_buffer_end();
-        editor.delete_word_left();
-        assert_eq!(editor.text(), "SELECT héllo 日本");
-        editor.delete_word_left();
-        assert_eq!(editor.text(), "SELECT héllo ");
-        assert!(editor.text().is_char_boundary(editor.cursor()));
-
-        editor.move_buffer_start();
-        editor.delete_forward();
-        assert_eq!(editor.text(), "ELECT héllo ");
-        for _ in 0..50 {
-            editor.delete_forward();
-        }
-        assert!(editor.text().is_empty());
-        editor.delete_forward();
-        editor.backspace();
-        assert!(editor.text().is_empty(), "both ends are no-ops, not panics");
-    }
-
-    #[test]
-    fn undo_takes_back_a_word_at_a_time_and_redo_puts_it_back() {
-        let mut editor = typed("SELECT one two");
-        assert_eq!(editor.text(), "SELECT one two");
-
-        editor.undo();
-        assert_eq!(editor.text(), "SELECT one ", "a word is one step");
-        editor.undo();
-        assert_eq!(editor.text(), "SELECT ");
-        assert!(editor.can_redo());
-
-        editor.redo();
-        assert_eq!(editor.text(), "SELECT one ");
-        editor.redo();
-        assert_eq!(editor.text(), "SELECT one two");
-        assert!(!editor.can_redo());
-
-        // Typing after an undo makes the redo path unreachable, as everywhere.
-        editor.undo();
-        editor.insert('!');
-        assert!(!editor.can_redo());
-    }
-
-    #[test]
-    fn undo_covers_deletions_and_a_replaced_buffer() {
-        let mut editor = Editor::with_text("SELECT 1;");
-        editor.set_text("DROP TABLE orders;");
-        assert_eq!(editor.text(), "DROP TABLE orders;");
-        editor.undo();
-        assert_eq!(
-            editor.text(),
-            "SELECT 1;",
-            "text arriving from elsewhere is exactly what someone wants back"
-        );
-
-        editor.move_buffer_end();
-        editor.delete_word_left();
-        editor.backspace();
-        assert_eq!(editor.text(), "SELECT ");
-        editor.undo();
-        editor.undo();
-        assert_eq!(editor.text(), "SELECT 1;");
-    }
-
-    #[test]
-    fn undo_on_an_untouched_buffer_does_nothing_at_all() {
-        let mut editor = Editor::with_text("SELECT 1");
-        assert!(!editor.can_undo());
-        editor.undo();
-        editor.redo();
-        assert_eq!(editor.text(), "SELECT 1");
-        assert_eq!(editor.cursor(), 8);
-    }
-
-    #[test]
-    fn the_history_is_bounded_so_a_long_session_cannot_grow_without_end() {
-        let mut editor = Editor::default();
-        for index in 0..(HISTORY_LIMIT * 2) {
-            // Whitespace ends each run, so every character is its own step.
-            editor.insert(char::from_digit((index % 10) as u32, 10).unwrap_or('0'));
-            editor.insert(' ');
-        }
-        assert!(editor.past.len() <= HISTORY_LIMIT);
-        // The recent past still works, which is the part anyone reaches for.
-        let before = editor.text().to_owned();
-        editor.undo();
-        assert_ne!(editor.text(), before);
-    }
-
-    #[test]
-    fn multibyte_text_is_never_split_by_any_movement() {
-        let mut editor = typed("SELECT 'héllo 日本';");
-        assert_eq!(editor.text(), "SELECT 'héllo 日本';");
-        for _ in 0..40 {
-            editor.move_left();
-            assert!(editor.text().is_char_boundary(editor.cursor()));
-        }
-        for _ in 0..40 {
-            editor.move_right();
-            assert!(editor.text().is_char_boundary(editor.cursor()));
-        }
-        editor.move_buffer_start();
-        editor.move_word_right();
-        assert!(editor.text().is_char_boundary(editor.cursor()));
-    }
-
-    #[test]
-    fn a_page_moves_by_a_screenful_and_stops_at_the_end() {
-        let mut editor = Editor::with_text("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
-        editor.move_buffer_start();
-        editor.move_page_down(4);
-        assert_eq!(editor.position().0, 5);
-        editor.move_page_up(4);
-        assert_eq!(editor.position().0, 1);
-        editor.move_page_down(100);
-        assert_eq!(editor.position().0, 10, "it stops at the last line");
-    }
-
-    #[test]
-    fn loading_text_is_not_an_edit_but_typing_is() {
-        let mut editor = Editor::with_text("SELECT 1");
-        assert!(!editor.is_modified());
-        editor.set_text("SELECT 2");
-        assert!(!editor.is_modified(), "the buffer matches what it holds");
-        editor.insert('!');
-        assert!(editor.is_modified());
-    }
-
-    #[test]
-    fn moving_the_cursor_ends_the_undo_run() {
-        // Typing in one place, going somewhere else, and typing there is two
-        // changes. Before this was fixed they shared one undo step, so a single
-        // undo took back work in a place the cursor was no longer near.
-        let mut editor = typed("SELECT");
-        editor.move_buffer_start();
-        for ch in "x".chars() {
-            editor.insert(ch);
-        }
-
-        editor.undo();
-        assert_eq!(editor.text(), "SELECT", "only the second run comes back");
-
-        editor.undo();
-        assert_eq!(editor.text(), "", "and the first run is a step of its own");
-    }
-
-    #[test]
-    fn every_movement_ends_the_undo_run_not_just_the_arrow_keys() {
-        // One test per key, because the run is ended in each method and an
-        // added movement that forgets to do it would otherwise go unnoticed.
-        type Movement = fn(&mut Editor);
-        let movements: Vec<(&str, Movement)> = vec![
-            ("left", |e| e.move_left()),
-            ("right", |e| e.move_right()),
-            ("up", |e| e.move_up()),
-            ("down", |e| e.move_down()),
-            ("line start", |e| e.move_line_start()),
-            ("line end", |e| e.move_line_end()),
-            ("buffer start", |e| e.move_buffer_start()),
-            ("buffer end", |e| e.move_buffer_end()),
-            ("word left", |e| e.move_word_left()),
-            ("word right", |e| e.move_word_right()),
-            ("page up", |e| e.move_page_up(4)),
-            ("page down", |e| e.move_page_down(4)),
-        ];
-
-        // No trailing space or newline: a run that ends mid-word is the only one
-        // the next insert would coalesce into, so this can actually fail. The
-        // first version of this test typed a trailing newline, which starts a
-        // fresh undo step by itself, and it passed with the fix taken out.
-        let source = "SELECT one\nFROM two\nWHERE three\nAND four";
-
-        for (name, movement) in movements {
-            let mut editor = typed(source);
-            movement(&mut editor);
-            editor.insert('x');
-            editor.undo();
-            assert_eq!(
-                editor.text(),
-                source,
-                "moving by {name} did not end the undo run, so one undo took back \
-                 the typing before the move as well"
-            );
-        }
-    }
+    out
 }
+
+#[cfg(test)]
+mod tests;

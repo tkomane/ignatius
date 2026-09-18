@@ -4421,3 +4421,332 @@ fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select(
             && notice.contains("again")
     }));
 }
+
+#[test]
+fn paste_with_crlf_lands_at_the_caret_as_one_undo_step_with_no_effects() {
+    let mut model = connected();
+    model.focus = Focus::Editor;
+    model.editor.set_text("SELECT ;");
+    model.editor.set_cursor("SELECT ".len());
+    let before_text = model.editor.text().to_owned();
+    let before_cursor = model.editor.cursor();
+    let before_revision = model.editor.revision();
+
+    let effects = update(
+        &mut model,
+        Message::Pasted("1\r\nFROM t\r\nWHERE id = 2".into()),
+    );
+
+    assert!(
+        effects.is_empty(),
+        "paste must not create effects: {effects:?}"
+    );
+    assert!(
+        model.paste_notice.is_none(),
+        "a landed paste needs no notice"
+    );
+    let expected = "SELECT 1\nFROM t\nWHERE id = 2;";
+    assert_eq!(model.editor.text(), expected);
+    assert_eq!(
+        model.editor.cursor(),
+        expected.find(';').expect("semicolon")
+    );
+    assert_eq!(model.editor.revision(), before_revision + 1);
+    assert!(model.editor.is_modified());
+
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), before_text);
+    assert_eq!(model.editor.cursor(), before_cursor);
+}
+
+#[test]
+fn paste_at_the_byte_limit_is_accepted_and_one_byte_over_is_refused() {
+    let mut model = connected();
+    model.focus = Focus::Editor;
+    let accepted = "a".repeat(crate::app::editor::PASTE_LIMIT_BYTES);
+    let effects = update(&mut model, Message::Pasted(accepted.clone()));
+    assert!(effects.is_empty());
+    assert!(model.paste_notice.is_none());
+    assert_eq!(
+        model.editor.text().len(),
+        accepted.len(),
+        "the whole paste reached the buffer"
+    );
+    assert!(model.editor.text().chars().all(|ch| ch == 'a'));
+
+    let mut refused = connected();
+    refused.focus = Focus::Editor;
+    refused.editor.set_text("SELECT 1;");
+    let before_text = refused.editor.text().to_owned();
+    let before_revision = refused.editor.revision();
+    let over = "b".repeat(crate::app::editor::PASTE_LIMIT_BYTES + 1);
+    let effects = update(&mut refused, Message::Pasted(over));
+    assert!(effects.is_empty());
+    assert_eq!(
+        refused.paste_notice,
+        Some(crate::app::model::PasteNotice::Refused)
+    );
+    assert_eq!(refused.editor.text(), before_text);
+    assert_eq!(refused.editor.revision(), before_revision);
+    // The setup's set_text is the only undo step; a refused paste adds none.
+    refused.editor.undo();
+    assert_eq!(
+        refused.editor.text(),
+        "",
+        "one undo removes the setup edit and nothing from the refusal"
+    );
+}
+
+#[test]
+fn paste_into_a_password_prompt_is_masked_and_reaches_the_prompt() {
+    let mut model = connected();
+    model.password_prompt = Some(crate::app::model::PasswordPrompt::new(
+        "app@localhost:5432/orders",
+        "the server asked for a password",
+    ));
+
+    let effects = update(&mut model, Message::Pasted("hunter2".into()));
+
+    assert!(effects.is_empty());
+    assert!(model.paste_notice.is_none());
+    let prompt = model.password_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.length(), "hunter2".chars().count());
+    assert_eq!(
+        model.editor.text(),
+        "",
+        "the paste did not reach the editor"
+    );
+
+    let text = crate::ui::layout::render_to_string(
+        &model,
+        &crate::ui::keymap::Keymap::new(),
+        &crate::ui::layout::Presentation::default(),
+        100,
+        30,
+    );
+    assert!(
+        !text.contains("hunter2"),
+        "the masked prompt echoed: {text}"
+    );
+}
+
+#[test]
+fn paste_into_a_parameter_prompt_reaches_the_active_value() {
+    let mut model = connected();
+    model.parameter_prompt = Some(ParameterPrompt::new(
+        "SELECT * FROM t WHERE id = :id".into(),
+        None,
+        vec!["id".into()],
+    ));
+
+    let effects = update(&mut model, Message::Pasted("42".into()));
+
+    assert!(effects.is_empty());
+    assert!(model.paste_notice.is_none());
+    let prompt = model.parameter_prompt.as_ref().expect("prompt");
+    assert_eq!(prompt.active_index(), 0);
+    assert_eq!(prompt.typed_length(), "42".chars().count());
+    assert_eq!(model.editor.text(), "");
+}
+
+#[test]
+fn paste_while_a_confirmation_is_open_is_ignored_with_a_notice() {
+    let mut model = connected();
+    model.focus = Focus::Editor;
+    model.editor.set_text("SELECT 1;");
+    let before_text = model.editor.text().to_owned();
+    let before_revision = model.editor.revision();
+    model.pending_run = Some(crate::app::model::PendingRun {
+        sql: "DROP TABLE orders".into(),
+        impact: crate::query::Impact::Destructive,
+        typed: String::new(),
+        required: "orders".into(),
+        source: None,
+    });
+
+    let effects = update(&mut model, Message::Pasted("orders".into()));
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        model.paste_notice,
+        Some(crate::app::model::PasteNotice::Ignored)
+    );
+    assert_eq!(model.editor.text(), before_text);
+    assert_eq!(model.editor.revision(), before_revision);
+    let pending = model.pending_run.as_ref().expect("confirmation");
+    assert!(
+        pending.typed.is_empty(),
+        "a paste cannot answer a confirmation"
+    );
+}
+
+#[test]
+fn paste_never_emits_an_execution_effect() {
+    fn has_execution(effects: &[Effect]) -> bool {
+        effects.iter().any(|effect| {
+            matches!(
+                effect,
+                Effect::Execute { .. }
+                    | Effect::ExecuteParameterized { .. }
+                    | Effect::Explain { .. }
+            )
+        })
+    }
+
+    let mut editor_model = connected();
+    editor_model.focus = Focus::Editor;
+    let effects = update(&mut editor_model, Message::Pasted("SELECT 1;".into()));
+    assert!(!has_execution(&effects), "{effects:?}");
+
+    let mut refused = connected();
+    refused.focus = Focus::Editor;
+    let over = "x".repeat(crate::app::editor::PASTE_LIMIT_BYTES + 1);
+    let effects = update(&mut refused, Message::Pasted(over));
+    assert!(!has_execution(&effects), "{effects:?}");
+
+    let mut password = connected();
+    password.password_prompt = Some(crate::app::model::PasswordPrompt::new("t", "r"));
+    let effects = update(&mut password, Message::Pasted("secret".into()));
+    assert!(!has_execution(&effects), "{effects:?}");
+
+    let mut parameter = connected();
+    parameter.parameter_prompt = Some(ParameterPrompt::new(
+        "SELECT :id".into(),
+        None,
+        vec!["id".into()],
+    ));
+    let effects = update(&mut parameter, Message::Pasted("1".into()));
+    assert!(!has_execution(&effects), "{effects:?}");
+
+    let mut confirmation = connected();
+    confirmation.pending_run = Some(crate::app::model::PendingRun {
+        sql: "DROP TABLE t".into(),
+        impact: crate::query::Impact::Destructive,
+        typed: String::new(),
+        required: "t".into(),
+        source: None,
+    });
+    let effects = update(&mut confirmation, Message::Pasted("t".into()));
+    assert!(!has_execution(&effects), "{effects:?}");
+}
+
+#[test]
+fn paste_invalidates_a_stale_error_marker_and_format_notice() {
+    let mut model = connected();
+    model.editor = crate::app::editor::Editor::with_text("SELECT 1 FROM t;");
+    model.error_location = Some(crate::query::error_location::ErrorLocation {
+        cursor: 7,
+        token: None,
+        line: 1,
+        column: 8,
+        statement_number: 1,
+        character: 8,
+    });
+    model.format_notice = Some(crate::app::model::FormatNotice::Empty);
+
+    let effects = update(&mut model, Message::Pasted("-- pasted\r\n".into()));
+
+    assert!(effects.is_empty());
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission")),
+        "{:?}",
+        model.error_location_note
+    );
+    assert_eq!(model.format_notice, None);
+}
+
+#[test]
+fn paste_refusal_replaces_a_format_notice() {
+    let mut model = connected();
+    model.format_notice = Some(crate::app::model::FormatNotice::Empty);
+    let over = "x".repeat(crate::app::editor::PASTE_LIMIT_BYTES + 1);
+
+    update(&mut model, Message::Pasted(over));
+
+    assert_eq!(model.paste_notice, Some(PasteNotice::Refused));
+    assert_eq!(model.format_notice, None);
+}
+
+#[test]
+fn paste_empty_clears_a_stale_notice() {
+    let mut model = connected();
+    model.paste_notice = Some(PasteNotice::Refused);
+
+    let effects = update(&mut model, Message::Pasted(String::new()));
+
+    assert!(effects.is_empty());
+    assert_eq!(model.paste_notice, None);
+}
+
+#[test]
+fn paste_reaches_the_name_prompt() {
+    let mut model = connected();
+    model.name_prompt = Some(crate::app::model::NamePrompt::for_query(""));
+
+    let effects = update(&mut model, Message::Pasted("saved_query.sql".into()));
+
+    assert!(effects.is_empty());
+    let prompt = model.name_prompt.as_ref().expect("name prompt");
+    assert_eq!(prompt.typed, "saved_query.sql");
+    assert!(model.paste_notice.is_none());
+}
+
+#[test]
+fn paste_reaches_the_palette_query() {
+    let mut model = connected();
+    model.palette = Some(crate::app::palette::Palette::new(Vec::new()));
+
+    let effects = update(&mut model, Message::Pasted("orders".into()));
+
+    assert!(effects.is_empty());
+    let palette = model.palette.as_ref().expect("palette");
+    assert_eq!(palette.query, "orders");
+    assert!(model.paste_notice.is_none());
+}
+
+#[test]
+fn paste_reaches_the_tree_and_result_filters() {
+    let mut tree = connected();
+    tree.tree.filtering = true;
+    let effects = update(&mut tree, Message::Pasted("orders".into()));
+    assert!(effects.is_empty());
+    assert_eq!(tree.tree.filter, "orders");
+    assert_eq!(tree.tree.selected, 0);
+    assert!(tree.paste_notice.is_none());
+
+    let mut results = connected();
+    results.result_filtering = true;
+    let effects = update(&mut results, Message::Pasted("12".into()));
+    assert!(effects.is_empty());
+    assert_eq!(results.result_filter, "12");
+    assert_eq!(results.selected_row, 0);
+    assert!(results.paste_notice.is_none());
+}
+
+#[test]
+fn paste_into_the_editor_clears_a_stale_paste_notice() {
+    let mut model = connected();
+    model.paste_notice = Some(PasteNotice::Refused);
+
+    let effects = update(&mut model, Message::Pasted("SELECT 1;".into()));
+
+    assert!(effects.is_empty());
+    assert_eq!(model.paste_notice, None);
+    assert_eq!(model.editor.text(), "SELECT 1;");
+}
+
+#[test]
+fn paste_while_connection_details_is_open_is_ignored() {
+    let mut model = connected();
+    model.connection_details = true;
+
+    let effects = update(&mut model, Message::Pasted("SELECT 1;".into()));
+
+    assert!(effects.is_empty());
+    assert_eq!(model.paste_notice, Some(PasteNotice::Ignored));
+    assert_eq!(model.editor.text(), "");
+}

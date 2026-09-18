@@ -14,8 +14,8 @@
 use crate::app::grid::GridCommand;
 use crate::app::message::{Action, Direction, Effect, Message};
 use crate::app::model::{
-    ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PendingUpdate, QueryPhase,
-    UpdateCandidate, UpdateLookup, UpdatePrompt,
+    ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PasteNotice, PendingUpdate,
+    QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
 };
 use crate::query::error_location::{self, StatementSource};
 use crate::query::result::ExecutionStatus;
@@ -29,11 +29,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.size = (columns, rows);
             Vec::new()
         }
-        // Mouse and paste are translated by the runtime but deliberately inert
-        // until their behaviour phases land: no state change, no effect, no
-        // notice, so adding the input boundary changes nothing on screen.
+        // Mouse stays inert until the pointer phase; a paste routes to the
+        // surface that owns input, or says it was ignored.
         Message::Mouse { .. } => Vec::new(),
-        Message::Pasted(_) => Vec::new(),
+        Message::Pasted(text) => paste_action(model, text),
         Message::Connected(info) => {
             model.connection = ConnectionState::Connected(info);
             model.error = None;
@@ -550,11 +549,13 @@ where
             );
         }
         model.format_notice = None;
+        model.paste_notice = None;
     }
 }
 
 /// Formats the editor as one local, undoable edit.
 fn format_buffer(model: &mut Model) {
+    model.paste_notice = None;
     let source = model.editor.text().to_owned();
     if source.trim().is_empty() || crate::query::format::is_comment_only(&source) {
         model.format_notice = Some(crate::app::model::FormatNotice::Empty);
@@ -2840,6 +2841,102 @@ fn connection_details_action(model: &mut Model, action: Action) -> Vec<Effect> {
         // Other actions are deliberately ignored until the panel is closed.
         _ => Vec::new(),
     }
+}
+
+/// Delivers a paste to the surface that owns input.
+///
+/// The peel order mirrors [`apply_action`] exactly, so a paste and a keystroke
+/// can never disagree about who owns input. A text surface receives the text;
+/// a surface that does not accept text says the paste was ignored instead of
+/// dropping it. No route emits an effect, so a paste can never execute SQL.
+fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
+    if text.len() > crate::app::editor::PASTE_LIMIT_BYTES {
+        model.paste_notice = Some(PasteNotice::Refused);
+        model.format_notice = None;
+        return Vec::new();
+    }
+    // Windows and old-Mac line endings become LF before anything stores them.
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    if text.is_empty() {
+        model.paste_notice = None;
+        return Vec::new();
+    }
+
+    if let Some(prompt) = model.password_prompt.as_mut() {
+        for character in text.chars() {
+            prompt.push(character);
+        }
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if let Some(prompt) = model.parameter_prompt.as_mut() {
+        for character in text.chars() {
+            prompt.push(character);
+        }
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if let Some(prompt) = model.name_prompt.as_mut() {
+        prompt.typed.push_str(&text);
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.connection_details || model.prefix_pending {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
+        return Vec::new();
+    }
+    if model.pending_run.is_some() || model.pending_plan.is_some() || model.pending_copy.is_some() {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
+        return Vec::new();
+    }
+    if let Some(prompt) = model.update_prompt.as_mut() {
+        for character in text.chars() {
+            prompt.push(character);
+        }
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.pending_update.is_some() {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
+        return Vec::new();
+    }
+    if let Some(palette) = model.palette.as_mut() {
+        for character in text.chars() {
+            palette.push(character);
+        }
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.tree.filtering {
+        model.tree.filter.push_str(&text);
+        model.tree.selected = 0;
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.result_filtering {
+        model.result_filter.push_str(&text);
+        model.selected_row = 0;
+        model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.inspector.is_some() || model.definition.is_some() {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
+        return Vec::new();
+    }
+
+    // The editor is the client's SQL surface: a paste reaches it whenever no
+    // higher surface owns input, even while the completion menu is open. It
+    // goes through `edit_editor` so a stale server error marker and a format
+    // notice are invalidated exactly as they would be for typed input.
+    edit_editor(model, |editor| {
+        editor.insert_paste(&text);
+    });
+    refresh_completion_menu(model);
+    Vec::new()
 }
 
 /// Handles input while the object filter is being typed.

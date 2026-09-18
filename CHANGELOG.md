@@ -8,6 +8,14 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: pasted text now reaches the interactive client. The terminal has
+  requested bracketed paste since the first release and the runtime discarded
+  every paste event, so pasting into the full-screen client did nothing. A
+  paste now inserts at the caret as one undoable edit, normalises CRLF and CR
+  to LF, refuses text over 1 MiB with the limit named, and reaches masked
+  prompts without echo. A paste that cannot be accepted says it was ignored
+  instead of disappearing silently; plain mode, machine output and history are
+  unchanged.
 - Security: provider error output now redacts inline HTTP authorization header
   values, including quoted and repr-style forms, and bare bearer tokens before
   they can reach a diagnostic or log. A provider stderr probe showed that
