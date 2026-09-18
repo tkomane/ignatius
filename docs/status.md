@@ -4,6 +4,33 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Feature 025 Phase 3: pasted SQL arrives (US1) - 2026-09-18
+
+US1 is implemented on the `025-us1-paste` branch. A delivered paste now
+routes through the reducer to the surface that owns input, in the same peel
+order a keystroke takes: the editor (at the caret, CRLF and CR normalised to
+LF, one non-coalesced undo step, text over 1 MiB refused with the limit
+named), masked password and parameter prompts, the name and update prompts,
+the palette query, and the tree and result filters. A surface that owns
+input but does not accept text sets `PasteNotice::Ignored`; no route emits
+an effect, so a paste can never execute SQL. The editor route goes through
+`edit_editor`, so a landed paste invalidates a stale server error marker and
+the format notice exactly as typing does, and the footer rail shows the
+newest paste or format notice.
+
+| Field | Record |
+| --- | --- |
+| Claim | T010-T012: FR-2501 and FR-2502, no paste silently dropped, one undo step, bounded and normalised |
+| Source | `025-us1-paste` branch, verified before the Phase 3 commit; based on `origin/main` 77c4124 |
+| Environment | macOS 26.6.1 arm64, Homebrew Rust/Cargo 1.98.1. Mid-session the linker began refusing because the Xcode licence was not accepted; focused runs then used `DEVELOPER_DIR=/Library/Developer/CommandLineTools` per command. No system setting was changed; accepting the Xcode licence remains an owner action |
+| Method | `cargo fmt --all -- --check`; workspace clippy with warnings denied; `cargo test --locked --lib app::editor` (27), `--lib app::update::tests::paste` (14), `--lib ui::widgets::footer` (6), `--lib` (799), `--test documentation_matches_the_build` (15), `--test release_notes_contract` (7) |
+| Result | Focused and full-library sets pass, no failures and no skips. The reducer and editor tests were watched failing against the inert arm before the routing landed. Independent review found two substantive defects (a paste bypassed `edit_editor`, leaving a stale error marker and format notice; a refusal or ignored notice was invisible while a format notice was up) and three minor ones; all five were fixed with regression tests, and the review accepted the slice |
+| Scope | Proves library-level paste routing, the editor edit semantics, the notice rail and the privacy boundary for masked prompts. Does not prove live terminal paste delivery in Warp or Windows Terminal, cross-platform line-ending delivery, or non-macOS builds |
+| Retention | This section, the `025-us1-paste` pull request, and the commit that carries it |
+
+The full `cargo --locked xtask verify` remains the Phase 12 gate (T050). A
+live terminal paste check is a manual evidence gap.
+
 ## Feature 025 Phase 2 foundational extraction - 2026-09-18
 
 Phase 2 (T002-T009) of `specs/025-gui-grade-experience/` is implemented on the

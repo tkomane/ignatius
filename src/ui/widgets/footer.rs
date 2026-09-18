@@ -52,8 +52,12 @@ pub(crate) fn render_footer(
         theme.style(transaction_token),
     ));
 
-    let showing_format_notice = model.format_notice.is_some();
-    if let Some(info) = model.connection.info().filter(|_| !showing_format_notice) {
+    let showing_transient_notice = model.format_notice.is_some() || model.paste_notice.is_some();
+    if let Some(info) = model
+        .connection
+        .info()
+        .filter(|_| !showing_transient_notice)
+    {
         spans.push(Span::styled(
             format!(
                 "{}{} ",
@@ -69,8 +73,41 @@ pub(crate) fn render_footer(
     // Stop before the next complete pair would be clipped so every shown hint
     // retains both its key and its meaning in a narrow terminal.
     let mut used = display_width(&status) + display_width(model.transaction.label()) + 2;
-    if let Some(info) = model.connection.info().filter(|_| !showing_format_notice) {
+    if let Some(info) = model
+        .connection
+        .info()
+        .filter(|_| !showing_transient_notice)
+    {
         used += display_width(&info.search_path) + 2;
+    }
+
+    // A paste that did not reach the editor travels the same rail as a format
+    // result: it is rendered through the display-sanitising rule, wears the same
+    // refusal or information colour, and falls back to its short form rather
+    // than losing the message in a narrow terminal. It is checked first because
+    // it is the newest feedback when both exist.
+    if let Some(notice) = &model.paste_notice {
+        let token = if matches!(notice, crate::app::model::PasteNotice::Refused) {
+            Token::Warning
+        } else {
+            Token::Info
+        };
+        let remaining = usize::from(area.width).saturating_sub(used + 1);
+        let full = sanitize_for_display(&notice.message());
+        let compact = match notice {
+            crate::app::model::PasteNotice::Refused => "Paste refused",
+            crate::app::model::PasteNotice::Ignored => "Paste ignored",
+        };
+        let message = if display_width(&full) <= remaining {
+            full
+        } else {
+            truncate_to_width(compact, remaining, !presentation.glyphs.is_ascii())
+        };
+        if !message.is_empty() {
+            spans.push(Span::styled(format!(" {message}"), theme.style(token)));
+        }
+        Paragraph::new(Line::from(spans)).render(area, buf);
+        return;
     }
 
     // A formatting result is transient feedback for the editor. Give it the
@@ -140,3 +177,6 @@ pub(crate) fn render_footer(
 
     Paragraph::new(Line::from(spans)).render(area, buf);
 }
+
+#[cfg(test)]
+mod tests;

@@ -746,6 +746,26 @@ impl ClipboardNotice {
     }
 }
 
+/// A value-free outcome from delivering a paste that did not reach the editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PasteNotice {
+    /// The text was over the accepted paste limit.
+    Refused,
+    /// A surface that does not accept text owned input when the paste arrived.
+    Ignored,
+}
+
+impl PasteNotice {
+    /// Plain-language status for the editor footer.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::Refused => "Paste refused: the text is over the 1 MiB limit.".to_owned(),
+            Self::Ignored => "Paste ignored: this surface does not accept pasted text.".to_owned(),
+        }
+    }
+}
+
 /// A value-free outcome from formatting the local SQL buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormatNotice {
@@ -927,6 +947,8 @@ pub struct Model {
     pub clipboard_notice: Option<ClipboardNotice>,
     /// The last value-free formatting outcome shown in the editor footer.
     pub format_notice: Option<FormatNotice>,
+    /// The last value-free paste refusal or acknowledgement shown in the editor footer.
+    pub paste_notice: Option<PasteNotice>,
     /// The in-memory plan view over the Results pane.
     pub plan: PlanView,
     /// The transaction state the server last reported.

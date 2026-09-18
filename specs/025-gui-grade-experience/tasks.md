@@ -110,7 +110,7 @@ refusal and acknowledgement per spec with zero executions.
 
 ### Tests for User Story 1
 
-- [ ] T010 [US1] Add failing tests in `src/app/editor.rs` (or its
+- [x] T010 [US1] Add failing tests in `src/app/editor.rs` (or its
   `tests.rs`) and `src/app/update/tests.rs` for caret insertion as one
   undo step, CRLF and CR normalisation, the 1 MiB bound with its named
   refusal, revision advance, no execution, paste into a masked prompt
@@ -119,11 +119,11 @@ refusal and acknowledgement per spec with zero executions.
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Implement paste insertion through the editor's existing
+- [x] T011 [US1] Implement paste insertion through the editor's existing
   edit primitives in `src/app/editor.rs`; the integrator fills the
   `Message::Pasted` arm in `src/app/update.rs` with routing to editor,
   text-accepting prompts, and the acknowledged-ignore path.
-- [ ] T012 [US1] Render the ignored-paste and refusal notices through the
+- [x] T012 [US1] Render the ignored-paste and refusal notices through the
   existing transient-notice route and assert their wording, narrow layout
   and ASCII output in `src/ui/widgets/footer.rs` tests.
 
