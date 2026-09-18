@@ -5,6 +5,7 @@
 //! reconfigured without touching behaviour. Effects are requests, not work: the
 //! reducer returns them and the runtime performs them.
 
+use crate::app::model::ConnectingStep;
 use crate::diagnostics::Diagnostic;
 use crate::postgres::SessionInfo;
 use crate::query::plan::PlanDocument;
@@ -303,6 +304,16 @@ pub enum Message {
     Pasted(String),
     /// A connection attempt succeeded.
     Connected(Box<SessionInfo>),
+    /// The runtime reports the connecting stage now in progress.
+    ///
+    /// Stages the runtime cannot honestly observe are never sent; the reducer
+    /// stores only what it is told.
+    ConnectingStep {
+        /// The stage in progress.
+        step: ConnectingStep,
+        /// A display-safe target, such as a profile name or `user@host:port/db`.
+        target: String,
+    },
     /// A connection attempt failed.
     ConnectionFailed(Box<Diagnostic>),
     /// The connection dropped after being established.

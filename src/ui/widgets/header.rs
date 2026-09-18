@@ -1,4 +1,4 @@
-use crate::app::model::Model;
+use crate::app::model::{ConnectingStep, ConnectionState, Model};
 use crate::query::value::sanitize_for_display;
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
@@ -67,6 +67,10 @@ pub(crate) fn render_header(
         ),
         theme.style(Token::Text),
     ));
+
+    // The connecting clock and the failed stage are extra facts about the
+    // connection segment, so they sit beside it rather than replacing it.
+    spans.extend(connection_state_spans(model, presentation));
 
     if let Some(info) = model.connection.info() {
         spans.push(Span::styled(
@@ -161,6 +165,62 @@ pub(crate) fn render_header(
     Paragraph::new(Line::from(spans)).render(area, buf);
 }
 
+/// The connection facts a header adds beside the connection label.
+///
+/// A failed attempt names the stage it failed in, so the diagnostic's "what"
+/// is paired with the sequence's "where". The elapsed clock appears only while
+/// a connection is in flight and only once the runtime has reported a tick.
+/// A stage the runtime never reported is simply absent, so the header can
+/// never read as a checklist.
+fn connection_state_spans(model: &Model, presentation: &Presentation) -> Vec<Span<'static>> {
+    let theme = &presentation.theme;
+    let mut spans = Vec::new();
+
+    if let Some(step) = failed_step(model) {
+        spans.push(Span::styled(
+            presentation.glyphs.separator(),
+            theme.style(Token::Border),
+        ));
+        spans.push(Span::styled(
+            format!("failed during {}", step.label()),
+            theme.style(Token::Danger),
+        ));
+    }
+
+    if let Some(elapsed) = connecting_elapsed(model) {
+        spans.push(Span::styled(
+            presentation.glyphs.separator(),
+            theme.style(Token::Border),
+        ));
+        spans.push(Span::styled(
+            format!(
+                "{}{:.1}s",
+                presentation.icon(Icon::Clock),
+                elapsed.as_secs_f64()
+            ),
+            theme.style(Token::Muted),
+        ));
+    }
+
+    spans
+}
+
+/// The stage a failed connection stopped in, when the runtime reported one.
+fn failed_step(model: &Model) -> Option<ConnectingStep> {
+    match &model.connection {
+        ConnectionState::Failed(_) => model.connecting_step,
+        _ => None,
+    }
+}
+
+/// The elapsed connecting time, once the runtime has reported one.
+fn connecting_elapsed(model: &Model) -> Option<std::time::Duration> {
+    match &model.connection {
+        ConnectionState::Connecting { .. } => model.running_for,
+        _ => None,
+    }
+}
+
 /// The icon and token for a transport state.
 ///
 /// Encryption with a verified identity, encryption without one, and no
@@ -190,33 +250,46 @@ pub(crate) fn render_compact_header(
 ) {
     let theme = &presentation.theme;
     let environment = model.environment();
-    let database = model
-        .connection
-        .info()
-        .map_or_else(|| "not connected".to_owned(), |i| i.database.clone());
+    // A session has a database name to pair with its target. Without a session
+    // there is no database yet, so the connection label stands alone instead of
+    // claiming "not connected" beside a connecting or failed state.
+    let connection = model.connection.info().map_or_else(
+        || {
+            format!(
+                "{}{}",
+                presentation.icon(Icon::Database),
+                model.connection.label()
+            )
+        },
+        |info| {
+            format!(
+                "{}{} ({})",
+                presentation.icon(Icon::Database),
+                info.database,
+                model.connection.label()
+            )
+        },
+    );
     let label = format!(" [{}] ", environment.label());
-    let spans = vec![
+    let mut spans = vec![
         if environment.is_production() {
             Span::styled(label, theme.capsule(Token::EnvironmentProduction))
         } else {
             Span::styled(label, theme.style(Token::EnvironmentNonProduction))
         },
-        Span::styled(
-            format!(
-                "{}{database} ({})",
-                presentation.icon(Icon::Database),
-                model.connection.label()
-            ),
-            theme.style(Token::Text),
-        ),
-        Span::styled(
-            format!(
-                " {}[{}]",
-                presentation.icon(Icon::Focus),
-                model.focus.label()
-            ),
-            theme.style(Token::Focus),
-        ),
+        Span::styled(connection, theme.style(Token::Text)),
     ];
+    spans.extend(connection_state_spans(model, presentation));
+    spans.push(Span::styled(
+        format!(
+            " {}[{}]",
+            presentation.icon(Icon::Focus),
+            model.focus.label()
+        ),
+        theme.style(Token::Focus),
+    ));
     Paragraph::new(Line::from(spans)).render(area, buf);
 }
+
+#[cfg(test)]
+mod tests;

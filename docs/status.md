@@ -4,6 +4,37 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Feature 025 Phase 6: the first frame is useful (US4) - 2026-09-18
+
+US4 is implemented on the `025-us4-first-frame` branch. The reducer and the
+runtime gained the pinned connecting vocabulary (`resolving profile`,
+`acquiring credential`, `TLS handshake`, `server handshake`, `loading
+catalogue`): the runtime reports only the stage it can honestly observe
+(plain or `sslmode=prefer` targets name the server handshake; a target that
+requires encryption names the TLS handshake), the header shows the stage
+with the target and the elapsed time in words at every tier, a failure keeps
+the stage it failed in beside the unchanged diagnostic, and a real
+connecting-to-connected transition focuses the editor and opens the tree's
+first schema level once. An unconfigured first frame names one next action
+instead of empty panes.
+
+| Field | Record |
+| --- | --- |
+| Claim | T024-T027: FR-2510..FR-2512, SC-2505 - named connecting steps, a painted first frame, a productive first connected frame |
+| Source | `025-us4-first-frame` branch, verified before the Phase 6 commit; based on `origin/main` c0045f6 |
+| Environment | macOS 26.6.1 arm64, Homebrew Rust/Cargo 1.98.1, `DEVELOPER_DIR=/Library/Developer/CommandLineTools` because the Xcode licence is not accepted; disposable `postgres:18.4-alpine` plain/TLS fixtures |
+| Method | `cargo fmt --all -- --check`; workspace clippy with warnings denied; focused sets (`ui::widgets::header` 9, `ui::widgets::objects` 7, `app::update` 169, `ui::widgets` 48, `--lib` 869); `cargo --locked xtask db up`; `cargo --locked xtask verify` (20 test binaries, 1,111 tests passed); `cargo xtask db down`; independent review of the whole slice |
+| Result | Pass. All gates passed including the database-backed plain/TLS gates; the Unix-socket gate skipped because `IGNATIUS_TEST_PG_SOCKET_URI` is not set. Review found no blocking or substantive issues and nine minor ones; the two it recommended in-slice (a generation check before the step report, and a pure sslmode-to-stage test) plus six others were fixed, with the remaining honesty limit recorded below; re-review accepted |
+| Scope | Proves reducer transitions, runtime step selection (by test of the pure mapping), and buffer-level rendering. Does not prove live terminal rendering, runtime timing under a real connect, Windows/Linux, or the catalogue-loading step as a visible transient: `loading catalogue` is the tree's own state, and the runtime's single opaque `session::connect` call cannot report a post-TLS failure separately from the TLS stage, so a `Require` target's authentication failure displays as `failed during TLS handshake` beside the unchanged diagnostic |
+| Retention | This section, the `025-us4-first-frame` pull request, and the commit that carries it |
+
+The task list names `src/connection/service.rs` as the step-reporting home,
+but that file holds `pg_service.conf` parsing; the connect flow lives in the
+runtime, so the vocabulary is in `src/app/model.rs` and the emissions are in
+`src/cli/interactive.rs`. Nothing in FR-2510..FR-2512 requires a specific
+file, and the task's focused `connection::service` command proves nothing
+about this slice.
+
 ## Feature 025 Phase 5: a workable results grid (US3) - 2026-09-18
 
 US3 is implemented on the `025-us3-grid` branch. The Results state line now

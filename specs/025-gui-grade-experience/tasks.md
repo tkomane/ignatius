@@ -214,7 +214,7 @@ unconfigured next-action frame.
 
 ### Tests for User Story 4
 
-- [ ] T024 [US4] Add failing tests for step wording with target and
+- [x] T024 [US4] Add failing tests for step wording with target and
   elapsed time, skipped-step honesty, failure naming the failing step,
   first-frame shell completeness, post-connect editor focus with the run
   hint, first-level tree expansion, and the unconfigured next action, in
@@ -223,14 +223,14 @@ unconfigured next-action frame.
 
 ### Implementation for User Story 4
 
-- [ ] T025 [US4] Report named connecting steps from
+- [x] T025 [US4] Report named connecting steps from
   `src/connection/service.rs` as messages; the integrator adds the step
   variant in `src/app/message.rs` and the `ConnectionState::Connecting`
   step field in `src/app/model.rs`.
-- [ ] T026 [US4] The integrator routes step transitions, post-connect
+- [x] T026 [US4] The integrator routes step transitions, post-connect
   focus and first-level expansion in `src/app/update.rs`, skipping
   inapplicable steps without showing them.
-- [ ] T027 [US4] Render steps in `src/ui/widgets/header.rs`, the loading
+- [x] T027 [US4] Render steps in `src/ui/widgets/header.rs`, the loading
   and expanded tree states in `src/ui/widgets/objects.rs`, and the
   unconfigured first frame's single next action.
 

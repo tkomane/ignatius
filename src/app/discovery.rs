@@ -380,7 +380,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         Action::OpenConnectionPicker => {
             !model.connection_profiles.is_empty()
                 && !model.phase.is_busy()
-                && !matches!(model.connection, ConnectionState::Connecting)
+                && !matches!(model.connection, ConnectionState::Connecting { .. })
         }
         Action::Cancel => model.phase.is_busy(),
         Action::ToggleHelp
@@ -806,7 +806,7 @@ fn is_explain_statement(sql: &str) -> bool {
 fn connection_posture(connection: &ConnectionState) -> ConnectionPosture {
     match connection {
         ConnectionState::Disconnected => ConnectionPosture::Disconnected,
-        ConnectionState::Connecting => ConnectionPosture::Connecting,
+        ConnectionState::Connecting { .. } => ConnectionPosture::Connecting,
         ConnectionState::Connected(_) => ConnectionPosture::Connected,
         ConnectionState::Lost { .. } => ConnectionPosture::Lost,
         ConnectionState::Failed(_) => ConnectionPosture::Failed,
@@ -1024,7 +1024,10 @@ mod tests {
         let mut model = Model::new(100);
         model.editor.set_text("SELECT 1;");
         for connection in [
-            ConnectionState::Connecting,
+            ConnectionState::Connecting {
+                step: crate::app::model::ConnectingStep::ServerHandshake,
+                target: String::new(),
+            },
             ConnectionState::Lost {
                 info: Box::new(SessionInfo {
                     target: "app@localhost:5432/orders".into(),
