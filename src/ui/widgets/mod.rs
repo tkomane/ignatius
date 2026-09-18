@@ -56,11 +56,33 @@ pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> To
         Kind::Plain => Token::Text,
     }
 }
+/// The shared bordered block behind a pane.
+///
+/// It carries the pane elevation as its fill, so every pane interior is painted
+/// from the theme rather than inheriting the terminal's background. At
+/// 16-colour depth and below the theme returns an empty surface style and
+/// nothing is painted, which is the documented colour-off behaviour.
 pub(crate) fn pane_block(
     title: String,
     focused: bool,
     presentation: &Presentation,
 ) -> Block<'static> {
+    bordered_block(title, focused, presentation)
+        .style(presentation.theme.surface(Token::SurfacePane))
+}
+
+/// The shared bordered block behind an overlay.
+///
+/// An overlay is one elevation above a pane, so it paints the overlay surface.
+/// Callers clear the rectangle first, then draw this block over it, so no stale
+/// cell shows through the frame.
+pub(crate) fn overlay_block(title: String, presentation: &Presentation) -> Block<'static> {
+    bordered_block(title, true, presentation)
+        .style(presentation.theme.surface(Token::SurfaceOverlay))
+}
+
+/// The border, title and focus styling shared by panes and overlays.
+fn bordered_block(title: String, focused: bool, presentation: &Presentation) -> Block<'static> {
     let theme = &presentation.theme;
     Block::bordered()
         .border_set(presentation.glyphs.borders(focused))

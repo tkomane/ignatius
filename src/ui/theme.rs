@@ -19,6 +19,10 @@ pub enum Token {
     Surface,
     /// Background of a raised or striped area.
     SurfaceAlt,
+    /// Background of a pane interior, one elevation above the base.
+    SurfacePane,
+    /// Background of an overlay, one elevation above a pane.
+    SurfaceOverlay,
     /// Primary readable text.
     Text,
     /// Secondary text: hints, units, inactive labels.
@@ -66,6 +70,8 @@ impl Token {
     pub const ALL: &'static [Self] = &[
         Self::Surface,
         Self::SurfaceAlt,
+        Self::SurfacePane,
+        Self::SurfaceOverlay,
         Self::Text,
         Self::Muted,
         Self::Border,
@@ -130,13 +136,123 @@ pub struct Theme {
     pub choice: ThemeChoice,
     /// When false, tokens resolve to modifiers only and no colour is emitted.
     pub color: bool,
+    /// How many colours the terminal can actually show.
+    pub depth: ColorDepth,
+}
+
+/// How many colours the terminal can actually show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorDepth {
+    /// 24-bit colour, emitted exactly as chosen.
+    #[default]
+    TrueColor,
+    /// The 256-colour indexed palette, reached through the quantizer.
+    Indexed256,
+    /// The 16 basic ANSI colours, reached through the fixed family table.
+    Basic16,
+    /// No colour of any kind.
+    None,
+}
+
+impl ColorDepth {
+    /// Whether the depth allows a painted surface, as opposed to plain cells
+    /// whose background belongs to the terminal.
+    #[must_use]
+    pub const fn paints_surfaces(self) -> bool {
+        matches!(self, Self::TrueColor | Self::Indexed256)
+    }
+}
+
+/// Where the active colour depth came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DepthSource {
+    /// No override and no environment hint, so the documented fallback chose.
+    #[default]
+    Default,
+    /// The `--color-depth` flag.
+    Flag,
+    /// The `ui.color-depth` configuration key.
+    Configuration,
+    /// The `COLORTERM` environment variable.
+    Colorterm,
+    /// The `TERM` environment variable.
+    Term,
+    /// `NO_COLOR`, `TERM=dumb`, `--plain` or colour resolved off.
+    ForcedOff,
+}
+
+impl DepthSource {
+    /// The exact label `doctor` reports.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Flag => "flag",
+            Self::Configuration => "configuration",
+            Self::Colorterm => "COLORTERM",
+            Self::Term => "TERM",
+            Self::ForcedOff => "forced off",
+        }
+    }
 }
 
 impl Theme {
     /// Builds a theme for a palette choice and colour availability.
+    ///
+    /// The depth defaults to full truecolour; the runtime narrows it with
+    /// [`Theme::with_depth`] once detection has run.
     #[must_use]
     pub const fn new(choice: ThemeChoice, color: bool) -> Self {
-        Self { choice, color }
+        Self {
+            choice,
+            color,
+            depth: ColorDepth::TrueColor,
+        }
+    }
+
+    /// Sets the colour depth this theme emits at.
+    #[must_use]
+    pub const fn with_depth(mut self, depth: ColorDepth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// The colour emitted for a token at the active depth, or `None` when
+    /// colour must not be emitted at all.
+    ///
+    /// This is the single depth-aware conversion point: every style method
+    /// goes through it rather than converting `Rgb` directly.
+    #[must_use]
+    pub fn color(&self, token: Token) -> Option<Color> {
+        if !self.color || self.depth == ColorDepth::None {
+            return None;
+        }
+        Some(self.foreground(token))
+    }
+
+    /// The colour for a token at the active depth, assuming colour is allowed.
+    fn foreground(&self, token: Token) -> Color {
+        match self.depth {
+            // `None` is filtered by `color`, but converting as truecolour
+            // keeps this total rather than panicking on an internal mistake.
+            ColorDepth::TrueColor | ColorDepth::None => self.rgb(token).into(),
+            ColorDepth::Indexed256 => Color::Indexed(quantize_256(self.rgb(token))),
+            ColorDepth::Basic16 => Color::Indexed(basic_16(token, self)),
+        }
+    }
+
+    /// A fill for one of the painted elevation surfaces.
+    ///
+    /// At 16-colour depth and below this is empty, so a caller can apply it
+    /// unconditionally and get the documented unpainted-surface behaviour.
+    #[must_use]
+    pub fn surface(&self, token: Token) -> Style {
+        if self.depth.paints_surfaces()
+            && let Some(colour) = self.color(token)
+        {
+            return Style::default().bg(colour);
+        }
+        Style::default()
     }
 
     /// The palette colour for a token, ignoring whether colour is enabled.
@@ -158,31 +274,27 @@ impl Theme {
     /// The style to apply for a token.
     ///
     /// With colour disabled, emphasis is carried by modifiers so focus and
-    /// selection remain visible in a monochrome terminal.
+    /// selection remain visible in a monochrome terminal. At 16-colour depth
+    /// the foreground comes from the fixed family table and no background is
+    /// painted, so elevation follows the colour-off rules.
     #[must_use]
     pub fn style(&self, token: Token) -> Style {
-        if !self.color {
+        if !self.color || self.depth == ColorDepth::None {
+            return modifier_only(token);
+        }
+        if self.depth == ColorDepth::Basic16 {
             return match token {
-                Token::Focus | Token::Header => Style::default().add_modifier(Modifier::BOLD),
-                Token::Selection => Style::default().add_modifier(Modifier::REVERSED),
-                Token::Danger | Token::EnvironmentProduction | Token::TransactionFailed => {
-                    Style::default().add_modifier(Modifier::BOLD)
-                }
-                Token::Muted | Token::NullValue | Token::SyntaxComment => {
-                    Style::default().add_modifier(Modifier::DIM)
-                }
-                // Keywords stay emphasised without colour. The rest of the
-                // syntax tokens are plain text, because a buffer where every
-                // second word is bold is harder to read, not easier.
-                Token::SyntaxKeyword => Style::default().add_modifier(Modifier::BOLD),
-                _ => Style::default(),
+                // A filled selection background is an elevation-style paint:
+                // at 16 colours selection falls back to reversed text.
+                Token::Selection => modifier_only(token),
+                _ => modifier_only(token).fg(self.foreground(token)),
             };
         }
-        let style = Style::default().fg(self.rgb(token).into());
+        let style = Style::default().fg(self.foreground(token));
         match token {
             Token::Selection => Style::default()
-                .bg(self.rgb(Token::Selection).into())
-                .fg(self.rgb(Token::Surface).into()),
+                .bg(self.foreground(Token::Selection))
+                .fg(self.foreground(Token::Surface)),
             Token::Header | Token::Focus | Token::EnvironmentProduction => {
                 style.add_modifier(Modifier::BOLD)
             }
@@ -194,10 +306,31 @@ impl Theme {
     }
 }
 
+/// The colour-off emphasis rules, shared by `ColorDepth::None` and `Basic16`.
+fn modifier_only(token: Token) -> Style {
+    match token {
+        Token::Focus | Token::Header => Style::default().add_modifier(Modifier::BOLD),
+        Token::Selection => Style::default().add_modifier(Modifier::REVERSED),
+        Token::Danger | Token::EnvironmentProduction | Token::TransactionFailed => {
+            Style::default().add_modifier(Modifier::BOLD)
+        }
+        Token::Muted | Token::NullValue | Token::SyntaxComment => {
+            Style::default().add_modifier(Modifier::DIM)
+        }
+        // Keywords stay emphasised without colour. The rest of the
+        // syntax tokens are plain text, because a buffer where every
+        // second word is bold is harder to read, not easier.
+        Token::SyntaxKeyword => Style::default().add_modifier(Modifier::BOLD),
+        _ => Style::default(),
+    }
+}
+
 const fn dark(token: Token) -> Rgb {
     match token {
-        Token::Surface => Rgb(0x12, 0x15, 0x1a),
+        Token::Surface => Rgb(0x18, 0x18, 0x25),
         Token::SurfaceAlt => Rgb(0x1a, 0x1f, 0x26),
+        Token::SurfacePane => Rgb(0x1e, 0x1e, 0x2e),
+        Token::SurfaceOverlay => Rgb(0x31, 0x32, 0x44),
         Token::Text => Rgb(0xe6, 0xe9, 0xef),
         Token::Muted => Rgb(0x9a, 0xa4, 0xb2),
         Token::Border => Rgb(0x39, 0x42, 0x4f),
@@ -224,8 +357,10 @@ const fn light(token: Token) -> Rgb {
     // Designed for a light terminal rather than inverted from the dark palette:
     // hues are darkened and desaturated so they stay legible on near-white.
     match token {
-        Token::Surface => Rgb(0xfc, 0xfc, 0xfd),
+        Token::Surface => Rgb(0xe6, 0xe9, 0xef),
         Token::SurfaceAlt => Rgb(0xef, 0xf1, 0xf4),
+        Token::SurfacePane => Rgb(0xef, 0xf1, 0xf5),
+        Token::SurfaceOverlay => Rgb(0xdc, 0xe0, 0xe8),
         Token::Text => Rgb(0x1a, 0x1e, 0x26),
         Token::Muted => Rgb(0x55, 0x5e, 0x6b),
         Token::Border => Rgb(0xc4, 0xca, 0xd3),
@@ -250,7 +385,8 @@ const fn light(token: Token) -> Rgb {
 
 const fn high_contrast(token: Token) -> Rgb {
     match token {
-        Token::Surface | Token::SurfaceAlt => Rgb(0x00, 0x00, 0x00),
+        Token::Surface | Token::SurfaceAlt | Token::SurfacePane => Rgb(0x00, 0x00, 0x00),
+        Token::SurfaceOverlay => Rgb(0x10, 0x10, 0x10),
         Token::Text | Token::Border | Token::Header => Rgb(0xff, 0xff, 0xff),
         Token::Muted | Token::NullValue | Token::EnvironmentNonProduction => Rgb(0xd0, 0xd0, 0xd0),
         Token::Focus | Token::Warning | Token::TransactionActive => Rgb(0xff, 0xff, 0x00),
@@ -276,228 +412,163 @@ impl Theme {
     /// foreground contrast, which the palette tests already enforce.
     #[must_use]
     pub fn capsule(&self, token: Token) -> Style {
-        if !self.color {
+        if !self.depth.paints_surfaces() {
             return Style::default().add_modifier(Modifier::REVERSED);
         }
-        Style::default()
-            .bg(self.rgb(token).into())
-            .fg(self.rgb(Token::Surface).into())
-            .add_modifier(Modifier::BOLD)
+        match self.color(token) {
+            Some(fill) => Style::default()
+                .bg(fill)
+                .fg(self.foreground(Token::Surface))
+                .add_modifier(Modifier::BOLD),
+            None => Style::default().add_modifier(Modifier::REVERSED),
+        }
     }
 
     /// The background of an alternating result row.
     ///
     /// Striping is a reading aid across wide rows. With colour off it is absent
     /// rather than faked, because a modifier applied to every second row would
-    /// be noise rather than help.
+    /// be noise rather than help. At 16-colour depth it is absent for the same
+    /// reason as the elevation surfaces.
     #[must_use]
     pub fn stripe(&self) -> Style {
-        if !self.color {
-            return Style::default();
-        }
-        Style::default().bg(self.rgb(Token::SurfaceAlt).into())
+        self.surface(Token::SurfaceAlt)
     }
 
     /// Text drawn on a striped row.
     #[must_use]
     pub fn on_stripe(&self, token: Token) -> Style {
-        if !self.color {
-            return self.style(token);
+        let mut style = self.style(token);
+        if let Some(background) = self.surface(Token::SurfaceAlt).bg {
+            style = style.bg(background);
         }
-        self.style(token).bg(self.rgb(Token::SurfaceAlt).into())
+        style
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// The fixed ANSI family each token belongs to, per `contracts/presentation.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Family {
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    Grey,
+    Muted,
+}
 
-    const READABLE: f64 = 4.5;
-    const LARGE_OR_SECONDARY: f64 = 3.0;
-    const HIGH_CONTRAST_MINIMUM: f64 = 7.0;
-
-    fn themes() -> [Theme; 3] {
-        [
-            Theme::new(ThemeChoice::Dark, true),
-            Theme::new(ThemeChoice::Light, true),
-            Theme::new(ThemeChoice::HighContrast, true),
-        ]
+impl Family {
+    const fn normal(self) -> u8 {
+        match self {
+            Self::Red => 1,
+            Self::Green => 2,
+            Self::Yellow => 3,
+            Self::Blue => 4,
+            Self::Magenta => 5,
+            Self::Cyan => 6,
+            Self::Grey => 7,
+            Self::Muted => 8,
+        }
     }
 
-    #[test]
-    fn every_theme_defines_every_token() {
-        for theme in themes() {
-            for token in Token::ALL {
-                let rgb = theme.rgb(*token);
-                // A token resolving to the surface colour would be invisible.
-                if !matches!(token, Token::Surface | Token::SurfaceAlt) {
-                    assert_ne!(
-                        rgb,
-                        theme.background(),
-                        "{:?}/{token:?} is invisible against its own background",
-                        theme.choice
-                    );
+    const fn bright(self) -> u8 {
+        match self {
+            Self::Red => 9,
+            Self::Green => 10,
+            Self::Yellow => 11,
+            Self::Blue => 12,
+            Self::Magenta => 13,
+            Self::Cyan => 14,
+            Self::Grey => 15,
+            // The muted family has no bright member.
+            Self::Muted => 8,
+        }
+    }
+
+    const fn has_bright(self) -> bool {
+        !matches!(self, Self::Muted)
+    }
+}
+
+/// The contract's fixed family for a token.
+///
+/// Syntax tokens take the family their hue belongs to; the surface tokens are
+/// backgrounds and are never foregrounded, so they take the muted index rather
+/// than ever resolving to a bright value if a caller misuses them.
+fn family(token: Token) -> Family {
+    match token {
+        Token::Danger | Token::EnvironmentProduction | Token::TransactionFailed => Family::Red,
+        Token::Success | Token::SyntaxLiteral => Family::Green,
+        Token::Warning | Token::TransactionActive | Token::SyntaxNumber => Family::Yellow,
+        Token::Focus | Token::Selection => Family::Blue,
+        Token::SyntaxKeyword => Family::Magenta,
+        Token::Info | Token::SyntaxIdentifier => Family::Cyan,
+        Token::Text | Token::Header | Token::Border => Family::Grey,
+        Token::Muted
+        | Token::EnvironmentNonProduction
+        | Token::NullValue
+        | Token::SyntaxComment
+        | Token::Surface
+        | Token::SurfaceAlt
+        | Token::SurfacePane
+        | Token::SurfaceOverlay => Family::Muted,
+    }
+}
+
+/// The fixed 16-colour lookup for a token: its contract family, brightened
+/// when the token's truecolour relative luminance is at least 0.5.
+fn basic_16(token: Token, theme: &Theme) -> u8 {
+    let family = family(token);
+    if family.has_bright() && theme.rgb(token).luminance() >= 0.5 {
+        family.bright()
+    } else {
+        family.normal()
+    }
+}
+
+/// Maps a truecolour to the nearest xterm-256 index.
+///
+/// Candidates are the 6x6x6 colour cube (indices 16-231, component levels
+/// `[0, 95, 135, 175, 215, 255]`) and the grey ramp (indices 232-255, values
+/// `8, 18, .. 238`). The result is the candidate with the smallest squared RGB
+/// distance; ties resolve to the lower index. Indices 0-15 are never produced
+/// because they are terminal-redefinable and unpredictable.
+#[must_use]
+pub fn quantize_256(rgb: Rgb) -> u8 {
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let mut best_index = 16u8;
+    let mut best_distance = u32::MAX;
+    for (r, level_r) in LEVELS.iter().enumerate() {
+        for (g, level_g) in LEVELS.iter().enumerate() {
+            for (b, level_b) in LEVELS.iter().enumerate() {
+                let distance = distance_squared(rgb, Rgb(*level_r, *level_g, *level_b));
+                if distance < best_distance {
+                    best_distance = distance;
+                    best_index = 16 + (r as u8) * 36 + (g as u8) * 6 + (b as u8);
                 }
             }
         }
     }
-
-    #[test]
-    fn primary_text_is_readable_on_its_surface() {
-        for theme in themes() {
-            let ratio = theme.rgb(Token::Text).contrast(theme.background());
-            assert!(
-                ratio >= READABLE,
-                "{:?}: text contrast {ratio:.2} is below {READABLE}",
-                theme.choice
-            );
+    for step in 0..24u8 {
+        let value = 8 + 10 * step;
+        let distance = distance_squared(rgb, Rgb(value, value, value));
+        if distance < best_distance {
+            best_distance = distance;
+            best_index = 232 + step;
         }
     }
-
-    #[test]
-    fn semantic_states_stay_legible_on_their_surface() {
-        for theme in themes() {
-            for token in [
-                Token::Muted,
-                Token::Success,
-                Token::Warning,
-                Token::Danger,
-                Token::Info,
-                Token::EnvironmentProduction,
-                Token::TransactionFailed,
-                Token::NullValue,
-                Token::Header,
-            ] {
-                let ratio = theme.rgb(token).contrast(theme.background());
-                assert!(
-                    ratio >= LARGE_OR_SECONDARY,
-                    "{:?}/{token:?} contrast {ratio:.2} is below {LARGE_OR_SECONDARY}",
-                    theme.choice
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn text_stays_readable_on_a_striped_row() {
-        // Striping alternates the background, so every contrast guarantee has to
-        // hold against the alternate surface as well as the main one.
-        for theme in themes() {
-            let stripe = theme.rgb(Token::SurfaceAlt);
-            assert!(
-                theme.rgb(Token::Text).contrast(stripe) >= READABLE,
-                "{:?}: text on a striped row is {:.2}",
-                theme.choice,
-                theme.rgb(Token::Text).contrast(stripe)
-            );
-            for token in [
-                Token::Muted,
-                Token::NullValue,
-                Token::Danger,
-                Token::Success,
-            ] {
-                assert!(
-                    theme.rgb(token).contrast(stripe) >= LARGE_OR_SECONDARY,
-                    "{:?}/{token:?} on a striped row is {:.2}",
-                    theme.choice,
-                    theme.rgb(token).contrast(stripe)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_capsule_is_legible_and_falls_back_to_reversed_text() {
-        for theme in themes() {
-            let style = theme.capsule(Token::EnvironmentProduction);
-            assert!(
-                style.bg.is_some(),
-                "{:?}: a capsule needs a fill",
-                theme.choice
-            );
-            assert!(style.fg.is_some());
-            // The pair is token against surface, which the palette tests already
-            // hold to a threshold; assert it here so the capsule cannot drift.
-            let ratio = theme
-                .rgb(Token::EnvironmentProduction)
-                .contrast(theme.rgb(Token::Surface));
-            assert!(
-                ratio >= LARGE_OR_SECONDARY,
-                "{:?}: capsule contrast {ratio:.2}",
-                theme.choice
-            );
-        }
-        let plain = Theme::new(ThemeChoice::Dark, false);
-        assert!(plain.capsule(Token::EnvironmentProduction).bg.is_none());
-        assert!(
-            plain
-                .capsule(Token::EnvironmentProduction)
-                .add_modifier
-                .contains(Modifier::REVERSED),
-            "without colour a capsule must still stand out"
-        );
-        assert!(
-            plain.stripe().bg.is_none(),
-            "striping is dropped, not faked"
-        );
-    }
-
-    #[test]
-    fn the_high_contrast_theme_actually_earns_its_name() {
-        let theme = Theme::new(ThemeChoice::HighContrast, true);
-        for token in Token::ALL {
-            if matches!(token, Token::Surface | Token::SurfaceAlt) {
-                continue;
-            }
-            let ratio = theme.rgb(*token).contrast(theme.background());
-            assert!(
-                ratio >= HIGH_CONTRAST_MINIMUM,
-                "{token:?} contrast {ratio:.2} is below {HIGH_CONTRAST_MINIMUM}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_light_theme_is_light_and_the_dark_theme_is_dark() {
-        assert!(
-            Theme::new(ThemeChoice::Light, true)
-                .background()
-                .luminance()
-                > 0.7
-        );
-        assert!(Theme::new(ThemeChoice::Dark, true).background().luminance() < 0.05);
-    }
-
-    #[test]
-    fn disabling_colour_emits_no_colour_but_keeps_emphasis() {
-        let theme = Theme::new(ThemeChoice::Dark, false);
-        for token in Token::ALL {
-            let style = theme.style(*token);
-            assert!(style.fg.is_none(), "{token:?} emitted a foreground colour");
-            assert!(style.bg.is_none(), "{token:?} emitted a background colour");
-        }
-        assert!(
-            theme
-                .style(Token::Focus)
-                .add_modifier
-                .contains(Modifier::BOLD),
-            "focus must stay visible without colour"
-        );
-        assert!(
-            theme
-                .style(Token::Selection)
-                .add_modifier
-                .contains(Modifier::REVERSED),
-            "selection must stay visible without colour"
-        );
-    }
-
-    #[test]
-    fn contrast_maths_matches_known_values() {
-        // Black on white is the WCAG maximum of 21:1.
-        let ratio = Rgb(0, 0, 0).contrast(Rgb(255, 255, 255));
-        assert!((ratio - 21.0).abs() < 0.01, "{ratio}");
-        // A colour against itself is 1:1.
-        assert!((Rgb(18, 21, 26).contrast(Rgb(18, 21, 26)) - 1.0).abs() < f64::EPSILON);
-    }
+    best_index
 }
+
+/// Squared Euclidean distance between two RGB colours.
+fn distance_squared(a: Rgb, b: Rgb) -> u32 {
+    let dr = i32::from(a.0) - i32::from(b.0);
+    let dg = i32::from(a.1) - i32::from(b.1);
+    let db = i32::from(a.2) - i32::from(b.2);
+    (dr * dr + dg * dg + db * db) as u32
+}
+
+#[cfg(test)]
+mod tests;

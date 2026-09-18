@@ -1,5 +1,5 @@
 use super::overlays::render_plan;
-use super::{action_key_label, input_cursor, pane_block};
+use super::{action_key_label, input_cursor, overlay_block, pane_block};
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -325,12 +325,11 @@ pub(crate) fn render_inspector(
     }
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             format!(
                 " {}Value  arrows move, Esc closes ",
                 presentation.icon(Icon::Rows)
             ),
-            true,
             presentation,
         ))
         .render(box_area, buf);

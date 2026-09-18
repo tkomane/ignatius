@@ -3,14 +3,281 @@
 //! Each expectation is the screen cell a renderer paints, so a region can only
 //! pass these tests if it agrees with the drawing arithmetic.
 
-use super::{Focus, Region, region_at};
+use super::{
+    Focus, Region, region_at, render_editor, render_objects, render_palette,
+    render_password_prompt, render_results,
+};
 use crate::app::model::{Model, PasswordPrompt};
 use crate::app::palette::{Palette, PaletteCommand, PaletteEntry};
+use crate::config::ThemeChoice;
 use crate::query::result::{Execution, ExecutionStatus, JobId, ResultSet, StatementResult};
 use crate::query::value::Cell;
-use crate::ui::layout::{body_area, main_panes, sidebar_width};
-use ratatui::layout::Rect;
+use crate::ui::glyphs::{GlyphTier, Glyphs};
+use crate::ui::keymap::Keymap;
+use crate::ui::layout::{Presentation, body_area, main_panes, sidebar_width};
+use crate::ui::theme::{ColorDepth, Theme, Token};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Color;
 use std::time::Duration;
+
+// ------------------------------------------------- painted surfaces (T017)
+
+/// A presentation on one palette at a chosen colour depth.
+fn presentation_at(depth: ColorDepth) -> Presentation {
+    Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(depth),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    )
+}
+
+/// The same palette with colour resolved off entirely.
+fn colour_off_presentation() -> Presentation {
+    Presentation::new(
+        Theme::new(ThemeChoice::Dark, false),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    )
+}
+
+/// A whole frame's worth of state: a loaded tree, multi-line SQL and a grid.
+fn full_model() -> Model {
+    let mut model = grid_model(2, 4);
+    model.sidebar_visible = true;
+    model.focus = Focus::Results;
+    model
+        .editor
+        .set_text("SELECT id, name\nFROM orders\nORDER BY id;");
+    with_tree(&mut model);
+    model
+}
+
+/// The three pane rectangles the full renderer draws.
+fn pane_rects(area: Rect) -> (Rect, Rect, Rect) {
+    let body = body_area(area);
+    let width = sidebar_width(body.width);
+    let [tree, main] =
+        Layout::horizontal([Constraint::Length(width), Constraint::Min(30)]).areas(body);
+    let [editor, results] =
+        Layout::vertical([Constraint::Percentage(40), Constraint::Min(3)]).areas(main);
+    (tree, editor, results)
+}
+
+/// The rectangle `render_palette` computes for its bordered box.
+fn palette_area(area: Rect) -> Rect {
+    let width = area.width.saturating_sub(8).min(76);
+    let height = area.height.saturating_sub(6).min(18);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + 2,
+        width,
+        height,
+    }
+}
+
+/// The rectangle `render_password_prompt` computes for its bordered box.
+fn password_prompt_area(area: Rect) -> Rect {
+    let width = area.width.saturating_sub(6).min(72);
+    let height = 9.min(area.height.saturating_sub(2));
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+fn render_panes(model: &Model, presentation: &Presentation, area: Rect) -> Buffer {
+    let (tree, editor, results) = pane_rects(area);
+    let mut buf = Buffer::empty(area);
+    let keymap = Keymap::new();
+    render_objects(model, &keymap, presentation, tree, &mut buf);
+    render_editor(model, &keymap, presentation, editor, &mut buf);
+    render_results(model, &keymap, presentation, results, &mut buf);
+    buf
+}
+
+/// The background a painted surface token resolves to, or `None` at depths
+/// that must not paint.
+fn surface_background(presentation: &Presentation, token: Token) -> Option<Color> {
+    presentation.theme.surface(token).bg
+}
+
+fn count_background(buf: &Buffer, rect: Rect, colour: Color) -> usize {
+    let mut count = 0;
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            if buf[(x, y)].bg == colour {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Every cell of `rect` must be exactly `colour`.
+fn assert_background(buf: &Buffer, rect: Rect, colour: Color, label: &str) {
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            assert_eq!(
+                buf[(x, y)].bg,
+                colour,
+                "{label}: cell ({x},{y}) is not the surface it should be"
+            );
+        }
+    }
+}
+
+/// Every cell of `rect` must be painted, and only with a documented surface.
+fn assert_theme_surfaced(buf: &Buffer, rect: Rect, allowed: &[Color], label: &str) {
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            let bg = buf[(x, y)].bg;
+            assert_ne!(bg, Color::Reset, "{label}: cell ({x},{y}) is unpainted");
+            assert!(
+                allowed.contains(&bg),
+                "{label}: cell ({x},{y}) painted {bg:?}, not a documented surface"
+            );
+        }
+    }
+}
+
+/// No cell of `rect` may carry a background at all.
+fn assert_unpainted(buf: &Buffer, rect: Rect, label: &str) {
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            assert_eq!(
+                buf[(x, y)].bg,
+                Color::Reset,
+                "{label}: cell ({x},{y}) painted a surface at a depth that must not"
+            );
+        }
+    }
+}
+
+#[test]
+fn pane_interiors_carry_the_pane_surface_at_truecolor_and_256() {
+    let model = full_model();
+    let area = Rect::new(0, 0, 100, 30);
+    let (tree, editor, results) = pane_rects(area);
+
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let presentation = presentation_at(depth);
+        let buf = render_panes(&model, &presentation, area);
+        let pane =
+            surface_background(&presentation, Token::SurfacePane).expect("a painted pane surface");
+
+        // This model keeps focus on the results, so the tree and the editor
+        // draw no selected cell and every interior cell is the pane itself.
+        assert_background(&buf, inner(tree), pane, "object tree");
+        assert_background(&buf, inner(editor), pane, "editor");
+
+        // The grid paints a selected row and alternate stripes over the pane.
+        // Every cell must still be a documented theme surface, none left to
+        // the terminal, and the pane fill must be present.
+        let stripe =
+            surface_background(&presentation, Token::SurfaceAlt).expect("a stripe surface");
+        let selection =
+            surface_background(&presentation, Token::Selection).expect("a selection surface");
+        assert_theme_surfaced(&buf, inner(results), &[pane, stripe, selection], "results");
+        assert!(
+            count_background(&buf, inner(results), pane) > 0,
+            "{depth:?}: the results interior carried no pane surface"
+        );
+    }
+}
+
+#[test]
+fn overlay_interiors_carry_the_overlay_surface_at_truecolor_and_256() {
+    let area = Rect::new(0, 0, 100, 30);
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let presentation = presentation_at(depth);
+        let overlay = surface_background(&presentation, Token::SurfaceOverlay)
+            .expect("a painted overlay surface");
+        let selection =
+            surface_background(&presentation, Token::Selection).expect("a selection surface");
+
+        let palette = Palette::new(vec![PaletteEntry {
+            label: "Run".into(),
+            detail: "run the buffer".into(),
+            group: "action",
+            command: PaletteCommand::Run(crate::app::Action::RunBuffer),
+        }]);
+        let mut buf = Buffer::empty(area);
+        render_palette(&palette, &presentation, area, &mut buf);
+        let box_area = palette_area(area);
+        assert_theme_surfaced(&buf, inner(box_area), &[overlay, selection], "palette");
+        assert!(
+            count_background(&buf, inner(box_area), overlay) > 0,
+            "{depth:?}: the palette interior carried no overlay surface"
+        );
+
+        let prompt = PasswordPrompt::new("orders", "the server asked");
+        let mut buf = Buffer::empty(area);
+        render_password_prompt(&prompt, &presentation, area, &mut buf);
+        let box_area = password_prompt_area(area);
+        assert_theme_surfaced(&buf, inner(box_area), &[overlay], "password prompt");
+        assert!(
+            count_background(&buf, inner(box_area), overlay) > 0,
+            "{depth:?}: the prompt interior carried no overlay surface"
+        );
+    }
+}
+
+#[test]
+fn panes_and_overlays_stay_unpainted_at_16_colour_and_with_colour_off() {
+    let model = full_model();
+    let area = Rect::new(0, 0, 100, 30);
+    let (tree, editor, results) = pane_rects(area);
+    let palette = Palette::new(vec![PaletteEntry {
+        label: "Run".into(),
+        detail: "run the buffer".into(),
+        group: "action",
+        command: PaletteCommand::Run(crate::app::Action::RunBuffer),
+    }]);
+    let prompt = PasswordPrompt::new("orders", "the server asked");
+
+    for presentation in [
+        presentation_at(ColorDepth::Basic16),
+        presentation_at(ColorDepth::None),
+        colour_off_presentation(),
+    ] {
+        let buf = render_panes(&model, &presentation, area);
+        assert_unpainted(&buf, inner(tree), "object tree");
+        assert_unpainted(&buf, inner(editor), "editor");
+        assert_unpainted(&buf, inner(results), "results");
+
+        let mut buf = Buffer::empty(area);
+        render_palette(&palette, &presentation, area, &mut buf);
+        assert_unpainted(&buf, inner(palette_area(area)), "palette");
+
+        let mut buf = Buffer::empty(area);
+        render_password_prompt(&prompt, &presentation, area, &mut buf);
+        assert_unpainted(&buf, inner(password_prompt_area(area)), "password prompt");
+    }
+}
+
+#[test]
+fn meaning_carrying_words_survive_every_colour_depth() {
+    let mut model = full_model();
+    model.password_prompt = Some(PasswordPrompt::new("orders", "the server asked"));
+    let keymap = Keymap::new();
+
+    let mut expected: Option<String> = None;
+    for (label, presentation) in [
+        ("truecolor", presentation_at(ColorDepth::TrueColor)),
+        ("256", presentation_at(ColorDepth::Indexed256)),
+        ("16", presentation_at(ColorDepth::Basic16)),
+        ("none", presentation_at(ColorDepth::None)),
+    ] {
+        let text = crate::ui::layout::render_to_string(&model, &keymap, &presentation, 100, 30);
+        match &expected {
+            Some(first) => assert_eq!(first, &text, "the {label} frame changed the words"),
+            None => expected = Some(text),
+        }
+    }
+}
 
 /// The rectangle inside a one-cell bordered pane.
 fn inner(rect: Rect) -> Rect {

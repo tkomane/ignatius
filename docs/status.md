@@ -4,6 +4,32 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Feature 025 Phase 4: painted surfaces and colour depth (US2) - 2026-09-18
+
+US2 is implemented on the `025-us2-surfaces` branch. The frame now owns its
+background: at full-colour and 256-colour depth every cell is painted from
+three elevation levels (`Surface`, `SurfacePane`, `SurfaceOverlay`), panes
+and overlays carry their own surfaces with Clear-then-block overlays, and at
+16 colours and below the same words render with no painted surface and the
+existing modifier-only rules. A deterministic 6x6x6-plus-grey quantizer and
+a fixed 16-colour family table sit behind one depth-aware conversion point
+in `src/ui/theme.rs`. Detection follows the pinned precedence (forced-off,
+then `--color-depth`, then `ui.color-depth`, then `COLORTERM`, then `TERM`,
+then the 16-colour default) and is a pure function of captured
+`TerminalFacts`. `doctor` reports the effective depth and its source label;
+the `[ui]` template and the global `--color-depth` flag land with the
+schema.
+
+| Field | Record |
+| --- | --- |
+| Claim | T013-T019: FR-2503..FR-2506, SC-2502, SC-2503 - painted surfaces at truecolor/256, honest 16-colour and off, deterministic quantization, depth reporting |
+| Source | `025-us2-surfaces` branch, verified before the Phase 4 commit; based on `origin/main` 889efa3 |
+| Environment | macOS 26.6.1 arm64, Homebrew Rust/Cargo 1.98.1. The Xcode licence is still not accepted, so every cargo command used `DEVELOPER_DIR=/Library/Developer/CommandLineTools`; no system setting changed. Disposable `postgres:18.4-alpine` plain/TLS fixtures for the verifier |
+| Method | `cargo fmt --all -- --check`; workspace clippy with warnings denied; the focused module filters (`ui::theme` 20, `ui::terminal` 10, `ui::widgets` 25, `ui::layout` 88, `config` 42, `diagnostics` 39, `cli` 97); `cargo --locked xtask db up`; `cargo --locked xtask verify` (20 test binaries, 1,075 tests passed); `cargo xtask db down`, then `cargo xtask db status` reported `Not running.`; independent review of the full slice |
+| Result | Pass. Formatting, lints, API documentation, workspace tests, documentation tests and the database-backed plain/TLS gates all passed. The Unix-socket gate skipped because `IGNATIUS_TEST_PG_SOCKET_URI` is not set; that is a skip, not a pass. Every contract starting hex passed the extended contrast tests unchanged, so no adjustment was made. Review found no blocking or substantive issues and three minor ones (a wrong `no_color` doc comment, a full-frame test narrower than SC-2502's wording, and missing grey/cube-vs-grey quantizer tie assertions); all three were fixed and re-checked |
+| Scope | Proves buffer-level rendering, quantization, detection, configuration refusal and doctor wording. Does not prove live terminal rendering at any depth, Windows or Linux behaviour, or the OSC 11 `auto` path (a later phase). The feature's own plan names Windows terminal evidence as an outstanding gap |
+| Retention | This section, the `025-us2-surfaces` pull request, and the commit that carries it |
+
 ## Feature 025 Phase 3: pasted SQL arrives (US1) - 2026-09-18
 
 US1 is implemented on the `025-us1-paste` branch. A delivered paste now

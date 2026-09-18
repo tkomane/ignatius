@@ -81,8 +81,17 @@ fn render_with(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    // The frame owns its background: at depths that paint surfaces this cell
+    // fill is the base elevation level, so no cell shows the terminal's own
+    // background. At 16-colour depth and below it collapses to the existing
+    // foreground-only style.
     Block::new()
-        .style(presentation.theme.style(Token::Text))
+        .style(
+            presentation
+                .theme
+                .surface(Token::Surface)
+                .patch(presentation.theme.style(Token::Text)),
+        )
         .render(area, buf);
 
     match layout_mode(area) {
@@ -468,6 +477,33 @@ mod tests {
         Presentation::new(Theme::new(theme, color), Glyphs::new(tier), false)
     }
 
+    fn presentation_at_depth(
+        theme: ThemeChoice,
+        color: bool,
+        tier: GlyphTier,
+        depth: crate::ui::theme::ColorDepth,
+    ) -> Presentation {
+        Presentation::new(
+            Theme::new(theme, color).with_depth(depth),
+            Glyphs::new(tier),
+            false,
+        )
+    }
+
+    /// Renders a frame to a buffer so tests can inspect cell styles, not just
+    /// the words.
+    fn rendered_buffer(
+        model: &Model,
+        presentation: &Presentation,
+        width: u16,
+        height: u16,
+    ) -> Buffer {
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        render_with(model, &Keymap::new(), presentation, area, &mut buf);
+        buf
+    }
+
     /// The richest presentation: colour, icons, motion.
     fn rich() -> Presentation {
         presentation(ThemeChoice::Dark, true, GlyphTier::Nerd)
@@ -714,21 +750,93 @@ mod tests {
             ThemeChoice::Light,
             ThemeChoice::HighContrast,
         ] {
-            for color in [true, false] {
+            for depth in [
+                crate::ui::theme::ColorDepth::TrueColor,
+                crate::ui::theme::ColorDepth::Indexed256,
+                crate::ui::theme::ColorDepth::Basic16,
+                crate::ui::theme::ColorDepth::None,
+            ] {
                 for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+                    let color = depth != crate::ui::theme::ColorDepth::None;
                     let text = render_to_string(
                         &model,
                         &Keymap::new(),
-                        &presentation(theme, color, tier),
+                        &presentation_at_depth(theme, color, tier, depth),
                         100,
                         30,
                     );
-                    let context = format!("{theme:?}/colour={color}/{tier:?}");
+                    let context = format!("{theme:?}/{depth:?}/{tier:?}");
                     assert!(text.contains("[PROD]"), "{context}");
                     assert!(text.contains("[null]"), "{context}");
                     assert!(text.contains("Ready"), "{context}");
                     assert!(text.contains("Results"), "{context}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn every_cell_is_painted_at_depths_that_paint_surfaces() {
+        let mut model = connected_model(Environment::Local);
+        with_rows(&mut model, &["id"], &[&[Cell::Text("1".into())]]);
+
+        for theme in [
+            ThemeChoice::Dark,
+            ThemeChoice::Light,
+            ThemeChoice::HighContrast,
+        ] {
+            for depth in [
+                crate::ui::theme::ColorDepth::TrueColor,
+                crate::ui::theme::ColorDepth::Indexed256,
+            ] {
+                let presentation = presentation_at_depth(theme, true, GlyphTier::Nerd, depth);
+                let buf = rendered_buffer(&model, &presentation, 100, 30);
+                for y in 0..buf.area.height {
+                    for x in 0..buf.area.width {
+                        let bg = buf[(x, y)].style().bg;
+                        assert!(
+                            matches!(bg, Some(colour) if colour != ratatui::style::Color::Reset),
+                            "{theme:?}/{depth:?}: cell ({x},{y}) shows the terminal background: {bg:?}"
+                        );
+                    }
+                }
+            }
+
+            for depth in [
+                crate::ui::theme::ColorDepth::Basic16,
+                crate::ui::theme::ColorDepth::None,
+            ] {
+                let presentation = presentation_at_depth(theme, true, GlyphTier::Unicode, depth);
+                let buf = rendered_buffer(&model, &presentation, 100, 30);
+                for y in 0..buf.area.height {
+                    for x in 0..buf.area.width {
+                        let bg = buf[(x, y)].style().bg;
+                        assert!(
+                            matches!(bg, None | Some(ratatui::style::Color::Reset)),
+                            "{theme:?}/{depth:?}: cell ({x},{y}) paints a surface it must not: {bg:?}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // An overlay owns most of the frame and must still leave no cell on the
+        // terminal's own background.
+        model.help_open = true;
+        let presentation = presentation_at_depth(
+            ThemeChoice::Dark,
+            true,
+            GlyphTier::Nerd,
+            crate::ui::theme::ColorDepth::TrueColor,
+        );
+        let buf = rendered_buffer(&model, &presentation, 100, 30);
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let bg = buf[(x, y)].style().bg;
+                assert!(
+                    matches!(bg, Some(colour) if colour != ratatui::style::Color::Reset),
+                    "help overlay: cell ({x},{y}) shows the terminal background: {bg:?}"
+                );
             }
         }
     }

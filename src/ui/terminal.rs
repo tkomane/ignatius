@@ -175,18 +175,67 @@ pub fn install_panic_hook() {
 /// configuration.
 #[must_use]
 pub fn capabilities() -> TerminalFacts {
+    use crate::config::ColorDepthChoice;
     let is_terminal = io::stdout().is_terminal();
-    TerminalFacts {
+    let mut facts = TerminalFacts {
         is_terminal,
         term: std::env::var("TERM").ok().filter(|v| !v.is_empty()),
         term_program: std::env::var("TERM_PROGRAM").ok().filter(|v| !v.is_empty()),
         no_color: std::env::var_os("NO_COLOR").is_some(),
+        colorterm: std::env::var("COLORTERM").ok().filter(|v| !v.is_empty()),
         size: if is_terminal {
             terminal::size().ok()
         } else {
             None
         },
         unicode: detect_unicode(),
+        color_depth: crate::ui::theme::ColorDepth::TrueColor,
+        color_depth_source: crate::ui::theme::DepthSource::Default,
+    };
+    // The environment alone decides here; the runtime overwrites these two
+    // fields with the effective flag and configuration resolution before
+    // `doctor` runs.
+    let (depth, source) = resolve_color_depth(ColorDepthChoice::Auto, None, true, &facts);
+    facts.color_depth = depth;
+    facts.color_depth_source = source;
+    facts
+}
+
+/// Resolves the active colour depth and where it came from.
+///
+/// Precedence is pinned by `contracts/presentation.md`: a forced-off route
+/// wins over everything; an explicit choice wins over detection; `COLORTERM`
+/// wins over `TERM`; and the fallback is the 16 basic colours.
+#[must_use]
+pub fn resolve_color_depth(
+    choice: crate::config::ColorDepthChoice,
+    choice_source: Option<crate::ui::theme::DepthSource>,
+    color_enabled: bool,
+    facts: &TerminalFacts,
+) -> (crate::ui::theme::ColorDepth, crate::ui::theme::DepthSource) {
+    use crate::config::ColorDepthChoice;
+    use crate::ui::theme::{ColorDepth, DepthSource};
+    if !color_enabled || facts.no_color || facts.term.as_deref() == Some("dumb") {
+        return (ColorDepth::None, DepthSource::ForcedOff);
+    }
+    let source = choice_source.unwrap_or(DepthSource::Configuration);
+    match choice {
+        ColorDepthChoice::TrueColor => (ColorDepth::TrueColor, source),
+        ColorDepthChoice::Indexed256 => (ColorDepth::Indexed256, source),
+        ColorDepthChoice::Basic16 => (ColorDepth::Basic16, source),
+        ColorDepthChoice::Auto => {
+            if matches!(facts.colorterm.as_deref(), Some("truecolor" | "24bit")) {
+                (ColorDepth::TrueColor, DepthSource::Colorterm)
+            } else if facts
+                .term
+                .as_deref()
+                .is_some_and(|term| term.contains("256color"))
+            {
+                (ColorDepth::Indexed256, DepthSource::Term)
+            } else {
+                (ColorDepth::Basic16, DepthSource::Default)
+            }
+        }
     }
 }
 
@@ -223,149 +272,4 @@ pub fn should_use_color(config: crate::config::ColorMode, facts: &TerminalFacts)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sequences(options: TerminalOptions) -> (String, String) {
-        let mut entered = Vec::new();
-        enter(&mut entered, options).expect("enter");
-        let mut left = Vec::new();
-        leave(&mut left, options).expect("leave");
-        (
-            String::from_utf8(entered).expect("utf8"),
-            String::from_utf8(left).expect("utf8"),
-        )
-    }
-
-    #[test]
-    fn defaults_take_the_alternate_screen_and_leave_the_mouse_alone() {
-        let options = TerminalOptions::default();
-        assert!(options.alternate_screen);
-        assert!(options.bracketed_paste);
-        assert!(!options.mouse, "mouse capture must be opt-in");
-
-        let (entered, left) = sequences(options);
-        assert!(entered.contains("\x1b[?1049h"), "alternate screen entered");
-        assert!(entered.contains("\x1b[?2004h"), "bracketed paste enabled");
-        assert!(entered.contains("\x1b[?25l"), "cursor hidden");
-        assert!(
-            !entered.contains("\x1b[?1000h"),
-            "mouse not captured by default"
-        );
-
-        assert!(left.contains("\x1b[?25h"), "cursor shown again");
-        assert!(left.contains("\x1b[?2004l"), "bracketed paste disabled");
-        assert!(left.contains("\x1b[?1049l"), "alternate screen left");
-    }
-
-    #[test]
-    fn every_mode_that_is_enabled_is_disabled_again() {
-        let options = TerminalOptions {
-            mouse: true,
-            alternate_screen: true,
-            bracketed_paste: true,
-        };
-        let (entered, left) = sequences(options);
-        let mut modes = vec![
-            ("\x1b[?1049h", "\x1b[?1049l", "alternate screen"),
-            ("\x1b[?2004h", "\x1b[?2004l", "bracketed paste"),
-            ("\x1b[?25l", "\x1b[?25h", "cursor visibility"),
-        ];
-        // Mouse capture is the one mode Crossterm does not express as an escape
-        // sequence on Windows: it goes through the console API instead, so no
-        // bytes reach this writer. The call is still made and still undone,
-        // which is what matters; only its observability differs.
-        if cfg!(unix) {
-            modes.push(("\x1b[?1000h", "\x1b[?1000l", "mouse capture"));
-        }
-        for (on, off, what) in modes {
-            assert!(entered.contains(on), "{what} was never enabled");
-            assert!(left.contains(off), "{what} was left enabled");
-        }
-    }
-
-    #[test]
-    fn restore_order_is_the_reverse_of_acquisition() {
-        let options = TerminalOptions {
-            mouse: true,
-            ..TerminalOptions::default()
-        };
-        let (_, left) = sequences(options);
-        let cursor = left.find("\x1b[?25h").expect("cursor restored");
-        let paste = left.find("\x1b[?2004l").expect("paste restored");
-        let screen = left.find("\x1b[?1049l").expect("screen left");
-
-        // Mouse capture is released through the console API on Windows and so
-        // has no sequence to order; where it does emit one, it belongs between
-        // the cursor and the paste mode.
-        #[cfg(unix)]
-        {
-            let mouse = left.find("\x1b[?1000l").expect("mouse released");
-            assert!(cursor < mouse && mouse < paste, "mouse released in order");
-        }
-
-        assert!(
-            cursor < paste && paste < screen,
-            "the alternate screen must be left last so the restored state applies to the user's screen"
-        );
-    }
-
-    #[test]
-    fn disabled_options_emit_nothing_for_those_modes() {
-        let options = TerminalOptions {
-            mouse: false,
-            alternate_screen: false,
-            bracketed_paste: false,
-        };
-        let (entered, left) = sequences(options);
-        assert!(!entered.contains("\x1b[?1049h"));
-        assert!(!left.contains("\x1b[?1049l"));
-        assert!(!entered.contains("\x1b[?2004h"));
-        assert_eq!(entered, "\x1b[?25l", "only the cursor is touched");
-    }
-
-    #[test]
-    fn no_color_and_dumb_terminals_win_over_configuration() {
-        use crate::config::ColorMode;
-        let base = TerminalFacts {
-            is_terminal: true,
-            term: Some("xterm-256color".into()),
-            term_program: None,
-            no_color: false,
-            size: Some((100, 30)),
-            unicode: true,
-        };
-
-        assert!(should_use_color(ColorMode::Auto, &base));
-        assert!(should_use_color(ColorMode::Always, &base));
-        assert!(!should_use_color(ColorMode::Never, &base));
-
-        let no_color = TerminalFacts {
-            no_color: true,
-            ..base.clone()
-        };
-        assert!(
-            !should_use_color(ColorMode::Always, &no_color),
-            "NO_COLOR is not negotiable"
-        );
-
-        let dumb = TerminalFacts {
-            term: Some("dumb".into()),
-            ..base.clone()
-        };
-        assert!(!should_use_color(ColorMode::Always, &dumb));
-
-        let piped = TerminalFacts {
-            is_terminal: false,
-            ..base
-        };
-        assert!(
-            !should_use_color(ColorMode::Auto, &piped),
-            "piped output stays plain"
-        );
-        assert!(
-            should_use_color(ColorMode::Always, &piped),
-            "explicit --color=always is honoured"
-        );
-    }
-}
+mod tests;

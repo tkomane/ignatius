@@ -141,31 +141,31 @@ unchanged meaning words at every depth.
 
 ### Tests for User Story 2
 
-- [ ] T013 [US2] Add failing tests for the detection precedence of
+- [x] T013 [US2] Add failing tests for the detection precedence of
   `contracts/presentation.md` in `src/ui/terminal.rs`, and for the
   quantizer and 16-colour table in `src/ui/theme.rs` (exact cube and grey
   candidates, tie-to-lower-index, no indices 0-15 from the quantizer).
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Implement `ColorDepth`, the quantizer, the fixed
+- [x] T014 [US2] Implement `ColorDepth`, the quantizer, the fixed
   16-colour table and depth-aware emission at the single Rgb conversion
   point in `src/ui/theme.rs`, and detection in `src/ui/terminal.rs`.
-- [ ] T015 [P] [US2] Add `ui.color-depth` to `src/config/schema.rs`, the
+- [x] T015 [P] [US2] Add `ui.color-depth` to `src/config/schema.rs`, the
   template block in `src/config/store.rs`, and the `--color-depth` flag in
   `src/cli/mod.rs`, with refusal tests for invalid values.
-- [ ] T016 [US2] Add `SurfacePane` and `SurfaceOverlay` tokens to
+- [x] T016 [US2] Add `SurfacePane` and `SurfaceOverlay` tokens to
   `src/ui/theme.rs` with the contract's starting values in all three
   palettes, passing the existing contrast tests (adjusting hex under the
   tests where required and recording the adjustment).
-- [ ] T017 [US2] Paint the base fill in `src/ui/layout.rs` (integrator
+- [x] T017 [US2] Paint the base fill in `src/ui/layout.rs` (integrator
   lane) and the pane and overlay surfaces in `src/ui/widgets/*.rs`,
   including Clear-then-block overlays, with layout tests asserting no
   unpainted cell at truecolor and 256 depth and unpainted surfaces at
   16-colour and colour-off.
-- [ ] T018 [P] [US2] Report depth, source and override in
+- [x] T018 [P] [US2] Report depth, source and override in
   `src/diagnostics/doctor.rs` with tests for the contract's wording.
-- [ ] T019 [US2] Extend the meaning-parity matrix in `src/ui/layout.rs`
+- [x] T019 [US2] Extend the meaning-parity matrix in `src/ui/layout.rs`
   tests to all four colour depths.
 
 **Checkpoint**: The product owns its background and degrades honestly.

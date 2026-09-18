@@ -1,4 +1,4 @@
-use super::{action_key_label, input_cursor, pane_block, syntax_token};
+use super::{action_key_label, input_cursor, overlay_block, pane_block, syntax_token};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -56,12 +56,11 @@ pub(crate) fn render_name_prompt(
 
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
-        .block(pane_block(
+        .block(overlay_block(
             format!(
                 " {}Save  Enter to save, Esc to cancel ",
                 presentation.icon(Icon::Editor)
             ),
-            true,
             presentation,
         ))
         .render(box_area, buf);
@@ -124,12 +123,11 @@ pub(crate) fn render_parameter_prompt(
 
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
-        .block(pane_block(
+        .block(overlay_block(
             format!(
                 " {}Parameter  Enter to accept, Esc to cancel ",
                 presentation.icon(Icon::Editor)
             ),
-            true,
             presentation,
         ))
         .render(box_area, buf);
@@ -187,12 +185,11 @@ pub(crate) fn render_password_prompt(
 
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
-        .block(pane_block(
+        .block(overlay_block(
             format!(
                 " {}Password  Enter to try again, Esc to cancel ",
                 presentation.icon(Icon::Role)
             ),
-            true,
             presentation,
         ))
         .render(box_area, buf);
@@ -283,9 +280,8 @@ pub(crate) fn render_confirmation(
     )));
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             " Confirm  Esc to cancel ".to_owned(),
-            true,
             presentation,
         ))
         .wrap(Wrap { trim: true })
@@ -369,9 +365,8 @@ pub(crate) fn render_plan_confirmation(
     )));
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             " Confirm analyzed plan  Esc to cancel ".to_owned(),
-            true,
             presentation,
         ))
         .wrap(Wrap { trim: true })
@@ -458,9 +453,8 @@ pub(crate) fn render_copy_confirmation(
     ];
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             " Confirm copy  Esc to cancel ".to_owned(),
-            true,
             presentation,
         ))
         .wrap(Wrap { trim: true })
@@ -529,9 +523,8 @@ pub(crate) fn render_update_value_prompt(
     ];
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             " Edit result cell  Enter to review, Esc to cancel ".to_owned(),
-            true,
             presentation,
         ))
         .wrap(Wrap { trim: true })
@@ -608,9 +601,8 @@ pub(crate) fn render_update_review(
     ];
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             " Confirm cell update  Esc to cancel ".to_owned(),
-            true,
             presentation,
         ))
         .wrap(Wrap { trim: true })
@@ -1107,12 +1099,11 @@ pub(crate) fn render_definition(
     }
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             format!(
                 " {}Definition  arrows scroll, Esc closes ",
                 presentation.icon(Icon::Schema)
             ),
-            true,
             presentation,
         ))
         .render(box_area, buf);
@@ -1157,7 +1148,7 @@ pub(crate) fn render_chords(
         .map(|(key, _)| key)
         .unwrap_or_else(|| "Ctrl+K".to_owned());
     Paragraph::new(lines)
-        .block(pane_block(format!(" {prefix}  then "), true, presentation))
+        .block(overlay_block(format!(" {prefix}  then "), presentation))
         .render(chord_area, buf);
 }
 pub(crate) fn render_help(
@@ -1213,9 +1204,8 @@ pub(crate) fn render_help(
     }
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             format!(" {}Help  Esc to close ", presentation.icon(Icon::Help)),
-            true,
             presentation,
         ))
         .style(theme.style(Token::Text))
