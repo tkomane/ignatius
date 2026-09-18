@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::model::ConnectingStep;
 use crate::connection::Environment;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::{SessionInfo, TlsState};
@@ -745,7 +746,13 @@ fn choosing_a_profile_emits_only_its_name_and_clears_server_facts() {
             profile: Some("orders-prod".to_owned()),
         }]
     );
-    assert_eq!(model.connection, ConnectionState::Connecting);
+    assert_eq!(
+        model.connection,
+        ConnectionState::Connecting {
+            step: ConnectingStep::ResolvingProfile,
+            target: "orders-prod".to_owned(),
+        }
+    );
     assert_eq!(model.credential_provider.as_deref(), Some("entra"));
     assert_eq!(model.editor.text(), "SELECT 1;");
     assert!(model.last_execution.is_none());
@@ -771,7 +778,13 @@ fn choosing_default_settings_clears_profile_identity() {
     let effects = update(&mut model, Message::Action(Action::Activate));
 
     assert_eq!(effects, vec![Effect::ConnectProfile { profile: None }]);
-    assert_eq!(model.connection, ConnectionState::Connecting);
+    assert_eq!(
+        model.connection,
+        ConnectionState::Connecting {
+            step: ConnectingStep::ResolvingProfile,
+            target: String::new(),
+        }
+    );
     assert!(model.credential_provider.is_none());
 }
 
@@ -2258,7 +2271,13 @@ fn a_server_asking_for_a_password_is_asked_back_rather_than_only_reported() {
         model.password_prompt.is_none(),
         "the characters are gone from the model the moment they are sent"
     );
-    assert_eq!(model.connection, ConnectionState::Connecting);
+    assert!(matches!(
+        model.connection,
+        ConnectionState::Connecting {
+            step: ConnectingStep::ServerHandshake,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -4796,4 +4815,117 @@ fn paste_while_connection_details_is_open_is_ignored() {
     assert!(effects.is_empty());
     assert_eq!(model.paste_notice, Some(PasteNotice::Ignored));
     assert_eq!(model.editor.text(), "");
+}
+
+#[test]
+fn connecting_steps_name_their_stage_and_target() {
+    let mut model = Model::new(100);
+    let effects = update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::ServerHandshake,
+            target: "app@localhost:5432/orders".to_owned(),
+        },
+    );
+    assert!(effects.is_empty(), "a step report performs no work");
+    assert_eq!(model.connecting_step, Some(ConnectingStep::ServerHandshake));
+    let label = model.connection.label();
+    assert!(label.contains("server handshake"), "{label}");
+    assert!(label.contains("app@localhost:5432/orders"), "{label}");
+
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::LoadingCatalogue,
+            target: "app@localhost:5432/orders".to_owned(),
+        },
+    );
+    assert_eq!(
+        model.connecting_step,
+        Some(ConnectingStep::LoadingCatalogue)
+    );
+}
+
+#[test]
+fn a_failed_connection_keeps_the_step_it_failed_in() {
+    let mut model = Model::new(100);
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::TlsHandshake,
+            target: "app@localhost:5432/orders".to_owned(),
+        },
+    );
+    update(
+        &mut model,
+        Message::ConnectionFailed(Box::new(Diagnostic::new(
+            DiagnosticKind::Connection,
+            "certificate verify failed",
+            "opening the connection",
+        ))),
+    );
+    assert!(matches!(model.connection, ConnectionState::Failed(_)));
+    assert_eq!(
+        model.connecting_step,
+        Some(ConnectingStep::TlsHandshake),
+        "the failed stage stays named"
+    );
+}
+
+#[test]
+fn the_first_connect_focuses_the_editor_and_expands_the_first_schema_level_once() {
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::ServerHandshake,
+            target: "app@localhost:5432/orders".to_owned(),
+        },
+    );
+    update(&mut model, Message::Connected(session()));
+
+    assert_eq!(
+        model.focus,
+        Focus::Editor,
+        "the first connected frame is ready"
+    );
+    assert!(model.expand_first_schema_on_load);
+    assert_eq!(model.connecting_step, None);
+
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema_summary("public", 2)]))),
+    );
+    assert!(
+        model.tree.roots[0].expanded,
+        "the first catalogue load opens the first level"
+    );
+    assert!(
+        !model.expand_first_schema_on_load,
+        "the request is consumed once"
+    );
+
+    // A later load never re-expands over the user's own state.
+    model.tree.roots[0].expanded = false;
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema_summary("public", 2)]))),
+    );
+    assert!(!model.tree.roots[0].expanded, "a reload does not re-expand");
+}
+
+#[test]
+fn a_connection_established_without_a_connecting_attempt_does_not_steal_focus() {
+    let mut model = Model::new(100);
+    model.focus = Focus::Objects;
+
+    update(&mut model, Message::Connected(session()));
+
+    assert_eq!(
+        model.focus,
+        Focus::Objects,
+        "a fixture or restored session must not move focus"
+    );
+    assert!(!model.expand_first_schema_on_load);
 }

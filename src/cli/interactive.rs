@@ -202,10 +202,16 @@ async fn event_loop(
     let providers = crate::connection::cloud::registry(&configured_providers);
     model.connection_profiles =
         crate::app::connection_picker::summaries(&config.profiles, &providers);
-    model.connection = if target.is_some() {
-        crate::app::ConnectionState::Connecting
-    } else {
-        crate::app::ConnectionState::Disconnected
+    model.connection = match target.as_ref() {
+        Some(target) => {
+            let step = connecting_step_for(target.sslmode);
+            model.connecting_step = Some(step);
+            crate::app::ConnectionState::Connecting {
+                step,
+                target: target.safe_display(),
+            }
+        }
+        None => crate::app::ConnectionState::Disconnected,
     };
     model.editor.set_text(starter_query());
     model.completion.enabled = config.ui.completion;
@@ -727,6 +733,23 @@ fn spawn_signal_watcher(tx: mpsc::UnboundedSender<Message>) {
     });
 }
 
+/// The connecting stage the runtime can truthfully name for a target.
+///
+/// A target that requires encryption is negotiating TLS during the connect;
+/// anything else is the ordinary server handshake. `Prefer` may or may not
+/// negotiate TLS, so it is named as the broader server handshake rather than
+/// claiming an encryption step that might not happen.
+pub(crate) fn connecting_step_for(
+    sslmode: crate::connection::SslMode,
+) -> crate::app::model::ConnectingStep {
+    use crate::app::model::ConnectingStep;
+    use crate::connection::SslMode;
+    match sslmode {
+        SslMode::Require | SslMode::VerifyCa | SslMode::VerifyFull => ConnectingStep::TlsHandshake,
+        SslMode::Disable | SslMode::Prefer => ConnectingStep::ServerHandshake,
+    }
+}
+
 fn spawn_connect(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
@@ -738,6 +761,18 @@ fn spawn_connect(
 ) {
     tokio::spawn(async move {
         let timeout = Duration::from_millis(config.query.statement_timeout_ms);
+        if !connection_generation_is_current(&generation, request) {
+            return;
+        }
+        // The runtime reports the stage it can honestly observe: opening the
+        // session. A target that requires encryption is negotiating TLS on the
+        // way, so that is the stage named; a plain target names the server
+        // handshake. Resolution and credential work already happened before the
+        // terminal was taken, so they are not re-run or shown as done here.
+        let _ = tx.send(Message::ConnectingStep {
+            step: connecting_step_for(target.sslmode),
+            target: target.safe_display(),
+        });
         match session::connect(&target, timeout).await {
             Ok(opened) => {
                 let info = opened.info().clone();

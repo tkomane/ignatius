@@ -175,7 +175,7 @@ pub(crate) fn render_connection_details(
 
     let connection_state = match &model.connection {
         crate::app::model::ConnectionState::Disconnected => "Not connected".to_owned(),
-        crate::app::model::ConnectionState::Connecting => "Connecting".to_owned(),
+        crate::app::model::ConnectionState::Connecting { .. } => "Connecting".to_owned(),
         crate::app::model::ConnectionState::Connected(_) => "Connected".to_owned(),
         crate::app::model::ConnectionState::Lost { .. } => "Connection lost".to_owned(),
         crate::app::model::ConnectionState::Failed(_) => "Connection failed".to_owned(),

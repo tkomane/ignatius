@@ -14,8 +14,8 @@
 use crate::app::grid::GridCommand;
 use crate::app::message::{Action, Direction, Effect, Message};
 use crate::app::model::{
-    ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PasteNotice, PendingUpdate,
-    QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
+    ConnectingStep, ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PasteNotice,
+    PendingUpdate, QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
 };
 use crate::query::error_location::{self, StatementSource};
 use crate::query::result::ExecutionStatus;
@@ -34,9 +34,24 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         Message::Mouse { .. } => Vec::new(),
         Message::Pasted(text) => paste_action(model, text),
         Message::Connected(info) => {
+            let was_connecting = matches!(model.connection, ConnectionState::Connecting { .. });
             model.connection = ConnectionState::Connected(info);
             model.error = None;
+            model.connecting_step = None;
+            // The first connected frame after a real attempt is productive:
+            // focus the editor and open the tree's first level as soon as the
+            // catalogue arrives. A connection established by other means (a
+            // test fixture or a restored session) does not steal focus.
+            if was_connecting {
+                model.focus = Focus::Editor;
+                model.expand_first_schema_on_load = true;
+            }
             clear_error_location(model);
+            Vec::new()
+        }
+        Message::ConnectingStep { step, target } => {
+            model.connection = ConnectionState::Connecting { step, target };
+            model.connecting_step = Some(step);
             Vec::new()
         }
         Message::ConnectionFailed(diagnostic) => {
@@ -282,6 +297,12 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             match *result {
                 Ok(schemas) => model.tree.set_schemas(schemas),
                 Err(error) => model.tree.set_error(error),
+            }
+            // Consume the one-shot only when there is a first level to open, so
+            // a failed first load does not burn the promise.
+            if model.expand_first_schema_on_load && !model.tree.roots.is_empty() {
+                model.expand_first_schema_on_load = false;
+                let _ = model.tree.expand_schema(&[0]);
             }
             Vec::new()
         }
@@ -1430,8 +1451,17 @@ fn password_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
             let password = prompt.take();
             model.password_prompt = None;
+            let target = model
+                .error
+                .as_ref()
+                .map_or_else(String::new, |diagnostic| diagnostic.attempted.clone());
             model.error = None;
-            model.connection = ConnectionState::Connecting;
+            model.connection = ConnectionState::Connecting {
+                step: ConnectingStep::ServerHandshake,
+                target,
+            };
+            model.connecting_step = Some(ConnectingStep::ServerHandshake);
+            model.running_for = None;
             vec![Effect::Reconnect {
                 password: crate::app::message::TypedPassword::new(password),
             }]
@@ -3090,7 +3120,7 @@ fn connection_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
 /// and credentials do not enter this function: the runtime receives only the
 /// selected profile name and owns those values outside the model.
 fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
-    if model.phase.is_busy() || matches!(model.connection, ConnectionState::Connecting) {
+    if model.phase.is_busy() || matches!(model.connection, ConnectionState::Connecting { .. }) {
         return Vec::new();
     }
     let summary = profile.as_deref().and_then(|name| {
@@ -3101,7 +3131,11 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     });
     model.credential_provider = summary.and_then(|item| item.auth.clone());
     model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
-    model.connection = ConnectionState::Connecting;
+    model.connection = ConnectionState::Connecting {
+        step: ConnectingStep::ResolvingProfile,
+        target: profile.clone().unwrap_or_default(),
+    };
+    model.connecting_step = Some(ConnectingStep::ResolvingProfile);
     model.phase = QueryPhase::Idle;
     model.last_execution = None;
     model.last_elapsed = None;

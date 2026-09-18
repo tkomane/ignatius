@@ -619,3 +619,23 @@ fn color_depth_resolution_prefers_the_flag_then_configuration_then_detection() {
         "colour resolved off defeats every setting"
     );
 }
+
+#[test]
+fn a_target_that_requires_encryption_names_the_tls_stage() {
+    use crate::app::model::ConnectingStep;
+    use crate::connection::SslMode;
+
+    for (sslmode, expected) in [
+        (SslMode::Disable, ConnectingStep::ServerHandshake),
+        (SslMode::Prefer, ConnectingStep::ServerHandshake),
+        (SslMode::Require, ConnectingStep::TlsHandshake),
+        (SslMode::VerifyCa, ConnectingStep::TlsHandshake),
+        (SslMode::VerifyFull, ConnectingStep::TlsHandshake),
+    ] {
+        assert_eq!(
+            super::interactive::connecting_step_for(sslmode),
+            expected,
+            "{sslmode:?}"
+        );
+    }
+}

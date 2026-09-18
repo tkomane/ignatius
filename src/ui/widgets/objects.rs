@@ -132,10 +132,35 @@ pub(crate) fn render_objects(
                         action_key_label(keymap, &crate::app::Action::ReloadObjects)
                     ),
                 ]
-            } else {
+            } else if matches!(
+                model.connection,
+                crate::app::model::ConnectionState::Connecting { .. }
+            ) {
                 vec![
                     "Object tree unavailable until connected.".to_owned(),
-                    "Connect first; object names appear here after reload.".to_owned(),
+                    "The connection is being established.".to_owned(),
+                ]
+            } else if model.connection_profiles.is_empty() {
+                // Nothing to pick from, so the one next action is outside the
+                // client: name the configuration route and the command-line
+                // route rather than offering a key that would open nothing.
+                vec![
+                    "Object tree unavailable until connected.".to_owned(),
+                    "Add a profile in config.toml or pass a connection target when starting."
+                        .to_owned(),
+                ]
+            } else {
+                // The picker is the configured route; use its existing key and
+                // wording rather than inventing a second description.
+                let picker = keymap
+                    .contextual_hint(&crate::app::Action::OpenConnectionPicker)
+                    .map_or_else(
+                        || "Open the command palette to choose a connection".to_owned(),
+                        |(key, label)| format!("{key} {label}"),
+                    );
+                vec![
+                    "Object tree unavailable until connected.".to_owned(),
+                    format!("{picker}. Object names appear after reload."),
                 ]
             }
         } else {
@@ -266,3 +291,6 @@ const fn row_token(kind: &crate::app::tree::RowKind) -> Token {
         RowKind::Message => Token::Muted,
     }
 }
+
+#[cfg(test)]
+mod tests;

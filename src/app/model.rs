@@ -61,6 +61,39 @@ impl Focus {
     }
 }
 
+/// A named stage of establishing a session, in the order it can occur.
+///
+/// The vocabulary is pinned by the specification: a connecting display names
+/// one of these stages, and a stage that does not apply is skipped rather than
+/// shown as done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectingStep {
+    /// Choosing and resolving a named profile into a target.
+    ResolvingProfile,
+    /// Obtaining a credential, such as a cloud provider token.
+    AcquiringCredential,
+    /// Negotiating transport encryption with the server.
+    TlsHandshake,
+    /// Opening the session and authenticating.
+    ServerHandshake,
+    /// Reading the catalogue the object tree shows.
+    LoadingCatalogue,
+}
+
+impl ConnectingStep {
+    /// The exact phrase the interface and diagnostics use.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ResolvingProfile => "resolving profile",
+            Self::AcquiringCredential => "acquiring credential",
+            Self::TlsHandshake => "TLS handshake",
+            Self::ServerHandshake => "server handshake",
+            Self::LoadingCatalogue => "loading catalogue",
+        }
+    }
+}
+
 /// State of the database connection.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ConnectionState {
@@ -68,7 +101,12 @@ pub enum ConnectionState {
     #[default]
     Disconnected,
     /// A connection attempt is in flight.
-    Connecting,
+    Connecting {
+        /// The stage currently in progress.
+        step: ConnectingStep,
+        /// A display-safe target, such as a profile name or `user@host:port/db`.
+        target: String,
+    },
     /// Connected, with what the server told us about the session.
     Connected(Box<SessionInfo>),
     /// The connection was lost after being established.
@@ -101,7 +139,12 @@ impl ConnectionState {
     pub fn label(&self) -> String {
         match self {
             Self::Disconnected => "Not connected".to_owned(),
-            Self::Connecting => "Connecting".to_owned(),
+            Self::Connecting { step, target } if target.is_empty() => {
+                format!("Connecting: {}", step.label())
+            }
+            Self::Connecting { step, target } => {
+                format!("Connecting to {target}: {}", step.label())
+            }
             Self::Connected(info) => info.target.clone(),
             Self::Lost { info } => format!("{} (connection lost)", info.target),
             Self::Failed(_) => "Connection failed".to_owned(),
@@ -871,6 +914,16 @@ pub struct Model {
     pub completion: crate::app::completion::CompletionState,
     /// Connection state.
     pub connection: ConnectionState,
+    /// The connecting stage in progress, or the stage a failure happened in.
+    ///
+    /// Kept separately from [`ConnectionState::Connecting`] so a failure can
+    /// still name the stage it happened in after the state becomes `Failed`.
+    pub connecting_step: Option<ConnectingStep>,
+    /// Whether the next catalogue load should open the tree's first level.
+    ///
+    /// Set on a successful connection, consumed once by the first load, so a
+    /// later reload never re-expands over the user's own state.
+    pub expand_first_schema_on_load: bool,
     /// Safe, ephemeral summaries available to the connection picker.
     ///
     /// Resolved targets and credentials never enter the model. The runtime
@@ -1050,7 +1103,7 @@ impl Model {
     /// The runtime uses this to stop ticking, so an idle client wakes nothing.
     #[must_use]
     pub const fn is_animating(&self) -> bool {
-        self.phase.is_busy() || matches!(self.connection, ConnectionState::Connecting)
+        self.phase.is_busy() || matches!(self.connection, ConnectionState::Connecting { .. })
     }
 
     /// Hands out the next job identity.
