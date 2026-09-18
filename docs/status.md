@@ -7,7 +7,7 @@ before trusting anything else.
 ## Feature 025 Phase 2 foundational extraction - 2026-09-18
 
 Phase 2 (T002-T009) of `specs/025-gui-grade-experience/` is implemented on the
-`025-gui-grade-experience` branch and submitted as its own pull request before
+`025-gui-grade-experience` branch and merged as its own pull request before
 any later phase starts. The 6,553-line `src/ui/layout.rs` became seven per-pane
 widget modules under `src/ui/widgets/`; `layout.rs` keeps the orchestrator role
 plus the paging and viewport helpers. A pure
@@ -31,7 +31,7 @@ The full `cargo --locked xtask verify` was not run in this phase; the Phase 12
 verifier run is the full-suite and live evidence gate. Unix-socket, Windows
 input and live-terminal claims remain unverified.
 
-## Feature 025 GUI-grade experience: specified, not implemented - 2026-09-17
+## Feature 025 GUI-grade experience: specified; Phase 2 merged - 2026-09-17
 
 The owner reported abandoning Ignatius for the VS Code Azure PostgreSQL
 extension during real work against an Azure PostgreSQL database on
@@ -62,8 +62,18 @@ five single-writer files route through one integrator lane, each slice
 carries a pre-filled assignment block with owned paths, focused commands
 and stopping conditions, and design-document amendments land with the
 behaviour (keymap rows in the same change as their actions; narrative
-documents in the Polish phase). Implementation has not started; no
-application source or design document changed.
+documents in the Polish phase). Implementation started on 2026-09-18 with
+the Phase 2 extraction recorded above.
+
+The owner added a tenth user story on 2026-09-18, "The name materializes":
+an original ASCII identity mark in the README and a bounded boot reveal in
+the interactive client, riding the connecting wait. The specification, a
+fifth pinned-value contract (`contracts/banner.md`: art, sweep, easing,
+decode charsets, colour depth and README placement), the US10 tasks
+T052-T054 and the T046 design-document amendments were added in the
+specification change described here. Nothing in this amendment has been
+implemented; the reveal's colour path depends on the US2 depth machinery
+and its placement on the US4 connecting shell.
 
 Design research was performed on 2026-09-17 by web reading, one pass per
 source with citations and stated gaps, recorded in the feature's
