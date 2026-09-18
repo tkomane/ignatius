@@ -181,23 +181,23 @@ bounds and zero executions.
 
 ### Tests for User Story 3
 
-- [ ] T020 [US3] Add failing tests in `src/app/grid.rs` and
+- [x] T020 [US3] Add failing tests in `src/app/grid.rs` and
   `src/ui/widgets/results.rs` for the range wording shapes of
   `contracts/grid.md` (plain, truncated, filtered, empty), the sort cycle
   and its wording, and width bounds and steps.
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] Implement the range line, the sort-cycle action and
+- [x] T021 [US3] Implement the range line, the sort-cycle action and
   column-width state in `src/app/grid.rs`, rendered in
   `src/ui/widgets/results.rs`; sorting and resizing remain local view
   state with no execution effect and preserved selection identity.
-- [ ] T022 [US3] Add `narrow-column` and `widen-column` bindings
+- [x] T022 [US3] Add `narrow-column` and `widen-column` bindings
   (`Ctrl+K [`, `Ctrl+K ]`) in `src/ui/keymap.rs`, palette entries in
   `src/app/palette.rs`, hints in `src/app/discovery.rs`, and reachability
   tests; the integrator lands the matching `docs/design/keymap.md` rows
   and parity assertions in the same change.
-- [ ] T023 [US3] Assert NULL, empty and literal-NULL distinction on
+- [x] T023 [US3] Assert NULL, empty and literal-NULL distinction on
   painted stripes at every depth in `src/ui/widgets/results.rs` tests.
 
 **Checkpoint**: The grid is workable by keyboard alone; mouse verbs attach

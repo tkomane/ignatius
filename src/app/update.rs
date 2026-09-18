@@ -718,6 +718,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::OpenResultControls if model.plan.is_visible() => Vec::new(),
         Action::OpenResultControls => open_result_controls(model),
+        Action::NarrowColumn if model.plan.is_visible() => Vec::new(),
+        Action::NarrowColumn => apply_grid_command(model, GridCommand::NarrowSelected),
+        Action::WidenColumn if model.plan.is_visible() => Vec::new(),
+        Action::WidenColumn => apply_grid_command(model, GridCommand::WidenSelected),
         Action::BeginPrefix => {
             model.prefix_pending = true;
             Vec::new()
@@ -2522,7 +2526,7 @@ fn apply_grid_command(model: &mut Model, command: GridCommand) -> Vec<Effect> {
                 .map_or(crate::app::grid::MIN_COLUMN_WIDTH, |set| {
                     crate::app::grid::automatic_column_width(set, column)
                 });
-            let step = isize::try_from(crate::app::grid::COLUMN_WIDTH_STEP).unwrap_or(4);
+            let step = isize::try_from(crate::app::grid::COLUMN_WIDTH_STEP).unwrap_or(2);
             let delta = if matches!(command, GridCommand::WidenSelected) {
                 step
             } else {

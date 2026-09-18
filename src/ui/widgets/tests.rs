@@ -550,7 +550,12 @@ fn result_grid_cells_headers_and_edges_carry_source_indices() {
     let inside = inner(results);
     let content_x = inside.x + 3; // two-digit gutter plus its space
     let header_y = inside.y + 3;
-    let second_x = content_x + 6; // first column block (4) and its rule (2)
+    // The fixture's values are shorter than the minimum width, so each column
+    // is exactly `MIN_COLUMN_WIDTH` cells plus its one-cell padding. The rule
+    // and the space after it separate two columns.
+    let column_block =
+        u16::try_from(crate::app::grid::MIN_COLUMN_WIDTH + 1).expect("a small column width");
+    let second_x = content_x + column_block + 2;
 
     assert_eq!(
         region_at(&model, area, content_x, header_y),
@@ -561,11 +566,11 @@ fn result_grid_cells_headers_and_edges_carry_source_indices() {
         Some(Region::ResultsHeaderCell { column: 1 })
     );
     assert_eq!(
-        region_at(&model, area, content_x + 4, header_y),
+        region_at(&model, area, content_x + column_block, header_y),
         Some(Region::ColumnEdge { column: 0 })
     );
     assert_eq!(
-        region_at(&model, area, content_x + 5, header_y),
+        region_at(&model, area, content_x + column_block + 1, header_y),
         Some(Region::ColumnEdge { column: 0 })
     );
 

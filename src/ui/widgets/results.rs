@@ -551,6 +551,22 @@ fn render_grid(
         .and_then(|index| set.columns.get(index))
         .map_or_else(|| "none".to_owned(), |name| sanitize_for_display(name));
     let selected_number = selected_column.map_or(0, |index| index + 1);
+    // The range is the rows actually painted in the viewport, one-based and
+    // inclusive. The prelude (order line below) already owns its row, so the
+    // range extends that line rather than adding a sixth prelude row and
+    // shifting every hit region. A pane with no room for a data row states no
+    // range rather than claiming rows that were never drawn.
+    let drawable_rows = (area.height as usize).saturating_sub(header_rows);
+    let rendered_rows = rows.len().saturating_sub(offset).min(drawable_rows);
+    let range_label = grid::viewport_position_label(
+        offset + 1,
+        offset + rendered_rows,
+        rows.len(),
+        set.retained(),
+        set.rows_seen,
+        set.is_truncated(),
+        !model.result_filter.trim().is_empty(),
+    );
     let order_label = model.result_grid.sort.map_or_else(
         || "order: server".to_owned(),
         |sort| {
@@ -561,6 +577,13 @@ fn render_grid(
             )
         },
     );
+    let sort_label = model.result_grid.sort_label(&set.columns);
+    let order_line = match (range_label.as_deref(), sort_label.as_deref()) {
+        (Some(range), Some(sort)) => format!("{range} | {sort} | {order_label}"),
+        (Some(range), None) => format!("{range} | {order_label}"),
+        (None, Some(sort)) => format!("{sort} | {order_label}"),
+        (None, None) => order_label,
+    };
     let columns_label = format!(
         "shown {}/{} columns",
         visible_columns.len(),
@@ -595,7 +618,7 @@ fn render_grid(
     let mut lines: Vec<Line> = Vec::with_capacity(visible_rows + header_rows);
     lines.push(Line::from(Span::styled(
         truncate_to_width(
-            &format!("{order_label} | selected column {selected_number}: {selected_label}"),
+            &format!("{order_line} | selected column {selected_number}: {selected_label}"),
             grid_width,
             !presentation.glyphs.is_ascii(),
         ),
@@ -1056,3 +1079,6 @@ fn catalogue_note(model: &Model, object: &crate::diagnostics::ObjectContext) -> 
         sanitize_for_display(&catalogue_column.data_type)
     )
 }
+
+#[cfg(test)]
+mod tests;

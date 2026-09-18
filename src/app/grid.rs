@@ -13,11 +13,65 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The narrowest width that still leaves a column distinguishable.
-pub const MIN_COLUMN_WIDTH: usize = 3;
+pub const MIN_COLUMN_WIDTH: usize = 4;
 /// The widest explicit width a local view can request.
 pub const MAX_COLUMN_WIDTH: usize = 80;
 /// The amount a width control changes at a time.
-pub const COLUMN_WIDTH_STEP: usize = 4;
+pub const COLUMN_WIDTH_STEP: usize = 2;
+
+/// Formats the viewport position line for the rows actually on screen.
+///
+/// `first` and `last` are one-based and inclusive. The returned shape is pinned
+/// in `contracts/grid.md`: a plain result names the retained total, a truncated
+/// one adds what the server returned, and a filtered one names the match count.
+/// `None` means there is nothing to state, so an empty result keeps its own
+/// wording rather than showing `rows 0-0`.
+#[must_use]
+pub fn viewport_position_label(
+    first: usize,
+    last: usize,
+    matching: usize,
+    retained: usize,
+    rows_seen: u64,
+    truncated: bool,
+    filtered: bool,
+) -> Option<String> {
+    if first == 0 || last < first {
+        return None;
+    }
+    let range = format!(
+        "rows {}-{}",
+        thousands(first as u64),
+        thousands(last as u64)
+    );
+    let body = if filtered {
+        format!(
+            "{range} matching {} of {} retained",
+            thousands(matching as u64),
+            thousands(retained as u64)
+        )
+    } else {
+        format!("{range} of {} retained", thousands(retained as u64))
+    };
+    Some(if truncated {
+        format!("{body}, of {} returned", thousands(rows_seen))
+    } else {
+        body
+    })
+}
+
+/// Groups a count with commas, matching the pinned wording shapes.
+fn thousands(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
 
 /// Calculates an automatic readable width for one source column.
 #[must_use]
@@ -243,6 +297,21 @@ impl ResultGridState {
             }),
         };
         self.note = None;
+    }
+
+    /// The pinned wording for the active sort, or `None` in server order.
+    ///
+    /// `contracts/grid.md` requires `sorted by {column} ascending` or
+    /// `sorted by {column} descending`; the caller states server order with the
+    /// existing wording when this returns `None`.
+    #[must_use]
+    pub fn sort_label(&self, columns: &[String]) -> Option<String> {
+        let sort = self.sort?;
+        let name = columns.get(sort.column).map_or_else(
+            || format!("column {}", sort.column + 1),
+            |name| sanitize_for_display(name),
+        );
+        Some(format!("sorted by {name} {}", sort.direction.label()))
     }
 
     /// Orders source-row indices without changing the server-owned result.
@@ -543,224 +612,4 @@ impl PartialOrd for DecimalKey {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::query::value::Cell;
-
-    fn set(rows: &[&[Option<&str>]]) -> ResultSet {
-        let mut result = ResultSet::new(vec!["id".into(), "value".into()], 20);
-        for row in rows {
-            result.push(
-                row.iter()
-                    .map(|cell| cell.map_or(Cell::Null, |value| Cell::Text(value.to_owned())))
-                    .collect(),
-            );
-        }
-        result
-    }
-
-    #[test]
-    fn result_state_defaults_to_truthful_reading_preferences() {
-        let state = ResultGridState::new();
-        assert!(state.show_types);
-        assert!(!state.freeze_first);
-        assert!(state.sort.is_none());
-        assert!(state.visible_columns(0).is_empty());
-    }
-
-    #[test]
-    fn reset_for_result_clears_view_but_keeps_session_preferences() {
-        let mut state = ResultGridState::new();
-        state.show_types = false;
-        state.freeze_first = true;
-        state.sort = Some(SortSpec {
-            column: 1,
-            direction: SortDirection::Descending,
-        });
-        state.hidden_columns.insert(0);
-        state.widths.insert(1, 60);
-        state.horizontal_start = 4;
-        state.note = Some("old result".into());
-
-        state.reset_for_result(&["new".into()]);
-
-        assert_eq!(state.columns_signature, vec!["new"]);
-        assert!(!state.show_types);
-        assert!(state.freeze_first);
-        assert!(state.sort.is_none());
-        assert!(state.hidden_columns.is_empty());
-        assert!(state.widths.is_empty());
-        assert_eq!(state.horizontal_start, 0);
-        assert!(state.note.is_none());
-    }
-
-    #[test]
-    fn the_last_visible_column_cannot_be_hidden() {
-        let mut state = ResultGridState::new();
-        assert!(state.toggle_column(1, 2));
-        assert!(!state.toggle_column(0, 2));
-        assert_eq!(state.visible_columns(2), vec![0]);
-        assert!(
-            state
-                .note
-                .as_deref()
-                .is_some_and(|note| note.contains("one result column"))
-        );
-        assert!(state.toggle_column(1, 2), "restore the hidden neighbour");
-        assert_eq!(state.visible_columns(2), vec![0, 1]);
-    }
-
-    #[test]
-    fn duplicate_labels_are_still_independent_source_columns() {
-        let mut state = ResultGridState::new();
-        assert!(state.toggle_column(0, 3));
-        assert_eq!(state.visible_columns(3), vec![1, 2]);
-        assert!(!state.hidden_columns.contains(&1));
-        assert!(state.toggle_column(1, 3));
-        assert_eq!(state.visible_columns(3), vec![2]);
-    }
-
-    #[test]
-    fn widths_are_clamped_and_step_from_the_current_display_width() {
-        let mut state = ResultGridState::new();
-        assert_eq!(state.adjust_width(0, 10, 4), 14);
-        assert_eq!(state.adjust_width(0, 14, -100), MIN_COLUMN_WIDTH);
-        assert_eq!(state.adjust_width(0, 3, 1000), MAX_COLUMN_WIDTH);
-        assert_eq!(state.width_for(0, 12), MAX_COLUMN_WIDTH);
-    }
-
-    #[test]
-    fn sorting_uses_decimal_values_without_floating_point_loss() {
-        let result = set(&[
-            &[Some("a"), Some("10")],
-            &[Some("b"), Some("2")],
-            &[Some("c"), Some("9007199254740993")],
-            &[Some("d"), Some("9007199254740992")],
-        ]);
-        let mut state = ResultGridState::new();
-        state.toggle_sort(1);
-        assert_eq!(
-            state.sort_rows(&(0..4).collect::<Vec<_>>(), &result),
-            vec![1, 0, 3, 2]
-        );
-    }
-
-    #[test]
-    fn sorting_keeps_null_last_in_both_directions_and_is_stable_for_equals() {
-        let result = set(&[
-            &[Some("first"), Some("2")],
-            &[Some("second"), Some("2.00")],
-            &[Some("empty"), Some("")],
-            &[Some("null"), None],
-        ]);
-        let mut state = ResultGridState::new();
-        state.toggle_sort(1);
-        assert_eq!(
-            state.sort_rows(&(0..4).collect::<Vec<_>>(), &result),
-            vec![2, 0, 1, 3]
-        );
-        state.toggle_sort(1);
-        assert_eq!(
-            state.sort_rows(&(0..4).collect::<Vec<_>>(), &result),
-            vec![0, 1, 2, 3]
-        );
-    }
-
-    #[test]
-    fn sorting_cycles_back_to_server_order() {
-        let result = set(&[&[Some("first"), Some("b")], &[Some("second"), Some("a")]]);
-        let mut state = ResultGridState::new();
-        let source = vec![0, 1];
-        state.toggle_sort(1);
-        assert_eq!(state.sort_rows(&source, &result), vec![1, 0]);
-        state.toggle_sort(1);
-        state.toggle_sort(1);
-        assert!(state.sort.is_none());
-        assert_eq!(state.sort_rows(&source, &result), source);
-    }
-
-    #[test]
-    fn selected_column_window_stays_reachable_and_can_freeze_the_first() {
-        let visible = vec![0, 1, 2, 3, 4, 5];
-        let widths = vec![8; 6];
-        let window = column_window(&visible, 4, &widths, 25, false, 0);
-        assert!(window.contains(&4));
-        let frozen = column_window(&visible, 4, &widths, 25, true, 0);
-        assert_eq!(frozen[0], 0);
-        assert!(frozen.contains(&4));
-    }
-
-    #[test]
-    fn a_narrow_frozen_window_keeps_both_identity_and_selected_column_known() {
-        let window = column_window(&[0, 1, 2], 2, &[20, 20, 20], 5, true, 0);
-        assert_eq!(window, vec![0, 2]);
-    }
-
-    #[test]
-    fn a_horizontal_position_cannot_hide_the_selected_column() {
-        let visible = vec![0, 1, 2];
-        let widths = vec![8; 3];
-        assert_eq!(
-            column_window(&visible, 2, &widths, usize::MAX, false, usize::MAX),
-            visible,
-            "an invalid saved offset falls back to a reachable window"
-        );
-        assert_eq!(
-            column_window(&visible, 2, &widths, 12, true, usize::MAX),
-            vec![0, 2],
-            "freezing keeps identity and the selected source column visible"
-        );
-    }
-
-    #[test]
-    fn reset_view_keeps_reading_preferences_but_clears_result_shape() {
-        let mut state = ResultGridState::new();
-        state.show_types = false;
-        state.freeze_first = true;
-        state.toggle_sort(0);
-        state.toggle_column(1, 3);
-        let _ = state.adjust_width(2, 10, 4);
-        state.horizontal_start = 2;
-        state.reset_view();
-
-        assert!(state.sort.is_none());
-        assert!(state.hidden_columns.is_empty());
-        assert!(state.widths.is_empty());
-        assert_eq!(state.horizontal_start, 0);
-        assert!(!state.show_types);
-        assert!(state.freeze_first);
-    }
-
-    #[test]
-    fn text_sort_handles_case_and_short_rows_without_panicking() {
-        let mut result = ResultSet::new(vec!["id".into(), "label".into()], 20);
-        result.push(vec![Cell::Text("one".into()), Cell::Text("b".into())]);
-        result.push(vec![Cell::Text("two".into()), Cell::Text("A".into())]);
-        result.push(vec![Cell::Text("three".into())]);
-
-        let mut state = ResultGridState::new();
-        state.toggle_sort(1);
-        assert_eq!(
-            state.sort_rows(&[0, 1, 2], &result),
-            vec![1, 0, 2],
-            "case-folded text comes first and a missing cell is last"
-        );
-    }
-
-    #[test]
-    fn decimal_parser_handles_signs_fractions_and_exponents() {
-        let values = ["-2", "-1.5", "0", ".5", "1e2", "1.00", "10"];
-        let mut keys: Vec<_> = values
-            .iter()
-            .filter_map(|value| DecimalKey::parse(value))
-            .collect();
-        keys.sort();
-        let rendered: Vec<(bool, String, i64)> = keys
-            .into_iter()
-            .map(|key| (key.negative, key.digits, key.scale))
-            .collect();
-        assert_eq!(rendered.len(), values.len());
-        assert!(DecimalKey::parse("NaN").is_none());
-        assert!(DecimalKey::parse("1e999999999999999999999").is_none());
-    }
-}
+mod tests;
