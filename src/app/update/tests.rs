@@ -2771,6 +2771,53 @@ fn grid_sort_is_local_keeps_the_selected_record_and_emits_no_effect() {
 }
 
 #[test]
+fn narrow_and_widen_actions_step_the_selected_column_within_bounds_and_emit_no_effect() {
+    let mut model = with_grid(
+        &["id", "amount"],
+        &[
+            &[Cell::Text("first".into()), Cell::Text("30".into())],
+            &[Cell::Text("second".into()), Cell::Text("10".into())],
+        ],
+    );
+    model.selected_column = 0;
+    model.selected_row = 0;
+    let automatic = {
+        let set = model.visible_result().expect("result");
+        crate::app::grid::automatic_column_width(set, 0)
+    };
+    let minimum = crate::app::grid::MIN_COLUMN_WIDTH;
+    let start = model.result_grid.width_for(0, automatic);
+
+    let effects = update(&mut model, Message::Action(Action::WidenColumn));
+    assert!(
+        effects.is_empty(),
+        "resizing must not execute SQL: {effects:?}"
+    );
+    assert_eq!(model.result_grid.width_for(0, automatic), start + 2);
+    assert_eq!(
+        model.selected_source_row(),
+        Some(0),
+        "resizing keeps the selected record"
+    );
+
+    let effects = update(&mut model, Message::Action(Action::NarrowColumn));
+    assert!(effects.is_empty());
+    assert_eq!(model.result_grid.width_for(0, automatic), start);
+
+    for _ in 0..50 {
+        assert!(update(&mut model, Message::Action(Action::WidenColumn)).is_empty());
+    }
+    assert_eq!(
+        model.result_grid.width_for(0, automatic),
+        crate::app::grid::MAX_COLUMN_WIDTH
+    );
+    for _ in 0..50 {
+        assert!(update(&mut model, Message::Action(Action::NarrowColumn)).is_empty());
+    }
+    assert_eq!(model.result_grid.width_for(0, automatic), minimum);
+}
+
+#[test]
 fn the_column_chooser_uses_source_positions_and_keeps_one_column_visible() {
     let mut model = with_grid(
         &["id", "name", "name"],

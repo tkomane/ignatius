@@ -232,6 +232,8 @@ pub fn hint_actions(model: &Model) -> Vec<Action> {
             Action::ToggleInspector,
             Action::StartFilter,
             Action::OpenResultControls,
+            Action::NarrowColumn,
+            Action::WidenColumn,
         ],
         Focus::Results => vec![
             Action::FocusNext,
@@ -429,7 +431,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
                 && ctx.result == ResultPosture::Rows
                 && !model.plan.is_visible()
         }
-        Action::OpenResultControls => {
+        Action::OpenResultControls | Action::NarrowColumn | Action::WidenColumn => {
             ctx.focus == Focus::Results
                 && !model.plan.is_visible()
                 && model
@@ -523,6 +525,13 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
                 "a retained result with columns".to_owned()
             }
         }
+        Action::NarrowColumn | Action::WidenColumn => {
+            if ctx.focus != Focus::Results {
+                "focus the Results pane".to_owned()
+            } else {
+                "a retained result column to resize".to_owned()
+            }
+        }
         Action::CopyValue => {
             if ctx.focus != Focus::Results {
                 "focus Results on a retained text cell".to_owned()
@@ -611,6 +620,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::Complete
         | Action::SaveQuery => "Editor",
         Action::OpenResultControls
+        | Action::NarrowColumn
+        | Action::WidenColumn
         | Action::CopyValue
         | Action::GenerateCellUpdate
         | Action::RefreshResult
@@ -1059,6 +1070,33 @@ mod tests {
         assert!(hints.contains(&Action::ToggleInspector));
         assert!(hints.contains(&Action::StartFilter));
         assert!(hints.len() <= MAX_CONTEXTUAL_HINTS);
+    }
+
+    #[test]
+    fn column_resize_is_discoverable_only_for_a_retained_result() {
+        let mut model = Model::new(100);
+        connected(&mut model);
+        model.focus = Focus::Results;
+        model.last_execution = Some(rows_execution());
+
+        assert!(action_is_available(&model, &Action::NarrowColumn));
+        assert!(action_is_available(&model, &Action::WidenColumn));
+        assert_eq!(action_prerequisite(&model, &Action::NarrowColumn), None);
+
+        model.focus = Focus::Editor;
+        assert!(!action_is_available(&model, &Action::NarrowColumn));
+        assert_eq!(
+            action_prerequisite(&model, &Action::NarrowColumn),
+            Some("focus the Results pane".to_owned())
+        );
+
+        model.focus = Focus::Results;
+        model.last_execution = None;
+        assert!(!action_is_available(&model, &Action::WidenColumn));
+        assert_eq!(
+            action_prerequisite(&model, &Action::WidenColumn),
+            Some("a retained result column to resize".to_owned())
+        );
     }
 
     #[test]

@@ -57,6 +57,8 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `p` | Open the command palette |
 | `n` | Choose a connection |
 | `g` | Open result grid controls when Results has focus |
+| `[` | Narrow the selected result column by 2 cells |
+| `]` | Widen the selected result column by 2 cells |
 | `l` | Show the estimated query plan |
 | `a` | Measure the query plan (executes the statement) |
 | `f` | Filter the object tree |
@@ -259,7 +261,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `run-buffer`, `run-statement`, `refresh-result`, `cancel`, `quit`, `toggle-help`,
 `focus-next`, `format-buffer`,
 `toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
-`open-result-grid`,
+`open-result-grid`, `narrow-column`, `widen-column`,
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`,

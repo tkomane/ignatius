@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Feature 025 Phase 5: a workable results grid (US3) - 2026-09-18
+
+US3 is implemented on the `025-us3-grid` branch. The Results state line now
+opens with the viewport range in the contract's shapes (`rows 120-160 of
+1,248 retained`, the truncated and filtered forms, and no range rather than
+`rows 0-0` in a pane with no room for a data row), beside the pinned
+`sorted by {column} ascending|descending` wording and the existing server
+order note. Column widths are the contract's minimum 4, maximum 80 and
+2-cell keyboard step, and `Ctrl+K [` / `Ctrl+K ]` (configurable
+`narrow-column` / `widen-column`) resize the selected column locally with no
+execution effect and the selected record preserved. The grid contract's
+NULL, empty and literal-`NULL` distinction is asserted on painted stripes at
+all four colour depths; the keymap document carries both chord rows and both
+bindable names, and the parity suite passes.
+
+| Field | Record |
+| --- | --- |
+| Claim | T020-T023: FR-2507..FR-2509, SC-2507 - exact range wording, three-state sort wording, bounded resizing, keyboard reachability, zero executions |
+| Source | `025-us3-grid` branch, verified before the Phase 5 commit; based on `origin/main` a165ebd |
+| Environment | macOS 26.6.1 arm64, Homebrew Rust/Cargo 1.98.1, `DEVELOPER_DIR=/Library/Developer/CommandLineTools` because the Xcode licence is not accepted; disposable `postgres:18.4-alpine` plain/TLS fixtures for the verifier |
+| Method | `cargo fmt --all -- --check`; workspace clippy with warnings denied; focused sets (`app::grid` 18, `ui::widgets` 32, `ui::keymap` 29, `app::discovery` 12, `app::update` 163); `--test documentation_matches_the_build` 15 and `--test keymap_contract` 2; `cargo --locked xtask db up`; `cargo --locked xtask verify` (20 test binaries, 1,090 tests passed); `cargo xtask db down` then `cargo xtask db status` reported `Not running.`; independent review |
+| Result | Pass. All gates passed including the database-backed plain/TLS gates; the Unix-socket gate skipped because `IGNATIUS_TEST_PG_SOCKET_URI` is not set. Review found one substantive gap (no reducer-level test for the two new resize actions) and two minors (a degenerate-pane range overclaim and the footer hint cap hiding the new hints); the first two were fixed with tests watched failing first and re-review accepted, the third is recorded for the T046 documentation pass |
+| Scope | Proves the pinned wording and bounds, the local-only resize and sort transitions, keymap reachability and the NULL distinction at buffer level. Does not prove live terminal rendering, mouse resizing (US6) or cross-platform behaviour |
+| Retention | This section, the `025-us3-grid` pull request, and the commit that carries it |
+
 ## Feature 025 Phase 4: painted surfaces and colour depth (US2) - 2026-09-18
 
 US2 is implemented on the `025-us2-surfaces` branch. The frame now owns its

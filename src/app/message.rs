@@ -52,6 +52,10 @@ pub enum Action {
     OpenPalette,
     /// Open the contextual controls for the focused result grid.
     OpenResultControls,
+    /// Narrow the selected result column by the documented step.
+    NarrowColumn,
+    /// Widen the selected result column by the documented step.
+    WidenColumn,
     /// Begin a two-key chord and show the continuations.
     BeginPrefix,
     /// Filter the object tree.
@@ -167,6 +171,8 @@ impl Action {
             Self::ToggleSidebar,
             Self::OpenPalette,
             Self::OpenResultControls,
+            Self::NarrowColumn,
+            Self::WidenColumn,
             Self::BeginPrefix,
             Self::StartFilter,
             Self::ReloadObjects,

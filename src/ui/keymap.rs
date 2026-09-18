@@ -84,6 +84,8 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("toggle-sidebar", Action::ToggleSidebar),
     ("open-palette", Action::OpenPalette),
     ("open-result-grid", Action::OpenResultControls),
+    ("narrow-column", Action::NarrowColumn),
+    ("widen-column", Action::WidenColumn),
     ("begin-prefix", Action::BeginPrefix),
     ("start-filter", Action::StartFilter),
     ("reload-objects", Action::ReloadObjects),
@@ -689,6 +691,16 @@ pub const CHORDS: &[(char, Action, &str)] = &[
     ('q', Action::FormatBuffer, "Format the SQL buffer"),
     ('n', Action::OpenConnectionPicker, "Choose a connection"),
     ('g', Action::OpenResultControls, "Open result grid controls"),
+    (
+        '[',
+        Action::NarrowColumn,
+        "Narrow the selected result column by 2 cells",
+    ),
+    (
+        ']',
+        Action::WidenColumn,
+        "Widen the selected result column by 2 cells",
+    ),
     ('l', Action::ExplainPlan, "Show the estimated query plan"),
     (
         'a',
@@ -784,6 +796,8 @@ const fn short_label(action: &Action) -> &'static str {
         Action::ToggleSidebar => "Objects",
         Action::OpenPalette => "Palette",
         Action::OpenResultControls => "Grid controls",
+        Action::NarrowColumn => "Narrow column",
+        Action::WidenColumn => "Widen column",
         Action::BeginPrefix => "Chord",
         Action::StartFilter => "Filter",
         Action::ReloadObjects => "Reload",
@@ -1294,6 +1308,41 @@ mod tests {
             keymap.resolve(&press(KeyCode::Char('g'), KeyModifiers::NONE)),
             Some(Action::Insert('g')),
             "plain g remains available for editor text"
+        );
+    }
+
+    #[test]
+    fn column_resize_has_named_chords_without_stealing_printable_brackets() {
+        assert_eq!(
+            action_named("narrow-column"),
+            Some(Action::NarrowColumn),
+            "contracts/grid.md names the narrow action"
+        );
+        assert_eq!(
+            action_named("widen-column"),
+            Some(Action::WidenColumn),
+            "contracts/grid.md names the widen action"
+        );
+        assert_eq!(chord_action('['), Some(Action::NarrowColumn));
+        assert_eq!(chord_action(']'), Some(Action::WidenColumn));
+
+        let keymap = Keymap::new();
+        assert_eq!(
+            keymap.contextual_hint(&Action::NarrowColumn),
+            Some(("Ctrl+K [".to_owned(), "Narrow column"))
+        );
+        assert_eq!(
+            keymap.contextual_hint(&Action::WidenColumn),
+            Some(("Ctrl+K ]".to_owned(), "Widen column"))
+        );
+        // Plain brackets remain editor text; the chord owns only the prefixed form.
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char('['), KeyModifiers::NONE)),
+            Some(Action::Insert('['))
+        );
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char(']'), KeyModifiers::NONE)),
+            Some(Action::Insert(']'))
         );
     }
 
