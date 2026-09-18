@@ -813,6 +813,9 @@ pub struct Presentation {
     pub glyphs: crate::ui::glyphs::Glyphs,
     /// When true, indicators are static text rather than animation.
     pub reduced_motion: bool,
+    /// The colour depth the theme emits at, kept beside the theme so a report
+    /// can name it without reaching into the palette.
+    pub color_depth: crate::ui::theme::ColorDepth,
 }
 
 impl Presentation {
@@ -824,6 +827,7 @@ impl Presentation {
         reduced_motion: bool,
     ) -> Self {
         Self {
+            color_depth: theme.depth,
             theme,
             glyphs,
             reduced_motion,
@@ -844,6 +848,7 @@ impl Default for Presentation {
             theme: crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, false),
             glyphs: crate::ui::glyphs::Glyphs::new(crate::ui::glyphs::GlyphTier::Unicode),
             reduced_motion: false,
+            color_depth: crate::ui::theme::ColorDepth::TrueColor,
         }
     }
 }

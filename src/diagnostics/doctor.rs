@@ -117,10 +117,16 @@ pub struct TerminalFacts {
     pub term_program: Option<String>,
     /// Whether `NO_COLOR` is set.
     pub no_color: bool,
+    /// Value of `COLORTERM`, when set. The truecolor convention lives here.
+    pub colorterm: Option<String>,
     /// Detected size, when it could be read.
     pub size: Option<(u16, u16)>,
     /// Whether the environment looks able to render Unicode box drawing.
     pub unicode: bool,
+    /// The active colour depth, after every documented override.
+    pub color_depth: crate::ui::theme::ColorDepth,
+    /// Where `color_depth` came from.
+    pub color_depth_source: crate::ui::theme::DepthSource,
 }
 
 /// The complete doctor report.
@@ -277,6 +283,7 @@ pub fn environment_report(
 
     checks.push(terminal_check(terminal));
     checks.push(colour_check(terminal));
+    checks.push(colour_depth_check(terminal));
     checks.push(size_check(terminal));
 
     Report { checks }
@@ -337,6 +344,19 @@ fn colour_check(terminal: &TerminalFacts) -> Check {
     )
 }
 
+fn colour_depth_check(terminal: &TerminalFacts) -> Check {
+    let depth = match terminal.color_depth {
+        crate::ui::theme::ColorDepth::TrueColor => "truecolor",
+        crate::ui::theme::ColorDepth::Indexed256 => "256",
+        crate::ui::theme::ColorDepth::Basic16 => "16",
+        crate::ui::theme::ColorDepth::None => "none",
+    };
+    Check::ok(
+        "colour depth",
+        format!("{depth}, source {}", terminal.color_depth_source.label()),
+    )
+}
+
 fn size_check(terminal: &TerminalFacts) -> Check {
     match terminal.size {
         None => Check::skipped("terminal size", "size is only measurable on a terminal"),
@@ -356,122 +376,4 @@ fn size_check(terminal: &TerminalFacts) -> Check {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::store::Loaded;
-    use crate::config::{Config, Paths};
-
-    fn facts() -> TerminalFacts {
-        TerminalFacts {
-            is_terminal: true,
-            term: Some("xterm-256color".into()),
-            term_program: Some("WarpTerminal".into()),
-            no_color: false,
-            size: Some((120, 30)),
-            unicode: true,
-        }
-    }
-
-    fn ok_config() -> Result<Loaded, Diagnostic> {
-        Ok(Loaded {
-            config: Config::default(),
-            source: ConfigSource::Defaults,
-            pending_migration: None,
-        })
-    }
-
-    #[test]
-    fn a_healthy_environment_reports_no_failures() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let report = environment_report(&Paths::rooted_at(dir.path()), &ok_config(), &facts());
-        assert_eq!(report.worst(), CheckStatus::Ok, "{}", report.render_plain());
-        assert!(report.checks.len() >= 6);
-    }
-
-    #[test]
-    fn every_non_ok_check_states_a_next_action() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let broken = Err(Diagnostic::new(
-            crate::diagnostics::DiagnosticKind::Config,
-            "configuration file is not valid",
-            "parsing configuration",
-        )
-        .next_action("fix the syntax"));
-        let mut small = facts();
-        small.size = Some((40, 10));
-        small.term = Some("dumb".into());
-
-        let report = environment_report(&Paths::rooted_at(dir.path()), &broken, &small);
-        for check in &report.checks {
-            if matches!(check.status, CheckStatus::Warn | CheckStatus::Fail) {
-                assert!(
-                    check.next_action.is_some(),
-                    "{} has no next action",
-                    check.name
-                );
-            }
-        }
-        assert_eq!(report.worst(), CheckStatus::Fail);
-    }
-
-    #[test]
-    fn a_pending_migration_warns_rather_than_failing() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let loaded = Ok(Loaded {
-            config: Config::default(),
-            source: ConfigSource::File,
-            pending_migration: Some((0, 1)),
-        });
-        let report = environment_report(&Paths::rooted_at(dir.path()), &loaded, &facts());
-        let check = report
-            .checks
-            .iter()
-            .find(|c| c.name == "configuration")
-            .expect("check");
-        assert_eq!(check.status, CheckStatus::Warn);
-        assert!(
-            check
-                .next_action
-                .as_ref()
-                .expect("action")
-                .contains("config migrate")
-        );
-    }
-
-    #[test]
-    fn non_terminal_invocation_skips_rather_than_fails() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let piped = TerminalFacts {
-            is_terminal: false,
-            size: None,
-            ..facts()
-        };
-        let report = environment_report(&Paths::rooted_at(dir.path()), &ok_config(), &piped);
-        assert_eq!(report.worst(), CheckStatus::Skipped);
-        let (_, _, fail, skipped) = report.counts();
-        assert_eq!(fail, 0, "piping output is not a failure");
-        assert!(skipped >= 2);
-    }
-
-    #[test]
-    fn plain_output_shows_status_labels_and_a_summary_with_counts() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let report = environment_report(&Paths::rooted_at(dir.path()), &ok_config(), &facts());
-        let text = report.render_plain();
-        assert!(text.contains("OK      product"), "{text}");
-        assert!(text.contains("Summary: "), "{text}");
-        assert!(text.contains("failure(s)"), "{text}");
-    }
-
-    #[test]
-    fn json_output_carries_the_same_checks() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let report = environment_report(&Paths::rooted_at(dir.path()), &ok_config(), &facts());
-        let json = report.to_json();
-        assert_eq!(
-            json["checks"].as_array().expect("array").len(),
-            report.checks.len()
-        );
-        assert_eq!(json["version"], crate::branding::VERSION);
-    }
-}
+mod tests;

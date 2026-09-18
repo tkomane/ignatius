@@ -1,4 +1,4 @@
-use super::{action_key_label, pane_block, syntax_token};
+use super::{action_key_label, overlay_block, pane_block, syntax_token};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -145,7 +145,7 @@ pub(crate) fn render_completion(
     )));
 
     Paragraph::new(lines)
-        .block(pane_block(" Complete ".to_owned(), true, presentation))
+        .block(overlay_block(" Complete ".to_owned(), presentation))
         .wrap(Wrap { trim: true })
         .render(popup, buf);
 }

@@ -122,11 +122,18 @@ pub fn run(
 
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
     let library = crate::queries::Library::new(&paths.queries_dir);
+    let (color_depth, _depth_source) = crate::cli::resolve_depth(
+        presentation.color_depth,
+        loaded.config.ui.color_depth,
+        presentation.color,
+        &facts,
+    );
     let result = runtime.block_on(event_loop(
         resolved,
         loaded.config,
         keymap,
         presentation,
+        color_depth,
         history,
         library,
     ));
@@ -152,6 +159,7 @@ async fn event_loop(
     config: Config,
     keymap: Keymap,
     presentation: &Presentation,
+    color_depth: crate::ui::theme::ColorDepth,
     mut history: crate::history::History,
     library: crate::queries::Library,
 ) -> Result<ExitCode, Diagnostic> {
@@ -185,7 +193,7 @@ async fn event_loop(
     });
     let mut model = Model::new(config.query.max_buffered_rows);
     model.presentation = layout::Presentation::new(
-        Theme::new(config.ui.theme, presentation.color),
+        Theme::new(config.ui.theme, presentation.color).with_depth(color_depth),
         crate::ui::Glyphs::new(tier),
         config.ui.reduced_motion,
     );

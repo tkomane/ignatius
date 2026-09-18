@@ -1,4 +1,4 @@
-use super::{input_cursor, pane_block};
+use super::{input_cursor, overlay_block};
 use crate::app::model::Model;
 use crate::query::value::sanitize_for_display;
 use crate::ui::glyphs::Icon;
@@ -117,9 +117,8 @@ pub(crate) fn render_palette(
     }
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             palette.purpose.title().to_owned(),
-            true,
             presentation,
         ))
         .render(palette_area, buf);
@@ -154,9 +153,8 @@ pub(crate) fn render_connection_details(
             "Connection details need a larger terminal. Esc closes.",
             theme.style(Token::Text),
         )))
-        .block(pane_block(
+        .block(overlay_block(
             " Connection details ".to_owned(),
-            true,
             presentation,
         ))
         .render(area, buf);
@@ -170,11 +168,10 @@ pub(crate) fn render_connection_details(
         height,
     };
     ratatui::widgets::Clear.render(box_area, buf);
-    let panel_style = if theme.color {
-        Style::default().bg(theme.rgb(Token::Surface).into())
-    } else {
-        Style::default()
-    };
+    // The overlay fill comes from the depth-aware surface route, so 256-colour
+    // terminals get an indexed colour and 16-colour or colour-off terminals
+    // paint nothing rather than a raw `Color::Rgb`.
+    let panel_style = theme.surface(Token::SurfaceOverlay);
 
     let connection_state = match &model.connection {
         crate::app::model::ConnectionState::Disconnected => "Not connected".to_owned(),
@@ -344,12 +341,11 @@ pub(crate) fn render_connection_details(
     )));
 
     Paragraph::new(lines)
-        .block(pane_block(
+        .block(overlay_block(
             format!(
                 " {}Connection details  Esc to close ",
                 presentation.icon(Icon::Info)
             ),
-            true,
             presentation,
         ))
         .style(panel_style)
