@@ -1,6 +1,6 @@
 # ADR-0008: Hand-rolled release workflow first, cargo-dist deferred
 
-- Status: Accepted baseline; provider decisions remain gated
+- Status: Accepted baseline; trust providers chosen by the owner on 2026-09-30, implementation pending
 - Date: 2026-08-15
 - T031 update: 2026-08-16
 
@@ -83,6 +83,18 @@ No provider, key service, release host or owner approval is implied by this
 record. Until each applicable gate is resolved, the corresponding evidence
 state is `not-configured` or another explicit blocking state, not an omitted
 field and not a passing claim.
+
+## Owner trust choices - 2026-09-30
+
+The owner chose the trust providers; implementation and dry validation follow
+under W11, and the live release authorization gate below stays blocking:
+
+- Signing: Sigstore keyless (ephemeral OIDC keys, no long-term secrets).
+- SBOM: CycloneDX, matching the tooling already pinned for `xtask`.
+- Provenance: GitHub OIDC/SLSA from CI-hosted builds.
+- Still open: verification identity details, rotation/expiry/revocation
+  handling, retention location, the independent verification command, and
+  the live release and distribution authorization itself.
 
 ## Consequences
 
