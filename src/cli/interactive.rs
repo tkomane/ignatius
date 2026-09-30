@@ -1817,6 +1817,34 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_scope_is_current_only_for_its_own_request() {
+        let generation = Arc::new(std::sync::atomic::AtomicU64::new(7));
+        let scope = ConnectionScope {
+            generation: Arc::clone(&generation),
+            request: 7,
+        };
+        assert!(scope.is_current());
+
+        generation.store(8, std::sync::atomic::Ordering::SeqCst);
+        assert!(!scope.is_current());
+
+        let next = ConnectionScope {
+            generation,
+            request: 8,
+        };
+        assert!(next.is_current());
+    }
+
+    #[test]
+    fn server_bound_results_carry_their_generation_into_the_envelope() {
+        let wrapped = connection_message(7, Message::ConnectionLost);
+        assert!(matches!(
+            wrapped,
+            Message::ForConnection { generation: 7, .. }
+        ));
+    }
+
+    #[test]
     fn the_starter_buffer_is_useful_and_names_the_run_key() {
         let text = starter_query();
         assert!(text.contains("Ctrl+R"), "{text}");
