@@ -1040,6 +1040,68 @@ fn a_stale_result_cannot_overwrite_a_newer_query() {
 }
 
 #[test]
+fn a_queued_old_connection_message_cannot_restore_facts_after_a_switch() {
+    let mut model = connected();
+    model.connection_generation = 2;
+    let current = session();
+    let current_target = current.target.clone();
+    update(&mut model, Message::Connected(current));
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::ConnectionLost),
+        },
+    );
+    assert!(model.connection.is_usable());
+    assert_eq!(
+        model.connection.info().map(|info| &info.target),
+        Some(&current_target)
+    );
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::Connected(session())),
+        },
+    );
+    assert_eq!(
+        model.connection.info().map(|info| &info.target),
+        Some(&current_target)
+    );
+}
+
+#[test]
+fn an_old_envelope_cannot_deliver_a_stale_execution() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::RunBuffer));
+    let job = model.phase.job().expect("running");
+    model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::ExecutionFinished(execution(
+                job,
+                ExecutionStatus::Succeeded,
+                &["stale"],
+            ))),
+        },
+    );
+
+    assert_eq!(
+        model.phase.job(),
+        Some(job),
+        "a queued result from the replaced connection must not finish the new route"
+    );
+    assert!(model.visible_result().is_none());
+}
+
+#[test]
 fn cancelling_requests_but_does_not_claim_cancellation() {
     let mut model = connected();
     model.editor.set_text("SELECT pg_sleep(30);");
