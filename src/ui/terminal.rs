@@ -108,7 +108,7 @@ impl TerminalGuard {
         let mut stdout = io::stdout();
         if let Err(err) = enter(&mut stdout, options) {
             // Give the terminal back before reporting, so the error is readable.
-            let _ = terminal::disable_raw_mode();
+            let _ = restore_after_failed_enter(&mut stdout, options, terminal::disable_raw_mode);
             return Err(err);
         }
         TERMINAL_HELD.store(true, Ordering::SeqCst);
@@ -130,6 +130,19 @@ impl TerminalGuard {
         let raw_result = terminal::disable_raw_mode();
         leave_result.and(raw_result)
     }
+}
+
+/// Cleans up a partially completed terminal acquisition.
+///
+/// `enter` can fail after it has already emitted one or more mode changes. The
+/// normal guard does not exist on that path, so the attempted cleanup must run
+/// before raw mode is disabled and must still try every requested mode.
+fn restore_after_failed_enter<W: Write>(
+    writer: &mut W,
+    options: TerminalOptions,
+    disable_raw_mode: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    leave(writer, options).and(disable_raw_mode())
 }
 
 impl Drop for TerminalGuard {

@@ -899,6 +899,9 @@ impl Default for Presentation {
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
+    /// Identity of the connection whose server-derived facts are in this
+    /// model. It starts at one to match the initial runtime connection route.
+    pub(crate) connection_generation: u64,
     /// Which pane has focus.
     pub focus: Focus,
     /// The active key labels used when discovery surfaces describe actions.
@@ -1091,6 +1094,7 @@ impl Model {
     #[must_use]
     pub fn new(row_cap: usize) -> Self {
         Self {
+            connection_generation: 1,
             row_cap,
             size: (crate::ui::MIN_COLUMNS, crate::ui::MIN_ROWS),
             sidebar_visible: true,

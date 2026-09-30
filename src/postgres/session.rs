@@ -17,7 +17,9 @@ use crate::connection::{ConnectionTarget, Host, SslMode};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::{from_connect_error, from_query_error};
 use crate::postgres::tls::{TlsState, client_config};
-use crate::query::result::{Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult};
+use crate::query::result::{
+    Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult, bounded_notice_message,
+};
 use crate::query::statements;
 use crate::query::value::Cell;
 use futures_util::StreamExt;
@@ -504,7 +506,7 @@ impl Session {
         for (index, statement) in parsed.iter().enumerate() {
             let _ = self.take_notices();
             let statement_started = Instant::now();
-            match self.execute_one(&statement.text, row_cap).await {
+            match self.execute_one(&statement.text, row_cap, index + 1).await {
                 Ok((result_set, rows_affected)) => {
                     results.push(StatementResult {
                         result_set,
@@ -513,11 +515,10 @@ impl Session {
                         notices: self.take_notices(),
                     });
                 }
-                Err(err) => {
-                    let diagnostic = from_query_error(&err, index + 1);
+                Err(diagnostic) => {
                     let status = if diagnostic.kind == DiagnosticKind::Cancelled {
                         ExecutionStatus::Cancelled
-                    } else if err.is_closed() || self.is_closed() {
+                    } else if diagnostic.kind == DiagnosticKind::Connection || self.is_closed() {
                         ExecutionStatus::ConnectionLost
                     } else {
                         ExecutionStatus::Failed
@@ -557,27 +558,40 @@ impl Session {
         &self,
         sql: &str,
         row_cap: usize,
-    ) -> Result<(Option<ResultSet>, Option<u64>), tokio_postgres::Error> {
-        let stream = self.client.simple_query_raw(sql).await?;
+        statement_number: usize,
+    ) -> Result<(Option<ResultSet>, Option<u64>), Diagnostic> {
+        let stream = self
+            .client
+            .simple_query_raw(sql)
+            .await
+            .map_err(|err| from_query_error(&err, statement_number))?;
         tokio::pin!(stream);
 
         let mut result_set: Option<ResultSet> = None;
         let mut rows_affected = None;
 
         while let Some(message) = stream.next().await {
-            match message? {
+            match message.map_err(|err| from_query_error(&err, statement_number))? {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
                     let names = columns.iter().map(|c| c.name().to_owned()).collect();
                     result_set = Some(ResultSet::new(names, row_cap));
                 }
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
                     let set = result_set.get_or_insert_with(|| ResultSet::new(Vec::new(), row_cap));
-                    let cells = (0..row.len())
-                        .map(|i| Cell::from_option(row.get(i)))
-                        .collect();
-                    // Rows past the cap are counted and dropped here, which is
-                    // what keeps memory bounded on a large result.
-                    set.push(cells);
+                    if set.retained() < row_cap {
+                        let cells = (0..row.len())
+                            .map(|i| Cell::from_option_bounded(row.get(i)))
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|bytes| {
+                                retained_value_limit_diagnostic(statement_number, bytes)
+                            })?;
+                        set.push(cells);
+                    } else {
+                        // Rows past the cap are counted and dropped without
+                        // copying their values, which keeps both row and cell
+                        // retention bounded on a large result.
+                        set.push(Vec::new());
+                    }
                 }
                 tokio_postgres::SimpleQueryMessage::CommandComplete(count) => {
                     rows_affected = Some(count);
@@ -627,6 +641,24 @@ impl Session {
                 .collect(),
         )
     }
+}
+
+fn retained_value_limit_diagnostic(statement_number: usize, bytes: usize) -> Diagnostic {
+    let limit = crate::query::value::MAX_RETAINED_VALUE_BYTES;
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        "a result value is too large to retain",
+        format!("retaining result values from statement {statement_number}"),
+    )
+    .in_statement(statement_number)
+    .likely_cause(format!(
+        "one server-rendered value is {bytes} bytes; the retained-value limit is {limit} bytes"
+    ))
+    .next_action(
+        "use streaming export as csv, tsv, ndjson or insert, or select a smaller value before \
+         running it in the interactive result view",
+    )
+    .technical("Limit", limit.to_string())
 }
 
 /// Opens a session, applying the resolved target's policy.
@@ -755,7 +787,7 @@ where
                     if let Ok(mut held) = task_notices.lock() {
                         held.push(Notice {
                             severity: notice.severity().to_owned(),
-                            message: notice.message().to_owned(),
+                            message: bounded_notice_message(notice.message()),
                             code: Some(notice.code().code().to_owned()),
                         });
                     }

@@ -12,6 +12,10 @@
 use crate::query::value::Cell;
 use std::time::Duration;
 
+/// Largest notice message retained for display with an execution.
+pub const MAX_NOTICE_MESSAGE_BYTES: usize = 64 * 1024;
+const NOTICE_TRUNCATION_SUFFIX: &str = " ... [notice truncated]";
+
 /// A message the server sent alongside a result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
@@ -21,6 +25,25 @@ pub struct Notice {
     pub message: String,
     /// SQLSTATE, when the server supplied one.
     pub code: Option<String>,
+}
+
+/// Retains a notice message without allowing one server message to dominate
+/// the execution model. The suffix makes the loss visible.
+#[must_use]
+pub fn bounded_notice_message(message: &str) -> String {
+    if message.len() <= MAX_NOTICE_MESSAGE_BYTES {
+        return message.to_owned();
+    }
+
+    let prefix_limit = MAX_NOTICE_MESSAGE_BYTES.saturating_sub(NOTICE_TRUNCATION_SUFFIX.len());
+    let mut end = prefix_limit.min(message.len());
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut bounded = String::with_capacity(end + NOTICE_TRUNCATION_SUFFIX.len());
+    bounded.push_str(&message[..end]);
+    bounded.push_str(NOTICE_TRUNCATION_SUFFIX);
+    bounded
 }
 
 /// Rows returned by one statement, bounded by a cap.

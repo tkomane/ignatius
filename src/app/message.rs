@@ -285,6 +285,16 @@ pub struct MouseModifiers {
 /// Everything that can change the model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
+    /// A message produced by a server-bound task, scoped to one connection
+    /// generation. The runtime wraps asynchronous results before enqueueing
+    /// them so a message that was already queued cannot restore facts from a
+    /// connection that the user has since replaced.
+    ForConnection {
+        /// The connection generation that produced the message.
+        generation: u64,
+        /// The server-bound message.
+        message: Box<Self>,
+    },
     /// A user intent.
     Action(Action),
     /// The terminal was resized.

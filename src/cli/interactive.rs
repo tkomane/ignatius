@@ -769,10 +769,13 @@ fn spawn_connect(
         // way, so that is the stage named; a plain target names the server
         // handshake. Resolution and credential work already happened before the
         // terminal was taken, so they are not re-run or shown as done here.
-        let _ = tx.send(Message::ConnectingStep {
-            step: connecting_step_for(target.sslmode),
-            target: target.safe_display(),
-        });
+        let _ = tx.send(connection_message(
+            request,
+            Message::ConnectingStep {
+                step: connecting_step_for(target.sslmode),
+                target: target.safe_display(),
+            },
+        ));
         match session::connect(&target, timeout).await {
             Ok(opened) => {
                 let info = opened.info().clone();
@@ -782,7 +785,10 @@ fn spawn_connect(
                 }
                 *held = Some(Arc::new(opened));
                 drop(held);
-                let _ = tx.send(Message::Connected(Box::new(info)));
+                let _ = tx.send(connection_message(
+                    request,
+                    Message::Connected(Box::new(info)),
+                ));
                 // The tree is populated as soon as there is something to read it
                 // from, so the sidebar is useful the moment it appears.
                 if !connection_generation_is_current(&generation, request) {
@@ -795,7 +801,10 @@ fn spawn_connect(
                 if !connection_generation_is_current(&generation, request) {
                     return;
                 }
-                let _ = tx.send(Message::ConnectionFailed(Box::new(diagnostic)));
+                let _ = tx.send(connection_message(
+                    request,
+                    Message::ConnectionFailed(Box::new(diagnostic)),
+                ));
             }
         }
     });
@@ -842,6 +851,18 @@ fn connection_generation_is_current(
     request: u64,
 ) -> bool {
     generation.load(std::sync::atomic::Ordering::SeqCst) == request
+}
+
+/// Wraps a server-bound result before it enters the shared application queue.
+///
+/// The atomic check in a worker prevents unnecessary work after a switch. The
+/// envelope is the stronger boundary: it also rejects a result that won a race
+/// with the switch and was queued before the reducer saw the profile choice.
+fn connection_message(generation: u64, message: Message) -> Message {
+    Message::ForConnection {
+        generation,
+        message: Box::new(message),
+    }
 }
 
 /// Opens the connection the object tree reads on.

@@ -24,6 +24,15 @@ use crate::query::statements;
 /// Applies a message to the model and returns the effects to perform.
 pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
     match message {
+        Message::ForConnection {
+            generation,
+            message,
+        } => {
+            if model.connection_generation != generation {
+                return Vec::new();
+            }
+            update(model, *message)
+        }
         Message::Action(action) => apply_action(model, action),
         Message::Resized(columns, rows) => {
             model.size = (columns, rows);
@@ -3129,6 +3138,7 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
             .iter()
             .find(|item| item.name == name)
     });
+    model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
     model.credential_provider = summary.and_then(|item| item.auth.clone());
     model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
     model.connection = ConnectionState::Connecting {
