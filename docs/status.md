@@ -1,8 +1,34 @@
 # Status
 
-**Updated: 2026-09-18.** This file is the resumption point. Read it, then check
+**Updated: 2026-09-30.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## W01/W02 integration branch: connection identity and bounds on the 025 base - 2026-09-30
+
+Branch `w01/reconcile-1d841b4-onto-bd05b9d` (based on `origin/main` bd05b9d)
+ports the local-only hardening onto the 025 base without dropping remote
+behaviour: the reducer `ForConnection` envelope with generation increment on
+profile switch, runtime generation checks plus envelope wrapping in connect,
+execute, parameterized, explain, and cancel workers, provider `kill_on_drop`
+with ms-aware timeout wording, 1 MiB retained-value refusal, 64 KiB notice
+cap, and partial-acquisition terminal restore. The xtask second redactor was
+deliberately not ported; the central redactor remains the single
+implementation. Grid MIN/STEP stay at the remote 4/2. A direct merge into
+local `main` 1d841b4 was attempted with `--allow-unrelated-histories` and
+aborted: the histories share no merge base, every file conflicts, and an
+automatic merge would risk dropping one side. Old `main` is retained
+untouched; the forward line is this branch via pull request.
+
+| Field | Record |
+| --- | --- |
+| Claim | W01 behaviour preservation plus W02 envelope/worker scoping and regression tests |
+| Source | `w01/reconcile-1d841b4-onto-bd05b9d` e7b8059, pushed to origin; local `main` 1d841b4 retained |
+| Environment | macOS arm64, Docker Desktop `desktop-linux`, disposable `postgres:18.4-alpine` plain/TLS fixtures |
+| Method | `cargo xtask db up`; `cargo xtask verify`; `cargo xtask db down`; focused `app::update` envelope tests (2 new) |
+| Result | Pass. Formatting, lints, API docs, workspace tests, doc tests, and database-backed plain/TLS gates all passed. Unix-socket slot skipped because `IGNATIUS_TEST_PG_SOCKET_URI` is not set. Pre-push hook passed with DB gates skipped (no development database in hook context) |
+| Scope | Proves reducer envelope rejection and worker generation checks on the current branch. Does not prove hosted Linux matrix, socket job, Windows ConPTY, hand-terminal, provider-account, signing, provenance, or publication readiness |
+| Retention | This section, the pushed branch, and PR https://github.com/tkomane/ignatius/pull/new/w01/reconcile-1d841b4-onto-bd05b9d |
 
 ## Feature 025 Phase 6: the first frame is useful (US4) - 2026-09-18
 
