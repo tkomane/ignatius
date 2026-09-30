@@ -372,7 +372,18 @@ async fn event_loop(
                     });
                 }
                 Effect::Execute { job, sql } => {
-                    spawn_execute(tx.clone(), Arc::clone(&session), job, sql, model.row_cap);
+                    spawn_execute(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        job,
+                        sql,
+                        model.row_cap,
+                        ConnectionScope {
+                            generation: Arc::clone(&connection_generation),
+                            request: connection_generation
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                        },
+                    );
                 }
                 Effect::ExecuteParameterized {
                     job,
@@ -386,17 +397,42 @@ async fn event_loop(
                         sql,
                         parameters,
                         model.row_cap,
+                        ConnectionScope {
+                            generation: Arc::clone(&connection_generation),
+                            request: connection_generation
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                        },
                     );
                 }
                 Effect::Explain { job, sql, analyze } => {
-                    spawn_explain(tx.clone(), Arc::clone(&session), job, sql, analyze);
+                    spawn_explain(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        job,
+                        sql,
+                        analyze,
+                        ConnectionScope {
+                            generation: Arc::clone(&connection_generation),
+                            request: connection_generation
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                        },
+                    );
                 }
                 Effect::CopyValue { payload } => {
                     let message = copy_to_terminal(terminal.backend_mut(), &payload);
                     let _ = tx.send(message);
                 }
                 Effect::Cancel { job } => {
-                    spawn_cancel(tx.clone(), Arc::clone(&session), job);
+                    spawn_cancel(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        job,
+                        ConnectionScope {
+                            generation: Arc::clone(&connection_generation),
+                            request: connection_generation
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                        },
+                    );
                 }
                 Effect::LoadSchemas => {
                     let generation =
@@ -865,6 +901,18 @@ fn connection_message(generation: u64, message: Message) -> Message {
     }
 }
 
+/// The connection generation a server-bound worker belongs to.
+struct ConnectionScope {
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request: u64,
+}
+
+impl ConnectionScope {
+    fn is_current(&self) -> bool {
+        connection_generation_is_current(&self.generation, self.request)
+    }
+}
+
 /// Opens the connection the object tree reads on.
 ///
 /// The target is the one that was already resolved, cloned rather than derived
@@ -920,16 +968,29 @@ fn spawn_execute(
     job: JobId,
     sql: String,
     row_cap: usize,
+    scope: ConnectionScope,
 ) {
     tokio::spawn(async move {
+        if !scope.is_current() {
+            return;
+        }
         let Some(session) = slot.read().await.clone() else {
             return;
         };
-        let execution = session.execute(&sql, row_cap, job).await;
-        if execution.status == ExecutionStatus::ConnectionLost {
-            let _ = tx.send(Message::ConnectionLost);
+        if !scope.is_current() {
+            return;
         }
-        let _ = tx.send(Message::ExecutionFinished(Box::new(execution)));
+        let execution = session.execute(&sql, row_cap, job).await;
+        if !scope.is_current() {
+            return;
+        }
+        if execution.status == ExecutionStatus::ConnectionLost {
+            let _ = tx.send(connection_message(scope.request, Message::ConnectionLost));
+        }
+        let _ = tx.send(connection_message(
+            scope.request,
+            Message::ExecutionFinished(Box::new(execution)),
+        ));
     });
 }
 
@@ -940,18 +1001,31 @@ fn spawn_execute_parameterized(
     sql: String,
     parameters: crate::query::ParameterBindings,
     row_cap: usize,
+    scope: ConnectionScope,
 ) {
     tokio::spawn(async move {
+        if !scope.is_current() {
+            return;
+        }
         let Some(session) = slot.read().await.clone() else {
             return;
         };
+        if !scope.is_current() {
+            return;
+        }
         let execution = session
             .execute_with_parameters(&sql, &parameters, row_cap, job)
             .await;
-        if execution.status == ExecutionStatus::ConnectionLost {
-            let _ = tx.send(Message::ConnectionLost);
+        if !scope.is_current() {
+            return;
         }
-        let _ = tx.send(Message::ExecutionFinished(Box::new(execution)));
+        if execution.status == ExecutionStatus::ConnectionLost {
+            let _ = tx.send(connection_message(scope.request, Message::ConnectionLost));
+        }
+        let _ = tx.send(connection_message(
+            scope.request,
+            Message::ExecutionFinished(Box::new(execution)),
+        ));
     });
 }
 
@@ -961,22 +1035,29 @@ fn spawn_explain(
     job: JobId,
     sql: String,
     analyzed: bool,
+    scope: ConnectionScope,
 ) {
     tokio::spawn(async move {
+        if !scope.is_current() {
+            return;
+        }
         let Some(session) = slot.read().await.clone() else {
-            let _ = tx.send(Message::PlanFinished(Box::new(crate::app::PlanExecution {
-                job,
-                analyzed,
-                elapsed: Duration::ZERO,
-                transaction: crate::query::result::TransactionState::Unknown,
-                result: Err(Diagnostic::new(
-                    DiagnosticKind::Connection,
-                    "the connection was unavailable while reading the query plan",
-                    "reading a structured query plan",
-                )
-                .next_action("reconnect before asking for a plan")),
-                connection_lost: true,
-            })));
+            let _ = tx.send(connection_message(
+                scope.request,
+                Message::PlanFinished(Box::new(crate::app::PlanExecution {
+                    job,
+                    analyzed,
+                    elapsed: Duration::ZERO,
+                    transaction: crate::query::result::TransactionState::Unknown,
+                    result: Err(Diagnostic::new(
+                        DiagnosticKind::Connection,
+                        "the connection was unavailable while reading the query plan",
+                        "reading a structured query plan",
+                    )
+                    .next_action("reconnect before asking for a plan")),
+                    connection_lost: true,
+                })),
+            ));
             return;
         };
         let started = std::time::Instant::now();
@@ -1000,14 +1081,20 @@ fn spawn_explain(
         } else {
             session.transaction_state().await
         };
-        let _ = tx.send(Message::PlanFinished(Box::new(crate::app::PlanExecution {
-            job,
-            analyzed,
-            elapsed: started.elapsed(),
-            transaction,
-            result,
-            connection_lost,
-        })));
+        if !scope.is_current() {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            scope.request,
+            Message::PlanFinished(Box::new(crate::app::PlanExecution {
+                job,
+                analyzed,
+                elapsed: started.elapsed(),
+                transaction,
+                result,
+                connection_lost,
+            })),
+        ));
     });
 }
 
@@ -1015,11 +1102,18 @@ fn spawn_cancel(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
     job: JobId,
+    scope: ConnectionScope,
 ) {
     tokio::spawn(async move {
+        if !scope.is_current() {
+            return;
+        }
         let Some(session) = slot.read().await.clone() else {
             return;
         };
+        if !scope.is_current() {
+            return;
+        }
         let handle = session.cancel_handle();
         match handle.cancel().await {
             Ok(()) => {
