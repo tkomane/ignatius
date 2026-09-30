@@ -244,6 +244,7 @@ header. Scripted `ignatius query` runs are never recorded.
 ignatius doctor --json          # is this machine set up correctly
 ignatius connect --check URI    # test a target, stage by stage
 ignatius config paths           # where configuration and logs live
+ignatius history path           # where statements are kept (list, clear)
 ignatius completion zsh         # zsh, bash, fish, powershell
 ignatius version --verbose      # version, revision, build identity, target
 ```
