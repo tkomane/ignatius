@@ -4,6 +4,25 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## W10 streaming export footprint 200k vs 2M rows - 2026-09-30
+
+Measured the acceptance streaming-growth scenario on branch
+`w01/reconcile-1d841b4-onto-bd05b9d` with the release binary against
+disposable PostgreSQL 18.4 on localhost: `SELECT g, md5(g::text) FROM
+generate_series(...)`, two fixed columns, CSV to a file, peak RSS from
+`/usr/bin/time -l`. Machine: Mac Studio arm64, rustc 1.98.1, ignatius 0.1.0
+release profile.
+
+| Rows | Output bytes | Wall time | Peak RSS |
+| --- | --- | --- | --- |
+| 200,000 | 7,888,903 | 0.22 s | 2,933,216 |
+| 2,000,000 | 80,888,904 | 1.77 s | 2,916,832 |
+
+Ten times the rows adds sixteen kilobytes of peak memory: retained growth is
+flat, not proportional. Time scales with bytes at roughly 45 MB/s on
+localhost. Still open in W10: whole-process ceiling for one oversized value
+or notice, p95 input/grid latency baselines, and the recovery matrix.
+
 ## W05 local server matrix 14-18 on the integration branch - 2026-09-30
 
 Ran the full 53-test plain/TLS integration suite on branch
