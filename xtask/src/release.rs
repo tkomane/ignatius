@@ -4026,6 +4026,253 @@ fn sbom_verify(args: &[&str]) -> Result<(), String> {
     ))
 }
 
+/// Checks that signature and provenance sidecars bind their artefacts.
+///
+/// For each artefact in `release-manifest.json` this expects siblings
+/// `<name>.sigstore.json` (Sigstore bundle) and `<name>.intoto.jsonl` (SLSA
+/// provenance) in the bundle directory and requires both to name the
+/// artefact's SHA-256 digest. A bound sidecar proves the signature and the
+/// provenance statement are *about* these exact bytes; it is not
+/// cryptographic verification, which needs the Sigstore client and the SLSA
+/// verifier named in the release record against the release identity.
+/// Missing, mismatched or malformed sidecars are explicit blockers, never a
+/// passing claim.
+pub fn trust(args: &[&str]) -> Result<(), String> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| "release trust needs verify".to_owned())?;
+    if *command != "verify" {
+        return Err(format!("release trust needs verify, not {command}"));
+    }
+    let mut manifest_dir: Option<&str> = None;
+    let mut bundle_dir: Option<&str> = None;
+    for arg in rest {
+        let Some((flag, value)) = arg.split_once('=') else {
+            return Err(format!("release trust options use --flag=value, not {arg}"));
+        };
+        match flag {
+            "--manifest-dir" => manifest_dir = Some(value),
+            "--bundle-dir" => bundle_dir = Some(value),
+            _ => {
+                return Err(format!(
+                    "unknown release trust option {flag}; expected --manifest-dir and --bundle-dir"
+                ));
+            }
+        }
+    }
+    let manifest_dir =
+        resolve_path(Path::new(manifest_dir.ok_or_else(|| {
+            "release trust needs --manifest-dir=DIR".to_owned()
+        })?));
+    let bundle_dir = resolve_path(Path::new(
+        bundle_dir.ok_or_else(|| "release trust needs --bundle-dir=DIR".to_owned())?,
+    ));
+    for (kind, dir) in [("manifest", &manifest_dir), ("bundle", &bundle_dir)] {
+        if path_is_symlink(dir)? {
+            return Err(format!(
+                "{kind} directory must not be a symlink: {}",
+                dir.display()
+            ));
+        }
+        if !dir.is_dir() {
+            return Err(format!(
+                "{kind} directory does not exist: {}",
+                dir.display()
+            ));
+        }
+    }
+    let manifest_path = manifest_dir.join("release-manifest.json");
+    let manifest_bytes = fs::read(&manifest_path)
+        .map_err(|error| format!("could not read {}: {error}", manifest_path.display()))?;
+    let manifest = parse_canonical_manifest(&manifest_bytes)?;
+    if manifest.artefacts.is_empty() {
+        return Err("release-manifest.json names no artefacts".to_owned());
+    }
+    let mut bound = 0usize;
+    for artefact in &manifest.artefacts {
+        let bundle_path = checked_trust_sidecar(&bundle_dir, &artefact.name, "sigstore.json")?;
+        let bundle_bytes = fs::read(&bundle_path)
+            .map_err(|error| format!("could not read {}: {error}", bundle_path.display()))?;
+        check_sigstore_binding(&bundle_bytes, &artefact.checksum, &bundle_path)?;
+        let provenance_path = checked_trust_sidecar(&bundle_dir, &artefact.name, "intoto.jsonl")?;
+        let provenance_bytes = fs::read(&provenance_path)
+            .map_err(|error| format!("could not read {}: {error}", provenance_path.display()))?;
+        let predicate =
+            check_provenance_binding(&provenance_bytes, &artefact.checksum, &provenance_path)?;
+        println!(
+            "bound {} (sigstore bundle and {} provenance)",
+            artefact.name, predicate
+        );
+        bound += 1;
+    }
+    println!(
+        "Trust: {bound} of {} artefact(s) bound; cryptographic verification still needs the Sigstore client and SLSA verifier from the release record",
+        manifest.artefacts.len()
+    );
+    Ok(())
+}
+
+fn checked_trust_sidecar(
+    directory: &Path,
+    artefact: &str,
+    extension: &str,
+) -> Result<PathBuf, String> {
+    let name = format!("{artefact}.{extension}");
+    let path = directory.join(&name);
+    if path.is_symlink() {
+        return Err(format!(
+            "trust sidecar must not be a symlink: {}",
+            path.display()
+        ));
+    }
+    if !path.is_file() {
+        return Err(format!(
+            "{artefact} has no {extension} sidecar: binding missing"
+        ));
+    }
+    Ok(path)
+}
+
+/// Requires the bundle's message digest to be the artefact's SHA-256.
+fn check_sigstore_binding(bytes: &[u8], checksum: &str, path: &Path) -> Result<(), String> {
+    let document: serde_json::Value = serde_json::from_str(
+        std::str::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8 JSON", path.display()))?,
+    )
+    .map_err(|error| format!("{} is not a Sigstore bundle: {error}", path.display()))?;
+    let digest = document
+        .pointer("/messageSignature/messageDigest/digest")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "{} has no messageSignature.messageDigest.digest",
+                path.display()
+            )
+        })?;
+    let algorithm = document
+        .pointer("/messageSignature/messageDigest/algorithm")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "{} has no messageSignature.messageDigest.algorithm",
+                path.display()
+            )
+        })?;
+    if algorithm != "SHA2_256" {
+        return Err(format!(
+            "{} uses digest algorithm {algorithm}, not SHA2_256",
+            path.display()
+        ));
+    }
+    let decoded = base64_decode(digest)
+        .ok_or_else(|| format!("{} has a malformed bundle digest", path.display()))?;
+    let actual = hex_bytes(&decoded);
+    if actual != checksum.to_lowercase() {
+        return Err(format!(
+            "{} binds a different digest than the manifest checksum",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Requires the first in-toto statement to carry the artefact's digest.
+fn check_provenance_binding(bytes: &[u8], checksum: &str, path: &Path) -> Result<String, String> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| format!("{} is not UTF-8 JSON lines", path.display()))?;
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .ok_or_else(|| format!("{} names no statement", path.display()))?;
+    let statement: serde_json::Value = serde_json::from_str(first)
+        .map_err(|error| format!("{} is not an in-toto statement: {error}", path.display()))?;
+    if statement
+        .pointer("/_type")
+        .and_then(serde_json::Value::as_str)
+        != Some("https://in-toto.io/Statement/v1")
+    {
+        return Err(format!("{} is not an in-toto v1 statement", path.display()));
+    }
+    let subjects = statement
+        .pointer("/subject")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{} has no statement subject", path.display()))?;
+    let bound = subjects.iter().any(|subject| {
+        subject
+            .pointer("/digest/sha256")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|digest| digest.eq_ignore_ascii_case(checksum))
+    });
+    if !bound {
+        return Err(format!(
+            "{} names no subject with the manifest checksum",
+            path.display()
+        ));
+    }
+    Ok(statement
+        .pointer("/predicateType")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("untyped")
+        .to_owned())
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        text.push_str(&format!("{byte:02x}"));
+    }
+    text
+}
+
+/// Decodes standard base64 without outside crates.
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    if text.is_empty() || !text.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (chunks, _) = text.as_bytes().as_chunks::<4>();
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        let last = chunk_index + 1 == chunks.len();
+        let mut group = 0u32;
+        let mut padding = 0usize;
+        for (index, byte) in chunk.iter().enumerate() {
+            let sextet = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => {
+                    padding += 1;
+                    0
+                }
+                _ => return None,
+            };
+            if padding > 0 && *byte != b'=' {
+                return None;
+            }
+            if *byte == b'=' && index < 2 {
+                return None;
+            }
+            group = (group << 6) | u32::from(sextet);
+        }
+        if padding > 2 {
+            return None;
+        }
+        if padding > 0 && !last {
+            return None;
+        }
+        out.push((group >> 16) as u8);
+        if padding < 2 {
+            out.push((group >> 8) as u8);
+        }
+        if padding < 1 {
+            out.push(group as u8);
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::json_u64;
@@ -4152,6 +4399,150 @@ mod tests {
             sbom_verify(&[&format!("--lockfile={lock}"), &format!("--sbom={out}")]).is_err(),
             "a changed byte must fail verification"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn base64_decode_matches_the_rfc_vectors_and_rejects_junk() {
+        use super::base64_decode;
+        assert_eq!(base64_decode("TQ=="), Some(b"M".to_vec()));
+        assert_eq!(base64_decode("TWE="), Some(b"Ma".to_vec()));
+        assert_eq!(base64_decode("TWFu"), Some(b"Man".to_vec()));
+        assert_eq!(base64_decode(""), None);
+        assert_eq!(base64_decode("TQ="), None);
+        assert_eq!(base64_decode("T==="), None);
+        assert_eq!(base64_decode("!!!!"), None);
+        assert_eq!(base64_decode("TQ==TQ==".repeat(2).as_str()), None);
+    }
+
+    fn base64_encode(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut text = String::new();
+        for chunk in bytes.chunks(3) {
+            let mut group = 0u32;
+            for byte in chunk {
+                group = (group << 8) | u32::from(*byte);
+            }
+            group <<= 8 * (3 - chunk.len());
+            for index in 0..4 {
+                if index <= chunk.len() {
+                    text.push(ALPHABET[((group >> (18 - index * 6)) & 63) as usize] as char);
+                } else {
+                    text.push('=');
+                }
+            }
+        }
+        text
+    }
+
+    fn trust_fixture_dir(case: &str, digest_hex: &str, digest_b64: &str) -> std::path::PathBuf {
+        use super::{ManifestArtefact, canonical_manifest_bytes, sort_manifest_artefacts};
+        let dir = sbom_scratch_dir(case);
+        let manifest_dir = dir.join("manifest");
+        let bundle_dir = dir.join("bundles");
+        std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
+        std::fs::create_dir_all(&bundle_dir).expect("bundle dir");
+        let mut artefacts = vec![ManifestArtefact {
+            name: "ignatius-0.1.0-aarch64-apple-darwin.tar.gz".to_owned(),
+            target: "aarch64-apple-darwin".to_owned(),
+            format: "tar.gz".to_owned(),
+            size_bytes: 8,
+            checksum: digest_hex.to_owned(),
+        }];
+        sort_manifest_artefacts(&mut artefacts);
+        let manifest = canonical_manifest_bytes("0.1.0", &"ab".repeat(20), "test", &artefacts);
+        std::fs::write(manifest_dir.join("release-manifest.json"), &manifest).expect("manifest");
+        let bundle = format!(
+            "{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{digest_b64}\"}},\"signature\":\"AAA=\"}}}}"
+        );
+        std::fs::write(
+            bundle_dir.join("ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            &bundle,
+        )
+        .expect("bundle");
+        let provenance = format!(
+            "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"a.tar.gz\",\"digest\":{{\"sha256\":\"{digest_hex}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
+        );
+        std::fs::write(
+            bundle_dir.join("ignatius-0.1.0-aarch64-apple-darwin.tar.gz.intoto.jsonl"),
+            &provenance,
+        )
+        .expect("provenance");
+        dir
+    }
+
+    fn fixture_digest() -> (String, String) {
+        use sha2::Digest as _;
+        let bytes = sha2::Sha256::digest(b"fixture artefact bytes");
+        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        (hex.clone(), base64_encode(&bytes))
+    }
+
+    #[test]
+    fn trust_verify_binds_matching_sidecars() {
+        use super::trust;
+        let (hex, b64) = fixture_digest();
+        let dir = trust_fixture_dir("bound", &hex, &b64);
+        let manifest = dir.join("manifest").to_str().expect("utf-8").to_owned();
+        let bundles = dir.join("bundles").to_str().expect("utf-8").to_owned();
+        trust(&[
+            "verify",
+            &format!("--manifest-dir={manifest}"),
+            &format!("--bundle-dir={bundles}"),
+        ])
+        .expect("bound sidecars verify");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn trust_verify_names_missing_mismatched_and_malformed_sidecars() {
+        use super::trust;
+        let (hex, b64) = fixture_digest();
+        let wrong = "00".repeat(32);
+
+        let dir = trust_fixture_dir("cases", &hex, &b64);
+        let manifest = dir.join("manifest").to_str().expect("utf-8").to_owned();
+        let bundles = dir.join("bundles").to_str().expect("utf-8").to_owned();
+        let run = || {
+            trust(&[
+                "verify",
+                &format!("--manifest-dir={manifest}"),
+                &format!("--bundle-dir={bundles}"),
+            ])
+        };
+
+        std::fs::remove_file(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+        )
+        .expect("remove");
+        assert!(run().is_err(), "a missing bundle must block");
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            format!("{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{}\"}}}}}}", base64_encode(&[0u8; 32])),
+        )
+        .expect("rewrite");
+        let error = run().expect_err("a foreign digest must block");
+        assert!(error.contains("different digest"), "{error}");
+
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            format!("{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA512\",\"digest\":\"{b64}\"}}}}}}"),
+        )
+        .expect("rewrite");
+        assert!(run().is_err(), "an unexpected algorithm must block");
+
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            format!("{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{b64}\"}}}}}}"),
+        )
+        .expect("restore");
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.intoto.jsonl"),
+            format!("{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"digest\":{{\"sha256\":\"{wrong}\"}}}}]}}\n"),
+        )
+        .expect("rewrite");
+        assert!(run().is_err(), "a foreign provenance subject must block");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
