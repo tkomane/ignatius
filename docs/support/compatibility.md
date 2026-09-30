@@ -16,9 +16,10 @@ which upstream minor version is current.
 contracts on Linux at source `52872ac` in
 [CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
 whose executed jobs were rechecked on 2026-09-04. Its PostgreSQL 18 Unix-socket
-job also executed successfully. **Local evidence: PostgreSQL 18.4 on macOS**,
-including recorded later feature runs in `docs/status.md` with an unconfigured
-socket gate. The hosted baseline does not cover the newer local worktree;
+job also executed successfully. **Local evidence: PostgreSQL 14.24, 15.19,
+16.15, 17.11 and 18.4 on macOS**, 53/53 plain/TLS integration tests on each
+major against the integration branch on 2026-09-30 (see `docs/status.md`),
+with an unconfigured socket gate. The hosted baseline does not cover the newer local worktree;
 rerun the applicable matrix against the source to be released. Native Windows
 database and hand-terminal claims remain separate evidence requirements.
 

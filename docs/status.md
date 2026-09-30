@@ -4,6 +4,26 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## W05 local server matrix 14-18 on the integration branch - 2026-09-30
+
+Ran the full 53-test plain/TLS integration suite on branch
+`w01/reconcile-1d841b4-onto-bd05b9d` against each supported major from the
+reviewed digest map in `docker/postgres-images.env`, one disposable server at
+a time on macOS arm64 with Docker Desktop. Every major passed 53/53:
+
+| Major | Server version | Result |
+| --- | --- | --- |
+| 14 | 14.24 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 15 | 15.19 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 16 | 16.15 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 17 | 17.11 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 18 | 18.4 (existing `cargo xtask verify` gates) | pass |
+
+One procedural note: the tests read the password from `IGNATIUS_TEST_PG_URI`
+itself, so the URIs were exported with the synthetic fixture password via a
+variable reference, never on the command line. The Unix-socket gate stays
+skipped and the hosted matrix at candidate source stays open.
+
 ## W01/W02 integration branch: connection identity and bounds on the 025 base - 2026-09-30
 
 Branch `w01/reconcile-1d841b4-onto-bd05b9d` (based on `origin/main` bd05b9d)
