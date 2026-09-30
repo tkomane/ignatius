@@ -364,6 +364,15 @@ mod tests {
     }
 
     #[test]
+    fn oversized_notice_is_bounded_and_marked() {
+        let message = "é".repeat(MAX_NOTICE_MESSAGE_BYTES);
+        let bounded = bounded_notice_message(&message);
+        assert!(bounded.len() <= MAX_NOTICE_MESSAGE_BYTES);
+        assert!(bounded.ends_with(" ... [notice truncated]"));
+        assert!(bounded.is_char_boundary(bounded.len()));
+    }
+
+    #[test]
     fn summaries_distinguish_rows_returned_from_rows_affected() {
         let mut set = ResultSet::new(vec!["n".into()], 10);
         set.push(row("1"));

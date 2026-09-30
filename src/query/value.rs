@@ -312,6 +312,20 @@ mod tests {
     }
 
     #[test]
+    fn retained_values_have_a_byte_bound_but_streaming_cells_do_not() {
+        let value = "x".repeat(MAX_RETAINED_VALUE_BYTES + 1);
+        assert_eq!(
+            Cell::from_option_bounded(Some(&value)),
+            Err(MAX_RETAINED_VALUE_BYTES + 1)
+        );
+        assert_eq!(
+            Cell::from_option_bounded(Some("x")),
+            Ok(Cell::Text("x".into()))
+        );
+        assert_eq!(Cell::from_option_bounded(None), Ok(Cell::Null));
+    }
+
+    #[test]
     fn width_counts_terminal_cells_not_characters() {
         assert_eq!(display_width("abc"), 3);
         assert_eq!(display_width("日本語"), 6, "wide characters take two cells");
