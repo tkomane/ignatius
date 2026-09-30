@@ -3691,6 +3691,341 @@ fn days_in_month(year: u16, month: u8) -> u8 {
     }
 }
 
+/// Generates or verifies the CycloneDX software bill of materials.
+///
+/// The SBOM is derived deterministically from `Cargo.lock`: no network, no
+/// clock, no randomness, so regenerating it must reproduce the exact bytes.
+/// This is the inventory half of the owner-chosen W11 trust providers
+/// (CycloneDX SBOM, Sigstore keyless signing, GitHub OIDC/SLSA provenance);
+/// signing and provenance adapters follow separately.
+pub fn sbom(args: &[&str]) -> Result<(), String> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| "release sbom needs generate or verify".to_owned())?;
+    match *command {
+        "generate" => sbom_generate(rest),
+        "verify" => sbom_verify(rest),
+        other => Err(format!(
+            "release sbom needs generate or verify, not {other}"
+        )),
+    }
+}
+
+fn sbom_options(args: &[&str], out_flag: &str) -> Result<(PathBuf, PathBuf), String> {
+    let mut lockfile: Option<&str> = None;
+    let mut out: Option<&str> = None;
+    for arg in args {
+        let Some((flag, value)) = arg.split_once('=') else {
+            return Err(format!("release sbom options use --flag=value, not {arg}"));
+        };
+        match flag {
+            "--lockfile" => lockfile = Some(value),
+            flag if flag == out_flag => out = Some(value),
+            _ => {
+                return Err(format!(
+                    "unknown release sbom option {flag}; expected --lockfile and {out_flag}"
+                ));
+            }
+        }
+    }
+    let lockfile = lockfile.ok_or_else(|| "release sbom needs --lockfile=PATH".to_owned())?;
+    let out = out
+        .ok_or_else(|| format!("release sbom needs {out_flag}=PATH"))
+        .map(PathBuf::from)?;
+    Ok((resolve_path(Path::new(lockfile)), out))
+}
+
+/// One `[[package]]` entry of the lockfile subset this command understands.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct LockedCrate {
+    name: String,
+    version: String,
+}
+
+/// Parses the narrow `Cargo.lock` subset the SBOM covers.
+///
+/// Only `[[package]]` sections with `name` and `version` string entries (plus
+/// the top-level `version` marker and skippable `dependencies` arrays) are
+/// understood. Anything else is an error rather than a silent omission: an
+/// inventory that quietly drops crates is worse than one that refuses.
+fn parse_lockfile(text: &str, path: &Path) -> Result<Vec<LockedCrate>, String> {
+    let fail = |detail: &str| -> String {
+        format!("{} is not a supported Cargo.lock: {detail}", path.display())
+    };
+    let mut crates: Vec<LockedCrate> = Vec::new();
+    let mut current: Option<(Option<String>, Option<String>)> = None;
+    let mut in_dependencies = false;
+    let mut packages_seen = 0usize;
+
+    for (number, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        let location = number + 1;
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if in_dependencies {
+            if line.starts_with(']') {
+                in_dependencies = false;
+            }
+            continue;
+        }
+        if line.starts_with('[') {
+            if line == "[[package]]" {
+                if let Some((name, version)) = current.take() {
+                    crates.push(LockedCrate {
+                        name: name
+                            .ok_or_else(|| fail(&format!("package {packages_seen} has no name")))?,
+                        version: version.ok_or_else(|| {
+                            fail(&format!("package {packages_seen} has no version"))
+                        })?,
+                    });
+                }
+                packages_seen += 1;
+                current = Some((None, None));
+                continue;
+            }
+            return Err(fail(&format!("line {location} has an unknown section")));
+        }
+        let Some((name, version)) = current.as_mut() else {
+            if line.starts_with("version") {
+                continue;
+            }
+            return Err(fail(&format!("line {location} is outside a package")));
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(fail(&format!("line {location} is not a key/value pair")));
+        };
+        match key.trim() {
+            "name" => {
+                *name = Some(quoted_string(value.trim(), &fail, location)?);
+            }
+            "version" => {
+                *version = Some(quoted_string(value.trim(), &fail, location)?);
+            }
+            "source" | "checksum" => {
+                quoted_string(value.trim(), &fail, location)?;
+            }
+            "dependencies" => {
+                if !value.trim().starts_with('[') {
+                    return Err(fail(&format!(
+                        "line {location} has a bad dependencies list"
+                    )));
+                }
+                if !value.trim().ends_with(']') {
+                    in_dependencies = true;
+                }
+            }
+            other => {
+                return Err(fail(&format!(
+                    "line {location} has an unsupported key {other}"
+                )));
+            }
+        }
+    }
+    if in_dependencies {
+        return Err(fail("the dependencies list never closes"));
+    }
+    if let Some((name, version)) = current.take() {
+        crates.push(LockedCrate {
+            name: name.ok_or_else(|| fail("the last package has no name"))?,
+            version: version.ok_or_else(|| fail("the last package has no version"))?,
+        });
+    }
+    if crates.is_empty() {
+        return Err(fail("it names no packages"));
+    }
+    let mut sorted = crates;
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != packages_seen {
+        return Err(fail("it names a duplicate package"));
+    }
+    Ok(sorted)
+}
+
+fn quoted_string(
+    value: &str,
+    fail: &dyn Fn(&str) -> String,
+    location: usize,
+) -> Result<String, String> {
+    let inner = value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .ok_or_else(|| fail(&format!("line {location} is not a quoted string")))?;
+    if inner.contains('"') || inner.contains('\n') {
+        return Err(fail(&format!("line {location} has a bad quoted string")));
+    }
+    Ok(inner.to_owned())
+}
+
+/// Reads the root product name and version for the SBOM metadata component.
+fn read_product_identity(root: &Path) -> Result<(String, String), String> {
+    let path = root.join("Cargo.toml");
+    let text = fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "could not read product manifest {}: {error}",
+            path.display()
+        )
+    })?;
+    let mut in_package = false;
+    let mut name: Option<String> = None;
+    let mut version: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=')
+            && name.is_none()
+            && key.trim() == "name"
+        {
+            name = Some(value.trim().trim_matches('"').trim_matches('\'').to_owned());
+        }
+        if let Some((key, value)) = line.split_once('=')
+            && version.is_none()
+            && key.trim() == "version"
+        {
+            let candidate = value.trim().trim_matches('"').trim_matches('\'');
+            if looks_like_semver(candidate) {
+                version = Some(candidate.to_owned());
+            }
+        }
+    }
+    match (name, version) {
+        (Some(name), Some(version)) if !name.is_empty() => Ok((name, version)),
+        _ => Err(format!(
+            "product manifest {} has no usable package name and version",
+            path.display()
+        )),
+    }
+}
+
+/// Renders the deterministic CycloneDX 1.5 document for these crates.
+///
+/// Key order is fixed by construction and there is no timestamp, serial
+/// number or randomness, so the same lockfile always yields the same bytes.
+fn canonical_sbom_bytes(product: &str, product_version: &str, crates: &[LockedCrate]) -> Vec<u8> {
+    use serde_json::{Map, Value};
+    let components: Vec<Value> = crates
+        .iter()
+        .map(|item| {
+            let mut component = Map::new();
+            component.insert(
+                "bom-ref".to_owned(),
+                Value::String(format!("pkg:cargo/{}@{}", item.name, item.version)),
+            );
+            component.insert("name".to_owned(), Value::String(item.name.clone()));
+            component.insert(
+                "purl".to_owned(),
+                Value::String(format!("pkg:cargo/{}@{}", item.name, item.version)),
+            );
+            component.insert("type".to_owned(), Value::String("library".to_owned()));
+            component.insert("version".to_owned(), Value::String(item.version.clone()));
+            Value::Object(component)
+        })
+        .collect();
+    let mut metadata_component = Map::new();
+    metadata_component.insert("name".to_owned(), Value::String(product.to_owned()));
+    metadata_component.insert("type".to_owned(), Value::String("application".to_owned()));
+    metadata_component.insert(
+        "version".to_owned(),
+        Value::String(product_version.to_owned()),
+    );
+    let mut metadata = Map::new();
+    metadata.insert("component".to_owned(), Value::Object(metadata_component));
+    let mut document = Map::new();
+    document.insert(
+        "bomFormat".to_owned(),
+        Value::String("CycloneDX".to_owned()),
+    );
+    document.insert("components".to_owned(), Value::Array(components));
+    document.insert("metadata".to_owned(), Value::Object(metadata));
+    document.insert("specVersion".to_owned(), Value::String("1.5".to_owned()));
+    document.insert("version".to_owned(), Value::Number(1.into()));
+    let mut bytes = serde_json::to_string_pretty(&Value::Object(document))
+        .expect("SBOM document is JSON-serializable")
+        .into_bytes();
+    bytes.push(b'\n');
+    bytes
+}
+
+fn sbom_generate(args: &[&str]) -> Result<(), String> {
+    let (lockfile, out) = sbom_options(args, "--out")?;
+    let root = super::repo_root();
+    let (product, product_version) = read_product_identity(&root)?;
+    let text = fs::read_to_string(&lockfile)
+        .map_err(|error| format!("could not read {}: {error}", lockfile.display()))?;
+    if path_is_symlink(&lockfile)? {
+        return Err(format!(
+            "lockfile must not be a symlink: {}",
+            lockfile.display()
+        ));
+    }
+    let out = resolve_path(&out);
+    let Some(parent) = out.parent() else {
+        return Err("output path must have a parent directory".to_owned());
+    };
+    if !parent.is_dir() {
+        return Err(format!(
+            "output parent directory does not exist: {}",
+            parent.display()
+        ));
+    }
+    if path_is_symlink(parent)? {
+        return Err(format!(
+            "output parent must not use a symlink: {}",
+            parent.display()
+        ));
+    }
+    let crates = parse_lockfile(&text, &lockfile)?;
+    let bytes = canonical_sbom_bytes(&product, &product_version, &crates);
+    write_new_file(&out, &bytes)?;
+    println!(
+        "SBOM: recorded {} crates from {} in {}",
+        crates.len(),
+        lockfile.display(),
+        out.display()
+    );
+    Ok(())
+}
+
+fn sbom_verify(args: &[&str]) -> Result<(), String> {
+    let (lockfile, sbom) = sbom_options(args, "--sbom")?;
+    let root = super::repo_root();
+    let (product, product_version) = read_product_identity(&root)?;
+    let text = fs::read_to_string(&lockfile)
+        .map_err(|error| format!("could not read {}: {error}", lockfile.display()))?;
+    let stored =
+        fs::read(&sbom).map_err(|error| format!("could not read {}: {error}", sbom.display()))?;
+    let crates = parse_lockfile(&text, &lockfile)?;
+    let expected = canonical_sbom_bytes(&product, &product_version, &crates);
+    if stored == expected {
+        println!(
+            "SBOM: {} matches {} ({} crates)",
+            sbom.display(),
+            lockfile.display(),
+            crates.len()
+        );
+        return Ok(());
+    }
+    let first = stored
+        .iter()
+        .zip(expected.iter())
+        .position(|(left, right)| left != right)
+        .unwrap_or(stored.len().min(expected.len()));
+    Err(format!(
+        "{} does not match {}: first difference at byte {first} (stored {} bytes, expected {} bytes)",
+        sbom.display(),
+        lockfile.display(),
+        stored.len(),
+        expected.len()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::json_u64;
@@ -3712,5 +4047,111 @@ mod tests {
         assert_eq!(json_u64(&number("23.1")), None);
         assert_eq!(json_u64(&number("-1.0")), None);
         assert_eq!(json_u64(&number("18446744073709551616")), None);
+    }
+
+    fn lock_fixture() -> &'static str {
+        "version = 4\n\
+         \n\
+         [[package]]\n\
+         name = \"zebra\"\n\
+         version = \"2.0.0\"\n\
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+         checksum = \"abc\"\n\
+         \n\
+         [[package]]\n\
+         name = \"apple\"\n\
+         version = \"1.0.0\"\n\
+         dependencies = [\n\
+          \"zebra\",\n\
+         ]\n"
+    }
+
+    #[test]
+    fn sbom_parses_packages_sorted_with_purls() {
+        use super::{canonical_sbom_bytes, parse_lockfile};
+        use std::path::Path;
+        let crates = parse_lockfile(lock_fixture(), Path::new("Cargo.lock")).expect("parse");
+        assert_eq!(crates.len(), 2);
+        assert_eq!(crates[0].name, "apple");
+        assert_eq!(crates[1].name, "zebra");
+
+        let bytes = canonical_sbom_bytes("ignatius", "0.1.0", &crates);
+        let first = canonical_sbom_bytes("ignatius", "0.1.0", &crates);
+        assert_eq!(bytes, first, "the same lockfile must yield the same bytes");
+        let text = String::from_utf8(bytes).expect("utf-8");
+        assert!(text.contains("\"bomFormat\": \"CycloneDX\""), "{text}");
+        assert!(text.contains("\"specVersion\": \"1.5\""), "{text}");
+        assert!(text.contains("pkg:cargo/apple@1.0.0"), "{text}");
+        assert!(text.contains("pkg:cargo/zebra@2.0.0"), "{text}");
+        assert!(
+            text.find("pkg:cargo/apple").unwrap() < text.find("pkg:cargo/zebra").unwrap(),
+            "components stay sorted: {text}"
+        );
+        assert!(!text.contains("serialNumber"), "no randomness: {text}");
+    }
+
+    #[test]
+    fn sbom_rejects_a_lockfile_it_cannot_fully_cover() {
+        use super::parse_lockfile;
+        use std::path::Path;
+        let path = Path::new("Cargo.lock");
+        assert!(parse_lockfile("[[package]]\nname = \"only\"\n", path).is_err());
+        assert!(
+            parse_lockfile(
+                "[[package]]\nname = \"a\"\nversion = \"1\"\nmagic = \"x\"\n",
+                path
+            )
+            .is_err()
+        );
+        assert!(parse_lockfile(
+            "[[package]]\nname = \"a\"\nversion = \"1\"\n[[package]]\nname = \"a\"\nversion = \"1\"\n",
+            path
+        )
+        .is_err());
+        assert!(
+            parse_lockfile(
+                "[[package]]\nname = \"a\"\nversion = \"1\"\ndependencies = [\n",
+                path
+            )
+            .is_err()
+        );
+        assert!(parse_lockfile("", path).is_err());
+    }
+
+    fn sbom_scratch_dir(case: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ignatius-sbom-{}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst),
+            case
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn sbom_generate_then_verify_round_trips_and_detects_tampering() {
+        use super::{sbom_generate, sbom_verify};
+        let dir = sbom_scratch_dir("round-trip");
+        let lock = dir.join("Cargo.lock");
+        let out = dir.join("sbom.json");
+        std::fs::write(&lock, lock_fixture()).expect("fixture");
+        let lock = lock.to_str().expect("utf-8").to_owned();
+        let out = out.to_str().expect("utf-8").to_owned();
+
+        sbom_generate(&[&format!("--lockfile={lock}"), &format!("--out={out}")]).expect("generate");
+        sbom_verify(&[&format!("--lockfile={lock}"), &format!("--sbom={out}")]).expect("verify");
+
+        let mut bytes = std::fs::read(&out).expect("read");
+        let last = bytes.len() - 2;
+        bytes[last] = if bytes[last] == b'0' { b'1' } else { b'0' };
+        std::fs::write(&out, &bytes).expect("tamper");
+        assert!(
+            sbom_verify(&[&format!("--lockfile={lock}"), &format!("--sbom={out}")]).is_err(),
+            "a changed byte must fail verification"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

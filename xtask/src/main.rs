@@ -48,6 +48,7 @@ fn main() -> ExitCode {
         ["release", "evidence-scope", rest @ ..] => release::evidence_scope(rest),
         ["release", "manifest", "generate", rest @ ..] => release::manifest_generate(rest),
         ["release", "manifest", "verify", rest @ ..] => release::manifest_verify(rest),
+        ["release", "sbom", rest @ ..] => release::sbom(rest),
         ["install", rest @ ..] => install(rest),
         ["install-hooks"] => install_hooks(),
         other => Err(format!(
@@ -91,6 +92,10 @@ fn print_help() {
                            Generate release-manifest.json and SHA256SUMS
   cargo xtask release manifest verify OPTIONS
                            Verify sidecars and exact archive bytes
+  cargo xtask release sbom generate --lockfile=PATH --out=PATH
+                           Generate the deterministic CycloneDX SBOM
+  cargo xtask release sbom verify --lockfile=PATH --sbom=PATH
+                           Verify the SBOM matches the lockfile
   cargo xtask install [--dir PATH]
                            Build a release binary and put it on PATH
   cargo xtask install-hooks
