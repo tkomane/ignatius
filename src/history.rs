@@ -567,6 +567,25 @@ mod tests {
     }
 
     #[test]
+    fn recording_past_the_configured_max_keeps_only_the_newest() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let history = history(&dir, 3);
+        for statement in [
+            "SELECT 1;",
+            "SELECT 2;",
+            "SELECT 3;",
+            "SELECT 4;",
+            "SELECT 5;",
+        ] {
+            history.record(&entry(statement)).expect("record");
+        }
+        let entries = history.entries().expect("read");
+        assert_eq!(entries.len(), 3, "the file stays bounded");
+        assert_eq!(entries[0].sql, "SELECT 3;", "oldest first of what survived");
+        assert_eq!(entries[2].sql, "SELECT 5;");
+    }
+
+    #[test]
     fn a_damaged_line_does_not_lose_the_rest_of_the_history() {
         let dir = tempfile::tempdir().expect("temp dir");
         let history = history(&dir, 100);
