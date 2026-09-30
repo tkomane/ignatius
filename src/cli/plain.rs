@@ -543,7 +543,15 @@ pub fn run(
 
         for statement in &execution.statements {
             for notice in &statement.notices {
-                writeln!(err, "{}: {}", notice.severity, notice.message).ok();
+                // Server text is hostile input: escape control characters before
+                // they can reach the terminal, where they could repaint it.
+                writeln!(
+                    err,
+                    "{}: {}",
+                    crate::query::sanitize_for_display(&notice.severity),
+                    crate::query::sanitize_for_display(&notice.message)
+                )
+                .ok();
             }
         }
         if let Some(error) = &execution.error {
