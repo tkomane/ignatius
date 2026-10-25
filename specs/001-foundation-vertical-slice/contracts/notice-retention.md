@@ -307,6 +307,16 @@ acknowledgement and use the existing single cancellation transition/effect,
 retaining duplicate suppression and requested-versus-confirmed semantics.
 Quit remains available. These explicit recovery paths do not clear pending loss.
 
+Quit also accounts for opened sessions already held in the runtime's fixed
+pending-install slots or bounded install channel. After retiring installed
+physical sources, transfer the locally available retention counts from each
+current-generation, uninstalled attempt into previous-connection accounting
+once per captured opaque attempt identity. Reject stale generations and avoid
+counting a session already installed/shared twice. Close and drain this bounded
+handoff without waiting for a held metadata reader, sending new SQL, retrying
+or adding a report history. This covers sessions locally available at shutdown,
+not remote observations arriving after that boundary.
+
 When no higher owner is drawn, show a complete compact footer badge
 `Notices: O4 S1` (A for abandoned) after immutable query/transaction facts and
 before optional search-path/key hints. Use ASCII in every glyph mode. Full

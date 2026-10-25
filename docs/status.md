@@ -139,6 +139,11 @@ W10-008's incoming-frame design remains unadopted. Root specified W10-013's
 32-MiB logical retained-data allowance and typed-unavailability/output contract,
 including execution-level disclosure when later nonvisible sets lose data;
 its implementation is serialized after W10-012 integration and remains open.
+A separate pure budget candidate passed 24 standalone arithmetic/admission
+tests, a non-test warnings-denied build and formatting. The lead verified its
+13 recorded artefacts. It is preparation only, with no Session/UI integration
+or product memory-limit claim; the final ResultSet layout must be measured
+again. Evidence: `/private/tmp/ignatius-w10-013-budget-OJB7A3/`.
 Root adopted W10-012's complete notice policy under foundation REL-005, with fixed cumulative
 allowances, precision-safe pending counts and explicit acknowledgement. Privacy
 implements in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
@@ -216,13 +221,16 @@ do not establish native terminal appearance or hand-use acceptance.
 
 No recursive agents or shared reducer/runtime writers. Root's PostgreSQL 18.6
 fixture pair remains available; unrelated COI services and original branches
-are preserved. Required different-family review is still pending owner consent.
+are preserved. The owner approved scoped OpenCode Go GLM-5.3 source review on
+25 October, using included allowance only. Different-family review remains
+open until the paid-fallback setting is verified and the actual review runs.
 
 Detailed sources, environments, exact logs and boundaries are in
 [verification](operations/verification.md). Synthetic buffer images establish
 rendered cells, not native terminal appearance. Native Terminal computer use
-was blocked by tool policy. Required different-family review remains pending
-explicit consent for external source transmission; hosted, Windows, participant,
+was blocked by tool policy. Scoped external source transmission now has owner
+consent; included-only billing and the actual different-family review remain
+open. Hosted, Windows, participant,
 full hand-use and release acceptance are separate open gates.
 
 ### Current security and governance evidence - 2026-10-25
@@ -289,8 +297,12 @@ than describing 024 as the latest slice.
 
 Automatic approval review rejected the attempted read-only OpenCode review
 because transmitting unpublished repository changes to that external service
-needs explicit owner consent. No review payload was sent. An owner question is
-pending in this chat. Cross-lane native peer review found one W10 regression
+needs explicit owner consent. No review payload was sent then. The owner
+subsequently approved scoped OpenCode Go GLM-5.3 review, limited to included
+subscription allowance. Current vendor documentation says Extra Usage can
+fall back to paid Console credit; the CLI does not expose that setting and
+the browser Console requires sign-in. A billing-fact question is pending in
+this chat before inference. Cross-lane native peer review found one W10 regression
 (temporary basename too long); it was reproduced, repaired and re-reviewed.
 The required different-family gate remains open even after those native reviews.
 
@@ -323,7 +335,7 @@ GitHub or publish today's changes.
 | Focused evidence | W02 sender and target-lock regressions failed before fixes; interactive 19 and reducer 171 passed. W10 original temporary/link probes failed before fixes; configuration 13, history 14, query 10 and atomic helper 6 passed. W04 generated constraint failure leaked before the correction; 8 error units, 4 session units and 5 live plain PostgreSQL subprocess privacy contracts passed after it. |
 | Full gate | First run failed a roadmap phrase-parity assertion after 898 library tests passed. Corrected the meaningful Feature 024 reference. The repeat `cargo --locked xtask verify` passed formatting, warnings-denied lints, API docs, the complete workspace and doc tests, including plain/TLS PostgreSQL. The harness reports 1,152 passing cases across 21 summaries; its socket case returns early and remains a semantic skip, not live evidence. |
 | Verifier repair | Added workspace `--no-fail-fast` so later binaries run after failure. A failed workspace gate now labels configured fixtures as information rather than falsely reporting database/socket passes. |
-| Review | Cross-lane native peer review found and re-checked the repaired W10 long-basename regression and found no remaining blocking W02/W04/W10 issue in scope. Different-family review is still pending explicit consent for external code transmission. |
+| Review | Cross-lane native peer review found and re-checked the repaired W10 long-basename regression and found no remaining blocking W02/W04/W10 issue in scope. Scoped OpenCode Go GLM-5.3 transmission now has owner consent; included-only billing verification and the actual different-family review remain open. |
 | Retention | Safe local verifier logs: `/private/tmp/ignatius-verify-2026-10-25-wave1.log` and `/private/tmp/ignatius-verify-2026-10-25-wave1-recheck.log`; regressions retained in sidecar/integration tests. |
 | Open boundaries | Required external review, Unix socket, native Windows/Linux, real terminal/screen-reader use, packaged-candidate privacy and release gates. The separate verified-TLS repeat of all five privacy contracts passed with zero skips using the generated fixture CA and `sslmode=verify-full`. |
 
