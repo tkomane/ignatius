@@ -19,12 +19,41 @@ Fresh main-targeted CodeQL and parent integration remain pending. Manual US5
 custom themes/runtime switching are in implementation on the isolated
 `codex/manual-themes-2026-10-25` branch: strict configuration/startup, runtime
 cycling and styled parity are integrated and the full local verifier passes
-1,497 harness cases. Hosted acceptance/publication are pending. Visual review
+1,497 harness cases. Published `d92c416` in draft PR35; hosted platform/MSRV,
+PG14/18/socket and policy gates passed (13 jobs, one scheduled-fixture skip).
+Fresh CodeQL/parent integration and native hand use remain pending. Visual review
 also exposed and repaired T056's selected palette group/detail ink composition.
 Final integration review found the ignored configured-colour startup/doctor
 route; T057 now corrects it with a full repeat and actual owned-PTY route evidence.
 Automatic background detection, native hand use and release remain separate
 open work.
+The next observed-friction slice is W09 / Feature025 T058: the long-line editor
+can clip its caret at the right edge. FR-2529 and the dated presentation
+contract now specify a shared horizontal view for drawing, completion and hit
+mapping. Its implementation and independent-review correction passed 78 widget
+and 114 layout cases, the full 1,515-case local gate and the same-width owned
+PTY repeat on `codex/editor-caret-2026-10-25`, based on PR35. Publication/hosted
+acceptance and native appearance/hand use remain separate next steps.
+
+Read-only readiness reviews at `d92c416` also bound the next assignments:
+
+- US6 mouse needs explicit input-time/interruption, viewport-only scrolling
+  and drag/keyboard-parity policies before its combined integrator assignment.
+  Preserve `mouse = false` until the complete verb table and restoration gates
+  pass; existing hit regions alone do not establish dispatch readiness.
+- US8 quiet chrome needs the complete state/token/suppression table, filled
+  custom-theme contrast admission, one-row safety priorities and completed-only
+  200 ms threshold pinned before implementation. Keep truthful transport,
+  transaction and recovery wording through narrow layouts.
+- US5 automatic background detection needs a supported single-owner reply
+  transport, reserved-envelope/late-input policy and staged terminal lifecycle
+  before T032. Locked Crossterm has no public OSC reply event; a finite drain
+  cannot guarantee late replies never become keys. Manual themes remain the
+  accepted implementation; no detector or fallback claim is inferred.
+
+These are dependency clarifications, not completed feature checkboxes or a
+replacement for the authoritative feature tasks. Resolve them as bounded
+contracts before assigning the next implementation.
 On 25 October, local M1 work also patched the current dependency advisories,
 refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
 window. Feature 025 keyboard panes T039/T041 and density T040 are implemented

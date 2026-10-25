@@ -155,6 +155,50 @@ existing configuration rule (report before the terminal is taken, exit 3).
   density at startup. There is no new toggle action, CLI flag, doctor field,
   theme value, third density or mouse-capture change in T040.
 
+## Editor horizontal view - 2026-10-25
+
+FR-2529 / T058 corrects the observed long-line clipping independently of mouse
+dispatch. The existing line-number, space and statement/error-marker gutter
+stays fixed. The remaining inner width is text capacity. Keep the existing
+derived vertical window; derive one horizontal cell offset from the current
+caret line and use it for every visible line. Do not add stored viewport state,
+soft wrapping or changes to SQL, scalar cursor movement, revision or undo.
+
+- Apply the existing display sanitiser first. Map rendered graphemes and each
+  complete escaped-control representation back to their original source-byte
+  ranges and one-based scalar columns. Use the locked renderer's grapheme
+  semantics without adding a segmentation dependency. A scalar cursor inside
+  a combining/ZWJ cluster highlights that whole displayed cluster; this does
+  not introduce grapheme-based editing or change the title's scalar column.
+- When text capacity is positive, the focused caret has at least one visible
+  Selection cell. Fit its whole displayed unit when possible; an end-of-line
+  or zero-width-only caret uses a selected blank. If a caret unit is wider
+  than the entire text capacity, use a selected blank in that capacity instead
+  of drawing a partial wide glyph or partial control escape. With no text
+  capacity there is no visibility claim and no completion popup.
+- Clip non-caret units by display cells. A wide grapheme or escaped-control
+  unit intersecting an edge is replaced by the intersecting number of blank
+  cells, preserving following cell positions. Never emit a raw control or
+  split a UTF-8 scalar. Keep syntax/error styles, statement/error gutter
+  markers and theme/depth/glyph degradation; the caret retains Selection
+  precedence. An unfocused editor keeps the same derived view without a caret.
+- Completion anchors to this actual visible caret coordinate. Editor hit
+  mapping uses the same offset and units: any cell of a visible wide/escaped
+  unit maps to its first source scalar; trailing blank cells map to the line's
+  end position. The fixed gutter and existing vertical mapping retain their
+  meanings. This mapping alone does not enable mouse capture or dispatch.
+- Home/buffer-start, cursor movement and width changes recompute the view.
+  Reaching a prefix that fits returns its offset to zero. Do not clamp a long
+  line's source offset to a `u16` scroll limit or confuse display cells with
+  source scalars. Painting/geometry are pure and perform no I/O or effects.
+
+Acceptance retains the failing actual-Buffer baseline, then covers long ASCII,
+wide and combining/ZWJ text, escaped controls, end-of-line/interior carets,
+very long lines beyond 65,535 cells, tiny capacities, Home/resize, completion
+and hit alignment, both densities and colour/glyph degradation. Inspect actual
+rendered cells and repeat the owned 100x30 PTY journey. These proofs establish
+rendering and captured input, not native emulator/font appearance or whole W09.
+
 ## Doctor reporting
 
 `ignatius doctor` reports, in this order, beside the existing detections:

@@ -1,5 +1,59 @@
 # Verification
 
+## Long-line editor correction - 2026-10-25
+
+Feature025 FR-2529 / T058 is integrated from clean `d92c416` with five owned
+source paths. The root presentation/plan/task amendments precede implementation.
+Actual 100x30 Buffer tests first recorded four failures and one short-ASCII
+control: missing long-line caret and incorrect wide/combining/control hits.
+The first candidate then passed 76 widget and 114 layout cases. Independent
+review found an unfocused zero-width hit override that disagreed with painting;
+a separate failing actual-Buffer case precedes the one-predicate focus repair.
+Final focused counts are **78 widget and 114 layout cases**, with formatting
+and warnings-denied Clippy passing. All original 26,505 widget-test bytes remain
+an exact prefix; the short ASCII control preserves all 3,000 cells exactly.
+
+Root verified every artifact in both immutable freezes (49 and 38 respectively),
+the 446 compiled input hashes against the published base or owned candidate
+files, and the five installed files against the final freeze. Root inspected
+seven synthetic raster files, including before/after long-line, Home, control,
+combining, error, completion and tiny-capacity views. Raw cells remain primary;
+Menlo/indexed/default/DIM approximations and missing CJK/emoji font glyphs do not
+establish native appearance. The short completion regression proves display-cell
+agreement; it is not an exhaustive scrolled-popup matrix, where right-clamping
+can hide anchor differences. No memory/latency ceiling or grapheme-based editing
+claim is added. Source positions and undo remain scalar/byte based.
+
+The full integrated local verifier passed **1,515 outer harness cases, 1,207
+library cases and 25 summaries**, with zero failures/ignored cases and all six
+executed gates. Existing synthetic plain/TLS servers were freshly queried as
+PostgreSQL **18.6**; the macOS Unix-socket case is still an explicit semantic
+skip. Local tools are macOS 27.0.1 arm64 and Homebrew Rust/Cargo 1.99.1; hosted
+Rust 1.97.1/MSRV acceptance remains separate. Log:
+`/private/tmp/ignatius-t058-full-verify-20261025.log`, SHA-256
+`03c40158ff7af92030466bd04d9ad3591c7b9b0bbbd0cfd502ee054ca0e8b462`.
+
+Root's identical owned 100x30 PTY script and synthetic config show the typed
+end sentinel absent before and present after, with Home revealing the prefix
+in both. Both quit zero, enter/leave the alternate screen and preserve config
+bytes. No profile was selected or SQL submitted. Before binary is clean d92;
+after binary is d92-modified with the exact installed freeze02 source, not a
+clean publication identity. Script SHA-256:
+`8b12cc6426c98e299ded8f9c42fad8ad154de9e5d81a1c17b5dfa0414f06a678`.
+Receipts: `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-before-c0901prg/receipt.json`
+and `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-oarmp52a/receipt.json`.
+Two prior harness redraw expectations and one non-integrated verifier attempt
+are retained and excluded from acceptance. The latter was stopped by exact
+task-owned process ancestry before the source-bound full repeat above.
+
+Freeze02: `/private/tmp/ignatius-editor-eol-red-1di2ma1e/freeze-02/`, manifest
+`1acce2109b6ac2cc8cdd0efa90f08284f07532e544ef589b8d51f50a4f93de71`.
+Native independent review:
+`/private/tmp/ignatius-t058-freeze02-independent-review-224cbtyy/REVIEW.md`.
+The owner's external-review skip remains in force; no different-family provider
+review is claimed. Hosted acceptance, native terminal/font/hand use, fresh
+main-targeted CodeQL, parent integration and release remain separate gates.
+
 ## Manual theme integration - 2026-10-25
 
 The manual FR-2513/2515/2516 slice integrates the immutable pure-theme and strict
@@ -86,8 +140,39 @@ SGRs; explicit always and NO_COLOR raw captures remain byte-identical to their
 pre-fix controls. After receipt:
 `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-qtg0xxks/receipt.json`,
 binary SHA-256 `3d0c50917ae5640bfda906be225314360c1ad015c18130319062c252eed01883`.
-These remain local macOS 27 arm64/Rust 1.99.1 results, with no native font or
-emulator claim. Hosted/pinned/MSRV, fresh CodeQL and publication remain pending.
+These are local macOS 27 arm64/Rust 1.99.1 results, with no native font or
+emulator claim. Published clean `d92c416` in draft PR35 after the full unchanged
+pre-push verifier repeated all 1,497 cases. Pinned Gitleaks passed 444 exact-source
+files and 291 non-merge commits among 320 reachable local revisions.
+
+CI `40231713035` completed with 13 successful jobs and one deliberate scheduled
+fixture-drift skip. Actual merge `253ac7cc` and head share tree
+`00158901056a97195719d3e08026eeeff7234254`. Independent platform audit confirms
+the same 74 selected manual-theme/T056/T057 cases executed on each primary
+platform under Rust 1.97.1; full harness/library totals are Linux 1,497/1,189,
+macOS 1,497/1,189 and Windows 1,441/1,170. Startup/refusal and docs passed, with
+doctor's three explicit skips per platform. Platform fixture guards are not live
+database claims. Separate PG14/18 jobs each passed 236 selected invocations,
+including positive runtime-major/readiness and plain/verify-full routes; one
+actual Linux socket query passed. The 473 total includes pure/local cases.
+
+MSRV 1.90 compilation and policy jobs passed. Six configured duplicate-version
+warnings remain; three reported archive-helper passes have conditional Python
+guards without separately printed positive invocation evidence. Neither is
+converted into a zero-warning/no-semantic-skip claim. Full log receipts:
+`/private/tmp/ignatius-pr35-platform-audit-2u768bko/receipt.json` (28 artifacts),
+`/private/tmp/ignatius-pr35-policy-audit-ziQQqR/RECEIPT.md` (37 artifacts), and
+`/private/tmp/ignatius-pr35-d92c416-db-audit-20261025.json`.
+
+The actual clean published local binary also passed a 180x40 owned-PTY keyboard
+journey through all four palettes, retaining typed SQL/config bytes and exiting
+normally without connection selection or SQL execution. Earlier probe harness
+setup/clipping/wrong-RGB expectations are retained as failed harness attempts.
+Final receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-cycle-pty-h7f9buo8/receipt.json`.
+Fresh main-targeted CodeQL, parent integration, native desktop appearance/hand
+use and release remain open. Post-publication acceptance notes remain local
+owned documentation edits until the next meaningful source checkpoint.
 
 ## Expanded Results selection correction - 2026-10-25
 

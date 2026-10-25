@@ -39,6 +39,12 @@ current keystroke.
 edits, and whether it has focus. All four are in the title so the pane body is
 only ever SQL.
 
+Long lines use a derived horizontal view that follows the caret while keeping
+the line-number and statement/error gutter fixed. Completion and editor hit
+regions share the same sanitised display-cell mapping, including wide and
+combining text. The title still names the source scalar column; viewing does
+not rewrite SQL, wrap it into new source lines or create undo entries.
+
 **Completion menu.** A static, cursor-adjacent overlay over the editor. It
 answers `Ctrl+Space` with the current scope, candidate kind, schema or source,
 type/detail, visible and true counts, catalogue freshness, and the keys that

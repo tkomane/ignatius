@@ -581,6 +581,21 @@ position; a real command choice reveals its target, including clearing covered
 reading panels before object insertion. `Space` is named visibly. Feature 015
 T042 records local implementation/rendered checks; native hand use is separate.
 
+## Long SQL lines
+
+The editor follows the caret horizontally while its line-number/statement
+gutter stays fixed. Completion anchoring and editor hit regions use the same
+sanitised display-cell view, including wide and combining graphemes and complete
+escaped-control representations. Source SQL, scalar cursor columns and undo
+state are unchanged; there is no soft wrap or persistent scroll setting.
+
+When text capacity is positive, an oversized or zero-width caret unit has a
+selected blank fallback. Partial wide/control units at a viewport edge become
+position-preserving blanks. No text capacity means no caret-visibility claim
+or completion popup. This does not enable mouse dispatch. Feature025 FR-2529 /
+T058 records scoped implementation and evidence; native emulator/font and
+whole daily-use acceptance remain separate.
+
 ## Manual themes
 
 The manual-theme slice supports `dark`, `light`, `high-contrast` and `custom`
@@ -600,7 +615,9 @@ font, DIM, emulator appearance and hand use remain separate. Automatic backgroun
 detection (`auto`, T032) remains unimplemented and is explicitly refused.
 The integrated manual source passed full local verification on 25 October 2026:
 1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
-The macOS socket case is skipped; publication and hosted acceptance are pending.
+The local macOS socket case is skipped. Published `d92c416` in draft PR35 passed
+hosted Linux/macOS/Windows, pinned/MSRV and PG14/18 plain/TLS plus a real Linux
+socket. Fresh main-targeted CodeQL and native hand use remain pending.
 T057 corrects the existing ignored `[ui] color` startup/doctor route. The final
 gate includes that correction; actual owned macOS PTY startup/quit probes show
 configured never emitting no painted SGRs, with explicit always/NO_COLOR controls.
