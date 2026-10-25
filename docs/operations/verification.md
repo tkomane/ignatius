@@ -104,6 +104,36 @@ skip against unchanged application source `f99fe75` plus only this harness edit.
 Log: `/private/tmp/ignatius-export-interrupt-barrier-2026-10-25.log`.
 The complete matrix recheck remains separate until executed.
 
+## Live database CI coverage repair - 2026-10-25
+
+The PostgreSQL matrix now explicitly runs the parameter-semantics and runtime-
+privacy contracts with live plain fixtures, repeats them with verified TLS, and
+checks session-sidecar guards over both transports. The ordinary native-OS job
+still auto-discovers all targets, but its missing database cannot substitute
+for this live evidence. A new wiring assertion first failed for the omitted
+parameter-semantics target before the CI change.
+
+Socket startup now probes final-server TCP readiness. The official PostgreSQL
+entrypoint's temporary initialization server accepts only sockets, so its
+availability was insufficient. Two behavioral contracts execute the actual CI
+shell with isolated fake Docker/delay tools: ready on the third TCP probe, and
+failure after all 60 probes with diagnostics. Both reject the isolated old
+socket-probe body as a negative control.
+
+The scheduled drift job checks every supported major before failing, including
+resolver/inspection errors and malformed registry output. Its five behavioral
+contracts execute the actual shell and cover simultaneous early/late drift;
+the initial implementation stopped at the first failure. Dependency auditing
+is now a separately named step after tool installation and includes the locked,
+all-features complete workspace, preserving the existing policy.
+
+All 14 focused workflow contracts passed with zero skips against the modified
+CI/map. Actionlint also passed using the workflow's pinned image and a read-only,
+no-network source mount. Logs:
+`/private/tmp/ignatius-workflow-final-ci-2026-10-25.log` and
+`/private/tmp/ignatius-actionlint-2026-10-25-wave2.log`. These are local checks;
+the updated workflow has not been pushed or executed by GitHub Actions.
+
 ## CI execution contract prepared on 2026-09-02
 
 The hardened workflow makes failures complete and actionable: stale branch runs
