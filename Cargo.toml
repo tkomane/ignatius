@@ -29,7 +29,7 @@ clap = { version = "4.6.6", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.6.0"
 
 # Async runtime and PostgreSQL protocol client (ADR-0003).
-tokio = { version = "1.53.1", features = [
+tokio = { version = "1.53.3", features = [
     "rt-multi-thread",
     "macros",
     "net",
@@ -48,7 +48,7 @@ tokio-postgres = { version = "0.7.18", features = [
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 
 # TLS (ADR-0004).
-rustls = { version = "0.23.35", default-features = false, features = ["std", "ring", "tls12", "logging"] }
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring", "tls12", "logging"] }
 tokio-postgres-rustls = "0.14.0"
 rustls-platform-verifier = "0.7.0"
 # PEM reading for explicit trust roots and client certificates. Maintained by
@@ -77,7 +77,7 @@ chrono = { version = "0.4.42", default-features = false, features = ["std", "clo
 [dev-dependencies]
 tempfile = "3.24.0"
 # Integration tests drive the async API directly.
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
 # The CLI contract tests parse machine-format output the way a script would.
 serde_json = { version = "1.0.145", features = ["unbounded_depth"] }
 

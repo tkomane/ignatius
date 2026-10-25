@@ -10,10 +10,10 @@
 //!   the user runs `config migrate` when they choose to.
 
 use crate::config::paths::Paths;
-use crate::config::schema::{CURRENT_SCHEMA_VERSION, Config};
+use crate::config::schema::{CURRENT_SCHEMA_VERSION, Config, PendingConfig};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// Where the loaded configuration came from.
@@ -30,6 +30,8 @@ pub enum ConfigSource {
 pub struct Loaded {
     /// The effective configuration.
     pub config: Config,
+    /// Validated palettes bound to the configuration admitted by this load.
+    pub themes: crate::ui::theme::ValidatedThemes,
     /// Whether it came from a file or from defaults.
     pub source: ConfigSource,
     /// Set when the file's schema is older than this build understands.
@@ -45,8 +47,11 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let config = Config::default();
+            let themes = resolve_themes(&config)?;
             return Ok(Loaded {
-                config: Config::default(),
+                config,
+                themes,
                 source: ConfigSource::Defaults,
                 pending_migration: None,
             });
@@ -66,7 +71,7 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
         }
     };
 
-    let config: Config = toml::from_str(&text).map_err(|err| {
+    let pending: PendingConfig = toml::from_str(&text).map_err(|err| {
         let mut diagnostic = Diagnostic::new(
             DiagnosticKind::Config,
             "configuration file is not valid",
@@ -85,10 +90,10 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
         diagnostic
     })?;
 
-    let pending_migration = (config.schema_version < CURRENT_SCHEMA_VERSION)
-        .then_some((config.schema_version, CURRENT_SCHEMA_VERSION));
+    let pending_migration = (pending.schema_version < CURRENT_SCHEMA_VERSION)
+        .then_some((pending.schema_version, CURRENT_SCHEMA_VERSION));
 
-    let issues = config.validate();
+    let issues = pending.validate();
     if !issues.is_empty() {
         let mut diagnostic = Diagnostic::new(
             DiagnosticKind::Config,
@@ -104,11 +109,18 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
         return Err(diagnostic);
     }
 
+    let (config, themes) = pending.resolve().map_err(Diagnostic::from_theme_refusal)?;
     Ok(Loaded {
         config,
+        themes,
         source: ConfigSource::File,
         pending_migration,
     })
+}
+
+fn resolve_themes(config: &Config) -> Result<crate::ui::theme::ValidatedThemes, Diagnostic> {
+    crate::ui::theme::ValidatedThemes::resolve(config.ui.theme, config.theme.as_ref())
+        .map_err(Diagnostic::from_theme_refusal)
 }
 
 /// What a migration did, or would do under `--dry-run`.
@@ -133,6 +145,22 @@ pub struct MigrationReport {
 /// Safe to run repeatedly: an already-current file is reported as a no-op and
 /// nothing is written.
 pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnostic> {
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    migrate_at(paths, dry_run, &stamp)
+}
+
+fn migrate_at(paths: &Paths, dry_run: bool, stamp: &str) -> Result<MigrationReport, Diagnostic> {
+    migrate_with_backup_writer(paths, dry_run, stamp, |file, contents| {
+        file.write_all(contents)
+    })
+}
+
+fn migrate_with_backup_writer(
+    paths: &Paths,
+    dry_run: bool,
+    stamp: &str,
+    write_backup: impl FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+) -> Result<MigrationReport, Diagnostic> {
     let path = &paths.config_file;
     if !path.exists() {
         return Ok(MigrationReport {
@@ -155,7 +183,7 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         .next_action("check the file's permissions")
     })?;
 
-    let mut config: Config = toml::from_str(&loaded_text).map_err(|err| {
+    let pending: PendingConfig = toml::from_str(&loaded_text).map_err(|err| {
         Diagnostic::new(
             DiagnosticKind::Config,
             "configuration file is not valid, so it cannot be migrated",
@@ -168,19 +196,7 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         ))
     })?;
 
-    let from_version = config.schema_version;
-    if from_version == CURRENT_SCHEMA_VERSION {
-        return Ok(MigrationReport {
-            from_version,
-            to_version: CURRENT_SCHEMA_VERSION,
-            steps: vec![format!(
-                "already at schema version {CURRENT_SCHEMA_VERSION}"
-            )],
-            backup: None,
-            no_op: true,
-            dry_run,
-        });
-    }
+    let from_version = pending.schema_version;
     if from_version > CURRENT_SCHEMA_VERSION {
         return Err(Diagnostic::new(
             DiagnosticKind::Config,
@@ -192,6 +208,20 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         .likely_cause("the file was written by a newer version of the product")
         .next_action("upgrade Ignatius; downgrading a configuration file is not supported")
         .technical("Path", path.display().to_string()));
+    }
+
+    let (mut config, _themes) = pending.resolve().map_err(Diagnostic::from_theme_refusal)?;
+    if from_version == CURRENT_SCHEMA_VERSION {
+        return Ok(MigrationReport {
+            from_version,
+            to_version: CURRENT_SCHEMA_VERSION,
+            steps: vec![format!(
+                "already at schema version {CURRENT_SCHEMA_VERSION}"
+            )],
+            backup: None,
+            no_op: true,
+            dry_run,
+        });
     }
 
     let mut steps = Vec::new();
@@ -213,17 +243,7 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         });
     }
 
-    let backup = backup_path(path);
-    fs::copy(path, &backup).map_err(|err| {
-        Diagnostic::new(
-            DiagnosticKind::Config,
-            "could not write a backup, so nothing was migrated",
-            "backing up configuration before migration",
-        )
-        .likely_cause(err.to_string())
-        .next_action("free space or fix permissions in the configuration directory, then retry")
-        .technical("Backup", backup.display().to_string())
-    })?;
+    let backup = backup_configuration(path, loaded_text.as_bytes(), stamp, write_backup)?;
 
     let rendered = toml::to_string_pretty(&config).map_err(|err| {
         Diagnostic::new(
@@ -265,7 +285,7 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
 /// A test parses this and compares it with [`Config::default`], so the file the
 /// product hands someone is always one this build accepts and always says what
 /// this build actually does.
-pub const TEMPLATE: &str = r#"# Ignatius configuration.
+pub const TEMPLATE: &str = r##"# Ignatius configuration.
 #
 # Every value here is this build's default, written out so it can be changed.
 # `ignatius config paths` says where this file and the local state live, and
@@ -277,7 +297,10 @@ pub const TEMPLATE: &str = r#"# Ignatius configuration.
 schema_version = 1
 
 [ui]
-# dark, light, high-contrast
+# comfortable, compact. Changes only the interactive presentation.
+density = "comfortable"
+# dark, light, high-contrast, custom. custom needs the optional [theme] below.
+# auto is not available in this build.
 theme = "dark"
 # auto, unicode, ascii, nerd-font. nerd-font is never chosen automatically:
 # whether your font carries the icons cannot be detected from in here.
@@ -314,6 +337,11 @@ max-entries = 1000
 # Sends explicitly copied values through the terminal using OSC 52. The
 # terminal, SSH path, or multiplexer may observe or retain the value.
 osc52 = false
+
+# Optional custom theme. Keep the whole example commented to use defaults.
+# [theme]
+# extends = "dark"
+# danger = "#F38BA8"
 
 # Named connections. `ignatius connect @orders-prod` uses one.
 #
@@ -352,7 +380,7 @@ osc52 = false
 #
 # [keys]
 # run-buffer = ["f2", "ctrl+r"]
-"#;
+"##;
 
 /// Writes the starter file, atomically and with the same permissions as any
 /// other configuration write.
@@ -370,6 +398,7 @@ pub fn write_template(paths: &Paths) -> Result<(), Diagnostic> {
 
 /// Writes the configuration file atomically, creating the directory if needed.
 pub fn save(paths: &Paths, config: &Config) -> Result<(), Diagnostic> {
+    let _themes = resolve_themes(config)?;
     let rendered = toml::to_string_pretty(config).map_err(|err| {
         Diagnostic::new(
             DiagnosticKind::Internal,
@@ -395,34 +424,62 @@ fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
     let _ = crate::platform::restrict_to_owner(dir);
 
-    let temp = dir.join(format!(
-        ".{}.tmp",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("config")
-    ));
-    {
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(contents.as_bytes())?;
-        file.flush()?;
-        // Durability before the rename, so a crash cannot leave a truncated file.
-        file.sync_all()?;
-    }
-    crate::platform::restrict_to_owner(&temp)?;
-    fs::rename(&temp, path)?;
-    Ok(())
+    crate::platform::write_atomic(path, contents.as_bytes())
 }
 
-/// Builds a timestamped backup path that never overwrites an existing backup.
-fn backup_path(path: &Path) -> std::path::PathBuf {
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    let mut candidate = path.with_extension(format!("toml.{stamp}.bak"));
-    let mut counter = 1;
-    while candidate.exists() {
-        candidate = path.with_extension(format!("toml.{stamp}-{counter}.bak"));
-        counter += 1;
+/// Backs up the exact parsed bytes without reopening the configuration source.
+fn backup_configuration(
+    path: &Path,
+    contents: &[u8],
+    stamp: &str,
+    write_backup: impl FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+) -> Result<std::path::PathBuf, Diagnostic> {
+    for counter in 0..128 {
+        let candidate = backup_candidate(path, stamp, counter);
+        let mut file = match crate::platform::create_private_file(&candidate) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(backup_failure(&candidate, &error)),
+        };
+        let result = write_backup(&mut file, contents)
+            .and_then(|()| file.flush())
+            .and_then(|()| file.sync_all());
+        drop(file);
+        if let Err(error) = result {
+            let mut diagnostic = backup_failure(&candidate, &error);
+            if let Err(cleanup) = fs::remove_file(&candidate) {
+                diagnostic = diagnostic.technical("Partial backup cleanup", cleanup.to_string());
+            }
+            return Err(diagnostic);
+        }
+        return Ok(candidate);
     }
-    candidate
+    Err(backup_failure(
+        &backup_candidate(path, stamp, 127),
+        &io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not reserve a new configuration backup after 128 attempts",
+        ),
+    ))
+}
+
+fn backup_candidate(path: &Path, stamp: &str, counter: u32) -> std::path::PathBuf {
+    if counter == 0 {
+        path.with_extension(format!("toml.{stamp}.bak"))
+    } else {
+        path.with_extension(format!("toml.{stamp}-{counter}.bak"))
+    }
+}
+
+fn backup_failure(path: &Path, error: &io::Error) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Config,
+        "could not write a backup, so nothing was migrated",
+        "backing up configuration before migration",
+    )
+    .likely_cause(error.to_string())
+    .next_action("free space or fix permissions in the configuration directory, then retry")
+    .technical("Backup", path.display().to_string())
 }
 
 #[cfg(test)]

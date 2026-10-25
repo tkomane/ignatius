@@ -194,14 +194,14 @@ jobs:
             fi
             if [[ "$plain" == yes && "$tls" == yes ]]; then
               ready=yes
-              echo "both fixtures ready after ${attempt}s"
+              echo "both fixtures ready on attempt ${attempt}"
               break
             fi
             sleep 1
           done
 
           if [[ "$ready" != yes ]]; then
-            echo "PostgreSQL $IGNATIUS_PG_VERSION fixtures were not ready after 60 seconds" >&2
+            echo "PostgreSQL $IGNATIUS_PG_VERSION fixtures were not ready after 60 attempts" >&2
             docker compose -f docker/compose.yaml ps
             docker compose -f docker/compose.yaml logs --no-color
             exit 1
@@ -216,6 +216,23 @@ jobs:
           --test cli_contract
           --test password_prompt
           --test cloud_identity_integration
+          --test parameter_semantics_contract
+          --test runtime_privacy_contract
+          --test notice_retention_contract
+          --test retained_result_contract
+      - name: Session and notice lifecycle guards over plain PostgreSQL
+        env:
+          IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo
+        run: |
+          cargo test --locked --lib postgres::session
+          cargo test --locked --lib cli::interactive::tests::notice_
+      - name: Parameter semantics, privacy, notices and retained data over verified TLS
+        env:
+          IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@localhost:55433/ignatius_demo?sslmode=verify-full&sslrootcert=${{ github.workspace }}/docker/tls/generated/ca.crt
+        run: |
+          cargo test --locked --test parameter_semantics_contract --test runtime_privacy_contract --test notice_retention_contract --test retained_result_contract
+          cargo test --locked --lib postgres::session
+          cargo test --locked --lib cli::interactive::tests::notice_
       - name: Show fixture diagnostics after a failure
         if: failure()
         shell: bash
@@ -271,16 +288,18 @@ jobs:
 
           ready=no
           for attempt in $(seq 1 60); do
+            # The entrypoint's temporary init server listens only on its socket.
+            # TCP readiness proves initialization ended before the socket test.
             if docker exec "$container" \
-              pg_isready -h /var/run/postgresql -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
+              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
               ready=yes
-              echo "socket fixture ready after ${attempt}s"
+              echo "socket fixture ready on attempt ${attempt}"
               break
             fi
             sleep 1
           done
           if [[ "$ready" != yes ]]; then
-            echo "PostgreSQL socket fixture was not ready after 60 seconds" >&2
+            echo "PostgreSQL socket fixture was not ready after 60 attempts" >&2
             docker logs "$container"
             exit 1
           fi
@@ -324,17 +343,35 @@ jobs:
           set -euo pipefail
           printf '### PostgreSQL fixture review\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf '| Major | Reviewed digest | Current tag digest |\n| --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          drift_status=0
           for major in 14 15 16 17 18; do
-            expected="$(docker/postgres-image.sh "$major")"
+            if ! expected="$(docker/postgres-image.sh "$major")"; then
+              printf '| %s | resolver failed | not inspected |\n' "$major" >> "$GITHUB_STEP_SUMMARY"
+              echo "Could not resolve the reviewed PostgreSQL $major image; review docker/postgres-images.env" >&2
+              drift_status=1
+              continue
+            fi
             expected_digest="${expected##*@}"
             # shellcheck disable=SC2016 # Docker requires this literal Go template.
-            actual="$(docker buildx imagetools inspect --format "{{.Manifest.Digest}}" "postgres:${major}-alpine")"
+            if ! actual="$(docker buildx imagetools inspect --format "{{.Manifest.Digest}}" "postgres:${major}-alpine")"; then
+              printf "| %s | \`%s\` | inspection failed |\n" "$major" "$expected_digest" >> "$GITHUB_STEP_SUMMARY"
+              echo "Could not inspect PostgreSQL ${major}-alpine; later majors will still be checked" >&2
+              drift_status=1
+              continue
+            fi
+            if [[ ! "$actual" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              printf "| %s | \`%s\` | invalid digest |\n" "$major" "$expected_digest" >> "$GITHUB_STEP_SUMMARY"
+              echo "PostgreSQL ${major}-alpine returned an invalid digest; registry output was omitted" >&2
+              drift_status=1
+              continue
+            fi
             printf "| %s | \`%s\` | \`%s\` |\n" "$major" "$expected_digest" "$actual" >> "$GITHUB_STEP_SUMMARY"
             if [[ "$actual" != "$expected_digest" ]]; then
               echo "PostgreSQL ${major}-alpine moved from $expected_digest to $actual; review and update docker/postgres-images.env" >&2
-              exit 1
+              drift_status=1
             fi
           done
+          exit "$drift_status"
 
   # Keep independent security controls in independent jobs. One finding must
   # not suppress the other control and leave the run with incomplete evidence.
@@ -365,7 +402,12 @@ jobs:
             echo "installed an unexpected cargo-deny version: $version" >&2
             exit 1
           fi
-          "$install_root/bin/cargo-deny" check advisories licenses bans sources
+      - name: Audit all workspace dependency inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/cargo-deny/bin/cargo-deny" --locked --workspace --all-features \
+            check advisories licenses bans sources
 
   secret-scan:
     name: Repository secret scan

@@ -16,9 +16,19 @@ which upstream minor version is current.
 contracts on Linux at source `52872ac` in
 [CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
 whose executed jobs were rechecked on 2026-09-04. Its PostgreSQL 18 Unix-socket
-job also executed successfully. **Local evidence: PostgreSQL 18.4 on macOS**,
-including recorded later feature runs in `docs/status.md` with an unconfigured
-socket gate. The hosted baseline does not cover the newer local worktree;
+job also executed successfully. **Local evidence: PostgreSQL 14.24, 15.19,
+16.15, 17.11 and 18.4 on macOS**, 53/53 plain/TLS integration tests on each
+major against the integration branch on 2026-09-30 (see `docs/status.md`),
+with an unconfigured socket gate. Fresh local checks on 25 October 2026 passed
+155 scoped contracts per major over PostgreSQL 14.24, 15.19, 16.15, 17.11 and
+18.6 using reviewed immutable fixtures on macOS arm64, including verified-TLS
+parameter/privacy and session guards. Clean source was `e5389f7`, whose
+application code matches the security candidate `f99fe75`. The latter also
+passed a real PostgreSQL 18.6 socket test, three normal-quit PTY contracts and
+the Rust 1.90 workspace check in Linux arm64 containers. See
+[verification](../operations/verification.md#frozen-postgresql-and-linux-acceptance---2026-10-25)
+for exact scope and retained evidence. These frozen results exclude subsequent
+UI edits. The hosted baseline does not cover the newer local worktree;
 rerun the applicable matrix against the source to be released. Native Windows
 database and hand-terminal claims remain separate evidence requirements.
 
@@ -227,6 +237,33 @@ before resolving a target. The template, not the answers, is retained in
 history and editor state. A server position after expansion is shown as
 technical information without a guessed template caret.
 
+Runtime binding requires a fresh `SHOW standard_conforming_strings` response
+of exactly `on`. With `off` or an unavailable response, the request refuses
+before the requested SQL is sent; restore the setting separately. Buffered
+execution rechecks before each separately sent statement and keeps an already
+completed prefix once. Streaming checks before its unchanged whole Query
+message, preserving PostgreSQL's initial parsing and implicit transaction.
+User-SQL methods on one session serialize that check/bind/send interval;
+metadata reads and cancellation remain independent. The read-only setting
+probe adds a database round trip per separately sent parameterized statement,
+and parameterized elapsed time includes it. No setting, transaction or statement
+is changed or retried automatically.
+
+For parameterized execution/export errors, server-controlled message, detail,
+hint, context and object fields are omitted because they can contain original,
+transformed or truncated values. The omission is explicit; classification,
+validated SQLSTATE, statement ordinal and numeric server position remain
+available with built-in recovery guidance. Ordinary query diagnostics keep
+their existing detail. From the first parameterized send until disconnect,
+server notices use fixed privacy wording and validated SQLSTATE only, including
+delayed notices from completed or interrupted work. Deliberately returned query
+and export rows remain output.
+
+Saved queries are regular `.sql` files. Loading or saving a linked/non-regular
+entry refuses; the list skips it. Named replacements use exclusive private
+temporary files and atomic rename, as do configuration writes and history
+trimming. Earlier interrupted temporary files are preserved for inspection.
+
 ## Reviewable cell-to-UPDATE
 
 The interactive client supports a deliberately narrow result-cell write flow.
@@ -330,12 +367,54 @@ They do not issue another request, change the editor, alter the retained result,
 or add a history entry. A malformed, failed, connection-lost, or bounded plan
 response remains an unavailable or incomplete plan with a recovery action.
 
+## Server notice retention
+
+After the driver connects, each query, export or plan observation window admits
+at most 256 server notices and 1 MiB of retained UTF-8 severity/message/SQLSTATE
+fields. The existing 64 KiB per-message shortening remains. Successful statement
+drains do not replenish the whole-operation allowance; idle/metadata storage is
+separately bounded and pending idle entries are charged to the next operation.
+Later messages are counted as omitted rather than causing SQL replay, rollback,
+automatic cancellation or a server-setting change. These are application
+retention limits, not incoming-frame, aggregate-result or process-memory limits.
+
+Client omission, shortening and abandoned-delivery counts use explicit exact,
+lower-bound or unknown wording. Scripted formats keep stdout data unchanged.
+JSON success adds one client status object on stderr when needed; a JSON error
+keeps its existing single diagnostic object with additive `notice_report`.
+Plain mode adds accounting before its next prompt/interaction or exit. A closed
+or failed output stream does not establish that a report was visibly delivered.
+Public payload-only stream/explain/connect compatibility APIs do not return
+reports; first-party consumers use their report-carrying variants.
+
+The TUI retains fixed pending counts and offers **Server notice retention** in
+the palette. Its global badge yields to query/transaction facts and protected
+reviews rather than reducing their 40x8 input/body/command geometry. Opening the
+reader captures a snapshot and acknowledges nothing. Esc closes without
+acknowledging; its active Enter/Activate command explicitly acknowledges only
+that captured snapshot, with new loss kept pending. Insufficient reader geometry
+refuses acknowledgement. Cancel keeps its existing running-query recovery path.
+The latest source summary remains inspectable after acknowledgement. Known
+counts from locally held opened attempts survive replacement, profile change
+and ordinary quit, using captured identities; this does not include future or
+racing server observations after the retirement boundary.
+Counts cover observed messages, not complete server warning delivery or proof
+that a person read them. Metadata/idle observations do not prove statement cause.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson
-and insert**. json, markdown and the aligned table are refused, because each
-needs the whole result before its first byte is correct and buffering it would
-give up the bounded memory that makes an export worth having.
+and insert**. json, markdown and the aligned table are refused for this route;
+their current encoders use buffered results. Streaming avoids retaining the
+entire result. Individual values, rows and driver frames still use memory;
+there is no whole-process memory ceiling.
+
+Buffered CSV, TSV, NDJSON, Markdown and INSERT keep stdout as data and report
+one stderr line per truncated result set, using retained versus received rows.
+Result-set ordinals exclude command-only statements. A successful prefix keeps
+its disclosure before a later query error; the actual error/exit code is
+preserved. Table and JSON already carry their in-band counts. Successful query
+execution remains exit zero even when client retention is explicitly limited.
 
 `--format insert` is deliberately explicit: it requires a non-empty
 `--insert-table TABLE` and rejects `--no-header`. The table and every result
@@ -351,17 +430,22 @@ flushed, synced and renamed only when the export completes, so a file at the
 destination is always a complete file. An existing destination stops the export
 unless `--force` is given.
 
-An interrupted export exits 9, leaves the partial file, and reports how many rows
-reached it.
+An interrupted export exits 9 and leaves the partial file. Progress counts only
+complete row encodings accepted by the writer. When the partial-file flush
+succeeds, the existing written-row count is reported. If it fails, the message
+states that the file's row count is unconfirmed, separately from accepted-row
+progress. Best-effort buffered recovery is preserved. A partial file may contain
+an incomplete final row; inspect it before continuing. No database write outcome
+or automatic retry is inferred from a file failure.
 
 `Ctrl+K e` in the client writes **what is on screen** through a small
 save-as flow. A searchable format palette offers CSV, TSV, JSON, NDJSON and
 Markdown, names the retained and filtered row scope, and opens the path prompt
 only after a format is chosen. The selected format wins even when the path has
 no familiar extension; the client never guesses from the filename. No file is
-created while the palette is open or while the path is being edited. To write
-the whole result, run the statement with `--output`, which streams from the
-server and never holds it in memory.
+created while the palette is open or while the path is being edited. For a
+future complete streaming export, choose `--output` before execution. No
+completed statement is automatically replayed to recover discarded rows.
 
 ## Interactive clipboard copy
 
@@ -452,13 +536,106 @@ export, history, diagnostics, or terminal-restoration output. Automated renderin
 and reducer evidence is separate from hand use in Warp, Windows Terminal, Linux
 terminals and screen readers.
 
+## Keyboard pane controls
+
+The full-screen client supports session-local split adjustment with `Ctrl+K ,`
+and `Ctrl+K .`, and zoom/restore with `Ctrl+K z`. Objects focus changes sidebar
+width within 20-60 cells; Editor and Results focus change editor height while
+preserving at least three outer rows for each main pane. The active keymap and
+palette expose the same actions. See [keymap](../design/keymap.md).
+
+Zoom fills the body while retaining header/footer. Focus moves the visible
+zoomed pane; restore returns the saved split preferences exactly, with effective
+rectangles clamped to the current size. Paging and completion anchoring share
+the renderer's geometry. Errors and failed transactions restore the ordinary
+layout outside Results focus, while Results can zoom its diagnostic/recovery
+surface. Chords retain modal input ownership until their action is resolved.
+At the minimum usable compact size, diagnostic text has a content row and
+layout feedback preserves transaction facts without covering pane content.
+
+Split/zoom preferences are never persisted. `[ui] density = "comfortable"`
+(default) or `"compact"` selects title padding, the empty grid toolbar row,
+footer hint caps (six/four) and preferred overlay clearance from one table.
+Notices and the existing one-cell grid padding remain present. Unknown density
+values are refused with configuration exit 3 before taking terminal modes;
+there is no density CLI flag or runtime toggle. Mouse dragging remains open
+Feature 025 work. Rendered-buffer checks and actual native terminal use remain
+separate acceptance classes. Density itself does not change acceptance policy.
+
+Clipboard, generated UPDATE, production-run, EXPLAIN ANALYZE and named-parameter
+reviews now share scrollable content and a fixed input/command rail. Both
+acceptance aliases require usable geometry and the current final page, followed
+by existing typed-name/identity/posture checks. Home/End and page/move actions
+stay within the review. Actual resizing resets it; acceptance that first
+observes a changed backend size waits for repaint and another explicit key.
+Below 40x8 or without two readable body rows, the client explains how to enlarge
+or cancel and sends nothing. Late cell-update metadata cannot cover a newer
+input/review owner. Feature 018 T037-T040 records implementation and acceptance.
+
+Help keeps every active binding/chord and complete description reachable by
+local scrolling, with a fixed navigation/close/palette rail. Long and Unicode
+key labels wrap without colliding with descriptions. At narrow widths the rail
+teaches page scrolling; first/last keys remain available. Ordinary typing/paste
+cannot edit covered SQL. A cancelled palette or prefix returns to its help
+position; a real command choice reveals its target, including clearing covered
+reading panels before object insertion. `Space` is named visibly. Feature 015
+T042 records local implementation/rendered checks; native hand use is separate.
+
+## Long SQL lines
+
+The editor follows the caret horizontally while its line-number/statement
+gutter stays fixed. Completion anchoring and editor hit regions use the same
+sanitised display-cell view, including wide and combining graphemes and complete
+escaped-control representations. Source SQL, scalar cursor columns and undo
+state are unchanged; there is no soft wrap or persistent scroll setting.
+
+When text capacity is positive, an oversized or zero-width caret unit has a
+selected blank fallback. Partial wide/control units at a viewport edge become
+position-preserving blanks. No text capacity means no caret-visibility claim
+or completion popup. This does not enable mouse dispatch. Feature025 FR-2529 /
+T058 records scoped implementation and evidence; native emulator/font and
+whole daily-use acceptance remain separate.
+
+T059 bounds retained display-unit metadata to the visible window plus a caret,
+while line width/scalar facts still scan the source. Sanitisation precedes the
+ASCII fast path; Unicode and escaped controls retain the same mapping. Exact
+styled-buffer parity and local large-line diagnostics are recorded in
+[verification](../operations/verification.md#w10-long-line-renderer-diagnostic---2026-10-25).
+Observed process RSS and renderer times are not memory ceilings or release p95.
+
+## Manual themes
+
+The manual-theme slice supports `dark`, `light`, `high-contrast` and `custom`
+in `[ui] theme`. A single optional `[theme]` table inherits a built-in palette
+and overrides exact named RGB tokens. The complete resolved palette is checked
+even when inactive or colour is disabled. Invalid definitions refuse with
+configuration exit 3 before terminal acquisition or configuration writes.
+Existing ordinary configuration validation and migration behavior are retained.
+See [theme tokens](../design/theme-tokens.md) for grammar and contrast scope.
+
+The Session / Switch theme palette entry cycles the validated catalog without
+writing files or changing connection/query state. Direct bindings preserve input
+owners; palette cancellation retains covered reading positions. The choice
+survives resize and profile changes for the session. Rendered-buffer evidence
+includes five palettes and colour-off/depth/glyph/density combinations; native
+font, DIM, emulator appearance and hand use remain separate. Automatic background
+detection (`auto`, T032) remains unimplemented and is explicitly refused.
+The integrated manual source passed full local verification on 25 October 2026:
+1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
+The local macOS socket case is skipped. Published `d92c416` in draft PR35 passed
+hosted Linux/macOS/Windows, pinned/MSRV and PG14/18 plain/TLS plus a real Linux
+socket. Fresh main-targeted CodeQL and native hand use remain pending.
+T057 corrects the existing ignored `[ui] color` startup/doctor route. The final
+gate includes that correction; actual owned macOS PTY startup/quit probes show
+configured never emitting no painted SGRs, with explicit always/NO_COLOR controls.
+
 ## Terminals
 
 | Terminal | Status |
 | --- | --- |
 | macOS, in a pseudo-terminal | Verified: full-screen render, Ctrl+R executed a query, Ctrl+Q restored the terminal, with the exact escape sequences captured |
 | Warp on macOS, interactive | **Not yet verified by hand.** The pty run above used a forced size, not Warp's own renderer |
-| Live terminal resize | **Not verified.** Covered only by a unit test on the resize message |
+| Live terminal resize | Actual Ratatui TestBackend frame/input/stale-event boundaries tested; native terminal resize remains unverified |
 | Windows Terminal with PowerShell 7 | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
 | Any VT-capable terminal on Linux | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
@@ -468,14 +645,39 @@ Minimum size for the full layout is 80x24. Below that a single-pane layout is
 used; below 40x8 a message states the current size, the minimum, and the
 line-oriented alternative.
 
+On macOS, owned-PTY children prove error-return and caught-panic cleanup through
+the actual terminal guard/hook for all mouse/paste/alternate-screen options.
+The hook attempts acquired-mode restoration before previous-hook details and
+reports failed cleanup truthfully. This is separate from native visual use, a
+full uncaught product crash and Windows ConPTY acceptance. Crash details may
+contain sensitive information and cannot prove a database write outcome.
+
+At published `7d167a9` on 25 October 2026, the owned Windows ConPTY no-guard,
+known-unrestored and acknowledged hung-child controls passed. Actual Guard
+raw/mouse and alternate-buffer observations are partial evidence; its acquired
+cursor-visibility assertion failed. At `65cf237`, separate cursor calibration
+completed: native setters/main VT are observable but this retained sensor does
+not track alternate-VT visibility. The original capability still fails; the full
+option/path matrix and Windows 11/Windows Terminal hand use remain open. These results do
+not upgrade full Windows restoration or release acceptance; see the
+[dated verification record](../operations/verification.md).
+
 ## Platforms
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | Verified by hand, and by the CI macOS runner |
-| Windows, GitHub `windows-latest` runner | Builds and passes unit, layout and CLI contract tests, plus a startup smoke test |
-| Linux, GitHub `ubuntu-latest` runner | The same, plus the full PostgreSQL integration suite against 14, 16 and 18 |
+| macOS on Apple silicon | At `ffb86a1`, local full verification and styled Buffer inspection passed; hosted macOS 26 arm64 tests/startup passed with Rust 1.97.1, including all three T055 regressions. Native visual/full hand-use acceptance remains open. |
+| Windows, GitHub `windows-latest` runner | At `ffb86a1`, Windows Server 2025 build/tests/startup/refusal passed, including all three T055 Buffer regressions. Windows 11/Windows Terminal hand use and full ConPTY restoration remain open; separate PR33's cursor-sensor diagnostic does not close them. |
+| Linux, GitHub `ubuntu-latest` runner | At `ffb86a1`, hosted build/tests/startup, PG14/18 plain/verified-TLS and the real Unix-socket contract passed. Prior `54056c2` separately covers all five PostgreSQL majors. Full-screen hand use and release installation remain open. |
+| Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
+
+Historical W07 source `65cf237` separately completed three native ConPTY controls
+and cursor calibration on image `win25-vs2026`/`20261021.278.1`. Its retained
+sensor did not track alternate-VT visibility, so its original Guard cursor
+assertion failed and its later startup smoke step did not run. The unchanged
+assertion remains in the explicit-dispatch ConPTY diagnostic workflow; product
+CI passing does not close native restoration acceptance.
 
 Claims are stated by runner rather than by target triple, because the runner is
 what was actually exercised. Cross-architecture builds are release work and
@@ -523,3 +725,34 @@ manager support are separate gates.
 Unix-domain sockets are supported on Unix only; requesting one elsewhere fails
 with an explanation. Owner-only file permissions are enforced on Unix; on Windows
 files inherit the profile ACL and this program makes no stronger claim.
+
+## Buffered retained-result data
+
+Buffered Session ingestion applies one 33,554,432-byte logical occupied-data
+allowance across all result sets in an execution. It charges actual native
+ResultSet/name/type/row/Cell slots and UTF-8 payload before application-owned
+copies. Descriptions and rows are admitted whole; the first data refusal closes
+further data admission while PostgreSQL rows and CommandComplete are consumed.
+Existing row caps, zero-row count-only mode and the 1 MiB candidate-cell refusal
+remain separate. A CLI row-cap override does not disable this allowance.
+
+This is not RSS, incoming/driver-frame, metadata-cache, spare-capacity or
+control-vector accounting. Old results can coexist with an execution in flight.
+Public synthetic ResultSet construction is not a universal bound. Streaming
+exports keep complete values and do not use this buffered allowance.
+
+An unavailable essential description is distinct from a known zero-row answer.
+It retains only its typed reason, source-column count and delivered-row count.
+JSON adds `data_unavailable: "retained_result_limit"` and `source_column_count`
+only to that case, alongside empty columns/rows and `truncated: true`. Other
+script formats emit no invented data and disclose unavailability on stderr;
+NDJSON still refuses multiple result sets before writing. Available-result
+encoding remains unchanged.
+
+The TUI keeps a fixed execution-level loss summary, including later result sets,
+and shows complete numeric facts or defers them until space is available. An
+unavailable description refuses retained-data actions before I/O; a future
+complete streaming export must be chosen before a deliberate execution. No SQL
+is replayed or cancelled, and no setting or transaction state is changed because
+of the client allowance. True errors, cancellation and unknown outcomes retain
+their existing precedence.

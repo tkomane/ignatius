@@ -29,7 +29,9 @@ in `Model`, so it cannot become stale independently of the state it describes.
 | Priority | Determines order within the current focus and state |
 | Applicability | Candidate is shown only when it can act, or its prerequisite is stated by the surrounding empty state |
 
-The renderer receives at most five hints. It may shorten spacing to fit the
+The renderer receives at most six hints in comfortable density or four in
+compact density under Feature 025's 2026-10-25 clarification, superseding the
+original five-hint bound. It may shorten spacing to fit the
 footer, but it must not remove the key or action meaning silently.
 
 ## Discovery palette

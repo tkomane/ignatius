@@ -256,6 +256,55 @@ creates the completed archive in the destination directory and installs it
 with a same-directory hard link, so a concurrent destination cannot be
 silently replaced or redirected through a directory symlink.
 
+### Inventory and trust sidecars
+
+The owner trust choices are Sigstore keyless signing, a CycloneDX SBOM, and
+GitHub OIDC/SLSA provenance (ADR-0008). Two local commands implement the
+checkable halves; cryptographic verification stays an explicit independent
+step below.
+
+~~~text
+cargo --locked xtask release sbom generate \
+  --lockfile PATH --out PATH
+cargo --locked xtask release sbom verify \
+  --lockfile PATH --sbom PATH
+~~~
+
+`sbom generate` derives a CycloneDX 1.5 inventory deterministically from
+`Cargo.lock`: no network, no clock, no randomness, so the same lockfile
+always yields the same bytes. Its parser understands only `[[package]]`
+name/version entries and refuses unknown keys, duplicates, or unclosed lists
+rather than silently dropping crates. `sbom verify` regenerates and
+byte-compares, naming the first differing offset. An SBOM proves which
+dependencies the source resolves, not what they do.
+
+~~~text
+cargo --locked xtask release trust verify \
+  --manifest-dir DIR --bundle-dir DIR
+~~~
+
+`trust verify` requires `<name>.sigstore.json` and `<name>.intoto.jsonl`
+siblings for every manifest artefact and requires both to bind the
+artefact's SHA-256: the bundle's `messageSignature.messageDigest` must be
+`SHA2_256` over the manifest checksum, and the first in-toto v1 statement
+must carry that checksum as a subject digest. Missing, mismatched, or
+malformed sidecars fail closed. A bound sidecar proves the signature and the
+provenance statement are about these exact bytes. It does not prove who
+signed, which builder ran, or that the transparency log holds the entry.
+
+The independent verification for a candidate is therefore:
+
+1. Run `manifest verify`, `sbom verify`, and `trust verify` above; all pass.
+2. With the Sigstore client, verify each bundle's signature against the
+   certificate identity named in the release record, confirm the digest in
+   the bundle equals the `SHA256SUMS` entry, and confirm the transparency
+   log entry is present.
+3. With the SLSA verifier, verify each provenance statement's builder
+   identity against the release record and confirm its subject equals the
+   `SHA256SUMS` entry.
+4. Any failure at any step blocks the candidate; a passing local binding
+   check never substitutes for steps 2 and 3.
+
 ## Native dependency boundary
 
 The generic release contract above proves candidate identity, exact archive
@@ -714,11 +763,17 @@ performed none of those publication operations.
 
 ## Before any public release
 
-- Finish the naming work in `docs/product/landscape.md`: the name is confirmed
-  and the availability check is done, but no trademark search has been run.
-- Publish `SECURITY.md` with a working private reporting route.
-- Generate an SBOM and decide on signing and provenance. Until both are real, say
-  so plainly rather than omitting the subject.
+- Finish the naming work in `docs/product/landscape.md`: the name is confirmed,
+  but the dated research does not establish trademark clearance or registrar
+  availability. Obtain the owner's domain/distribution decision before acting.
+- Verify `SECURITY.md` and the private reporting route. The setting was enabled
+  on 2026-10-25; submission, notification and response handling remain untested.
+- Use ADR-0008's selected CycloneDX, Sigstore keyless and GitHub OIDC/SLSA
+  mechanisms. Complete the outstanding verification identity, failure/revocation
+  handling, retention and independent-verification details, then generate and
+  validate the actual candidate evidence. Provider selection is not proof that
+  an artifact is signed or provenance is verified; live actions still require
+  the owner's explicit authority.
 
 ## Support and deprecation
 

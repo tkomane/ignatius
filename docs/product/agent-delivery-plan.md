@@ -229,6 +229,26 @@ missing restoration step, and live native Windows plus Unix process results.
 W08 still verifies real terminal renderers and human shell usability. A Windows
 compile or startup-refusal test does not satisfy T055a.
 
+Progress on 25 October 2026: `7d167a9` ran four owned native ConPTY children on
+the hosted Windows runner. No-guard, known-unrestored and acknowledged hung-child
+controls passed; actual Guard raw/mouse and buffer observations are partial
+evidence. The hidden-cursor capability failed. W07-064's adopted contract now
+pins one persistent-actor cursor calibration before further matrix admission.
+Published `65cf237` completes that separate diagnostic: native setters/main VT
+are observable, alternate VT is not tracked by the retained sensor. The original
+capability remains failed, with all five owned trees cleaned up. A different
+faithful observation seam is required before matrix admission; no product defect
+or installed-source cause is established. Feature025 T055's independently
+reproduced Results selection defect proceeds on a sibling branch before custom
+themes, without changing this Windows gate.
+Integration on 26 October isolates this still-failing experiment in the
+explicitly dispatched `windows-conpty-diagnostic.yml` workflow. Its native
+assertions and evidence allowlist remain strict; routine CI continues all three
+platform product suites. This integration does not admit the full matrix or
+turn an unsupported sensor into a pass.
+Keep W07/T055a and Windows 11/Windows Terminal hand use open; see the
+[dated verification record](../operations/verification.md).
+
 ## W08 - Verify terminals, accessibility and core journeys by hand
 
 **Outcomes:** O1-O6. **Primary artifacts:** terminal compatibility, keymap,

@@ -16,6 +16,7 @@ use crate::ui::layout::{Presentation, buffer_to_string};
 use crate::ui::theme::{ColorDepth, Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 use std::time::Duration;
 
 fn presentation_at(depth: ColorDepth) -> Presentation {
@@ -35,6 +36,7 @@ fn model_with(columns: &[&str], rows: &[Vec<Cell>]) -> Model {
     model.sidebar_visible = false;
     model.focus = Focus::Results;
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -271,6 +273,222 @@ fn null_empty_and_literal_null_stay_distinct_on_stripes_at_every_depth() {
                     "{summary}: a stripe was faked where it is dropped"
                 );
             }
+        }
+    }
+}
+
+fn expanded_presentations(color: bool) -> Vec<Presentation> {
+    let mut presentations = Vec::new();
+    for choice in [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::HighContrast,
+    ] {
+        for depth in [
+            ColorDepth::TrueColor,
+            ColorDepth::Indexed256,
+            ColorDepth::Basic16,
+            ColorDepth::None,
+        ] {
+            for glyphs in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+                for density in [
+                    crate::config::Density::Comfortable,
+                    crate::config::Density::Compact,
+                ] {
+                    presentations.push(
+                        Presentation::new(
+                            Theme::new(choice, color).with_depth(depth),
+                            Glyphs::new(glyphs),
+                            false,
+                        )
+                        .with_density(density),
+                    );
+                }
+            }
+        }
+    }
+    presentations
+}
+
+fn expanded_selection_model() -> Model {
+    let mut model = model_with(
+        &[
+            "sql_null",
+            "empty_text",
+            "literal_null",
+            "plain_text",
+            "control",
+        ],
+        &[vec![
+            Cell::Null,
+            Cell::Text(String::new()),
+            Cell::Text("NULL".into()),
+            Cell::Text("value".into()),
+            Cell::Text("control-value".into()),
+        ]],
+    );
+    model.expanded_row = true;
+    model
+}
+
+fn expanded_field_row(buf: &Buffer, name: &str) -> u16 {
+    (0..buf.area.height)
+        .find(|y| {
+            let text: String = (0..buf.area.width).map(|x| buf[(x, *y)].symbol()).collect();
+            text.contains(name)
+        })
+        .unwrap_or_else(|| panic!("missing expanded field {name}: {}", buffer_to_string(buf)))
+}
+
+fn expanded_text_column(buf: &Buffer, y: u16, text: &str) -> u16 {
+    (0..buf.area.width)
+        .find(|x| {
+            let suffix: String = (*x..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+            suffix.starts_with(text)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "missing {text:?} in expanded row {y}: {}",
+                buffer_to_string(buf)
+            )
+        })
+}
+
+#[test]
+fn selected_expanded_fields_use_active_ink_and_keep_modifiers_across_presentations() {
+    for presentation in expanded_presentations(true) {
+        let summary = format!(
+            "{:?}/{:?}/{:?}/{:?}",
+            presentation.theme.selection(),
+            presentation.color_depth,
+            presentation.glyphs.tier,
+            presentation.density
+        );
+        let mut model = expanded_selection_model();
+        model.selected_column = 4;
+        let ordinary = render(&model, &presentation, Rect::new(0, 0, 80, 12));
+        for (column, name, value, value_token) in [
+            (0, "sql_null", "[null]", Token::NullValue),
+            (1, "empty_text", "", Token::Text),
+            (2, "literal_null", "NULL", Token::Text),
+            (3, "plain_text", "value", Token::Text),
+        ] {
+            model.selected_column = column;
+            let selected = render(&model, &presentation, ordinary.area);
+            let y = expanded_field_row(&selected, name);
+            assert_eq!(y, expanded_field_row(&ordinary, name), "{summary}");
+            let arrow = if presentation.glyphs.is_ascii() {
+                ">"
+            } else {
+                "▸"
+            };
+            let mut samples = vec![
+                (expanded_text_column(&selected, y, name), Token::Header),
+                (expanded_text_column(&selected, y, arrow), Token::Focus),
+            ];
+            if !value.is_empty() {
+                samples.push((expanded_text_column(&selected, y, value), value_token));
+            }
+            let selection = presentation.theme.style(Token::Selection);
+            for (x, token) in samples {
+                let old = &ordinary[(x, y)];
+                let actual = &selected[(x, y)];
+                let token_style = presentation.theme.style(token);
+                assert_eq!(
+                    old.fg,
+                    token_style.fg.unwrap_or(Color::Reset),
+                    "ordinary {summary}/{name}/{token:?}"
+                );
+                assert!(
+                    old.modifier.contains(token_style.add_modifier),
+                    "ordinary {summary}/{name}/{token:?}"
+                );
+                assert!(
+                    !old.modifier.contains(Modifier::REVERSED),
+                    "ordinary {summary}/{name}/{token:?}"
+                );
+                assert_eq!(
+                    actual.fg,
+                    selection.fg.unwrap_or(old.fg),
+                    "selected ink {summary}/{name}/{token:?} at({x},{y})"
+                );
+                assert_eq!(
+                    actual.bg,
+                    selection.bg.unwrap_or(old.bg),
+                    "selected fill {summary}/{name}/{token:?} at({x},{y})"
+                );
+                assert_eq!(
+                    actual.modifier,
+                    old.modifier | selection.add_modifier,
+                    "selected modifiers {summary}/{name}/{token:?}"
+                );
+            }
+            if matches!(
+                presentation.color_depth,
+                ColorDepth::Basic16 | ColorDepth::None
+            ) {
+                assert!(
+                    selected.content.iter().all(|cell| cell.bg == Color::Reset),
+                    "painted background at {summary}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn selected_expanded_fields_with_colour_disabled_emit_no_colours() {
+    for presentation in expanded_presentations(false) {
+        let mut model = expanded_selection_model();
+        for column in [0, 3] {
+            model.selected_column = column;
+            let buf = render(&model, &presentation, Rect::new(0, 0, 80, 12));
+            assert!(
+                buf.content
+                    .iter()
+                    .all(|cell| cell.fg == Color::Reset && cell.bg == Color::Reset)
+            );
+            let name = if column == 0 {
+                "sql_null"
+            } else {
+                "plain_text"
+            };
+            let y = expanded_field_row(&buf, name);
+            let x = expanded_text_column(&buf, y, name);
+            assert!(
+                buf[(x, y)]
+                    .modifier
+                    .contains(Modifier::REVERSED | Modifier::BOLD)
+            );
+            let value = if column == 0 { "[null]" } else { "value" };
+            let x = expanded_text_column(&buf, y, value);
+            assert!(buf[(x, y)].modifier.contains(Modifier::REVERSED));
+            assert_eq!(buf[(x, y)].modifier.contains(Modifier::DIM), column == 0);
+        }
+    }
+}
+
+#[test]
+fn expanded_selection_preserves_null_empty_and_literal_null_words_across_presentations() {
+    for presentation in expanded_presentations(true) {
+        let mut model = expanded_selection_model();
+        for column in 0..4 {
+            model.selected_column = column;
+            let buf = render(&model, &presentation, Rect::new(0, 0, 80, 12));
+            let row = |name| {
+                let y = expanded_field_row(&buf, name);
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert!(row("sql_null").contains("[null]"));
+            let empty = row("empty_text");
+            assert!(
+                !empty.contains("[null]") && !empty.contains("NULL") && !empty.contains("value")
+            );
+            assert!(row("literal_null").contains("NULL"));
+            assert!(!row("literal_null").contains("[null]"));
+            assert!(row("plain_text").contains("value"));
         }
     }
 }

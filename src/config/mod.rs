@@ -7,7 +7,8 @@ pub mod store;
 pub use paths::Paths;
 pub use schema::{
     CURRENT_SCHEMA_VERSION, ClipboardConfig, ColorDepthChoice, ColorMode, Config, ConnectionConfig,
-    GlyphMode, QueryConfig, ThemeChoice, UiConfig, ValidationIssue,
+    Density, GlyphMode, QueryConfig, ThemeChoice, ThemeDefinition, ThemeSelection, UiConfig,
+    ValidationIssue,
 };
 pub use store::{
     ConfigSource, Loaded, MigrationReport, TEMPLATE, load, migrate, save, write_template,

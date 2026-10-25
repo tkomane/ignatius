@@ -8,6 +8,108 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: long SQL lines retain only visible/caret display metadata, reducing
+  transient memory and render work while preserving the same SQL, gutter,
+  selection and completion geometry.
+- Fixed: long SQL lines keep the editor caret in view, with a fixed gutter
+  and matching completion/hit geometry for wide, combining and escaped-control
+  text. Horizontal viewing preserves source SQL, scalar columns and undo state.
+- New: manual custom themes inherit a built-in palette and validate every
+  resolved colour before use, including inactive definitions. The command
+  palette's Switch theme entry changes appearance for the current session,
+  preserving active SQL, query progress and input owners. Automatic background
+  detection remains pending.
+- Fixed: dark/light NULL and SQL comment colours meet the resolved 4.5:1 text
+  threshold on overlay surfaces as well as the frame, pane and striped rows.
+- Fixed: selected command-palette groups and details use the selection ink
+  instead of retaining pale text on a pale fill. Semantic emphasis and
+  colour-off selection remain available.
+- Fixed: full-screen startup and doctor honor `[ui] color`, with explicit
+  `--color` taking precedence. Plain, NO_COLOR and TERM=dumb keep colour off;
+  doctor distinguishes automatic policy from an explicit override.
+- Fixed: selected fields in expanded Results keep readable text on the selection
+  fill, including headers and NULL markers. Semantic emphasis and colour-off
+  selection are preserved.
+- Improved: buffered executions share a 32 MiB logical occupied-result-data
+  allowance across result sets, alongside the existing row and per-cell caps.
+  Complete retained prefixes and unavailable descriptions are reported without
+  changing PostgreSQL outcomes, affected rows or transaction behavior.
+- Improved: Results keeps a bounded execution-level loss summary, including
+  losses in later result sets, and refuses unavailable-data copy, inspection,
+  cell update and retained-file export before effects. Unavailable JSON results
+  explicitly carry `data_unavailable` and `source_column_count`; known-result
+  schemas and complete streaming exports remain unchanged.
+
+- Security: server notice retention after driver connection is bounded by a
+  whole-operation count/retained-text allowance, with explicit omission,
+  shortening and uncertain accounting. Statements and transaction outcomes are
+  unchanged; driver allocation, aggregate results and process RSS remain
+  separate limits.
+- Improved: scripted/plain/export/plan paths retain client notice accounting on
+  failure as well as success. JSON adds accounting to the existing single error
+  object; the TUI keeps pending counts with an explicit snapshot reader and
+  acknowledgement while preserving protected review geometry.
+- Fixed: streaming exports count only complete accepted row encodings. Failed
+  or partial row writes no longer advance progress. An unsuccessful partial-
+  file flush reports an unconfirmed file-row count while preserving best-effort
+  recovery and the existing exit 9 and complete-file finish behavior.
+- Improved: help wraps complete active key labels/descriptions, scrolls locally
+  and keeps its navigation/close rail visible. Reading, typing and paste no
+  longer edit covered SQL. Explicit commands reveal their surface, nested
+  palettes/inspectors retain ownership, and Space bindings now say `Space`.
+- Fixed: buffered CSV, TSV, NDJSON, Markdown and INSERT now disclose discarded
+  rows on stderr with retained/received counts, including a completed prefix
+  before a later error. Data bytes and execution exit codes stay unchanged;
+  table/JSON keep existing in-band counts. Streaming help now states that
+  individual values, rows and driver frames still use memory.
+- Security: interactive sending reviews keep complete warning and exact UPDATE
+  content reachable by keyboard, retain a fixed input/command area, and refuse
+  acceptance until the current final page is visible. Insufficient terminal
+  space refuses sending. New frame/backend size facts govern admission; a
+  resize that first arrives with confirmation requires a fresh confirmation
+  after repaint. Older cell-update metadata cannot replace a newer input owner.
+- Fixed: panic cleanup uses the modes actually acquired, including mouse
+  capture, before previous-hook details. Notices distinguish successful cleanup
+  from a failed attempt and do not assert a database write outcome.
+- Improved: `[ui] density = "comfortable"` (default) or `"compact"` selects
+  one consistent spacing table. Compact removes the empty grid toolbar row
+  while retaining notices; footer hints are capped at six or four complete
+  key/action pairs. Preferred overlay clearance preserves usable input rows.
+- Fixed: Unix SIGTERM handling is registered before full-screen terminal
+  acquisition, closing the startup window where termination could bypass
+  restoration. Registration failure refuses startup before taking terminal
+  modes; received termination uses the existing quit path.
+- Improved: resize panes with `Ctrl+K ,` and `Ctrl+K .`, and zoom or restore
+  the focused pane with `Ctrl+K z`. Paging follows the drawn editor, grid, tree
+  or Plan area. Session-local preferences survive resizing, while errors and
+  transaction recovery remain visible and modal input keeps ownership.
+- Security: update rustls 0.23.46, rustls-webpki 0.103.16, Tokio 1.53.3,
+  ctutils 0.4.4 and webpki-root-certs 1.0.11 to address the current TLS,
+  certificate, constant-time crypto and I/O-safety advisories. Direct rustls
+  and Tokio minimums exclude the affected releases; dependency policy is
+  unchanged and the broader workspace audit includes development tooling.
+- Security: named parameters now require a fresh confirmation that
+  `standard_conforming_strings` is on. Buffered runs recheck between statements;
+  a refusal keeps completed work without sending the suffix, changing settings
+  or rolling back. Streaming keeps PostgreSQL's whole-message transaction
+  semantics. User-SQL operations on one session serialize the check and send;
+  cancellation remains independent.
+- Security: configuration migration reserves private backup files exclusively,
+  preserves ordinary and dangling-link collisions, and syncs the exact parsed
+  source bytes before replacement. Failed writes remove only their own partial
+  backup; a completed backup survives a later configuration-replacement failure.
+- Security: parameterized execution and export omit server-controlled error
+  text that can echo replacement/key values, including transformed values.
+  SQLSTATE, failure classification and statement position remain available.
+  After the first parameterized send, notices stay value-free until disconnect;
+  the privacy omission is stated explicitly.
+- Security: saved-query load/save refuses linked or non-regular entries, and
+  listings skip them. Query saves, configuration writes and history trimming
+  use exclusive, owner-only temporary files and synced atomic replacement,
+  preserving unrelated stale files and link targets after interrupted work.
+- Fixed: queued profile failures and initial catalogue reloads retain their
+  connection generation. A superseded profile resolver also checks identity
+  while holding the reconnect-target lock before installing its target.
 - Fixed: pasted text now reaches the interactive client. The terminal has
   requested bracketed paste since the first release and the runtime discarded
   every paste event, so pasting into the full-screen client did nothing. A

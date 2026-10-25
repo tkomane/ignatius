@@ -47,6 +47,11 @@ literal form for review; the bound form is not placed in history or tracing.
 
 ## Review and execution
 
+The 2026-10-25 shared [review viewport contract](../../018-clipboard-copy/contracts/review-viewport.md)
+applies before accepting the existing one-shot effect. Long exact SQL remains
+traversable; small geometry cannot silently authorize clipped review content.
+Shared W04 work is tracked in Feature 018 T037-T040.
+
 The review modal must state:
 
 - the resolved target relation

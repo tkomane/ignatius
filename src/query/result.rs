@@ -1,7 +1,8 @@
 //! The result model.
 //!
-//! Results are bounded in memory by construction: a [`ResultSet`] stops keeping
-//! rows once it reaches its cap and records that it did. Truncation is therefore
+//! Retained row counts are bounded: a [`ResultSet`] stops keeping rows once it
+//! reaches its cap and records that it did. Individual values and driver frames
+//! still allocate before row retention; this is not a process-memory ceiling. Truncation is therefore
 //! a fact the interface can state, never a silent omission, and the client never
 //! re-runs a query to page through it.
 //!
@@ -12,6 +13,256 @@
 use crate::query::value::Cell;
 use std::time::Duration;
 
+/// Fixed value-free explanation for an essential description not retained.
+pub const RETAINED_DATA_UNAVAILABLE: &str =
+    "Result data unavailable - retained-result limit reached";
+/// Advice for a future deliberate execution, never an automatic replay.
+pub const RETAINED_DATA_GUIDANCE: &str =
+    "For a future complete streaming export, choose --output before execution.";
+
+/// Largest notice message retained for display with an execution.
+pub const MAX_NOTICE_MESSAGE_BYTES: usize = 64 * 1024;
+const NOTICE_TRUNCATION_SUFFIX: &str = " ... [notice truncated]";
+
+/// Maximum entries admitted in one notice observation window.
+pub const MAX_NOTICE_COUNT: usize = 256;
+/// Maximum retained UTF-8 notice fields in one observation window.
+pub const MAX_NOTICE_TEXT_BYTES: usize = 1024 * 1024;
+
+/// Precision of an observed client-side count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeCount {
+    /// The exact observed count.
+    Exact(u64),
+    /// At least this many were observed; accounting saturated.
+    AtLeast(u64),
+    /// Accounting was unavailable.
+    Unknown,
+}
+
+impl Default for NoticeCount {
+    fn default() -> Self {
+        Self::Exact(0)
+    }
+}
+
+impl NoticeCount {
+    /// Adds counts without wrapping or inventing precision.
+    #[must_use]
+    pub fn plus(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
+            (Self::Exact(a), Self::Exact(b)) => a
+                .checked_add(b)
+                .map_or(Self::AtLeast(u64::MAX), Self::Exact),
+            (Self::Exact(a) | Self::AtLeast(a), Self::Exact(b) | Self::AtLeast(b)) => {
+                Self::AtLeast(a.saturating_add(b))
+            }
+        }
+    }
+    /// Observations since an exact baseline; uncertain baselines cannot be subtracted.
+    #[must_use]
+    pub fn since(self, baseline: Self) -> Self {
+        match (self, baseline) {
+            (Self::Exact(a), Self::Exact(b)) if a >= b => Self::Exact(a - b),
+            (Self::AtLeast(a), Self::Exact(b)) if a >= b => Self::AtLeast(a - b),
+            _ => Self::Unknown,
+        }
+    }
+    /// Whether the count is known to be zero.
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        matches!(self, Self::Exact(0))
+    }
+    /// Fixed, value-free wording with truthful precision.
+    #[must_use]
+    pub fn words(self) -> String {
+        match self {
+            Self::Exact(n) => n.to_string(),
+            Self::AtLeast(n) => format!("at least {n}"),
+            Self::Unknown => "an unknown number of".into(),
+        }
+    }
+    /// Compact ASCII count, used only beside an explicit category label.
+    #[must_use]
+    pub fn compact(self) -> String {
+        match self {
+            Self::Exact(n) => n.to_string(),
+            Self::AtLeast(n) => format!(">={n}"),
+            Self::Unknown => "?".into(),
+        }
+    }
+    /// The additive scripted status schema.
+    #[must_use]
+    pub fn to_json(self) -> serde_json::Value {
+        match self {
+            Self::Exact(n) => serde_json::json!({"count":n,"precision":"exact"}),
+            Self::AtLeast(n) => serde_json::json!({"count":n,"precision":"at_least"}),
+            Self::Unknown => serde_json::json!({"count":null,"precision":"unknown"}),
+        }
+    }
+}
+
+/// Client notice loss, independent of SQL outcome and result rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NoticeCounts {
+    /// Notices rejected by admission.
+    pub omitted: NoticeCount,
+    /// Admitted messages shortened by the per-message rule.
+    pub shortened: NoticeCount,
+    /// Admitted prefix notices not returned when a future was abandoned.
+    pub abandoned: NoticeCount,
+}
+impl NoticeCounts {
+    /// Unavailable accounting, rather than a fabricated zero.
+    pub const UNKNOWN: Self = Self {
+        omitted: NoticeCount::Unknown,
+        shortened: NoticeCount::Unknown,
+        abandoned: NoticeCount::Unknown,
+    };
+    /// Adds fixed counters without retaining payload.
+    #[must_use]
+    pub fn plus(self, other: Self) -> Self {
+        Self {
+            omitted: self.omitted.plus(other.omitted),
+            shortened: self.shortened.plus(other.shortened),
+            abandoned: self.abandoned.plus(other.abandoned),
+        }
+    }
+    /// Counts since a checkpoint with precision preserved.
+    #[must_use]
+    pub fn since(self, baseline: Self) -> Self {
+        Self {
+            omitted: self.omitted.since(baseline.omitted),
+            shortened: self.shortened.since(baseline.shortened),
+            abandoned: self.abandoned.since(baseline.abandoned),
+        }
+    }
+    /// Whether any client loss or uncertain accounting needs disclosure.
+    #[must_use]
+    pub fn needs_report(self) -> bool {
+        !self.omitted.is_zero() || !self.shortened.is_zero() || !self.abandoned.is_zero()
+    }
+    /// Exact fixed client wording, containing no server text.
+    #[must_use]
+    pub fn lines(self) -> Vec<String> {
+        let mut lines = Vec::new();
+        if !self.omitted.is_zero() {
+            lines.push(format!("Client omitted {} observed server notices after reaching the notice-retention limit.",self.omitted.words()));
+        }
+        if !self.shortened.is_zero() {
+            lines.push(format!(
+                "Client shortened {} retained server notice messages.",
+                self.shortened.words()
+            ));
+        }
+        if !self.abandoned.is_zero() {
+            lines.push(format!("Client did not return {} retained server notices because an operation was abandoned.",self.abandoned.words()));
+        }
+        lines
+    }
+}
+
+/// The observation window; it does not establish statement causation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NoticeScope {
+    /// Ordinary buffered execution.
+    Query,
+    /// Complete streaming export.
+    Export,
+    /// Structured plan request.
+    Plan,
+    /// Idle, metadata, startup or late messages on a connection.
+    #[default]
+    Connection,
+}
+impl NoticeScope {
+    /// Stable machine-readable name.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Query => "query",
+            Self::Export => "export",
+            Self::Plan => "plan",
+            Self::Connection => "connection",
+        }
+    }
+}
+
+/// Fixed cumulative counters survive payload transfer and dropped outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NoticeCheckpoint {
+    /// Monotonic until saturation; a saturated revision is not an unchanged proof.
+    pub revision: u64,
+    /// Committed counters for this physical connection.
+    pub totals: NoticeCounts,
+}
+impl NoticeCheckpoint {
+    /// A fail-closed snapshot when the accounting lock is unavailable.
+    pub const UNKNOWN: Self = Self {
+        revision: u64::MAX,
+        totals: NoticeCounts::UNKNOWN,
+    };
+}
+
+/// Bounded payload and client accounting for one observation window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeReport {
+    /// Where messages were observed, without causal attribution.
+    pub scope: NoticeScope,
+    /// All admitted entries, including transferred statement notices; unavailable is None.
+    pub retained: Option<u16>,
+    /// Client accounting for this delivered report.
+    pub counts: NoticeCounts,
+    /// Entries not already owned by successful statement results.
+    pub unattributed: Vec<Notice>,
+    /// Cumulative committed counters, for duplicate-safe consumer transfer.
+    pub checkpoint: NoticeCheckpoint,
+}
+impl Default for NoticeReport {
+    fn default() -> Self {
+        Self::empty(NoticeScope::Connection)
+    }
+}
+impl NoticeReport {
+    /// Empty known accounting, used for operations that did not establish an inbox.
+    #[must_use]
+    pub fn empty(scope: NoticeScope) -> Self {
+        Self {
+            scope,
+            retained: Some(0),
+            counts: NoticeCounts::default(),
+            unattributed: Vec::new(),
+            checkpoint: NoticeCheckpoint::default(),
+        }
+    }
+    /// No invented counts when accounting is unavailable.
+    #[must_use]
+    pub fn unavailable(scope: NoticeScope) -> Self {
+        Self {
+            scope,
+            retained: None,
+            counts: NoticeCounts::UNKNOWN,
+            unattributed: Vec::new(),
+            checkpoint: NoticeCheckpoint::UNKNOWN,
+        }
+    }
+    /// Additive value-free stderr representation.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({"scope":self.scope.label(),"observed_only":true,"retained":self.retained,"omitted":self.counts.omitted.to_json(),"shortened":self.counts.shortened.to_json(),"abandoned":self.counts.abandoned.to_json(),"limits":{"count":MAX_NOTICE_COUNT,"text_bytes":MAX_NOTICE_TEXT_BYTES,"message_bytes":MAX_NOTICE_MESSAGE_BYTES}})
+    }
+}
+
+/// An outcome whose notice report survives both success and error.
+#[derive(Debug)]
+pub struct Reported<T> {
+    /// Original outcome; accounting never changes database facts.
+    pub value: T,
+    /// Bounded observed notices and client accounting.
+    pub notice_report: NoticeReport,
+}
+
 /// A message the server sent alongside a result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
@@ -21,6 +272,149 @@ pub struct Notice {
     pub message: String,
     /// SQLSTATE, when the server supplied one.
     pub code: Option<String>,
+}
+
+/// Retains a notice message without allowing one server message to dominate
+/// the execution model. The suffix makes the loss visible.
+#[must_use]
+pub fn bounded_notice_message(message: &str) -> String {
+    if message.len() <= MAX_NOTICE_MESSAGE_BYTES {
+        return message.to_owned();
+    }
+
+    let end = notice_prefix_end(message);
+    let mut bounded = String::with_capacity(end + NOTICE_TRUNCATION_SUFFIX.len());
+    bounded.push_str(&message[..end]);
+    bounded.push_str(NOTICE_TRUNCATION_SUFFIX);
+    bounded
+}
+
+/// Retained message byte length without allocating another application copy.
+pub(crate) fn bounded_notice_message_len(message: &str) -> usize {
+    if message.len() <= MAX_NOTICE_MESSAGE_BYTES {
+        return message.len();
+    }
+    notice_prefix_end(message) + NOTICE_TRUNCATION_SUFFIX.len()
+}
+
+fn notice_prefix_end(message: &str) -> usize {
+    let mut end = MAX_NOTICE_MESSAGE_BYTES
+        .saturating_sub(NOTICE_TRUNCATION_SUFFIX.len())
+        .min(message.len());
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
+
+/// Buffered ingestion arithmetic; no transport or output ownership.
+pub(crate) mod retention_budget;
+/// Execution-wide logical occupied-result-data allowance in bytes.
+pub use retention_budget::RETAINED_RESULT_DATA_BYTES as MAX_RETAINED_RESULT_DATA_BYTES;
+
+/// Why the client did not retain all described result data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetentionReason {
+    /// Existing configured per-result row cap.
+    RowCap,
+    /// Execution-wide occupied-data allowance.
+    RetainedResultLimit,
+    /// No essential description fit the allowance.
+    DescriptionUnavailable,
+}
+impl RetentionReason {
+    /// Fixed client wording, with no result text.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RowCap => "row cap",
+            Self::RetainedResultLimit => "retained-result limit",
+            Self::DescriptionUnavailable => "unavailable description",
+        }
+    }
+}
+
+/// Typed availability, separate from a genuine empty result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResultRetention {
+    /// All received rows were retained.
+    #[default]
+    Complete,
+    /// A known description with a row-cap prefix.
+    RowCap,
+    /// A known description with an occupied-data prefix.
+    DataLimit,
+    /// Count-only control record; no name/type/value payload is retained.
+    Unavailable { source_column_count: usize },
+}
+
+/// Fixed first affected result-set facts; ordinals exclude non-result statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionLoss {
+    /// One-based result-set ordinal.
+    pub ordinal: usize,
+    /// Client retention reason, independent of SQL outcome.
+    pub reason: RetentionReason,
+    /// Rows actually retained.
+    pub retained: usize,
+    /// Rows actually delivered by the server.
+    pub received: u64,
+    /// Known source column count, even when names were not retained.
+    pub source_columns: usize,
+}
+
+/// Fixed scalar summary computed once when a retained Execution is replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RetentionLossSummary {
+    /// Number of limited/unavailable result sets in the Execution.
+    pub limited_sets: usize,
+    /// First affected result's fixed facts; no ordinal list or result text.
+    pub first: Option<RetentionLoss>,
+}
+impl RetentionLossSummary {
+    /// Scans only at explicit accepted replacement, never at frame rendering.
+    #[must_use]
+    pub fn from_execution(execution: &Execution) -> Self {
+        let mut summary = Self::default();
+        for (index, set) in execution
+            .statements
+            .iter()
+            .filter_map(|s| s.result_set.as_ref())
+            .enumerate()
+        {
+            if let Some(reason) = set.retention_reason() {
+                summary.limited_sets += 1;
+                summary.first.get_or_insert(RetentionLoss {
+                    ordinal: index + 1,
+                    reason,
+                    retained: set.retained(),
+                    received: set.rows_seen,
+                    source_columns: set.source_column_count(),
+                });
+            }
+        }
+        summary
+    }
+    /// Complete compact warning. Its allocation depends on fixed scalars only.
+    #[must_use]
+    pub fn warning(&self) -> Option<String> {
+        (self.limited_sets > 0)
+            .then(|| format!("Data limited in {} result set(s)", self.limited_sets))
+    }
+    /// Fixed first-result detail; never includes names, cells or source SQL.
+    #[must_use]
+    pub fn detail(&self) -> Option<String> {
+        self.first.map(|first| {
+            format!(
+                "First: result set {}, {}; retained {} of {} received rows; {} source columns.",
+                first.ordinal,
+                first.reason.label(),
+                first.retained,
+                first.received,
+                first.source_columns
+            )
+        })
+    }
 }
 
 /// Rows returned by one statement, bounded by a cap.
@@ -40,6 +434,8 @@ pub struct ResultSet {
     pub rows_seen: u64,
     /// The cap that was applied.
     pub cap: usize,
+    /// Typed client retention state; does not change server success or affected rows.
+    pub retention: ResultRetention,
 }
 
 impl ResultSet {
@@ -52,6 +448,65 @@ impl ResultSet {
             rows: Vec::new(),
             rows_seen: 0,
             cap,
+            retention: ResultRetention::Complete,
+        }
+    }
+
+    /// Count-only result whose essential description was not admitted.
+    /// This differs from a known description with zero returned rows.
+    #[must_use]
+    pub const fn unavailable(source_column_count: usize, cap: usize) -> Self {
+        Self {
+            columns: Vec::new(),
+            column_types: Vec::new(),
+            rows: Vec::new(),
+            rows_seen: 0,
+            cap,
+            retention: ResultRetention::Unavailable {
+                source_column_count,
+            },
+        }
+    }
+
+    /// Whether retained names/rows may be used by data actions and encoders.
+    #[must_use]
+    pub const fn is_available(&self) -> bool {
+        !matches!(self.retention, ResultRetention::Unavailable { .. })
+    }
+
+    /// Known source count without inventing retained column labels.
+    #[must_use]
+    pub fn source_column_count(&self) -> usize {
+        match self.retention {
+            ResultRetention::Unavailable {
+                source_column_count,
+            } => source_column_count,
+            _ => self.columns.len(),
+        }
+    }
+
+    /// Counts an unretained row without allocating/retaining a placeholder.
+    pub(crate) fn discard_row(&mut self, reason: RetentionReason) {
+        self.rows_seen += 1;
+        if matches!(self.retention, ResultRetention::Complete) {
+            self.retention = match reason {
+                RetentionReason::RowCap => ResultRetention::RowCap,
+                _ => ResultRetention::DataLimit,
+            };
+        }
+    }
+
+    /// The typed loss cause, including legacy synthetic count-only truncation.
+    #[must_use]
+    pub fn retention_reason(&self) -> Option<RetentionReason> {
+        match self.retention {
+            ResultRetention::Unavailable { .. } => Some(RetentionReason::DescriptionUnavailable),
+            ResultRetention::DataLimit => Some(RetentionReason::RetainedResultLimit),
+            ResultRetention::RowCap => Some(RetentionReason::RowCap),
+            ResultRetention::Complete if self.rows_seen > self.rows.len() as u64 => {
+                Some(RetentionReason::RowCap)
+            }
+            ResultRetention::Complete => None,
         }
     }
 
@@ -74,6 +529,9 @@ impl ResultSet {
     /// Replaces type labels when their positions align exactly with the headers.
     /// Returns whether the metadata was accepted.
     pub fn set_column_types(&mut self, column_types: Vec<Option<String>>) -> bool {
+        if !self.is_available() {
+            return false;
+        }
         if column_types.len() != self.columns.len() {
             self.column_types = vec![None; self.columns.len()];
             return false;
@@ -94,18 +552,24 @@ impl ResultSet {
     /// tell the difference between "not kept" and "not received".
     pub fn push(&mut self, row: Vec<Cell>) -> bool {
         self.rows_seen += 1;
-        if self.rows.len() < self.cap {
+        if self.is_available()
+            && !matches!(self.retention, ResultRetention::DataLimit)
+            && self.rows.len() < self.cap
+        {
             self.rows.push(row);
             true
         } else {
+            if matches!(self.retention, ResultRetention::Complete) {
+                self.retention = ResultRetention::RowCap;
+            }
             false
         }
     }
 
-    /// Whether rows were dropped because of the cap.
+    /// Whether the client could not retain the complete result.
     #[must_use]
     pub fn is_truncated(&self) -> bool {
-        self.rows_seen > self.rows.len() as u64
+        self.retention_reason().is_some()
     }
 
     /// Rows currently held in memory.
@@ -117,6 +581,20 @@ impl ResultSet {
     /// A short description of what is being shown, always stating truncation.
     #[must_use]
     pub fn window_label(&self) -> String {
+        if !self.is_available() {
+            return format!(
+                "Result data unavailable - retained-result limit reached ({} source columns, {} received rows)",
+                self.source_column_count(),
+                self.rows_seen
+            );
+        }
+        if self.retention_reason() == Some(RetentionReason::RetainedResultLimit) {
+            return format!(
+                "showing {} of {} rows (retained-result limit reached)",
+                self.retained(),
+                self.rows_seen
+            );
+        }
         if self.is_truncated() {
             format!(
                 "showing {} of {} rows (limit {} reached)",
@@ -279,6 +757,8 @@ pub struct Execution {
     pub error: Option<crate::diagnostics::Diagnostic>,
     /// The transaction state the server reported afterwards.
     pub transaction: TransactionState,
+    /// Bounded operation-wide notice accounting and unattributed messages.
+    pub notice_report: NoticeReport,
 }
 
 impl Execution {
@@ -303,188 +783,4 @@ impl Execution {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn row(value: &str) -> Vec<Cell> {
-        vec![Cell::Text(value.to_owned())]
-    }
-
-    #[test]
-    fn a_result_set_stops_at_its_cap_but_keeps_counting() {
-        let mut set = ResultSet::new(vec!["n".into()], 3);
-        for i in 0..10 {
-            let retained = set.push(row(&i.to_string()));
-            assert_eq!(retained, i < 3, "row {i}");
-        }
-        assert_eq!(set.retained(), 3, "memory stays bounded");
-        assert_eq!(set.rows_seen, 10, "the true count is still known");
-        assert!(set.is_truncated());
-        assert_eq!(set.window_label(), "showing 3 of 10 rows (limit 3 reached)");
-    }
-
-    #[test]
-    fn an_untruncated_set_says_so_plainly() {
-        let mut set = ResultSet::new(vec!["n".into()], 100);
-        set.push(row("1"));
-        assert!(!set.is_truncated());
-        assert_eq!(set.window_label(), "1 row");
-        set.push(row("2"));
-        assert_eq!(set.window_label(), "2 rows");
-    }
-
-    #[test]
-    fn an_empty_set_is_not_truncated() {
-        let set = ResultSet::new(vec!["n".into()], 10);
-        assert!(!set.is_truncated());
-        assert_eq!(set.window_label(), "0 rows");
-    }
-
-    #[test]
-    fn summaries_distinguish_rows_returned_from_rows_affected() {
-        let mut set = ResultSet::new(vec!["n".into()], 10);
-        set.push(row("1"));
-        let select = StatementResult {
-            result_set: Some(set),
-            rows_affected: Some(1),
-            elapsed: Duration::from_millis(87),
-            notices: Vec::new(),
-        };
-        assert_eq!(select.summary(), "1 row, 87 ms");
-
-        let update = StatementResult {
-            result_set: None,
-            rows_affected: Some(4),
-            elapsed: Duration::from_millis(12),
-            notices: Vec::new(),
-        };
-        assert_eq!(update.summary(), "4 rows affected, 12 ms");
-
-        let ddl = StatementResult {
-            result_set: None,
-            rows_affected: None,
-            elapsed: Duration::from_millis(3),
-            notices: Vec::new(),
-        };
-        assert_eq!(ddl.summary(), "completed, 3 ms");
-    }
-
-    #[test]
-    fn status_wording_never_claims_more_than_is_known() {
-        assert_eq!(
-            ExecutionStatus::ConnectionLost.label(),
-            "Connection lost - query outcome unknown"
-        );
-        assert_eq!(
-            ExecutionStatus::Cancelled.label(),
-            "Query cancelled by server"
-        );
-        assert_ne!(
-            ExecutionStatus::Failed.label(),
-            ExecutionStatus::Cancelled.label()
-        );
-    }
-
-    #[test]
-    fn an_execution_aggregates_across_statements() {
-        let mut first = ResultSet::new(vec!["a".into()], 2);
-        first.push(row("1"));
-        first.push(row("2"));
-        first.push(row("3"));
-        let mut second = ResultSet::new(vec!["b".into()], 10);
-        second.push(row("x"));
-
-        let execution = Execution {
-            job: JobId(1),
-            statements: vec![
-                StatementResult {
-                    result_set: Some(first),
-                    rows_affected: Some(3),
-                    elapsed: Duration::from_millis(5),
-                    notices: Vec::new(),
-                },
-                StatementResult {
-                    result_set: Some(second),
-                    rows_affected: Some(1),
-                    elapsed: Duration::from_millis(2),
-                    notices: Vec::new(),
-                },
-            ],
-            status: ExecutionStatus::Succeeded,
-            elapsed: Duration::from_millis(7),
-            error: None,
-            transaction: TransactionState::Autocommit,
-        };
-        assert_eq!(execution.retained_rows(), 3);
-        assert!(execution.any_truncated());
-        assert_eq!(execution.job.to_string(), "job-1");
-    }
-
-    #[test]
-    fn transaction_states_come_from_the_server_and_each_says_what_to_do() {
-        assert_eq!(
-            TransactionState::from_probe(Some(true)),
-            TransactionState::Open
-        );
-        assert_eq!(
-            TransactionState::from_probe(Some(false)),
-            TransactionState::Autocommit
-        );
-        assert_eq!(
-            TransactionState::from_probe(None),
-            TransactionState::Unknown,
-            "an unreadable state is unknown, not assumed to be fine"
-        );
-
-        // The failed state is the one people need a way out of, and it names it.
-        assert!(
-            TransactionState::Failed
-                .recovery()
-                .expect("a way out")
-                .contains("ROLLBACK")
-        );
-        assert!(TransactionState::Autocommit.recovery().is_none());
-        for state in [
-            TransactionState::Autocommit,
-            TransactionState::Open,
-            TransactionState::Failed,
-            TransactionState::Unknown,
-        ] {
-            assert!(!state.label().is_empty());
-        }
-    }
-
-    #[test]
-    fn a_zero_cap_keeps_nothing_but_still_reports_the_count() {
-        let mut set = ResultSet::new(vec!["n".into()], 0);
-        assert!(!set.push(row("1")));
-        assert_eq!(set.retained(), 0);
-        assert_eq!(set.rows_seen, 1);
-        assert!(set.is_truncated());
-    }
-
-    #[test]
-    fn type_metadata_is_optional_and_positionally_safe() {
-        let mut set = ResultSet::new(vec!["n".into(), "label".into()], 10);
-        assert_eq!(set.column_types, vec![None, None]);
-        assert!(set.set_column_types(vec![Some("int4".into()), Some("text".into())]));
-        assert_eq!(set.column_type(0), Some("int4"));
-        assert_eq!(set.column_type(1), Some("text"));
-
-        assert!(!set.set_column_types(vec![Some("wrong".into())]));
-        assert_eq!(set.column_types, vec![None, None]);
-        assert!(set.column_type(8).is_none());
-    }
-
-    #[test]
-    fn partial_type_metadata_stays_partial_instead_of_shifting_labels() {
-        let set = ResultSet::with_column_types(
-            vec!["id".into(), "payload".into(), "created".into()],
-            vec![Some("int8".into()), None, Some("timestamptz".into())],
-            10,
-        );
-        assert_eq!(set.column_type(0), Some("int8"));
-        assert!(set.column_type(1).is_none());
-        assert_eq!(set.column_type(2), Some("timestamptz"));
-    }
-}
+mod tests;

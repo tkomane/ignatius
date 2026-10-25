@@ -1,8 +1,9 @@
 use super::{action_key_label, input_cursor, overlay_block, pane_block, syntax_token};
 use crate::app::model::{Focus, Model};
-use crate::query::value::{sanitize_for_display, truncate_to_width};
+use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
+use crate::ui::layout::{OverlayAnchor, overlay_box, prompt_box};
 use crate::ui::layout::{Presentation, definition_box, definition_viewport};
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
@@ -23,14 +24,7 @@ pub(crate) fn render_name_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(70);
-    let height = 7.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (70, 7));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let lines = vec![
@@ -66,71 +60,82 @@ pub(crate) fn render_name_prompt(
         .render(box_area, buf);
 }
 
-/// Asks for one named value without changing the SQL editor underneath.
-pub(crate) fn render_parameter_prompt(
-    prompt: &crate::app::model::ParameterPrompt,
+/// Draws precisely the rows and fixed interaction areas used for admission.
+fn render_sending_review(
+    model: &Model,
+    kind: crate::ui::review::Kind,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(84);
-    let height = 11.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
+    let Some(view) = crate::ui::review::build(model, kind, presentation, area) else {
+        return;
     };
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let dot = if presentation.glyphs.is_ascii() {
-        "*"
+    ratatui::widgets::Clear.render(view.outer, buf);
+    overlay_block(format!(" {} ", view.title), presentation).render(view.outer, buf);
+    if !view.usable {
+        if view.outer.width > 2 && view.outer.height > 2 {
+            let inner = Rect::new(
+                view.outer.x.saturating_add(1),
+                view.outer.y.saturating_add(1),
+                view.outer.width.saturating_sub(2),
+                view.outer.height.saturating_sub(2),
+            );
+            Paragraph::new(
+                view.refusal
+                    .iter()
+                    .map(|line| Line::from(line.as_str()))
+                    .collect::<Vec<_>>(),
+            )
+            .style(presentation.theme.style(Token::Warning))
+            .render(inner, buf);
+        }
+        return;
+    }
+    let body = view
+        .window()
+        .iter()
+        .map(|row| {
+            Line::from(Span::styled(
+                row.text.as_str(),
+                presentation.theme.style(row.token),
+            ))
+        })
+        .collect::<Vec<_>>();
+    Paragraph::new(body).render(view.body, buf);
+    if let (Some(input), Some(input_area)) = (&view.input, view.input_area) {
+        Paragraph::new(input.as_str())
+            .style(presentation.theme.style(Token::Focus))
+            .render(input_area, buf);
+    }
+    Paragraph::new(
+        view.rail
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .style(presentation.theme.style(if view.ready {
+        Token::Info
     } else {
-        "\u{2022}"
-    };
-    let name = prompt
-        .active_name()
-        .map_or_else(|| "unknown".to_owned(), sanitize_for_display);
-    let progress = format!(
-        "Parameter {} of {}: :{name}",
-        prompt.active_index() + 1,
-        prompt.total()
+        Token::Warning
+    }))
+    .render(view.rail_area, buf);
+}
+
+/// Asks for one named value without changing the SQL editor underneath.
+pub(crate) fn render_parameter_prompt(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Parameter,
+        presentation,
+        area,
+        buf,
     );
-    let value = if prompt.typed_length() == 0 {
-        "(empty)".to_owned()
-    } else {
-        dot.repeat(prompt.typed_length())
-    };
-    let lines = vec![
-        Line::from(Span::styled(progress, theme.style(Token::Focus))),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Value: ", theme.style(Token::Text)),
-            Span::styled(value, theme.style(Token::Focus)),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "The answer is literal text data. Quotes, punctuation and newlines stay data; empty text is valid.",
-            theme.style(Token::Muted),
-        )),
-        Line::from(Span::styled(
-            "The SQL template stays unchanged and prompted values are kept nowhere in history.",
-            theme.style(Token::Muted),
-        )),
-    ];
-
-    Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .block(overlay_block(
-            format!(
-                " {}Parameter  Enter to accept, Esc to cancel ",
-                presentation.icon(Icon::Editor)
-            ),
-            presentation,
-        ))
-        .render(box_area, buf);
 }
 
 /// Asks for a password the server has demanded.
@@ -145,15 +150,14 @@ pub(crate) fn render_password_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(72);
-    let height = 9.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (72, 9));
     ratatui::widgets::Clear.render(box_area, buf);
+    let full_title = format!(
+        " {}Password  Enter to try again, Esc to cancel ",
+        presentation.icon(Icon::Role)
+    );
+    let title_width = display_width(&full_title).saturating_sub(2)
+        + usize::from(presentation.spacing().title_padding) * 2;
 
     let dot = if presentation.glyphs.is_ascii() {
         "*"
@@ -186,10 +190,11 @@ pub(crate) fn render_password_prompt(
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .block(overlay_block(
-            format!(
-                " {}Password  Enter to try again, Esc to cancel ",
-                presentation.icon(Icon::Role)
-            ),
+            if title_width > usize::from(box_area.width.saturating_sub(2)) {
+                " Password Enter try, Esc cancel ".to_owned()
+            } else {
+                full_title
+            },
             presentation,
         ))
         .render(box_area, buf);
@@ -202,175 +207,33 @@ pub(crate) fn render_password_prompt(
 /// distrust it, which costs more than it saves.
 pub(crate) fn render_confirmation(
     model: &Model,
-    pending: &crate::app::model::PendingRun,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(78);
-    let height = 12.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    };
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let target = model
-        .connection
-        .info()
-        .map_or_else(|| "this database".to_owned(), |info| info.target.clone());
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!(
-                    " {}[{}] ",
-                    presentation.icon(Icon::Production),
-                    model.environment().label()
-                ),
-                theme.capsule(Token::EnvironmentProduction),
-            ),
-            Span::styled(format!(" {target}"), theme.style(Token::Text)),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("This statement {}.", pending.impact.label()),
-            theme.style(Token::Danger),
-        )),
-    ];
-
-    for line in pending.sql.lines().take(4) {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", sanitize_for_display(line)),
-            theme.style(Token::Muted),
-        )));
-    }
-
-    lines.push(Line::from(""));
-    if pending.impact.needs_typed_confirmation() {
-        lines.push(Line::from(Span::styled(
-            format!("Type the database name to continue: {}", pending.required),
-            theme.style(Token::Warning),
-        )));
-        lines.push(Line::from(vec![
-            Span::styled("  ", theme.style(Token::Text)),
-            Span::styled(
-                sanitize_for_display(&pending.typed),
-                theme.style(if pending.is_satisfied() {
-                    Token::Success
-                } else {
-                    Token::Text
-                }),
-            ),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        ]));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Enter to run it, Esc to cancel.",
-            theme.style(Token::Info),
-        )));
-    }
-
-    lines.push(Line::from(Span::styled(
-        "This reads leading keywords only. Database permissions are the real control.",
-        theme.style(Token::Muted),
-    )));
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Production,
+        presentation,
+        area,
+        buf,
+    );
 }
 
 /// Explains the one-shot side effect before EXPLAIN ANALYZE is sent.
 pub(crate) fn render_plan_confirmation(
     model: &Model,
-    pending: &crate::app::model::PendingPlan,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(84);
-    let height = 14.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let target = model
-        .connection
-        .info()
-        .map_or_else(|| "this database".to_owned(), |info| info.target.clone());
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "EXPLAIN ANALYZE will execute the statement to measure it.",
-            theme.style(Token::Danger),
-        )),
-        Line::from(Span::styled(
-            "Side effects are possible. This client will not automatically roll it back.",
-            theme.style(Token::Warning),
-        )),
-        Line::from(Span::styled(
-            format!("Target: {}", safe_plan_text(&target)),
-            theme.style(Token::Muted),
-        )),
-        Line::from(""),
-    ];
-    for line in pending.sql.lines().take(4) {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", safe_plan_text(line)),
-            theme.style(Token::Muted),
-        )));
-    }
-    lines.push(Line::from(""));
-    if pending.impact.needs_typed_confirmation() {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "Type the database name to continue: {}",
-                safe_plan_text(&pending.required)
-            ),
-            theme.style(Token::Warning),
-        )));
-        lines.push(Line::from(vec![
-            Span::styled("  ", theme.style(Token::Text)),
-            Span::styled(
-                safe_plan_text(&pending.typed),
-                theme.style(if pending.is_satisfied() {
-                    Token::Success
-                } else {
-                    Token::Text
-                }),
-            ),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        ]));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Enter to execute once and measure it. Esc to cancel.",
-            theme.style(Token::Info),
-        )));
-    }
-    lines.push(Line::from(Span::styled(
-        "Classification is advisory: database permissions remain the real control.",
-        theme.style(Token::Muted),
-    )));
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm analyzed plan  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Analyze,
+        presentation,
+        area,
+        buf,
+    );
 }
 
 /// Asks before a result value leaves through the terminal.
@@ -380,85 +243,17 @@ pub(crate) fn render_plan_confirmation(
 /// never rendered in this overlay.
 pub(crate) fn render_copy_confirmation(
     model: &Model,
-    pending: &crate::app::model::PendingCopy,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(84);
-    let height = 11.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let column = model
-        .visible_result()
-        .and_then(|set| set.columns.get(pending.column))
-        .map_or_else(
-            || format!("column {}", pending.column + 1),
-            |name| {
-                format!(
-                    "column {} ({})",
-                    pending.column + 1,
-                    sanitize_for_display(name)
-                )
-            },
-        );
-    let target = model.connection.info().map_or_else(
-        || "this terminal".to_owned(),
-        |info| safe_plan_text(&info.target),
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Copy,
+        presentation,
+        area,
+        buf,
     );
-    let lines = vec![
-        Line::from(Span::styled(
-            "Send one selected text value through the terminal?",
-            theme.style(Token::Warning),
-        )),
-        Line::from(Span::styled(
-            format!("Cell: row {}, {column}", pending.source_row + 1),
-            theme.style(Token::Text),
-        )),
-        Line::from(Span::styled(
-            format!(
-                "Size: {} UTF-8 bytes, {} characters",
-                pending.bytes, pending.characters
-            ),
-            theme.style(Token::Info),
-        )),
-        Line::from(Span::styled(
-            format!("Path: {target} -> terminal clipboard sequence"),
-            theme.style(Token::Muted),
-        )),
-        Line::from(Span::styled(
-            "The terminal, SSH path, or multiplexer may observe or retain it.",
-            theme.style(Token::Danger),
-        )),
-        Line::from(Span::styled(
-            "Ignatius writes only; it never reads or clears the clipboard.",
-            theme.style(Token::Muted),
-        )),
-        Line::from(Span::styled(
-            "Terminal acceptance is unconfirmed: this client can only know its write and flush.",
-            theme.style(Token::Muted),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Enter to send once. Esc to cancel.",
-            theme.style(Token::Info),
-        )),
-    ];
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm copy  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
 }
 
 /// Collects the replacement before showing the exact generated statement.
@@ -469,14 +264,7 @@ pub(crate) fn render_update_value_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(92);
-    let height = 12.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (92, 12));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let relation = format!(
@@ -533,80 +321,18 @@ pub(crate) fn render_update_value_prompt(
 
 /// Shows the literal-bound statement immediately before the one write effect.
 pub(crate) fn render_update_review(
-    pending: &crate::app::model::PendingUpdate,
+    model: &Model,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(104);
-    let height = 17.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let bound = pending
-        .plan
-        .bound_sql()
-        .map(|sql| sanitize_for_display(&sql))
-        .unwrap_or_else(|_| "The generated statement could not be rendered for review.".into());
-    let keys = if pending.plan.key_columns.is_empty() {
-        "none".to_owned()
-    } else {
-        pending
-            .plan
-            .key_columns
-            .iter()
-            .map(|name| sanitize_for_display(name))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let lines = vec![
-        Line::from(Span::styled(
-            "Review generated UPDATE",
-            theme.style(Token::Warning),
-        )),
-        Line::from(Span::styled(
-            format!(
-                "Target: {}.{}; column: {}",
-                sanitize_for_display(&pending.relation.schema),
-                sanitize_for_display(&pending.relation.relation),
-                sanitize_for_display(&pending.plan.target_column)
-            ),
-            theme.style(Token::Text),
-        )),
-        Line::from(Span::styled(
-            format!("Primary-key identity: {keys}"),
-            theme.style(Token::Muted),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Exact bound statement:",
-            theme.style(Token::Header),
-        )),
-        Line::from(Span::styled(bound, theme.style(Token::Text))),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Nothing has been sent yet. Enter runs this UPDATE once; Esc cancels.",
-            theme.style(Token::Info),
-        )),
-        Line::from(Span::styled(
-            "The prior SELECT is a snapshot and will not be rerun automatically.",
-            theme.style(Token::Muted),
-        )),
-    ];
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm cell update  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Update,
+        presentation,
+        area,
+        buf,
+    );
 }
 /// Renders the plan surface over the Results pane without changing the retained
 /// ordinary execution underneath it.
@@ -633,7 +359,16 @@ pub(crate) fn render_plan(
         crate::app::PlanStatus::Hidden => " Plan ",
     };
     let block = pane_block(
-        format!("{}{}", presentation.icon(Icon::Info), title),
+        format!(
+            "{}{}{}",
+            if model.splits.zoomed && focused {
+                "(zoomed) "
+            } else {
+                ""
+            },
+            presentation.icon(Icon::Info),
+            title
+        ),
         focused,
         presentation,
     );
@@ -731,23 +466,42 @@ fn render_ready_plan(
         return;
     }
 
+    let (summary_area, tree_area, detail_area) = plan_areas(area);
+    render_plan_summary(&summary, document, presentation, summary_area, buf);
+    render_plan_tree(document, view, presentation, tree_area, buf);
+    if let Some(detail) = detail_area {
+        render_plan_detail(document, view, presentation, detail, buf);
+    }
+}
+
+/// Plan sections, shared with keyboard paging through the tree.
+fn plan_areas(area: Rect) -> (Rect, Rect, Option<Rect>) {
+    if area.height < 3 {
+        return (area, Rect::default(), None);
+    }
     if area.height >= 8 {
         let detail_height = 5.min(area.height.saturating_sub(3));
         let tree_height = area.height.saturating_sub(2 + detail_height);
-        let [summary_area, tree_area, detail_area] = Layout::vertical([
+        let [summary, tree, detail] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Length(tree_height),
             Constraint::Length(detail_height),
         ])
         .areas(area);
-        render_plan_summary(&summary, document, presentation, summary_area, buf);
-        render_plan_tree(document, view, presentation, tree_area, buf);
-        render_plan_detail(document, view, presentation, detail_area, buf);
+        (summary, tree, Some(detail))
     } else {
-        let [summary_area, tree_area] =
+        let [summary, tree] =
             Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
-        render_plan_summary(&summary, document, presentation, summary_area, buf);
-        render_plan_tree(document, view, presentation, tree_area, buf);
+        (summary, tree, None)
+    }
+}
+
+pub(crate) fn plan_capacity(pane: Rect) -> usize {
+    let inner = super::inner_rect(pane);
+    if inner.width == 0 {
+        0
+    } else {
+        usize::from(plan_areas(inner).1.height)
     }
 }
 
@@ -1023,11 +777,11 @@ pub(crate) fn render_definition(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let box_area = definition_box(area);
+    let box_area = definition_box(area, presentation);
     if box_area.width < 12 || box_area.height < 5 {
         return;
     }
-    let (_, height) = definition_viewport((area.width, area.height));
+    let (_, height) = definition_viewport((area.width, area.height), presentation);
     ratatui::widgets::Clear.render(box_area, buf);
 
     let mut lines = vec![Line::from(Span::styled(
@@ -1120,14 +874,16 @@ pub(crate) fn render_chords(
 ) {
     let theme = &presentation.theme;
     let chords = crate::ui::keymap::CHORDS;
-    let width = area.width.saturating_sub(8).min(60);
-    let height = (u16::try_from(chords.len()).unwrap_or(6) + 2).min(area.height);
-    let chord_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + area.height.saturating_sub(height + 1),
-        width,
-        height,
-    };
+    let height = u16::try_from(chords.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let chord_area = overlay_box(
+        area,
+        presentation,
+        (60, height),
+        height.min(area.height),
+        OverlayAnchor::Bottom,
+    );
     ratatui::widgets::Clear.render(chord_area, buf);
 
     let lines: Vec<Line> = chords
@@ -1152,62 +908,28 @@ pub(crate) fn render_chords(
         .render(chord_area, buf);
 }
 pub(crate) fn render_help(
-    keymap: &Keymap,
+    model: &crate::app::Model,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let width = area.width.saturating_sub(4).min(70);
-    let rows = keymap.bindings().len() + crate::ui::keymap::CHORDS.len() + 2;
-    let height = (u16::try_from(rows).unwrap_or(24) + 3).min(area.height.saturating_sub(2));
-    let help_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    };
-
-    ratatui::widgets::Clear.render(help_area, buf);
-    let mut lines = vec![Line::from(Span::styled(
-        "Every action is reachable from the keyboard.",
-        theme.style(Token::Muted),
-    ))];
-    for binding in keymap.bindings() {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {:<12}", binding.key_label()),
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(binding.description, theme.style(Token::Text)),
-        ]));
-    }
-
-    // The chords belong here too. Reading help and still not knowing how to
-    // reach half the interface is the failure this overlay exists to prevent.
-    let prefix = keymap
-        .contextual_hint(&crate::app::Action::BeginPrefix)
-        .map(|(key, _)| key)
-        .unwrap_or_else(|| "Ctrl+K".to_owned());
-    lines.push(Line::from(Span::styled(
-        format!("{prefix} then:"),
-        theme.style(Token::Muted),
-    )));
-    for (key, _, description) in crate::ui::keymap::CHORDS {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {:<12}", format!("{prefix} {key}")),
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(*description, theme.style(Token::Text)),
-        ]));
-    }
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            format!(" {}Help  Esc to close ", presentation.icon(Icon::Help)),
-            presentation,
-        ))
-        .style(theme.style(Token::Text))
-        .render(help_area, buf);
+    let view = crate::ui::help::build(model, presentation, area);
+    ratatui::widgets::Clear.render(view.outer, buf);
+    overlay_block(
+        format!(" {}Help ", presentation.icon(Icon::Help)),
+        presentation,
+    )
+    .render(view.outer, buf);
+    Paragraph::new(view.window().to_vec())
+        .style(presentation.theme.style(Token::Text))
+        .render(view.body, buf);
+    Paragraph::new(
+        view.rail
+            .iter()
+            .cloned()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    )
+    .style(presentation.theme.style(Token::Focus))
+    .render(view.rail_area, buf);
 }

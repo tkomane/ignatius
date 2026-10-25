@@ -84,8 +84,9 @@ policies bolted onto the side; they are why it is built the way it is.
 
 - **Uncertainty is stated.** `Cancellation requested` until the server
   confirms. `Connection lost - query outcome unknown` when that is the truth.
-  An interrupted export leaves a `.partial` file, a row count and exit code 9,
+  An interrupted export leaves a `.partial` file, row progress and exit code 9,
   never a truncated file at the destination that looks finished.
+  A failed flush states that the file's row count is unconfirmed.
 - **The TLS state shown is the server's answer**, read back from
   `pg_stat_ssl`, not the one you asked for. `require` and `verify-full` are
   never described as the same thing, and a TLS failure is never retried
@@ -109,8 +110,8 @@ ignatius query "$DATABASE_URL" -c "SELECT count(*) FROM orders" --format csv
 ignatius query "$DATABASE_URL" -f report.sql --format json | jq '.[0].rows'
 echo "SELECT 1" | ignatius query "$DATABASE_URL" --format ndjson
 
-# Stream a large result straight to a file. The rows never pass through
-# memory, so the size of the result does not matter.
+# Stream without retaining the entire result. Individual values, rows
+# and driver frames still use memory.
 ignatius query "$DATABASE_URL" -c "SELECT * FROM orders" --format csv -o orders.csv
 ```
 
@@ -120,6 +121,11 @@ whose first byte is correct before the last row is read. Exit codes tell a
 script which kind of failure happened: 2 usage, 3 configuration, 4 connection,
 5 authentication, 6 TLS, 7 query, 8 cancelled, 9 interrupted export,
 70 internal.
+
+Buffered CSV, TSV, NDJSON, Markdown and INSERT write truncation status to
+stderr when a row limit discards data, stating retained and received counts.
+Table and JSON include that metadata in their data shape. For a future complete
+streaming export, choose `--output` before execution; no statement is replayed.
 
 ## Plain mode, and the screen reader question
 
@@ -244,6 +250,7 @@ header. Scripted `ignatius query` runs are never recorded.
 ignatius doctor --json          # is this machine set up correctly
 ignatius connect --check URI    # test a target, stage by stage
 ignatius config paths           # where configuration and logs live
+ignatius history path           # where statements are kept (list, clear)
 ignatius completion zsh         # zsh, bash, fish, powershell
 ignatius version --verbose      # version, revision, build identity, target
 ```

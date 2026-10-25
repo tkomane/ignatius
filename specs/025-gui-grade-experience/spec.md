@@ -4,9 +4,13 @@
 
 **Created**: 2026-09-17
 
-**Status**: Specified; not implemented. Written from the owner's 2026-09-17
-observed-friction evidence and a planning session's code reading; no product
-behaviour has changed for this feature yet.
+**Status**: US1-US4 are implemented with dated evidence in `docs/status.md`.
+US7's keyboard split/zoom/shared-geometry core passed its integrated local
+verifier on 2026-10-25. Density and its remaining T038 tests also passed the
+integrated local verifier that day. Dragging and complete US7 acceptance,
+plus US5/US6/US8-US10, remain open. The feature originated in
+one owner observation on 2026-09-17; automated checks add no participant sample
+or native hand-use claim.
 
 **Input**: User description: "Close the gap between the GUI-like promise and
 the observed experience. On 2026-09-17 the owner abandoned Ignatius for the
@@ -52,6 +56,11 @@ revision advances once.
    newline, **when** it is inserted, **then** the stored text is the pasted
    text and the rendered view stays free of raw control sequences under the
    existing display-sanitising rules.
+5. **Given** a typed or pasted line extends beyond the editor's text width,
+   **when** its caret moves along the line or the pane is resized, **then**
+   the caret remains visible wherever text capacity is positive, the gutter
+   stays fixed and completion/hit geometry follows the same displayed cells,
+   with SQL, scalar position and undo history preserved (FR-2529 / T058).
 
 ### User Story 2 - The screen is a surface, not a transparency (Priority: P1)
 
@@ -135,6 +144,11 @@ execution effects.
    text and the literal text NULL appear, **then** the three remain
    distinguishable by words and markers exactly as the existing rules
    require, with colour and striping as reinforcement only.
+7. **Given** the expanded-row Results view, **when** a field is selected,
+   **then** its header, arrow and value use Selection ink on its painted fill,
+   retaining semantic emphasis and the explicit value markers. Unselected
+   fields keep their token styles; basic16 and colour-off retain reversed
+   selection without adding a painted background or colour-off colours.
 
 ### User Story 4 - The first frame is already useful (Priority: P1)
 
@@ -571,6 +585,20 @@ output never contain banner bytes.
   identical on every row, quantized at 256, two flat bands at 16 colours,
   modifiers only with colour off; the product name MUST remain readable at
   every tier.
+- **FR-2529**: The focused SQL editor MUST keep its caret visible when a
+  line exceeds the available text width. Horizontal viewing MUST preserve
+  the fixed line-number/statement gutter, stored SQL, scalar cursor position,
+  undo history and existing vertical window. Drawing, completion anchoring
+  and editor hit regions MUST share display-cell geometry after the existing
+  display sanitisation. The dated editor-view section of
+  `contracts/presentation.md` pins clipping and Unicode behaviour. This is
+  the W09 correction for observed clipping, not mouse-dispatch acceptance.
+- **FR-2530**: Editor horizontal viewing MUST retain display-unit metadata
+  proportional to the visible text capacity plus the caret unit, rather than
+  one retained record for every scalar of a long off-screen line. Preserve
+  FR-2529's rendered cells, source identity and sanitisation. The dated
+  presentation contract defines the W10 / T059 resource correction; measured
+  diagnostic peaks do not establish a process-memory ceiling or release p95.
 
 ### Security and Compatibility Requirements
 

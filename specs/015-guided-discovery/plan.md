@@ -36,7 +36,7 @@ effects, and no onboarding state is persisted.
 
 **Performance Goals**: Derive and render discovery copy during the existing frame with no database, filesystem, subprocess, or network work; palette search remains bounded by the existing visible list
 
-**Constraints**: At most five contextual hints; active configured keys only; truthful prerequisites; no automatic SQL, metadata reload, file, history, clipboard, telemetry, or new persisted state effects
+**Constraints**: The original five-hint bound is superseded by Feature 025's six comfortable/four compact density cap; active configured keys only; truthful prerequisites; no automatic SQL, metadata reload, file, history, clipboard, telemetry, or new persisted state effects
 
 **Scale/Scope**: Existing Editor, Results, Objects, empty/blocked states, general command palette, and related documentation; no new database capability or machine-output change
 
@@ -113,3 +113,22 @@ feature does not create a second command or state system.
 |-----------|------------|-------------------------------------|
 | [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
 | [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+
+## T042 help follow-up - 2026-10-25
+
+Follow `contracts/discovery.md`'s pinned scrollable-help contract. Root owns
+canonical app model/reducer, help/layout/overlay and sidecar writes after W04
+handoff. Store one ephemeral scroll offset, derive active-key content/wrapping
+and viewport in a pure helper, and share it between reducer navigation and
+rendering. Reuse existing width wrapping, density overlay placement and action
+keys. Do not generalize the sending-review state machine or add dependencies,
+configuration, persistence or a second search system. Keep explicit command
+routes and higher prompt/review ownership unchanged.
+
+First reproduce hidden text/paste/editor navigation and unreachable help rows.
+Then prove complete buffer traversal, long-key separation, nested inspector/
+palette behavior and no-effects reading with both densities and narrow modes.
+Run focused app/UI/parity checks, inspect actual styled buffers and include the
+final source in the combined locked verifier. Native visual and hand-use gates
+remain open. W10 export workers own only their isolated clones; no canonical
+runtime/Cargo writer overlaps root.

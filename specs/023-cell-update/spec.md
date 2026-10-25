@@ -175,6 +175,8 @@ generated update and verify exactly one row changes only after confirmation.
   statement has been sent yet.
 - **FR-2309**: The client MUST require one explicit confirmation after review
   before emitting an execution effect and MUST emit no effect on dismissal.
+  The 2026-10-25 [review viewport contract](../018-clipboard-copy/contracts/review-viewport.md)
+  adds shared traversal/admission rules without changing statement semantics.
 - **FR-2310**: Generated updates MUST use a distinct parameterized effect whose
   template is reviewable and whose values use `SecretString`; the bound SQL
   MUST exist only at the existing PostgreSQL simple-query boundary.
@@ -190,6 +192,9 @@ generated update and verify exactly one row changes only after confirmation.
 - **FR-2315**: The generated template, not bound values, MUST be eligible for
   statement history and tracing; values MUST not appear in diagnostics, debug
   output or machine-output routes.
+  Generated writes use Feature 022's value-free server-diagnostic and
+  session-notice policy, including constraint/type failures and transformed
+  replacement or primary-key values.
 
 ### Security and Compatibility Requirements
 

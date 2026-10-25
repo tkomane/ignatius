@@ -34,9 +34,16 @@ Output: SQL sent to PostgreSQL through the existing simple-query adapter.
 
 ## TUI contract
 
+The 2026-10-25 shared [review viewport contract](../../018-clipboard-copy/contracts/review-viewport.md)
+governs each prompt's scrollable name/disclosure body, visible masked input
+and admission before accepting a value. Shared W04 work is tracked in Feature
+018 T037-T040. Plain and environment-backed CLI routes remain separate.
+
 - The prompt opens only after any required production confirmation.
-- The prompt title names the current `:name` and progress, and the body states
-  that the answer is literal text data.
+- Under the 2026-10-25 shared review contract, the fixed title identifies the
+  parameter surface; its scrollable body names the full current `:name` and
+  progress and states that the answer is literal text data. This supersedes
+  the older title-only wording without clipping long names or masked input.
 - Enter accepts empty text and advances; Esc, Cancel and Quit have their normal
   modal semantics.
 - The editor, template SQL, history and result state do not change while the
@@ -59,9 +66,34 @@ Output: SQL sent to PostgreSQL through the existing simple-query adapter.
 
 ## Error and history contract
 
+Runtime binding requires a fresh `SHOW standard_conforming_strings` value of
+exactly `on`; otherwise the request is refused with value-free query diagnostic
+wording and advice to restore `on` separately. The client never changes the
+setting. Buffered execution checks every separately sent statement and retains
+a successful prefix once. Streaming keeps its single Query message and initial
+check. User-SQL methods on one session serialize the check/bind/send operation;
+cancellation remains independent. CLI mapping validation remains pre-connection.
+
+The distinct boundaries follow [PostgreSQL 18 message flow](https://www.postgresql.org/docs/18/protocol-flow.html),
+section 54.2.2.1, checked 2026-10-25: initial parsing covers the complete Query
+message, and splitting such a message changes its implicit transaction scope.
+The string-setting semantics are documented in [PostgreSQL 18 compatibility settings](https://www.postgresql.org/docs/18/runtime-config-compatible.html#GUC-STANDARD-CONFORMING-STRINGS),
+checked the same date. An earlier connection-time snapshot is insufficient
+because SQL can change the setting later in the session.
+
 - The template is recorded after a completed job when history is enabled.
 - Parameter values never appear in history, debug, logs, diagnostics, palette
   entries, notices or machine output.
+- Parameterized execution/export diagnostics retain classification, validated
+  SQLSTATE, statement ordinal and numeric server position; server-controlled
+  prose/object fields are omitted with an explicit privacy explanation. Safe
+  cause/action text comes from the built-in SQLSTATE guidance. This is omission
+  of untrusted text, not an attempt to recognise every transformation of a value.
+- From the first parameterized send until disconnect, notices contain fixed
+  privacy wording and validated SQLSTATE only. The policy is session-scoped
+  because delayed notices cannot be reliably associated with a request. Query
+  and export rows remain intentional output; unparameterized errors retain
+  their existing detailed diagnostic fields.
 - A query position from expanded SQL is retained as server technical data but is
   not mapped into the template. The UI and plain mode say why.
 - Cancellation and connection-loss outcomes reuse the existing server-confirmed

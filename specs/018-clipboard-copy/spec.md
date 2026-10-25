@@ -135,6 +135,8 @@ before.
 - **FR-004**: Every copy request MUST show a confirmation containing the result
   row, column, UTF-8 byte count, character count, terminal destination, and an
   acceptance-unconfirmed statement before sending.
+  The 2026-10-25 [review viewport contract](contracts/review-viewport.md) makes
+  this content reachable at narrow sizes and gates both acceptance actions.
 - **FR-005**: Enter on a valid confirmation MUST emit exactly one effect carrying
   the exact selected text bytes and MUST NOT execute SQL, alter history, write a
   result export, or change the database.

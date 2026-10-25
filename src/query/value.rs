@@ -25,6 +25,12 @@ pub const TRUNCATION_MARKER: char = '\u{2026}';
 /// ASCII equivalent of [`TRUNCATION_MARKER`].
 pub const TRUNCATION_MARKER_ASCII: &str = "...";
 
+/// Largest server-rendered value retained in an interactive result cell.
+///
+/// Streaming export does not use this limit: it writes each value as it arrives
+/// and therefore remains the route for larger values.
+pub const MAX_RETAINED_VALUE_BYTES: usize = 1024 * 1024;
+
 /// One value in a result row.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Cell {
@@ -48,6 +54,18 @@ impl Cell {
     #[must_use]
     pub fn from_option(value: Option<&str>) -> Self {
         value.map_or(Self::Null, |v| Self::Text(v.to_owned()))
+    }
+
+    /// Builds a retained cell, refusing a value that would exceed the result
+    /// model's per-cell memory bound.
+    pub fn from_option_bounded(value: Option<&str>) -> Result<Self, usize> {
+        let Some(value) = value else {
+            return Ok(Self::Null);
+        };
+        if value.len() > MAX_RETAINED_VALUE_BYTES {
+            return Err(value.len());
+        }
+        Ok(Self::Text(value.to_owned()))
     }
 
     /// Whether this is a SQL NULL.
@@ -291,6 +309,20 @@ mod tests {
         assert_eq!(Cell::Null.export("\\N"), "\\N");
         // Export is not display: escaping here would corrupt the exported data.
         assert_eq!(Cell::Text("a\tb".into()).export(""), "a\tb");
+    }
+
+    #[test]
+    fn retained_values_have_a_byte_bound_but_streaming_cells_do_not() {
+        let value = "x".repeat(MAX_RETAINED_VALUE_BYTES + 1);
+        assert_eq!(
+            Cell::from_option_bounded(Some(&value)),
+            Err(MAX_RETAINED_VALUE_BYTES + 1)
+        );
+        assert_eq!(
+            Cell::from_option_bounded(Some("x")),
+            Ok(Cell::Text("x".into()))
+        );
+        assert_eq!(Cell::from_option_bounded(None), Ok(Cell::Null));
     }
 
     #[test]

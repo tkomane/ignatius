@@ -4,10 +4,23 @@ The authority is `src/ui/keymap.rs`; this document mirrors it. Bindings are data
 checked for conflicts by a test, and listed in help at runtime.
 
 The first-frame copy, contextual footer and command palette use a read-only
-snapshot of the active keymap. The footer shows at most five complete
+snapshot of the active keymap. The footer shows at most
+six in comfortable density and four in compact density, using complete
 action/key pairs, selected for the current focus and state. A configured key
 therefore replaces the default everywhere discovery names that action; the
 command palette remains the route to actions that do not fit in the footer.
+
+Help lists every active binding/chord with wrapped labels and descriptions.
+Up/Down, PageUp/PageDown, Home/End and Ctrl+Home/Ctrl+End scroll within it.
+Its fixed rail names the active keys, close route, position and searchable
+command palette. Esc, Enter or the help key closes only help. Text, paste and
+editing/navigation keys cannot change covered SQL; other explicit commands
+close help before using their usual handler. Direct theme switches preserve
+the current input/overlay owner instead of acting through it. A palette or chord
+prefix can cover help and return to the same position; pane chords retain their modal
+no-op rule. Help opened from an inspector covers that inspector until dismissed.
+Opening help or resizing starts at the top. Space bindings are written as
+`Space`, including `Ctrl+Space`.
 
 | Key | Action | Advertised |
 | --- | --- | --- |
@@ -46,6 +59,27 @@ command palette remains the route to actions that do not fit in the footer.
 | `/` | Filter what is in front of you: the rows when the results have focus, the object tree otherwise | No |
 | Any printable key | Type into the editor | No |
 
+The palette's **Server notice retention** entry opens a read-only snapshot of
+client omission/shortening/abandoned-delivery counts. Page keys and Home/End
+scroll locally using the active snapshot labels. Esc closes without
+acknowledgement. Enter/Activate explicitly acknowledges only that captured
+snapshot and closes; new loss remains pending, and unusable geometry refuses
+acknowledgement. Cancel closes this reader without acknowledgement and requests
+cancellation through the existing query recovery path when one is running.
+Palette cancel/empty choice returns to the same snapshot/offset. Reading and
+paste never edit covered SQL; protected prompts/reviews keep higher ownership.
+No new mandatory binding or configuration name is introduced.
+
+The palette's **Session / Switch theme** entry is always available, including
+without a direct key and while a query is running or cancellation is pending.
+It cycles dark, light, high-contrast, custom when a validated `[theme]` exists,
+then dark. The choice lasts for the session; it does not write configuration,
+reconnect or repeat SQL. Configure the optional `switch-theme` action under
+`[keys]`; the single palette row lists the active aliases. Direct keys preserve
+prompts, reviews, filters, help, inspectors, palettes and pending chord prefixes.
+Choosing the palette entry follows the existing parent-close policy; cancelling
+or choosing no match returns to the same help/notice position.
+
 ## Chords
 
 `Ctrl+K` opens a popup listing every key that can follow it. Nothing is on a
@@ -53,6 +87,9 @@ timer: a popup that disappears while being read is worse than one that waits.
 
 | After `Ctrl+K` | Does |
 | --- | --- |
+| `,` | Shrink the sidebar or editor share |
+| `.` | Grow the sidebar or editor share |
+| `z` | Zoom the focused pane or restore the layout |
 | `b` | Show or hide the object tree |
 | `p` | Open the command palette |
 | `n` | Choose a connection |
@@ -90,6 +127,17 @@ replacement, then shows the exact bound statement. Enter on that review sends
 one parameterized update; Esc sends nothing, and the prior result is never
 rerun automatically. Printable `u` remains editor input outside the chord.
 
+Copy, generated UPDATE, production-run, analyzed-plan and parameter prompts
+share a scrollable review. Up/Down and PageUp/PageDown move through its text;
+Home/End and Ctrl+Home/Ctrl+End go to its beginning/end. The prompt names the
+active configured keys. Acceptance stays blocked until the final page is
+visible, and returning to an earlier page blocks it again. A new candidate,
+next parameter or actual resize restarts that review. Typed input stays in a
+fixed row. Below 40 columns by 8 rows, or without room for two body rows and
+the complete command rail, enlarge the terminal or cancel. Esc and Ctrl+C
+remain available. Reaching the last page establishes visibility, not that the
+user read the text.
+
 With the editor focused, `Ctrl+Shift+F` or `Ctrl+K q` formats the complete SQL
 buffer locally. It changes only whitespace and layout outside strings, quoted
 identifiers, dollar bodies, and comments; it is deterministic and one Undo
@@ -120,6 +168,26 @@ facts, result, object tree and completion snapshot are cleared while local
 reading preferences remain. The runtime receives only the profile name and
 resolves credentials outside the application model. Passwords, tokens and
 unknown profile fields never appear in the picker.
+
+The pane keys change only this application session. With Objects focused,
+shrink/grow changes sidebar width by 2 cells within 20-60 cells, retaining at
+least 30 cells for the main column. Otherwise they change editor height by
+1 row, retaining at least 3 outer rows each for Editor and Results. Zoom fills
+the body; Tab changes the visible zoomed pane, and repeat zoom restores the
+saved shape. A split key while zoomed restores before adjusting. Resizing
+clamps the visible panes without discarding the preferred shape. Compact
+terminals explain that the layout is already single-pane.
+Active diagnostics and failed transactions keep their Results safety surface
+visible: zooming another pane is refused with an explanation, and a new failure
+restores the ordinary layout outside Results focus. A chord retains its current
+input owner until the continuation is resolved.
+
+An active error or failed transaction restores the split layout when focus is
+outside Results, so diagnostic and recovery details stay visible. Results can
+still be zoomed. Trying to zoom another pane explains how to keep those details
+visible; moving focus away from Results restores the saved shape.
+The pane actions keep an input overlay open, whether invoked by a chord or a
+configured direct key. Other chords retain their usual input handling.
 
 ## Editing keys
 
@@ -259,9 +327,10 @@ modifiers followed by one key: a single character, `f1` to `f24`, or one of
 
 The bindable action names are the authority in `src/ui/keymap.rs`:
 `run-buffer`, `run-statement`, `refresh-result`, `cancel`, `quit`, `toggle-help`,
-`focus-next`, `format-buffer`,
+`focus-next`, `format-buffer`, `switch-theme`,
 `toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
 `open-result-grid`, `narrow-column`, `widen-column`,
+`shrink-pane`, `grow-pane`, `zoom-pane`,
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`,

@@ -199,6 +199,22 @@ bounds and zero executions.
   and parity assertions in the same change.
 - [x] T023 [US3] Assert NULL, empty and literal-NULL distinction on
   painted stripes at every depth in `src/ui/widgets/results.rs` tests.
+- [x] T055 [US3] Repair the observed expanded-field selection foreground
+  precedence under `contracts/grid.md`. Retain the meaningful actual-Buffer
+  red, apply Selection ink after child token colours while preserving their
+  modifiers, and prove selected header/arrow/NULL/text cells plus unselected
+  and colour-off/basic16 controls across built-ins/depths/glyphs/densities.
+  Own only `src/ui/widgets/results.rs` and its sidecar `results/tests.rs`;
+  no palette/configuration/reducer change. Root owns records, rendered review,
+  full integration and publication. The reproduced white-on-white header is
+  evidence of this composition defect, not a new custom-theme acceptance claim.
+
+**T055 local evidence - 2026-10-25:** 31 unique focused cases, 72 presentation
+combinations, unchanged eight original tests and independent source review.
+Root inspected the 12 before/after synthetic rasters; the full repeat passed
+1,434 outer cases/1,130 library/24 summaries after fixing missing ignored TLS
+fixture files. Socket remains skipped; publication/hosted/native acceptance are
+separate. See `docs/operations/verification.md`'s dated T055 record.
 
 **Checkpoint**: The grid is workable by keyboard alone; mouse verbs attach
 in Phase 8.
@@ -253,26 +269,69 @@ runtime; drive `auto` with an answering and a silent terminal.
   custom themes, and the OSC 11 reply parser (both terminators, component
   scaling, malformed replies) in `src/config/schema.rs` and
   `src/ui/theme.rs`.
+- [x] T028a [US5] Prove the manual theme grammar, caller-specific refusal
+  precedence/envelopes, original TOML syntax/duplicate/non-theme spans, full
+  resolved contrast matrix and colour-off neutrality. Watch current-library
+  NullValue/comment threshold failures before the four admitted RGB repairs.
+  This manual subset does not close T028's OSC parser obligation.
+- [ ] T028b [US5] Complete T028's OSC reply-parser cases with T032; leave this
+  unchecked during the manual startup/runtime-switch delivery.
 
 ### Implementation for User Story 5
 
-- [ ] T029 [US5] Parse and validate `[theme]` in `src/config/schema.rs`
+- [x] T029 [US5] Parse and validate `[theme]` in `src/config/schema.rs`
   and build the custom theme in `src/ui/theme.rs`, refusing whole with
   exit 3 before the terminal is taken.
-- [ ] T030 [P] [US5] Add the `[theme]` block and new `[ui]` keys to the
+  Follow the dated manual clarification: one strict schema, only theme leaves
+  deferred, shared full resolution through load/migrate/save, typed safe theme
+  lines and inseparable Custom/cache identity. Preserve ordinary route behavior.
+- [x] T030 [P] [US5] Add the `[theme]` block and new `[ui]` keys to the
   template in `src/config/store.rs` in the same change as the schema.
-- [ ] T031 [US5] The integrator adds the `switch-theme` action
+  Comment the complete optional theme example so init equals defaults/None;
+  prove its uncommented example is valid. Keep mouse=false until US6.
+- [x] T031 [US5] The integrator adds the `switch-theme` action
   (`src/app/message.rs`, `src/app/update.rs`), its palette entry in
   `src/app/palette.rs`, and the presentation swap on the next frame, with
   the contract's cycle order, landing the matching `docs/design/keymap.md`
   action row and parity assertions in the same change.
+  Include the explicit no-key Session row, snapshot-alias deduplication, direct
+  owner/prefix no-op and busy-session zero-effect preservation rules.
 - [ ] T032 [US5] The integrator implements the one-shot OSC 11 exchange in
   `src/cli/interactive.rs` before the alternate screen with the 100 ms
   deadline and drain rule, the luminance decision in `src/ui/theme.rs`,
   and the answered and unanswered `doctor` wording in
   `src/diagnostics/doctor.rs`.
-- [ ] T033 [US5] Add the valid and hostile fixture themes to the parity
-  matrix in `src/ui/layout.rs` tests.
+- [x] T033 [US5] Add the valid and hostile fixture themes to the parity
+  matrix through the actual full-frame renderer in `src/ui/acceptance/tests.rs`.
+  The focused sidecar keeps the cross-widget matrix separate from layout-unit
+  fixtures; include selected palette group/label/detail composition.
+- [x] T056 [US5] Repair the observed selected command-palette group/detail
+  foreground override in `src/ui/widgets/palette.rs`. Watch actual-Buffer
+  failures before applying Selection after each selected span's semantic style;
+  preserve modifiers, unselected styles, colour-off/depth gates and geometry.
+  Add maintained sidecar coverage and repeat the five-palette styled matrix.
+- [x] T057 [US5] Honor `[ui] color` at full-screen startup and in doctor.
+  Watch the actual configured-never bootstrap seam fail before correction;
+  retain explicit flag-over-config-over-auto precedence and absolute
+  plain/NO_COLOR/dumb gates. Prove validated Custom and built-ins cannot paint
+  under the configured off route, with doctor JSON using the same resolution.
+
+**Manual local evidence - 2026-10-25:** root reviewed and integrated the frozen
+theme/configuration/T056 source, verified all artifact hashes and independently
+compared 12,096,000 actual cells. The full local verifier passed 1,492 outer
+harness cases, 1,184 library cases and 25 summaries, all six executed gates and
+actual PostgreSQL 18.6 plain/TLS. The macOS socket case remains skipped. Four
+real-CLI tests include 150 isolated invocations; runtime and styled parity prove
+the manual subset. Hosted/pinned/MSRV, fresh CodeQL, native appearance and hand
+use remain separate. T028/T028b/T032 and whole-US5 completion remain open. See
+the dated manual-theme record in `docs/operations/verification.md`.
+
+T057's observed configured-colour omission is now corrected and independently
+reviewed. The final combined repeat passes **1,497 outer cases, 1,189 library
+cases and 25 summaries**, all six executed gates with the same socket skip.
+Actual owned macOS PTY startup/quit probes show configured never changing from
+119 painted SGRs to zero; explicit always and NO_COLOR controls retain identical
+raw bytes. This is PTY route evidence, not native font/emulator appearance.
 
 **Checkpoint**: Appearance is owned, validated and truthful.
 
@@ -316,28 +375,70 @@ tables and the compact-layout explanation.
 
 ### Tests for User Story 7
 
-- [ ] T038 [US7] Add failing tests for split bounds and steps, zoom
+- [x] T038 [US7] Add failing tests for split bounds and steps, zoom
   save-and-exact-restore, paging that follows resized panes, density
   spacing tables, session-locality and the single-pane explanation, in
   `src/app/update/tests.rs` and `src/ui/layout.rs` tests.
 
 ### Implementation for User Story 7
 
-- [ ] T039 [US7] The integrator adds `Model::splits` in
+- [x] T039 [US7] The integrator adds `Model::splits` in
   `src/app/model.rs`, the `shrink-pane`, `grow-pane` and `zoom-pane`
   actions in `src/app/message.rs` and `src/app/update.rs`, and split-aware
   geometry in `src/ui/layout.rs` (`main_panes`, `body_area`, paging
   helpers).
-- [ ] T040 [P] [US7] Add `ui.density` to `src/config/schema.rs` and the
+- [x] T040 [P] [US7] Add `ui.density` to `src/config/schema.rs` and the
   template in `src/config/store.rs`, and consume the spacing table in
   `src/ui/widgets/*.rs`.
-- [ ] T041 [US7] Add the key defaults (`Ctrl+K ,`, `Ctrl+K .`,
+- [x] T041 [US7] Add the key defaults (`Ctrl+K ,`, `Ctrl+K .`,
   `Ctrl+K z`) in `src/ui/keymap.rs`, palette entries in
   `src/app/palette.rs`, hints in `src/app/discovery.rs`, and reachability
   tests; the integrator lands the matching `docs/design/keymap.md` rows
   and parity assertions in the same change.
 
-**Checkpoint**: Layout serves the task, and a new session starts clean.
+**Keyboard-core evidence - 2026-10-25:** T039/T041 are implemented with their
+portion of T038. Initial seven behavior regressions failed before the feature;
+later review reproduced hidden diagnostics under zoom, modal ownership lost
+through default chords, a border-only error at 40x8 and clipped unknown-state
+feedback. The corresponding fixes preserve saved geometry, error/recovery
+visibility and input ownership. Native cross-lane review found these issues
+before integration; required different-family review remains open.
+
+Focused app 303 and final UI 215 cases passed. The integrated locked verifier
+passed formatting, warnings-denied lints, API docs, complete workspace/doc tests
+and live PostgreSQL 18.6 plain/TLS checks: 1,206 harness cases across 22
+summaries, with one semantic macOS socket skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-panes.log`. Four touched inline unit
+modules moved to sidecars with every original test name retained.
+
+**Density implementation evidence - 2026-10-25:** T040 and the remaining T038
+tests are implemented. Strict two-value configuration, one spacing table,
+notice-preserving grid capacity, shared overlay/viewports, title padding and
+active-key 6/4 footer caps passed config 36, app 305, UI 224, real CLI one and
+documentation 15 focused cases plus warnings-denied Clippy. Failing-first
+checks include config/template/caps, widget spacing/overrides and minimum input
+guidance. Review then reproduced hidden wrapped-password and typed-PROD inputs;
+the final preferred-margin fallback preserves their legacy usable height.
+Raw logs and exact focused scope are indexed in
+`/private/tmp/ignatius-density-evidence-2026-10-25.md`.
+
+The complete integrated locked verifier passed 1,224 harness cases/22 summaries,
+formatting, lints, API/workspace/doc tests and PostgreSQL 18.6 plain/TLS, with
+the macOS socket still a semantic skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-density.log`. The lead inspected 88
+actual styled synthetic buffers, including the formerly hidden inputs, grid
+notices, help and completion. Retention:
+`/private/tmp/ignatius-density-styled-buffer-x9t8tv6x/`, source-input digest
+`2de4048cac30deb6aec2446ddd3983e2102c002eac2a41af15346d13880567cc`.
+These are rendered-cell proofs, not native terminal screenshots or hand use.
+
+Dragging still depends on T035. Required different-family review and full
+independent/native/platform acceptance remain open. The pre-existing sending-
+review clipping gap is tracked separately in Feature 018 T037-T040; density
+does not alter authorization. This is not complete US7 acceptance.
+
+**Checkpoint**: Keyboard layout controls and density are implemented locally;
+dragging and the remaining acceptance gates precede the full story checkpoint.
 
 ## Phase 10: User Story 8 - Quiet chrome (Priority: P3)
 
@@ -415,6 +516,44 @@ when it is not.
 
 ## Phase 12: Polish and cross-cutting concerns
 
+- [x] T058 [W09] Reproduce the observed long-line editor caret clipping in
+  actual rendered cells, then implement FR-2529's derived horizontal view in
+  `src/ui/widgets/editor.rs` and the shared hit mapping in
+  `src/ui/widgets/mod.rs`. Keep tests in sidecars; prove completion alignment,
+  fixed gutter, resize/Home recovery, wide/combining/control text, accessible
+  styling and unchanged editor state. Obtain independent review, focused/full
+  verification and a repeated owned-PTY journey before closing this scoped
+  correction. Native terminal appearance and whole W09 acceptance stay open.
+
+  **Scoped evidence - 2026-10-25:** four actual Buffer failures plus a short
+  ASCII control preceded the horizontal-view implementation. Independent review
+  then found an unfocused zero-width hit mismatch; its own failing regression
+  precedes the focus-gate correction. Final 78 widget and 114 layout tests,
+  warnings-denied Clippy and formatting passed. Root verified the 49/38-artifact
+  freezes and original test preservation, inspected seven synthetic images and
+  passed the full local verifier (1,515 harness / 1,207 library cases). The same
+  100x30 owned macOS PTY script changes end-sentinel visibility from false to
+  true while Home, normal quit, terminal exit and config preservation pass.
+  PostgreSQL 18.6 plain/TLS ran; macOS socket remains skipped. Source/evidence
+  and native/hosted qualifications are in `docs/operations/verification.md`.
+
+- [x] T059 [W10] Correct the measured T058 display-unit allocation increase
+  under FR-2530. Add the failing long-line projection bound, limit retained
+  metadata for caret/render/hit consumers, preserve T058's exact raw cells and
+  original tests, and repeat the identical diagnostic harness. Independent
+  review, focused/full verification and an owned-PTY control precede scoped
+  completion. Keep process ceilings and release p95 acceptance separate.
+
+  **Scoped local evidence - 2026-10-25:** the million-unit/64-cell red precedes
+  bounded projection and the independently reviewed sanitizer-gated ASCII
+  path. Final 83 widget and 114 layout cases, Clippy/formatting and the full
+  1,520-harness / 1,212-library local verifier pass. Root independently compares
+  all 21 retained frames/51,081 actual cells exactly and preserves prior tests.
+  An owned 100x30 PTY end/Home/quit/config control passes. The same hashed
+  six-child test-profile diagnostic gives 1 MiB median 138.342 ms/17.063 MiB
+  RSS versus 902.313 ms/146.500 MiB before. Small-sample process observations
+  are not a release p95 or memory ceiling. Hosted acceptance remains separate.
+
 - [ ] T046 Amend the narrative design documents in the same change as the
   final behaviour: `docs/design/theme-tokens.md` (painted surfaces,
   elevation, colour depth, the superseded Feature 007 override note),
@@ -456,8 +595,12 @@ when it is not.
   integrator.
 - Phase 7 follows Phase 4 (it swaps model-owned presentation built there).
   Phase 8 follows Phases 5 and 6 (its verbs dispatch to grid and layout
-  actions). Phase 9 follows Phase 2 only, but its T039 queues in the
-  integrator lane. Phases 10 and 11 follow Phase 4.
+  actions); its split-drag implementation additionally requires the keyboard
+  split core and shared geometry from T039. Phase 9 follows Phase 2 only,
+  so T038/T039's keyboard/geometry subset can precede Phase 8. Mouse-drag
+  acceptance for both stories follows T035; neither story is fully accepted
+  before its complete independent test. T039 queues in the integrator lane.
+  Phases 10 and 11 follow Phase 4.
 - T046-T048 land together after all behaviour is stable; T049 precedes
   T050; T051 is last. US10 (T052-T054) follows Phases 4 and 6, the
   colour-depth machinery and the connecting shell it builds on, and
@@ -469,8 +612,9 @@ when it is not.
   anything outside `src/diagnostics/`; T030 with T040; T042-T043 with
   T044-T045; T047 with T046 (distinct documents).
 - The integrator lane is the bottleneck by design: T011, T017, T025, T026,
-  T031, T032, T035, T039 and T046 serialize through it in that preferred
-  order.
+  T031, T032, T039's keyboard split core, T035's mouse integration and T046
+  serialize through it. Shared geometry precedes pointer dragging; the
+  capture-default flip remains last after keyboard parity and restoration.
 
 ## Implementation strategy
 
