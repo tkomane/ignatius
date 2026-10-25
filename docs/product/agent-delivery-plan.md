@@ -241,6 +241,11 @@ faithful observation seam is required before matrix admission; no product defect
 or installed-source cause is established. Feature025 T055's independently
 reproduced Results selection defect proceeds on a sibling branch before custom
 themes, without changing this Windows gate.
+Integration on 26 October isolates this still-failing experiment in the
+explicitly dispatched `windows-conpty-diagnostic.yml` workflow. Its native
+assertions and evidence allowlist remain strict; routine CI continues all three
+platform product suites. This integration does not admit the full matrix or
+turn an unsupported sensor into a pass.
 Keep W07/T055a and Windows 11/Windows Terminal hand use open; see the
 [dated verification record](../operations/verification.md).
 

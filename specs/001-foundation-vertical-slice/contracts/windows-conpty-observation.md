@@ -100,6 +100,22 @@ Primary evidence checked 25 October 2026: Microsoft
 and [buffer routing](https://raw.githubusercontent.com/microsoft/terminal/main/src/host/screenInfo.cpp).
 Current main is not proven identical to the installed Windows binary.
 
+## Integration boundary - 26 October 2026
+
+The capability experiment is retained in the explicitly dispatched
+`windows-conpty-diagnostic.yml` workflow. The lead reviewed this integration
+boundary during repository consolidation. It runs the unchanged cursor
+calibration followed by the unchanged first-four capability controls, retains
+the bounded source-bound evidence even on failure, and has no error override.
+The installed runner's unsupported alternate cursor sensor still fails the
+capability assertion; dispatch completion is not capability acceptance.
+
+Routine CI retains the mandatory Linux, macOS and Windows product suites.
+The experimental probe has never been an accepted main-branch product gate.
+Moving its execution out of routine CI does not close W07-064, T055a or T051,
+change any native assertion, admit the full matrix or establish release
+readiness. A future sensor change still needs its scoped native evidence.
+
 ## Cases and ordering
 
 After capability admission, use one fresh process/console per normal return,

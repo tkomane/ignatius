@@ -1,5 +1,17 @@
 # Verification
 
+## ConPTY integration boundary - 26 October 2026
+
+The diagnostic now has a separate explicit-dispatch workflow,
+`.github/workflows/windows-conpty-diagnostic.yml`. It retains the unchanged
+native helper/control assertions and bounded evidence, including failed cases.
+There is no `continue-on-error`, accepted constant observation or replacement
+sensor. Routine CI keeps mandatory Windows product tests; the experimental
+capability failure remains a W07-064/T055a/T051 gap. Existing source-bound native
+results below remain historical evidence, not a new runtime result for this
+workflow relocation. Local workflow contracts and Actionlint pass for the new
+boundary; hosted acceptance is recorded after CI completes.
+
 ## W07-064 first Windows capability harness - 2026-10-25
 
 The integrated test-only C++/safe Rust/PowerShell harness is based on `d6d65e7`.

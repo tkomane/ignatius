@@ -444,18 +444,25 @@ fn shared_ci_runs_the_complete_declared_coverage() {
 }
 
 #[test]
-fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml");
-    let platform = job_block(&workflow_text(&path), "test");
+fn windows_conpty_diagnostic_preserves_native_assertions_and_evidence_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflow = workflow_text(&root.join(".github/workflows/windows-conpty-diagnostic.yml"));
+    let triggers = workflow.split("permissions:").next().unwrap();
+    assert!(triggers.contains("workflow_dispatch:"));
+    assert!(!triggers.contains("pull_request:") && !triggers.contains("push:"));
+    assert!(!workflow.contains("continue-on-error:"));
+    let ci = workflow_text(&root.join(".github/workflows/ci.yml"));
+    assert!(!ci.contains("RunReviewedCapabilityControls"));
+    let platform = job_block(&workflow, "diagnostic");
+    assert!(platform.contains("runs-on: windows-latest"));
     let native = platform
         .split("- name: Windows ConPTY capability and ownership controls")
         .nth(1)
-        .expect("Windows CI must execute the real ConPTY capability/ownership controls")
+        .expect("Windows diagnostic must execute the real ConPTY capability/ownership controls")
         .split("- name:")
         .next()
         .unwrap();
     for required in [
-        "if: matrix.name == 'Windows'",
         "shell: pwsh",
         "Launch-VsDevShell.ps1",
         "-SkipAutomaticLocation",
@@ -484,7 +491,7 @@ fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
         .next()
         .unwrap();
     for required in [
-        "always() && matrix.name == 'Windows'",
+        "always() && steps.windows-conpty.outcome",
         "steps.windows-conpty.outcome != 'skipped'",
         "/build/build-manifest.json",
         "/build/prebuild-inputs.json",
