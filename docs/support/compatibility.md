@@ -532,6 +532,13 @@ Minimum size for the full layout is 80x24. Below that a single-pane layout is
 used; below 40x8 a message states the current size, the minimum, and the
 line-oriented alternative.
 
+On macOS, owned-PTY children prove error-return and caught-panic cleanup through
+the actual terminal guard/hook for all mouse/paste/alternate-screen options.
+The hook attempts acquired-mode restoration before previous-hook details and
+reports failed cleanup truthfully. This is separate from native visual use, a
+full uncaught product crash and Windows ConPTY acceptance. Crash details may
+contain sensitive information and cannot prove a database write outcome.
+
 ## Platforms
 
 | Platform | Status |

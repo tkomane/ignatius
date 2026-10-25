@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: panic cleanup uses the modes actually acquired, including mouse
+  capture, before previous-hook details. Notices distinguish successful cleanup
+  from a failed attempt and do not assert a database write outcome.
 - Improved: `[ui] density = "comfortable"` (default) or `"compact"` selects
   one consistent spacing table. Compact removes the empty grid toolbar row
   while retaining notices; footer hints are capped at six or four complete

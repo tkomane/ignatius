@@ -104,7 +104,7 @@ when the behaviour exists and a test or recorded evidence proves it.
   registration failure through a private callback seam and prove acquisition
   is never called. Use no production trigger flag, unsafe FFI or parent-process
   signal. Keep actual steady-state PTY restoration evidence separate.
-- [ ] W07-062 Prove error-return and panic restoration in owned isolated Unix
+- [x] W07-062 Prove error-return and panic restoration in owned isolated Unix
   PTY children through the actual `TerminalGuard` and panic hook, with default
   and non-default mouse/paste/screen options. Assert restoration precedes panic
   details and matches the acquired options. Reproduce and repair any default-
@@ -130,6 +130,18 @@ The original platform acceptance items T051, T052 and T055a remain open for
 hand evidence or the Windows ConPTY harness. The W07 follow-ups above track
 additional lifecycle findings without relabelling that platform acceptance.
 Current assignments and evidence are carried in `docs/status.md`.
+
+W07-062 evidence on 2026-10-25: the original mouse-enabled panic case failed
+because cleanup reached the prior hook before disabling mouse capture. The
+repair passed 13 ordinary units, two PTY drivers and one inert parent helper;
+the drivers exercised 16 actual owned macOS PTY children, all eight acquired
+mouse/paste/screen combinations for error return and caught panic. Actual
+canonical/echo/signal/raw state and output ordering were observed before the
+previous hook; the original payload survived. Logs/manifest/patch:
+`/private/tmp/ignatius-w07-062-w2iPKH/`. The lead reviewed/applied the two-file
+patch; focused repeats and the combined full gate passed, recorded in
+verification. This proves guard/hook behavior, not a full uncaught product
+crash, forced OS-device failure, native visual acceptance or Windows behavior.
 
 Partial T052 evidence on 2026-08-16: the focused
 `tests/postgres_socket_integration.rs` check passed inside a disposable Linux

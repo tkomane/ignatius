@@ -240,7 +240,9 @@ These are a stable contract. Changing a value requires a major version.
 
 ## What a crash message tells you
 
-A panic restores the terminal first, then prints where the log would be and
-confirms that nothing was retried and nothing was written. The Rust backtrace is
-not shown in the normal interface; set `RUST_BACKTRACE=1` to get it when
-preparing a report.
+A panic attempts to restore the acquired terminal modes before the previous
+panic hook prints details. The message distinguishes successful cleanup from
+an incomplete attempt; it cannot establish whether an in-flight database write
+committed. Details may contain sensitive information, so inspect them before
+sharing. The message names the optional logging variable. Set
+`RUST_BACKTRACE=1` when preparing a report that needs a Rust backtrace.

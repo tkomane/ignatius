@@ -1,15 +1,15 @@
 //! Terminal acquisition and restoration.
 //!
-//! Every mode this module turns on is turned off again on every exit path:
+//! Every mode this module turns on has a matching restore attempt on every exit path:
 //! normal quit, error, cancellation, panic and supported signals. Acquisition is
 //! guarded by RAII so an early return cannot skip the restore, and a panic hook
-//! restores before the panic message is printed so the message lands on a usable
-//! terminal rather than inside the alternate screen.
+//! attempts restoration before the panic message is printed, so successful
+//! cleanup leaves the message on a usable terminal rather than the alternate screen.
 //!
 //! The escape sequences are emitted through an injected writer, which is what
 //! makes restoration testable without a pseudo-terminal. `tests/terminal_restore.rs`
-//! proves normal-quit drawing and restoration order at process level; it does not
-//! yet exercise the panic path.
+//! proves normal-quit drawing and restoration order at process level. This
+//! module's Unix tests exercise the actual guard and panic hook in owned PTYs.
 
 use crate::diagnostics::doctor::TerminalFacts;
 use crossterm::cursor::{Hide, Show};
@@ -19,7 +19,7 @@ use crossterm::event::{
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{execute, terminal};
 use std::io::{self, IsTerminal, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Which optional terminal modes to turn on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,8 +62,8 @@ pub fn enter<W: Write>(writer: &mut W, options: TerminalOptions) -> io::Result<(
 
 /// Emits the sequences that undo [`enter`], in reverse order.
 ///
-/// Every step runs even if an earlier one fails, so one broken sequence cannot
-/// strand the terminal in raw mode.
+/// Every step runs even if an earlier one fails, so one broken sequence does not
+/// prevent the remaining cleanup attempts.
 pub fn leave<W: Write>(writer: &mut W, options: TerminalOptions) -> io::Result<()> {
     let mut first_error = None;
     let mut record = |result: io::Result<()>| {
@@ -88,9 +88,39 @@ pub fn leave<W: Write>(writer: &mut W, options: TerminalOptions) -> io::Result<(
     first_error.map_or(Ok(()), Err)
 }
 
-/// Tracks whether the process currently holds the terminal, so the panic hook
-/// only restores when there is something to restore.
-static TERMINAL_HELD: AtomicBool = AtomicBool::new(false);
+const HELD: u8 = 1;
+const MOUSE: u8 = 1 << 1;
+const ALTERNATE_SCREEN: u8 = 1 << 2;
+const BRACKETED_PASTE: u8 = 1 << 3;
+
+/// Retains the acquired options atomically, so the panic hook restores those
+/// modes without taking a lock while the process is unwinding. Zero is idle.
+static TERMINAL_STATE: AtomicU8 = AtomicU8::new(0);
+
+fn hold_terminal(options: TerminalOptions) {
+    let state = HELD
+        | if options.mouse { MOUSE } else { 0 }
+        | if options.alternate_screen {
+            ALTERNATE_SCREEN
+        } else {
+            0
+        }
+        | if options.bracketed_paste {
+            BRACKETED_PASTE
+        } else {
+            0
+        };
+    TERMINAL_STATE.store(state, Ordering::SeqCst);
+}
+
+fn take_terminal_options() -> Option<TerminalOptions> {
+    let state = TERMINAL_STATE.swap(0, Ordering::SeqCst);
+    (state & HELD != 0).then_some(TerminalOptions {
+        mouse: state & MOUSE != 0,
+        alternate_screen: state & ALTERNATE_SCREEN != 0,
+        bracketed_paste: state & BRACKETED_PASTE != 0,
+    })
+}
 
 /// Owns the terminal for the lifetime of the interactive session.
 ///
@@ -109,10 +139,10 @@ impl TerminalGuard {
         let mut stdout = io::stdout();
         if let Err(err) = enter(&mut stdout, options) {
             // Give the terminal back before reporting, so the error is readable.
-            let _ = restore_after_failed_enter(&mut stdout, options, terminal::disable_raw_mode);
+            let _ = restore_modes(&mut stdout, options, terminal::disable_raw_mode);
             return Err(err);
         }
-        TERMINAL_HELD.store(true, Ordering::SeqCst);
+        hold_terminal(options);
         Ok(Self {
             options,
             restored: false,
@@ -125,20 +155,18 @@ impl TerminalGuard {
             return Ok(());
         }
         self.restored = true;
-        TERMINAL_HELD.store(false, Ordering::SeqCst);
+        TERMINAL_STATE.store(0, Ordering::SeqCst);
         let mut stdout = io::stdout();
-        let leave_result = leave(&mut stdout, self.options);
-        let raw_result = terminal::disable_raw_mode();
-        leave_result.and(raw_result)
+        restore_modes(&mut stdout, self.options, terminal::disable_raw_mode)
     }
 }
 
-/// Cleans up a partially completed terminal acquisition.
+/// Attempts every output-mode cleanup before disabling raw mode.
 ///
 /// `enter` can fail after it has already emitted one or more mode changes. The
 /// normal guard does not exist on that path, so the attempted cleanup must run
 /// before raw mode is disabled and must still try every requested mode.
-fn restore_after_failed_enter<W: Write>(
+fn restore_modes<W: Write>(
     writer: &mut W,
     options: TerminalOptions,
     disable_raw_mode: impl FnOnce() -> io::Result<()>,
@@ -154,32 +182,39 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// Installs a panic hook that restores the terminal before the default hook runs.
+/// Installs a panic hook that attempts restoration before the previous hook runs.
 ///
 /// Without this, a panic prints its message into the alternate screen, which then
 /// disappears, leaving the user with a broken terminal and no explanation.
 pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if TERMINAL_HELD.swap(false, Ordering::SeqCst) {
+        let restored = take_terminal_options().map(|options| {
             let mut stdout = io::stdout();
-            let _ = leave(&mut stdout, TerminalOptions::default());
-            let _ = terminal::disable_raw_mode();
-        }
+            restore_modes(&mut stdout, options, terminal::disable_raw_mode).is_ok()
+        });
         let mut stderr = io::stderr();
-        let _ = writeln!(
-            stderr,
-            "\n{} stopped unexpectedly. Your terminal has been restored.",
-            crate::branding::PRODUCT_NAME
-        );
-        let _ = writeln!(
-            stderr,
-            "No query was retried and no data was written. Details follow; they contain no \
-             connection secrets, and enabling {} adds a local log file.",
-            crate::diagnostics::logging::LOG_ENV
-        );
+        let _ = write_panic_notice(&mut stderr, restored);
         previous(info);
     }));
+}
+
+fn write_panic_notice<W: Write>(writer: &mut W, restored: Option<bool>) -> io::Result<()> {
+    let restoration = match restored {
+        Some(true) => " Your terminal has been restored.",
+        Some(false) => " Terminal restoration was attempted but did not complete.",
+        None => "",
+    };
+    writeln!(
+        writer,
+        "\n{} stopped unexpectedly.{restoration}",
+        crate::branding::PRODUCT_NAME
+    )?;
+    writeln!(
+        writer,
+        "Details follow; they may contain sensitive information. Enabling {} adds a local log file.",
+        crate::diagnostics::logging::LOG_ENV
+    )
 }
 
 /// Reads what can be honestly determined about the terminal.

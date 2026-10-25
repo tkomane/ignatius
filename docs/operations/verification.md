@@ -48,6 +48,34 @@ as information; it is not reported as a database/socket test pass.
 | Code scanning | CodeQL advanced setup in CI, test sources excluded | Yes |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
+## Panic and error acquired-mode restoration - 2026-10-25
+
+W07-062's original mouse-enabled panic failed before prior-hook output: the
+hook restored default options, so mouse disable sequences arrived only later
+through Drop. The two-file repair retains actual acquired options in an atomic
+mask and attempts every output-mode cleanup before raw-mode cleanup and the
+previous hook. Panic wording distinguishes successful restoration, failed
+attempt and no held terminal, preserving the prior hook and original payload.
+It no longer claims no database write or secret-free arbitrary panic details.
+
+The isolated modified `24db9c5` clone passed 13 ordinary units, two PTY drivers
+and one inert parent helper, plus warnings-denied Clippy and formatting. The
+drivers exercised 16 actual owned macOS PTY children: all eight mouse/paste/
+alternate-screen combinations on error return and caught panic through the
+actual TerminalGuard/hook. The previous hook observed restored canonical,
+echo, signal and raw states before printing details; sequence ordering and
+payload preservation were checked. Children clear inherited environment and
+use task-owned config/data/absent-passfile routes without overriding HOME.
+
+Evidence and red/green logs: `/private/tmp/ignatius-w07-062-w2iPKH/`.
+Final two-file patch SHA-256:
+`cf3570a569025794995da01bffacfa9b1102036db75f14e5abf6350ad350b763`.
+The lead reviewed/applied it; focused integration and the combined full gate
+at the modified W04/W07 integration tree passed (recorded separately). This is actual Unix guard/hook restoration evidence, not a full
+uncaught application crash or native visual acceptance. Forced output/raw-mode
+failures were unit-injected, not induced on an OS device. Windows, Linux and
+latest-source pinned/MSRV proof remain separate at this checkpoint.
+
 ## Local security maintenance - 2026-10-25
 
 Current primary advisories and maintainer releases were checked on 25 October
