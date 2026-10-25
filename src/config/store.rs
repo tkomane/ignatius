@@ -10,7 +10,7 @@
 //!   the user runs `config migrate` when they choose to.
 
 use crate::config::paths::Paths;
-use crate::config::schema::{CURRENT_SCHEMA_VERSION, Config};
+use crate::config::schema::{CURRENT_SCHEMA_VERSION, Config, PendingConfig};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use std::fs;
 use std::io::{self, Write};
@@ -30,6 +30,8 @@ pub enum ConfigSource {
 pub struct Loaded {
     /// The effective configuration.
     pub config: Config,
+    /// Validated palettes bound to the configuration admitted by this load.
+    pub themes: crate::ui::theme::ValidatedThemes,
     /// Whether it came from a file or from defaults.
     pub source: ConfigSource,
     /// Set when the file's schema is older than this build understands.
@@ -45,8 +47,11 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let config = Config::default();
+            let themes = resolve_themes(&config)?;
             return Ok(Loaded {
-                config: Config::default(),
+                config,
+                themes,
                 source: ConfigSource::Defaults,
                 pending_migration: None,
             });
@@ -66,7 +71,7 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
         }
     };
 
-    let config: Config = toml::from_str(&text).map_err(|err| {
+    let pending: PendingConfig = toml::from_str(&text).map_err(|err| {
         let mut diagnostic = Diagnostic::new(
             DiagnosticKind::Config,
             "configuration file is not valid",
@@ -85,10 +90,10 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
         diagnostic
     })?;
 
-    let pending_migration = (config.schema_version < CURRENT_SCHEMA_VERSION)
-        .then_some((config.schema_version, CURRENT_SCHEMA_VERSION));
+    let pending_migration = (pending.schema_version < CURRENT_SCHEMA_VERSION)
+        .then_some((pending.schema_version, CURRENT_SCHEMA_VERSION));
 
-    let issues = config.validate();
+    let issues = pending.validate();
     if !issues.is_empty() {
         let mut diagnostic = Diagnostic::new(
             DiagnosticKind::Config,
@@ -104,11 +109,18 @@ pub fn load(paths: &Paths) -> Result<Loaded, Diagnostic> {
         return Err(diagnostic);
     }
 
+    let (config, themes) = pending.resolve().map_err(Diagnostic::from_theme_refusal)?;
     Ok(Loaded {
         config,
+        themes,
         source: ConfigSource::File,
         pending_migration,
     })
+}
+
+fn resolve_themes(config: &Config) -> Result<crate::ui::theme::ValidatedThemes, Diagnostic> {
+    crate::ui::theme::ValidatedThemes::resolve(config.ui.theme, config.theme.as_ref())
+        .map_err(Diagnostic::from_theme_refusal)
 }
 
 /// What a migration did, or would do under `--dry-run`.
@@ -171,7 +183,7 @@ fn migrate_with_backup_writer(
         .next_action("check the file's permissions")
     })?;
 
-    let mut config: Config = toml::from_str(&loaded_text).map_err(|err| {
+    let pending: PendingConfig = toml::from_str(&loaded_text).map_err(|err| {
         Diagnostic::new(
             DiagnosticKind::Config,
             "configuration file is not valid, so it cannot be migrated",
@@ -184,19 +196,7 @@ fn migrate_with_backup_writer(
         ))
     })?;
 
-    let from_version = config.schema_version;
-    if from_version == CURRENT_SCHEMA_VERSION {
-        return Ok(MigrationReport {
-            from_version,
-            to_version: CURRENT_SCHEMA_VERSION,
-            steps: vec![format!(
-                "already at schema version {CURRENT_SCHEMA_VERSION}"
-            )],
-            backup: None,
-            no_op: true,
-            dry_run,
-        });
-    }
+    let from_version = pending.schema_version;
     if from_version > CURRENT_SCHEMA_VERSION {
         return Err(Diagnostic::new(
             DiagnosticKind::Config,
@@ -208,6 +208,20 @@ fn migrate_with_backup_writer(
         .likely_cause("the file was written by a newer version of the product")
         .next_action("upgrade Ignatius; downgrading a configuration file is not supported")
         .technical("Path", path.display().to_string()));
+    }
+
+    let (mut config, _themes) = pending.resolve().map_err(Diagnostic::from_theme_refusal)?;
+    if from_version == CURRENT_SCHEMA_VERSION {
+        return Ok(MigrationReport {
+            from_version,
+            to_version: CURRENT_SCHEMA_VERSION,
+            steps: vec![format!(
+                "already at schema version {CURRENT_SCHEMA_VERSION}"
+            )],
+            backup: None,
+            no_op: true,
+            dry_run,
+        });
     }
 
     let mut steps = Vec::new();
@@ -271,7 +285,7 @@ fn migrate_with_backup_writer(
 /// A test parses this and compares it with [`Config::default`], so the file the
 /// product hands someone is always one this build accepts and always says what
 /// this build actually does.
-pub const TEMPLATE: &str = r#"# Ignatius configuration.
+pub const TEMPLATE: &str = r##"# Ignatius configuration.
 #
 # Every value here is this build's default, written out so it can be changed.
 # `ignatius config paths` says where this file and the local state live, and
@@ -285,7 +299,8 @@ schema_version = 1
 [ui]
 # comfortable, compact. Changes only the interactive presentation.
 density = "comfortable"
-# dark, light, high-contrast
+# dark, light, high-contrast, custom. custom needs the optional [theme] below.
+# auto is not available in this build.
 theme = "dark"
 # auto, unicode, ascii, nerd-font. nerd-font is never chosen automatically:
 # whether your font carries the icons cannot be detected from in here.
@@ -322,6 +337,11 @@ max-entries = 1000
 # Sends explicitly copied values through the terminal using OSC 52. The
 # terminal, SSH path, or multiplexer may observe or retain the value.
 osc52 = false
+
+# Optional custom theme. Keep the whole example commented to use defaults.
+# [theme]
+# extends = "dark"
+# danger = "#F38BA8"
 
 # Named connections. `ignatius connect @orders-prod` uses one.
 #
@@ -360,7 +380,7 @@ osc52 = false
 #
 # [keys]
 # run-buffer = ["f2", "ctrl+r"]
-"#;
+"##;
 
 /// Writes the starter file, atomically and with the same permissions as any
 /// other configuration write.
@@ -378,6 +398,7 @@ pub fn write_template(paths: &Paths) -> Result<(), Diagnostic> {
 
 /// Writes the configuration file atomically, creating the directory if needed.
 pub fn save(paths: &Paths, config: &Config) -> Result<(), Diagnostic> {
+    let _themes = resolve_themes(config)?;
     let rendered = toml::to_string_pretty(config).map_err(|err| {
         Diagnostic::new(
             DiagnosticKind::Internal,

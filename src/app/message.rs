@@ -31,6 +31,8 @@ pub enum Action {
     RefreshResult,
     /// Format the SQL buffer locally without contacting the server.
     FormatBuffer,
+    /// Cycle the active theme for this session.
+    SwitchTheme,
     /// Open the searchable connection picker.
     OpenConnectionPicker,
     /// Ask the server to cancel the running statement.
@@ -164,6 +166,7 @@ impl Action {
             Self::GenerateCellUpdate,
             Self::RefreshResult,
             Self::FormatBuffer,
+            Self::SwitchTheme,
             Self::OpenConnectionPicker,
             Self::Cancel,
             Self::Quit,

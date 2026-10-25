@@ -269,26 +269,69 @@ runtime; drive `auto` with an answering and a silent terminal.
   custom themes, and the OSC 11 reply parser (both terminators, component
   scaling, malformed replies) in `src/config/schema.rs` and
   `src/ui/theme.rs`.
+- [x] T028a [US5] Prove the manual theme grammar, caller-specific refusal
+  precedence/envelopes, original TOML syntax/duplicate/non-theme spans, full
+  resolved contrast matrix and colour-off neutrality. Watch current-library
+  NullValue/comment threshold failures before the four admitted RGB repairs.
+  This manual subset does not close T028's OSC parser obligation.
+- [ ] T028b [US5] Complete T028's OSC reply-parser cases with T032; leave this
+  unchecked during the manual startup/runtime-switch delivery.
 
 ### Implementation for User Story 5
 
-- [ ] T029 [US5] Parse and validate `[theme]` in `src/config/schema.rs`
+- [x] T029 [US5] Parse and validate `[theme]` in `src/config/schema.rs`
   and build the custom theme in `src/ui/theme.rs`, refusing whole with
   exit 3 before the terminal is taken.
-- [ ] T030 [P] [US5] Add the `[theme]` block and new `[ui]` keys to the
+  Follow the dated manual clarification: one strict schema, only theme leaves
+  deferred, shared full resolution through load/migrate/save, typed safe theme
+  lines and inseparable Custom/cache identity. Preserve ordinary route behavior.
+- [x] T030 [P] [US5] Add the `[theme]` block and new `[ui]` keys to the
   template in `src/config/store.rs` in the same change as the schema.
-- [ ] T031 [US5] The integrator adds the `switch-theme` action
+  Comment the complete optional theme example so init equals defaults/None;
+  prove its uncommented example is valid. Keep mouse=false until US6.
+- [x] T031 [US5] The integrator adds the `switch-theme` action
   (`src/app/message.rs`, `src/app/update.rs`), its palette entry in
   `src/app/palette.rs`, and the presentation swap on the next frame, with
   the contract's cycle order, landing the matching `docs/design/keymap.md`
   action row and parity assertions in the same change.
+  Include the explicit no-key Session row, snapshot-alias deduplication, direct
+  owner/prefix no-op and busy-session zero-effect preservation rules.
 - [ ] T032 [US5] The integrator implements the one-shot OSC 11 exchange in
   `src/cli/interactive.rs` before the alternate screen with the 100 ms
   deadline and drain rule, the luminance decision in `src/ui/theme.rs`,
   and the answered and unanswered `doctor` wording in
   `src/diagnostics/doctor.rs`.
-- [ ] T033 [US5] Add the valid and hostile fixture themes to the parity
-  matrix in `src/ui/layout.rs` tests.
+- [x] T033 [US5] Add the valid and hostile fixture themes to the parity
+  matrix through the actual full-frame renderer in `src/ui/acceptance/tests.rs`.
+  The focused sidecar keeps the cross-widget matrix separate from layout-unit
+  fixtures; include selected palette group/label/detail composition.
+- [x] T056 [US5] Repair the observed selected command-palette group/detail
+  foreground override in `src/ui/widgets/palette.rs`. Watch actual-Buffer
+  failures before applying Selection after each selected span's semantic style;
+  preserve modifiers, unselected styles, colour-off/depth gates and geometry.
+  Add maintained sidecar coverage and repeat the five-palette styled matrix.
+- [x] T057 [US5] Honor `[ui] color` at full-screen startup and in doctor.
+  Watch the actual configured-never bootstrap seam fail before correction;
+  retain explicit flag-over-config-over-auto precedence and absolute
+  plain/NO_COLOR/dumb gates. Prove validated Custom and built-ins cannot paint
+  under the configured off route, with doctor JSON using the same resolution.
+
+**Manual local evidence - 2026-10-25:** root reviewed and integrated the frozen
+theme/configuration/T056 source, verified all artifact hashes and independently
+compared 12,096,000 actual cells. The full local verifier passed 1,492 outer
+harness cases, 1,184 library cases and 25 summaries, all six executed gates and
+actual PostgreSQL 18.6 plain/TLS. The macOS socket case remains skipped. Four
+real-CLI tests include 150 isolated invocations; runtime and styled parity prove
+the manual subset. Hosted/pinned/MSRV, fresh CodeQL, native appearance and hand
+use remain separate. T028/T028b/T032 and whole-US5 completion remain open. See
+the dated manual-theme record in `docs/operations/verification.md`.
+
+T057's observed configured-colour omission is now corrected and independently
+reviewed. The final combined repeat passes **1,497 outer cases, 1,189 library
+cases and 25 summaries**, all six executed gates with the same socket skip.
+Actual owned macOS PTY startup/quit probes show configured never changing from
+119 painted SGRs to zero; explicit always and NO_COLOR controls retain identical
+raw bytes. This is PTY route evidence, not native font/emulator appearance.
 
 **Checkpoint**: Appearance is owned, validated and truthful.
 

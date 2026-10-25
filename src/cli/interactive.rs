@@ -24,7 +24,6 @@ use crate::query::result::{
 };
 use crate::ui::keymap::Keymap;
 use crate::ui::layout;
-use crate::ui::theme::Theme;
 use crossterm::event::{self, Event};
 use std::io::Write;
 use std::sync::Arc;
@@ -508,6 +507,7 @@ pub fn run(
             crate::branding::BINARY_NAME
         )));
     }
+    let (presentation, color_depth) = configured_presentation(&loaded, presentation, &facts);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -548,18 +548,12 @@ pub fn run(
 
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
     let library = crate::queries::Library::new(&paths.queries_dir);
-    let (color_depth, _depth_source) = crate::cli::resolve_depth(
-        presentation.color_depth,
-        loaded.config.ui.color_depth,
-        presentation.color,
-        &facts,
-    );
     let mut exit_notice_counts = NoticeCounts::default();
     let result = runtime.block_on(event_loop(
         resolved,
-        loaded.config,
+        loaded,
         keymap,
-        presentation,
+        &presentation,
         color_depth,
         history,
         library,
@@ -588,12 +582,27 @@ pub fn run(
     })
 }
 
+fn configured_presentation(
+    loaded: &crate::config::Loaded,
+    presentation: &Presentation,
+    facts: &crate::diagnostics::doctor::TerminalFacts,
+) -> (Presentation, crate::ui::theme::ColorDepth) {
+    let presentation = presentation.with_configured_color(loaded.config.ui.color, facts);
+    let (depth, _) = crate::cli::resolve_depth(
+        presentation.color_depth,
+        loaded.config.ui.color_depth,
+        presentation.color,
+        facts,
+    );
+    (presentation, depth)
+}
+
 // The Unix receiver is prepared before terminal acquisition and moved with the
 // existing session resources; keeping it explicit avoids deferred registration.
 #[allow(clippy::too_many_arguments)]
 async fn event_loop(
     target: Option<ConnectionTarget>,
-    config: Config,
+    loaded: crate::config::Loaded,
     keymap: Keymap,
     presentation: &Presentation,
     color_depth: crate::ui::theme::ColorDepth,
@@ -602,6 +611,7 @@ async fn event_loop(
     exit_notice_counts: &mut NoticeCounts,
     #[cfg(unix)] termination: tokio::signal::unix::Signal,
 ) -> Result<ExitCode, Diagnostic> {
+    let crate::config::Loaded { config, themes, .. } = loaded;
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend).map_err(|err| {
         Diagnostic::new(
@@ -631,8 +641,11 @@ async fn event_loop(
         }
     });
     let mut model = Model::new(config.query.max_buffered_rows);
+    model.theme_catalog = themes;
     model.presentation = layout::Presentation::new(
-        Theme::new(config.ui.theme, presentation.color).with_depth(color_depth),
+        model
+            .theme_catalog
+            .selected_theme(presentation.color, color_depth),
         crate::ui::Glyphs::new(tier),
         config.ui.reduced_motion,
     )
@@ -1168,7 +1181,7 @@ fn reduce_terminal_input<B: ratatui::backend::Backend>(
 }
 
 /// Sending and navigation use current backend geometry, not an initial default
-/// or a queued resize that may already be stale. Recovery keys need no size.
+/// or a queued resize that may already be stale. Recovery and theme keys need no size.
 fn reduce_input_with_size(
     model: &mut Model,
     message: Message,
@@ -1178,7 +1191,8 @@ fn reduce_input_with_size(
         Message::Action(
             action @ (crate::app::Action::Quit
             | crate::app::Action::Cancel
-            | crate::app::Action::Dismiss),
+            | crate::app::Action::Dismiss
+            | crate::app::Action::SwitchTheme),
         ) => Ok(update(model, Message::Action(action))),
         Message::Action(action) => {
             let size = read_size()?;

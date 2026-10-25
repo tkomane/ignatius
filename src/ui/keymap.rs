@@ -75,6 +75,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("run-statement", Action::RunStatement),
     ("refresh-result", Action::RefreshResult),
     ("format-buffer", Action::FormatBuffer),
+    ("switch-theme", Action::SwitchTheme),
     ("cancel", Action::Cancel),
     ("quit", Action::Quit),
     ("toggle-help", Action::ToggleHelp),
@@ -771,6 +772,9 @@ pub fn chord_action(key: char) -> Option<Action> {
 /// The built-in description of an action, so a configured binding still reads
 /// correctly in help.
 fn description_of(action: &Action) -> &'static str {
+    if matches!(action, Action::SwitchTheme) {
+        return "Switch theme";
+    }
     Keymap::new()
         .bindings
         .iter()
@@ -827,6 +831,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::GenerateCellUpdate => "Update",
         Action::RefreshResult => "Refresh",
         Action::FormatBuffer => "Format",
+        Action::SwitchTheme => "Theme",
         Action::OpenConnectionPicker => "Connections",
         Action::Cancel => "Cancel",
         Action::Quit => "Quit",

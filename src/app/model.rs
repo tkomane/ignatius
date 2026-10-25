@@ -1276,6 +1276,8 @@ pub struct Model {
     pub keymap_snapshot: KeymapSnapshot,
     /// How the interface is presented: theme, glyph tier and reduced motion.
     pub presentation: Presentation,
+    /// Validated immutable palettes available during this application session.
+    pub(crate) theme_catalog: crate::ui::theme::ValidatedThemes,
     /// The SQL buffer.
     pub editor: Editor,
     /// Schema-aware completion state and its catalogue snapshot.

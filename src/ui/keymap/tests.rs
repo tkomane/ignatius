@@ -182,6 +182,18 @@ fn every_configurable_name_is_unique_and_reaches_a_real_action() {
     assert!(action_named("nonsense").is_none());
 }
 
+fn palette_reaches(action: &Action) -> bool {
+    let mut model = crate::app::Model::new(100);
+    crate::app::update(&mut model, crate::app::Message::Action(Action::OpenPalette));
+    model
+        .palette
+        .as_ref()
+        .expect("palette opens")
+        .matches()
+        .iter()
+        .any(|entry| entry.command == crate::app::palette::PaletteCommand::Run(action.clone()))
+}
+
 #[test]
 fn every_action_this_build_has_can_be_reached() {
     // The test that would have caught five features shipping with no way in.
@@ -197,7 +209,7 @@ fn every_action_this_build_has_can_be_reached() {
         let chorded = CHORDS.iter().any(|(_, chord, _)| *chord == action);
         let typed = matches!(action, Action::Insert(_));
         assert!(
-            bound || chorded || typed,
+            bound || chorded || typed || palette_reaches(&action),
             "{action:?} has no key, no chord and no other way in"
         );
     }
@@ -205,8 +217,9 @@ fn every_action_this_build_has_can_be_reached() {
 
 #[test]
 fn every_action_worth_looking_up_is_in_the_palette_or_bound_to_a_key() {
-    // The palette is built from the bindings and the chords, so an action
-    // in neither is invisible there too. Typing and movement are excluded:
+    // Include explicit palette rows as well as bindings/chords. Check the
+    // actual opened palette rather than assume an unbound action is reachable.
+    // Typing and movement are excluded:
     // nobody looks up "move left" by name.
     let keymap = Keymap::new();
     for action in Action::all() {
@@ -231,7 +244,8 @@ fn every_action_worth_looking_up_is_in_the_palette_or_bound_to_a_key() {
             .bindings()
             .iter()
             .any(|binding| binding.action == action)
-            || CHORDS.iter().any(|(_, chord, _)| *chord == action);
+            || CHORDS.iter().any(|(_, chord, _)| *chord == action)
+            || palette_reaches(&action);
         assert!(
             listed,
             "{action:?} cannot be found by anyone looking for it"

@@ -335,8 +335,11 @@ fn colour_check(terminal: &TerminalFacts) -> Check {
     if terminal.no_color {
         return Check::ok("colour", "NO_COLOR is set, so output stays uncoloured");
     }
+    if terminal.term.as_deref() == Some("dumb") {
+        return Check::ok("colour", "TERM=dumb, so output stays uncoloured");
+    }
     if !terminal.is_terminal {
-        return Check::ok("colour", "not a terminal, so colour is off");
+        return Check::ok("colour", "not a terminal, so automatic colour is off");
     }
     Check::ok(
         "colour",
