@@ -180,6 +180,25 @@ contracts in W10-008; they do not close that requirement.
 
 ## Local security maintenance - 2026-10-25
 
+The first clean `e70cddf` repeat found one confirmed scanner false positive:
+`src/ui/review/tests.rs:351` assigns the keyboard label `Ctrl+Shift+F12` to
+`binding.key`, triggering `generic-api-key`. It is no credential. Redacted
+source/history logs are retained as
+`/private/tmp/ignatius-gitleaks-e70cddf-*-policy-2026-10-25.log`.
+The narrow policy repair targets only that rule, exact test-file suffix and
+exact full label, with AND matching. Existing global fixture allowances are
+unchanged; their old single table becomes the equivalent array table.
+
+Actual Gitleaks 8.30.0 controls detected four synthetic findings under the old
+policy and exactly three under the new policy: a changed key label and a
+synthetic API key in the same file, plus the original label outside that file,
+still fail. Only the intended original test literal is excluded. Logs:
+`/private/tmp/ignatius-gitleaks-keyboard-policy-{old,new}-2026-10-25.log`.
+Configuration behavior was checked on 25 October 2026 against the
+[pinned vendor parser](https://github.com/gitleaks/gitleaks/blob/v8.30.0/config/config.go).
+This makes no change to product output, scan rules or other test-file coverage;
+fresh complete scans follow the saved policy checkpoint.
+
 Current primary advisories and maintainer releases were checked on 25 October
 2026. Only these five lockfile package versions/checksums changed; existing
 dependency edges, including Windows-specific resolutions, were preserved.

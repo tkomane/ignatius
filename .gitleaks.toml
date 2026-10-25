@@ -18,7 +18,7 @@ keywords = ["not-a-real-password"]
 description = "These strings are fake by construction and named to say so"
 regexes = ['''not-a-real-password[a-z-]*''']
 
-[allowlist]
+[[allowlists]]
 description = "Fixtures and documentation that deliberately show fake credentials"
 regexes = [
     '''not-a-real-password[a-z-]*''',
@@ -29,3 +29,11 @@ paths = [
     '''docker/dev\.env''',
     '''docker/init/.*\.sql''',
 ]
+
+[[allowlists]]
+description = "One exact keyboard label in the review geometry test, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)src/ui/review/tests\.rs$''']
+regexTarget = "secret"
+regexes = ['''^Ctrl\+Shift\+F12$''']
