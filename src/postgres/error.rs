@@ -1,10 +1,10 @@
 //! Turning driver and server errors into layered diagnostics.
 //!
 //! A PostgreSQL error already carries most of what a person needs: a SQLSTATE, a
-//! message, often a detail, a hint, and a position in the statement. None of that
-//! is discarded. What this module adds is the outer layer - what was being
-//! attempted, the likely cause in plain language for the SQLSTATEs people
-//! actually hit, and a safe next action.
+//! message, often a detail, a hint, and a position in the statement. Ordinary
+//! queries retain those facts. Parameterized queries omit server prose because
+//! it can contain a bound value or an arbitrary transformation of one. Both
+//! routes keep classification, SQLSTATE and safe built-in recovery guidance.
 
 use crate::connection::ConnectionTarget;
 use crate::diagnostics::{Diagnostic, DiagnosticKind, ObjectContext};
@@ -161,6 +161,105 @@ pub fn from_query_error(err: &tokio_postgres::Error, statement_number: usize) ->
     Diagnostic::new(DiagnosticKind::Query, err.to_string(), attempted)
         .in_statement(statement_number)
         .next_action("check the statement and the connection, then try again")
+}
+
+/// Builds a value-free diagnostic for a parameterized request.
+///
+/// A server can quote, truncate or transform a value in any text field. Keeping
+/// an allowlist of protocol facts is therefore safer than trying to recognise
+/// the values after the error has already exposed them. Ordinary query errors
+/// deliberately retain their existing rich representation.
+pub(crate) fn from_parameterized_query_error(
+    err: &tokio_postgres::Error,
+    statement_number: usize,
+) -> Diagnostic {
+    let attempted = format!("running statement {statement_number} with named parameters");
+    if let Some(db) = err.as_db_error() {
+        let mut diagnostic = parameterized_server_error(db.code(), statement_number).technical(
+            "Privacy",
+            "server diagnostic text omitted to protect parameter values",
+        );
+        if let Some(ErrorPosition::Original(position)) = db.position() {
+            diagnostic = diagnostic.at_position(*position);
+        }
+        return diagnostic;
+    }
+    if err.is_closed() {
+        return Diagnostic::new(
+            DiagnosticKind::Connection,
+            "the connection closed while the parameterized statement was running",
+            attempted,
+        )
+        .in_statement(statement_number)
+        .likely_cause("whether the statement committed is not known from this connection")
+        .next_action(
+            "reconnect and check the data before running it again. Nothing is retried automatically.",
+        );
+    }
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        "the parameterized statement failed (driver text omitted for privacy)",
+        attempted,
+    )
+    .in_statement(statement_number)
+    .technical(
+        "Privacy",
+        "driver diagnostic text omitted to protect parameter values",
+    )
+    .next_action("check the statement, supplied values and connection; nothing was retried")
+}
+
+/// Retains only the fixed-width SQLSTATE alphabet defined by PostgreSQL.
+pub(crate) fn safe_sqlstate(code: &str) -> Option<&str> {
+    (code.len() == 5
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()))
+    .then_some(code)
+}
+
+fn parameterized_server_error(code: &SqlState, statement_number: usize) -> Diagnostic {
+    let (kind, headline) = if *code == SqlState::QUERY_CANCELED {
+        (
+            DiagnosticKind::Cancelled,
+            "the server cancelled the parameterized statement (server text omitted for privacy)",
+        )
+    } else {
+        (
+            DiagnosticKind::Query,
+            "the parameterized statement failed (server text omitted for privacy)",
+        )
+    };
+    let mut diagnostic = Diagnostic::new(
+        kind,
+        headline,
+        format!("running statement {statement_number} with named parameters"),
+    )
+    .in_statement(statement_number);
+    if let Some(state) = safe_sqlstate(code.code()) {
+        diagnostic = diagnostic.technical("SQLSTATE", state);
+    }
+    let (cause, action) = match *code {
+        SqlState::UNIQUE_VIOLATION => (
+            Some("a row with the same key already exists".to_owned()),
+            Some("check the supplied key and the table's unique constraints".to_owned()),
+        ),
+        SqlState::CHECK_VIOLATION => (
+            Some("the row does not satisfy a check constraint".to_owned()),
+            Some("review the table constraints and supplied values".to_owned()),
+        ),
+        SqlState::INVALID_TEXT_REPRESENTATION => (
+            Some("a supplied value is not valid for the requested PostgreSQL type".to_owned()),
+            Some("check the supplied values and explicit type casts".to_owned()),
+        ),
+        _ => query_advice(code),
+    };
+    if let Some(cause) = cause {
+        diagnostic = diagnostic.likely_cause(cause);
+    }
+    diagnostic.next_action(action.unwrap_or_else(|| {
+        "check the statement and supplied values; nothing was retried".to_owned()
+    }))
 }
 
 /// Attaches every structured field the server supplied.
@@ -333,83 +432,4 @@ fn find_source<T: std::error::Error + 'static>(err: &tokio_postgres::Error) -> O
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::connection::{ConnectionArgs, EnvSnapshot, resolve};
-
-    fn target(uri: &str) -> ConnectionTarget {
-        resolve(
-            Some(uri),
-            &ConnectionArgs::default(),
-            &EnvSnapshot::default(),
-            &crate::config::ConnectionConfig::default(),
-        )
-        .expect("resolve")
-    }
-
-    #[test]
-    fn tls_advice_never_suggests_connecting_without_tls_when_it_was_required() {
-        let target = target("postgres://app@db.example.net/orders?sslmode=verify-full");
-        let action = tls_action(&target);
-        assert!(action.contains("not retried without TLS"), "{action}");
-        assert!(
-            !action.to_lowercase().contains("use sslmode=disable"),
-            "{action}"
-        );
-    }
-
-    #[test]
-    fn tls_causes_name_the_actual_problem() {
-        let target = target("postgres://app@db.example.net/orders?sslmode=verify-full");
-        let expired = rustls::Error::InvalidCertificate(rustls::CertificateError::Expired);
-        assert!(tls_cause(&expired, &target).contains("validity period"));
-
-        let unknown = rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer);
-        assert!(tls_cause(&unknown, &target).contains("trusts"));
-
-        let name = rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidForName);
-        assert!(tls_cause(&name, &target).contains("db.example.net"));
-    }
-
-    #[test]
-    fn connect_advice_covers_the_failures_people_actually_hit() {
-        let target = target("postgres://app@db.example.net/orders");
-        for state in [
-            SqlState::INVALID_PASSWORD,
-            SqlState::INVALID_AUTHORIZATION_SPECIFICATION,
-            SqlState::INVALID_CATALOG_NAME,
-            SqlState::TOO_MANY_CONNECTIONS,
-        ] {
-            let (cause, action) = connect_advice(&state, &target);
-            assert!(cause.is_some(), "{state:?} has no cause");
-            assert!(action.is_some(), "{state:?} has no next action");
-        }
-        // An unknown state gets no invented explanation.
-        assert_eq!(
-            connect_advice(&SqlState::from_code("XX999"), &target),
-            (None, None)
-        );
-    }
-
-    #[test]
-    fn a_failed_transaction_is_told_to_roll_back() {
-        let (cause, action) = query_advice(&SqlState::IN_FAILED_SQL_TRANSACTION);
-        assert!(cause.expect("cause").contains("earlier statement"));
-        assert_eq!(
-            action.expect("action"),
-            "run ROLLBACK to end the failed transaction"
-        );
-    }
-
-    #[test]
-    fn query_advice_is_absent_rather_than_invented_for_unknown_states() {
-        assert_eq!(query_advice(&SqlState::from_code("XX999")), (None, None));
-    }
-
-    #[test]
-    fn cancellation_is_classified_as_cancelled_not_as_a_query_failure() {
-        let (cause, action) = query_advice(&SqlState::QUERY_CANCELED);
-        assert!(cause.expect("cause").contains("cancelled"));
-        assert!(action.expect("action").contains("nothing was retried"));
-    }
-}
+mod tests;

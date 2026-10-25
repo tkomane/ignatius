@@ -15,7 +15,9 @@
 
 use crate::connection::{ConnectionTarget, Host, SslMode};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
-use crate::postgres::error::{from_connect_error, from_query_error};
+use crate::postgres::error::{
+    from_connect_error, from_parameterized_query_error, from_query_error, safe_sqlstate,
+};
 use crate::postgres::tls::{TlsState, client_config};
 use crate::query::result::{
     Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult, bounded_notice_message,
@@ -72,7 +74,64 @@ pub struct Session {
     info: SessionInfo,
     tls: crate::postgres::tls::TlsOptions,
     notices: Arc<Mutex<Vec<Notice>>>,
+    notice_privacy: Arc<AtomicBool>,
     connection_lost: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum QueryPrivacy {
+    Ordinary,
+    Parameterized,
+}
+
+impl QueryPrivacy {
+    fn diagnostic(self, error: &tokio_postgres::Error, statement_number: usize) -> Diagnostic {
+        match self {
+            Self::Ordinary => from_query_error(error, statement_number),
+            Self::Parameterized => from_parameterized_query_error(error, statement_number),
+        }
+    }
+}
+
+fn private_notice(code: Option<&str>) -> Notice {
+    Notice {
+        severity: "NOTICE".to_owned(),
+        message: "Server notice text omitted to protect parameter values.".to_owned(),
+        code: code.and_then(safe_sqlstate).map(str::to_owned),
+    }
+}
+
+fn activate_notice_privacy(notices: &Mutex<Vec<Notice>>, privacy: &AtomicBool) {
+    // Serialize activation with the connection task's insertion. A notice
+    // already queued must not retain text after parameterized work begins.
+    if let Ok(mut held) = notices.lock() {
+        privacy.store(true, Ordering::SeqCst);
+        for notice in held.iter_mut() {
+            *notice = private_notice(notice.code.as_deref());
+        }
+    } else {
+        privacy.store(true, Ordering::SeqCst);
+    }
+}
+
+fn retain_notice(
+    notices: &Mutex<Vec<Notice>>,
+    privacy: &AtomicBool,
+    severity: &str,
+    message: &str,
+    code: &str,
+) {
+    if let Ok(mut held) = notices.lock() {
+        held.push(if privacy.load(Ordering::SeqCst) {
+            private_notice(Some(code))
+        } else {
+            Notice {
+                severity: severity.to_owned(),
+                message: bounded_notice_message(message),
+                code: Some(code.to_owned()),
+            }
+        });
+    }
 }
 
 /// One thing that happened while streaming.
@@ -371,11 +430,20 @@ impl Session {
         sql: &str,
         sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
     ) -> Result<u64, StreamStop> {
+        self.stream_bound(sql, sink, QueryPrivacy::Ordinary).await
+    }
+
+    async fn stream_bound(
+        &self,
+        sql: &str,
+        sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
+        privacy: QueryPrivacy,
+    ) -> Result<u64, StreamStop> {
         let stream = self
             .client
             .simple_query_raw(sql)
             .await
-            .map_err(|err| StreamStop::Server(Box::new(from_query_error(&err, 1))))?;
+            .map_err(|err| StreamStop::Server(Box::new(privacy.diagnostic(&err, 1))))?;
         tokio::pin!(stream);
 
         let mut rows = 0u64;
@@ -383,7 +451,7 @@ impl Session {
 
         while let Some(message) = stream.next().await {
             let message =
-                message.map_err(|err| StreamStop::Server(Box::new(from_query_error(&err, 1))))?;
+                message.map_err(|err| StreamStop::Server(Box::new(privacy.diagnostic(&err, 1))))?;
             match message {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
                     if seen_columns {
@@ -435,7 +503,9 @@ impl Session {
                     error.diagnostic("binding named parameters for export"),
                 ))
             })?;
-        self.stream(&bound, sink).await
+        activate_notice_privacy(&self.notices, &self.notice_privacy);
+        self.stream_bound(&bound, sink, QueryPrivacy::Parameterized)
+            .await
     }
 
     /// Executes every statement in a buffer, in order.
@@ -448,7 +518,8 @@ impl Session {
             "{}",
             crate::diagnostics::logging::statement_descriptor(job.0, sql)
         );
-        self.execute_bound(sql, row_cap, job).await
+        self.execute_bound(sql, row_cap, job, QueryPrivacy::Ordinary)
+            .await
     }
 
     /// Binds named values and executes the resulting simple query.
@@ -484,10 +555,18 @@ impl Session {
                 };
             }
         };
-        self.execute_bound(&bound, row_cap, job).await
+        activate_notice_privacy(&self.notices, &self.notice_privacy);
+        self.execute_bound(&bound, row_cap, job, QueryPrivacy::Parameterized)
+            .await
     }
 
-    async fn execute_bound(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
+    async fn execute_bound(
+        &self,
+        sql: &str,
+        row_cap: usize,
+        job: JobId,
+        privacy: QueryPrivacy,
+    ) -> Execution {
         let started = Instant::now();
         let parsed = statements::split(sql);
         let mut results = Vec::new();
@@ -506,7 +585,10 @@ impl Session {
         for (index, statement) in parsed.iter().enumerate() {
             let _ = self.take_notices();
             let statement_started = Instant::now();
-            match self.execute_one(&statement.text, row_cap, index + 1).await {
+            match self
+                .execute_one(&statement.text, row_cap, index + 1, privacy)
+                .await
+            {
                 Ok((result_set, rows_affected)) => {
                     results.push(StatementResult {
                         result_set,
@@ -559,19 +641,20 @@ impl Session {
         sql: &str,
         row_cap: usize,
         statement_number: usize,
+        privacy: QueryPrivacy,
     ) -> Result<(Option<ResultSet>, Option<u64>), Diagnostic> {
         let stream = self
             .client
             .simple_query_raw(sql)
             .await
-            .map_err(|err| from_query_error(&err, statement_number))?;
+            .map_err(|err| privacy.diagnostic(&err, statement_number))?;
         tokio::pin!(stream);
 
         let mut result_set: Option<ResultSet> = None;
         let mut rows_affected = None;
 
         while let Some(message) = stream.next().await {
-            match message.map_err(|err| from_query_error(&err, statement_number))? {
+            match message.map_err(|err| privacy.diagnostic(&err, statement_number))? {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
                     let names = columns.iter().map(|c| c.name().to_owned()).collect();
                     result_set = Some(ResultSet::new(names, row_cap));
@@ -693,14 +776,24 @@ pub async fn connect(
         client_key: target.client_key.clone(),
     };
     let tls_config = client_config(&tls)?;
+    let notice_privacy = Arc::new(AtomicBool::new(false));
 
     let (client, notices, connection_lost) = match tls_config {
-        None => establish(&config, tokio_postgres::NoTls, target).await?,
+        None => {
+            establish(
+                &config,
+                tokio_postgres::NoTls,
+                target,
+                Arc::clone(&notice_privacy),
+            )
+            .await?
+        }
         Some(rustls_config) => {
             establish(
                 &config,
                 tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config),
                 target,
+                Arc::clone(&notice_privacy),
             )
             .await?
         }
@@ -729,6 +822,7 @@ pub async fn connect(
         info,
         tls,
         notices,
+        notice_privacy,
         connection_lost,
     })
 }
@@ -740,6 +834,7 @@ async fn establish<T>(
     config: &tokio_postgres::Config,
     tls: T,
     target: &ConnectionTarget,
+    notice_privacy: Arc<AtomicBool>,
 ) -> Result<Established, Diagnostic>
 where
     T: MakeTlsConnect<Socket> + Send + 'static,
@@ -784,13 +879,13 @@ where
         while let Some(message) = stream.next().await {
             match message {
                 Ok(AsyncMessage::Notice(notice)) => {
-                    if let Ok(mut held) = task_notices.lock() {
-                        held.push(Notice {
-                            severity: notice.severity().to_owned(),
-                            message: bounded_notice_message(notice.message()),
-                            code: Some(notice.code().code().to_owned()),
-                        });
-                    }
+                    retain_notice(
+                        &task_notices,
+                        &notice_privacy,
+                        notice.severity(),
+                        notice.message(),
+                        notice.code().code(),
+                    );
                 }
                 Ok(_) => {}
                 Err(_) => break,
@@ -933,70 +1028,4 @@ fn non_empty(value: String, fallback: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::connection::{ConnectionArgs, EnvSnapshot, resolve};
-
-    fn target(uri: &str) -> ConnectionTarget {
-        resolve(
-            Some(uri),
-            &ConnectionArgs::default(),
-            &EnvSnapshot::default(),
-            &crate::config::ConnectionConfig::default(),
-        )
-        .expect("resolve")
-    }
-
-    #[test]
-    fn the_driver_configuration_mirrors_the_resolved_target() {
-        let target = target("postgres://app@db.example.net:6432/orders?sslmode=require");
-        let config = build_config(&target);
-        assert_eq!(config.get_ports(), [6432]);
-        assert_eq!(config.get_user(), Some("app"));
-        assert_eq!(config.get_dbname(), Some("orders"));
-        assert_eq!(config.get_ssl_mode(), PgSslMode::Require);
-        assert_eq!(
-            config.get_application_name(),
-            Some(crate::branding::DEFAULT_APPLICATION_NAME)
-        );
-    }
-
-    #[test]
-    fn verifying_modes_still_require_tls_at_the_protocol_level() {
-        for uri in [
-            "postgres://app@db.example.net/orders?sslmode=verify-full",
-            "postgres://app@db.example.net/orders?sslmode=require",
-        ] {
-            assert_eq!(
-                build_config(&target(uri)).get_ssl_mode(),
-                PgSslMode::Require
-            );
-        }
-        assert_eq!(
-            build_config(&target("postgres://app@localhost/orders?sslmode=disable")).get_ssl_mode(),
-            PgSslMode::Disable
-        );
-        assert_eq!(
-            build_config(&target("postgres://app@localhost/orders")).get_ssl_mode(),
-            PgSslMode::Prefer
-        );
-    }
-
-    #[test]
-    fn posture_is_stated_in_words() {
-        let mut info = SessionInfo {
-            target: "app@localhost:5432/orders".into(),
-            database: "orders".into(),
-            user: "app".into(),
-            server_version: "18.6".into(),
-            backend_pid: "123".into(),
-            search_path: "\"$user\", public".into(),
-            read_only: false,
-            tls: TlsState::Disabled,
-            environment: crate::connection::Environment::Local,
-        };
-        assert_eq!(info.posture(), "read-write");
-        info.read_only = true;
-        assert_eq!(info.posture(), "read-only");
-    }
-}
+mod tests;

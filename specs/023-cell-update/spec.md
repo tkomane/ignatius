@@ -190,6 +190,9 @@ generated update and verify exactly one row changes only after confirmation.
 - **FR-2315**: The generated template, not bound values, MUST be eligible for
   statement history and tracing; values MUST not appear in diagnostics, debug
   output or machine-output routes.
+  Generated writes use Feature 022's value-free server-diagnostic and
+  session-notice policy, including constraint/type failures and transformed
+  replacement or primary-key values.
 
 ### Security and Compatibility Requirements
 

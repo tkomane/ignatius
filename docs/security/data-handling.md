@@ -44,6 +44,15 @@ What this program stores, where, for how long, and what it never stores.
   not a command-line argument. Binding creates an escaped text literal only at
   the simple-query boundary. NUL is refused before send.
 
+  Server error prose/object fields for parameterized execution and export are
+  omitted with explicit privacy wording, retaining classification, validated
+  SQLSTATE, statement ordinal, numeric position and built-in advice. This also
+  protects transformed or truncated values that exact-value redaction cannot
+  recognise. Before the first parameterized send, existing and future notices
+  become value-free until disconnect, because their asynchronous arrival can
+  outlive the request. Ordinary query errors remain detailed; deliberately
+  returned row values remain query/export output.
+
 - **Generated cell-update values.** A replacement and the selected row's key
   values are held in secret `ParameterBindings` for one reviewed, parameterized
   `UPDATE`. The template, identifiers, row and privilege facts are safe model
@@ -161,8 +170,21 @@ a cell update does not trigger it.
 | Configuration | `~/.config/ignatius/config.toml` or `%APPDATA%\ignatius\config.toml` | `0600` on Unix; profile ACL on Windows | Until deleted |
 | Migration backups | Beside the configuration, timestamped | Same | Until deleted |
 | Logs | `~/.local/share/ignatius/logs/ignatius.log` | `0600` on Unix | Rotated at 5 MB, one previous file kept |
-| Saved queries | `~/.config/ignatius/queries/*.sql` | The directory's own | Until deleted. Written only when the user names one |
+| Saved queries | `~/.config/ignatius/queries/*.sql` | `0600` for newly saved/replaced files on Unix; profile ACL on Windows | Until deleted. Written only when the user names one |
 | Statement history | `~/.local/share/ignatius/history.jsonl` | `0600` on Unix, set at creation and kept when the file is trimmed | Last 1000 entries by default; `ignatius history clear` removes it |
+
+Configuration writes, saved-query replacements and history trimming reserve
+new sibling temporary files exclusively, with Unix mode `0600` from creation.
+Their contents are flushed and synced before rename; an existing temporary is
+never reopened, followed or removed. A failed replacement preserves the prior
+destination and removes only this attempt's temporary. Stale files from an
+interrupted earlier attempt are left for the owner to inspect. This does not
+claim directory-entry durability across power loss or multi-process locking.
+
+Saved-query load/save refuses symbolic links and non-regular leaf entries;
+listings omit them. A regular file replaced through a hard link is replaced as
+a directory entry, leaving its other names unchanged. The configured library
+root is trusted; same-user path replacement races are outside this boundary.
 
 `ignatius config paths` prints all of these. Deleting the configuration directory
 returns the program to a first-run state and loses nothing else.

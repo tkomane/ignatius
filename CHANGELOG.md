@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: parameterized execution and export omit server-controlled error
+  text that can echo replacement/key values, including transformed values.
+  SQLSTATE, failure classification and statement position remain available.
+  After the first parameterized send, notices stay value-free until disconnect;
+  the privacy omission is stated explicitly.
 - Security: saved-query load/save refuses linked or non-regular entries, and
   listings skip them. Query saves, configuration writes and history trimming
   use exclusive, owner-only temporary files and synced atomic replacement,

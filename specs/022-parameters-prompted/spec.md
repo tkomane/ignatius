@@ -4,7 +4,10 @@
 
 **Created**: 2026-09-04
 
-**Status**: Implemented locally; locked verifier green with semantic Unix-socket skip; terminal hand checks pending
+**Status**: Original slice and W04 privacy correction implemented locally;
+2026-10-25 locked verifier green with semantic Unix-socket skip. FR-2215's W03
+guard is specified and pending implementation. Different-family review and
+terminal hand checks remain pending.
 
 **Input**: The experience roadmap item "Parameters prompted": a statement with
 `:name` placeholders asks for the values instead of being edited each time.
@@ -168,6 +171,17 @@ diagnostic text for the synthetic secret marker.
   template, not prompted values, in statement history.
 - **FR-2211**: Prompted values MUST NOT appear in diagnostics, logs, debug
   representations, palette text, result metadata or terminal decoration.
+  Parameterized execution/export errors MUST retain classification, validated
+  SQLSTATE, statement ordinal, numeric server position and execution/transaction
+  outcome, but MUST omit server-controlled prose and object fields that may
+  contain original, transformed or truncated values. The omission MUST be
+  explained with fixed text and guidance MUST use built-in wording. Before the
+  first parameterized send, the session MUST switch to value-free notices:
+  fixed privacy wording and validated SQLSTATE only. That notice policy lasts
+  until disconnect because asynchronous notices cannot be safely attributed to
+  a completed or cancelled request. Returned row values remain intentional
+  query/export output. Ordinary unparameterized diagnostics retain their
+  existing rich fields.
 - **FR-2212**: Parameterized errors MUST not move an editor caret using a server
   position that refers to the expanded request; the client MUST state why the
   location is unavailable.
@@ -175,6 +189,19 @@ diagnostic text for the synthetic secret marker.
   cancellation, transaction, row-cap, result, output and exit-code contracts.
 - **FR-2214**: The implementation MUST enforce a bounded number of distinct
   names and document the limit as a compatibility contract.
+- **FR-2215**: Authoritative runtime discovery/binding MUST require a fresh
+  `SHOW standard_conforming_strings` response of exactly `on`. An `off`,
+  unknown or unreadable setting MUST refuse without sending the requested SQL,
+  changing the setting, retrying, or adding transaction controls. Buffered
+  execution MUST recheck before each separately sent statement, preserving
+  completed-prefix results if a prior statement changes the setting. Streaming
+  MUST retain its existing whole-Query-message boundary with one initial check,
+  preserving implicit transactions and initial whole-message parsing. A
+  per-session async gate MUST serialize arbitrary user-SQL operations around
+  the check/bind/send interval; cancellation stays independent. Probe failures
+  MUST preserve safe SQLSTATE, cancellation/connection classification and real
+  transaction state. Preliminary CLI mapping validation stays before connection
+  work as required by FR-2209.
 
 ### Security and Compatibility Requirements
 

@@ -228,6 +228,21 @@ before resolving a target. The template, not the answers, is retained in
 history and editor state. A server position after expansion is shown as
 technical information without a guessed template caret.
 
+For parameterized execution/export errors, server-controlled message, detail,
+hint, context and object fields are omitted because they can contain original,
+transformed or truncated values. The omission is explicit; classification,
+validated SQLSTATE, statement ordinal and numeric server position remain
+available with built-in recovery guidance. Ordinary query diagnostics keep
+their existing detail. From the first parameterized send until disconnect,
+server notices use fixed privacy wording and validated SQLSTATE only, including
+delayed notices from completed or interrupted work. Deliberately returned query
+and export rows remain output.
+
+Saved queries are regular `.sql` files. Loading or saving a linked/non-regular
+entry refuses; the list skips it. Named replacements use exclusive private
+temporary files and atomic rename, as do configuration writes and history
+trimming. Earlier interrupted temporary files are preserved for inspection.
+
 ## Reviewable cell-to-UPDATE
 
 The interactive client supports a deliberately narrow result-cell write flow.
