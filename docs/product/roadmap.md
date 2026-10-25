@@ -92,6 +92,12 @@ flowchart LR
    story dependencies and exact contracts; no additional feature is needed to
    keep development moving. Final terminal/participant evidence stays open
    until the named platform and journey have actually been exercised.
+   The pane-control keyboard/shared-geometry core precedes mouse split dragging;
+   the task plan now records this previously omitted dependency. Mouse capture
+   stays off until complete pointer behavior and keyboard parity are verified.
+   T039/T041's keyboard split/zoom core passed local integration on 25 October
+   2026. Density T040 and complete T038 acceptance remain next; dragging still
+   belongs to T035. Full US7, native visual and hosted acceptance remain open.
 
 Use full feature directory slugs in assignments. The historical `007` collision
 and old broad-theme numbers are documented in the inventory; neither justifies

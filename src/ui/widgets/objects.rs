@@ -10,6 +10,28 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
+/// The row rectangle after the pane border and optional filter prompt.
+pub(crate) fn content_area(model: &Model, inner: Rect) -> Rect {
+    if model.tree.filtering || !model.tree.filter.is_empty() {
+        let [_, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+        rest
+    } else {
+        inner
+    }
+}
+
+pub(crate) fn content_capacity(model: &Model, pane: Rect) -> usize {
+    let body = content_area(model, super::inner_rect(pane));
+    if body.width == 0
+        || model.tree.error.is_some()
+        || (model.tree.loading && model.tree.roots.is_empty())
+    {
+        0
+    } else {
+        usize::from(body.height)
+    }
+}
+
 pub(crate) fn render_objects(
     model: &Model,
     keymap: &Keymap,
@@ -44,6 +66,9 @@ pub(crate) fn render_objects(
     }
     if focused {
         title.push_str("[focused] ");
+    }
+    if model.splits.zoomed && focused {
+        title.insert_str(0, " (zoomed)");
     }
 
     let block = pane_block(title, focused, presentation);
@@ -92,7 +117,7 @@ pub(crate) fn render_objects(
     let mut lines: Vec<Line> = Vec::new();
 
     // The filter is shown as a line of its own so it is never mistaken for a row.
-    let mut body = inner;
+    let body = content_area(model, inner);
     if model.tree.filtering || !model.tree.filter.is_empty() {
         let prompt = format!(
             " {}{}{}",
@@ -108,7 +133,7 @@ pub(crate) fn render_objects(
                 ""
             }
         );
-        let [filter_area, rest] =
+        let [filter_area, _] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
         Paragraph::new(Line::from(Span::styled(
             prompt,
@@ -119,7 +144,6 @@ pub(crate) fn render_objects(
             }),
         )))
         .render(filter_area, buf);
-        body = rest;
     }
 
     if rows.is_empty() {

@@ -8,6 +8,552 @@ use crate::query::value::Cell;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+fn split_key(model: &mut Model, key: char) {
+    assert!(update(model, Message::Action(Action::BeginPrefix)).is_empty());
+    assert!(update(model, Message::Action(Action::Insert(key))).is_empty());
+}
+
+fn split_frame(model: &Model) -> String {
+    crate::ui::layout::render_to_string(
+        model,
+        &crate::ui::Keymap::new(),
+        &model.presentation,
+        model.size.0,
+        model.size.1,
+    )
+}
+
+fn split_dividers(model: &Model) -> (Option<u16>, Option<u16>) {
+    use crate::ui::widgets::{Region, region_at};
+    use ratatui::layout::Rect;
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+    let sidebar =
+        (0..area.width).find(|x| region_at(model, area, *x, 2) == Some(Region::VerticalSplit));
+    let editor = (1..area.height.saturating_sub(1)).find(|y| {
+        region_at(model, area, area.width.saturating_sub(2), *y) == Some(Region::HorizontalSplit)
+    });
+    (sidebar.map(|x| x + 1), editor)
+}
+
+#[test]
+fn split_sidebar_keyboard_steps_and_bounds_preserve_main_column() {
+    let mut model = Model::new(100);
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    let initial = split_dividers(&model).0.expect("sidebar");
+    split_key(&mut model, '.');
+    assert_eq!(split_dividers(&model).0, Some(initial + 2));
+    for _ in 0..80 {
+        split_key(&mut model, '.');
+    }
+    assert_eq!(split_dividers(&model).0, Some(60));
+    model.size = (80, 24);
+    assert_eq!(split_dividers(&model).0, Some(50));
+    for _ in 0..80 {
+        split_key(&mut model, ',');
+    }
+    assert_eq!(split_dividers(&model).0, Some(20));
+}
+
+#[test]
+fn split_results_focus_adjusts_editor_and_page_matches_new_height() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let before = split_dividers(&model).1.expect("editor border");
+    split_key(&mut model, '.');
+    assert_eq!(split_dividers(&model).1, Some(before + 1));
+    model.focus = Focus::Editor;
+    model
+        .editor
+        .set_text((0..100).map(|_| "SELECT 1;").collect::<Vec<_>>().join("\n"));
+    update(&mut model, Message::Action(Action::MoveBufferStart));
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.editor.position().0, usize::from(before));
+}
+
+#[test]
+fn split_zoom_follows_focus_and_restores_exact_frame() {
+    let mut model = connected();
+    model.size = (120, 40);
+    let before = split_frame(&model);
+    split_key(&mut model, 'z');
+    assert!(split_frame(&model).contains("(zoomed)"));
+    assert_eq!(split_dividers(&model), (None, None));
+    update(&mut model, Message::Action(Action::FocusNext));
+    let text = split_frame(&model);
+    assert!(text.contains("Results") && text.contains("(zoomed)"));
+    assert!(!text.contains("Editor  line"));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert!(split_frame(&model).contains("Objects"));
+    update(&mut model, Message::Action(Action::FocusNext));
+    split_key(&mut model, 'z');
+    assert_eq!(split_frame(&model), before);
+}
+
+#[test]
+fn split_compact_feedback_survives_ticks_until_next_user_action() {
+    let mut model = connected();
+    model.size = (79, 24);
+    split_key(&mut model, 'z');
+    const NOTICE: &str = "Layout is already single-pane at this terminal size.";
+    assert!(split_frame(&model).contains(NOTICE));
+    update(&mut model, Message::Tick { running_for: None });
+    assert!(split_frame(&model).contains(NOTICE));
+    update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert!(!split_frame(&model).contains(NOTICE));
+}
+
+#[test]
+fn split_grid_page_uses_drawable_rows_including_types() {
+    for with_types in [false, true] {
+        let mut model = copy_model(
+            (0..100)
+                .map(|n| vec![Cell::Text(n.to_string()), Cell::Text("x".into())])
+                .collect(),
+        );
+        model.size = (120, 40);
+        model.result_grid.show_types = with_types;
+        model.last_execution.as_mut().unwrap().statements[0]
+            .result_set
+            .as_mut()
+            .unwrap()
+            .column_types = vec![Some("text".into()), Some("text".into())];
+        let editor = split_dividers(&model).1.unwrap();
+        let outer_results = model.size.1 - 2 - editor;
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(
+            model.selected_row,
+            usize::from(outer_results - 7 - u16::from(with_types))
+        );
+    }
+}
+
+#[test]
+fn split_tree_page_uses_its_own_content_height() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    model.tree.roots = (0..100)
+        .map(|n| {
+            crate::app::tree::Node::new(crate::app::tree::NodeKind::Message(format!("row {n}")))
+        })
+        .collect();
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.tree.selected, 36);
+}
+
+#[test]
+fn split_plan_page_uses_tree_capacity_and_zoom_title() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let children = (0..80)
+        .map(|_| r#"{"Node Type":"Result"}"#)
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"[{{"Plan":{{"Node Type":"Append","Plans":[{children}]}}}}]"#);
+    model
+        .plan
+        .ready(crate::query::PlanDocument::parse(&json, false).unwrap());
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.plan.selected_path, vec![13]);
+    split_key(&mut model, 'z');
+    let frame = split_frame(&model);
+    assert!(frame.contains("Plan") && frame.contains("(zoomed)"));
+}
+
+#[test]
+fn split_zoom_resize_preserves_preferences_and_split_restores_before_step() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    for _ in 0..20 {
+        split_key(&mut model, '.');
+    }
+    model.focus = Focus::Editor;
+    for _ in 0..10 {
+        split_key(&mut model, '.');
+    }
+    let before = split_dividers(&model);
+    let preferences = model.splits;
+    split_key(&mut model, 'z');
+    update(&mut model, Message::Resized(80, 24));
+    assert_eq!(model.splits.sidebar_cells, preferences.sidebar_cells);
+    assert_eq!(model.splits.editor_rows, preferences.editor_rows);
+    split_key(&mut model, 'z');
+    assert_eq!(model.splits, preferences);
+    assert_eq!(split_dividers(&model), (Some(50), Some(19)));
+    update(&mut model, Message::Resized(120, 40));
+    assert_eq!(split_dividers(&model), before);
+    split_key(&mut model, 'z');
+    split_key(&mut model, ',');
+    assert!(!model.splits.zoomed);
+    assert_eq!(split_dividers(&model).1, before.1.map(|height| height - 1));
+    assert_eq!(
+        Model::new(100).splits,
+        crate::app::model::SplitState::default()
+    );
+}
+
+#[test]
+fn split_editor_minimums_and_hidden_sidebar_are_coherent() {
+    let mut model = connected();
+    model.size = (80, 24);
+    for _ in 0..60 {
+        split_key(&mut model, ',');
+    }
+    assert_eq!(split_dividers(&model).1, Some(3));
+    for _ in 0..60 {
+        split_key(&mut model, '.');
+    }
+    assert_eq!(split_dividers(&model).1, Some(19));
+    model.focus = Focus::Objects;
+    split_key(&mut model, '.');
+    let sidebar = model.splits.sidebar_cells;
+    split_key(&mut model, 'z');
+    update(&mut model, Message::Action(Action::ToggleSidebar));
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(model.splits.zoomed);
+    assert_eq!(split_dividers(&model), (None, None));
+    split_key(&mut model, 'z');
+    assert_eq!(split_dividers(&model).0, None);
+    assert_eq!(model.splits.sidebar_cells, sidebar);
+    update(&mut model, Message::Action(Action::FocusNext));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Editor);
+}
+
+fn split_modal_models() -> Vec<Model> {
+    let base = connected();
+    let mut cases = Vec::new();
+    let mut help = base.clone();
+    help.help_open = true;
+    cases.push(help);
+    let mut password = base.clone();
+    password.password_prompt = Some(crate::app::model::PasswordPrompt::new("target", "reason"));
+    cases.push(password);
+    let mut name = base.clone();
+    name.name_prompt = Some(crate::app::model::NamePrompt::for_query(""));
+    cases.push(name);
+    let mut details = base.clone();
+    details.connection_details = true;
+    cases.push(details);
+    let mut inspector = base.clone();
+    inspector.inspector = Some(crate::app::inspect::Inspector::new());
+    cases.push(inspector);
+    let mut definition = base.clone();
+    definition.definition = Some(crate::app::model::Definition {
+        pending: None,
+        heading: "view".into(),
+        definition: None,
+        error: None,
+        scroll: 0,
+    });
+    cases.push(definition);
+    let mut completion = base.clone();
+    completion.completion.menu = Some(crate::app::completion::CompletionMenu::new(
+        crate::query::completion::complete("SEL", 3, None),
+        true,
+    ));
+    cases.push(completion);
+    let mut filtering = base.clone();
+    filtering.tree.filtering = true;
+    cases.push(filtering);
+    let mut results_filter = base.clone();
+    results_filter.result_filtering = true;
+    cases.push(results_filter);
+    let mut palette = base.clone();
+    palette.palette = Some(crate::app::palette::Palette::default());
+    cases.push(palette);
+    cases
+}
+
+fn split_modal_owners(model: &Model) -> [bool; 10] {
+    [
+        model.help_open,
+        model.password_prompt.is_some(),
+        model.name_prompt.is_some(),
+        model.connection_details,
+        model.inspector.is_some(),
+        model.definition.is_some(),
+        model.completion.menu.is_some(),
+        model.tree.filtering,
+        model.result_filtering,
+        model.palette.is_some(),
+    ]
+}
+
+#[test]
+fn split_actions_never_act_through_modal_surfaces() {
+    for model in split_modal_models() {
+        for action in [Action::ShrinkPane, Action::GrowPane, Action::ZoomPane] {
+            let mut candidate = model.clone();
+            assert!(update(&mut candidate, Message::Action(action.clone())).is_empty());
+            assert_eq!(candidate.splits, model.splits, "{action:?}");
+        }
+    }
+}
+
+#[test]
+fn split_default_chords_keep_modal_owners_and_never_edit_or_run_sql() {
+    for model in split_modal_models() {
+        for key in [',', '.', 'z'] {
+            let mut candidate = model.clone();
+            split_key(&mut candidate, key);
+            assert_eq!(
+                candidate.splits,
+                model.splits,
+                "{key}, owners {:?}",
+                split_modal_owners(&model)
+            );
+            assert_eq!(
+                split_modal_owners(&candidate),
+                split_modal_owners(&model),
+                "{key}"
+            );
+            assert_eq!(candidate.editor.text(), model.editor.text());
+            assert_eq!(candidate.editor.revision(), model.editor.revision());
+            assert_eq!(candidate.phase, model.phase);
+        }
+    }
+}
+
+#[test]
+fn split_configured_direct_keys_keep_modal_owners_and_never_edit_or_run_sql() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    for model in split_modal_models() {
+        for name in ["shrink-pane", "grow-pane", "zoom-pane"] {
+            let keys = BTreeMap::from([(
+                name.to_owned(),
+                crate::config::schema::KeySpec::One("alt+f10".into()),
+            )]);
+            let keymap = crate::ui::Keymap::from_config(&keys).unwrap();
+            let action = keymap
+                .resolve(&KeyEvent::new(KeyCode::F(10), KeyModifiers::ALT))
+                .unwrap();
+            let mut candidate = model.clone();
+            assert!(update(&mut candidate, Message::Action(action)).is_empty());
+            assert_eq!(candidate.splits, model.splits, "{name}");
+            assert_eq!(
+                split_modal_owners(&candidate),
+                split_modal_owners(&model),
+                "{name}"
+            );
+            assert_eq!(candidate.editor.text(), model.editor.text());
+            assert_eq!(candidate.editor.revision(), model.editor.revision());
+            assert_eq!(candidate.phase, model.phase);
+        }
+    }
+}
+
+#[test]
+fn split_deferred_chords_preserve_other_commands_close_and_forward_behavior() {
+    for mut model in split_modal_models().into_iter().skip(4).take(5) {
+        model.editor.set_text("select 1");
+        let owners = split_modal_owners(&model);
+        assert!(update(&mut model, Message::Action(Action::BeginPrefix)).is_empty());
+        assert_eq!(split_modal_owners(&model), owners);
+        assert!(model.prefix_pending);
+        assert!(update(&mut model, Message::Action(Action::Insert('q'))).is_empty());
+        assert!(!model.prefix_pending);
+        assert!(!pane_input_owned(&model));
+        assert!(
+            model.format_notice.is_some(),
+            "the format command was forwarded"
+        );
+    }
+}
+
+#[test]
+fn split_palette_commands_use_underlying_focus_and_active_keys() {
+    use crate::app::palette::{Palette, PaletteCommand};
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let mut keys = BTreeMap::new();
+    keys.insert(
+        "grow-pane".into(),
+        crate::config::schema::KeySpec::One("alt+f10".into()),
+    );
+    let keymap = crate::ui::Keymap::from_config(&keys).unwrap();
+    model.keymap_snapshot = keymap.snapshot();
+    let entry = palette_entries(&model)
+        .into_iter()
+        .find(|entry| entry.command == PaletteCommand::Run(Action::GrowPane))
+        .expect("grow palette entry");
+    assert!(entry.detail.contains("Alt+F10"));
+    let before = split_dividers(&model).1.unwrap();
+    model.palette = Some(Palette::new(vec![entry]));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.palette.is_none());
+    assert_eq!(model.focus, Focus::Results);
+    assert_eq!(split_dividers(&model).1, Some(before + 1));
+}
+
+#[test]
+fn split_paging_tracks_zoom_and_tree_filter_prelude() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    model.tree.roots = (0..100)
+        .map(|n| {
+            crate::app::tree::Node::new(crate::app::tree::NodeKind::Message(format!("row {n}")))
+        })
+        .collect();
+    model.tree.filter = "row".into();
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.tree.selected, 35);
+    model.focus = Focus::Editor;
+    model
+        .editor
+        .set_text((0..100).map(|_| "line").collect::<Vec<_>>().join("\n"));
+    update(&mut model, Message::Action(Action::MoveBufferStart));
+    split_key(&mut model, 'z');
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.editor.position().0, 37);
+}
+
+#[test]
+fn split_unready_plan_paging_never_moves_the_hidden_retained_grid() {
+    let mut model = copy_model(
+        (0..100)
+            .map(|n| vec![Cell::Text(n.to_string()), Cell::Text("x".into())])
+            .collect(),
+    );
+    model.size = (120, 40);
+    model.selected_row = 7;
+    for failed in [false, true] {
+        model.plan = crate::app::PlanView::loading(JobId(9), false);
+        if failed {
+            model.plan.failed(false, "No plan", "Try again");
+        }
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(model.selected_row, 7);
+        assert_eq!(crate::ui::layout::results_page(&model), 1);
+    }
+}
+
+#[test]
+fn split_fresh_diagnostics_and_failed_transactions_remain_visible() {
+    let mut base = connected();
+    base.size = (120, 40);
+    base.editor.set_text("SELECT 1;");
+    let effects = update(&mut base, Message::Action(Action::RunBuffer));
+    let Effect::Execute { job, .. } = effects[0] else {
+        panic!("execute");
+    };
+    let diagnostic = Diagnostic::new(
+        DiagnosticKind::Query,
+        "Synthetic failure must remain visible.",
+        "a synthetic operation",
+    );
+    for focus in [Focus::Editor, Focus::Objects] {
+        let messages = vec![
+            (
+                "execution",
+                Message::ExecutionFinished(failed_execution(job, diagnostic.clone())),
+            ),
+            (
+                "connection",
+                Message::ConnectionFailed(Box::new(diagnostic.clone())),
+            ),
+            (
+                "cancellation",
+                Message::CancellationFailed(Box::new(diagnostic.clone())),
+            ),
+            (
+                "export",
+                Message::RowsExported(Box::new(Err(diagnostic.clone()))),
+            ),
+            (
+                "clipboard",
+                Message::ClipboardFailed(Box::new(diagnostic.clone())),
+            ),
+        ];
+        for (origin, message) in messages {
+            let mut model = base.clone();
+            model.focus = focus;
+            split_key(&mut model, 'z');
+            update(&mut model, message);
+            assert!(
+                split_frame(&model).contains(&diagnostic.headline),
+                "{origin}, {focus:?}"
+            );
+        }
+        let mut model = base.clone();
+        model.focus = focus;
+        split_key(&mut model, 'z');
+        let mut failed = execution(job, ExecutionStatus::Failed, &[]);
+        failed.transaction = crate::query::result::TransactionState::Failed;
+        update(&mut model, Message::ExecutionFinished(failed));
+        let text = split_frame(&model);
+        assert!(
+            text.contains("This transaction has failed."),
+            "{focus:?}: {text}"
+        );
+        assert!(text.contains("ROLLBACK ends it."));
+    }
+}
+
+#[test]
+fn split_error_zoom_refusal_and_results_focus_keep_details_visible() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.error = Some(Diagnostic::new(
+        DiagnosticKind::Query,
+        "Visible error",
+        "a synthetic operation",
+    ));
+    let preferences = model.splits;
+    split_key(&mut model, 'z');
+    assert!(!model.splits.zoomed);
+    assert_eq!(model.splits, preferences);
+    const NOTICE: &str = "Zoom Results to keep error and recovery details visible.";
+    assert!(split_frame(&model).contains(NOTICE));
+    update(&mut model, Message::Tick { running_for: None });
+    assert!(split_frame(&model).contains(NOTICE));
+    model.focus = Focus::Results;
+    split_key(&mut model, 'z');
+    assert!(model.splits.zoomed);
+    assert!(split_frame(&model).contains("Visible error"));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Objects);
+    assert!(!model.splits.zoomed);
+    assert!(split_frame(&model).contains("Visible error"));
+    model.error = None;
+    model.transaction = crate::query::result::TransactionState::Failed;
+    model.last_execution = Some(*execution(JobId(42), ExecutionStatus::Failed, &[]));
+    model.focus = Focus::Results;
+    split_key(&mut model, 'z');
+    assert!(model.splits.zoomed);
+    assert!(split_frame(&model).contains("This transaction has failed."));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert!(!model.splits.zoomed);
+    assert!(split_frame(&model).contains("ROLLBACK ends it."));
+}
+
 fn session() -> Box<SessionInfo> {
     Box::new(SessionInfo {
         target: "app@localhost:5432/orders".into(),
@@ -1801,7 +2347,7 @@ fn a_page_key_moves_by_what_is_on_screen_in_whichever_pane_has_focus() {
     model.editor.set_text(text);
     update(&mut model, Message::Action(Action::MoveBufferStart));
 
-    let page = crate::ui::layout::editor_page(model.size);
+    let page = crate::ui::layout::editor_page(&model);
     assert!(page > 1, "a full-size terminal shows more than one line");
     update(
         &mut model,
@@ -1828,10 +2374,7 @@ fn a_page_key_moves_by_what_is_on_screen_in_whichever_pane_has_focus() {
         &mut model,
         Message::Action(Action::MovePage(Direction::Down)),
     );
-    assert_eq!(
-        model.selected_row,
-        crate::ui::layout::results_page(model.size)
-    );
+    assert_eq!(model.selected_row, crate::ui::layout::results_page(&model));
     update(&mut model, Message::Action(Action::MoveBufferEnd));
     assert_eq!(
         model.selected_row, 99,
@@ -3432,7 +3975,7 @@ fn a_chord_shows_its_continuations_and_the_next_key_ends_it() {
 
     // An unrecognised second key cancels rather than leaving it hanging.
     update(&mut model, Message::Action(Action::BeginPrefix));
-    update(&mut model, Message::Action(Action::Insert('z')));
+    update(&mut model, Message::Action(Action::Insert('~')));
     assert!(!model.prefix_pending);
 }
 

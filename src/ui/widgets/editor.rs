@@ -3,7 +3,7 @@ use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
-use crate::ui::layout::{LayoutMode, Presentation, body_area, layout_mode, main_panes};
+use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -13,12 +13,18 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 /// The editor's content rectangle in the current layout.
 fn editor_content_area(model: &Model, presentation: &Presentation, area: Rect) -> Rect {
-    let editor = match layout_mode(area) {
-        LayoutMode::Compact => body_area(area),
-        LayoutMode::Full => main_panes(body_area(area), model.sidebar_visible).0,
-        LayoutMode::TooSmall => area,
-    };
+    let editor = pane_geometry(model, area).editor.unwrap_or_default();
     pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor)
+}
+
+/// Text rows inside the pane border; zero means no text can be drawn.
+pub(crate) fn content_capacity(pane: Rect) -> usize {
+    let inner = super::inner_rect(pane);
+    if inner.width == 0 {
+        0
+    } else {
+        usize::from(inner.height)
+    }
 }
 
 /// Draws the local completion menu next to the editor caret.
@@ -163,6 +169,9 @@ pub(crate) fn render_editor(
         " {}Editor  line {line}, column {column} ",
         presentation.icon(Icon::Editor)
     );
+    if model.splits.zoomed && focused {
+        title.insert_str(0, " (zoomed)");
+    }
     if model.editor.is_modified() {
         title.push_str("[modified] ");
     }

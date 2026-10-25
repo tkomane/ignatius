@@ -633,7 +633,16 @@ pub(crate) fn render_plan(
         crate::app::PlanStatus::Hidden => " Plan ",
     };
     let block = pane_block(
-        format!("{}{}", presentation.icon(Icon::Info), title),
+        format!(
+            "{}{}{}",
+            if model.splits.zoomed && focused {
+                "(zoomed) "
+            } else {
+                ""
+            },
+            presentation.icon(Icon::Info),
+            title
+        ),
         focused,
         presentation,
     );
@@ -731,23 +740,42 @@ fn render_ready_plan(
         return;
     }
 
+    let (summary_area, tree_area, detail_area) = plan_areas(area);
+    render_plan_summary(&summary, document, presentation, summary_area, buf);
+    render_plan_tree(document, view, presentation, tree_area, buf);
+    if let Some(detail) = detail_area {
+        render_plan_detail(document, view, presentation, detail, buf);
+    }
+}
+
+/// Plan sections, shared with keyboard paging through the tree.
+fn plan_areas(area: Rect) -> (Rect, Rect, Option<Rect>) {
+    if area.height < 3 {
+        return (area, Rect::default(), None);
+    }
     if area.height >= 8 {
         let detail_height = 5.min(area.height.saturating_sub(3));
         let tree_height = area.height.saturating_sub(2 + detail_height);
-        let [summary_area, tree_area, detail_area] = Layout::vertical([
+        let [summary, tree, detail] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Length(tree_height),
             Constraint::Length(detail_height),
         ])
         .areas(area);
-        render_plan_summary(&summary, document, presentation, summary_area, buf);
-        render_plan_tree(document, view, presentation, tree_area, buf);
-        render_plan_detail(document, view, presentation, detail_area, buf);
+        (summary, tree, Some(detail))
     } else {
-        let [summary_area, tree_area] =
+        let [summary, tree] =
             Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
-        render_plan_summary(&summary, document, presentation, summary_area, buf);
-        render_plan_tree(document, view, presentation, tree_area, buf);
+        (summary, tree, None)
+    }
+}
+
+pub(crate) fn plan_capacity(pane: Rect) -> usize {
+    let inner = super::inner_rect(pane);
+    if inner.width == 0 {
+        0
+    } else {
+        usize::from(plan_areas(inner).1.height)
     }
 }
 

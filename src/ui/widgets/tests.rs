@@ -380,7 +380,7 @@ fn the_horizontal_split_is_where_editor_meets_results() {
     let model = Model::new(100);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (editor, results) = main_panes(body, true);
+    let (editor, results) = main_panes(body, true, &model.splits);
     let editor_bottom = editor.y + editor.height - 1;
     assert_eq!(
         region_at(&model, area, editor.x + 5, editor_bottom),
@@ -491,7 +491,7 @@ fn editor_cells_carry_line_and_column() {
     model.editor.set_cursor(0);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (editor, _) = main_panes(body, false);
+    let (editor, _) = main_panes(body, false, &model.splits);
     let inside = inner(editor);
     let text_start = inside.x + 4; // two-digit gutter, a space and the marker
 
@@ -546,7 +546,7 @@ fn result_grid_cells_headers_and_edges_carry_source_indices() {
     let model = grid_model(2, 2);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (_, results) = main_panes(body, false);
+    let (_, results) = main_panes(body, false, &model.splits);
     let inside = inner(results);
     let content_x = inside.x + 3; // two-digit gutter plus its space
     let header_y = inside.y + 3;
@@ -592,7 +592,7 @@ fn an_overflowing_grid_exposes_the_scrollbar() {
     let model = grid_model(2, 40);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (_, results) = main_panes(body, false);
+    let (_, results) = main_panes(body, false, &model.splits);
     let inside = inner(results);
     let scrollbar_x = inside.x + inside.width - 1;
     assert_eq!(
@@ -628,7 +628,7 @@ fn borders_and_out_of_area_cells_are_misses() {
     assert_eq!(region_at(&model, area, 0, 30), None);
 
     let body = body_area(area);
-    let (editor, _) = main_panes(body, true);
+    let (editor, _) = main_panes(body, true, &model.splits);
     // The editor's top border is not a text cell.
     assert_eq!(region_at(&model, area, editor.x + 1, editor.y), None);
 
@@ -672,7 +672,7 @@ fn an_open_palette_reports_items_and_hides_the_panes_beneath() {
 
     // A pane cell is owned by the overlay, not by the editor beneath it.
     let body = body_area(area);
-    let (editor, _) = main_panes(body, false);
+    let (editor, _) = main_panes(body, false, &model.splits);
     let editor_inner = inner(editor);
     assert_eq!(
         region_at(&model, area, editor_inner.x, editor_inner.y),
@@ -692,7 +692,7 @@ fn an_open_help_overlay_hides_the_panes_beneath() {
     model.help_open = true;
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (editor, _) = main_panes(body, false);
+    let (editor, _) = main_panes(body, false, &model.splits);
     let editor_inner = inner(editor);
     assert_eq!(
         region_at(&model, area, editor_inner.x, editor_inner.y),

@@ -17,6 +17,134 @@ fn presentation(theme: ThemeChoice, color: bool, tier: GlyphTier) -> Presentatio
 }
 
 #[test]
+fn split_feedback_keeps_its_meaning_when_transaction_facts_fill_the_footer() {
+    use crate::app::model::LayoutNotice;
+    use crate::query::result::TransactionState;
+    for (color, tier) in [(false, GlyphTier::Ascii), (true, GlyphTier::Nerd)] {
+        for (notice, wording) in [
+            (LayoutNotice::SinglePane, "Already single-pane."),
+            (LayoutNotice::SafetyDetails, "Zoom Results for details."),
+        ] {
+            let mut model = Model::new(100);
+            model.size = (40, 8);
+            model.transaction = TransactionState::Unknown;
+            model.layout_notice = Some(notice);
+            model.editor.set_text("SELECT 1;");
+            let text = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                40,
+                8,
+            );
+            assert!(
+                text.contains(wording),
+                "the explanation was clipped: {text}"
+            );
+            assert!(
+                text.contains("SELECT 1;"),
+                "pane content was covered: {text}"
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(footer.contains("Ready") && footer.contains("Transaction state unknown"));
+            let baseline = crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8));
+            model.layout_notice = None;
+            assert_eq!(
+                crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8)),
+                baseline
+            );
+            let cleared = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                40,
+                8,
+            );
+            assert!(!cleared.contains(wording));
+        }
+    }
+}
+
+#[test]
+fn split_footer_feedback_fits_minimum_size_and_preserves_transaction_facts() {
+    use crate::app::{Action, Message, update};
+    use crate::query::result::TransactionState;
+    for (color, tier) in [(false, GlyphTier::Ascii), (true, GlyphTier::Nerd)] {
+        for state in [
+            TransactionState::Autocommit,
+            TransactionState::Failed,
+            TransactionState::Unknown,
+        ] {
+            let mut model = Model::new(100);
+            model.size = (40, 8);
+            model.transaction = state;
+            update(&mut model, Message::Action(Action::ZoomPane));
+            let text = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                40,
+                8,
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(footer.contains("Ready"), "{footer}");
+            assert!(footer.contains(state.label()), "{footer}");
+            if state != TransactionState::Unknown {
+                assert!(footer.to_lowercase().contains("single-pane"), "{footer}");
+            }
+            if !color && state == TransactionState::Autocommit {
+                assert!(footer.contains("Already single-pane."), "{footer}");
+            }
+            if !color && state == TransactionState::Failed {
+                assert!(footer.contains("Single-pane"), "{footer}");
+            }
+        }
+    }
+}
+
+#[test]
+fn split_footer_safety_refusal_uses_the_first_wording_that_fits() {
+    use crate::app::{Action, Message, update};
+    use crate::diagnostics::{Diagnostic, DiagnosticKind};
+    for (color, tier) in [(false, GlyphTier::Ascii), (true, GlyphTier::Nerd)] {
+        let mut model = Model::new(100);
+        model.size = (120, 40);
+        model.error = Some(Diagnostic::new(
+            DiagnosticKind::Query,
+            "Synthetic error",
+            "a synthetic operation",
+        ));
+        update(&mut model, Message::Action(Action::ZoomPane));
+        for (width, expected) in [
+            (40, "Zoom Results"),
+            (45, "Zoom Results for details."),
+            (
+                79,
+                "Zoom Results to keep error and recovery details visible.",
+            ),
+        ] {
+            update(&mut model, Message::Resized(width, 8));
+            let text = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                width,
+                8,
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(
+                footer.contains("Ready") && footer.contains("Autocommit"),
+                "{footer}"
+            );
+            if !color {
+                assert!(footer.contains(expected), "{width}: {footer}");
+            }
+            assert!(footer.contains("Zoom Results"), "{footer}");
+        }
+    }
+}
+
+#[test]
 fn paste_refusal_renders_its_exact_wording() {
     let model = model_with(PasteNotice::Refused);
     let text = crate::ui::layout::render_to_string(

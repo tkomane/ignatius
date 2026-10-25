@@ -212,3 +212,19 @@ No constitution violations. Two structural costs are accepted knowingly:
    focused checks, then the locked verifier with the database fixture, and
    record focused, full, live and unverified evidence separately in
    `docs/status.md`.
+
+### Dependency reconciliation - 2026-10-25
+
+The US6 drag contract consumes US7's split state and keyboard split actions,
+which do not exist yet. Implement and verify T039's keyboard split/shared
+geometry core before T035's drag dispatch; retain final drag acceptance in both
+stories. This corrects an omitted dependency rather than adding a capability.
+US7 can proceed independently of US5 after the completed extraction.
+
+Mouse-wheel integration also needs explicit viewport state because existing
+arrow/page actions change selection or caret. Do not simulate viewport-only
+scrolling by replaying selection actions. Keep capture disabled until the whole
+verb table, keyboard parity, hit alignment and restoration are proven. Before
+T035, clarify the input-event timing seam and reconcile it with existing tick
+and asynchronous messages; do not let a render tick cancel a valid drag by
+accident. No numerical contract or theme decision changes in this preparation.

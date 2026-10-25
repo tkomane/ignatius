@@ -489,6 +489,27 @@ export, history, diagnostics, or terminal-restoration output. Automated renderin
 and reducer evidence is separate from hand use in Warp, Windows Terminal, Linux
 terminals and screen readers.
 
+## Keyboard pane controls
+
+The full-screen client supports session-local split adjustment with `Ctrl+K ,`
+and `Ctrl+K .`, and zoom/restore with `Ctrl+K z`. Objects focus changes sidebar
+width within 20-60 cells; Editor and Results focus change editor height while
+preserving at least three outer rows for each main pane. The active keymap and
+palette expose the same actions. See [keymap](../design/keymap.md).
+
+Zoom fills the body while retaining header/footer. Focus moves the visible
+zoomed pane; restore returns the saved split preferences exactly, with effective
+rectangles clamped to the current size. Paging and completion anchoring share
+the renderer's geometry. Errors and failed transactions restore the ordinary
+layout outside Results focus, while Results can zoom its diagnostic/recovery
+surface. Chords retain modal input ownership until their action is resolved.
+At the minimum usable compact size, diagnostic text has a content row and
+layout feedback preserves transaction facts without covering pane content.
+
+These controls are never persisted. Mouse dragging and density settings remain
+open Feature 025 work. Rendered-buffer checks and actual native terminal use
+remain separate acceptance classes.
+
 ## Terminals
 
 | Terminal | Status |

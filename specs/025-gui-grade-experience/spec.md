@@ -4,9 +4,12 @@
 
 **Created**: 2026-09-17
 
-**Status**: Specified; not implemented. Written from the owner's 2026-09-17
-observed-friction evidence and a planning session's code reading; no product
-behaviour has changed for this feature yet.
+**Status**: US1-US4 are implemented with dated evidence in `docs/status.md`.
+US7's keyboard split/zoom/shared-geometry core passed its integrated local
+verifier on 2026-10-25. Density, dragging and complete
+US7 acceptance, plus US5/US6/US8-US10, remain open. The feature originated in
+one owner observation on 2026-09-17; automated checks add no participant sample
+or native hand-use claim.
 
 **Input**: User description: "Close the gap between the GUI-like promise and
 the observed experience. On 2026-09-17 the owner abandoned Ignatius for the

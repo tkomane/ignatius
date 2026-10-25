@@ -6,15 +6,99 @@ before trusting anything else.
 
 ## Autonomous roadmap continuation - 2026-10-25 (in progress)
 
+### Current local progress and active assignments
+
+Branch: `codex/autonomous-roadmap-2026-10-25`. All work remains local. Read
+Git state before taking an assignment; the day-long goal remains active.
+
+- W03's fresh string-semantics guard and W10-006's private parsed-snapshot
+  migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
+  probes, plain/TLS checks and native peer review are recorded in their tasks.
+- `f99fe75` patches exactly five security packages without other dependency-edge
+  changes. All-workspace/all-features locked cargo-deny passed with zero errors
+  and six existing duplicate warnings; policy was unchanged.
+- W05's final clean `e5389f7` source passed 155 scoped contracts on each of
+  PostgreSQL 14.24, 15.19, 16.15, 17.11 and 18.6 (775 total), including verified
+  TLS. Application code matches `f99fe75`; `e5389f7` repairs a reproduced fixed-
+  delay export-test race. Reviewed digests/default 18.6 are saved in `5e6d232`.
+- Clean `f99fe75` passed actual Linux arm64 PostgreSQL 18.6 socket, Rust 1.90.0
+  locked/offline workspace/all-targets/all-features compilation and three
+  normal-quit PTY cases. Those frozen results exclude later UI work.
+- Feature 025 T039/T041 keyboard panes are implemented: reversible splits/zoom,
+  shared geometry and accurate paging, modal ownership through chords, visible
+  error/recovery state, minimum-size diagnostic content and readable feedback.
+  Full local verifier `/private/tmp/ignatius-verify-2026-10-25-panes.log` passed
+  1,206 harness cases (935 library, four isolated PTY, 14 workflow), formatting,
+  lints, API/doc checks and PostgreSQL 18.6 plain/TLS. Its macOS socket case
+  remains a semantic skip. Source was the modified integration tree based on
+  `abe4aed`. Density T040, the rest of T038 and dragging T035 remain open.
+- W07-059 is saved in `abe4aed`: unique PTY config/data, inherited logging/PG
+  routes removed, explicit absent passfile. A real child probe failed first;
+  all four focused PTY contracts and the integrated repeat passed.
+- A separate owned-PTY probe at clean `e5389f7` passed macOS SIGTERM after first
+  paint, restoration order and actual canonical/echo/signal-mode recovery.
+  Initial Darwin PENDIN state cleared after a same-PTY line read; full stty
+  then matched without reset. Startup registration still had a window.
+- W07-060 is specified and implemented only in an isolated clone based on
+  `abe4aed`; root has not applied its two-file patch yet. The owned self-exec
+  red died by SIGTERM before runtime polling; the repair passed 21 interactive
+  tests, four PTY cases and Clippy. Lead review/integration is next.
+
+UI code ownership is released. Its worker is producing synthetic styled-buffer
+artifacts only; the W07 worker owns only its temporary clone. No recursive
+agents, Docker lifecycle overlap or shared reducer/runtime writers. The lead
+owns integration and these documents. Root's PostgreSQL 18.6 fixture pair
+remains available; unrelated COI services and original branches are preserved.
+
+Detailed sources, environments, exact logs and boundaries are in
+[verification](operations/verification.md). Synthetic buffer images establish
+rendered cells, not native terminal appearance. Native Terminal computer use
+was blocked by tool policy. Required different-family review remains pending
+explicit consent for external source transmission; hosted, Windows, participant,
+full hand-use and release acceptance are separate open gates.
+
+### Current security and governance evidence - 2026-10-25
+
+- A no-network, read-only Gitleaks 8.30.0 history scan actually scanned 239
+  commits/10.46 MB with no leaks. A separate 412-file modified-source snapshot
+  (manifest tree digest `93b573dbfaffa6cf35d9b3f1346e362e4f03231fae37581a05942dd6ff6032f6`)
+  scanned 4.77 MB with no leaks. These cover their recorded source snapshots,
+  not future commits. Local logs are `/private/tmp/ignatius-gitleaks-history-2026-10-25.log`
+  and `/private/tmp/ignatius-gitleaks-wave2-source-2026-10-25.log`.
+- Scheduled remote CI run `39226168252`, inspected read-only, failed actual
+  rustls advisories and mutable PostgreSQL image drift on 19 October. Native
+  OS jobs passed at remote `445ed82`; this is not today's local-candidate CI.
+  Its drift loop stopped at 14, so that run proves nothing about 15-18 drift.
+- Fresh maintainer/advisory checks led to precise patches: rustls 0.23.46,
+  rustls-webpki 0.103.16, ctutils 0.4.4, Tokio 1.53.3 and webpki-root-certs
+  1.0.11. All other lockfile versions and dependency edges were preserved.
+  The all-workspace/all-features locked cargo-deny 0.20.2 audit passed with zero
+  errors; six existing duplicate-version warnings remain. The same broader
+  audit found missing xtask licence metadata, now the existing Apache-2.0
+  licence. No audit exception or allowance was added. See
+  [verification](operations/verification.md#local-security-maintenance---2026-10-25)
+  for primary advisory sources and exact local scope.
+- Live GitHub readback confirms public visibility; active main ruleset
+  `22835887` requires PRs, resolved review threads and 13 CI contexts, with no
+  bypass actors. Required approvals are zero, code-owner approval and strict
+  up-to-date checks are off, and the three observed CodeQL contexts are absent.
+  The `v*` tag ruleset `22835888` prevents updates/deletion. No setting changed.
+- Private vulnerability reporting, secret scanning, push protection and
+  Dependabot security updates are enabled. The private reporting route was not
+  submitted to or tested for notification/response. Classic protection reads
+  returned 403 through the integration and 404 through the owner CLI; neither
+  negates the independently observed active rulesets. The release collection
+  was empty. Naming/legal/domain and exact release actions remain owner gates.
+
 Owner requested day-long autonomous development and a bounded team. Start:
 `39d7923cf3b7d132c12a98bc081a454e45e1ec58`, clean branch
 `w01/reconcile-1d841b4-onto-bd05b9d`, 16 commits ahead of the local tracked
-`origin/main`; no fresh remote comparison has been claimed. The prior local
+`origin/main` before the read-only remote refresh described below. The prior local
 commits and unrelated COI Docker containers are preserved. The active-feature
 pointer was stale at 024 and now matches 025, whose US1-US4 are recorded in
 the historical sections below; US5-US10 remain unchecked.
 
-Current lanes (single writers, no recursive delegation): W02 async-envelope
+First-batch lanes (single writers, no recursive delegation) were W02 async-envelope
 repair in the interactive runtime/reducer sidecar tests; W04 generated-UPDATE
 privacy probes in a new integration-test file; lead-owned W10 saved-query and
 atomic local-state recovery. Native workers inherit the lead's model settings.
@@ -1691,10 +1775,12 @@ These are real and none of them is hidden anywhere else:
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
    full history for that job. Every earlier green run of that gate should be read
    as "did not run".
-9. **Main is not protected.** GitHub readback on 2026-09-04 reports
-   `protected: false`. Local hooks and CI do not enforce server-side required
-   checks. W13 prepares the governance proposal against current hosting
-   capabilities; no hosting-plan entitlement is assumed by this observation.
+9. **Main is protected by an active ruleset as of 2026-10-25.** The older
+   2026-09-04 `protected: false` snapshot is superseded. Current required PRs,
+   13 CI contexts and resolved threads are enforced without bypass actors;
+   approvals are zero and strict up-to-date/code-owner approval are off. The
+   three CodeQL contexts are absent despite the documented blocking gate.
+   W13 has prepared the exact owner decision; no remote setting was changed.
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.

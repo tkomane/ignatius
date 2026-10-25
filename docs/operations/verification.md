@@ -161,6 +161,38 @@ local Docker results do not establish hosted acceptance, x86-64/Windows,
 Linux full-screen hand use or release readiness. Ongoing UI work is outside
 both frozen revisions and needs its own integrated verification.
 
+## Integrated keyboard panes - 2026-10-25
+
+The modified integration tree based on `abe4aed` passed the complete locked
+verifier on macOS arm64/Homebrew Rust 1.99.1 with live PostgreSQL 18.6 plain/TLS:
+formatting, warnings-denied lints, API docs, complete workspace and doc tests.
+It reported 1,206 harness passes across 22 summaries, including 935 library,
+four isolated PTY and 14 workflow contracts. The unconfigured macOS socket case
+still returned early; the earlier frozen Linux socket proof does not silently
+verify this newer UI source. Log:
+`/private/tmp/ignatius-verify-2026-10-25-panes.log`.
+
+Focused app 303 and UI 215 checks passed after meaningful failing regressions
+for split/paging/zoom behavior, hidden error/recovery state, default-chord modal
+ownership, minimum-size diagnostic content and clipped transaction-state
+feedback. The lead also checked that all original test names survived the four
+inline-to-sidecar moves. Density, dragging, final native visuals and hosted
+acceptance remain separate. Native cross-lane review drove the repairs;
+required different-family review remains pending consent for external review.
+
+Rendered review captured 60 actual Ratatui buffers: 15 synthetic scenarios in
+dark/light/high-contrast truecolour Unicode and ASCII/no-colour modes. Raw JSON
+retains symbols, foreground/background and modifiers; adjusted/restored cells
+match exactly in every mode. The lead inspected the theme, error zoom and
+minimum-size Unknown-state contact sheets after the overflow correction.
+Source-input SHA-256:
+`14d5ce27e05fa62677d8bdba42c4ba6bc14c61c88e89429432b998f0d6ed0359`.
+Captures, raster assumptions and provenance are retained under
+`/private/tmp/ignatius-us7-styled-buffer-_9kmu8u2/`. Rasterized buffers establish
+cell layout/styles under their stated font/DIM assumptions. Native Terminal
+computer use was blocked by tool policy; no native screenshot or hand-use
+acceptance is claimed.
+
 ## PTY profile isolation - 2026-10-25
 
 The Unix terminal harness previously overrode only configuration, leaving real

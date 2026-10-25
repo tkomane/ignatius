@@ -53,6 +53,9 @@ timer: a popup that disappears while being read is worse than one that waits.
 
 | After `Ctrl+K` | Does |
 | --- | --- |
+| `,` | Shrink the sidebar or editor share |
+| `.` | Grow the sidebar or editor share |
+| `z` | Zoom the focused pane or restore the layout |
 | `b` | Show or hide the object tree |
 | `p` | Open the command palette |
 | `n` | Choose a connection |
@@ -120,6 +123,26 @@ facts, result, object tree and completion snapshot are cleared while local
 reading preferences remain. The runtime receives only the profile name and
 resolves credentials outside the application model. Passwords, tokens and
 unknown profile fields never appear in the picker.
+
+The pane keys change only this application session. With Objects focused,
+shrink/grow changes sidebar width by 2 cells within 20-60 cells, retaining at
+least 30 cells for the main column. Otherwise they change editor height by
+1 row, retaining at least 3 outer rows each for Editor and Results. Zoom fills
+the body; Tab changes the visible zoomed pane, and repeat zoom restores the
+saved shape. A split key while zoomed restores before adjusting. Resizing
+clamps the visible panes without discarding the preferred shape. Compact
+terminals explain that the layout is already single-pane.
+Active diagnostics and failed transactions keep their Results safety surface
+visible: zooming another pane is refused with an explanation, and a new failure
+restores the ordinary layout outside Results focus. A chord retains its current
+input owner until the continuation is resolved.
+
+An active error or failed transaction restores the split layout when focus is
+outside Results, so diagnostic and recovery details stay visible. Results can
+still be zoomed. Trying to zoom another pane explains how to keep those details
+visible; moving focus away from Results restores the saved shape.
+The pane actions keep an input overlay open, whether invoked by a chord or a
+configured direct key. Other chords retain their usual input handling.
 
 ## Editing keys
 
@@ -262,6 +285,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `focus-next`, `format-buffer`,
 `toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
 `open-result-grid`, `narrow-column`, `widen-column`,
+`shrink-pane`, `grow-pane`, `zoom-pane`,
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`,

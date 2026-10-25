@@ -18,13 +18,13 @@ pub(crate) use overlays::{
 pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
 
-use crate::app::model::{Focus, Model};
+#[cfg(test)]
+use crate::app::model::Focus;
+use crate::app::model::Model;
 use crate::ui::keymap::Keymap;
-use crate::ui::layout::{
-    LayoutMode, Presentation, body_area, layout_mode, main_panes, sidebar_width,
-};
+use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
 use crate::ui::theme::Token;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
 
@@ -195,90 +195,38 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         return None;
     }
 
-    match layout_mode(area) {
-        LayoutMode::TooSmall => None,
-        LayoutMode::Full => full_region_at(model, area, column, row),
-        LayoutMode::Compact => compact_region_at(model, area, column, row),
+    let geometry = pane_geometry(model, area);
+    if layout_mode(area) == LayoutMode::TooSmall {
+        return None;
     }
-}
-
-/// The regions of the two-pane full layout.
-fn full_region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Region> {
-    if row == area.y {
+    if in_rect(geometry.header, column, row) {
         return Some(Region::Header);
     }
-    if row == area.y.saturating_add(area.height).saturating_sub(1) {
+    if in_rect(geometry.footer, column, row) {
         return Some(Region::Footer);
     }
-    let body = body_area(area);
-
-    let mut sidebar = None;
-    let mut main = body;
-    if model.sidebar_visible {
-        let width = sidebar_width(body.width);
-        let [tree, panes] =
-            Layout::horizontal([Constraint::Length(width), Constraint::Min(30)]).areas(body);
-        sidebar = Some(tree);
-        main = panes;
-    }
-    let (editor, results) = main_panes(body, model.sidebar_visible);
-
-    // The divider columns exist only when both panes are on screen.
-    if let Some(tree) = sidebar
-        && in_rect(body, column, row)
+    if geometry
+        .vertical_split
+        .is_some_and(|rect| in_rect(rect, column, row))
     {
-        let divider = tree.x.saturating_add(tree.width).saturating_sub(1);
-        if column == divider || column == main.x {
-            return Some(Region::VerticalSplit);
-        }
+        return Some(Region::VerticalSplit);
     }
-
-    // The two border rows where the editor meets the results.
-    let editor_bottom = editor.y.saturating_add(editor.height).saturating_sub(1);
-    let results_top = editor.y.saturating_add(editor.height);
-    if in_rect(main, column, row) && (row == editor_bottom || row == results_top) {
+    if geometry
+        .horizontal_split
+        .is_some_and(|rect| in_rect(rect, column, row))
+    {
         return Some(Region::HorizontalSplit);
     }
-
-    if let Some(tree) = sidebar
-        && in_rect(tree, column, row)
-    {
+    if let Some(tree) = geometry.objects.filter(|rect| in_rect(*rect, column, row)) {
         return sidebar_row_region(model, tree, column, row);
     }
-    if in_rect(editor, column, row) {
+    if let Some(editor) = geometry.editor.filter(|rect| in_rect(*rect, column, row)) {
         return editor_region(model, editor, column, row);
     }
-    if in_rect(results, column, row) {
+    if let Some(results) = geometry.results.filter(|rect| in_rect(*rect, column, row)) {
         return results_region(model, results, column, row);
     }
     None
-}
-
-/// The regions of the single-pane compact layout.
-fn compact_region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Region> {
-    if row == area.y {
-        return Some(Region::Header);
-    }
-    if row == area.y.saturating_add(area.height).saturating_sub(1) {
-        return Some(Region::Footer);
-    }
-    let body = body_area(area);
-
-    if model.transaction == crate::query::result::TransactionState::Failed {
-        return results_region(model, body, column, row);
-    }
-    if model.error.is_some() {
-        // An error keeps the editor below it, mirroring the compact renderer.
-        let error_height = body.height.saturating_sub(4).clamp(2, 8);
-        let [_, editor_area] =
-            Layout::vertical([Constraint::Length(error_height), Constraint::Min(1)]).areas(body);
-        return editor_region(model, editor_area, column, row);
-    }
-    match model.focus {
-        Focus::Editor => editor_region(model, body, column, row),
-        Focus::Results => results_region(model, body, column, row),
-        Focus::Objects => sidebar_row_region(model, body, column, row),
-    }
 }
 
 /// Maps a cell inside the object tree to the row it selects.
@@ -295,15 +243,7 @@ fn sidebar_row_region(model: &Model, pane: Rect, column: u16, row: u16) -> Optio
         return None;
     }
     // The filter sits on its own row above the rows, exactly as it is drawn.
-    let body = if model.tree.filtering || !model.tree.filter.is_empty() {
-        Rect {
-            y: inner.y.saturating_add(1),
-            height: inner.height.saturating_sub(1),
-            ..inner
-        }
-    } else {
-        inner
-    };
+    let body = objects::content_area(model, inner);
     if !in_rect(body, column, row) {
         return None;
     }
@@ -374,8 +314,7 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
     }
 
     let rows = model.displayed_rows();
-    let has_type_row = model.result_grid.show_types && set.column_types.iter().any(Option::is_some);
-    let header_rows = 5 + usize::from(has_type_row);
+    let header_rows = results::grid_header_rows(model, set);
     let visible_rows = (inner.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (inner.width as usize).saturating_sub(usize::from(needs_scrollbar));

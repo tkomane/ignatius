@@ -41,6 +41,12 @@ pub enum Action {
     ToggleHelp,
     /// Move focus to the next pane.
     FocusNext,
+    /// Shrink the sidebar or editor share by its documented step.
+    ShrinkPane,
+    /// Grow the sidebar or editor share by its documented step.
+    GrowPane,
+    /// Zoom the focused pane over the body, or restore the saved layout.
+    ZoomPane,
     /// Expand or collapse the technical section of an error.
     ToggleErrorDetail,
     /// Dismiss the error or the help overlay.
@@ -163,6 +169,9 @@ impl Action {
             Self::Quit,
             Self::ToggleHelp,
             Self::FocusNext,
+            Self::ShrinkPane,
+            Self::GrowPane,
+            Self::ZoomPane,
             Self::ToggleErrorDetail,
             Self::Dismiss,
             Self::Move(Direction::Up),

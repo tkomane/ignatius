@@ -10,13 +10,14 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
+/// Returns false only when layout feedback needs the body's border rail.
 pub(crate) fn render_footer(
     model: &Model,
     keymap: &Keymap,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
-) {
+) -> bool {
     let theme = &presentation.theme;
     let (status_icon, status_token) = match model.phase {
         QueryPhase::Idle => (Icon::Success, Token::Muted),
@@ -52,7 +53,9 @@ pub(crate) fn render_footer(
         theme.style(transaction_token),
     ));
 
-    let showing_transient_notice = model.format_notice.is_some() || model.paste_notice.is_some();
+    let showing_transient_notice = model.format_notice.is_some()
+        || model.paste_notice.is_some()
+        || model.layout_notice.is_some();
     if let Some(info) = model
         .connection
         .info()
@@ -81,6 +84,22 @@ pub(crate) fn render_footer(
         used += display_width(&info.search_path) + 2;
     }
 
+    if let Some(notice) = model.layout_notice {
+        let remaining = usize::from(area.width).saturating_sub(used + 1);
+        let wordings = notice.wordings();
+        let wording = wordings
+            .into_iter()
+            .find(|wording| display_width(wording) <= remaining);
+        if let Some(wording) = wording {
+            spans.push(Span::styled(
+                format!(" {wording}"),
+                theme.style(Token::Info),
+            ));
+        }
+        Paragraph::new(Line::from(spans)).render(area, buf);
+        return wording.is_some();
+    }
+
     // A paste that did not reach the editor travels the same rail as a format
     // result: it is rendered through the display-sanitising rule, wears the same
     // refusal or information colour, and falls back to its short form rather
@@ -107,7 +126,7 @@ pub(crate) fn render_footer(
             spans.push(Span::styled(format!(" {message}"), theme.style(token)));
         }
         Paragraph::new(Line::from(spans)).render(area, buf);
-        return;
+        return true;
     }
 
     // A formatting result is transient feedback for the editor. Give it the
@@ -136,7 +155,7 @@ pub(crate) fn render_footer(
             spans.push(Span::styled(format!(" {message}"), theme.style(token)));
         }
         Paragraph::new(Line::from(spans)).render(area, buf);
-        return;
+        return true;
     }
 
     if let Some(notice) = &model.cell_update_notice {
@@ -176,6 +195,7 @@ pub(crate) fn render_footer(
     }
 
     Paragraph::new(Line::from(spans)).render(area, buf);
+    true
 }
 
 #[cfg(test)]

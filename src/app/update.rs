@@ -14,8 +14,8 @@
 use crate::app::grid::GridCommand;
 use crate::app::message::{Action, Direction, Effect, Message};
 use crate::app::model::{
-    ConnectingStep, ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PasteNotice,
-    PendingUpdate, QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
+    ConnectingStep, ConnectionState, ExportFormat, Focus, LayoutNotice, Model, ParameterPrompt,
+    PasteNotice, PendingUpdate, QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
 };
 use crate::query::error_location::{self, StatementSource};
 use crate::query::result::ExecutionStatus;
@@ -23,7 +23,7 @@ use crate::query::statements;
 
 /// Applies a message to the model and returns the effects to perform.
 pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
-    match message {
+    let effects = match message {
         Message::ForConnection {
             generation,
             message,
@@ -41,7 +41,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         // Mouse stays inert until the pointer phase; a paste routes to the
         // surface that owns input, or says it was ignored.
         Message::Mouse { .. } => Vec::new(),
-        Message::Pasted(text) => paste_action(model, text),
+        Message::Pasted(text) => {
+            model.layout_notice = None;
+            paste_action(model, text)
+        }
         Message::Connected(info) => {
             let was_connecting = matches!(model.connection, ConnectionState::Connecting { .. });
             model.connection = ConnectionState::Connected(info);
@@ -480,7 +483,17 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.running_for = running_for;
             Vec::new()
         }
+    };
+    // All diagnostic origins share this safety boundary. Restore the saved
+    // shape without stealing editor focus or changing transaction semantics.
+    if model.focus != Focus::Results && needs_safety_details(model) {
+        model.splits.zoomed = false;
     }
+    effects
+}
+
+fn needs_safety_details(model: &Model) -> bool {
+    model.error.is_some() || model.transaction == crate::query::result::TransactionState::Failed
 }
 
 /// Maps a server error only when its source buffer is still the one on screen.
@@ -622,7 +635,25 @@ fn format_buffer(model: &mut Model) {
     });
 }
 
+fn pane_input_owned(model: &Model) -> bool {
+    model.inspector.is_some()
+        || model.definition.is_some()
+        || model.completion.menu.is_some()
+        || model.tree.filtering
+        || model.result_filtering
+}
+
 fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    model.layout_notice = None;
+    // Reshaping a pane must not dismiss an input owner and act underneath it.
+    if (model.help_open || pane_input_owned(model))
+        && matches!(
+            action,
+            Action::ShrinkPane | Action::GrowPane | Action::ZoomPane
+        )
+    {
+        return Vec::new();
+    }
     // Modes are peeled in a fixed order, highest first. Getting this wrong is
     // how typing in the editor starts doing surprising things, so the order is
     // stated once here and tested directly.
@@ -661,6 +692,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.palette.is_some() {
         return palette_action(model, action);
+    }
+    // Keep the owner until the continuation identifies the command. Layout
+    // actions then remain no-ops; other commands retain their normal handler.
+    if matches!(action, Action::BeginPrefix) && pane_input_owned(model) {
+        model.prefix_pending = true;
+        return Vec::new();
     }
     if model.completion.menu.is_some() {
         return completion_action(model, action);
@@ -716,6 +753,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::FocusNext => {
             model.focus = model.focus.next(model.sidebar_visible);
+            Vec::new()
+        }
+        Action::ShrinkPane | Action::GrowPane | Action::ZoomPane => {
+            adjust_panes(model, &action);
             Vec::new()
         }
         Action::ToggleSidebar => {
@@ -1252,13 +1293,49 @@ fn history_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         .collect()
 }
 
-/// Moves by a screenful in whichever pane has focus.
-///
-/// The height comes from the terminal size the model already knows, through the
-/// same layout functions the renderer uses, so a page here is the page the user
-/// can see rather than a number chosen in advance.
+/// Changes the session shape, restoring before a visible split adjustment.
+fn adjust_panes(model: &mut Model, action: &Action) {
+    use crate::ui::layout::{LayoutMode, layout_mode, pane_geometry};
+    use ratatui::layout::Rect;
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+    if layout_mode(area) != LayoutMode::Full {
+        model.layout_notice = Some(LayoutNotice::SinglePane);
+        return;
+    }
+    if matches!(action, Action::ZoomPane) {
+        if model.focus != Focus::Results && needs_safety_details(model) {
+            model.layout_notice = Some(LayoutNotice::SafetyDetails);
+            return;
+        }
+        model.splits.zoomed = !model.splits.zoomed;
+        return;
+    }
+    model.splits.zoomed = false;
+    let geometry = pane_geometry(model, area);
+    let grow = matches!(action, Action::GrowPane);
+    if model.focus == Focus::Objects {
+        if let Some(sidebar) = geometry.objects {
+            let desired = if grow {
+                sidebar.width.saturating_add(2)
+            } else {
+                sidebar.width.saturating_sub(2)
+            };
+            model.splits.sidebar_cells =
+                Some(desired.clamp(20, 60.min(geometry.body.width.saturating_sub(30))));
+        }
+    } else if let Some(editor) = geometry.editor {
+        let desired = if grow {
+            editor.height.saturating_add(1)
+        } else {
+            editor.height.saturating_sub(1)
+        };
+        model.splits.editor_rows = Some(desired.clamp(3, geometry.body.height.saturating_sub(3)));
+    }
+}
+
+/// Moves by the current renderer-owned content capacity of the focused pane.
 fn page(model: &mut Model, direction: Direction) {
-    let lines = crate::ui::layout::editor_page(model.size);
+    let lines = crate::ui::layout::editor_page(model);
     match model.focus {
         Focus::Editor => match direction {
             Direction::Up => model.editor.move_page_up(lines),
@@ -1266,16 +1343,21 @@ fn page(model: &mut Model, direction: Direction) {
             Direction::Left | Direction::Right => {}
         },
         Focus::Results => {
+            if model.plan.is_visible() && model.plan.document().is_none() {
+                return;
+            }
             if model.plan.document().is_some() {
+                let step =
+                    isize::try_from(crate::ui::layout::results_page(model)).unwrap_or(isize::MAX);
                 match direction {
-                    Direction::Up => model.plan.move_selection(-1),
-                    Direction::Down => model.plan.move_selection(1),
+                    Direction::Up => model.plan.move_selection(-step),
+                    Direction::Down => model.plan.move_selection(step),
                     Direction::Left | Direction::Right => {}
                 }
                 return;
             }
             let rows = model.displayed_rows().len();
-            let step = crate::ui::layout::results_page(model.size);
+            let step = crate::ui::layout::results_page(model);
             match direction {
                 Direction::Up => model.selected_row = model.selected_row.saturating_sub(step),
                 Direction::Down => {
@@ -1285,7 +1367,8 @@ fn page(model: &mut Model, direction: Direction) {
             }
         }
         Focus::Objects => {
-            let step = isize::try_from(crate::ui::layout::results_page(model.size)).unwrap_or(10);
+            let step =
+                isize::try_from(crate::ui::layout::objects_page(model)).unwrap_or(isize::MAX);
             match direction {
                 Direction::Up => model.tree.move_selection(-step),
                 Direction::Down => model.tree.move_selection(step),

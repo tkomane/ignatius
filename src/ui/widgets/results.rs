@@ -13,6 +13,22 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
+/// Grid prelude rows, shared with paging and hit testing.
+pub(crate) fn grid_header_rows(model: &Model, set: &crate::query::result::ResultSet) -> usize {
+    5 + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+}
+
+/// Actual drawable rows, before imposing the navigation minimum of one.
+pub(crate) fn grid_capacity(model: &Model, pane: Rect) -> usize {
+    let inner = super::inner_rect(pane);
+    if inner.width == 0 {
+        return 0;
+    }
+    model.visible_result().map_or(0, |set| {
+        usize::from(inner.height).saturating_sub(grid_header_rows(model, set))
+    })
+}
+
 pub(crate) fn render_results(
     model: &Model,
     keymap: &Keymap,
@@ -36,7 +52,15 @@ pub(crate) fn render_results(
     // it ends, so the way out is shown rather than left to be remembered.
     if model.transaction == crate::query::result::TransactionState::Failed {
         let block = pane_block(
-            format!(" {}Transaction failed ", presentation.icon(Icon::Warning)),
+            format!(
+                " {}{}Transaction failed ",
+                if model.splits.zoomed && focused {
+                    "(zoomed) "
+                } else {
+                    ""
+                },
+                presentation.icon(Icon::Warning)
+            ),
             focused,
             presentation,
         );
@@ -92,6 +116,9 @@ pub(crate) fn render_results(
         status,
         summary
     );
+    if model.splits.zoomed && focused {
+        title.insert_str(0, " (zoomed)");
+    }
     // What the filter admits is stated in full: how many match, of how many are
     // held, of how many the server sent. Collapsing those into one number is
     // the lie this pane exists not to tell.
@@ -345,7 +372,15 @@ fn render_results_placeholder(
 ) {
     let theme = &presentation.theme;
     let block = pane_block(
-        format!(" {}Results ", presentation.icon(Icon::Rows)),
+        format!(
+            " {}{}Results ",
+            if model.splits.zoomed && focused {
+                "(zoomed) "
+            } else {
+                ""
+            },
+            presentation.icon(Icon::Rows)
+        ),
         focused,
         presentation,
     );
@@ -511,7 +546,7 @@ fn render_grid(
     // each row is in the server result.
     let rows = model.displayed_rows();
     let has_type_row = model.result_grid.show_types && set.column_types.iter().any(Option::is_some);
-    let header_rows = 5 + usize::from(has_type_row);
+    let header_rows = grid_header_rows(model, set);
     let visible_rows = (area.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (area.width as usize).saturating_sub(usize::from(needs_scrollbar));
@@ -894,7 +929,16 @@ pub(crate) fn render_error(
 ) {
     let theme = &presentation.theme;
     let block = pane_block(
-        format!(" {}{} ", presentation.icon(Icon::Error), error.kind.label()),
+        format!(
+            " {}{}{} ",
+            if model.splits.zoomed && model.focus == Focus::Results {
+                "(zoomed) "
+            } else {
+                ""
+            },
+            presentation.icon(Icon::Error),
+            error.kind.label()
+        ),
         false,
         presentation,
     );
