@@ -6,6 +6,33 @@ before trusting anything else.
 
 ## Autonomous roadmap continuation - 2026-10-25 (in progress)
 
+### Latest reviewable checkpoint
+
+Latest product-source commit is **`d2edce1`**, published in
+[draft PR37](https://github.com/tkomane/ignatius/pull/37). Its CI run
+`40236560722` passed 13 executable jobs with one intentional scheduled-fixture
+skip. All five T059 and 18 T058 cases executed on Linux/macOS/Windows. The
+normal local/pre-push gate passed 1,520 harness cases, including 1,212 library
+cases; real PG14/18 plain/TLS and Linux socket hosted evidence also passed.
+The documentation checkpoint retains that exact product source; current-head
+workflow state is visible in PR37's checks.
+
+Review order is PR32 -> PR34 -> PR35 -> PR36 -> PR37. PR33 is the separate
+Windows ConPTY diagnostic with its preserved sensor limitation, not an accepted
+restoration fix. PR32 remains open at `d6d65e7`, against unchanged main `445ed82`.
+Its already-requested specific main-merge permission is still pending; phone
+workflow-scope approval did not authorize that protected action. After actual
+owner permission, refresh exact-head checks and integrate sequentially, with
+fresh main-targeted CodeQL on retargeted descendants. Native Warp/Windows11
+hand use, cloud-provider evidence, release p95/trust and release remain open.
+
+The team also prepared source-bound US6 mouse, US8 quiet-chrome and T032 input/
+lifecycle readiness notes, indexed in the roadmap. No mouse default or automatic
+background-detection support was enabled. One authorized Codex reset was used;
+external OpenCode review was explicitly skipped. The canonical W07 checkout
+and its unpublished `9278db4` record are preserved. The active managed worktree
+is retained for review; only owned acceptance records enter this checkpoint.
+
 ### Current local progress and active assignments
 
 Accepted manual-theme branch: `codex/manual-themes-2026-10-25`, reusing the managed worktree
@@ -84,7 +111,21 @@ Final identical-harness samples give 16 KiB median 6.198 ms/12.156 MiB RSS and
 The 100x30 owned PTY end/Home/normal-quit/config control also passes. Receipt:
 `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-jzgapy6r/receipt.json`.
 These are local test-profile observations, not release p95, process ceilings
-or native hand use. Normal commit/scans/push and hosted acceptance are next.
+or native hand use. Published clean **`d2edce1`** in
+[draft PR37](https://github.com/tkomane/ignatius/pull/37), stacked on PR36.
+The normal pre-push verifier repeated all 1,520/1,212 cases; pinned offline
+Gitleaks passed 446 exact-source files and 293 non-merge commits among 322
+reachable local revisions. Local/head/upstream match. The clean published
+binary also passes the 100x30 PTY control, receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-3z02aab9/receipt.json`.
+CI `40236560722` uses merge `882873ec`, whose tree equals head
+`c9276f6b71c45dc439f247e37ef9b9431cd6d414`. PG14/18 plain/TLS, real Linux socket,
+all 13 executable jobs passed, with one intentional scheduled-fixture skip.
+Root verified eight platform/20 policy artifacts and complete database logs.
+Linux/macOS totals are 1,520/1,212 library and Windows 1,464/1,193; all five
+T059 plus 18 T058 cases execute on each. Doctor retains three explicit skips.
+These acceptance records form a documentation-only checkpoint. Canonical
+W07 checkout remains clean at its original `9278db4`; no owner work was replaced.
 Read-only US6/US8/T032 readiness
 reviews are reflected in the roadmap; their unresolved policy dependencies
 remain open and mouse capture stays disabled.

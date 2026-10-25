@@ -42,8 +42,13 @@ bounded visible/caret metadata while preserving the accepted cells; isolated
 implementation on `codex/bounded-editor-view-2026-10-25` passed local independent
 review, 83 widget/114 layout cases, the full 1,520-case gate, exact 51,081-cell
 parity and an owned-PTY control. Final 1 MiB diagnostic medians improve to
-138.342 ms/17.063 MiB RSS. Publication/hosted acceptance are next; the small
-diagnostic is not release-build p95 or a process-memory ceiling.
+138.342 ms/17.063 MiB RSS. Published clean `d2edce1` in draft PR37 after normal
+pre-push/source-history scanning. Hosted acceptance passed all 13 executable
+jobs with one intentional scheduled-fixture skip; all five T059 and 18 T058
+cases execute on Linux/macOS/Windows. PG14/18/socket, policy and MSRV are also
+accepted for this product source. The small diagnostic is not release-build
+p95 or a process-memory ceiling. The final documentation checkpoint preserves
+accepted product-source bytes and points to PR37 for current-head checks.
 
 Read-only readiness reviews at `d92c416` also bound the next assignments:
 

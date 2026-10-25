@@ -154,8 +154,45 @@ PostgreSQL 18.6 plain/TLS ran; macOS socket remains skipped. Log:
 The actual 100x30 owned macOS PTY end/Home/quit/config control passes at the
 modified parent build with exact integrated final source. Receipt:
 `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-jzgapy6r/receipt.json`.
-Commit/scans/normal pre-push and hosted acceptance remain next; whole resource,
-native and release-performance acceptance remain open.
+Published clean `d2edce1bde1e92ca193a94f84c954e8bb594e6d3` in draft PR37.
+Normal pre-push repeats all 1,520/1,212 cases, with six passing gates and the
+same socket skip; log SHA-256
+`9090ca7cd89cccc02b19ce893172d321b567345176362f9a877d22a3fbd8128f`.
+Pinned network-disabled Gitleaks passes the exact 446-file Git archive and
+293 non-merge revisions among 322 local reachable revisions; every archive
+blob is checked against Git. Source digest:
+`4272b687c41e3514d79b7e1bad315f6beb46fe80d7a9371f3550c67edc779113`.
+Receipt: `/private/tmp/ignatius-t059-d2edce1-scan-source-20261025.json`.
+
+The clean publication binary (SHA-256
+`ba37ca675819d3d15fe5f11d9ecdb35eb07b0f34e27629e116d88c5d0b5fb5dd`)
+also passes the 100x30 owned-PTY control, with normal exit/config preservation
+and no connection selection or SQL submission:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-3z02aab9/receipt.json`.
+
+Hosted run `40236560722` uses actual merge `882873ec` with the same tree as
+head, `c9276f6b71c45dc439f247e37ef9b9431cd6d414`. Root accepts complete PG14/18
+plain/verified-TLS and socket logs: 236 selected invocations per major plus one
+socket, including pure/local controls. Positive readiness and runtime-major/
+transport guards establish those live paths, not 473 queries or printed patch
+versions. Seven policy jobs also passed; root verified their 20-artifact
+manifest `ce9a3466760aa43eb54f72d93fc0ef427df0bdc853215486712ed72812064d90`
+at `/private/tmp/ignatius-pr37-policy-audit-Ha8yQb/`. Six permitted duplicate
+warnings, conditional Python archive-test runtimes and feature-base CodeQL
+limits remain qualified. The run completed successfully with **13 successful
+jobs and one intentional scheduled-fixture skip**. Root verified all eight
+platform artifacts: Linux/macOS harness/library totals are 1,520/1,212 and
+Windows 1,464/1,193. Every platform executes all five T059 and 18 T058 cases
+under Rust 1.97.1; compile/docs/startup-refusal smoke passes. Doctor retains
+three explicit skips each. Actual smoke binaries identify the clean merge,
+while exact-head diagnostics bind the published head; equal trees establish
+the product source, not identical build identities.
+Platform manifest:
+`9a350e422a0f5ff1df4d8ea6ade34d8c0028b10430cd90e2d59d625f22cedebd`
+at `/private/tmp/ignatius-pr37-platform-audit-nwy_o3ki/`.
+The final documentation checkpoint preserves all production/test source bytes
+from accepted `d2edce1`; its current-head workflow remains in PR37's checks.
+Whole resource, native and release-performance acceptance remain open.
 
 ## Manual theme integration - 2026-10-25
 
