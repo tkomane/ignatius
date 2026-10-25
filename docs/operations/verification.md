@@ -322,8 +322,9 @@ one focused check, with production inputs unchanged:
 
 These are local focused/full/live/rendered-cell results. Frozen Linux `871db73`
 below excludes the later CLI/export/help implementation. Current-source
-Linux/pinned/MSRV/Windows, hosted, required different-family review and native
-visual/hand-use acceptance remain separate. Nothing was pushed or released.
+Linux/pinned/MSRV/Windows, hosted and native visual/hand-use acceptance remain
+separate. Different-family review was subsequently skipped by explicit owner
+instruction, not completed. Nothing was pushed or released.
 
 ## Frozen review/panic Linux acceptance - 2026-10-25
 

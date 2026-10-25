@@ -225,9 +225,16 @@ row-cap-zero control and a complete streaming control. No individual result
 payload exceeds 64 MiB, 30-second child deadline, 512-MiB completed-RSS and 256-MiB output
 experiment stops, isolated state/absent passfile and environment-only dummy credentials.
 Read authenticated version/orders3 before/after and preserve fixture lifecycle.
-A bounded temporary-table RETURNING case may be specified by the primary only
-if needed; no persistent data/schema or unrelated backend is changed here.
-Do not substitute SELECT counts for evidence about a database write.
+The primary also adopts one real write-outcome proof: on the helper's own
+synthetic fixture session, create one TEMP table with integer id/text payload,
+then INSERT at most 40 generated rows with a 1-MiB text value each and RETURNING
+both columns. Assert real CommandComplete/rows_affected=40, successful outcome,
+bounded retained prefix/loss state and unchanged transaction facts. A separate
+subsequent SELECT on that same session must positively observe all 40 TEMP rows,
+showing retention did not cancel, replay or roll back the write. Session closure
+removes the table. No persistent table/schema, shared fixture data or unrelated
+backend may change; the same 64-MiB/30-second/RSS/output stops apply. Do not
+substitute SELECT-only evidence for the RETURNING write outcome.
 
 The primary reviews the concrete patch, full required verifier, affected
 plain/verify-full TLS PostgreSQL evidence and actual rendered buffers before

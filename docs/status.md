@@ -342,7 +342,7 @@ GitHub or publish today's changes.
 | Verifier repair | Added workspace `--no-fail-fast` so later binaries run after failure. A failed workspace gate now labels configured fixtures as information rather than falsely reporting database/socket passes. |
 | Review | Cross-lane native peer review found and re-checked the repaired W10 long-basename regression and found no remaining blocking W02/W04/W10 issue in scope. The owner subsequently chose `Skip external review`; different-family review was not performed, under that explicit exception. |
 | Retention | Safe local verifier logs: `/private/tmp/ignatius-verify-2026-10-25-wave1.log` and `/private/tmp/ignatius-verify-2026-10-25-wave1-recheck.log`; regressions retained in sidecar/integration tests. |
-| Open boundaries | Required external review, Unix socket, native Windows/Linux, real terminal/screen-reader use, packaged-candidate privacy and release gates. The separate verified-TLS repeat of all five privacy contracts passed with zero skips using the generated fixture CA and `sslmode=verify-full`. |
+| Open boundaries | Unix socket, native Windows/Linux, real terminal/screen-reader use, packaged-candidate privacy and release gates. External review was later skipped by explicit owner instruction. The separate verified-TLS repeat of all five privacy contracts passed with zero skips using the generated fixture CA and `sslmode=verify-full`. |
 
 Local commits: `f8cbce8` W02 identity, `2017f03` W10 replacement boundaries,
 `b845106` W04 privacy and its specified next W03 guard. The platform's existing
@@ -2046,5 +2046,6 @@ evidence dependencies, not reasons to reopen those decisions.
 5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence
    when access exists. Synthetic buffers and PTYs do not replace hand use.
 6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open;
-   require actual consent for different-family external review and exact external
-   actions. No hosted acceptance, push, signing or release is implied.
+   keep the owner's instruction to skip today's external review. Exact external
+   actions still need their own authority. No hosted acceptance, push, signing
+   or release is implied.
