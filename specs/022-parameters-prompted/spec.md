@@ -4,10 +4,11 @@
 
 **Created**: 2026-09-04
 
-**Status**: Original slice and W04 privacy correction implemented locally;
-2026-10-25 locked verifier green with semantic Unix-socket skip. FR-2215's W03
-guard is specified and pending implementation. Different-family review and
-terminal hand checks remain pending.
+**Status**: Original slice, W04 privacy correction and FR-2215's W03 guard
+implemented locally. The guard's focused plain/TLS checks and integrated locked
+verifier pass on 2026-10-25 with the patched security dependencies. Different-
+family review, semantic Unix-socket and terminal hand checks remain separate
+pending gates.
 
 **Input**: The experience roadmap item "Parameters prompted": a statement with
 `:name` placeholders asks for the values instead of being edited each time.

@@ -99,3 +99,224 @@ fn notice_privacy_scrubs_the_backlog_and_stays_active_for_later_notices() {
     assert_eq!(held[0].code.as_deref(), Some("00000"));
     assert!(held[1].code.is_none());
 }
+
+#[test]
+fn parameter_semantics_refuses_unknown_or_non_exact_settings_without_echoing_them() {
+    assert!(validate_parameter_semantics(Some("on"), 3).is_ok());
+    for setting in [
+        None,
+        Some("off"),
+        Some("ON"),
+        Some(" on"),
+        Some("on\n"),
+        Some("private-setting-value"),
+    ] {
+        let diagnostic = validate_parameter_semantics(setting, 3).expect_err("exact on required");
+        assert_eq!(diagnostic.kind, DiagnosticKind::Query);
+        assert_eq!(diagnostic.statement_number, Some(3));
+        assert!(
+            diagnostic
+                .next_action
+                .as_deref()
+                .is_some_and(|action| action.contains("separately"))
+        );
+        assert!(!format!("{diagnostic:?}").contains("private-setting-value"));
+    }
+}
+
+#[allow(clippy::print_stderr)]
+async fn live_session(startup_setting: Option<&str>) -> Option<Session> {
+    let Ok(uri) = std::env::var("IGNATIUS_TEST_PG_URI") else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_URI is not set");
+        return None;
+    };
+    if uri.is_empty() {
+        eprintln!("skipping: IGNATIUS_TEST_PG_URI is empty");
+        return None;
+    }
+    let target = target(&uri);
+    let mut config = build_config(&target);
+    if let Some(setting) = startup_setting {
+        // The public connection contract deliberately has no PGOPTIONS route.
+        // Exercise the production driver/notice/bootstrap path with a startup
+        // setting instead of changing a shared role or database's defaults.
+        config.options(format!("-c standard_conforming_strings={setting}"));
+    }
+    let tls = crate::postgres::tls::TlsOptions {
+        mode: target.sslmode,
+        root_cert: target.root_cert.clone(),
+        client_cert: target.client_cert.clone(),
+        client_key: target.client_key.clone(),
+    };
+    let notice_privacy = Arc::new(AtomicBool::new(false));
+    let (client, notices, connection_lost) = match client_config(&tls).expect("fixture TLS") {
+        None => {
+            establish(
+                &config,
+                tokio_postgres::NoTls,
+                &target,
+                Arc::clone(&notice_privacy),
+            )
+            .await
+        }
+        Some(tls_config) => {
+            establish(
+                &config,
+                tokio_postgres_rustls::MakeRustlsConnect::new(tls_config),
+                &target,
+                Arc::clone(&notice_privacy),
+            )
+            .await
+        }
+    }
+    .expect("synthetic fixture connection");
+    let info = bootstrap(&client, &target).await.expect("session facts");
+    Some(Session {
+        client,
+        user_sql_gate: tokio::sync::Mutex::new(()),
+        info,
+        tls,
+        notices,
+        notice_privacy,
+        connection_lost,
+    })
+}
+
+fn semantics_bindings(value: &str) -> crate::query::ParameterBindings {
+    crate::query::ParameterBindings::from_secrets(
+        vec!["value".to_owned()],
+        vec![secrecy::SecretString::from(value.to_owned())],
+    )
+    .expect("synthetic binding")
+}
+
+#[tokio::test]
+async fn parameter_semantics_off_at_start_is_refused_before_the_first_parameterized_send() {
+    let Some(session) = live_session(Some("off")).await else {
+        return;
+    };
+    let supplied = semantics_bindings("synthetic-startup-value");
+    let execution = session
+        .execute_with_parameters("SELECT :value", &supplied, 10, JobId(820))
+        .await;
+    assert_eq!(execution.status, ExecutionStatus::Failed);
+    assert!(execution.statements.is_empty());
+    assert!(
+        execution
+            .error
+            .expect("setting refusal")
+            .headline
+            .contains("standard_conforming_strings")
+    );
+    let mut events = Vec::new();
+    assert!(matches!(
+        session
+            .stream_with_parameters("SELECT :value", &supplied, &mut |event| {
+                events.push(event);
+                Ok(())
+            })
+            .await,
+        Err(StreamStop::Server(_))
+    ));
+    assert!(events.is_empty());
+}
+
+#[tokio::test]
+async fn parameter_semantics_gate_covers_every_user_sql_entry_point() {
+    let Some(session) = live_session(None).await else {
+        return;
+    };
+    session
+        .client
+        .batch_execute("CREATE TEMP TABLE semantics_gate_marker (n integer)")
+        .await
+        .expect("synthetic gate marker");
+
+    macro_rules! prove_gate {
+        ($operation:expr, $check:expr) => {{
+            let held = session.user_sql_gate.lock().await;
+            let mut operation = Box::pin($operation);
+            for _ in 0..4 {
+                std::future::poll_fn(|cx| {
+                    assert!(
+                        std::future::Future::poll(operation.as_mut(), cx).is_pending(),
+                        "the user operation completed while another operation held the gate"
+                    );
+                    std::task::Poll::Ready(())
+                })
+                .await;
+                // This private, fixed SQL is a protocol barrier, not a sleep.
+                // Any request sent by the polled operation has completed by
+                // this response, including a fresh setting probe.
+                let row = session
+                    .client
+                    .query_one("SELECT count(*) FROM semantics_gate_marker", &[])
+                    .await
+                    .expect("protocol barrier");
+                assert_eq!(
+                    row.get::<_, i64>(0),
+                    0,
+                    "user SQL bypassed the held session gate"
+                );
+            }
+            drop(held);
+            let result = tokio::time::timeout(Duration::from_secs(5), operation)
+                .await
+                .expect("the released operation must complete");
+            ($check)(result);
+            let row = session
+                .client
+                .query_one("SELECT count(*) FROM semantics_gate_marker", &[])
+                .await
+                .expect("post-operation barrier");
+            assert_eq!(
+                row.get::<_, i64>(0),
+                1,
+                "the operation executes once after gate release"
+            );
+            session
+                .client
+                .batch_execute("TRUNCATE semantics_gate_marker")
+                .await
+                .expect("clear marker");
+        }};
+    }
+
+    prove_gate!(
+        session.execute(
+            "INSERT INTO semantics_gate_marker VALUES (1)",
+            10,
+            JobId(821)
+        ),
+        |execution: Execution| assert_eq!(execution.status, ExecutionStatus::Succeeded)
+    );
+    let supplied = semantics_bindings("2");
+    prove_gate!(
+        session.execute_with_parameters(
+            "INSERT INTO semantics_gate_marker VALUES (:value::integer)",
+            &supplied,
+            10,
+            JobId(822)
+        ),
+        |execution: Execution| assert_eq!(execution.status, ExecutionStatus::Succeeded)
+    );
+    let mut sink = |_| Ok(());
+    prove_gate!(
+        session.stream("INSERT INTO semantics_gate_marker VALUES (3)", &mut sink),
+        |result: Result<u64, StreamStop>| assert_eq!(result.expect("ordinary stream"), 0)
+    );
+    prove_gate!(
+        session.stream_with_parameters(
+            "INSERT INTO semantics_gate_marker VALUES (:value::integer)",
+            &supplied,
+            &mut sink
+        ),
+        |result: Result<u64, StreamStop>| assert_eq!(result.expect("parameterized stream"), 0)
+    );
+    prove_gate!(
+        session.explain("INSERT INTO semantics_gate_marker VALUES (5)", true),
+        |result: Result<String, Diagnostic>| assert!(
+            result.expect("analyzed statement").contains("Plan")
+        )
+    );
+}

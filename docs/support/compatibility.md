@@ -228,6 +228,18 @@ before resolving a target. The template, not the answers, is retained in
 history and editor state. A server position after expansion is shown as
 technical information without a guessed template caret.
 
+Runtime binding requires a fresh `SHOW standard_conforming_strings` response
+of exactly `on`. With `off` or an unavailable response, the request refuses
+before the requested SQL is sent; restore the setting separately. Buffered
+execution rechecks before each separately sent statement and keeps an already
+completed prefix once. Streaming checks before its unchanged whole Query
+message, preserving PostgreSQL's initial parsing and implicit transaction.
+User-SQL methods on one session serialize that check/bind/send interval;
+metadata reads and cancellation remain independent. The read-only setting
+probe adds a database round trip per separately sent parameterized statement,
+and parameterized elapsed time includes it. No setting, transaction or statement
+is changed or retried automatically.
+
 For parameterized execution/export errors, server-controlled message, detail,
 hint, context and object fields are omitted because they can contain original,
 transformed or truncated values. The omission is explicit; classification,

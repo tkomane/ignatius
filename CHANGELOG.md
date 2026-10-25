@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: named parameters now require a fresh confirmation that
+  `standard_conforming_strings` is on. Buffered runs recheck between statements;
+  a refusal keeps completed work without sending the suffix, changing settings
+  or rolling back. Streaming keeps PostgreSQL's whole-message transaction
+  semantics. User-SQL operations on one session serialize the check and send;
+  cancellation remains independent.
 - Security: parameterized execution and export omit server-controlled error
   text that can echo replacement/key values, including transformed values.
   SQLSTATE, failure classification and statement position remain available.

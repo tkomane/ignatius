@@ -71,6 +71,8 @@ impl SessionInfo {
 #[derive(Debug)]
 pub struct Session {
     client: Client,
+    /// Serializes arbitrary user SQL without blocking cancellation or metadata.
+    user_sql_gate: tokio::sync::Mutex<()>,
     info: SessionInfo,
     tls: crate::postgres::tls::TlsOptions,
     notices: Arc<Mutex<Vec<Notice>>>,
@@ -305,6 +307,7 @@ impl Session {
     /// export, and keeping the boundary here makes that distinction visible at
     /// the only place that can send it to PostgreSQL.
     pub async fn explain(&self, sql: &str, analyze: bool) -> Result<String, Diagnostic> {
+        let _operation = self.user_sql_gate.lock().await;
         const PLAIN_OPTIONS: &str = "ANALYZE false, COSTS true, SUMMARY true, FORMAT JSON";
         const ANALYZE_OPTIONS: &str =
             "ANALYZE true, COSTS true, SUMMARY true, TIMING true, FORMAT JSON";
@@ -430,6 +433,7 @@ impl Session {
         sql: &str,
         sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
     ) -> Result<u64, StreamStop> {
+        let _operation = self.user_sql_gate.lock().await;
         self.stream_bound(sql, sink, QueryPrivacy::Ordinary).await
     }
 
@@ -496,6 +500,10 @@ impl Session {
         parameters: &crate::query::ParameterBindings,
         sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
     ) -> Result<u64, StreamStop> {
+        let _operation = self.user_sql_gate.lock().await;
+        self.require_parameter_semantics(1)
+            .await
+            .map_err(|error| StreamStop::Server(Box::new(error)))?;
         let bound = crate::query::discover_parameters(sql)
             .and_then(|template| template.bind(sql, parameters))
             .map_err(|error| {
@@ -513,6 +521,7 @@ impl Session {
     /// Statements after a failure do not run. Results produced before the failure
     /// are kept and returned along with the diagnostic, because they happened.
     pub async fn execute(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
+        let _operation = self.user_sql_gate.lock().await;
         tracing::debug!(
             target: "ignatius::query",
             "{}",
@@ -534,12 +543,18 @@ impl Session {
         row_cap: usize,
         job: JobId,
     ) -> Execution {
+        let _operation = self.user_sql_gate.lock().await;
         tracing::debug!(
             target: "ignatius::query",
             "{}",
             crate::diagnostics::logging::statement_descriptor(job.0, sql)
         );
         let started = Instant::now();
+        if let Err(diagnostic) = self.require_parameter_semantics(1).await {
+            return self
+                .failed_execution(job, started, Vec::new(), diagnostic)
+                .await;
+        }
         let bound = match crate::query::discover_parameters(sql)
             .and_then(|template| template.bind(sql, parameters))
         {
@@ -556,8 +571,86 @@ impl Session {
             }
         };
         activate_notice_privacy(&self.notices, &self.notice_privacy);
-        self.execute_bound(&bound, row_cap, job, QueryPrivacy::Parameterized)
+        let mut execution = self
+            .execute_bound(&bound, row_cap, job, QueryPrivacy::Parameterized)
+            .await;
+        execution.elapsed = started.elapsed();
+        execution
+    }
+
+    /// Checks the live lexer setting while the user-SQL gate is held.
+    ///
+    /// A connection-time snapshot is insufficient: preceding SQL can change
+    /// this setting. The probe never changes it and uses the value-free error
+    /// route even when PostgreSQL cannot answer (for example a failed txn).
+    async fn require_parameter_semantics(&self, statement_number: usize) -> Result<(), Diagnostic> {
+        let messages = self
+            .client
+            .simple_query("SHOW standard_conforming_strings")
             .await
+            .map_err(|error| {
+                let mut diagnostic = from_parameterized_query_error(&error, statement_number);
+                // A fatal ErrorResponse can reach its waiter before the
+                // connection task has marked the socket closed. Its severity
+                // is used only for classification, never displayed.
+                if self.is_closed() || error.as_db_error().is_some_and(|db| matches!(db.severity(), "FATAL" | "PANIC")) {
+                    diagnostic.kind = DiagnosticKind::Connection;
+                }
+                diagnostic.attempted = format!(
+                    "checking standard_conforming_strings before statement {statement_number}"
+                );
+                diagnostic.headline = match diagnostic.kind {
+                    DiagnosticKind::Cancelled => "the server cancelled the string-semantics check; the requested statement was not sent",
+                    DiagnosticKind::Connection => "the connection closed during the string-semantics check; the requested statement was not sent",
+                    _ => "the string-semantics check failed; the requested statement was not sent (server text omitted for privacy)",
+                }.to_owned();
+                if diagnostic.kind == DiagnosticKind::Connection {
+                    diagnostic.likely_cause = Some("the connection ended before the requested statement could be sent".to_owned());
+                    diagnostic.next_action = Some("reconnect and inspect any earlier statements before trying again; nothing was retried".to_owned());
+                }
+                diagnostic
+            })?;
+        let mut rows = messages.iter().filter_map(|message| match message {
+            tokio_postgres::SimpleQueryMessage::Row(row) => Some(row),
+            _ => None,
+        });
+        let setting = rows
+            .next()
+            .filter(|row| row.len() == 1)
+            .and_then(|row| row.get(0));
+        // More than one answer is an unknown response, not permission to guess.
+        let setting = if rows.next().is_some() { None } else { setting };
+        validate_parameter_semantics(setting, statement_number)
+    }
+
+    /// Builds an execution failure without re-entering the user-SQL gate.
+    async fn failed_execution(
+        &self,
+        job: JobId,
+        started: Instant,
+        statements: Vec<StatementResult>,
+        diagnostic: Diagnostic,
+    ) -> Execution {
+        let status = if diagnostic.kind == DiagnosticKind::Cancelled {
+            ExecutionStatus::Cancelled
+        } else if diagnostic.kind == DiagnosticKind::Connection || self.is_closed() {
+            ExecutionStatus::ConnectionLost
+        } else {
+            ExecutionStatus::Failed
+        };
+        let transaction = if status == ExecutionStatus::ConnectionLost {
+            crate::query::result::TransactionState::Unknown
+        } else {
+            self.transaction_state().await
+        };
+        Execution {
+            job,
+            statements,
+            status,
+            elapsed: started.elapsed(),
+            error: Some(diagnostic),
+            transaction,
+        }
     }
 
     async fn execute_bound(
@@ -583,6 +676,17 @@ impl Session {
         }
 
         for (index, statement) in parsed.iter().enumerate() {
+            // The initial check precedes binding and covers the first send.
+            // No arbitrary SQL can intervene while the gate is held. A prior
+            // statement in this same buffer may change the setting, however.
+            if index > 0
+                && matches!(privacy, QueryPrivacy::Parameterized)
+                && let Err(diagnostic) = self.require_parameter_semantics(index + 1).await
+            {
+                return self
+                    .failed_execution(job, started, results, diagnostic)
+                    .await;
+            }
             let _ = self.take_notices();
             let statement_started = Instant::now();
             match self
@@ -598,28 +702,9 @@ impl Session {
                     });
                 }
                 Err(diagnostic) => {
-                    let status = if diagnostic.kind == DiagnosticKind::Cancelled {
-                        ExecutionStatus::Cancelled
-                    } else if diagnostic.kind == DiagnosticKind::Connection || self.is_closed() {
-                        ExecutionStatus::ConnectionLost
-                    } else {
-                        ExecutionStatus::Failed
-                    };
-                    let transaction = if status == ExecutionStatus::ConnectionLost {
-                        // Asking a closed connection would only produce another
-                        // failure, and the honest answer is that we do not know.
-                        crate::query::result::TransactionState::Unknown
-                    } else {
-                        self.transaction_state().await
-                    };
-                    return Execution {
-                        job,
-                        statements: results,
-                        status,
-                        elapsed: started.elapsed(),
-                        error: Some(diagnostic),
-                        transaction,
-                    };
+                    return self
+                        .failed_execution(job, started, results, diagnostic)
+                        .await;
                 }
             }
         }
@@ -726,6 +811,23 @@ impl Session {
     }
 }
 
+fn validate_parameter_semantics(
+    setting: Option<&str>,
+    statement_number: usize,
+) -> Result<(), Diagnostic> {
+    if setting == Some("on") {
+        return Ok(());
+    }
+    Err(Diagnostic::new(
+        DiagnosticKind::Query,
+        "named parameters require standard_conforming_strings = on",
+        format!("checking standard_conforming_strings before statement {statement_number}"),
+    )
+    .in_statement(statement_number)
+    .likely_cause("the server did not confirm the supported string-literal semantics")
+    .next_action("restore standard_conforming_strings = on separately, then run the statement again; nothing was changed or retried"))
+}
+
 fn retained_value_limit_diagnostic(statement_number: usize, bytes: usize) -> Diagnostic {
     let limit = crate::query::value::MAX_RETAINED_VALUE_BYTES;
     Diagnostic::new(
@@ -819,6 +921,7 @@ pub async fn connect(
     let info = bootstrap(&client, target).await?;
     Ok(Session {
         client,
+        user_sql_gate: tokio::sync::Mutex::new(()),
         info,
         tls,
         notices,
