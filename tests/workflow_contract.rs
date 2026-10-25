@@ -462,6 +462,7 @@ fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
         "tests/support/windows_conpty/Build.ps1",
         "-ExpectedRevision $env:GITHUB_SHA",
         "tests/support/windows_conpty/Run-Controls.ps1",
+        "-RunReviewedCursorDiagnostic",
         "-RunReviewedCapabilityControls",
         "$env:RUNNER_TEMP",
     ] {
@@ -470,6 +471,11 @@ fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
             "missing native ConPTY CI boundary: {required}"
         );
     }
+    assert!(
+        native.find("-RunReviewedCursorDiagnostic").unwrap()
+            < native.find("-RunReviewedCapabilityControls").unwrap(),
+        "cursor calibration must run before the preserved failing capability gate"
+    );
     let evidence = platform
         .split("- name: Retain bounded Windows ConPTY evidence")
         .nth(1)
@@ -486,6 +492,12 @@ fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
         "/runtime/capture-manifest.json",
         "/runtime/*/controller.json",
         "/runtime/*/translated.bin",
+        "/cursor-runtime/summary.json",
+        "/cursor-runtime/capture-manifest.json",
+        "/cursor-runtime/cursor-routing/controller.json",
+        "/cursor-runtime/cursor-routing/supervisor.stdout.bin",
+        "/cursor-runtime/cursor-routing/supervisor.stderr.bin",
+        "/cursor-runtime/cursor-routing/translated.bin",
         "retention-days: 7",
     ] {
         assert!(
@@ -497,6 +509,7 @@ fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
         "/build/**",
         "/target/**",
         "/runtime/**",
+        "/cursor-runtime/**",
         "*.exe",
         "*.rlib",
         "*.obj",

@@ -96,4 +96,64 @@ try {
     foreach ($file in @($one,$two,$three)) { [IO.File]::Delete($file) }
     foreach ($directory in @($deeper,$nested,$emptyA,$emptyB,$inventory)) { if ([IO.Directory]::Exists($directory)) { [IO.Directory]::Delete($directory) } }
 }
-Write-Output "$script:Checks receipt/deadline/identity/inventory checks passed; only tiny owned temporary fixtures; no Windows/native execution"
+
+function New-CursorDiagnostic {
+    $good=@{ok=1;error=0};$none=@{ok=0;error=0};$rows=@()
+    $phases=@('baseline-main','native-hidden','native-shown','main-vt-hidden','main-vt-shown','alternate-entered','alternate-vt-hidden','alternate-vt-shown','restored-main')
+    $prefix=@('','','',"$([char]27)[?25l","$([char]27)[?25h","$([char]27)[?1049h","$([char]27)[?25l","$([char]27)[?25h","$([char]27)[?1049l")
+    for($i=0;$i -lt 9;++$i) {
+        $setter=$i -eq 1 -or $i -eq 2 -or $i -eq 8;$marker="W07C-nonce-$i";$expected=($prefix[$i]+"$([char]27)[2;1H"+$marker).Length
+        $rows+=@{sequence=$i;phase=$phases[$i];actor_pid=42;query=@($good,$good,$good,$good);setter_attempted=[int]$setter;setter=$(if($setter){$good}else{$none});write=$good;fence=$good;written=$expected;expected=$expected;input_mask=423;output_mask=7;cursor_size=25;cursor_visible=[int]($i -ne 1 -and $i -ne 3 -and $i -ne 6);sentinel_expected=9;sentinel_read=9;sentinel_seen=[int]($i -lt 5 -or $i -eq 8);marker_seen=1;marker=$marker;observed_qpc=(1220+$i*2);acknowledged_qpc=(1221+$i*2)}
+    }
+    $r=@{schema=1;case='cursor-routing';native_windows=$true;diagnostic_complete=$true;product_acceptance=$false;cursor_capability_accepted=$false;failure='';actor_pid=42;child_pid=41;actor_exit=0;observer_registrations=1;attachment_attestations=1;actor_waited=1;exact_job_actor=1;child_exit=0;worker_exit=0;exact_job_worker=1;exact_job_guard=1;guard_waited=1;worker_waited=1;cleanup_confirmed=1;control_io_cleanup_confirmed=1;job_active_processes=0;output_seen=100;output_kept=100;output_error=0;control_bytes=1500;qpc_frequency=1000;clocks=@{start=1000;registered=1100;resume_ack=1200;guard_wait=1700;cleanup=1800;end=1900};writer_route='WriteConsoleW retained CONOUT$';handle_route='one retained CONIN$/CONOUT$ actor';fence_meaning='parser-buffer-only';sensor_capabilities=@{native_setter=$true;main_vt=$true;alternate_vt=$true};initialization=@{api=@($good,$good,$good,$good,$good,$good,$good);written=9;expected=9;input_mask=423;output_mask=7;cursor_size=25;observed_qpc=1210};stages=$rows;restoration=@{api=@($good,$good,$good);verification=@($good,$good,$good);input_mask=423;output_mask=7;cursor_size=25;cursor_visible=1;verified_qpc=1235;baseline_restored=1;observed_qpc=1260};paste_observation='open-not-measured'}
+    return($r|ConvertTo-Json -Depth 12|ConvertFrom-Json)
+}
+function Bad-Cursor([string]$Name,[scriptblock]$Change) {
+    $r=New-CursorDiagnostic;&$Change $r;$rejected=$false
+    try{Assert-W07CursorDiagnostic $r 'nonce'}catch{$rejected=$true}
+    Assert-W07 $rejected "cursor false completion: $Name";++$script:Checks
+}
+Assert-W07CursorDiagnostic (New-CursorDiagnostic) 'nonce';++$script:Checks
+Bad-Cursor 'wrong baseline nonce sentinel count' {param($r)$r.initialization.written=8;$r.initialization.expected=8}
+Bad-Cursor 'setup deadline overrun' {param($r)$r.clocks.guard_wait=22000;$r.clocks.cleanup=22001;$r.clocks.end=22002}
+Bad-Cursor 'outer deadline overrun' {param($r)$r.clocks.end=26001}
+Bad-Cursor 'same actor as Rust parent' {param($r)$r.child_pid=$r.actor_pid}
+Bad-Cursor 'coherent cursor size differs from seeded baseline' {param($r)$r.stages[0].cursor_size=75;$r.stages[8].cursor_size=75}
+Bad-Cursor 'wrong actor' {param($r)$r.stages[3].actor_pid=43}
+Bad-Cursor 'missing final baseline' {param($r)$r.stages[8].cursor_visible=0}
+Bad-Cursor 'cleanup unconfirmed' {param($r)$r.cleanup_confirmed=0}
+
+Bad-Cursor 'diagnostic completion false' {param($r)$r.diagnostic_complete=$false}
+Bad-Cursor 'wrong phase' {param($r)$r.stages[5].sequence=4}
+Bad-Cursor 'missing stage' {param($r)$r.stages=$r.stages[0..7]}
+Bad-Cursor 'second actor registration' {param($r)$r.observer_registrations=2}
+Bad-Cursor 'unconfirmed actor identity' {param($r)$r.exact_job_actor=0}
+Bad-Cursor 'API error despite true flag' {param($r)$r.stages[3].query[2].error=5}
+Bad-Cursor 'partial write' {param($r)$r.stages[6].written--}
+Bad-Cursor 'missing marker' {param($r)$r.stages[6].marker_seen=0}
+Bad-Cursor 'wrong phase marker' {param($r)$r.stages[6].marker='W07C-other-6'}
+Bad-Cursor 'restoration API failure' {param($r)$r.restoration.api[2].ok=0}
+Bad-Cursor 'missing final restoration' {param($r)$r.restoration.baseline_restored=0}
+Bad-Cursor 'truncated output' {param($r)$r.output_kept=99}
+Bad-Cursor 'capture overflow' {param($r)$r.control_bytes=65537}
+Bad-Cursor 'product success claimed' {param($r)$r.product_acceptance=$true}
+Bad-Cursor 'sensor success forged' {param($r)$r.sensor_capabilities.alternate_vt=$false}
+Bad-Cursor 'reordered acknowledgement' {param($r)$r.stages[6].acknowledged_qpc=1}
+$constant=New-CursorDiagnostic;foreach($row in $constant.stages){$row.cursor_visible=1};$constant.sensor_capabilities.native_setter=$false;$constant.sensor_capabilities.main_vt=$false;$constant.sensor_capabilities.alternate_vt=$false
+Assert-W07CursorDiagnostic $constant 'nonce';++$script:Checks
+Assert-W07Selection $true $false;++$script:Checks
+Assert-W07Selection $false $true;++$script:Checks
+foreach($selection in @(@($false,$false),@($true,$true))){$rejected=$false;try{Assert-W07Selection $selection[0] $selection[1]}catch{$rejected=$true};Assert-W07 $rejected 'no implicit or combined selection';++$script:Checks}
+Bad-Cursor 'TRUE sentinel short read' {param($r)$r.stages[6].sentinel_read=8}
+Bad-Cursor 'restoration verification API failed despite good stage8' {param($r)$r.restoration.verification[0].ok=0;$r.restoration.verification[0].error=5}
+$different=New-CursorDiagnostic;$different.stages[6].sentinel_seen=0
+Assert-W07CursorDiagnostic $different 'nonce';++$script:Checks
+for($i=0;$i -lt 9;++$i){$index=$i;Bad-Cursor 'every stage refuses TRUE-short' {param($r)$r.stages[$index].sentinel_read--}}
+Bad-Cursor 'sentinel requested count differs from full nonce' {param($r)$r.stages[6].sentinel_expected=8;$r.stages[6].sentinel_read=8}
+for($i=0;$i -lt 3;++$i){$index=$i;Bad-Cursor 'every restoration verification API outcome' {param($r)$r.restoration.verification[$index].ok=0;$r.restoration.verification[$index].error=5}}
+Bad-Cursor 'independent restoration input differs despite good stage8' {param($r)$r.restoration.input_mask=152}
+Bad-Cursor 'independent restoration output differs despite good stage8' {param($r)$r.restoration.output_mask=3}
+Bad-Cursor 'independent restoration cursor size differs despite good stage8' {param($r)$r.restoration.cursor_size=75}
+Bad-Cursor 'independent restoration visibility differs despite good stage8' {param($r)$r.restoration.cursor_visible=0}
+Bad-Cursor 'verification clock substituted by later stage8' {param($r)$r.restoration.verified_qpc=1237}
+Write-Output "$script:Checks receipt/deadline/identity/inventory/cursor checks passed; no Windows/native execution"

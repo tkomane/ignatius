@@ -1,19 +1,21 @@
-# First capability/control execution only. Root must inspect frozen inputs first.
+# Reviewed first controls or one cursor diagnostic only. Root inspects frozen inputs first.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $BuildManifest,
     [Parameter(Mandatory)] [string] $EvidenceRoot,
-    [switch] $RunReviewedCapabilityControls
+    [switch] $RunReviewedCapabilityControls,
+    [switch] $RunReviewedCursorDiagnostic
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Actual Windows is required; parser/local compilation are not native runtime evidence' }
-if (-not $RunReviewedCapabilityControls) { throw 'No execution by default. First immutable source review and explicit native execution authority are required.' }
 . (Join-Path $PSScriptRoot 'Validation.ps1')
+Assert-W07Selection ([bool]$RunReviewedCapabilityControls) ([bool]$RunReviewedCursorDiagnostic)
 $manifestPath = (Resolve-Path -LiteralPath $BuildManifest).Path
 $manifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 Assert-W07 ($manifest.schema -eq 1 -and $manifest.scope -ceq 'first-capability-controls-only' -and -not $manifest.native_executed -and $manifest.pre_post_inputs_verified) 'first capability build manifest'
+if ($RunReviewedCursorDiagnostic) { Assert-W07 ($manifest.cursor_routing_diagnostic -is [bool] -and $manifest.cursor_routing_diagnostic) 'explicit diagnostic build support' }
 Assert-W07 ([IO.Path]::IsPathFullyQualified($EvidenceRoot) -and -not (Test-Path -LiteralPath $EvidenceRoot)) 'new absolute owned evidence root'
 $null = New-Item -ItemType Directory -Path $EvidenceRoot
 $evidence = (Resolve-Path -LiteralPath $EvidenceRoot).Path
@@ -89,7 +91,13 @@ function Invoke-OwnedCase([string] $Case, [string] $Directory, [long] $Allowance
         foreach ($stream in $streams) { $stream.file.Flush(); $stream.file.Dispose() }
         $raw = [IO.File]::ReadAllText((Join-Path $Directory 'supervisor.stdout.bin'))
         $receipt = $raw | ConvertFrom-Json
-        Assert-W07Receipt $receipt $Case
+        if ($RunReviewedCursorDiagnostic) {
+            Assert-W07CursorDiagnostic $receipt $nonce
+            $state.diagnostic_complete=$receipt.diagnostic_complete
+            $state.product_acceptance=$false
+            $state.cursor_capability_accepted=$false
+            $state.sensor_capabilities=$receipt.sensor_capabilities
+        } else { Assert-W07Receipt $receipt $Case }
         Assert-W07 (($captured + [long]$receipt.control_bytes) -le 65536) 'combined structured evidence bound'
         $translated = Join-Path $Directory 'translated.bin'
         Assert-W07 ((Test-Path -LiteralPath $translated -PathType Leaf) -and (Get-Item -LiteralPath $translated).Length -eq $receipt.output_kept) 'actual translated capture length'
@@ -137,9 +145,17 @@ function Invoke-OwnedCase([string] $Case, [string] $Directory, [long] $Allowance
     return [pscustomobject]$state
 }
 $summary = [ordered]@{schema=1;scope='first-capability-controls-only';build_manifest_sha256=$manifestHash;platform=[Environment]::OSVersion.VersionString;os_build=[Environment]::OSVersion.Version.Build;windows11_hand_use=$false;full_24_path_matrix=$false;paste_observation='open-not-measured';native_wrong_ownership_control='open-not-run';cases=@();stop=$null;post_inputs_verified=$false;capture_budget_bytes=33554432}
+if ($RunReviewedCursorDiagnostic) {
+    $summary.scope='cursor-sensor-calibration-only'
+    $summary.diagnostic_complete=$false
+    $summary.product_acceptance=$false
+    $summary.cursor_capability_accepted=$false
+}
+$cases=if ($RunReviewedCursorDiagnostic) { @('cursor-routing') } else { @('no-guard','known-unrestored','hung-child','capability') }
+$expectedCases=if ($RunReviewedCursorDiagnostic) { 1 } else { 4 }
 try {
     Assert-Inputs
-    foreach ($case in @('no-guard','known-unrestored','hung-child','capability')) {
+    foreach ($case in $cases) {
         $used = Get-W07InventoryBytes $evidence
         Assert-W07 (($used + 262144) -le 33554432) 'experiment budget admission'
         $directory = Join-Path $evidence $case; $null=New-Item -ItemType Directory -Path $directory
@@ -150,9 +166,14 @@ try {
 } catch { $summary.stop=$_.Exception.Message }
 finally {
     try { Assert-Inputs; $summary.post_inputs_verified=$true } catch { $summary.stop="Frozen input verification failed: $($_.Exception.Message)" }
+    if ($RunReviewedCursorDiagnostic) { $summary.diagnostic_complete=$null -eq $summary.stop -and $summary.cases.Count -eq 1 -and $summary.cases[0].receipt_valid -and $summary.post_inputs_verified }
     $summary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $evidence 'summary.json') -Encoding utf8NoBOM
     $files = @(Get-ChildItem -LiteralPath $evidence -File -Recurse | Sort-Object FullName | ForEach-Object { @{path=[IO.Path]::GetRelativePath($evidence,$_.FullName);bytes=$_.Length;sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()} })
     $files | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'capture-manifest.json') -Encoding utf8NoBOM
 }
-if ($summary.stop -or $summary.cases.Count -ne 4 -or -not $summary.post_inputs_verified) { throw 'Capability/control run incomplete or failed; inspect retained bounded evidence' }
-Write-Output 'Four actual Windows capability/control children passed. Paste/full matrix/Windows 11 hand use remain open.'
+if ($summary.stop -or $summary.cases.Count -ne $expectedCases -or -not $summary.post_inputs_verified) {
+    if ($RunReviewedCursorDiagnostic) { throw 'Cursor routing diagnostic incomplete or failed; inspect retained bounded evidence' }
+    throw 'Capability/control run incomplete or failed; inspect retained bounded evidence'
+}
+if ($RunReviewedCursorDiagnostic) { Write-Output 'Cursor routing diagnostic completed; product/cursor capability acceptance remains false.' }
+else { Write-Output 'Four actual Windows capability/control children passed. Paste/full matrix/Windows 11 hand use remain open.' }

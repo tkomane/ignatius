@@ -604,13 +604,21 @@ reports failed cleanup truthfully. This is separate from native visual use, a
 full uncaught product crash and Windows ConPTY acceptance. Crash details may
 contain sensitive information and cannot prove a database write outcome.
 
+At published `7d167a9` on 25 October 2026, the owned Windows ConPTY no-guard,
+known-unrestored and acknowledged hung-child controls passed. Actual Guard
+raw/mouse and alternate-buffer observations are partial evidence; its acquired
+cursor-visibility assertion failed. Cursor calibration, the full option/path
+matrix and Windows 11/Windows Terminal hand use remain open. These results do
+not upgrade full Windows restoration or release acceptance; see the
+[dated verification record](../operations/verification.md).
+
 ## Platforms
 
 | Platform | Status |
 | --- | --- |
 | macOS on Apple silicon | Dated local CLI, PostgreSQL and owned-PTY evidence; latest-source native visual/full hand-use acceptance remains open. Historical hosted results cover their recorded source only. |
-| Windows, GitHub `windows-latest` runner | Historical builds/unit/layout/CLI/startup results; today's local branch has no fresh hosted/native Windows acceptance. |
-| Linux, GitHub `ubuntu-latest` runner | Historical hosted PostgreSQL/CLI evidence covers its recorded source, not today's later local changes. |
+| Windows, GitHub `windows-latest` runner | At `7d167a9`, workspace build/tests and three native ConPTY controls passed. Overall Windows CI failed the Guard cursor check on image `win25-vs2026`/`20261021.278.1`; the later startup/refusal smoke step did not run. Full restoration and hand use remain open. |
+| Linux, GitHub `ubuntu-latest` runner | At `7d167a9`, the hosted platform gate and PG14/18 plain/verified-TLS/socket jobs passed. Accepted `54056c2` separately covers PG14-18. Full-screen native hand use and release installation remain open. |
 | Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
 

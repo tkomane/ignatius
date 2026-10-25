@@ -63,8 +63,59 @@ repeat after the normal pre-push gate. Repair source:
 `736b89b6db7bb2023b17dc3f0dfd2172ed35657623243397a4f2a970720433cc`.
 First failed Windows evidence:
 `/private/tmp/ignatius-pr33-windows-first-40215610812-1/`. No ConPTY child ran.
+The repaired clean head `7d167a9` is published after the unchanged full pre-push
+gate passed all 1,432 cases/24 summaries with the same macOS socket skip.
+Pinned source/history scans passed 447 files and 287 revisions. The hosted
+repeat CI `40216991785` completed with 12 successful jobs, one deliberate
+schedule-only skip and the failed Windows capability check. Four fresh native
+children actually ran. No-guard, known-unrestored and acknowledged hung-child
+controls passed; capability failed because acquired cursor visibility stayed1.
+Actual Guard input masks were423/152/423 and native main/alternate/main sentinel
+reads1/0/1. Cursor query success with constant1/1/1 does not prove cursor hiding
+or identify a product defect. The observation method is under investigation.
+
+All four exact Jobs were empty, guard/worker processes positively waited,
+translated output complete/bounded and reader/HPCON/control-I/O cleanup
+confirmed. Native durations were41.3788/34.0117/297.3594/48.9785ms, controller
+95/81/340/92ms; the acknowledged hung interval was257.6195ms before owned
+termination and actual exit124. Root verified the 101,380-byte archive SHA-256
+`c55cfc2975541e6f2bf133bc85e32fd6f93eeb31b60637f029e8b25b96b8f1e4`,
+all27 files,17 capture-manifest entries and447 source/nine helper hashes against
+`7d167a9`. Actual checkout `da1283e4` has the identical head tree
+`a2a46e4933966baedd0ad49ee5c979be17f1f7de`; revision identity differs normally.
+Evidence: `/private/tmp/ignatius-pr33-windows-second-40216991785-1/`, root review
+`/private/tmp/ignatius-pr33-7d167a9-second-windows-review-20261025.json`.
+No assertion was weakened, product source changed or later matrix admitted.
+Independent native audit:
+`/private/tmp/ignatius-w07-windows-second-independent-review-9e8kfug0/REVIEW.md`,
+SHA-256 `8170f35388d47964ef6b3e52cf3d0b0786dac8f977026b827e21f71892a96680`.
+Root verified its two hashed review artifacts. The separate locked-Crossterm/
+Microsoft routing assessment is
+`/private/tmp/ignatius-w07-cursor-sensor-assessment-q4rnegi5/ASSESSMENT.md`.
+It supports a sensor hypothesis but cannot identify the shipped26100 source.
+The adopted one-actor calibration is integrated from repaired immutable02,
+manifest `c44d1f1f3f8ea4e9c7455051cf32ccd447dd8a07ba80581f71c52a6ea7c810bc`.
+Root verified all 75 artifact hashes and nine exact integrated source files.
+Review01 caught successful-short sentinel reads masquerading as alternate
+absence and incomplete restoration-query records. The repair independently
+requires full nonce-derived sentinel counts and retains every verification
+query/error/fact/clock. Both have C++/PowerShell failing-first evidence.
+Native independent review accepted the repair; root's integrated repeat passed
+74 portable C++ and 103 PowerShell cases. Six exact-emitter synthetic cases,
+two exact wire roundtrips, four AST parses and Rust formatting are separately
+qualified worker evidence. These checks are not Windows compilation/runtime.
+Root's diagnostic-before-capability CI contract failed first, then passed;
+formatting, pinned Actionlint, extracted PowerShell AST and independent review
+also passed. Uploads add only six fixed diagnostic paths to the prior15 patterns.
+The original four assertions and all ownership/deadline/environment protections
+remain. The primary admits only calibration followed by the unchanged first
+four on the reviewed source after the normal full pre-push gate. No calibration
+runtime result exists yet, and no later matrix is admitted.
+Source: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`;
+peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-20261025.md`,
+SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.
 New-head CodeQL remains pending until a main-targeted PR triggers the
-unchanged filter. No ConPTY runtime result or completed platform task is claimed.
+unchanged filter. Overall capability and W07-064/T055a/T051 remain incomplete.
 
 The separate read-only audit verified complete PG14/18/socket logs: each TCP
 job ran 236 selected invocations, plus one actual socket query (473 combined).

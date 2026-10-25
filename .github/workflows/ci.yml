@@ -142,9 +142,11 @@ jobs:
           $taskRoot = Join-Path $env:RUNNER_TEMP "ignatius-conpty-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $taskBuild = Join-Path $taskRoot 'build'
           $taskEvidence = Join-Path $taskRoot 'runtime'
+          $taskCursorEvidence = Join-Path $taskRoot 'cursor-runtime'
           $taskCargoHome = if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cargo' } else { [IO.Path]::GetFullPath($env:CARGO_HOME) }
           $taskCargoTarget = Join-Path $env:GITHUB_WORKSPACE 'target'
           & "$env:GITHUB_WORKSPACE/tests/support/windows_conpty/Build.ps1" -SourceRoot $env:GITHUB_WORKSPACE -BuildRoot $taskBuild -CargoHome $taskCargoHome -CargoTarget $taskCargoTarget -ExpectedRevision $env:GITHUB_SHA
+          & "$env:GITHUB_WORKSPACE/tests/support/windows_conpty/Run-Controls.ps1" -BuildManifest (Join-Path $taskBuild 'build-manifest.json') -EvidenceRoot $taskCursorEvidence -RunReviewedCursorDiagnostic
           & "$env:GITHUB_WORKSPACE/tests/support/windows_conpty/Run-Controls.ps1" -BuildManifest (Join-Path $taskBuild 'build-manifest.json') -EvidenceRoot $taskEvidence -RunReviewedCapabilityControls
       - name: Retain bounded Windows ConPTY evidence
         if: ${{ always() && matrix.name == 'Windows' && steps.windows-conpty.outcome != 'skipped' }}
@@ -170,6 +172,12 @@ jobs:
             ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/supervisor.stdout.bin
             ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/supervisor.stderr.bin
             ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/translated.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/summary.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/capture-manifest.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/controller.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/supervisor.stdout.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/supervisor.stderr.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/translated.bin
       - name: Terminal refusal and startup smoke test
         shell: bash
         run: |

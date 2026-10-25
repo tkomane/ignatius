@@ -1,7 +1,8 @@
 # W07-064 first ConPTY capability/control harness
 
-This is repaired review candidate 02 for test support, based on exact source
-`d6d65e717351d5e48c72bb28410a9e121917b060`. It changes no product source,
+This is the separate cursor-calibration review candidate, based on exact source
+`7d167a96103030914d12cda0e7f6ae2c5c903b84`. The original four capability/control
+paths and their acceptance assertions are preserved. It changes no product source,
 Cargo target/dependency, CLI option, fixture or CI workflow. It is not Windows
 runtime evidence until the integrator explicitly authorises and runs it on an
 actual Windows runner. The application contract is
@@ -11,8 +12,8 @@ SHA256 `7cd9fa8da74e009b815137be2f2403618ad74b3b56304ebe2ef9e6188ab2316b`.
 
 ## Bounded first scope
 
-`Run-Controls.ps1` offers exactly four fresh children/consoles, stopping on the
-first failure. It cannot run the later 24-path normal/error/panic matrix.
+`Run-Controls.ps1 -RunReviewedCapabilityControls` offers exactly four fresh
+children/consoles, stopping on the first failure. It cannot run the later 24-path normal/error/panic matrix.
 
 | Case | Meaning of success |
 | --- | --- |
@@ -152,10 +153,11 @@ expansion after a failed mandatory capability.
 ## Local validation boundary
 
 The portable C++ arithmetic/parser tests and PowerShell receipt tests can run
-on macOS without native calls. Local safe Rust links the actual Cargo-selected
-non-test library but returns an explicit unsupported error before acquiring a
-terminal. Its Windows-only `AsRawHandle` branch and the native Windows host need
-actual Windows/MSVC compilation. The non-Windows host stub exits 77. Neither
+on macOS without native calls. A standalone Rust build must link the actual
+Cargo-selected non-test library; its non-Windows route returns an explicit
+unsupported error before acquiring a terminal. This calibration candidate uses
+Rust formatting only locally. Its Windows-only `AsRawHandle` branch and the
+native Windows host need actual Windows/MSVC compilation. The non-Windows host stub exits 77. Neither
 local compile, stub nor synthetic receipt tests count as a Windows child case.
 
 Native API references were checked on 25 October 2026:
@@ -168,3 +170,84 @@ and [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job
 and [nonblocking GetOverlappedResult](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult).
 Additional named-pipe API fetches were unavailable through the current browser;
 Windows SDK compilation and hosted capability evidence remain required.
+
+
+## Separate cursor-routing calibration
+
+The additional authoritative immutable contract is
+`/private/tmp/ignatius-w07-cursor-calibration-contract-20261025.md`, SHA256
+`0cc81e4bdcd68692a155911463cd7aba279e7d03afac300c41b0811c5df5f286`.
+The existing default capability predicate and its actual failed cursor sensor
+run at `7d167a9` remain unchanged. This diagnostic has a separate explicit
+selection, no implicit invocation, and cannot be combined with the four cases:
+
+```powershell
+./Run-Controls.ps1 -BuildManifest C:\owned\build\build-manifest.json `
+  -EvidenceRoot C:\owned\cursor-runtime -RunReviewedCursorDiagnostic
+```
+
+The build manifest retains its legacy scope and adds only
+`cursor_routing_diagnostic=true`. It remains `BuildRoot/build-manifest.json`.
+The calibration reuses the original supervisor/worker/Rust-child topology and
+owned Job, pipe authentication, exact stable Child registration, positive
+console-attachment attestation, environment, output bounds and absolute
+20/25-second deadlines. The Rust child launches exactly one native actor before
+baseline and waits it. That actor retains its CONIN$/CONOUT$ handles throughout
+all nine ordered stages; no new observer enters between a Hide and its query.
+No product Guard is acquired in this selection.
+
+| Index | Stage | Writer/change before query |
+| --- | --- | --- |
+| 0 | baseline-main | Phase marker, seeded cooked/VT/visible baseline |
+| 1 | native-hidden | Marker then native cursor setter false |
+| 2 | native-shown | Marker then native cursor setter true |
+| 3 | main-vt-hidden | Fixed VT Hide plus marker in one write |
+| 4 | main-vt-shown | Fixed VT Show plus marker in one write |
+| 5 | alternate-entered | Fixed VT alternate entry plus marker |
+| 6 | alternate-vt-hidden | Fixed VT Hide plus marker in alternate |
+| 7 | alternate-vt-shown | Fixed VT Show plus marker, observed before exit |
+| 8 | restored-main | Ordinary VT main return plus marker, then baseline restore |
+
+Each marker is `W07C-<nonce>-<index>` at row 2, column 1. A full synchronous
+`WriteConsoleW` to the retained output handle is followed by a complete active
+buffer readback of that marker before the cursor query. Native setters keep the
+baseline cursor size; no intervening console write follows those setters before
+their query. Marker readback is a parser/buffer fence only. It is not cursor
+state proof, an emulator response or a rendering claim. The retained-handle route
+is explicit so a main/alternate sensor routing difference stays observable.
+
+Every stage retains the sentinel API's actual BOOL/error and its requested and
+returned character counts. A successful short read is not alternate absence:
+completion requires requested=`4+nonce length` and returned=requested in all
+nine stages. A successful full read with different content can establish that
+sentinel absence, without inventing a native error for TRUE-short reads.
+Restoration separately records all three verification Get* BOOL/error outcomes,
+actual input/output masks and cursor size/visibility, and their own QPC time.
+No query short-circuits an attempted later query. These earlier restore facts
+must independently match the seeded baseline and precede the distinct stage8
+requery; the later query cannot substitute for them. The diagnostic-only D/T
+wire shapes are exactly 30/23 bounded tokens; legacy O/P/A/C shapes stay intact.
+
+The separate receipt has nine stage masks, cursor sizes/visibility, API outcome
+and immediate error pairs, sentinel/marker observations, native QPC observation
+and supervisor acknowledgement clocks, and final restoration/owned cleanup
+facts. `diagnostic_complete` means those required facts and bounds completed;
+`product_acceptance` and `cursor_capability_accepted` are always false. Three
+separate sensor labels require actual hidden/shown values for native setters,
+main VT and alternate VT respectively. A constant visibility sensor can complete
+a diagnostic with its sensor labels false; it cannot pass the original Guard
+capability. API, fence, order, identity, restoration, deadline or cleanup failure
+stops this diagnostic with retained evidence.
+
+Only these bounded native evidence files are suitable for the later upload:
+`summary.json`, `capture-manifest.json`, and
+`cursor-routing/{controller.json,supervisor.stdout.bin,supervisor.stderr.bin,translated.bin}`.
+Build identities/logs are the existing separately reviewed narrow list, not the
+whole build/cache/temp tree. Paste, mode-25 query, an alt=false Guard, hidden
+alternate exit pairing, wrong-ownership/error/panic controls, the full 24 paths
+and Windows 11/Windows Terminal hand use remain outside this diagnostic.
+
+For this candidate, local portable C++/PowerShell checks, actual emitted-JSON
+validation, AST parsing and Rust formatting are separate evidence. No Cargo,
+Windows/MSVC compile, native child or old frozen cache is run or changed locally.
+The first reviewed hosted build must establish those platform-specific facts.

@@ -3,6 +3,7 @@
 #ifndef _WIN32
 #include <iostream>
 #include <memory>
+#include <iterator>
 int main() { std::cerr << "W07-064 native host requires actual Windows; no native evidence\n"; return 77; }
 #else
 #define WIN32_LEAN_AND_MEAN
@@ -16,6 +17,7 @@ int main() { std::cerr << "W07-064 native host requires actual Windows; no nativ
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -241,6 +243,96 @@ int worker(const std::wstring& kind, const std::wstring& guard, const std::wstri
     return 0;
 }
 const char* phase_name(w07::Phase p) { return p == w07::Phase::baseline ? "baseline" : p == w07::Phase::acquired ? "acquired" : "restored"; }
+
+w07::ApiResult capture_api(BOOL okay) { return {okay != FALSE, okay ? 0U : static_cast<std::uint32_t>(GetLastError())}; }
+void append_api(std::ostream& out, const w07::ApiResult& api) { out << ' ' << api.ok << ' ' << api.error; }
+std::wstring wide_ascii(const std::string& value) { return {value.begin(),value.end()}; }
+struct CalibrationReset {
+    HANDLE input, output; DWORD input_mode, output_mode; CONSOLE_CURSOR_INFO cursor; bool done{}; bool available{true};
+    w07::CalibrationRestore restore() {
+        w07::CalibrationRestore r;
+        r.api[0]=capture_api(SetConsoleMode(input,input_mode));
+        r.api[1]=capture_api(SetConsoleMode(output,output_mode));
+        r.api[2]=capture_api(SetConsoleCursorInfo(output,&cursor));
+        DWORD in{},out{};CONSOLE_CURSOR_INFO current{};
+        // Each verification executes and retains its own native BOOL/error,
+        // including after an earlier failure. These facts precede stage8.
+        r.verification[0]=capture_api(GetConsoleMode(input,&in));
+        r.verification[1]=capture_api(GetConsoleMode(output,&out));
+        r.verification[2]=capture_api(GetConsoleCursorInfo(output,&current));
+        r.input=in;r.output=out;r.size=current.dwSize;r.visible=current.bVisible!=FALSE;
+        r.baseline_restored=true;
+        for(const auto& api:r.api)r.baseline_restored=r.baseline_restored&&w07::api_ok(api);
+        for(const auto& api:r.verification)r.baseline_restored=r.baseline_restored&&w07::api_ok(api);
+        r.baseline_restored=r.baseline_restored&&in==input_mode&&out==output_mode&&current.dwSize==cursor.dwSize&&current.bVisible==cursor.bVisible;
+        r.verified=ticks();done=true;return r;
+    }
+    ~CalibrationReset() {
+        if(available&&!done) {
+            // Emergency attempt only in this owned console. It cannot complete
+            // a diagnostic, and remains under the outside process deadline.
+            const wchar_t leave[]=L"\x1b[?1049l";DWORD ignored{};
+            WriteConsoleW(output,leave,static_cast<DWORD>(std::size(leave)-1),&ignored,nullptr);
+            try { (void)restore(); } catch (...) { }
+        }
+    }
+};
+int calibrate_actor(HANDLE input,HANDLE output,const std::wstring& pipe,const std::wstring& nonce,const std::wstring& sentinel) {
+    w07::CalibrationInit init;DWORD in{},out{};CONSOLE_CURSOR_INFO cursor{};
+    init.api[0]=capture_api(GetConsoleMode(input,&in));init.api[1]=capture_api(GetConsoleMode(output,&out));init.api[2]=capture_api(GetConsoleCursorInfo(output,&cursor));
+    const bool readable=w07::api_ok(init.api[0])&&w07::api_ok(init.api[1])&&w07::api_ok(init.api[2])&&cursor.dwSize>=1&&cursor.dwSize<=100;
+    init.input=(in|ENABLE_PROCESSED_INPUT|ENABLE_LINE_INPUT|ENABLE_ECHO_INPUT|ENABLE_EXTENDED_FLAGS)&~(ENABLE_MOUSE_INPUT|ENABLE_WINDOW_INPUT|ENABLE_QUICK_EDIT_MODE|ENABLE_VIRTUAL_TERMINAL_INPUT);
+    init.output=out|ENABLE_VIRTUAL_TERMINAL_PROCESSING;init.size=cursor.dwSize;init.expected=static_cast<std::uint32_t>(sentinel.size());
+    if(readable) {
+        cursor.bVisible=TRUE;
+        init.api[3]=capture_api(SetConsoleMode(input,init.input));init.api[4]=capture_api(SetConsoleMode(output,init.output));init.api[5]=capture_api(SetConsoleCursorInfo(output,&cursor));
+        DWORD n{};init.api[6]=capture_api(WriteConsoleOutputCharacterW(output,sentinel.data(),static_cast<DWORD>(sentinel.size()),COORD{0,0},&n));init.written=n;
+    }
+    CalibrationReset reset{input,output,init.input,init.output,cursor,false,readable};
+    init.observed=ticks();
+    std::ostringstream initial;initial<<"I "<<ascii(nonce);for(const auto& api:init.api)append_api(initial,api);
+    initial<<' '<<init.written<<' '<<init.expected<<' '<<init.input<<' '<<init.output<<' '<<init.size<<' '<<static_cast<std::uint32_t>(init.observed)<<' '<<static_cast<std::uint32_t>(init.observed>>32);send(pipe,initial.str());
+    if(!readable)return 2; // No mutation occurred without readable restoration facts.
+    bool operations=true;for(const auto& api:init.api)operations=operations&&w07::api_ok(api);operations=operations&&init.written==init.expected;
+    auto observe=[&](std::uint32_t index,w07::CalibrationRestore* final_restore) {
+        w07::CalibrationStage row;row.sequence=index;row.actor=GetCurrentProcessId();
+        const auto marker=wide_ascii(w07::calibration_marker(ascii(nonce),index));const auto payload=wide_ascii(w07::calibration_payload(ascii(nonce),index));
+        row.expected=static_cast<std::uint32_t>(payload.size());DWORD n{};
+        row.write=capture_api(WriteConsoleW(output,payload.data(),static_cast<DWORD>(payload.size()),&n,nullptr));row.written=n;
+        std::wstring found_marker(marker.size(),L'\0');n=0;
+        row.fence=capture_api(ReadConsoleOutputCharacterW(output,found_marker.data(),static_cast<DWORD>(found_marker.size()),COORD{0,1},&n));
+        row.marker_seen=row.fence.ok&&n==marker.size()&&found_marker==marker;
+        // Native setters follow the marker; no later console write or actor
+        // launch intervenes between that setter and its cursor query.
+        row.setter_attempted=index==1||index==2||index==8;
+        if(index==1||index==2) { auto target=cursor;target.bVisible=index==2;row.setter=capture_api(SetConsoleCursorInfo(output,&target)); }
+        if(index==8) { *final_restore=reset.restore();row.setter=final_restore->api[2]; }
+        DWORD current_in{},current_out{};CONSOLE_CURSOR_INFO current{};
+        row.query[0]=capture_api(GetConsoleMode(input,&current_in));row.query[1]=capture_api(GetConsoleMode(output,&current_out));row.query[2]=capture_api(GetConsoleCursorInfo(output,&current));
+        std::wstring found(sentinel.size(),L'\0');n=0;row.query[3]=capture_api(ReadConsoleOutputCharacterW(output,found.data(),static_cast<DWORD>(found.size()),COORD{0,0},&n));
+        row.sentinel_expected=static_cast<std::uint32_t>(sentinel.size());row.sentinel_read=n;
+        row.input=current_in;row.output=current_out;row.size=current.dwSize;row.visible=current.bVisible!=FALSE;row.sentinel_seen=row.query[3].ok&&n==sentinel.size()&&found==sentinel;row.observed=ticks();
+        std::ostringstream line;line<<"D "<<ascii(nonce)<<' '<<row.sequence;for(const auto& api:row.query)append_api(line,api);
+        line<<' '<<row.setter_attempted;append_api(line,row.setter);append_api(line,row.write);line<<' '<<row.written<<' '<<row.expected;append_api(line,row.fence);
+        line<<' '<<row.input<<' '<<row.output<<' '<<row.size<<' '<<row.visible<<' '<<row.sentinel_seen<<' '<<row.marker_seen<<' '<<static_cast<std::uint32_t>(row.observed)<<' '<<static_cast<std::uint32_t>(row.observed>>32)<<' '<<row.sentinel_expected<<' '<<row.sentinel_read;send(pipe,line.str());
+        bool okay=w07::api_ok(row.write)&&w07::api_ok(row.fence)&&row.marker_seen&&row.written==row.expected&&row.sentinel_expected==4+nonce.size()&&row.sentinel_read==row.sentinel_expected;
+        for(const auto& api:row.query)okay=okay&&w07::api_ok(api);
+        return okay&&(!row.setter_attempted||w07::api_ok(row.setter));
+    };
+    if(operations)for(std::uint32_t index=0;index<8;++index) { if(!observe(index,nullptr)) { operations=false;break; } }
+    w07::CalibrationRestore restore;
+    if(operations)operations=observe(8,&restore);
+    else {
+        // Failed measurements still get a bounded baseline recovery attempt;
+        // no skipped stage can be reinterpreted as a complete diagnostic.
+        const wchar_t leave[]=L"\x1b[?1049l";DWORD n{};WriteConsoleW(output,leave,static_cast<DWORD>(std::size(leave)-1),&n,nullptr);restore=reset.restore();
+    }
+    // Observation time follows the final cursor query, not just setter return.
+    restore.observed=ticks();std::ostringstream final;final<<"T "<<ascii(nonce);for(const auto& api:restore.api)append_api(final,api);
+    for(const auto& api:restore.verification)append_api(final,api);
+    final<<' '<<restore.input<<' '<<restore.output<<' '<<restore.size<<' '<<restore.visible<<' '<<restore.baseline_restored<<' '<<static_cast<std::uint32_t>(restore.verified)<<' '<<static_cast<std::uint32_t>(restore.verified>>32)<<' '<<static_cast<std::uint32_t>(restore.observed)<<' '<<static_cast<std::uint32_t>(restore.observed>>32);send(pipe,final.str());
+    return operations&&restore.baseline_restored ? 0 : 2;
+}
 int probe(const std::wstring& pipe, const std::wstring& nonce, const std::wstring& sentinel, const std::wstring& operation, const std::wstring& phase, DWORD guard_pid) {
     require(token(nonce) && token(sentinel), "probe controlled token");
     // Positive console attachment BEFORE opening/mutating native console state.
@@ -255,6 +347,7 @@ int probe(const std::wstring& pipe, const std::wstring& nonce, const std::wstrin
     Handle input(CreateFileW(L"CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr));
     Handle output(CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr));
     require(input && output, "actual CONIN$/CONOUT$ handles");
+    if (operation == L"calibrate") return calibrate_actor(input.value,output.value,pipe,nonce,sentinel);
     if (operation == L"seed") {
         DWORD in{}, out{}; require(GetConsoleMode(input.value, &in) && GetConsoleMode(output.value, &out), "native baseline modes");
         in |= ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_EXTENDED_FLAGS;
@@ -293,12 +386,32 @@ void emit(const Receipt& r, w07::Case kind, std::uint64_t bytes, bool io_quiesce
     bool first = true; for (const auto& o : r.observations) { if (!first) std::cout << ','; first = false; std::cout << "{\"phase\":\"" << phase_name(o.phase) << "\",\"input_ok\":" << o.input_ok << ",\"output_ok\":" << o.output_ok << ",\"cursor_ok\":" << o.cursor_ok << ",\"buffer_ok\":" << o.buffer_ok << ",\"input_mask\":" << o.input << ",\"output_mask\":" << o.output << ",\"cursor_visible\":" << o.cursor_visible << ",\"sentinel_seen\":" << o.sentinel_seen << ",\"native_error\":" << o.native_error << '}'; }
     std::cout << "]}\n";
 }
+
+void json_api(const w07::ApiResult& api) {std::cout<<"{\"ok\":"<<api.ok<<",\"error\":"<<api.error<<'}';}
+template<std::size_t N>void json_apis(const std::array<w07::ApiResult,N>& apis) {std::cout<<'[';bool first=true;for(const auto& api:apis){if(!first)std::cout<<',';first=false;json_api(api);}std::cout<<']';}
+void emit_calibration(const Receipt& r,const w07::CalibrationInit& init,const std::vector<w07::CalibrationStage>& stages,const w07::CalibrationRestore& restore,const w07::CalibrationContext& context,bool actor_waited,DWORD actor_exit,bool exact_job_actor,bool io_quiescent,std::string_view nonce) {
+    const bool complete=r.success;
+    auto truth=[](bool value){return value?"true":"false";};
+    std::cout<<"{\"schema\":1,\"case\":\"cursor-routing\",\"native_windows\":true,\"diagnostic_complete\":"<<truth(complete)<<",\"product_acceptance\":false,\"cursor_capability_accepted\":false,\"failure\":\"";
+    for(char ch:r.failure)std::cout<<(ch=='"'||ch=='\\'||static_cast<unsigned char>(ch)<32?'_':ch);
+    std::cout<<"\",\"actor_pid\":"<<context.actor<<",\"observer_registrations\":"<<context.registrations<<",\"attachment_attestations\":"<<context.attachments<<",\"actor_waited\":"<<actor_waited<<",\"actor_exit\":"<<actor_exit<<",\"exact_job_actor\":"<<exact_job_actor<<",\"child_pid\":"<<r.child_pid<<",\"unassigned_terminated\":"<<r.unassigned_terminated<<",\"unassigned_waited\":"<<r.unassigned_waited<<",\"child_exit\":"<<r.child_exit<<",\"worker_exit\":"<<r.worker_exit<<",\"exact_job_worker\":"<<r.owned_worker<<",\"exact_job_guard\":"<<r.owned_guard<<",\"guard_waited\":"<<r.guard_waited<<",\"worker_waited\":"<<r.worker_waited<<",\"cleanup_confirmed\":"<<r.clean<<",\"control_io_cleanup_confirmed\":"<<io_quiescent<<",\"job_active_processes\":"<<r.job_remaining<<",\"output_seen\":"<<r.seen<<",\"output_kept\":"<<r.kept<<",\"output_error\":"<<r.output_error<<",\"control_bytes\":"<<context.control_bytes;
+    std::cout<<",\"qpc_frequency\":"<<frequency()<<",\"clocks\":{\"start\":"<<r.start<<",\"registered\":"<<r.registered<<",\"resume_ack\":"<<r.resumed<<",\"guard_wait\":"<<r.waited<<",\"cleanup\":"<<r.cleanup<<",\"end\":"<<r.end<<"},\"writer_route\":\"WriteConsoleW retained CONOUT$\",\"handle_route\":\"one retained CONIN$/CONOUT$ actor\",\"fence_meaning\":\"parser-buffer-only\",\"sensor_capabilities\":{\"native_setter\":"<<truth(complete&&w07::calibration_transition(stages,1,2))<<",\"main_vt\":"<<truth(complete&&w07::calibration_transition(stages,3,4))<<",\"alternate_vt\":"<<truth(complete&&w07::calibration_transition(stages,6,7))<<"},\"initialization\":{\"api\":";
+    json_apis(init.api);std::cout<<",\"written\":"<<init.written<<",\"expected\":"<<init.expected<<",\"input_mask\":"<<init.input<<",\"output_mask\":"<<init.output<<",\"cursor_size\":"<<init.size<<",\"observed_qpc\":"<<init.observed<<"},\"stages\":[";
+    bool first=true;for(const auto& row:stages){if(!first)std::cout<<',';first=false;
+        std::cout<<"{\"sequence\":"<<row.sequence<<",\"phase\":\""<<w07::calibration_stage_name(row.sequence)<<"\",\"marker\":\""<<w07::calibration_marker(nonce,row.sequence)<<"\",\"actor_pid\":"<<row.actor<<",\"query\":";json_apis(row.query);
+        std::cout<<",\"setter_attempted\":"<<row.setter_attempted<<",\"setter\":";json_api(row.setter);std::cout<<",\"write\":";json_api(row.write);std::cout<<",\"fence\":";json_api(row.fence);
+        std::cout<<",\"written\":"<<row.written<<",\"expected\":"<<row.expected<<",\"input_mask\":"<<row.input<<",\"output_mask\":"<<row.output<<",\"cursor_size\":"<<row.size<<",\"cursor_visible\":"<<row.visible<<",\"sentinel_seen\":"<<row.sentinel_seen<<",\"sentinel_expected\":"<<row.sentinel_expected<<",\"sentinel_read\":"<<row.sentinel_read<<",\"marker_seen\":"<<row.marker_seen<<",\"observed_qpc\":"<<row.observed<<",\"acknowledged_qpc\":"<<row.acknowledged<<'}';
+    }
+    std::cout<<"],\"restoration\":{\"api\":";json_apis(restore.api);std::cout<<",\"verification\":";json_apis(restore.verification);std::cout<<",\"input_mask\":"<<restore.input<<",\"output_mask\":"<<restore.output<<",\"cursor_size\":"<<restore.size<<",\"cursor_visible\":"<<restore.visible<<",\"verified_qpc\":"<<restore.verified<<",\"baseline_restored\":"<<restore.baseline_restored<<",\"observed_qpc\":"<<restore.observed<<"},\"paste_observation\":\"open-not-measured\"}\n";
+}
 int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& nonce, const std::wstring& work) {
     Receipt r; const auto outer = Clock::now() + 25s; const auto work_deadline = outer - 2s; auto phase_deadline = Clock::now() + 20s;
     // This non-inheritable Job handle is unnamed and NEVER passed/duplicated to
     // worker, guard or probe. Only the outside supervisor retains it.
     Handle job(CreateJobObjectW(nullptr, nullptr)); require(static_cast<bool>(job), "CreateJobObjectW"); JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{}; limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; require(SetInformationJobObject(job.value, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) != 0, "kill-on-close Job");
-    Handle guard_process, owned_probe; bool probe_attested = false; Child child; Security security; const std::wstring pipe_name = L"\\\\.\\pipe\\ignatius-w07-064-" + nonce; Server server(pipe_name, security, outer);
+    Handle guard_process, owned_probe; bool probe_attested = false; Child child;
+    w07::CalibrationInit calibration_init;w07::CalibrationRestore calibration_restore;std::vector<w07::CalibrationStage> calibration_stages;
+    std::uint32_t registrations=0;bool initialized=false,finished=false,actor_waited=false,exact_job_actor=false;DWORD actor_exit=STILL_ACTIVE; Security security; const std::wstring pipe_name = L"\\\\.\\pipe\\ignatius-w07-064-" + nonce; Server server(pipe_name, security, outer);
     try {
         STARTUPINFOW si{}; si.cb = sizeof(si); const std::wstring sentinel = L"W07-" + nonce;
         child = create(self(), {L"--worker", std::wstring(w07::case_name(kind), w07::case_name(kind) + strlen(w07::case_name(kind))), guard, pipe_name, nonce, sentinel, work}, work, &si, CREATE_NO_WINDOW);
@@ -307,7 +420,7 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
             require(Clock::now() < (std::min)(work_deadline, phase_deadline), "setup/case/outer deadline");
             server.connect((std::min)(work_deadline, phase_deadline));
             const auto pid = server.client(); Handle sender(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid)); require(static_cast<bool>(sender), "stable pipe client handle"); exact_job(sender.value, job.value); const auto sender_image = image(sender.value);
-            const auto line = server.read((std::min)(work_deadline, phase_deadline)); const auto parts = w07::words(line); require(parts.size() >= 2 && parts[1] == ascii(nonce), "control nonce/shape");
+            const auto line = server.read((std::min)(work_deadline, phase_deadline)); const auto parts = w07::words(line,kind==w07::Case::cursor_routing?32:16); require(parts.size() >= 2 && parts[1] == ascii(nonce), "control nonce/shape");
             const bool from_worker = pid == child.pid && same_path(sender_image, self());
             if (parts[0] == "R") {
                 require(from_worker && parts.size() == 5 && !guard_process, "single worker registration"); std::uint32_t n{}, low{}, high{}; require(w07::number(parts[2], n) && w07::number(parts[3], low) && w07::number(parts[4], high), "registration integers");
@@ -319,6 +432,8 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
             }
             else if (parts[0] == "H") { require(kind == w07::Case::hung && pid == r.child_pid && same_path(sender_image, guard) && parts.size() == 2 && !r.ready_ack && w07::required_phase_order(kind, r.observations), "positive HANG_READY identity/order"); }
             else if (parts[0] == "P") {
+                if(kind==w07::Case::cursor_routing)require(registrations==0,"single persistent calibration actor");
+                ++registrations;
                 require(pid == r.child_pid && same_path(sender_image, guard) && parts.size() == 5 && !owned_probe, "Rust actual observer handle registration");
                 std::uint32_t observer_pid{}, low{}, high{};
                 require(w07::number(parts[2], observer_pid) && w07::number(parts[3], low) && w07::number(parts[4], high), "observer handle integers");
@@ -326,6 +441,7 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
                 require(raw != 0 && raw <= static_cast<std::uint64_t>(UINTPTR_MAX), "observer native handle width"); HANDLE duplicate{};
                 require(DuplicateHandle(guard_process.value, reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(raw)), GetCurrentProcess(), &duplicate, PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, 0) != 0, "duplicate actual Rust Child observer handle");
                 owned_probe = Handle(duplicate); exact_job(owned_probe.value, job.value);
+                if(kind==w07::Case::cursor_routing)exact_job_actor=true;
                 require(GetProcessId(owned_probe.value) == observer_pid && same_path(image(owned_probe.value), self()) && WaitForSingleObject(owned_probe.value, 0) == WAIT_TIMEOUT, "live exact owned observer handle/image");
                 probe_attested = false;
             }
@@ -337,13 +453,28 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
                 const auto actual_birth = birth(owned_probe.value); const auto pipe_birth = birth(sender.value); require(actual_birth.dwLowDateTime == pipe_birth.dwLowDateTime && actual_birth.dwHighDateTime == pipe_birth.dwHighDateTime, "exact pipe client process creation identity");
                 probe_attested = true; ++r.attachment_attestations;
             }
+            else if (kind==w07::Case::cursor_routing&&(parts[0]=="I"||parts[0]=="D"||parts[0]=="T")) {
+                require(owned_probe&&probe_attested&&GetProcessId(owned_probe.value)==pid&&!from_worker&&same_path(sender_image,self()),"persistent calibration actor identity");
+                if(parts[0]=="I") {require(!initialized&&!finished&&calibration_stages.empty(),"one calibration initialization");const auto parsed=w07::parse_calibration_init(line,ascii(nonce));require(parsed.has_value(),"typed calibration initialization");calibration_init=*parsed;initialized=true;}
+                else if(parts[0]=="D") {require(initialized&&!finished&&calibration_stages.size()<w07::calibration_stage_count,"bounded ordered calibration stages");const auto parsed=w07::parse_calibration_stage(line,ascii(nonce),pid);require(parsed.has_value()&&parsed->sequence==calibration_stages.size(),"strict calibration sequence");calibration_stages.push_back(*parsed);}
+                else {require(initialized&&!finished,"one calibration restoration");const auto parsed=w07::parse_calibration_restore(line,ascii(nonce));require(parsed.has_value(),"typed calibration restoration");calibration_restore=*parsed;finished=true;}
+            }
             else if (parts[0] == "O") { require(!from_worker && same_path(sender_image, self()) && guard_process && owned_probe && probe_attested && GetProcessId(owned_probe.value) == pid, "attested native probe sender identity"); const auto observed = w07::parse_observation(line, ascii(nonce)); require(observed.has_value() && r.observations.size() < 3, "bounded native observation"); r.observations.push_back(*observed); owned_probe.close(); probe_attested = false; }
             else if (parts[0] == "C") {
                 require(from_worker && parts.size() == 8 && guard_process, "worker cleanup receipt"); std::array<std::uint32_t, 6> n{}; for (std::size_t i = 0; i < n.size(); ++i) require(w07::number(parts[i + 2], n[i]), "cleanup integers");
                 r.child_exit = n[0]; r.seen = n[1]; r.kept = n[2]; r.output_error = n[3]; r.clean = n[4] == 1 && n[5] == 1;
                 require(WaitForSingleObject(guard_process.value, 0) == WAIT_OBJECT_0, "guard actually exited before cleanup"); r.guard_waited = true; if (!r.waited) r.waited = ticks(); DWORD actual{}; require(GetExitCodeProcess(guard_process.value, &actual) && actual == r.child_exit, "matching actual guard exit"); r.cleanup = ticks();
+                if(kind==w07::Case::cursor_routing&&owned_probe) {
+                    actor_waited=WaitForSingleObject(owned_probe.value,0)==WAIT_OBJECT_0;
+                    if(actor_waited)require(GetExitCodeProcess(owned_probe.value,&actor_exit)!=0,"actual persistent actor exit query");
+                }
             } else { fail("control message allowlist"); }
             server.ack((std::min)(work_deadline, phase_deadline));
+            if(kind==w07::Case::cursor_routing&&parts[0]=="D")calibration_stages.back().acknowledged=ticks();
+            if(kind==w07::Case::cursor_routing&&parts[0]=="T") {
+                require(WaitForSingleObject(guard_process.value,remaining(phase_deadline,20000))==WAIT_OBJECT_0,"calibration Rust child deadline");r.guard_waited=true;r.waited=ticks();phase_deadline=work_deadline;
+                require(owned_probe&&WaitForSingleObject(owned_probe.value,0)==WAIT_OBJECT_0,"persistent actor actually exited");actor_waited=true;require(GetExitCodeProcess(owned_probe.value,&actor_exit)!=0,"persistent actor exit query");
+            }
             if (parts[0] == "H") {
                 r.ready_ack = true; r.ready = ticks();
                 // This is a direct wait on the stable, acknowledged child, not
@@ -369,12 +500,17 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
             Sleep(1); require(QueryInformationJobObject(job.value, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), nullptr) != 0, "final owned Job accounting"); r.job_remaining = accounting.ActiveProcesses;
         }
         require(r.clean && r.worker_exit == 0 && r.job_remaining == 0 && r.output_error == 0 && r.seen <= w07::output_limit && r.kept == r.seen, "complete bounded cleanup/output");
+        if(kind==w07::Case::cursor_routing) {
+            const w07::CalibrationContext context{owned_probe?GetProcessId(owned_probe.value):0,registrations,r.attachment_attestations,actor_waited&&r.owned_worker&&r.owned_guard&&server.quiescent(),r.seen,r.kept,server.bytes()};
+            require(initialized&&finished&&actor_waited&&actor_exit==0&&exact_job_actor&&r.child_exit==0&&w07::calibration_complete(calibration_init,calibration_stages,calibration_restore,context,ascii(nonce)),"cursor diagnostic incomplete or unsupported; measurements retained");
+        } else {
         require(w07::required_phase_order(kind, r.observations) && r.attachment_attestations == r.observations.size() && w07::baseline_valid(r.observations[0]), "native phase order/cooked baseline");
         if (kind == w07::Case::hung) require(r.child_exit == 124 && w07::hung_proven(r.ready_ack, r.deadline_elapsed, r.terminated, r.guard_waited, r.clean), "acknowledged owned hung-child control");
         else {
             require(r.child_exit == 0, "controlled guard child exit");
             if (kind == w07::Case::unrestored) require(!w07::restored(r.observations.front(), r.observations.back()) && r.observations.back().input_ok && r.observations.back().output_ok && r.observations.back().cursor_ok && w07::raw(r.observations.back()), "known unrestored mode detected");
             else { require(w07::restored(r.observations.front(), r.observations.back()), "native restoration of seeded baseline"); const auto& acquired = r.observations[1]; if (kind == w07::Case::no_guard) require(w07::restored(r.observations.front(), acquired), "no-guard stable control"); else require(acquired.input_ok && acquired.output_ok && acquired.cursor_ok && w07::raw(acquired) && (acquired.input & w07::mouse_bit) != 0 && !acquired.cursor_visible, "genuine raw/mouse/cursor acquisition capability"); }
+        }
         }
         r.success = true;
     } catch (const std::exception& error) {
@@ -390,7 +526,10 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
         if (guard_process) { r.guard_waited = WaitForSingleObject(guard_process.value, remaining(outer, 1000)) == WAIT_OBJECT_0; }
         if (child.process) { r.worker_waited = WaitForSingleObject(child.process.value, remaining(outer, 1000)) == WAIT_OBJECT_0; }
     }
-    r.end = ticks(); emit(r, kind, server.bytes(), server.quiescent()); return r.success ? 0 : 1;
+    r.end = ticks();
+    if(kind==w07::Case::cursor_routing){const w07::CalibrationContext context{owned_probe?GetProcessId(owned_probe.value):0,registrations,r.attachment_attestations,r.clean&&r.worker_waited&&r.guard_waited&&actor_waited,r.seen,r.kept,server.bytes()};emit_calibration(r,calibration_init,calibration_stages,calibration_restore,context,actor_waited,actor_exit,exact_job_actor,server.quiescent(),ascii(nonce));}
+    else emit(r, kind, server.bytes(), server.quiescent());
+    return r.success ? 0 : 1;
 }
 }
 int wmain(int argc, wchar_t** argv) {

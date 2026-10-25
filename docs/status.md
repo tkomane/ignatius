@@ -8,8 +8,12 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Current branch: `codex/windows-conpty-observation-2026-10-25`, from published
-`d6d65e7`. Parent PR32 remains at its unchanged D6 head. Notice source is saved in
+Current branch: `codex/windows-conpty-observation-2026-10-25`, published
+`7d167a9` in draft PR33, stacked on unchanged D6 in PR32. Windows has three
+native control passes and a failed cursor capability; the separate calibration
+is integrated locally after repaired source review. Root's calibration CI/contract/record changes
+are unpublished. Parent PR32's exact protected-main merge approval is pending.
+Earlier source-bound checkpoints follow. Notice source is saved in
 `d65024b`. W10-012's integrated notice
 implementation passed the complete local verifier: **1,370 outer harness cases,
 1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and
@@ -185,6 +189,52 @@ integrated source bytes. Budget/ownership/native code and first-four scope are
 unchanged; the primary admits the repeat after the normal pre-push gate.
 The failed run remains preserved and no native result is
 claimed. First evidence: `/private/tmp/ignatius-pr33-windows-first-40215610812-1/`.
+Repair `7d167a9` is now published after the installed full pre-push gate again
+passed all 1,432 cases with the same macOS socket skip. Clean 447-file source
+and 287 reachable revisions passed pinned Gitleaks. CI `40216991785` finished:
+12 jobs passed, scheduled drift skipped and Windows failed the capability
+cursor assertion after four actual children. No-guard, known-unrestored and
+acknowledged hung-child controls passed. Guard input masks were 423/152/423,
+with genuine raw/mouse transition/restoration; buffer sentinel was 1/0/1.
+Cursor queries succeeded but stayed visible 1/1/1, so capability remains failed.
+All four exact Jobs were empty, processes waited and output/control-I/O cleanup
+confirmed; the acknowledged hang interval was 257.6195 ms. Root verified all
+27 archive files, 17 capture entries and 447 source/nine helper hashes.
+Evidence: `/private/tmp/ignatius-pr33-windows-second-40216991785-1/`.
+The team is diagnosing sensor/active-buffer semantics without product changes,
+assertion weakening or matrix expansion. PR33 stays draft; parent PR32's
+specific protected-main merge approval remains unanswered.
+The root adopted a single separate cursor calibration in the existing contract:
+one persistent authenticated actor compares native setters and VT main/alternate
+cursor operations, with controlled marker readback and complete native facts.
+The implementation lane now owns only test-support changes in a fresh private
+`7d167a9` snapshot. The independent lane reviews the calibration design. Root
+owns canonical source/CI and any next native admission after frozen review;
+calibration source is integrated but no native run is admitted yet. Frozen contract input:
+`/private/tmp/ignatius-w07-cursor-calibration-contract-20261025.md`, SHA-256
+`0cc81e4bdcd68692a155911463cd7aba279e7d03afac300c41b0811c5df5f286`.
+Candidate freeze01 contains 60 root-verified artifacts and reported 53 portable
+C++/82 PowerShell/three actual-emitter synthetic checks, preserving prior26/52.
+Review01 blocked native admission on a short-sentinel-read gap: requested/
+actual read lengths must prove complete content before alternate absence.
+Repair02 captures individual restoration verification API results and all
+requested/actual sentinel counts. Root verified all 75 repaired artifact hashes,
+read the repaired fields and integrated all nine files byte-for-byte. Independent
+review accepted both repairs; 74 C++ and 103 PowerShell checks passed again in
+the canonical tree. Worker evidence separately records six synthetic emitter
+cases, two exact wire-emitter roundtrips, four AST parses and Rust formatting.
+The original immutable candidate remains preserved. The primary admits only
+the separate calibration and unchanged first four on this reviewed source,
+subject to the normal full pre-push publication gate; none has run yet.
+Root's separate diagnostic-before-capability CI wiring passed its meaningful
+red/green workflow contract, formatting, pinned Actionlint, PS AST and independent
+review. The 21-pattern evidence allowlist remains unpublished with the source.
+Freeze01: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-01/`.
+Accepted repair:
+`/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`,
+manifest `c44d1f1f3f8ea4e9c7455051cf32ccd447dd8a07ba80581f71c52a6ea7c810bc`;
+peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-20261025.md`,
+SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.
 Fresh CodeQL is pending retargeting to main because its existing base-main
 filter is preserved.
 The independent integration review accepted the installed-tool bootstrap and
@@ -2151,10 +2201,12 @@ These are real and none of them is hidden anywhere else:
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
    been driven by hand.
-7. **Terminal restoration is proven automatically on Unix**, by a test that runs
-   the client under a real pty and reads the bytes. The Windows equivalent needs
-   ConPTY and has not been written. Warp's own renderer and a live terminal
-   resize have not been exercised by hand; the pty runs use a forced size.
+7. **Terminal restoration is proven automatically on Unix**, by tests that run
+   owned real PTYs. Published `7d167a9` now has three actual Windows ConPTY control
+   passes and partial Guard raw/mouse/buffer evidence. Its hidden-cursor
+   capability check fails; calibration and full T055a acceptance remain open.
+   Warp's own renderer and a live terminal resize have not been exercised by
+   hand; the PTY runs use a forced size.
 8. **The secret scan was previously scanning nothing.** It walks the commit
    range of a push, which the default shallow checkout could not resolve, so it
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
@@ -2214,9 +2266,10 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W07:** pin and implement the owned Windows ConPTY capability/guard
-   observation slice. Use actual native modes/cursor/buffer evidence; preserve
-   T055a's remaining mode gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
+1. **W07:** calibrate the Windows cursor sensor under the owned native contract,
+   preserving `7d167a9`'s three control passes and failed capability. Admit the
+   Guard option/path matrix only after faithful observations; preserve T055a's
+   remaining gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
 2. **W10-008:** retain the separate notice and retained-data contracts; finish
    the incoming-allocation design without claiming driver/startup/RSS ceilings.
    Preserve cancellation, sticky privacy and unknown write outcomes.

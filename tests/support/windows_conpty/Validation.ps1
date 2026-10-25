@@ -101,3 +101,69 @@ function Get-W07InventoryBytes([string] $Directory) {
     }
     return $bytes
 }
+
+function Assert-W07Selection([bool]$Capability,[bool]$Diagnostic) {
+    Assert-W07 ($Capability -xor $Diagnostic) 'select exactly one reviewed capability or cursor diagnostic run'
+}
+function Assert-W07Api($Api) {
+    Assert-W07 ((Test-W07Flag $Api.ok) -and (Get-W07Number $Api.error) -eq 0) 'successful supported native API required'
+}
+function Assert-W07CursorDiagnostic($Receipt,[string] $Nonce) {
+    Assert-W07 ($Nonce -cmatch '^[A-Za-z0-9-]{1,64}$') 'controlled diagnostic nonce'
+    Assert-W07 ($Receipt.schema -eq 1 -and $Receipt.case -ceq 'cursor-routing' -and $Receipt.native_windows -is [bool] -and $Receipt.native_windows) 'typed native cursor diagnostic'
+    Assert-W07 ($Receipt.diagnostic_complete -is [bool] -and $Receipt.diagnostic_complete) 'diagnostic incomplete'
+    foreach($name in @('product_acceptance','cursor_capability_accepted')) { Assert-W07 ($Receipt.$name -is [bool] -and -not $Receipt.$name) 'diagnostic cannot accept product capability' }
+    Assert-W07 ([string]::IsNullOrEmpty($Receipt.failure)) 'completed diagnostic has no hidden failure'
+    foreach($name in @('actor_waited','exact_job_actor','exact_job_worker','exact_job_guard','guard_waited','worker_waited','cleanup_confirmed','control_io_cleanup_confirmed')) { Assert-W07 (Test-W07Flag $Receipt.$name) "positive diagnostic $name required" }
+    foreach($name in @('actor_exit','child_exit','worker_exit','job_active_processes','output_error')) { Assert-W07 ((Get-W07Number $Receipt.$name) -eq 0) "zero diagnostic $name required" }
+    $actor=Get-W07Number $Receipt.actor_pid
+    Assert-W07 ((Get-W07Number $Receipt.child_pid) -gt 0 -and $Receipt.child_pid -ne $actor) 'distinct stable Rust child and native actor identities'
+    Assert-W07 ($actor -gt 0 -and $Receipt.observer_registrations -eq 1 -and $Receipt.attachment_attestations -eq 1) 'exactly one persistent registered actor'
+    Assert-W07 ((Get-W07Number $Receipt.output_seen) -le 131072 -and $Receipt.output_seen -eq $Receipt.output_kept -and (Get-W07Number $Receipt.control_bytes) -le 65536) 'complete bounded diagnostic capture'
+    Assert-W07 ($Receipt.writer_route -ceq 'WriteConsoleW retained CONOUT$' -and $Receipt.handle_route -ceq 'one retained CONIN$/CONOUT$ actor' -and $Receipt.fence_meaning -ceq 'parser-buffer-only') 'declared retained writer/handle/parser-fence routes'
+    $frequency=Get-W07Number $Receipt.qpc_frequency;$c=$Receipt.clocks
+    Assert-W07 ($frequency -gt 0) 'positive diagnostic monotonic frequency'
+    foreach($name in @('start','registered','resume_ack','guard_wait','cleanup','end')) { $null=Get-W07Number $c.$name }
+    Assert-W07 ($c.start -gt 0 -and $c.start -le $c.registered -and $c.registered -le $c.resume_ack -and $c.resume_ack -le $c.guard_wait -and $c.guard_wait -le $c.cleanup -and $c.cleanup -le $c.end) 'diagnostic lifecycle clock order'
+    Assert-W07 (([decimal]$c.end-$c.start) -le 25*$frequency -and ([decimal]$c.guard_wait-$c.start) -le 20*$frequency) 'one diagnostic deadline'
+    $initial=$Receipt.initialization;Assert-W07 (@($initial.api).Count -eq 7) 'seven initialization API outcomes'
+    foreach($api in $initial.api) { Assert-W07Api $api }
+    Assert-W07 ((Get-W07Number $initial.expected) -eq (4+$Nonce.Length) -and $initial.written -eq $initial.expected) 'whole baseline sentinel write'
+    foreach($name in @('input_mask','output_mask','cursor_size','observed_qpc')) { $null=Get-W07Number $initial.$name }
+    Assert-W07 (($initial.input_mask -band 7) -eq 7 -and ($initial.input_mask -band 16) -eq 0 -and ($initial.output_mask -band 4) -ne 0 -and $initial.cursor_size -ge 1 -and $initial.cursor_size -le 100) 'seeded diagnostic baseline'
+    Assert-W07 ($initial.observed_qpc -ge $c.resume_ack) 'actor attached before baseline observation'
+    $rows=@($Receipt.stages);Assert-W07 ($rows.Count -eq 9) 'exactly nine diagnostic stages'
+    $names=@('baseline-main','native-hidden','native-shown','main-vt-hidden','main-vt-shown','alternate-entered','alternate-vt-hidden','alternate-vt-shown','restored-main')
+    $prefix=@('','','',"$([char]27)[?25l","$([char]27)[?25h","$([char]27)[?1049h","$([char]27)[?25l","$([char]27)[?25h","$([char]27)[?1049l")
+    $previous=$initial.observed_qpc;$previousAck=0
+    for($i=0;$i -lt 9;++$i) {
+        $row=$rows[$i];Assert-W07 ($row.sequence -eq $i -and $row.phase -ceq $names[$i] -and $row.actor_pid -eq $actor) 'persistent actor and exact phase order'
+        Assert-W07 (@($row.query).Count -eq 4) 'four query API outcomes';foreach($api in $row.query){Assert-W07Api $api}
+        foreach($api in @($row.write,$row.fence)){Assert-W07Api $api}
+        $setter=$i -eq 1 -or $i -eq 2 -or $i -eq 8;Assert-W07 ((Test-W07Flag $row.setter_attempted) -eq $setter) 'native setters only in declared phases'
+        if($setter){Assert-W07Api $row.setter}else{Assert-W07 (-not (Test-W07Flag $row.setter.ok) -and $row.setter.error -eq 0) 'unattempted setter is not success'}
+        $marker="W07C-$Nonce-$i";$expected=($prefix[$i]+"$([char]27)[2;1H"+$marker).Length
+        Assert-W07 ($row.marker -ceq $marker -and (Test-W07Flag $row.marker_seen) -and $row.expected -eq $expected -and $row.written -eq $expected) 'phase-unique nonce marker after complete fixed VT write'
+        Assert-W07 ($row.input_mask -eq $initial.input_mask -and $row.output_mask -eq $initial.output_mask -and $row.cursor_size -ge 1 -and $row.cursor_size -le 100) 'full masks and valid cursor size'
+        if($i -eq 1 -or $i -eq 2){Assert-W07 ($row.cursor_size -eq $initial.cursor_size) 'native setter preserves baseline cursor size'}
+        Assert-W07 ((Get-W07Number $row.sentinel_expected) -eq (4+$Nonce.Length) -and (Get-W07Number $row.sentinel_read) -eq $row.sentinel_expected) 'full sentinel read required before content absence'
+        Assert-W07 ((Test-W07Flag $row.sentinel_seen) -eq ($i -lt 5 -or $i -eq 8)) 'main/alternate/main buffer sentinel phases'
+        $null=Test-W07Flag $row.cursor_visible
+        foreach($name in @('observed_qpc','acknowledged_qpc')){$null=Get-W07Number $row.$name}
+        Assert-W07 ($row.observed_qpc -ge $previous -and $row.acknowledged_qpc -ge $row.observed_qpc -and $row.acknowledged_qpc -ge $previousAck -and $row.acknowledged_qpc -le $c.guard_wait) 'monotonic native observation/phase acknowledgements'
+        $previous=$row.observed_qpc;$previousAck=$row.acknowledged_qpc
+    }
+    Assert-W07 ($rows[0].cursor_size -eq $initial.cursor_size -and (Test-W07Flag $rows[0].cursor_visible) -and $rows[8].cursor_visible -eq $rows[0].cursor_visible -and $rows[8].cursor_size -eq $rows[0].cursor_size) 'restored stated cursor baseline'
+    $restored=$Receipt.restoration;Assert-W07 (@($restored.api).Count -eq 3) 'three native restoration outcomes';foreach($api in $restored.api){Assert-W07Api $api}
+    Assert-W07 (@($restored.verification).Count -eq 3) 'three independent restoration verification outcomes'
+    foreach($api in $restored.verification){Assert-W07Api $api}
+    foreach($name in @('input_mask','output_mask','cursor_size','verified_qpc')){$null=Get-W07Number $restored.$name}
+    Assert-W07 ($restored.input_mask -eq $initial.input_mask -and $restored.output_mask -eq $initial.output_mask -and $restored.cursor_size -eq $initial.cursor_size -and (Test-W07Flag $restored.cursor_visible)) 'independent verified restoration equals seeded baseline'
+    Assert-W07 ($restored.verified_qpc -ge $rows[7].observed_qpc -and $restored.verified_qpc -le $rows[8].observed_qpc) 'restoration verification precedes separate stage8 observation'
+    Assert-W07 ((Test-W07Flag $restored.baseline_restored) -and $restored.observed_qpc -ge $previous -and $restored.observed_qpc -le $c.guard_wait) 'positive final restoration observation'
+    foreach($pair in @(@('native_setter',1,2),@('main_vt',3,4),@('alternate_vt',6,7))) {
+        $value=$Receipt.sensor_capabilities.($pair[0]);$observed=-not (Test-W07Flag $rows[$pair[1]].cursor_visible) -and (Test-W07Flag $rows[$pair[2]].cursor_visible)
+        Assert-W07 ($value -is [bool] -and $value -eq $observed) 'sensor label requires actual hidden/shown observations'
+    }
+    Assert-W07 ($Receipt.paste_observation -ceq 'open-not-measured') 'diagnostic leaves paste open'
+}

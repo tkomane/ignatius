@@ -102,7 +102,15 @@ fn run() -> io::Result<()> {
         ));
     }
     let case = arguments[0].as_str();
-    if !["no-guard", "known-unrestored", "hung-child", "capability"].contains(&case) {
+    if ![
+        "no-guard",
+        "known-unrestored",
+        "hung-child",
+        "capability",
+        "cursor-routing",
+    ]
+    .contains(&case)
+    {
         return Err(io::Error::other("case is outside first capability scope"));
     }
     let host = PathBuf::from(&arguments[1]);
@@ -117,6 +125,11 @@ fn run() -> io::Result<()> {
         ));
     }
     let (pipe, nonce, sentinel) = (&arguments[2], &arguments[3], &arguments[4]);
+    if case == "cursor-routing" {
+        // Exactly one native actor starts before baseline and owns all stages.
+        // This selection never acquires a product Guard or accepts capability.
+        return probe(&host, pipe, nonce, sentinel, "calibrate", "baseline");
+    }
     probe(&host, pipe, nonce, sentinel, "seed", "baseline")?;
     match case {
         "no-guard" => {

@@ -52,6 +52,54 @@ or unsupported answers. Record unsupported observations as gaps, never passes.
   and full T055a acceptance open. Do not claim that every current ConPTY drops
   2004 merely because a historical state-forwarding issue exists.
 
+## Cursor sensor calibration after the first native run
+
+Run `40216991785` at `7d167a9` passed the three controls but failed acquired
+cursor visibility. Raw/mouse masks and buffer sentinels transitioned/restored;
+the successful cursor query stayed visible in all phases. Preserve that failed
+capability and its assertion. Current Microsoft host source suggests that
+classic cursor visibility can refer to main-buffer context while VT output
+changes the active alternate cursor. This is a hypothesis for installed
+build26100, not an established product defect or a faithful alternate sensor.
+
+Before any matrix expansion, implement one separate calibration case in a
+fresh owned pseudoconsole. Keep one authenticated native actor attached from
+before baseline through all measurements, retaining its stable Child/Job and
+console handles. No new actor starts between Hide and its primary measurement.
+Reuse the existing containment, environment, absolute deadline, drainage,
+source identities and capture bounds; do not duplicate an ownership path.
+
+Record native cursor size/visibility, full input/output masks, API results and
+errors, active-buffer sentinel/phase marker, writer/handle route and monotonic
+phase acknowledgements. On main, compare native SetConsoleCursorInfo hidden/
+shown with fixed VT Hide/Show. Enter VT alternate, verify the sentinel change,
+repeat fixed Hide/Show observations and restore the main baseline. Preserve
+native setter outcomes as calibration facts, never insert a setter into an
+actual Guard observation to manufacture its result.
+
+For VT stages, verify a complete synchronous console write containing the
+sequence followed by a unique controlled marker, then read that marker from
+the active buffer before the query. This fences parser/buffer processing;
+neither that fence nor side-channel acknowledgement proves cursor state or
+external rendering. Do not infer readiness from sleeps or block indefinitely
+in FlushFileBuffers. Any paired leave-alternate experiment or real Guard with
+alternate=false is a later admission if this minimal calibration leaves an
+ambiguity; do not silently add it or a mode-25 query/reply emulator now.
+
+Select calibration explicitly and separately from the unchanged first-four
+runner. Its receipt distinguishes diagnostic completion, observed sensor
+capability and product acceptance. Constant/unsupported observations remain
+gaps. Successful cleanup or diagnostic completion cannot turn the existing
+capability failure into success or close W07-064/T055a/T051. Root reviews the
+immutable delta and CI/evidence interface before admitting a Windows run.
+
+Primary evidence checked 25 October 2026: Microsoft
+[output handle routing](https://raw.githubusercontent.com/microsoft/terminal/main/src/server/IoDispatchers.cpp),
+[cursor query](https://raw.githubusercontent.com/microsoft/terminal/main/src/host/getset.cpp),
+[VT cursor dispatch](https://raw.githubusercontent.com/microsoft/terminal/main/src/terminal/adapter/adaptDispatch.cpp)
+and [buffer routing](https://raw.githubusercontent.com/microsoft/terminal/main/src/host/screenInfo.cpp).
+Current main is not proven identical to the installed Windows binary.
+
 ## Cases and ordering
 
 After capability admission, use one fresh process/console per normal return,
