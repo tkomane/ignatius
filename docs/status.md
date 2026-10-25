@@ -8,8 +8,47 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Active branch: `codex/manual-themes-2026-10-25`, reusing the managed worktree
-from accepted `ffb86a1`. Root adopted the dated manual theme contract/plan and
+Accepted manual-theme branch: `codex/manual-themes-2026-10-25`, reusing the managed worktree
+from accepted `ffb86a1`. Published clean **`d92c416`** in
+[draft PR35](https://github.com/tkomane/ignatius/pull/35), stacked on PR34.
+The unchanged full pre-push hook repeated all 1,497 cases successfully; pinned
+Gitleaks passed the exact 444-file clean source and 291 non-merge commits among
+320 reachable local revisions. CI `40231713035` completed with **13 successful
+jobs and one intentional scheduled-fixture skip**. Actual merge `253ac7cc`
+matches head tree `00158901056a97195719d3e08026eeeff7234254`.
+Continuation now uses `codex/editor-caret-2026-10-25` from that same accepted
+head. Four owned post-publication records were carried forward intact. Root
+added FR-2529, T058 and a dated presentation/plan contract for the observed
+long-line editor caret clipping. An isolated worker is retaining the actual
+Buffer red before implementation; a separate native worker owns independent
+review. The actual 100x30 Buffer baseline has four meaningful failures and one
+passing short-line control: long ASCII draws zero caret cells; wide, combining
+and escaped-control cell hits name the wrong source scalar. Red log:
+`/private/tmp/ignatius-editor-eol-red-1di2ma1e/red.log`. Root's actual clean-d92
+100x30 PTY also clips the typed end sentinel, while Home restores the prefix;
+normal quit, alternate-screen exit and unchanged config passed, with no profile
+selected or SQL submitted. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-before-c0901prg/receipt.json`.
+Two preceding harness expectations incorrectly required unchanged words in a
+differential repaint; both are retained with normal child cleanup, not labelled
+product failures. T058 is now locally accepted: the derived horizontal view,
+shared completion/hit mapping and independently caught unfocused-zero-width
+repair passed 78 widget and 114 layout tests, Clippy/formatting and the complete
+1,515-harness / 1,207-library local verifier. PostgreSQL 18.6 plain/TLS ran;
+macOS socket is still skipped. Root verified both freezes, original tests and
+installed source and inspected seven synthetic images. The identical 100x30
+PTY repeat now shows the end sentinel, still restores the prefix with Home,
+quits zero and preserves config, without selecting a profile or submitting SQL.
+After receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-oarmp52a/receipt.json`.
+Full log: `/private/tmp/ignatius-t058-full-verify-20261025.log`
+(`03c40158ff7af92030466bd04d9ad3591c7b9b0bbbd0cfd502ee054ca0e8b462`).
+Commit, clean-source/history scans, normal publication and hosted acceptance
+are next; native appearance/hand use and release remain open.
+Read-only US6/US8/T032 readiness
+reviews are reflected in the roadmap; their unresolved policy dependencies
+remain open and mouse capture stays disabled.
+Root adopted the dated manual theme contract/plan and
 T028a test subset. Root integrated the five-file pure theme freeze after checking
 all 39 artifact hashes and reviewing the grammar, safe refusals and resolver.
 That lane passed 42 theme and 11 Results tests; four measured Null/comment
@@ -45,8 +84,11 @@ library cases and 25 summaries**, all six executed gates and actual PostgreSQL
 The macOS socket case remains skipped. T028a/T029/T030/T031/T033/T056/T057 record
 manual local implementation, including the configured-colour route.
 T028/T028b/T032 and whole-US5 completion stay open.
-Current source is uncommitted; clean-source/history scans, final independent
-integration review, publication and hosted/pinned/MSRV acceptance are next.
+Published source is locally/hosted verified; current post-publication acceptance
+notes are owned local documentation edits for the next meaningful checkpoint.
+Fresh main-targeted CodeQL, parent integration, native appearance/hand use and
+release remain open. PR32's already-requested protected-main approval is still
+pending; phone workflow-scope approval did not authorize that merge.
 Full log: `/private/tmp/ignatius-manual-themes-t057-verify-20261025.log`
 (SHA-256 `965e7cd3662408e9da11c3d59a3647c1bdda22aac32bd20b5dccd418496da914`).
 
@@ -57,8 +99,8 @@ delegating a narrow private CLI correction: explicit flag, configured choice,
 then auto facts, with plain/NO_COLOR/dumb absolute. Root reviewed and integrated
 the five-file correction after verifying all 208 frozen artifacts; 64 distinct
 focused cases and 27 actual doctor subprocess controls passed. The final full
-repeat above includes this correction. Publication/scans and hosted acceptance
-remain next.
+repeat above includes this correction. Source/history scans, publication and
+hosted platform/MSRV acceptance have now passed as recorded above.
 Root also confirmed T057 in the actual pre-fix local binary using three owned
 macOS PTYs and a synthetic profile picker: configured Custom/never emitted 119
 painted SGR sequences, explicit always emitted 119, and NO_COLOR plus always
@@ -70,6 +112,38 @@ The corrected binary changes configured never to zero painted SGRs. Explicit
 always and NO_COLOR control captures are byte-identical to before; all three
 sessions quit normally. After receipt:
 `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-qtg0xxks/receipt.json`.
+
+Independent hosted platform audit confirms the same 74 selected manual-theme/
+T056/T057 cases executed on Linux/macOS/Windows with Rust 1.97.1. Full harness/
+library totals were 1,497/1,189, 1,497/1,189 and 1,441/1,170. Startup/refusal smoke
+passed; doctor retains three explicit skips per platform. Rust 1.90 compilation,
+advisories/licences, workflow and release-scope gates passed. Six permitted
+duplicate-version warnings and three conditional Python archive-test guards
+remain qualified in the policy audit. PG14/18 plain/verified-TLS and one actual
+Linux socket passed; 473 selected invocations include pure/local tests and are
+not 473 live queries. Runtime-major guards and readiness support the live claims.
+
+The clean published local binary also completed a real palette keyboard cycle
+through dark/light/high-contrast/custom in an owned 180x40 macOS PTY, retaining
+typed SQL and exact config bytes, with normal quit and no connection selection
+or SQL execution. Earlier probe harness failures are retained: one stalled
+setup was terminated by exact owned PID; another assumed visible text at a
+clipped width; a later one used a wrong expected Light RGB. None is claimed as
+a product regression or passing journey. Final receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-cycle-pty-h7f9buo8/receipt.json`.
+
+Hosted platform receipt: `/private/tmp/ignatius-pr35-platform-audit-2u768bko/receipt.json`
+(28 artifacts, manifest `14b6a8b72446181242dd24d1fa256a35bc9b96d9e991ef06a41f0c7a53cd08d9`).
+Policy: `/private/tmp/ignatius-pr35-policy-audit-ziQQqR/RECEIPT.md`
+(37 artifacts, manifest `d0b7857d77b8c9fd7a437143cc86effdf62396a035121a4534f8151dbbce6131`).
+DB audit: `/private/tmp/ignatius-pr35-d92c416-db-audit-20261025.json`.
+Publication: `/private/tmp/ignatius-manual-d92c416-publication-20261025.json`.
+
+Next roadmap readiness: `/private/tmp/ignatius-t032-readiness-w4djagqv/ASSESSMENT.md`
+identifies late OSC reply/input ownership, staged guard, deadline/parser and
+doctor-provenance decisions before T032. It is a read-only, source-backed
+proposal, not an adopted input design or permission to enable auto. Continue
+the day-long goal without weakening the current explicit auto refusal.
 
 Theme freeze: `/private/tmp/ignatius-us5-theme-ffb86a1-z53t1vo8/pure-theme-freeze-01/`
 (manifest SHA-256 `edf823b9f4c69bb56ef2669e0501e3b230873a005a5197d12145a0fbfce11263`).

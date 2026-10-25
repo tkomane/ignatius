@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: long SQL lines keep the editor caret in view, with a fixed gutter
+  and matching completion/hit geometry for wide, combining and escaped-control
+  text. Horizontal viewing preserves source SQL, scalar columns and undo state.
 - New: manual custom themes inherit a built-in palette and validate every
   resolved colour before use, including inactive definitions. The command
   palette's Switch theme entry changes appearance for the current session,

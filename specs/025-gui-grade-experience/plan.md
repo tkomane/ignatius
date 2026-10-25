@@ -296,3 +296,19 @@ semantic modifiers and depth/glyph/density boundaries before full and rendered
 review. No RGB palette, custom parsing, runtime action, geometry or mouse change
 is included. W07's independently measured alternate-buffer cursor sensor gap
 remains open and is not resolved by this UI correction.
+
+### Long-line editor view correction - 2026-10-25
+
+W09's owned 100x30 PTY journey exposed a long SQL line being clipped while its
+caret was beyond the right edge. Source inspection confirms the renderer has
+only a derived vertical window; completion clamps a scalar column to the pane
+edge and hit mapping treats screen cells as scalar columns. T058 first retains
+an actual-Buffer failing reproduction, then shares one pure display-cell view
+between those three consumers. Root owns FR-2529, the presentation contract,
+records and integration; the worker owns only editor rendering/shared hit
+mapping and their sidecar tests in an isolated source copy. No editor/model
+state, dependency, terminal input, mouse default, SQL or effect change is
+included. Existing source text, source scalar columns, styles and vertical
+window remain authoritative. Independent review, rendered-cell inspection and
+the same-width owned-PTY repeat precede scoped acceptance; native hand use
+remains separate.

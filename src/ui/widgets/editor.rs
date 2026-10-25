@@ -1,3 +1,5 @@
+pub(super) mod view;
+
 use super::{action_key_label, overlay_block, pane_block, syntax_token};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -9,7 +11,6 @@ use crate::ui::layout::{
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -52,8 +53,13 @@ pub(crate) fn render_completion(
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let (line, column) = model.editor.position();
+    let (line, _) = model.editor.position();
     let gutter = model.editor.line_count().to_string().len().max(2);
+    let capacity = usize::from(inner.width).saturating_sub(gutter + 2);
+    if capacity == 0 {
+        return;
+    }
+    let view = view::viewport(&model.editor, capacity);
     let offset = (line.saturating_sub(1)).saturating_sub((inner.height as usize).saturating_sub(1));
     let cursor_y = inner
         .y
@@ -61,7 +67,7 @@ pub(crate) fn render_completion(
         .min(inner.y.saturating_add(inner.height.saturating_sub(1)));
     let cursor_x = inner
         .x
-        .saturating_add(u16::try_from(gutter + column + 1).unwrap_or(u16::MAX))
+        .saturating_add(u16::try_from(gutter + 2 + view.caret_cell).unwrap_or(u16::MAX))
         .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
 
     let unicode = !presentation.glyphs.is_ascii();
@@ -273,7 +279,10 @@ pub(crate) fn render_editor(
 
     let lines: Vec<&str> = text.split('\n').collect();
     let gutter = lines.len().to_string().len().max(2);
-    let (cursor_line, cursor_column) = model.editor.position();
+    let (cursor_line, _) = model.editor.position();
+    let capacity = usize::from(inner.width).saturating_sub(gutter + 2);
+    let viewport = view::viewport(&model.editor, capacity);
+    let (_, cursor) = view::caret_line(&model.editor);
 
     // The window follows the cursor rather than being stored, exactly as the
     // result grid's does. A scroll offset in the model would be a second source
@@ -297,7 +306,7 @@ pub(crate) fn render_editor(
     };
 
     let mut line_start = 0usize;
-    let mut rendered: Vec<Line> = Vec::with_capacity(height);
+
     for (index, source) in lines.iter().enumerate() {
         let number = index + 1;
         let start = line_start;
@@ -336,21 +345,19 @@ pub(crate) fn render_editor(
             Span::styled(line_marker, theme.style(line_marker_token)),
         ];
 
-        // Styles are decided per character and then merged into runs, because a
-        // token can be split by the cursor and a character can be escaped into
-        // several. Merging keeps the buffer of spans small.
-        let mut run = String::new();
-        let mut run_style: Option<Style> = None;
-        for (column, (byte, ch)) in source.char_indices().enumerate() {
-            // A block cursor drawn by the renderer, because the terminal's own
-            // cursor is hidden while the alternate screen is in use. Without it
-            // the editor would have no visible caret at all.
-            let is_cursor = focused && number == cursor_line && column + 1 == cursor_column;
+        let y = inner.y + u16::try_from(number - offset - 1).unwrap_or(0);
+        Line::from(std::mem::take(&mut spans)).render(Rect::new(inner.x, y, inner.width, 1), buf);
+        if capacity == 0 {
+            continue;
+        }
+        let text_x = inner.x + u16::try_from(gutter + 2).unwrap_or(0);
+        let line = view::LineView::new(source);
+        for unit in &line.units {
+            let is_cursor = focused && number == cursor_line && unit.source.contains(&cursor);
             let in_error_token = error_location
                 .and_then(|location| location.token.as_ref())
                 .is_some_and(|token| {
-                    let offset = start + byte;
-                    token.start <= offset && offset < token.end
+                    start + unit.source.start < token.end && token.start < start + unit.source.end
                 });
             let style = if is_cursor {
                 theme.style(Token::Selection)
@@ -359,27 +366,27 @@ pub(crate) fn render_editor(
             } else {
                 theme.style(syntax_token(crate::query::highlight::kind_at(
                     &syntax,
-                    start + byte,
+                    start + unit.source.start,
                 )))
             };
-            if run_style != Some(style) {
-                if let Some(previous) = run_style {
-                    spans.push(Span::styled(std::mem::take(&mut run), previous));
-                }
-                run_style = Some(style);
+            if let Some((cell, visible)) = unit.clipped(viewport.offset, capacity) {
+                buf.set_stringn(
+                    text_x + u16::try_from(cell).unwrap_or(0),
+                    y,
+                    visible,
+                    capacity - cell,
+                    style,
+                );
             }
-            run.push_str(&sanitize_for_display(&ch.to_string()));
         }
-        if let Some(previous) = run_style {
-            spans.push(Span::styled(run, previous));
+        if focused && number == cursor_line && viewport.blank_caret {
+            buf.set_stringn(
+                text_x + u16::try_from(viewport.caret_cell).unwrap_or(0),
+                y,
+                " ",
+                1,
+                theme.style(Token::Selection),
+            );
         }
-        // The cursor sitting past the last character still needs somewhere to be.
-        if focused && number == cursor_line && cursor_column > source.chars().count() {
-            spans.push(Span::styled(" ", theme.style(Token::Selection)));
-        }
-
-        rendered.push(Line::from(spans));
     }
-
-    Paragraph::new(rendered).render(inner, buf);
 }

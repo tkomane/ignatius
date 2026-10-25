@@ -516,6 +516,27 @@ when it is not.
 
 ## Phase 12: Polish and cross-cutting concerns
 
+- [x] T058 [W09] Reproduce the observed long-line editor caret clipping in
+  actual rendered cells, then implement FR-2529's derived horizontal view in
+  `src/ui/widgets/editor.rs` and the shared hit mapping in
+  `src/ui/widgets/mod.rs`. Keep tests in sidecars; prove completion alignment,
+  fixed gutter, resize/Home recovery, wide/combining/control text, accessible
+  styling and unchanged editor state. Obtain independent review, focused/full
+  verification and a repeated owned-PTY journey before closing this scoped
+  correction. Native terminal appearance and whole W09 acceptance stay open.
+
+  **Scoped evidence - 2026-10-25:** four actual Buffer failures plus a short
+  ASCII control preceded the horizontal-view implementation. Independent review
+  then found an unfocused zero-width hit mismatch; its own failing regression
+  precedes the focus-gate correction. Final 78 widget and 114 layout tests,
+  warnings-denied Clippy and formatting passed. Root verified the 49/38-artifact
+  freezes and original test preservation, inspected seven synthetic images and
+  passed the full local verifier (1,515 harness / 1,207 library cases). The same
+  100x30 owned macOS PTY script changes end-sentinel visibility from false to
+  true while Home, normal quit, terminal exit and config preservation pass.
+  PostgreSQL 18.6 plain/TLS ran; macOS socket remains skipped. Source/evidence
+  and native/hosted qualifications are in `docs/operations/verification.md`.
+
 - [ ] T046 Amend the narrative design documents in the same change as the
   final behaviour: `docs/design/theme-tokens.md` (painted surfaces,
   elevation, colour depth, the superseded Feature 007 override note),

@@ -56,6 +56,11 @@ revision advances once.
    newline, **when** it is inserted, **then** the stored text is the pasted
    text and the rendered view stays free of raw control sequences under the
    existing display-sanitising rules.
+5. **Given** a typed or pasted line extends beyond the editor's text width,
+   **when** its caret moves along the line or the pane is resized, **then**
+   the caret remains visible wherever text capacity is positive, the gutter
+   stays fixed and completion/hit geometry follows the same displayed cells,
+   with SQL, scalar position and undo history preserved (FR-2529 / T058).
 
 ### User Story 2 - The screen is a surface, not a transparency (Priority: P1)
 
@@ -580,6 +585,14 @@ output never contain banner bytes.
   identical on every row, quantized at 256, two flat bands at 16 colours,
   modifiers only with colour off; the product name MUST remain readable at
   every tier.
+- **FR-2529**: The focused SQL editor MUST keep its caret visible when a
+  line exceeds the available text width. Horizontal viewing MUST preserve
+  the fixed line-number/statement gutter, stored SQL, scalar cursor position,
+  undo history and existing vertical window. Drawing, completion anchoring
+  and editor hit regions MUST share display-cell geometry after the existing
+  display sanitisation. The dated editor-view section of
+  `contracts/presentation.md` pins clipping and Unicode behaviour. This is
+  the W09 correction for observed clipping, not mouse-dispatch acceptance.
 
 ### Security and Compatibility Requirements
 
