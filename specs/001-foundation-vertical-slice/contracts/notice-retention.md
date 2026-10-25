@@ -285,7 +285,8 @@ stale old events cannot become current or add the same counts again.
 Add one internal `PaletteCommand::NoticeDetails`, no new mandatory binding or
 configuration. Palette label `Server notice retention`; detail says `N omitted,
 M shortened; pending` (precision-safe). Entry remains discoverable after
-acknowledgement to inspect latest summary. Add one read-only `notice_details`
+acknowledgement to inspect latest summary, including that source's fixed
+omitted/shortened/abandoned counts with their precision. Add one read-only `notice_details`
 owner with usize scroll and actual-key rail. Show fixed client counts, limits,
 scope, `Observed messages only; SQL outcome is unchanged`, and the distinction
 between limit omission/shortening/abandonment. This first slice does not invent
@@ -406,7 +407,9 @@ Substeps are sequential checkpoints, not parallel edits of protected seams.
    `app/message.rs` status/source facts; `ui/layout.rs`, `ui/widgets/footer.rs`,
    `ui/widgets/overlays.rs` and sidecars, optionally small pure `ui/notices.rs`.
    Test duplicate/stale generation and source, same-Session fallback, pending
-   coalescing/ack snapshot, owner/text/paste/cancel, zoom/Plan, 40x8 both
+   coalescing/ack snapshot, latest counts after acknowledgement, opened-but-
+   uninstalled shutdown counts and held-reader quit liveness,
+   owner/text/paste/cancel, zoom/Plan, 40x8 both
    densities, protected deferred then visible, ASCII/no-colour, long remaps and
    zero sizes. Move touched palette inline tests mechanically if needed.
 4. Focused integration: existing `tests/postgres_integration.rs`,
