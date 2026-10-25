@@ -11,6 +11,13 @@ in `docs/status.md`. Feature 025 US5-US10 and final acceptance remain open in
 its task list. The current integration branch also contains W02 connection
 identity hardening, W05 local server-matrix evidence and W11 dry trust tooling.
 Those local results do not establish hosted acceptance or release readiness.
+On 25 October, local M1 work also patched the current dependency advisories,
+refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
+window. Feature 025 keyboard panes T039/T041 are implemented locally; density
+T040 is active. A newly reproduced minimum-size clipboard disclosure gap is
+tracked in Feature 018 T037-T040 and blocks M1/M2 safety acceptance until its
+confirmation contracts and affected review surfaces are repaired. Keep these
+partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature
 chain; the later experience work preserves its source-bound, deliberate action.
 

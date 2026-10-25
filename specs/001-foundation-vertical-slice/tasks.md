@@ -81,6 +81,14 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8
 - [x] T055 Automated terminal-restoration test in CI (pty on Unix)
 - [ ] T055a The same on Windows, which needs ConPTY
+- [ ] W07-061 Keep the Unix PTY deadline attached to its owned `Child`, with
+  polling, termination and reaping before return. Remove the detached delayed
+  numeric-PID kill, which could outlive a completed test and target a reused
+  PID. Keep output capture bounded by child completion without pipe backpressure
+  or detached reader/watchdog threads; preserve all three normal-quit assertions
+  and profile isolation. Prove normal completion and a deliberately hung owned
+  child, then run the four existing PTY contracts before expanding abnormal-exit
+  coverage. This harness repair does not establish panic/error/Windows evidence.
 - [x] W07-059 Isolate the Unix PTY harness before expanding exit coverage:
   allocate unique temporary configuration and data roots, remove inherited
   logging and PostgreSQL connection environment, and keep those roots alive

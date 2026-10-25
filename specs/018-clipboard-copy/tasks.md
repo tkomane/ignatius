@@ -176,3 +176,28 @@ non-interfering, with filtered/source identity preserved.
 - `[P]` means tasks use different files or independent boundaries and can be parallelized safely.
 - Every task includes its principal repository path; tasks touching existing files must preserve unrelated Feature013-017 work.
 - No task authorizes commit, push, tag, release, or publication.
+
+## W04 follow-up - narrow confirmation disclosure (2026-10-25)
+
+The earlier checked renderer tasks do not establish complete disclosure at the
+minimum supported geometry. A 40x8 synthetic rendered-buffer probe on
+2026-10-25 showed the copy question and cell/count rows while clipping the
+terminal-path retention warning, acceptance-unconfirmed statement and send
+guidance. This contradicts FR-004/SEC-004; density margin changes alone do not
+repair it. No clipboard write was performed. Retained repro:
+`/private/tmp/ignatius-density-copy-probe-40x8.txt`.
+
+- [ ] T037 Reconcile the clipboard, generated-update and production/EXPLAIN
+  confirmation contracts with actual minimum-size rendering and confirmation
+  transitions. Record which required content can be clipped while acceptance
+  remains enabled, with synthetic values only and no transport/database effect.
+- [ ] T038 Specify the smallest complete disclosure/acceptance repair before
+  implementation, including resize, Unicode wrapping, alternate keymaps,
+  density, no-colour/ASCII and stale-candidate behavior. Do not silently weaken
+  existing confirmation or exact-statement review requirements.
+- [ ] T039 Add failing-first renderer/reducer regressions, implement the pinned
+  repair after the density worker releases the shared files, and prove that
+  hidden mandatory review content cannot authorize a transfer or statement.
+- [ ] T040 Run affected focused and full checks, inspect actual rendered
+  buffers, update the affected feature contracts, data handling, compatibility,
+  changelog and status, and retain native/platform acceptance as separate gates.

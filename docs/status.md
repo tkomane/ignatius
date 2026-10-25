@@ -61,11 +61,20 @@ T040 density implementation/config/presentation/widgets and the single runtime
 density assignment, plus its named tests/parity documents. It may not change
 W07 registration or any query/credential behavior. The platform worker owns an
 independent clean `21511f1` clone and task-only Docker resources; its fresh
-pinned-Rust/Linux/MSRV/socket/PTY checks are green and cleanup is finishing.
+pinned-Rust/Linux/MSRV/socket/PTY checks are green and cleanup is complete.
 Never edit either lane's files or
 tear down its fixture. The lead owns status, compatibility, changelog, feature
 authority and integration. Sixty styled synthetic buffers were captured and
 inspected; they do not establish native visual acceptance.
+
+The privacy worker now owns a read-only W04 confirmation audit while the UI
+worker finishes density. A 40x8 copy-confirmation buffer clips mandatory
+terminal-path/retention and acceptance-unconfirmed wording. No clipboard write
+was attempted. Feature 018 T037-T040 track the reopened disclosure gap and
+cross-check generated UPDATE and production/EXPLAIN review surfaces. This is
+an M1/M2 safety blocker until a specified repair is implemented and verified;
+preferred density margins alone cannot close it. Shared UI/reducer edits remain
+with the density worker until handoff.
 
 No recursive agents or shared reducer/runtime writers. Root's PostgreSQL 18.6
 fixture pair remains available; unrelated COI services and original branches
