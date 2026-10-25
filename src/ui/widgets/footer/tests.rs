@@ -348,3 +348,39 @@ fn a_paste_notice_never_carries_sql_or_a_credential() {
         assert!(!text.contains("hunter2"), "a credential was echoed: {text}");
     }
 }
+
+#[test]
+fn retained_data_footer_badge_is_complete_or_deferred_and_never_clears_facts() {
+    use crate::query::result::{RetentionLoss, RetentionLossSummary, RetentionReason};
+    let mut model = Model::new(100);
+    model.retained_data_loss = RetentionLossSummary {
+        limited_sets: 12,
+        first: Some(RetentionLoss {
+            ordinal: 2,
+            reason: RetentionReason::RetainedResultLimit,
+            retained: 1,
+            received: 3,
+            source_columns: 2,
+        }),
+    };
+    let before = model.retained_data_loss;
+    let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii);
+    let draw = |m: &Model, width| {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buffer = Buffer::empty(area);
+        render_footer(m, &Keymap::new(), &p, area, &mut buffer);
+        crate::ui::layout::buffer_to_string(&buffer)
+    };
+    let wide = draw(&model, 120);
+    assert!(wide.contains("Limited sets: 12"), "{wide}");
+    for width in 0..55 {
+        let text = draw(&model, width);
+        assert!(
+            !text.contains("Limited") || text.contains("Limited sets: 12"),
+            "{width}: {text}"
+        );
+    }
+    model.help_open = true;
+    assert!(!draw(&model, 120).contains("Limited sets"));
+    assert_eq!(model.retained_data_loss, before);
+}

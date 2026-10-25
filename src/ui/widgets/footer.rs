@@ -53,7 +53,8 @@ pub(crate) fn render_footer(
         theme.style(transaction_token),
     ));
 
-    let showing_transient_notice = model.notice_state.pending.needs_report()
+    let showing_transient_notice = model.retained_data_loss.limited_sets > 0
+        || model.notice_state.pending.needs_report()
         || model.format_notice.is_some()
         || model.paste_notice.is_some()
         || model.layout_notice.is_some();
@@ -93,6 +94,17 @@ pub(crate) fn render_footer(
             format!(" {badge}"),
             theme.style(Token::Warning),
         ));
+    }
+
+    if model.retained_data_loss.limited_sets > 0 && !crate::ui::notices::covered(model) {
+        let badge = format!("Limited sets: {}", model.retained_data_loss.limited_sets);
+        if display_width(&badge) <= usize::from(area.width).saturating_sub(used + 1) {
+            used += display_width(&badge) + 1;
+            spans.push(Span::styled(
+                format!(" {badge}"),
+                theme.style(Token::Warning),
+            ));
+        }
     }
 
     if let Some(notice) = model.layout_notice {

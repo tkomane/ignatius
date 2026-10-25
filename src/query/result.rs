@@ -13,6 +13,13 @@
 use crate::query::value::Cell;
 use std::time::Duration;
 
+/// Fixed value-free explanation for an essential description not retained.
+pub const RETAINED_DATA_UNAVAILABLE: &str =
+    "Result data unavailable - retained-result limit reached";
+/// Advice for a future deliberate execution, never an automatic replay.
+pub const RETAINED_DATA_GUIDANCE: &str =
+    "For a future complete streaming export, choose --output before execution.";
+
 /// Largest notice message retained for display with an execution.
 pub const MAX_NOTICE_MESSAGE_BYTES: usize = 64 * 1024;
 const NOTICE_TRUNCATION_SUFFIX: &str = " ... [notice truncated]";
@@ -300,6 +307,116 @@ fn notice_prefix_end(message: &str) -> usize {
     end
 }
 
+/// Buffered ingestion arithmetic; no transport or output ownership.
+pub(crate) mod retention_budget;
+/// Execution-wide logical occupied-result-data allowance in bytes.
+pub use retention_budget::RETAINED_RESULT_DATA_BYTES as MAX_RETAINED_RESULT_DATA_BYTES;
+
+/// Why the client did not retain all described result data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetentionReason {
+    /// Existing configured per-result row cap.
+    RowCap,
+    /// Execution-wide occupied-data allowance.
+    RetainedResultLimit,
+    /// No essential description fit the allowance.
+    DescriptionUnavailable,
+}
+impl RetentionReason {
+    /// Fixed client wording, with no result text.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RowCap => "row cap",
+            Self::RetainedResultLimit => "retained-result limit",
+            Self::DescriptionUnavailable => "unavailable description",
+        }
+    }
+}
+
+/// Typed availability, separate from a genuine empty result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResultRetention {
+    /// All received rows were retained.
+    #[default]
+    Complete,
+    /// A known description with a row-cap prefix.
+    RowCap,
+    /// A known description with an occupied-data prefix.
+    DataLimit,
+    /// Count-only control record; no name/type/value payload is retained.
+    Unavailable { source_column_count: usize },
+}
+
+/// Fixed first affected result-set facts; ordinals exclude non-result statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionLoss {
+    /// One-based result-set ordinal.
+    pub ordinal: usize,
+    /// Client retention reason, independent of SQL outcome.
+    pub reason: RetentionReason,
+    /// Rows actually retained.
+    pub retained: usize,
+    /// Rows actually delivered by the server.
+    pub received: u64,
+    /// Known source column count, even when names were not retained.
+    pub source_columns: usize,
+}
+
+/// Fixed scalar summary computed once when a retained Execution is replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RetentionLossSummary {
+    /// Number of limited/unavailable result sets in the Execution.
+    pub limited_sets: usize,
+    /// First affected result's fixed facts; no ordinal list or result text.
+    pub first: Option<RetentionLoss>,
+}
+impl RetentionLossSummary {
+    /// Scans only at explicit accepted replacement, never at frame rendering.
+    #[must_use]
+    pub fn from_execution(execution: &Execution) -> Self {
+        let mut summary = Self::default();
+        for (index, set) in execution
+            .statements
+            .iter()
+            .filter_map(|s| s.result_set.as_ref())
+            .enumerate()
+        {
+            if let Some(reason) = set.retention_reason() {
+                summary.limited_sets += 1;
+                summary.first.get_or_insert(RetentionLoss {
+                    ordinal: index + 1,
+                    reason,
+                    retained: set.retained(),
+                    received: set.rows_seen,
+                    source_columns: set.source_column_count(),
+                });
+            }
+        }
+        summary
+    }
+    /// Complete compact warning. Its allocation depends on fixed scalars only.
+    #[must_use]
+    pub fn warning(&self) -> Option<String> {
+        (self.limited_sets > 0)
+            .then(|| format!("Data limited in {} result set(s)", self.limited_sets))
+    }
+    /// Fixed first-result detail; never includes names, cells or source SQL.
+    #[must_use]
+    pub fn detail(&self) -> Option<String> {
+        self.first.map(|first| {
+            format!(
+                "First: result set {}, {}; retained {} of {} received rows; {} source columns.",
+                first.ordinal,
+                first.reason.label(),
+                first.retained,
+                first.received,
+                first.source_columns
+            )
+        })
+    }
+}
+
 /// Rows returned by one statement, bounded by a cap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultSet {
@@ -317,6 +434,8 @@ pub struct ResultSet {
     pub rows_seen: u64,
     /// The cap that was applied.
     pub cap: usize,
+    /// Typed client retention state; does not change server success or affected rows.
+    pub retention: ResultRetention,
 }
 
 impl ResultSet {
@@ -329,6 +448,65 @@ impl ResultSet {
             rows: Vec::new(),
             rows_seen: 0,
             cap,
+            retention: ResultRetention::Complete,
+        }
+    }
+
+    /// Count-only result whose essential description was not admitted.
+    /// This differs from a known description with zero returned rows.
+    #[must_use]
+    pub const fn unavailable(source_column_count: usize, cap: usize) -> Self {
+        Self {
+            columns: Vec::new(),
+            column_types: Vec::new(),
+            rows: Vec::new(),
+            rows_seen: 0,
+            cap,
+            retention: ResultRetention::Unavailable {
+                source_column_count,
+            },
+        }
+    }
+
+    /// Whether retained names/rows may be used by data actions and encoders.
+    #[must_use]
+    pub const fn is_available(&self) -> bool {
+        !matches!(self.retention, ResultRetention::Unavailable { .. })
+    }
+
+    /// Known source count without inventing retained column labels.
+    #[must_use]
+    pub fn source_column_count(&self) -> usize {
+        match self.retention {
+            ResultRetention::Unavailable {
+                source_column_count,
+            } => source_column_count,
+            _ => self.columns.len(),
+        }
+    }
+
+    /// Counts an unretained row without allocating/retaining a placeholder.
+    pub(crate) fn discard_row(&mut self, reason: RetentionReason) {
+        self.rows_seen += 1;
+        if matches!(self.retention, ResultRetention::Complete) {
+            self.retention = match reason {
+                RetentionReason::RowCap => ResultRetention::RowCap,
+                _ => ResultRetention::DataLimit,
+            };
+        }
+    }
+
+    /// The typed loss cause, including legacy synthetic count-only truncation.
+    #[must_use]
+    pub fn retention_reason(&self) -> Option<RetentionReason> {
+        match self.retention {
+            ResultRetention::Unavailable { .. } => Some(RetentionReason::DescriptionUnavailable),
+            ResultRetention::DataLimit => Some(RetentionReason::RetainedResultLimit),
+            ResultRetention::RowCap => Some(RetentionReason::RowCap),
+            ResultRetention::Complete if self.rows_seen > self.rows.len() as u64 => {
+                Some(RetentionReason::RowCap)
+            }
+            ResultRetention::Complete => None,
         }
     }
 
@@ -351,6 +529,9 @@ impl ResultSet {
     /// Replaces type labels when their positions align exactly with the headers.
     /// Returns whether the metadata was accepted.
     pub fn set_column_types(&mut self, column_types: Vec<Option<String>>) -> bool {
+        if !self.is_available() {
+            return false;
+        }
         if column_types.len() != self.columns.len() {
             self.column_types = vec![None; self.columns.len()];
             return false;
@@ -371,18 +552,24 @@ impl ResultSet {
     /// tell the difference between "not kept" and "not received".
     pub fn push(&mut self, row: Vec<Cell>) -> bool {
         self.rows_seen += 1;
-        if self.rows.len() < self.cap {
+        if self.is_available()
+            && !matches!(self.retention, ResultRetention::DataLimit)
+            && self.rows.len() < self.cap
+        {
             self.rows.push(row);
             true
         } else {
+            if matches!(self.retention, ResultRetention::Complete) {
+                self.retention = ResultRetention::RowCap;
+            }
             false
         }
     }
 
-    /// Whether rows were dropped because of the cap.
+    /// Whether the client could not retain the complete result.
     #[must_use]
     pub fn is_truncated(&self) -> bool {
-        self.rows_seen > self.rows.len() as u64
+        self.retention_reason().is_some()
     }
 
     /// Rows currently held in memory.
@@ -394,6 +581,20 @@ impl ResultSet {
     /// A short description of what is being shown, always stating truncation.
     #[must_use]
     pub fn window_label(&self) -> String {
+        if !self.is_available() {
+            return format!(
+                "Result data unavailable - retained-result limit reached ({} source columns, {} received rows)",
+                self.source_column_count(),
+                self.rows_seen
+            );
+        }
+        if self.retention_reason() == Some(RetentionReason::RetainedResultLimit) {
+            return format!(
+                "showing {} of {} rows (retained-result limit reached)",
+                self.retained(),
+                self.rows_seen
+            );
+        }
         if self.is_truncated() {
             format!(
                 "showing {} of {} rows (limit {} reached)",

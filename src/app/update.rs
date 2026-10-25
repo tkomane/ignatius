@@ -268,6 +268,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     }
                 });
             } else {
+                model.retained_data_loss =
+                    crate::query::result::RetentionLossSummary::from_execution(&execution);
                 model.last_execution = Some(*execution);
                 model.last_sql = completed_sql.clone();
                 model.cell_update_notice = None;
@@ -308,6 +310,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.pending_copy = None;
             model.clipboard_notice =
                 Some(crate::app::model::ClipboardNotice::Sent { bytes, characters });
+            Vec::new()
+        }
+        Message::RetainedDataUnavailable => {
+            refuse_unavailable_result(model);
             Vec::new()
         }
         Message::ClipboardFailed(diagnostic) => {
@@ -1054,6 +1060,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::ExportRows => {
+            if refuse_unavailable_result(model) {
+                return Vec::new();
+            }
             if model.plan.is_visible() {
                 return Vec::new();
             }
@@ -1594,6 +1603,9 @@ fn page(model: &mut Model, direction: Direction) {
 /// no rows would be a window onto nothing, and the selection can outlive the
 /// result it was made in, so the cell is looked up rather than assumed.
 fn toggle_inspector(model: &mut Model) {
+    if refuse_unavailable_result(model) {
+        return;
+    }
     if model.plan.is_visible() {
         return;
     }
@@ -1910,6 +1922,9 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     }]
                 }
                 crate::app::model::NamePurpose::ExportRows => {
+                    if refuse_unavailable_result(model) {
+                        return Vec::new();
+                    }
                     let Some(format) = export_format else {
                         return Vec::new();
                     };
@@ -2048,8 +2063,27 @@ fn copy_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// A local refusal keeps PostgreSQL outcome and diagnostic priority untouched.
+fn refuse_unavailable_result(model: &mut Model) -> bool {
+    if !model
+        .visible_result()
+        .is_some_and(|set| !set.is_available())
+    {
+        return false;
+    }
+    model.result_grid.note = Some(format!(
+        "{}. {}",
+        crate::query::result::RETAINED_DATA_UNAVAILABLE,
+        crate::query::result::RETAINED_DATA_GUIDANCE
+    ));
+    true
+}
+
 /// Opens a value-free copy confirmation for the selected retained cell.
 fn begin_copy(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
     if model.focus != Focus::Results
         || model.phase.is_busy()
         || model.plan.is_visible()
@@ -2126,7 +2160,7 @@ fn copy_payload_for_candidate(
     {
         return None;
     }
-    let set = model.visible_result()?;
+    let set = model.visible_result().filter(|set| set.is_available())?;
     if !model
         .result_grid
         .visible_columns(set.columns.len())
@@ -2367,6 +2401,9 @@ fn begin_refresh_result(model: &mut Model) -> Vec<Effect> {
 
 /// Starts the value-free source analysis and live metadata lookup for a cell.
 fn begin_cell_update(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
     if model.focus != Focus::Results
         || model.phase.is_busy()
         || model.plan.is_visible()
@@ -3597,6 +3634,7 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.connecting_step = Some(ConnectingStep::ResolvingProfile);
     model.phase = QueryPhase::Idle;
     model.last_execution = None;
+    model.retained_data_loss = crate::query::result::RetentionLossSummary::default();
     model.last_elapsed = None;
     model.running_for = None;
     model.running_sql = None;
@@ -3676,6 +3714,9 @@ fn export_note(model: &Model, set: &crate::query::result::ResultSet, matching: u
 }
 
 fn begin_export_format(model: &mut Model, format: ExportFormat) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
     let Some(note) = (|| {
         let set = model.visible_result()?;
         let matching = model.filtered_rows().len();

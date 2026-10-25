@@ -20,6 +20,10 @@ use crate::postgres::error::{
 };
 use crate::postgres::notices::{Notices, Operation};
 use crate::postgres::tls::{TlsState, client_config};
+use crate::query::result::RetentionReason;
+use crate::query::result::retention_budget::{
+    DescriptionAdmission, RetentionBudget, RowAdmission, TypeAdmission,
+};
 use crate::query::result::{
     Execution, ExecutionStatus, JobId, Notice, NoticeCheckpoint, NoticeReport, NoticeScope,
     Reported, ResultSet, StatementResult,
@@ -759,6 +763,7 @@ impl Session {
         let started = Instant::now();
         let parsed = statements::split(sql);
         let mut results = Vec::new();
+        let mut budget = RetentionBudget::new();
 
         if parsed.is_empty() {
             return Execution {
@@ -787,7 +792,14 @@ impl Session {
             operation.hold_unattributed();
             let statement_started = Instant::now();
             match self
-                .execute_one(&statement.text, row_cap, index + 1, privacy, operation)
+                .execute_one(
+                    &statement.text,
+                    row_cap,
+                    index + 1,
+                    privacy,
+                    operation,
+                    &mut budget,
+                )
                 .await
             {
                 Ok((result_set, rows_affected, notices)) => {
@@ -826,6 +838,7 @@ impl Session {
         statement_number: usize,
         privacy: QueryPrivacy,
         operation: &Operation<'_>,
+        budget: &mut RetentionBudget,
     ) -> Result<(Option<ResultSet>, Option<u64>, Vec<Notice>), Diagnostic> {
         let stream = self
             .client
@@ -840,25 +853,20 @@ impl Session {
         while let Some(message) = stream.next().await {
             match message.map_err(|err| privacy.diagnostic(&err, statement_number))? {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
-                    let names = columns.iter().map(|c| c.name().to_owned()).collect();
-                    result_set = Some(ResultSet::new(names, row_cap));
+                    result_set = Some(retain_description(
+                        columns.iter().map(|c| c.name()),
+                        columns.len(),
+                        row_cap,
+                        budget,
+                    ));
                 }
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
-                    let set = result_set.get_or_insert_with(|| ResultSet::new(Vec::new(), row_cap));
-                    if set.retained() < row_cap {
-                        let cells = (0..row.len())
-                            .map(|i| Cell::from_option_bounded(row.get(i)))
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(|bytes| {
-                                retained_value_limit_diagnostic(statement_number, bytes)
-                            })?;
-                        set.push(cells);
-                    } else {
-                        // Rows past the cap are counted and dropped without
-                        // copying their values, which keeps both row and cell
-                        // retention bounded on a large result.
-                        set.push(Vec::new());
-                    }
+                    let set = result_set.get_or_insert_with(|| {
+                        retain_description(std::iter::empty(), 0, row_cap, budget)
+                    });
+                    retain_buffered_row(set, (0..row.len()).map(|i| row.get(i)), budget).map_err(
+                        |bytes| retained_value_limit_diagnostic(statement_number, bytes),
+                    )?;
                 }
                 tokio_postgres::SimpleQueryMessage::CommandComplete(count) => {
                     rows_affected = Some(count);
@@ -875,12 +883,11 @@ impl Session {
         // names, but not type OIDs. Parse/describe is deliberately after the
         // result has arrived: it does not execute the statement, and a failure
         // here must never turn a successful query into a failed one.
-        if let Some(names) = result_set
-            .as_ref()
-            .filter(|set| !set.columns.is_empty())
-            .map(|set| set.columns.clone())
-            && let Some(types) = self.describe_columns(sql, &names).await
-            && let Some(set) = result_set.as_mut()
+        if !budget.data_is_closed()
+            && let Some(set) = result_set
+                .as_mut()
+                .filter(|set| set.is_available() && !set.columns.is_empty())
+            && let Some(types) = self.describe_columns(sql, &set.columns, budget).await
         {
             let _ = set.set_column_types(types);
         }
@@ -895,7 +902,12 @@ impl Session {
     /// accepted against the wrong shape would make a truthful type label into a
     /// quiet lie. A failed prepare or mismatch is ordinary unavailability for
     /// the grid, not a query failure.
-    async fn describe_columns(&self, sql: &str, names: &[String]) -> Option<Vec<Option<String>>> {
+    async fn describe_columns(
+        &self,
+        sql: &str,
+        names: &[String],
+        budget: &mut RetentionBudget,
+    ) -> Option<Vec<Option<String>>> {
         let statement = self.client.prepare(sql).await.ok()?;
         let columns = statement.columns();
         if columns.len() != names.len()
@@ -906,6 +918,15 @@ impl Session {
         {
             return None;
         }
+        if !matches!(
+            budget.admit_type_names(
+                columns.len(),
+                columns.iter().map(|column| Some(column.type_().name()))
+            ),
+            TypeAdmission::Admitted { .. }
+        ) {
+            return None;
+        }
         Some(
             columns
                 .iter()
@@ -913,6 +934,43 @@ impl Session {
                 .collect(),
         )
     }
+}
+
+/// The actual borrowed-name admission boundary, before owned names/type slots.
+fn retain_description<'a>(
+    names: impl Iterator<Item = &'a str> + Clone,
+    source_columns: usize,
+    cap: usize,
+    budget: &mut RetentionBudget,
+) -> ResultSet {
+    match budget.admit_description(names.clone()) {
+        DescriptionAdmission::Admitted { .. } => {
+            ResultSet::new(names.map(str::to_owned).collect(), cap)
+        }
+        DescriptionAdmission::Unavailable => ResultSet::unavailable(source_columns, cap),
+    }
+}
+
+/// Counts each delivered row once, without owned copies for a refused row.
+fn retain_buffered_row<'a>(
+    set: &mut ResultSet,
+    cells: impl Iterator<Item = Option<&'a str>> + Clone,
+    budget: &mut RetentionBudget,
+) -> Result<(), usize> {
+    if !set.is_available() {
+        set.discard_row(RetentionReason::DescriptionUnavailable);
+    } else if set.retained() >= set.cap {
+        set.discard_row(RetentionReason::RowCap);
+    } else {
+        match budget.admit_row(cells.clone()) {
+            RowAdmission::Admitted { .. } => {
+                set.push(cells.map(Cell::from_option).collect());
+            }
+            RowAdmission::DataLimit => set.discard_row(RetentionReason::RetainedResultLimit),
+            RowAdmission::OversizedCell { bytes } => return Err(bytes),
+        }
+    }
+    Ok(())
 }
 
 fn validate_parameter_semantics(

@@ -1785,3 +1785,46 @@ fn notice_runtime_profile_retirement_preserves_pending_loss_and_keeps_install_po
     notice_runtime_health(&runtime, &old.session);
     notice_runtime_health(&new_runtime, &new.session);
 }
+
+#[test]
+fn unavailable_description_runtime_export_refuses_before_creating_any_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut model = model_with_rows();
+    model.last_execution.as_mut().unwrap().statements[0].result_set =
+        Some(crate::query::result::ResultSet::unavailable(3, 100));
+    for format in [
+        crate::app::model::ExportFormat::Csv,
+        crate::app::model::ExportFormat::Json,
+    ] {
+        let path = dir.path().join(format!("{format:?}.out"));
+        let result = export_visible_rows(&model, path.to_str().unwrap(), format);
+        assert!(
+            result.is_err(),
+            "an unavailable description must not create a zero-row export"
+        );
+        assert_eq!(
+            result.unwrap_err().headline,
+            "Result data unavailable - retained-result limit reached"
+        );
+        assert!(!path.exists());
+    }
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn unavailable_description_runtime_copy_refuses_without_writer_activity() {
+    let mut model = model_with_rows();
+    model.last_execution.as_mut().unwrap().statements[0].result_set =
+        Some(crate::query::result::ResultSet::unavailable(3, 100));
+    let payload =
+        crate::clipboard::ClipboardPayload::try_new("synthetic stale payload".into()).unwrap();
+    let mut writer = RecordingWriter::default();
+    assert_eq!(
+        copy_retained_to_terminal(&mut writer, &model, &payload),
+        Message::RetainedDataUnavailable
+    );
+    assert_eq!(
+        (writer.writes, writer.flushes, writer.output.len()),
+        (0, 0, 0)
+    );
+}

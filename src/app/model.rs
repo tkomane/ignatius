@@ -1304,6 +1304,8 @@ pub struct Model {
     pub phase: QueryPhase,
     /// The most recent completed execution.
     pub last_execution: Option<Execution>,
+    /// Fixed loss summary tied to the retained source, never recomputed per frame.
+    pub retained_data_loss: crate::query::result::RetentionLossSummary,
     /// The SQL template that produced the retained execution.
     ///
     /// It is kept separately because `Execution` intentionally contains only
@@ -1525,6 +1527,9 @@ impl Model {
         let Some(set) = self.visible_result() else {
             return Vec::new();
         };
+        if !set.is_available() {
+            return Vec::new();
+        }
         if self.result_filter.trim().is_empty() {
             return (0..set.rows.len()).collect();
         }
@@ -1567,12 +1572,19 @@ impl Model {
         let Some(set) = self.visible_result() else {
             return String::new();
         };
-        if self.result_filter.trim().is_empty() {
+        if !set.is_available() || self.result_filter.trim().is_empty() {
             return set.window_label();
         }
         let matching = self.filtered_rows().len();
         let retained = set.retained();
-        if set.is_truncated() {
+        if set.retention_reason()
+            == Some(crate::query::result::RetentionReason::RetainedResultLimit)
+        {
+            format!(
+                "matching {matching} of {retained} retained rows, of {} returned (retained-result limit reached)",
+                set.rows_seen
+            )
+        } else if set.is_truncated() {
             format!(
                 "matching {matching} of {retained} retained rows, of {} returned (limit {} reached)",
                 set.rows_seen, set.cap

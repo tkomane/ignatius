@@ -146,7 +146,7 @@ when the behaviour exists and a test or recorded evidence proves it.
   unpaced/paced small-row/large-value case, complete file bytes/digests/counts
   and peak RSS; preserve the synthetic fixture and remove only owned payloads.
   Keep this distinct from top-level CLI cancellation, TLS and process ceilings.
-- [ ] W10-012 Implement REL-005's complete bounded notice slice under
+- [x] W10-012 Implement REL-005's complete bounded notice slice under
   `contracts/notice-retention.md`: cumulative admission and sticky privacy,
   precision-safe guard/report/checkpoint lifecycle, report-carrying query/stream/
   plan/connect outcomes, unchanged CLI stdout and single JSON diagnostics,
@@ -156,7 +156,10 @@ when the behaviour exists and a test or recorded evidence proves it.
   review, inspect rendered output and pass required combined gates. Do not
   relabel this as a frame/aggregate-result/process-memory ceiling.
   Local source: `d65024b`; peer/rendered review and full 1,370-case gate passed.
-  Hosted/platform/affected-major acceptance remains open; checkbox stays open.
+  Published head `fda16f8` passed hosted Linux/macOS/Windows and Rust1.90 gates,
+  PG14/18 plain+verify-full notices/runtime/session paths and the real socket
+  contract. Native hand-use, broader W05 matrix and other resource routes remain
+  separate. External model review was owner-skipped; native peer review passed.
 - [ ] W10-013 After W10-012 source integration, implement REL-002's complete
   execution-wide retained-data allowance under `contracts/retained-result-data.md`:
   checked whole-description/whole-row admission, cumulative prefix closure,
@@ -164,6 +167,11 @@ when the behaviour exists and a test or recorded evidence proves it.
   explicit new unavailable JSON/status case and pre-effect retained-data action
   refusals. Preserve notice/SQL/transaction/cancellation/stream contracts; obtain
   focused/live/peer/full/rendered and affected server evidence before closure.
+  Final milestone03 passed native peer review, canonical full 1,431 outer
+  cases/1,127 library and 112 styled-buffer capture with eight contact sheets
+  inspected. Milestone02's unchanged core/output passed 12 plain/verify-full
+  cases and 24 CLI health children on PG18.6. Affected-major/hosted acceptance
+  remains open; the macOS full-gate socket case is a semantic skip.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion

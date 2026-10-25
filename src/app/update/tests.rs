@@ -6323,6 +6323,11 @@ fn a_late_update_metadata_response_cannot_replace_a_changed_selection() {
 #[test]
 fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select() {
     let mut model = cell_update_model();
+    model.retained_data_loss = crate::query::result::RetentionLossSummary {
+        limited_sets: 1,
+        first: None,
+    };
+    let loss = model.retained_data_loss;
     let snapshot = model.last_execution.clone();
     let source_sql = model.last_sql.clone();
     let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
@@ -6350,6 +6355,7 @@ fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select(
         Effect::Execute { .. } | Effect::ExecuteParameterized { .. }
     )));
     assert_eq!(model.last_execution, snapshot);
+    assert_eq!(model.retained_data_loss, loss);
     assert_eq!(model.last_sql, source_sql);
     assert!(model.visible_result().is_some());
     assert!(model.cell_update_notice.as_deref().is_some_and(|notice| {
@@ -7306,4 +7312,90 @@ fn notice_uninstalled_retirement_is_current_generation_bounded_and_once() {
         "reopened same boundary cannot recount token"
     );
     assert!(model.notice_state.sources.iter().all(Option::is_none));
+}
+
+#[test]
+fn retained_data_summary_follows_only_accepted_replacement_executions() {
+    let mut model = connected();
+    let mut limited = execution(JobId(101), ExecutionStatus::Succeeded, &["first"]);
+    let mut later = ResultSet::new(vec!["later".into()], 0);
+    later.push(vec![Cell::Text("not retained".into())]);
+    limited.statements.push(StatementResult {
+        result_set: Some(later),
+        rows_affected: None,
+        elapsed: Duration::ZERO,
+        notices: Vec::new(),
+    });
+    model.phase = QueryPhase::Running {
+        job: JobId(101),
+        statements: 2,
+    };
+    update(&mut model, Message::ExecutionFinished(limited));
+    assert_eq!(model.retained_data_loss.limited_sets, 1);
+    assert_eq!(model.retained_data_loss.first.unwrap().ordinal, 2);
+    let loss = model.retained_data_loss;
+    model.phase = QueryPhase::Running {
+        job: JobId(102),
+        statements: 1,
+    };
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(
+            JobId(101),
+            ExecutionStatus::Succeeded,
+            &["stale"],
+        )),
+    );
+    assert_eq!(model.retained_data_loss, loss);
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(
+            JobId(102),
+            ExecutionStatus::Succeeded,
+            &["complete"],
+        )),
+    );
+    assert_eq!(model.retained_data_loss, Default::default());
+    model.retained_data_loss = loss;
+    begin_connection(&mut model, None);
+    assert_eq!(model.retained_data_loss, Default::default());
+    assert!(model.last_execution.is_none());
+}
+
+#[test]
+fn unavailable_description_intents_refuse_before_effects_with_fixed_guidance() {
+    for action in [
+        Action::CopyValue,
+        Action::ToggleInspector,
+        Action::GenerateCellUpdate,
+        Action::ExportRows,
+    ] {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        let mut prior = execution(
+            JobId(1),
+            ExecutionStatus::Succeeded,
+            &["synthetic forbidden"],
+        );
+        prior.statements[0].result_set = Some(ResultSet::unavailable(3, 100));
+        model.last_execution = Some(*prior);
+        assert!(
+            update(&mut model, Message::Action(action.clone())).is_empty(),
+            "{action:?}"
+        );
+        assert!(
+            model.pending_copy.is_none()
+                && model.update_lookup.is_none()
+                && model.name_prompt.is_none()
+                && model.palette.is_none()
+                && model.inspector.is_none()
+        );
+        assert!(
+            model.result_grid.note.as_deref().is_some_and(
+                |note| note.contains("Result data unavailable - retained-result limit reached")
+            ),
+            "{action:?}"
+        );
+        assert!(model.error.is_none());
+    }
 }

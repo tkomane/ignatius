@@ -1244,7 +1244,15 @@ fn write_buffered_truncation(
         .filter_map(|statement| statement.result_set.as_ref())
         .enumerate()
     {
-        if set.is_truncated() {
+        if !set.is_available() {
+            writeln!(
+                err,
+                "Result set {} data unavailable: retained no description for {} source columns and {} received rows because the retained-result limit was reached. For a future complete streaming export, choose --output before execution.",
+                index + 1,
+                set.source_column_count(),
+                set.rows_seen
+            )?;
+        } else if set.is_truncated() {
             writeln!(
                 err,
                 "Result set {} truncated: retained {} of {} received rows. For a future complete streaming export, choose --output before execution.",

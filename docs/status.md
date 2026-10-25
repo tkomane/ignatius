@@ -35,6 +35,67 @@ rather than keeping finished work local. The lead will push the task feature
 branch, open a draft PR and inspect hosted CI after integrated local checks.
 No release/production action follows from that workflow.
 
+Published clean checkpoint `fda16f8` to the task feature branch and opened
+[draft PR #32](https://github.com/tkomane/ignatius/pull/32). The installed
+pre-push hook repeated all 1,370 outer cases/23 summaries successfully before
+upload; the macOS socket skip remains explicit. Clean-source/history Gitleaks
+also passed (434 files/282 reachable revisions). Hosted CI run `40202770798`
+and CodeQL run `40202770715` completed for exact head `fda16f8`: 16 workflow jobs
+succeeded, one schedule-only drift job skipped, and the separate built-in
+CodeQL check succeeded with no new alerts. All three hosted platform jobs,
+Rust1.90, PG14/18 plain/verify-full and the real socket contract passed.
+The weekly fixture-drift job is deliberately schedule-only and skipped on this
+PR; that is not a passing upstream-manifest comparison. Hosted platform DB
+early returns are not live evidence; the separate PG jobs each ran 210 selected
+invocations across both routes. The socket job ran one real test without skip.
+PR merge ref `d9198a7` and head `fda16f8` have identical source tree
+`a561e457e7e9ab6923edc39e065e9459f5d38146`. Native Windows terminal/hand-use,
+all-major refresh beyond the representative PR matrix and release remain open.
+Reviewed evidence: `/private/tmp/ignatius-pr32-ci-fda16-20261025/`.
+
+A separate bounded smoke of published `fda16f8` passed PostgreSQL 15.19 plain
+and verify-full TLS, including exact 257-notice omission/output checks and
+before/after server-version/orders health. The isolated lifecycle controller
+removed only its two labelled containers/anonymous volumes; all five pre-existing
+running containers were preserved. Root verified both output digests and absence
+of task-labelled containers. Evidence:
+`/private/tmp/ignatius-resource-fixture-proof-mmfwivkh/`. This is notice-source
+PG15 smoke, not W10-013 or a full five-major repeat.
+
+W10-013 is integrated and locally verified. Root checked all 268 final
+milestone03 artifact hashes and exact equality for its 24 canonical code paths.
+Native independent review accepted the final patch, including the reproduced
+one/two-inner-row warning-clipping repair. All original sidecar assertions were
+preserved. The complete canonical verifier passed **1,431 outer harness cases,
+1,127 library, 24 summaries**, formatting, warnings-denied Clippy/API docs and
+PostgreSQL18.6-backed tests. Its macOS socket case remains a semantic skip.
+Log: `/private/tmp/ignatius-verify-2026-10-25-retained-result.log`.
+
+The unchanged core/output of milestone02 passed 12 fresh case children and 24
+separate CLI health children on PG18.6 plain/verify-full, without skips. Buffered
+40-MiB input retained 31/received 40/affected 40, including an owned TEMP write and
+subsequent positive same-session count; real SQLSTATE22012 remained true. Both
+complete streams verified 41,943,080 bytes before owned payload removal. Root
+verified 72 capture hashes and all 448 inputs after execution, then confirmed
+only the two authorised UI files changed in final03. Removed stream bytes were
+checked by Rust/controller; root inspected receipts and path absence.
+
+Root captured 112 styled synthetic Ratatui buffers in both densities/four
+presentations, verified all 354 artifact hashes and inspected eight contact
+sheets (16 frame images), including the reachable one/two-inner-row panes.
+No remaining scoped warning/count/ownership issue was found; native appearance
+and hand use remain separate. Evidence:
+`/private/tmp/ignatius-retained-styled-3rtx76kd/`, final manifest
+`a93728fabc53bfc56b7ce4b229d418a7bddc41317ef334fd9d60e321d22cb851`.
+CI omission red observed zero of two required routes; plain/verify-full wiring,
+the contract and pinned network-disabled Actionlint now pass. Source freeze:
+`/private/tmp/ignatius-w10-013-fda16f8-TfHH4z/milestone-03/`.
+
+W10-013 remains unchecked pending fresh affected-major/hosted acceptance.
+Next: commit/push through the unchanged pre-push gate, update draft PR32 and
+run the declared five-major workflow. The PostgreSQL lane is separately doing
+read-only incoming-allocation discovery; no frame/startup/RSS bound is adopted.
+
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
   migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
   probes, plain/TLS checks and native peer review are recorded in their tasks.
@@ -176,9 +237,9 @@ tree. Root inspected 128 styled buffers, incorporated the bounded final
 runtime/doctor review repair and live CI wiring, and passed the full 1,370-case
 local verifier after its test-only transport correction. Root owns shared
 records/policy; the current committed application checkpoint is `d65024b`.
-Hosted/platform/affected-major acceptance remains open; W10-013 may now take
-an isolated assignment because source integration and its combined local gate
-are saved.
+Representative hosted platform/major acceptance has also passed at `fda16f8`;
+W10-012 is checked. W10-013 has an isolated assignment because source integration
+and its combined local gate are saved. Broader W05/native/release work stays open.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
@@ -2049,26 +2110,19 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W10-012:** review repaired core03 and complete the isolated end-to-end
-   bounded-notice slice under the pinned contract. Preserve every outcome and
-   protected input owner; integrate only after peer review and affected combined
-   focused/full/live/rendered checks. W10-011 measurement is complete and frozen
-   at clean `d8a3ac3`; it does not prove top-level CLI cancellation.
-2. **W10-008:** finish and pin distinct notice, aggregate retained-result and
-   incoming-allocation contracts after the measured baseline. A notice cap
-   alone does not solve driver frames or startup backlogs; preserve cancellation,
-   sticky parameter privacy and unknown write outcomes. W10-009/010 are saved
-   and complete for their specified local scope.
-3. **W05/W07:** retain the reviewed clean `871db73` Linux pinned/MSRV/socket/PTY
-   evidence and clean `d8a3ac3` secret scans. Existing five-major database evidence
-   remains frozen at `e5389f7`; repeat affected server paths when session/protocol
-   code changes. Native Windows/ConPTY stays open.
-4. **Feature 025/015:** help T042 is implemented and checked. Continue existing
-   theme/pointer/daily-experience contracts after resource work; mouse capture
-   stays off until pointer behavior/parity exists.
-5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence
-   when access exists. Synthetic buffers and PTYs do not replace hand use.
-6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open;
-   keep the owner's instruction to skip today's external review. Exact external
-   actions still need their own authority. No hosted acceptance, push, signing
-   or release is implied.
+1. **W10-013:** inspect final frozen code/peer/live evidence, integrate the
+   retained-data slice, add both live CI routes and complete focused/full/styled
+   and affected-server acceptance. W10-012 is published with green hosted checks.
+2. **W10-008:** retain the separate notice and retained-data contracts; finish
+   the incoming-allocation design without claiming driver/startup/RSS ceilings.
+   Preserve cancellation, sticky privacy and unknown write outcomes.
+3. **W05/W07:** refresh affected server paths for final W10-013 source. Existing
+   five-major evidence remains frozen at `e5389f7`; published `fda16f8` adds hosted
+   PG14/18 and a bounded local PG15 smoke. Native Windows/ConPTY stays open.
+4. **Feature 025/015:** continue theme/pointer/daily-experience contracts after
+   resource work; mouse capture stays off until pointer behavior/parity exists.
+5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence when
+   access exists. Synthetic buffers and PTYs do not replace hand use.
+6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open and
+   today's owner-skipped external review explicit. Branch push, draft PR and CI
+   are authorised; merge, signing and release remain separate owner decisions.

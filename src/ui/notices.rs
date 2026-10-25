@@ -267,7 +267,7 @@ pub(crate) fn badge(model: &Model, available: usize) -> Option<String> {
     );
     (display_width(&compact) <= available).then_some(compact)
 }
-fn covered(model: &Model) -> bool {
+pub(super) fn covered(model: &Model) -> bool {
     model.help_open
         || model.notice_details.is_some()
         || model.palette.is_some()

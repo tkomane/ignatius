@@ -366,3 +366,154 @@ fn notice_retention_aggregate_fields_boundary_precedes_cloning() {
     );
     assert_eq!(held.len(), 15);
 }
+
+#[test]
+fn retained_data_ingestion_header_refusal_keeps_no_partial_description_and_closes() {
+    let mut budget = RetentionBudget::for_tests(1);
+    let set = retain_description(["one", "two"].into_iter(), 2, 10, &mut budget);
+    assert!(
+        !set.is_available(),
+        "essential description exceeded the complete occupied-data allowance"
+    );
+    assert!(set.columns.is_empty() && set.column_types.is_empty() && set.rows.is_empty());
+    assert_eq!(set.source_column_count(), 2);
+    assert_eq!(budget.charged_bytes(), 0);
+    assert!(budget.data_is_closed());
+}
+
+#[test]
+fn retained_data_ingestion_row_refusal_counts_without_owned_placeholder() {
+    let mut budget = RetentionBudget::for_tests(1);
+    let mut set = ResultSet::new(vec!["n".into()], 10);
+    retain_buffered_row(
+        &mut set,
+        [Some("too much for the remaining budget")].into_iter(),
+        &mut budget,
+    )
+    .unwrap();
+    assert_eq!(set.rows_seen, 1);
+    assert!(
+        set.rows.is_empty(),
+        "aggregate refusal must not retain a complete or empty invented row"
+    );
+    assert_eq!(
+        set.retention_reason(),
+        Some(crate::query::result::RetentionReason::RetainedResultLimit)
+    );
+}
+
+#[test]
+fn retained_data_ingestion_existing_percell_failure_precedes_aggregate_limit() {
+    let mut budget = RetentionBudget::for_tests(0);
+    let mut set = ResultSet::new(vec!["n".into()], 10);
+    let oversized = "x".repeat(crate::query::value::MAX_RETAINED_VALUE_BYTES + 1);
+    let error = retain_buffered_row(
+        &mut set,
+        [Some(oversized.as_str())].into_iter(),
+        &mut budget,
+    )
+    .unwrap_err();
+    assert_eq!(error, oversized.len());
+    assert_eq!(set.rows_seen, 0);
+    assert!(set.rows.is_empty());
+}
+
+#[test]
+fn retained_data_ingestion_existing_rowcap_zero_does_not_read_discarded_values() {
+    let mut budget = RetentionBudget::for_tests(0);
+    let mut set = ResultSet::new(vec!["n".into()], 0);
+    let cells = std::iter::once_with(|| -> Option<&str> {
+        panic!("row-cap-only discarded value was inspected")
+    });
+    retain_buffered_row(&mut set, cells, &mut budget).unwrap();
+    assert_eq!(set.rows_seen, 1);
+    assert!(set.rows.is_empty());
+    assert!(!budget.data_is_closed());
+}
+
+#[test]
+fn retained_data_ingestion_cumulative_closure_keeps_later_received_counts() {
+    let mut budget = RetentionBudget::for_tests(0);
+    let mut first = retain_description(["first"].into_iter(), 1, 100, &mut budget);
+    retain_buffered_row(
+        &mut first,
+        std::iter::once_with(|| -> Option<&str> { panic!("unavailable row inspected") }),
+        &mut budget,
+    )
+    .unwrap();
+    let mut later = retain_description(["small"].into_iter(), 1, 100, &mut budget);
+    retain_buffered_row(&mut later, [Some("42")].into_iter(), &mut budget).unwrap();
+    assert!(!first.is_available() && !later.is_available());
+    assert_eq!(first.rows_seen, 1);
+    assert_eq!(later.rows_seen, 1);
+    assert_eq!(budget.charged_bytes(), 0);
+}
+
+#[test]
+fn retained_data_ingestion_rowcap_only_leaves_later_set_budget_open() {
+    let mut budget = RetentionBudget::for_tests(1024);
+    let mut capped = retain_description(["capped"].into_iter(), 1, 0, &mut budget);
+    retain_buffered_row(
+        &mut capped,
+        std::iter::once_with(|| -> Option<&str> { panic!("capped value inspected") }),
+        &mut budget,
+    )
+    .unwrap();
+    let mut later = retain_description(["later"].into_iter(), 1, 1, &mut budget);
+    retain_buffered_row(&mut later, [Some("42")].into_iter(), &mut budget).unwrap();
+    assert_eq!(capped.retention_reason(), Some(RetentionReason::RowCap));
+    assert!(later.is_available());
+    assert_eq!(later.rows, vec![vec![Cell::Text("42".into())]]);
+    assert!(!budget.data_is_closed());
+}
+
+/// The original iterator is the owned-copy pass; only its clone may be visited
+/// for preflight when admission fails. This proves actual ingestion ordering.
+struct PreflightOnly<T: Copy + 'static> {
+    values: &'static [T],
+    index: usize,
+    preflight: bool,
+}
+impl<T: Copy> Clone for PreflightOnly<T> {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values,
+            index: self.index,
+            preflight: true,
+        }
+    }
+}
+impl<T: Copy> Iterator for PreflightOnly<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        assert!(
+            self.preflight,
+            "owned-copy pass started after complete admission refusal"
+        );
+        let value = self.values.get(self.index).copied();
+        self.index += usize::from(value.is_some());
+        value
+    }
+}
+
+#[test]
+fn retained_data_ingestion_refusal_never_starts_owned_header_or_cell_pass() {
+    let mut budget = RetentionBudget::for_tests(0);
+    let names = PreflightOnly {
+        values: &["one", "two"],
+        index: 0,
+        preflight: false,
+    };
+    let set = retain_description(names, 2, 100, &mut budget);
+    assert!(!set.is_available());
+    let mut budget = RetentionBudget::for_tests(0);
+    let mut set = ResultSet::new(vec!["value".into()], 100);
+    let cells = PreflightOnly {
+        values: &[Some("one"), Some("two")],
+        index: 0,
+        preflight: false,
+    };
+    retain_buffered_row(&mut set, cells, &mut budget).unwrap();
+    assert_eq!(set.rows_seen, 1);
+    assert!(set.rows.is_empty());
+}

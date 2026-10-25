@@ -672,3 +672,113 @@ fn a_run_that_succeeded_and_returned_no_result_sets_still_says_so() {
     execution.status = ExecutionStatus::Succeeded;
     assert_eq!(render(Format::Json, &execution).trim(), "[]");
 }
+
+#[test]
+fn unavailable_description_has_explicit_json_and_no_invented_machine_records() {
+    let mut unavailable = ResultSet::unavailable(3, 100);
+    unavailable.rows_seen = 7;
+    let execution = execution(vec![unavailable]);
+    let mut out = Vec::new();
+    write_execution(
+        &mut out,
+        &execution,
+        &OutputOptions {
+            format: Format::Json,
+            ..OutputOptions::default()
+        },
+    )
+    .unwrap();
+    let object: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        object,
+        serde_json::json!([{ "columns": [], "rows": [], "rows_seen": 7, "truncated": true, "data_unavailable": "retained_result_limit", "source_column_count": 3 }])
+    );
+    for format in [
+        Format::Csv,
+        Format::Tsv,
+        Format::Ndjson,
+        Format::Markdown,
+        Format::Insert,
+    ] {
+        out.clear();
+        write_execution(
+            &mut out,
+            &execution,
+            &OutputOptions {
+                format,
+                insert_table: (format == Format::Insert).then(|| "snapshot".into()),
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(out.is_empty(), "{format:?} invented output: {out:?}");
+    }
+}
+
+#[test]
+fn unavailable_sets_still_count_for_ndjson_ambiguity_before_output() {
+    let execution = execution(vec![sample(), ResultSet::unavailable(2, 0)]);
+    let mut out = Vec::new();
+    assert_eq!(
+        write_execution(
+            &mut out,
+            &execution,
+            &OutputOptions {
+                format: Format::Ndjson,
+                ..OutputOptions::default()
+            }
+        )
+        .unwrap_err()
+        .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert!(out.is_empty());
+}
+
+#[test]
+fn unavailable_description_preserves_machine_set_separators_and_available_bytes() {
+    let mut known = ResultSet::new(vec!["n".into()], 10);
+    known.push(vec![Cell::Text("42".into())]);
+    for format in [Format::Csv, Format::Tsv, Format::Markdown, Format::Insert] {
+        let options = OutputOptions {
+            format,
+            insert_table: (format == Format::Insert).then(|| "snapshot".into()),
+            ..OutputOptions::default()
+        };
+        let mut ordinary = Vec::new();
+        write_execution(&mut ordinary, &execution(vec![known.clone()]), &options).unwrap();
+        for position in 0..=2 {
+            let mut sets = vec![known.clone(), known.clone()];
+            sets.insert(position, ResultSet::unavailable(3, 100));
+            let mut actual = Vec::new();
+            write_execution(&mut actual, &execution(sets), &options).unwrap();
+            let separator = if format == Format::Insert {
+                b"\n".as_slice()
+            } else if position == 1 {
+                b"\n\n".as_slice()
+            } else {
+                b"\n".as_slice()
+            };
+            let expected = if format == Format::Insert || position == 1 {
+                [ordinary.as_slice(), separator, ordinary.as_slice()].concat()
+            } else if position == 0 {
+                [
+                    b"\n".as_slice(),
+                    ordinary.as_slice(),
+                    b"\n".as_slice(),
+                    ordinary.as_slice(),
+                ]
+                .concat()
+            } else {
+                [
+                    ordinary.as_slice(),
+                    b"\n".as_slice(),
+                    ordinary.as_slice(),
+                    b"\n".as_slice(),
+                ]
+                .concat()
+            };
+            assert_eq!(actual, expected, "{format:?} at ordinal {}", position + 1);
+        }
+    }
+}

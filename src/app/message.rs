@@ -362,6 +362,8 @@ pub enum Message {
         /// Unicode scalar values represented by those bytes.
         characters: usize,
     },
+    /// A retained-data effect was refused locally before any I/O.
+    RetainedDataUnavailable,
     /// The terminal clipboard write or flush failed.
     ClipboardFailed(Box<Diagnostic>),
     /// The cancellation request was delivered to the server.

@@ -95,6 +95,8 @@ pub enum ResultPosture {
     None,
     /// A query is still running or cancellation is not confirmed.
     Running,
+    /// The essential description was not retained; this is not an empty answer.
+    Unavailable,
     /// A completed result set has no retained rows.
     NoRows,
     /// A completed result set has rows and the current filter admits some.
@@ -711,6 +713,13 @@ pub fn palette_note(model: &Model) -> String {
     ) {
         notes.push("Result actions need retained rows.".to_owned());
     }
+    if ctx.result == ResultPosture::Unavailable {
+        notes.push(format!(
+            "{}. {}",
+            crate::query::result::RETAINED_DATA_UNAVAILABLE,
+            crate::query::result::RETAINED_DATA_GUIDANCE
+        ));
+    }
     if ctx.result == ResultPosture::FailedTransaction {
         notes.push("Run ROLLBACK before sending another query.".to_owned());
     }
@@ -744,17 +753,20 @@ fn copy_action_is_available(model: &Model) -> bool {
     let Some(source_row) = model.selected_source_row() else {
         return false;
     };
-    model.visible_result().is_some_and(|set| {
-        model
-            .result_grid
-            .visible_columns(set.columns.len())
-            .contains(&model.selected_column)
-            && set
-                .rows
-                .get(source_row)
-                .and_then(|row| row.get(model.selected_column))
-                .is_some()
-    })
+    model
+        .visible_result()
+        .filter(|set| set.is_available())
+        .is_some_and(|set| {
+            model
+                .result_grid
+                .visible_columns(set.columns.len())
+                .contains(&model.selected_column)
+                && set
+                    .rows
+                    .get(source_row)
+                    .and_then(|row| row.get(model.selected_column))
+                    .is_some()
+        })
 }
 
 fn cell_update_action_is_available(model: &Model) -> bool {
@@ -772,17 +784,20 @@ fn cell_update_action_is_available(model: &Model) -> bool {
     let Some(source_row) = model.selected_source_row() else {
         return false;
     };
-    model.visible_result().is_some_and(|set| {
-        model
-            .result_grid
-            .visible_columns(set.columns.len())
-            .contains(&model.selected_column)
-            && set
-                .rows
-                .get(source_row)
-                .and_then(|row| row.get(model.selected_column))
-                .is_some()
-    })
+    model
+        .visible_result()
+        .filter(|set| set.is_available())
+        .is_some_and(|set| {
+            model
+                .result_grid
+                .visible_columns(set.columns.len())
+                .contains(&model.selected_column)
+                && set
+                    .rows
+                    .get(source_row)
+                    .and_then(|row| row.get(model.selected_column))
+                    .is_some()
+        })
 }
 
 fn plan_action_prerequisite(
@@ -849,6 +864,9 @@ fn result_posture(model: &Model) -> ResultPosture {
     let Some(set) = model.visible_result() else {
         return ResultPosture::None;
     };
+    if !set.is_available() {
+        return ResultPosture::Unavailable;
+    }
     if set.rows.is_empty() {
         return ResultPosture::NoRows;
     }

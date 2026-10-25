@@ -3296,3 +3296,437 @@ fn notice_pending_defers_under_help_and_each_review_without_changing_required_ge
     let after = crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8));
     assert_eq!(before.body, after.body);
 }
+
+#[test]
+fn retained_result_later_loss_is_visible_with_complete_first_set() {
+    let mut model = connected_model(Environment::Local);
+    with_rows(&mut model, &["first"], &[&[Cell::Text("healthy".into())]]);
+    let mut execution = model.last_execution.take().unwrap();
+    let mut later = ResultSet::new(vec!["later".into()], 1);
+    later.push(vec![Cell::Text("retained".into())]);
+    later.push(vec![Cell::Text("received but dropped".into())]);
+    execution.statements.push(StatementResult {
+        result_set: Some(later),
+        rows_affected: Some(2),
+        elapsed: Duration::ZERO,
+        notices: Vec::new(),
+    });
+    model.phase = QueryPhase::Running {
+        job: execution.job,
+        statements: 2,
+    };
+    crate::app::update(
+        &mut model,
+        crate::app::Message::ExecutionFinished(Box::new(execution)),
+    );
+    assert_eq!(
+        model.visible_result().unwrap().rows[0][0],
+        Cell::Text("healthy".into())
+    );
+    let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+    assert!(
+        text.contains("Data limited in 1 result set(s)"),
+        "later-set loss was hidden by a complete first set: {text}"
+    );
+}
+
+fn retained_loss_model(unavailable: bool) -> Model {
+    let mut model = connected_model(Environment::Local);
+    model.focus = Focus::Results;
+    let rows: Vec<Vec<Cell>> = (0..60)
+        .map(|n| vec![Cell::Text(format!("bound-row-{n}"))])
+        .collect();
+    with_rows(
+        &mut model,
+        &["value"],
+        &rows.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+    );
+    let mut execution = model.last_execution.take().unwrap();
+    if unavailable {
+        let mut set = ResultSet::unavailable(3, 100);
+        set.rows_seen = 7;
+        execution.statements[0].result_set = Some(set);
+    } else {
+        let mut set = ResultSet::new(vec!["later".into()], 0);
+        set.push(vec![Cell::Text("dropped".into())]);
+        execution.statements.push(StatementResult {
+            result_set: Some(set),
+            rows_affected: Some(1),
+            elapsed: Duration::ZERO,
+            notices: Vec::new(),
+        });
+    }
+    model.phase = QueryPhase::Running {
+        job: execution.job,
+        statements: 2,
+    };
+    crate::app::update(
+        &mut model,
+        crate::app::Message::ExecutionFinished(Box::new(execution)),
+    );
+    model
+}
+
+#[test]
+fn retained_result_unavailable_is_truthful_at_minimum_and_enlarged_in_all_presentations() {
+    use crate::config::Density;
+    use crate::ui::theme::ColorDepth;
+    for density in [Density::Comfortable, Density::Compact] {
+        for theme in [
+            ThemeChoice::Dark,
+            ThemeChoice::Light,
+            ThemeChoice::HighContrast,
+        ] {
+            for (depth, tier) in [
+                (ColorDepth::TrueColor, GlyphTier::Unicode),
+                (ColorDepth::None, GlyphTier::Ascii),
+            ] {
+                for (width, height) in [(40, 8), (79, 24), (120, 30), (20, 4), (0, 0)] {
+                    let mut model = retained_loss_model(true);
+                    model.size = (width, height);
+                    model.presentation = Presentation::new(
+                        Theme::new(theme, true).with_depth(depth),
+                        Glyphs::new(tier),
+                        false,
+                    )
+                    .with_density(density);
+                    for zoomed in [false, true] {
+                        model.splits.zoomed = zoomed;
+                        let text = render_to_string(
+                            &model,
+                            &Keymap::new(),
+                            &model.presentation,
+                            width,
+                            height,
+                        );
+                        if width >= 40 && height >= 8 {
+                            assert!(
+                                text.contains("Result data unavailable"),
+                                "{width}x{height}: {text}"
+                            );
+                            assert!(text.contains("3 source columns; 7 received rows"), "{text}");
+                            assert!(text.contains("Data limited in 1 result set(s)"), "{text}");
+                            assert!(
+                                !text.contains("No rows returned") && !text.contains("No result"),
+                                "{text}"
+                            );
+                            if width >= 120 {
+                                assert!(
+                                    text.contains("For a future complete streaming export"),
+                                    "{text}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn retained_result_warning_paging_and_hit_geometry_agree_in_both_densities() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        let mut model = retained_loss_model(false);
+        model.size = (120, 40);
+        model.presentation = rich().with_density(density);
+        let text = render_to_string(&model, &Keymap::new(), &model.presentation, 120, 40);
+        assert!(text.contains("Data limited in 1 result set(s)"));
+        assert!(text.contains("First: result set 2, row cap"), "{text}");
+        let count = text
+            .lines()
+            .filter(|line| line.contains("bound-row-"))
+            .count();
+        assert_eq!(results_page(&model), count);
+        let data_y = text
+            .lines()
+            .position(|line| line.contains("bound-row-0"))
+            .unwrap() as u16;
+        let pane = pane_geometry(&model, Rect::new(0, 0, 120, 40))
+            .results
+            .unwrap();
+        assert_eq!(
+            crate::ui::widgets::region_at(&model, Rect::new(0, 0, 120, 40), pane.x + 6, data_y),
+            Some(crate::ui::widgets::Region::ResultsCell { row: 0, column: 0 })
+        );
+        crate::app::update(
+            &mut model,
+            crate::app::Message::Action(crate::app::Action::MovePage(
+                crate::app::message::Direction::Down,
+            )),
+        );
+        assert_eq!(model.selected_row, count);
+    }
+}
+
+#[test]
+fn retained_result_footer_survives_zoom_and_plan_without_losing_pending_notice_facts() {
+    let mut model = retained_loss_model(false);
+    model.size = (120, 30);
+    model.notice_state.pending.omitted = crate::query::result::NoticeCount::Exact(4);
+    let loss = model.retained_data_loss;
+    for focus in [Focus::Editor, Focus::Objects, Focus::Results] {
+        model.focus = focus;
+        model.splits.zoomed = true;
+        let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+        assert!(text.contains("Limited sets: 1"), "{text}");
+        assert!(text.contains("Notices: 4 omitted"), "{text}");
+    }
+    model.plan = crate::app::plan::PlanView::loading(JobId(8), false);
+    let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+    assert!(text.contains("Limited sets: 1"), "{text}");
+    model.plan.clear();
+    model.focus = Focus::Results;
+    assert!(
+        render_to_string(&model, &Keymap::new(), &rich(), 120, 30)
+            .contains("Data limited in 1 result set(s)")
+    );
+    assert_eq!(model.retained_data_loss, loss);
+    assert_eq!(
+        model.notice_state.pending.omitted,
+        crate::query::result::NoticeCount::Exact(4)
+    );
+}
+
+#[test]
+fn retention_edge_unavailable_large_counts_are_whole_or_deferred_at_40x8() {
+    use crate::query::result::NoticeCount;
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        let mut model = retained_loss_model(true);
+        let mut execution = model.last_execution.take().unwrap();
+        let mut set = ResultSet::unavailable(usize::MAX, 100);
+        set.rows_seen = u64::MAX;
+        execution.statements[0].result_set = Some(set);
+        model.phase = QueryPhase::Running {
+            job: execution.job,
+            statements: 1,
+        };
+        crate::app::update(
+            &mut model,
+            crate::app::Message::ExecutionFinished(Box::new(execution)),
+        );
+        model.size = (40, 8);
+        model.presentation =
+            presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+        model.notice_state.pending.omitted = NoticeCount::AtLeast(u64::MAX);
+        // Fixed cache counts can be large without constructing an enormous control vector.
+        model.retained_data_loss.limited_sets = usize::MAX;
+        let text = render_to_string(&model, &Keymap::new(), &model.presentation, 40, 8);
+        assert!(text.contains("Data limited in"), "{text}");
+        // A word may wrap across rows; the numeric token must stay complete.
+        let body = text
+            .lines()
+            .map(|line| line.trim_matches(['|', ' ']))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            body.contains(&format!("Data limited in {} result set(s)", usize::MAX)),
+            "{text}"
+        );
+        if text.contains("source columns") {
+            assert!(
+                text.contains(&usize::MAX.to_string()) && text.contains("received rows"),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            model.notice_state.pending.omitted,
+            NoticeCount::AtLeast(u64::MAX)
+        );
+        assert_eq!(model.visible_result().unwrap().rows_seen, u64::MAX);
+    }
+}
+
+#[test]
+fn retention_edge_expanded_zero_prefix_names_retained_loss_instead_of_server_zero() {
+    let mut model = retained_loss_model(false);
+    let mut execution = model.last_execution.take().unwrap();
+    let mut set = ResultSet::new(vec!["value".into()], 100);
+    set.retention = crate::query::result::ResultRetention::DataLimit;
+    set.rows_seen = 3;
+    execution.statements[0].result_set = Some(set);
+    model.phase = QueryPhase::Running {
+        job: execution.job,
+        statements: 2,
+    };
+    crate::app::update(
+        &mut model,
+        crate::app::Message::ExecutionFinished(Box::new(execution)),
+    );
+    model.expanded_row = true;
+    model.focus = Focus::Results;
+    let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
+    assert!(
+        text.contains("No retained row to expand; PostgreSQL delivered 3 rows."),
+        "{text}"
+    );
+    assert!(!text.contains("No rows, so"));
+}
+
+#[test]
+fn retention_edge_unavailable_caption_defers_metadata_to_complete_body_facts() {
+    let mut model = retained_loss_model(true);
+    let mut execution = model.last_execution.take().unwrap();
+    execution.statements[0].result_set = Some(ResultSet::unavailable(usize::MAX, 100));
+    execution.statements[0]
+        .result_set
+        .as_mut()
+        .unwrap()
+        .rows_seen = u64::MAX;
+    model.phase = QueryPhase::Running {
+        job: execution.job,
+        statements: 1,
+    };
+    crate::app::update(
+        &mut model,
+        crate::app::Message::ExecutionFinished(Box::new(execution)),
+    );
+    let text = render_to_string(
+        &model,
+        &Keymap::new(),
+        &presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+        120,
+        30,
+    );
+    let caption = text
+        .lines()
+        .find(|line| line.contains("Results") && line.contains("Completed"))
+        .unwrap();
+    assert!(
+        !caption.chars().any(|c| c.is_ascii_digit()),
+        "metadata in an ellipsised caption can invent a smaller count: {caption}"
+    );
+    assert!(text.contains(&format!(
+        "{} source columns; {} received rows",
+        usize::MAX,
+        u64::MAX
+    )));
+}
+
+#[test]
+fn retention_edge_known_prefix_captions_and_grid_never_clip_received_numerals() {
+    for reason in [
+        crate::query::result::ResultRetention::RowCap,
+        crate::query::result::ResultRetention::DataLimit,
+    ] {
+        for filtered in [false, true] {
+            for (width, height) in [(40, 8), (50, 20), (79, 24), (120, 30)] {
+                let mut model = retained_loss_model(false);
+                let mut execution = model.last_execution.take().unwrap();
+                let set = execution.statements[0].result_set.as_mut().unwrap();
+                set.rows_seen = u64::MAX;
+                set.retention = reason;
+                model.phase = QueryPhase::Running {
+                    job: execution.job,
+                    statements: 2,
+                };
+                crate::app::update(
+                    &mut model,
+                    crate::app::Message::ExecutionFinished(Box::new(execution)),
+                );
+                model.size = (width, height);
+                if filtered {
+                    model.result_filter = "bound".into();
+                }
+                let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii);
+                let text = render_to_string(&model, &Keymap::new(), &p, width, height);
+                let caption = text
+                    .lines()
+                    .find(|line| line.contains("Results") && line.contains("Completed"))
+                    .unwrap();
+                assert!(
+                    !caption.chars().any(|c| c.is_ascii_digit()),
+                    "limited caption must defer numeric metadata: {caption}"
+                );
+                if let Some(line) = text.lines().find(|line| line.contains("rows 1-")) {
+                    assert!(
+                        line.contains("18,446,744,073,709,551,615 returned"),
+                        "incomplete received fact: {line}"
+                    );
+                }
+                assert!(text.contains("Data limited in 2 result set(s)"), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn retention_inner_minimum_split_shows_complete_limited_cue_or_whole_summary() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for inner_rows in [1, 2] {
+            let mut model = retained_loss_model(false);
+            model.size = (80, 24);
+            model.splits.sidebar_cells = Some(60);
+            model.splits.editor_rows = Some(if inner_rows == 1 { u16::MAX } else { 18 });
+            model.presentation =
+                presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+            model.notice_state.pending.omitted = crate::query::result::NoticeCount::Exact(4);
+            let before = model.retained_data_loss;
+            let geometry = pane_geometry(&model, Rect::new(0, 0, 80, 24));
+            assert_eq!(geometry.results.unwrap().height, inner_rows + 2);
+            assert_eq!(geometry.results.unwrap().width, 30);
+            let text = render_to_string(&model, &Keymap::new(), &model.presentation, 80, 24);
+            if inner_rows == 1 {
+                assert!(text.contains("Data limited; enlarge view"), "{text}");
+            } else {
+                let rows = text
+                    .lines()
+                    .filter(|line| line.contains("Data limited in") || line.contains("set(s)"))
+                    .map(|line| line.trim_matches(['|', ' ']))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert!(rows.contains("Data limited in 1 result set(s)"), "{text}");
+            }
+            assert!(text.contains("Ready Autocommit"), "{text}");
+            assert!(text.contains("Limited sets: 1"), "{text}");
+            assert_eq!(model.retained_data_loss, before);
+            assert_eq!(
+                model.notice_state.pending.omitted,
+                crate::query::result::NoticeCount::Exact(4)
+            );
+        }
+    }
+}
+
+#[test]
+fn retention_inner_minimum_unavailable_view_defers_counts_without_partial_fact() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for inner_rows in [1, 2] {
+            let mut model = retained_loss_model(true);
+            model.size = (80, 24);
+            model.splits.sidebar_cells = Some(60);
+            model.splits.editor_rows = Some(if inner_rows == 1 { u16::MAX } else { 18 });
+            model.presentation =
+                presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+            let before = model.retained_data_loss;
+            assert_eq!(
+                pane_geometry(&model, Rect::new(0, 0, 80, 24))
+                    .results
+                    .unwrap()
+                    .height,
+                inner_rows + 2
+            );
+            let text = render_to_string(&model, &Keymap::new(), &model.presentation, 80, 24);
+            assert!(text.contains("Data unavailable; enlarge"), "{text}");
+            assert!(
+                !text.contains("source columns") && !text.contains("received rows"),
+                "{text}"
+            );
+            assert_eq!(model.retained_data_loss, before);
+            assert_eq!(model.visible_result().unwrap().rows_seen, 7);
+            assert!(text.contains("Ready Autocommit"), "{text}");
+        }
+    }
+}

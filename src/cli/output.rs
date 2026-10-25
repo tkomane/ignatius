@@ -169,6 +169,13 @@ fn write_json(out: &mut impl Write, sets: &[&ResultSet]) -> io::Result<()> {
     let payload: Vec<serde_json::Value> = sets
         .iter()
         .map(|set| {
+            if !set.is_available() {
+                return serde_json::json!({
+                    "columns": [], "rows": [], "rows_seen": set.rows_seen, "truncated": true,
+                    "data_unavailable": "retained_result_limit",
+                    "source_column_count": set.source_column_count(),
+                });
+            }
             let rows: Vec<serde_json::Value> = set
                 .rows
                 .iter()
@@ -203,6 +210,9 @@ fn write_json(out: &mut impl Write, sets: &[&ResultSet]) -> io::Result<()> {
 }
 
 fn write_ndjson(out: &mut impl Write, set: &ResultSet) -> io::Result<()> {
+    if !set.is_available() {
+        return Ok(());
+    }
     for row in &set.rows {
         let object: serde_json::Map<String, serde_json::Value> = set
             .columns
@@ -231,6 +241,9 @@ fn write_separated(
         if index > 0 {
             // A blank line is the documented separator between result sets.
             writeln!(out)?;
+        }
+        if !set.is_available() {
+            continue;
         }
         if options.header {
             let header: Vec<String> = set
@@ -282,6 +295,9 @@ fn write_markdown(
         if index > 0 {
             writeln!(out)?;
         }
+        if !set.is_available() {
+            continue;
+        }
         let escape = |text: &str| sanitize_for_display(text).replace('|', "\\|");
         writeln!(
             out,
@@ -327,11 +343,11 @@ fn write_insert(
     // Validate every result set before writing the first statement. A later
     // duplicate label or NUL must not leave an earlier result set looking like
     // a complete export on stdout.
-    for set in sets {
+    for set in sets.iter().filter(|set| set.is_available()) {
         validate_insert_set(set)?;
     }
     let mut wrote_statement = false;
-    for set in sets {
+    for set in sets.iter().filter(|set| set.is_available()) {
         for row in &set.rows {
             if wrote_statement {
                 writeln!(out)?;
@@ -458,6 +474,7 @@ fn write_table(
             writeln!(out)?;
         }
         match &statement.result_set {
+            Some(set) if !set.is_available() => writeln!(out, "({})", set.window_label())?,
             Some(set) => {
                 let widths = table_widths(set);
                 let separator = if options.unicode { "│" } else { "|" };

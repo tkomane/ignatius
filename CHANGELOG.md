@@ -8,6 +8,16 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: buffered executions share a 32 MiB logical occupied-result-data
+  allowance across result sets, alongside the existing row and per-cell caps.
+  Complete retained prefixes and unavailable descriptions are reported without
+  changing PostgreSQL outcomes, affected rows or transaction behavior.
+- Improved: Results keeps a bounded execution-level loss summary, including
+  losses in later result sets, and refuses unavailable-data copy, inspection,
+  cell update and retained-file export before effects. Unavailable JSON results
+  explicitly carry `data_unavailable` and `source_column_count`; known-result
+  schemas and complete streaming exports remain unchanged.
+
 - Security: server notice retention after driver connection is bounded by a
   whole-operation count/retained-text allowance, with explicit omission,
   shortening and uncertain accounting. Statements and transaction outcomes are

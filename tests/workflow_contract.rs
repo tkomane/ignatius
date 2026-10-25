@@ -409,6 +409,13 @@ fn shared_ci_runs_the_complete_declared_coverage() {
 
     assert_eq!(
         integration
+            .matches("--test retained_result_contract")
+            .count(),
+        2,
+        "retained-result contracts must use real endpoints over both plain and verified TLS"
+    );
+    assert_eq!(
+        integration
             .matches("--test notice_retention_contract")
             .count(),
         2,

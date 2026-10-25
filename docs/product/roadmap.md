@@ -27,9 +27,11 @@ W10-008 retains distinct notice, aggregate-result and incoming-allocation
 contracts; observed RSS peaks are not memory ceilings. W10-011's 12 real-writer
 pacing samples preserve all output bytes with distinct small/large-value RSS.
 W10-012 notice admission/accounting is implemented locally in `d65024b`, with
-1,370 combined harness cases and reviewed synthetic buffers; hosted/platform
-acceptance remains open. W10-013's execution-wide retained-data contract is
-ready for the next isolated implementation. CLI cancellation and complete
+1,370 combined harness cases and reviewed synthetic buffers. Published `fda16f8`
+also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; native
+hand-use remains separate. W10-013's execution-wide retained-data contract is
+now locally verified (1,431 outer cases and 112 styled buffers), with fresh
+affected-major/hosted acceptance pending. CLI cancellation and complete
 resource acceptance remain separate. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature

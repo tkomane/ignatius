@@ -56,7 +56,131 @@ network-disabled actionlint passed locally. Fresh Gitleaks found no leaks in
 `/private/tmp/ignatius-gitleaks-notice-final-{history,source}-20261025.log`;
 snapshot `/private/tmp/ignatius-notice-final-scan-a2ncvln9/`. These precede the
 small transport-harness correction; a clean-source scan follows the commit.
-Hosted execution remains pending.
+The subsequent hosted result is recorded below.
+
+Clean publication checkpoint `fda16f8041c4177ded2b451ec40ae252e9b9174e`
+passed its installed pre-push full gate again: 1,370 outer cases/23 summaries,
+plain/TLS PostgreSQL, with the same explicit macOS socket skip. Push log:
+`/private/tmp/ignatius-push-fda16f8-20261025.log`. Exact clean source (434 files,
+tree digest `aedd1c7786c95584f3e901b18044bea7201374d3e654a753989b5e8bf960828a`)
+and 282 reachable Git revisions passed fresh pinned Gitleaks scans. Snapshot:
+`/private/tmp/ignatius-source-fda16f8-pdi0klk0/`; logs:
+`/private/tmp/ignatius-gitleaks-fda16f8-{source,history}-20261025.log`.
+[Draft PR #32](https://github.com/tkomane/ignatius/pull/32) is published;
+hosted CI `40202770798` and CodeQL `40202770715` completed for that exact head.
+Sixteen workflow jobs succeeded; the upstream fixture-drift comparison was
+schedule-only and skipped. The separate built-in CodeQL check resolved its
+temporary neutral/missing-Rust state to success with no new alerts. No pending,
+failed or cancelled check remained. Fifteen annotation sets contained runner
+notices only, with no warning/error annotation. No rerun or source fix was needed.
+
+Hosted library counts were 1,072 Linux/1,072 macOS/1,053 Windows. Their database
+early-return cases are not live evidence, and doctor smoke has three expected
+nonterminal/no-target skips. Separate PG14 and PG18 jobs each ran 210 selected
+invocations across plain and verify-full TLS, including ten notice integration,
+eight notice sidecar (six actual-session) and nine Session cases per route.
+Those full logs have no semantic-skip line. The Linux Unix-socket job passed its
+one actual query contract with the URI supplied, without a semantic skip.
+Rust1.90, lints/docs, dependency/licence, secret, workflow/drift and all three
+CodeQL analysis jobs also succeeded. Native Windows terminal/hand-use and the
+schedule-only upstream comparison remain separate.
+
+The Actions checkout is PR merge ref `d9198a74aaebfa2165b25cdb70f3aa0c4d111f50`;
+the lead fetched it and verified tree
+`a561e457e7e9ab6923edc39e065e9459f5d38146` equals published head `fda16f8`.
+Build identity may name that merge ref; this is source-tree equivalence, not a
+packaged-candidate claim. Complete check listings and PG/socket logs were read;
+platform/Rust-CodeQL log APIs are truncated, so no exhaustive internal log/skip
+inventory is claimed for those jobs. Evidence and limits:
+`/private/tmp/ignatius-pr32-ci-fda16-20261025/`; both manifest hashes verified.
+Later W10-013 working source is excluded from these results.
+
+## Published notice-source PostgreSQL 15 smoke - 2026-10-25
+
+Clean published `fda16f8` debug CLI (Homebrew Rust1.99.1, macOS27.0.1 arm64)
+passed exact CSV/one-omission output for 257 notices against PostgreSQL15.19,
+plain and verify-full TLS, with server-version/orders health before/after.
+The image was immutable arm64 PostgreSQL digest
+`a8e042598834300dfaa17a54f695b87b7f25d3490433bbbe2ef3bffbb9747f24`.
+The independently inspected controller used unique task labels and allocated
+loopback ports; both owned containers/anonymous volumes were removed. Root
+verified the two output digests, no labelled containers remained and all five
+pre-existing running IDs were preserved. Evidence:
+`/private/tmp/ignatius-resource-fixture-proof-mmfwivkh/`; controller SHA-256
+`17c5fa99a8f15a2c3d357daae1a67d6201e206399e6fdfa5d61388cd0df8cb6f`.
+This is a small published notice-source smoke, not a full PG15 suite, W10-013
+acceptance or performance/RSS evidence.
+
+## W10-013 isolated live retained-data verification - 2026-10-25
+
+The modified isolated `fda16f8` candidate passed six fresh-process cases on each
+of PostgreSQL18.6 plain and verify-full TLS, with 24 separate CLI health children
+confirming version18.6/orders3 before and after. Root verified 36 observations,
+72 stdout/stderr byte counts/digests and all 448 prepared input hashes afterward.
+No case skipped, exceeded its owned deadline/output/RSS stop or changed fixtures.
+The measured debug build uses Homebrew Rust1.99.1 on macOS27.0.1 arm64;
+this is separate from pinned/MSRV/hosted/native-terminal acceptance.
+
+The 40x1-MiB buffered result retained 31 whole rows (32,507,503 logical occupied
+bytes), received 40 and real CommandComplete40. Cumulative exhaustion preserved
+the healthy first result and later SELECT42 count-only outcome. Row-cap0 skipped
+the oversized discarded value while admitting later descriptions; real
+SQLSTATE22012 preserved its completed prefix. The owned TEMP INSERT RETURNING
+reported 40 affected and a subsequent same-session SELECT saw all 40 rows.
+Both streaming controls verified all 40 rows/41,943,080 bytes with SHA-256
+`168d2882b1bff9d4e7e2f16ec515bb39d3ebfc4c24335c4cc4e90a98dc18f8d0`.
+Rust and the controller checked every byte before removing only the verified
+owned CSV. Root checked those assertions/cleanup receipts and path absence;
+it did not re-read the removed payloads. Completed-case RSS spans10.91-45.14MiB
+across distinct workloads, not a statistical comparison or process ceiling.
+
+Evidence: `/private/tmp/ignatius-w10-013-fda16f8-TfHH4z/evidence/`, including
+`live-preparation.json`, `live-results.jsonl`, `live-cleanup.json`,
+`live-summary.json` and `root-live-review.json`. The accepted pre-live freeze is
+milestone02, manifest SHA-256
+`f14e7b961c2e539cc6c2c6667129a53a6b08995dd29ee2d7abb5125a875c2bf8`.
+A subsequent UI-only repair covers complete warning admission in reachable
+one/two-inner-row Results panes; it changes no measured Session/core/output
+code. Canonical combined/full/rendered and affected-major gates follow separately.
+
+## W10-013 canonical full and rendered gate - 2026-10-25
+
+Root verified all 268 final milestone03 artifact hashes, all 24 applied code
+paths and unchanged original sidecar assertions. Final native peer review
+accepted the narrow UI repair; all 446 other live-preparation inputs still
+match the executed milestone02. Peer receipt:
+`/private/tmp/ignatius-w10-013-peer-review-20261025/REVIEW-03.md`, SHA-256
+`73e0db04678bcde622de2e2b388c2a1fd8b9f19cd2be1572dda82571e720982d`.
+
+The complete canonical locked/offline verifier passed **1,431 outer harness
+cases, 1,127 library, 24 summaries**, formatting, warnings-denied workspace
+Clippy/API docs and PG18.6-backed tests. The macOS socket case is a semantic
+skip. Source was the modified integrated tree based on `fda16f8`, with 437
+tracked/untracked inputs, digest
+`7f92451d3a5ae552e51aefed7ecb66f80e2fce10460ec357dc7fbc8edbcd083f`.
+Log/receipt: `/private/tmp/ignatius-verify-2026-10-25-retained-result.log` and
+`.json`; subsequent documentation reconciliation is separate from these inputs.
+The CI omission regression failed with zero required routes before repair,
+then passed with explicit plain/verify-full retained-result contracts. Pinned,
+network-disabled Actionlint passed. Logs:
+`/private/tmp/ignatius-retained-ci-wiring-{red,green}-20261025.log` and
+`/private/tmp/ignatius-retained-actionlint-20261025.log`.
+
+The fresh Cargo-selected non-test library produced 112 actual styled synthetic
+Ratatui buffers: 14 scenes, both densities, dark/light/high-contrast truecolour
+Unicode and ASCII/no-colour. Root verified all 354 artifact hashes and inspected
+eight contact sheets (16 frame images), including later-set loss, unavailable
+counts, maximum scalar stress, zero retained prefix, protected review and the
+reachable one/two-inner-row split. Complete warning/count admission and ownership
+have no remaining scoped material blocker. Unsupported glyphs: zero. These are
+rendered-cell checks, not native screenshots or hand use. Evidence:
+`/private/tmp/ignatius-retained-styled-3rtx76kd/`, final manifest SHA-256
+`a93728fabc53bfc56b7ce4b229d418a7bddc41317ef334fd9d60e321d22cb851`,
+source-input digest
+`bf6f89ed7632919c050b1d0f2a8d3bcf2b6b1d6dc1665d209daea77bd662fc61`,
+non-test library SHA-256
+`8e81a2409e6c73e04326e3847d5c6549b72816042b228f3ac3b575dba0196575`.
+Fresh affected-major/hosted acceptance and clean publication are still pending.
 
 ## The full command
 

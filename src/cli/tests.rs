@@ -891,3 +891,74 @@ fn notice_output_unknown_retained_is_null_and_zero_reports_are_silent() {
     write_query_execution(&mut Vec::new(), &mut status, &execution, &options).unwrap();
     assert!(status.is_empty());
 }
+
+#[test]
+fn unavailable_description_status_is_exact_once_instead_of_row_truncation() {
+    let mut execution = retention_status_execution();
+    let mut set = crate::query::result::ResultSet::unavailable(3, 100);
+    set.rows_seen = 7;
+    execution.statements[3].result_set = Some(set);
+    let mut out = Vec::new();
+    write_buffered_truncation(&mut out, &execution, Format::Csv).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.starts_with("Result set 2 data unavailable: retained no description for 3 source columns and 7 received rows because the retained-result limit was reached. For a future complete streaming export, choose --output before execution.\n"), "{text}");
+    assert!(!text.contains("Result set 2 truncated"));
+    assert_eq!(text.lines().count(), 2);
+}
+
+#[test]
+fn unavailable_description_json_keeps_completed_prefix_and_single_notice_failure_status() {
+    use crate::query::result::{ExecutionStatus, ResultSet, TransactionState};
+    for kind in [
+        None,
+        Some(DiagnosticKind::Query),
+        Some(DiagnosticKind::Cancelled),
+        Some(DiagnosticKind::Connection),
+    ] {
+        let mut execution = notice_output_execution();
+        let mut set = ResultSet::unavailable(3, 100);
+        set.rows_seen = 7;
+        execution.statements[0].result_set = Some(set);
+        execution.error = kind.map(|kind| {
+            Diagnostic::new(
+                kind,
+                "synthetic server outcome",
+                "reading the requested statement",
+            )
+        });
+        execution.status = match kind {
+            None => ExecutionStatus::Succeeded,
+            Some(DiagnosticKind::Cancelled) => ExecutionStatus::Cancelled,
+            Some(DiagnosticKind::Connection) => ExecutionStatus::ConnectionLost,
+            _ => ExecutionStatus::Failed,
+        };
+        if kind == Some(DiagnosticKind::Connection) {
+            execution.transaction = TransactionState::Unknown;
+        }
+        let expected_exit = execution
+            .error
+            .as_ref()
+            .map_or(ExitCode::Success, Diagnostic::exit_code);
+        let (mut data, mut status) = (Vec::new(), Vec::new());
+        let options = output::OutputOptions {
+            format: Format::Json,
+            ..output::OutputOptions::default()
+        };
+        assert_eq!(
+            write_query_execution(&mut data, &mut status, &execution, &options).unwrap(),
+            expected_exit
+        );
+        let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
+        assert_eq!(payload[0]["data_unavailable"], "retained_result_limit");
+        assert_eq!(payload[0]["source_column_count"], 3);
+        assert_eq!(payload[0]["rows_seen"], 7);
+        let diagnostic: serde_json::Value = serde_json::from_slice(&status).unwrap();
+        assert_eq!(diagnostic["notice_report"]["omitted"]["count"], 1);
+        assert_eq!(status.iter().filter(|b| **b == b'\n').count(), 1);
+        assert!(
+            !String::from_utf8(status)
+                .unwrap()
+                .contains("data unavailable:")
+        );
+    }
+}

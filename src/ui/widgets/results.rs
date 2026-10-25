@@ -2,7 +2,9 @@ use super::overlays::render_plan;
 use super::{action_key_label, input_cursor, overlay_block, pane_block};
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
-use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
+use crate::query::value::{
+    display_width, pad_to_width, sanitize_for_display, truncate_to_width, wrap_to_width,
+};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{Presentation, inspector_box, inspector_viewport};
@@ -18,13 +20,87 @@ pub(crate) fn grid_header_rows(
     model: &Model,
     set: &crate::query::result::ResultSet,
     spacing: crate::app::model::Spacing,
+    area: Rect,
 ) -> usize {
     let notice = model.cell_update_notice.is_some()
         || model.clipboard_notice.is_some()
         || model.refresh_notice.is_some()
         || model.result_grid.note.is_some();
-    4 + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+    retention_warning_lines(model, area).len()
+        + 4
+        + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
         + usize::from(u16::from(notice).max(spacing.toolbar_blank_rows))
+}
+
+/// Wrap fixed client prose without splitting a numeric token. An indivisible
+/// fact too wide for this viewport is deferred rather than shortened.
+fn wrap_retention_fact(text: &str, width: usize) -> Vec<String> {
+    if width == 0
+        || text
+            .split_whitespace()
+            .any(|word| display_width(word) > width)
+    {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && display_width(&line) + 1 + display_width(word) > width {
+            rows.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        rows.push(line);
+    }
+    rows
+}
+
+/// Complete nonnumeric cue when a short pane cannot admit a whole fact.
+fn short_retention_cue(area: Rect, unavailable: bool) -> Vec<String> {
+    if area.height == 0 {
+        return Vec::new();
+    }
+    let candidates = if unavailable {
+        [
+            "Data unavailable; enlarge",
+            "Data unavailable",
+            "Unavailable",
+        ]
+    } else {
+        ["Data limited; enlarge view", "Data limited", "Limited"]
+    };
+    candidates
+        .into_iter()
+        .find(|text| display_width(text) <= usize::from(area.width))
+        .map_or_else(Vec::new, |text| vec![text.to_owned()])
+}
+
+/// Complete fixed-size execution facts, shared by paint and viewport geometry.
+fn retention_warning_lines(model: &Model, area: Rect) -> Vec<String> {
+    let Some(summary) = model
+        .retained_data_loss
+        .warning()
+        .filter(|_| area.width > 0)
+    else {
+        return Vec::new();
+    };
+    let width = usize::from(area.width);
+    let mut rows = wrap_retention_fact(&summary, width);
+    if rows.is_empty() || rows.len() > usize::from(area.height) {
+        return short_retention_cue(area, false);
+    }
+    if let Some(detail) = model.retained_data_loss.detail() {
+        let detail = wrap_retention_fact(&detail, width);
+        // Keep the normal grid prelude and at least one data row usable.
+        if rows.len().saturating_add(detail.len()).saturating_add(7) <= usize::from(area.height) {
+            rows.extend(detail);
+        }
+    }
+    rows
 }
 
 /// Actual drawable rows, before imposing the navigation minimum of one.
@@ -37,9 +113,12 @@ pub(crate) fn grid_capacity(
     if inner.width == 0 {
         return 0;
     }
-    model.visible_result().map_or(0, |set| {
-        usize::from(inner.height).saturating_sub(grid_header_rows(model, set, spacing))
-    })
+    model
+        .visible_result()
+        .filter(|set| set.is_available())
+        .map_or(0, |set| {
+            usize::from(inner.height).saturating_sub(grid_header_rows(model, set, spacing, inner))
+        })
 }
 
 pub(crate) fn render_results(
@@ -114,10 +193,22 @@ pub(crate) fn render_results(
         return;
     }
 
-    let summary = execution
-        .statements
-        .first()
-        .map_or_else(|| execution.status.label().to_owned(), |s| s.summary());
+    let summary = execution.statements.first().map_or_else(
+        || execution.status.label().to_owned(),
+        |s| {
+            if let Some(set) = s.result_set.as_ref().filter(|set| set.is_truncated()) {
+                // Metadata counts live in complete body facts, never in a
+                // caption whose width can ellipsise a numeric token.
+                if set.retention_reason() == Some(crate::query::result::RetentionReason::RowCap) {
+                    "row cap reached".to_owned()
+                } else {
+                    "retained-result limit reached".to_owned()
+                }
+            } else {
+                s.summary()
+            }
+        },
+    );
     let status = if model.running_refresh {
         "Refreshing retained result".to_owned()
     } else {
@@ -136,7 +227,11 @@ pub(crate) fn render_results(
     // held, of how many the server sent. Collapsing those into one number is
     // the lie this pane exists not to tell.
     if !model.result_filter.trim().is_empty() {
-        title.push_str(&format!("[{}] ", model.result_window_label()));
+        if model.visible_result().is_some_and(|set| set.is_truncated()) {
+            title.push_str("[filtered retained rows] ");
+        } else {
+            title.push_str(&format!("[{}] ", model.result_window_label()));
+        }
     }
     if model.result_filtering {
         title.push_str(&format!(
@@ -187,12 +282,67 @@ pub(crate) fn render_results(
         return;
     };
 
-    if inner.height < 2 || inner.width == 0 {
+    if inner.height == 0 || inner.width == 0 {
         return;
     }
 
-    if model.expanded_row {
-        render_expanded_row(model, set, presentation, inner, buf);
+    if !set.is_available() {
+        let width = usize::from(inner.width);
+        let mut rows = wrap_to_width(crate::query::result::RETAINED_DATA_UNAVAILABLE, width);
+        if let Some(summary) = model.retained_data_loss.warning() {
+            rows.extend(wrap_retention_fact(&summary, width));
+        }
+        if rows.len() > usize::from(inner.height) {
+            rows = short_retention_cue(inner, true);
+            let compact = format!("Limited sets: {}", model.retained_data_loss.limited_sets);
+            if model.retained_data_loss.limited_sets > 0
+                && rows.len() < usize::from(inner.height)
+                && display_width(&compact) <= width
+            {
+                rows.push(compact);
+            }
+        }
+        let counts = wrap_retention_fact(
+            &format!(
+                "{} source columns; {} received rows",
+                set.source_column_count(),
+                set.rows_seen
+            ),
+            width,
+        );
+        // A count is shown as a whole fact or deferred, never vertically clipped
+        // into another number. The persistent whole-execution warning precedes
+        // optional description detail in the minimum usable pane.
+        if rows.len().saturating_add(counts.len()) <= usize::from(inner.height) {
+            rows.extend(counts);
+        }
+        let advice = wrap_retention_fact(crate::query::result::RETAINED_DATA_GUIDANCE, width);
+        if rows.len().saturating_add(advice.len()) <= usize::from(inner.height) {
+            rows.extend(advice);
+        }
+        Paragraph::new(rows.into_iter().map(Line::from).collect::<Vec<_>>())
+            .style(theme.style(Token::Warning))
+            .render(inner, buf);
+    } else if model.expanded_row {
+        let warning = retention_warning_lines(model, inner);
+        let height = u16::try_from(warning.len())
+            .unwrap_or(u16::MAX)
+            .min(inner.height);
+        Paragraph::new(warning.into_iter().map(Line::from).collect::<Vec<_>>())
+            .style(theme.style(Token::Warning))
+            .render(Rect::new(inner.x, inner.y, inner.width, height), buf);
+        render_expanded_row(
+            model,
+            set,
+            presentation,
+            Rect::new(
+                inner.x,
+                inner.y + height,
+                inner.width,
+                inner.height - height,
+            ),
+            buf,
+        );
     } else {
         render_grid(model, set, keymap, presentation, focused, inner, buf);
     }
@@ -211,11 +361,23 @@ fn render_expanded_row(
 ) {
     let theme = &presentation.theme;
     if set.rows.is_empty() {
-        Paragraph::new(Line::from(Span::styled(
-            "No rows, so there is no row to expand.",
-            theme.style(Token::Muted),
-        )))
-        .render(area, buf);
+        let text = if set.rows_seen > 0 {
+            format!(
+                "No retained row to expand; PostgreSQL delivered {} rows.",
+                set.rows_seen
+            )
+        } else {
+            "No rows, so there is no row to expand.".to_owned()
+        };
+        let rows = wrap_retention_fact(&text, usize::from(area.width));
+        let rows = if rows.len() <= usize::from(area.height) {
+            rows
+        } else {
+            vec!["No retained row to expand.".into()]
+        };
+        Paragraph::new(rows.into_iter().map(Line::from).collect::<Vec<_>>())
+            .style(theme.style(Token::Muted))
+            .render(area, buf);
         return;
     }
 
@@ -237,7 +399,11 @@ fn render_expanded_row(
             theme.style(Token::Text),
         ),
         Span::styled(
-            format!("   {}", set.window_label()),
+            if set.is_truncated() {
+                String::new()
+            } else {
+                format!("   {}", set.window_label())
+            },
             theme.style(Token::Muted),
         ),
     ])];
@@ -312,7 +478,7 @@ pub(crate) fn render_inspector(
     }
     let (width, height) = inspector_viewport((area.width, area.height), presentation);
 
-    let Some(set) = model.visible_result() else {
+    let Some(set) = model.visible_result().filter(|set| set.is_available()) else {
         return;
     };
     let Some(row) = model.selected_source_row() else {
@@ -560,7 +726,7 @@ fn render_grid(
     // each row is in the server result.
     let rows = model.displayed_rows();
     let has_type_row = model.result_grid.show_types && set.column_types.iter().any(Option::is_some);
-    let header_rows = grid_header_rows(model, set, presentation.spacing());
+    let header_rows = grid_header_rows(model, set, presentation.spacing(), area);
     let visible_rows = (area.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (area.width as usize).saturating_sub(usize::from(needs_scrollbar));
@@ -666,17 +832,48 @@ fn render_grid(
     };
 
     let mut lines: Vec<Line> = Vec::with_capacity(visible_rows + header_rows);
-    lines.push(Line::from(Span::styled(
-        truncate_to_width(
-            &format!("{order_line} | selected column {selected_number}: {selected_label}"),
-            grid_width,
-            !presentation.glyphs.is_ascii(),
-        ),
-        theme.style(Token::Info),
-    )));
+    lines.extend(
+        retention_warning_lines(model, area)
+            .into_iter()
+            .map(|line| Line::from(Span::styled(line, theme.style(Token::Warning)))),
+    );
+    let full_order = format!("{order_line} | selected column {selected_number}: {selected_label}");
+    let order = if set.is_truncated() {
+        [
+            Some(full_order.as_str()),
+            Some(order_line.as_str()),
+            range_label.as_deref(),
+            Some("Retained window"),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|line| display_width(line) <= grid_width)
+        .unwrap_or("")
+        .to_owned()
+    } else {
+        truncate_to_width(&full_order, grid_width, !presentation.glyphs.is_ascii())
+    };
+    lines.push(Line::from(Span::styled(order, theme.style(Token::Info))));
     let state_line = format!("{columns_label} | {type_label} | {freeze_label} | {controls_label}");
+    let filter_window = (set.is_truncated() && !model.result_filter.trim().is_empty())
+        .then(|| model.result_window_label());
+    let state_line = if set.is_truncated() {
+        [
+            filter_window.as_deref(),
+            Some(state_line.as_str()),
+            Some(columns_label.as_str()),
+            Some("Retained grid"),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|line| display_width(line) <= grid_width)
+        .unwrap_or("")
+        .to_owned()
+    } else {
+        truncate_to_width(&state_line, grid_width, !presentation.glyphs.is_ascii())
+    };
     lines.push(Line::from(Span::styled(
-        truncate_to_width(&state_line, grid_width, !presentation.glyphs.is_ascii()),
+        state_line,
         theme.style(Token::Muted),
     )));
     let clipboard_note = model
@@ -838,7 +1035,12 @@ fn render_grid(
     }
 
     if rows.is_empty() {
-        let message = if model.result_filter.trim().is_empty() {
+        let message = if model.result_filter.trim().is_empty() && set.rows_seen > 0 {
+            format!(
+                "No rows retained; PostgreSQL delivered {} rows.",
+                set.rows_seen
+            )
+        } else if model.result_filter.trim().is_empty() {
             "No rows returned. Edit the SQL or use the command palette for the next action."
                 .to_owned()
         } else {

@@ -660,3 +660,34 @@ manager support are separate gates.
 Unix-domain sockets are supported on Unix only; requesting one elsewhere fails
 with an explanation. Owner-only file permissions are enforced on Unix; on Windows
 files inherit the profile ACL and this program makes no stronger claim.
+
+## Buffered retained-result data
+
+Buffered Session ingestion applies one 33,554,432-byte logical occupied-data
+allowance across all result sets in an execution. It charges actual native
+ResultSet/name/type/row/Cell slots and UTF-8 payload before application-owned
+copies. Descriptions and rows are admitted whole; the first data refusal closes
+further data admission while PostgreSQL rows and CommandComplete are consumed.
+Existing row caps, zero-row count-only mode and the 1 MiB candidate-cell refusal
+remain separate. A CLI row-cap override does not disable this allowance.
+
+This is not RSS, incoming/driver-frame, metadata-cache, spare-capacity or
+control-vector accounting. Old results can coexist with an execution in flight.
+Public synthetic ResultSet construction is not a universal bound. Streaming
+exports keep complete values and do not use this buffered allowance.
+
+An unavailable essential description is distinct from a known zero-row answer.
+It retains only its typed reason, source-column count and delivered-row count.
+JSON adds `data_unavailable: "retained_result_limit"` and `source_column_count`
+only to that case, alongside empty columns/rows and `truncated: true`. Other
+script formats emit no invented data and disclose unavailability on stderr;
+NDJSON still refuses multiple result sets before writing. Available-result
+encoding remains unchanged.
+
+The TUI keeps a fixed execution-level loss summary, including later result sets,
+and shows complete numeric facts or defers them until space is available. An
+unavailable description refuses retained-data actions before I/O; a future
+complete streaming export must be chosen before a deliberate execution. No SQL
+is replayed or cancelled, and no setting or transaction state is changed because
+of the client allowance. True errors, cancellation and unknown outcomes retain
+their existing precedence.

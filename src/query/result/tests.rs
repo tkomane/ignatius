@@ -252,3 +252,102 @@ fn notice_admission_length_matches_actual_bytes_at_utf8_cutoffs() {
         }
     }
 }
+
+#[test]
+fn retained_result_unavailable_is_distinct_from_known_empty_even_at_zero_rows() {
+    let known = ResultSet::new(vec!["value".into()], 0);
+    let unavailable = ResultSet::unavailable(3, 0);
+    assert!(known.is_available());
+    assert!(!known.is_truncated());
+    assert!(!unavailable.is_available());
+    assert!(unavailable.is_truncated());
+    assert_eq!(unavailable.source_column_count(), 3);
+    assert_eq!(
+        unavailable.retention_reason(),
+        Some(RetentionReason::DescriptionUnavailable)
+    );
+    assert!(
+        unavailable
+            .window_label()
+            .starts_with("Result data unavailable - retained-result limit reached")
+    );
+    assert!(
+        unavailable.columns.is_empty()
+            && unavailable.column_types.is_empty()
+            && unavailable.rows.is_empty()
+    );
+}
+
+#[test]
+fn retained_result_discard_counts_without_empty_placeholder_or_wrong_rowcap_reason() {
+    let mut set = ResultSet::new(vec!["value".into()], 100);
+    set.push(vec![Cell::Text("first".into())]);
+    set.discard_row(RetentionReason::RetainedResultLimit);
+    assert_eq!(set.rows_seen, 2);
+    assert_eq!(set.retained(), 1);
+    assert_eq!(
+        set.retention_reason(),
+        Some(RetentionReason::RetainedResultLimit)
+    );
+    assert_eq!(
+        set.window_label(),
+        "showing 1 of 2 rows (retained-result limit reached)"
+    );
+    assert!(!set.push(vec![Cell::Text("later smaller".into())]));
+    assert_eq!(set.rows_seen, 3);
+    assert_eq!(set.retained(), 1);
+}
+
+#[test]
+fn retained_result_unavailable_refuses_synthetic_rows_and_type_payload() {
+    let mut set = ResultSet::unavailable(1, 10);
+    assert!(!set.push(vec![Cell::Text("must not become available".into())]));
+    assert!(!set.set_column_types(vec![Some("text".into())]));
+    assert_eq!(set.rows_seen, 1);
+    assert!(set.rows.is_empty() && set.column_types.is_empty());
+}
+
+#[test]
+fn retained_result_summary_counts_all_loss_reasons_and_skips_nonresult_ordinals() {
+    let mut rowcap = ResultSet::new(vec!["later".into()], 0);
+    rowcap.push(vec![Cell::Null]);
+    let mut data = ResultSet::new(vec!["next".into()], 10);
+    data.discard_row(RetentionReason::RetainedResultLimit);
+    let mut unknown = ResultSet::unavailable(4, 10);
+    unknown.discard_row(RetentionReason::DescriptionUnavailable);
+    let mut execution = Execution {
+        job: JobId(1),
+        statements: Vec::new(),
+        status: ExecutionStatus::Succeeded,
+        elapsed: Duration::ZERO,
+        error: None,
+        transaction: TransactionState::Autocommit,
+        notice_report: NoticeReport::default(),
+    };
+    for set in [
+        None,
+        Some(ResultSet::new(vec!["healthy".into()], 10)),
+        Some(rowcap),
+        None,
+        Some(data),
+        Some(unknown),
+    ] {
+        execution.statements.push(StatementResult {
+            result_set: set,
+            rows_affected: Some(1),
+            elapsed: Duration::ZERO,
+            notices: Vec::new(),
+        });
+    }
+    let summary = RetentionLossSummary::from_execution(&execution);
+    assert_eq!(summary.limited_sets, 3);
+    let first = summary.first.unwrap();
+    assert_eq!(first.ordinal, 2);
+    assert_eq!(first.reason, RetentionReason::RowCap);
+    assert_eq!(first.retained, 0);
+    assert_eq!(first.received, 1);
+    assert_eq!(
+        summary.warning().as_deref(),
+        Some("Data limited in 3 result set(s)")
+    );
+}

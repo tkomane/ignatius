@@ -897,7 +897,7 @@ async fn event_loop(
                     );
                 }
                 Effect::CopyValue { payload } => {
-                    let message = copy_to_terminal(terminal.backend_mut(), &payload);
+                    let message = copy_retained_to_terminal(terminal.backend_mut(), &model, &payload);
                     let _ = tx.send(message);
                 }
                 Effect::Cancel { job } => {
@@ -1055,6 +1055,20 @@ async fn event_loop(
 /// The reducer has already made the opt-in, confirmation, and stale-candidate
 /// decisions. This helper only writes and flushes the safe OSC 52 sequence, and
 /// reports metadata or an I/O error without carrying the result value further.
+fn copy_retained_to_terminal<W: Write>(
+    writer: &mut W,
+    model: &Model,
+    payload: &crate::clipboard::ClipboardPayload,
+) -> Message {
+    if model
+        .visible_result()
+        .is_some_and(|set| !set.is_available())
+    {
+        return Message::RetainedDataUnavailable;
+    }
+    copy_to_terminal(writer, payload)
+}
+
 fn copy_to_terminal<W: Write>(
     writer: &mut W,
     payload: &crate::clipboard::ClipboardPayload,
@@ -2038,6 +2052,14 @@ fn export_visible_rows(
         )
         .next_action("run a statement that returns rows first"));
     };
+    if !set.is_available() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            crate::query::result::RETAINED_DATA_UNAVAILABLE,
+            "writing the retained result",
+        )
+        .next_action(crate::query::result::RETAINED_DATA_GUIDANCE));
+    }
     let rows = model.filtered_rows();
     let mut visible = set.clone();
     visible.rows = rows

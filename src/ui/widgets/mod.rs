@@ -313,14 +313,14 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
     {
         return None;
     }
-    let set = model.visible_result()?;
+    let set = model.visible_result().filter(|set| set.is_available())?;
     let inner = inner_rect(pane);
     if !in_rect(inner, column, row) || inner.width == 0 || inner.height == 0 {
         return None;
     }
 
     let rows = model.displayed_rows();
-    let header_rows = results::grid_header_rows(model, set, model.presentation.spacing());
+    let header_rows = results::grid_header_rows(model, set, model.presentation.spacing(), inner);
     let visible_rows = (inner.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (inner.width as usize).saturating_sub(usize::from(needs_scrollbar));

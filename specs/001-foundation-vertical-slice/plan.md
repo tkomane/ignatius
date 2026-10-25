@@ -388,3 +388,13 @@ live outcomes, action refusals and actual rendered states, followed by the
 required combined gate and affected server evidence. Do not claim complete
 resource acceptance: driver frames/startup, output/display copies, metadata
 caches, control vectors and whole-process RSS remain separate boundaries.
+
+
+W10-013 source was integrated on 25 October 2026 after frozen native peer and
+12 plain/verified-TLS live cases with 24 before/after CLI health children. A
+UI-only inner-pane warning repair followed; `docs/operations/verification.md`
+separates measured02 source from final03. Both new CI transport routes passed
+the missing-wiring regression and pinned Actionlint. The canonical full gate
+passed 1,431 outer cases/1,127 library across 24 summaries with the explicit
+macOS socket skip. Root captured 112 styled buffers and inspected 16 frame images; affected-major/hosted
+acceptance remains open. See verification for exact source/build boundaries.
