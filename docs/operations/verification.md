@@ -161,6 +161,25 @@ local Docker results do not establish hosted acceptance, x86-64/Windows,
 Linux full-screen hand use or release readiness. Ongoing UI work is outside
 both frozen revisions and needs its own integrated verification.
 
+## PTY profile isolation - 2026-10-25
+
+The Unix terminal harness previously overrode only configuration, leaving real
+data/history and inherited logging/PostgreSQL routes available. W07-059 now
+keeps unique temporary configuration and data directories alive through child
+completion, clears inherited logging and all 18 supported PostgreSQL routes,
+then supplies only a test-owned absent PGPASSFILE to block personal fallback.
+It never changes HOME or process-global environment.
+
+A real synthetic child-process environment probe failed against the old
+boundary, then passed with the three existing actual macOS PTY tests (four
+total, zero skips). The probe never ran the product with hostile inherited
+settings or inspected a real profile. Homebrew Rust 1.99.1 used the modified
+integration working tree and existing SSD cache. Red/green logs are retained
+under `/private/tmp/ignatius-w07-059-20261025-emhifp/`. Source formatting and
+whitespace checks passed; the full integrated repeat follows the pane slice.
+This proves isolation plus existing normal-quit/drawing/order behavior, not
+panic, signal, raw-mode readback, Windows or native visual use.
+
 ## Live database CI coverage repair - 2026-10-25
 
 The PostgreSQL matrix now explicitly runs the parameter-semantics and runtime-

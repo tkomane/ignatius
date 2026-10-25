@@ -81,6 +81,12 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8
 - [x] T055 Automated terminal-restoration test in CI (pty on Unix)
 - [ ] T055a The same on Windows, which needs ConPTY
+- [x] W07-059 Isolate the Unix PTY harness before expanding exit coverage:
+  allocate unique temporary configuration and data roots, remove inherited
+  logging and PostgreSQL connection environment, and keep those roots alive
+  through the child lifetime. Prove the actual child receives that isolation
+  without reading the developer's real history. Retain the existing live PTY
+  render/normal-quit checks; do not count this as Windows or abnormal-exit proof.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
@@ -108,3 +114,25 @@ the socket fixture: its execution passed at `52872ac` in
 [run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
 rechecked on 2026-09-04. That historical source result does not verify newer
 local features or complete the hand-use task.
+
+Fresh partial T052 evidence on 2026-10-25: clean security source `f99fe75`
+passed the actual PostgreSQL 18.6 socket contract and all three existing normal-
+quit PTY restoration contracts in a Debian 13.6 Linux arm64 container using
+Rust 1.97.1, with zero skips. A separate actual Rust 1.90.0 locked/offline
+workspace/all-targets/all-features check also passed. Exact source, build,
+fixture and log identities are in
+[verification](../../docs/operations/verification.md#frozen-postgresql-and-linux-acceptance---2026-10-25).
+T052 remains open for Linux full-screen hand use, and T055a remains open for
+native Windows ConPTY. This does not verify subsequent UI changes.
+
+W07-059 evidence on 2026-10-25: a real synthetic child-environment probe first
+failed with inherited logging and all 18 supported PostgreSQL environment
+routes. After isolation, that probe and all three actual macOS normal-quit PTY
+contracts passed (four total, zero skips). Root working tree was modified;
+Homebrew Rust 1.99.1 and the existing SSD cache were used. The unique temporary
+configuration/data roots outlive the child, and an explicitly absent private
+PGPASSFILE blocks personal fallback. The regression changes only child-command
+environment, never process-global state or a real profile. Red/green logs:
+`/private/tmp/ignatius-w07-059-20261025-emhifp/`. The full integrated repeat is
+recorded separately after ongoing pane work. Panic/signal/raw-mode and Windows
+coverage are not inferred from this test.

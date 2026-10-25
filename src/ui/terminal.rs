@@ -7,8 +7,9 @@
 //! terminal rather than inside the alternate screen.
 //!
 //! The escape sequences are emitted through an injected writer, which is what
-//! makes restoration testable without a pseudo-terminal: see the tests below and
-//! `tests/terminal_restore.rs` for the process-level panic path.
+//! makes restoration testable without a pseudo-terminal. `tests/terminal_restore.rs`
+//! proves normal-quit drawing and restoration order at process level; it does not
+//! yet exercise the panic path.
 
 use crate::diagnostics::doctor::TerminalFacts;
 use crossterm::cursor::{Hide, Show};

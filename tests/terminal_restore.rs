@@ -21,6 +21,130 @@ const UNREACHABLE: &str = "postgres://someone@127.0.0.1:1/nothing?connect_timeou
 /// Ctrl+Q, the quit binding.
 const QUIT: &[u8] = b"\x11";
 
+/// Routes read by connection resolution, password files and service files.
+const PG_CONNECTION_ENV: &[&str] = &[
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGAPPNAME",
+    "PGSSLMODE",
+    "PGCONNECT_TIMEOUT",
+    "PGSERVICE",
+    "PGSERVICEFILE",
+    "PGSYSCONFDIR",
+    "PGPASSFILE",
+    "PGSSLROOTCERT",
+    "PGSSLCERT",
+    "PGSSLKEY",
+    "PGREQUIRESSL",
+    "PGCHANNELBINDING",
+    "PGGSSENCMODE",
+];
+
+/// The returned directory must outlive the child, including its final output.
+fn isolate_terminal_command(command: &mut Command) -> tempfile::TempDir {
+    let state = tempfile::tempdir().expect("isolated terminal state");
+    let config = state.path().join("config");
+    let data = state.path().join("data");
+    std::fs::create_dir_all(&config).expect("isolated terminal configuration");
+    std::fs::create_dir_all(&data).expect("isolated terminal data");
+    command
+        .env("IGNATIUS_CONFIG_DIR", config)
+        .env("IGNATIUS_DATA_DIR", data)
+        .env_remove("IGNATIUS_LOG");
+    for key in PG_CONNECTION_ENV {
+        command.env_remove(key);
+    }
+    // Clearing the inherited setting alone would fall back to ~/.pgpass.
+    command.env("PGPASSFILE", state.path().join("missing.pgpass"));
+    state
+}
+
+#[test]
+fn terminal_children_receive_unique_isolated_state_without_inherited_connections() {
+    let hostile = tempfile::tempdir().expect("synthetic inherited state");
+    let hostile_config = hostile.path().join("config");
+    let hostile_data = hostile.path().join("data");
+    std::fs::create_dir_all(&hostile_config).expect("synthetic config directory");
+    std::fs::create_dir_all(&hostile_data).expect("synthetic data directory");
+    let mut states = Vec::new();
+    let mut child_paths = Vec::new();
+
+    for _ in 0..2 {
+        // Every hostile value belongs to this command and this temporary tree.
+        // No process-global environment or developer profile is read or changed.
+        let mut command = Command::new("sh");
+        command
+            .env("IGNATIUS_CONFIG_DIR", &hostile_config)
+            .env("IGNATIUS_DATA_DIR", &hostile_data)
+            .env("IGNATIUS_LOG", "debug");
+        for key in PG_CONNECTION_ENV {
+            command.env(key, "synthetic-inherited-setting");
+        }
+        let state = isolate_terminal_command(&mut command);
+        let output = command
+            .args([
+                "-c",
+                r#"set -eu
+for key do
+  if printenv "$key" >/dev/null; then
+    printf 'present:%s\n' "$key"
+  fi
+done
+printf 'config:%s\ndata:%s\npassfile:%s\n' "$IGNATIUS_CONFIG_DIR" "$IGNATIUS_DATA_DIR" "${PGPASSFILE-}"
+if [ -d "$IGNATIUS_CONFIG_DIR" ] && [ -d "$IGNATIUS_DATA_DIR" ]; then
+  printf 'state-directories-alive\n'
+fi
+if [ -n "${PGPASSFILE-}" ] && [ ! -e "$PGPASSFILE" ]; then
+  printf 'personal-password-fallback-blocked\n'
+fi
+"#,
+                "terminal-environment-probe",
+                "IGNATIUS_LOG",
+            ])
+            .args(PG_CONNECTION_ENV)
+            .output()
+            .expect("run real child environment probe");
+        assert!(
+            output.status.success(),
+            "child probe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let transcript = String::from_utf8(output.stdout).expect("probe UTF-8");
+        let present: Vec<_> = transcript
+            .lines()
+            .filter_map(|line| line.strip_prefix("present:"))
+            .collect();
+        assert_eq!(
+            present,
+            ["PGPASSFILE"],
+            "only the harness-owned absent password file may reach the child"
+        );
+        for (label, expected) in [
+            ("config:", state.path().join("config")),
+            ("data:", state.path().join("data")),
+            ("passfile:", state.path().join("missing.pgpass")),
+        ] {
+            let actual = transcript
+                .lines()
+                .find_map(|line| line.strip_prefix(label))
+                .expect("child reported its actual state path");
+            assert_eq!(std::path::Path::new(actual), expected);
+            child_paths.push(expected);
+        }
+        assert!(transcript.contains("state-directories-alive"));
+        assert!(transcript.contains("personal-password-fallback-blocked"));
+        states.push(state);
+    }
+
+    assert_ne!(states[0].path(), states[1].path());
+    assert_ne!(child_paths[0], child_paths[3]);
+    assert_ne!(child_paths[1], child_paths[4]);
+    assert!(states.iter().all(|state| state.path().is_dir()));
+}
+
 /// Runs the client under a pty and returns everything it wrote.
 fn run_in_pty(extra_args: &[&str], input: &'static [u8]) -> Option<String> {
     if Command::new("script").arg("--version").output().is_err()
@@ -48,11 +172,8 @@ fn run_in_pty(extra_args: &[&str], input: &'static [u8]) -> Option<String> {
         command.args(["-q", "/dev/null", "sh", "-c", &inner]);
     }
 
+    let _state = isolate_terminal_command(&mut command);
     let mut child = command
-        .env(
-            "IGNATIUS_CONFIG_DIR",
-            std::env::temp_dir().join("ignatius-pty-test"),
-        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
