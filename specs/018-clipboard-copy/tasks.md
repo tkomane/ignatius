@@ -187,17 +187,35 @@ guidance. This contradicts FR-004/SEC-004; density margin changes alone do not
 repair it. No clipboard write was performed. Retained repro:
 `/private/tmp/ignatius-density-copy-probe-40x8.txt`.
 
-- [ ] T037 Reconcile the clipboard, generated-update and production/EXPLAIN
+- [x] T037 Reconcile the clipboard, generated-update and production/EXPLAIN
   confirmation contracts with actual minimum-size rendering and confirmation
   transitions. Record which required content can be clipped while acceptance
   remains enabled, with synthetic values only and no transport/database effect.
-- [ ] T038 Specify the smallest complete disclosure/acceptance repair before
+- [x] T038 Specify the smallest complete disclosure/acceptance repair before
   implementation, including resize, Unicode wrapping, alternate keymaps,
   density, no-colour/ASCII and stale-candidate behavior. Do not silently weaken
   existing confirmation or exact-statement review requirements.
 - [ ] T039 Add failing-first renderer/reducer regressions, implement the pinned
   repair after the density worker releases the shared files, and prove that
   hidden mandatory review content cannot authorize a transfer or statement.
+  The lead owns the first-frame/fresh-backend/stale-resize runtime seam and
+  tests in `src/cli/interactive.rs` and its sidecar; shared UI/app work remains
+  single-writer. Manually synchronized model/buffer probes do not prove that
+  runtime boundary.
 - [ ] T040 Run affected focused and full checks, inspect actual rendered
   buffers, update the affected feature contracts, data handling, compatibility,
   changelog and status, and retain native/platform acceptance as separate gates.
+
+T037 evidence: the read-only native audit retained 48 reducer probes and 24
+actual synthetic buffers at `/private/tmp/ignatius-confirmation-audit-20261025-70h7dC/`.
+All five surfaces produced effects under both acceptance actions while required
+content was clipped, including below usable size; no effect was dispatched.
+A 2,504-byte generated UPDATE lost its tail even at 140x50. Destructive PROD's
+typed-name match still held. Source was modified `b5a0e166`, library SHA-256
+`388614e935445734a7753c041ce711c3181310324d9b8209122d47e79fa49509`.
+This is a P1 disclosure failure, not a typed-name bypass or native acceptance.
+
+T038 pins `contracts/review-viewport.md` after native read-only review: stable
+rail height, identical active-key metrics, gate before mutation, complete
+shared wrapping, final-current-page admission, resize/new-candidate reset and
+bounded masking. T039/T040 remain open; a specification alone repairs nothing.

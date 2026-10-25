@@ -34,6 +34,11 @@ Output: SQL sent to PostgreSQL through the existing simple-query adapter.
 
 ## TUI contract
 
+The 2026-10-25 shared [review viewport contract](../../018-clipboard-copy/contracts/review-viewport.md)
+governs each prompt's scrollable name/disclosure body, visible masked input
+and admission before accepting a value. Shared W04 work is tracked in Feature
+018 T037-T040. Plain and environment-backed CLI routes remain separate.
+
 - The prompt opens only after any required production confirmation.
 - The prompt title names the current `:name` and progress, and the body states
   that the answer is literal text data.

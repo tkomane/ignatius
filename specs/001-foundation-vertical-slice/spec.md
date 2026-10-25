@@ -163,6 +163,13 @@ assert the exit code for both success and failure.
   MUST show how to run, cancel, get help and quit.
 - **UX-006**: A SQL NULL MUST be distinguishable from an empty string and from
   the text `NULL`.
+- **UX-007**: Interactive sending prompts MUST keep their required review
+  content reachable and refuse acceptance when the current viewport cannot
+  authorize it under the shared 2026-10-25
+  [review viewport contract](../018-clipboard-copy/contracts/review-viewport.md).
+  This covers clipboard, generated UPDATE, production-run, EXPLAIN ANALYZE
+  and named-parameter surfaces. Feature 018 T037-T040 track the shared repair;
+  existing typed-name, identity and one-shot effect guards still apply.
 
 ### Security
 
@@ -189,6 +196,12 @@ assert the exit code for both success and failure.
   terminal mode is taken. A signal received during startup remains queued for
   the existing quit path when the event loop starts; it does not replay SQL or
   introduce transaction recovery. Windows signal handling is unchanged.
+  Panic restoration MUST use the options actually acquired, before the panic
+  details are printed, rather than assuming default mouse/paste/screen options.
+  Report attempted restoration truthfully if an output/raw-mode restore fails;
+  a panic message MUST NOT assert that no database write occurred or that
+  arbitrary panic details contain no secrets. This changes no query retry,
+  rollback or panic-payload handling contract.
 - **REL-002**: Result rows held in memory MUST be bounded by an explicit cap,
   with truncation visible and the true count preserved.
 - **REL-003**: A result belonging to a superseded job MUST be discarded.

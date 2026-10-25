@@ -104,6 +104,16 @@ when the behaviour exists and a test or recorded evidence proves it.
   registration failure through a private callback seam and prove acquisition
   is never called. Use no production trigger flag, unsafe FFI or parent-process
   signal. Keep actual steady-state PTY restoration evidence separate.
+- [ ] W07-062 Prove error-return and panic restoration in owned isolated Unix
+  PTY children through the actual `TerminalGuard` and panic hook, with default
+  and non-default mouse/paste/screen options. Assert restoration precedes panic
+  details and matches the acquired options. Reproduce and repair any default-
+  option assumption before expanding mouse capture. Remove unsupported panic
+  claims that no data was written or that arbitrary details are secret-free;
+  report failed restoration attempts truthfully. Keep the existing previous-
+  hook/payload contract and all query behavior unchanged. Use no production
+  panic flag, unsafe FFI, real profile, database write or signal to an unowned
+  PID. Record exactly which modes/paths were observed; Windows stays separate.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion

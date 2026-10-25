@@ -131,3 +131,30 @@ query result remains the sole value store.
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
 | None | N/A | The feature stays within the existing config, reducer, terminal, and UI boundaries. |
+
+## W04 confirmation follow-up - 2026-10-25
+
+The [review viewport contract](contracts/review-viewport.md) repairs five
+existing sending surfaces through one pure review-content/wrapping/geometry
+helper shared by reducer admission and rendering. Store only navigation state;
+expanded UPDATE SQL remains transient at its intentional review boundary.
+Use the current model presentation and active keymap snapshot consistently.
+Reserve stable command/input rows before measuring the body and gate both
+acceptance actions before any candidate/value/job mutation. Actual resize and
+new candidate/parameter reset navigation; local scrolling has no I/O effect.
+
+Keep UI/reducer integration single-writer after density T040 releases those
+files. Write failing-first constrained-geometry and long-statement regressions,
+then run focused app/UI/parameter/update/clipboard/parity checks, inspect actual
+buffers and run the complete locked verifier against disposable PostgreSQL.
+No runtime transport changes, new dependency, real clipboard write or
+production query is needed. Native/platform/hosted/release evidence stays
+separate. Feature 018 T037-T040 own this shared follow-up so affected features
+link to one completion record rather than creating competing task lists.
+
+The lead separately owns `src/cli/interactive.rs` and its sidecar: synchronize
+actual frame size before rendering and fresh backend size before input
+reduction, supersede stale queued resize dimensions, and fail closed before
+sending on a size-read error while preserving Quit/Cancel/Dismiss. The UI/app
+worker does not edit that runtime seam. Use the existing resize transition only
+on actual changes, so reading dimensions cannot repeatedly reset review.
