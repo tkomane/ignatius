@@ -8,7 +8,8 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
+Current branch: `codex/windows-conpty-observation-2026-10-25`, from published
+`d6d65e7`. Parent PR32 remains at its unchanged D6 head. Notice source is saved in
 `d65024b`. W10-012's integrated notice
 implementation passed the complete local verifier: **1,370 outer harness cases,
 1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and
@@ -113,6 +114,18 @@ W10-013 is checked for this scoped implementation/acceptance. Native Windows
 hand-use and other resource routes remain open. Source publication has not
 merged main or released. The next record commit changes documentation only.
 
+Documentation-only checkpoints `999aba8` and `d6d65e7` are published after the
+unchanged full pre-push gate passed again. Rust/Cargo/build-script/test/workflow
+file bytes are identical to accepted `54056c2`; build revision identity changes
+normally. Fresh PR CI `40211200487` and CodeQL `40211200491` completed at
+`d6d65e7`: 17 successful checks, one deliberate schedule-only skip and no new
+CodeQL alerts. Reviews/comments/unresolved threads are empty; PR32 is ready.
+An attempted protected-main merge was rejected by automatic approval review
+because the publication grant did not explicitly authorise that merge. The
+owner's exact-head merge question is pending; do not retry without that approval.
+No main mutation occurred. Root inspected all 30 annotated checks at `54056c2`:
+30 runner queue/image notices and zero warning/error annotations.
+
 W07-064 is now specified as the next isolated assignment under foundation
 REL-001 and `contracts/windows-conpty-observation.md`. Use a test-only native
 SDK observer plus the selected safe Rust guard/hook process; establish native
@@ -120,6 +133,42 @@ capability and negative ownership/state controls before the full option/path
 matrix. Root owns CI and acceptance. Unsupported paste/buffer observations
 cannot close T055a; Windows 11/Windows Terminal hand use stays T051. No Windows
 ConPTY runtime evidence has run yet.
+
+The PostgreSQL lane now implements the first W07-064 capability/control freeze
+in `/private/tmp/ignatius-w07-064-d6d65e7-il6f_ql4/source`, exact detached D6,
+with a fresh SSD cache/target and all previous frozen inputs preserved. Owned
+paths are new test-support C++/safe Rust/PowerShell only; root owns CI, product
+source, canonical docs and Windows execution after immutable review. The root
+clarification pins 250 ms after positive HANG_READY, 20 s setup and 25 s outer
+supervision, exact Job membership and protected local pipes. Current canonical
+contract includes it; frozen input copy/hash is recorded in the private handoff.
+No 24-case expansion or Windows runtime is authorised before capability review.
+
+First W07 freeze01 is retained under the lane's
+`capability-control-freeze-01/`: 36 snapshot hashes independently verified. Local
+19 pure C++/30 synthetic PowerShell/4 parser checks and helper compilation ran;
+zero Windows cases. Root and peer blocked native execution on two harness
+findings: cleanup waits after the 25-second deadline and suppressed zero-byte
+ReadFile errors. Freeze02 repairs both with a shared absolute cleanup budget,
+heap-owned pending I/O lifetime, strict error classification and pre/post build
+input proof. Root verified all 32 new artifact hashes and nine integrated files;
+the only integration deviation removes one trailing space. Independent review
+accepted the limited source scope and rehashed all 36 prior artifacts and 1,207
+compiled inputs unchanged. Review:
+`/private/tmp/ignatius-w07-064-independent-review-02-20261025.md`, SHA-256
+`40aaead5667e256bc306a340ec4c086663af67b980b33f7cba94bdb024d2e4eb`.
+
+Root admits only the first four controls/capability cases to the authorised
+hosted CI workflow after the local publication gate. Actual wrong-ownership,
+native error-path cleanup and the full 24-path matrix remain open. All 15
+workflow contracts, 26 pure C++ and 48 synthetic PowerShell checks passed in the
+integration tree; standalone Rust formatting and pinned Actionlint passed.
+The Windows-only CI/evidence wiring previously failed first; its script AST
+also passed. The complete local verifier passed 1,432 outer harness cases,
+1,127 library cases and 24 summaries, formatting, warnings-denied lints/API
+docs and PostgreSQL 18.6 plain/TLS. The macOS socket case remains a semantic
+skip. Log: `/private/tmp/ignatius-w07-064-integrated-verify-20261025.log`.
+Nothing in this new slice has been published or executed on Windows yet.
 
 The team separately assessed incoming allocation and next-slice feasibility.
 No frame/startup/RSS bound is adopted: the locked driver has no single public

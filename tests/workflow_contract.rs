@@ -444,6 +444,71 @@ fn shared_ci_runs_the_complete_declared_coverage() {
 }
 
 #[test]
+fn windows_conpty_capability_is_native_gated_and_evidence_scoped() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml");
+    let platform = job_block(&workflow_text(&path), "test");
+    let native = platform
+        .split("- name: Windows ConPTY capability and ownership controls")
+        .nth(1)
+        .expect("Windows CI must execute the real ConPTY capability/ownership controls")
+        .split("- name:")
+        .next()
+        .unwrap();
+    for required in [
+        "if: matrix.name == 'Windows'",
+        "shell: pwsh",
+        "Launch-VsDevShell.ps1",
+        "-SkipAutomaticLocation",
+        "tests/support/windows_conpty/Build.ps1",
+        "-ExpectedRevision $env:GITHUB_SHA",
+        "tests/support/windows_conpty/Run-Controls.ps1",
+        "-RunReviewedCapabilityControls",
+        "$env:RUNNER_TEMP",
+    ] {
+        assert!(
+            native.contains(required),
+            "missing native ConPTY CI boundary: {required}"
+        );
+    }
+    let evidence = platform
+        .split("- name: Retain bounded Windows ConPTY evidence")
+        .nth(1)
+        .expect("native Windows observations need retained source-bound evidence")
+        .split("- name:")
+        .next()
+        .unwrap();
+    for required in [
+        "always() && matrix.name == 'Windows'",
+        "steps.windows-conpty.outcome != 'skipped'",
+        "/build/build-manifest.json",
+        "/build/prebuild-inputs.json",
+        "/runtime/summary.json",
+        "/runtime/capture-manifest.json",
+        "/runtime/*/controller.json",
+        "/runtime/*/translated.bin",
+        "retention-days: 7",
+    ] {
+        assert!(
+            evidence.contains(required),
+            "missing bounded ConPTY evidence: {required}"
+        );
+    }
+    for broad in [
+        "/build/**",
+        "/target/**",
+        "/runtime/**",
+        "*.exe",
+        "*.rlib",
+        "*.obj",
+    ] {
+        assert!(
+            !evidence.contains(broad),
+            "ConPTY evidence must not upload {broad}"
+        );
+    }
+}
+
+#[test]
 fn shared_ci_uses_reviewed_immutable_postgresql_fixtures() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workflow = workflow_text(&root.join(".github/workflows/ci.yml"));

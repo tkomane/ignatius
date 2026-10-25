@@ -79,13 +79,22 @@ covered. Existing reporting and restoration order remain authoritative.
 Only task-owned process/thread/job/pipe/console handles may be changed. Assign
 the controlled process tree to a kill-on-close Job Object before it can run
 uncontrolled instructions, using suspended creation where required. Preserve
-the runner's existing job membership. Assignment/ownership failure is a failed
-probe, not permission to bypass runner controls. No broad process-name kill,
+the runner's existing job membership. Keep the Job handle solely in an outside
+supervisor; a contained descendant retaining that handle can defeat last-close
+containment. Verify membership of the exact owned Job before resuming through
+stable owned process handles; an any-job check is insufficient. Local named
+control pipes require reject-remote/first-instance flags, explicit owner/SYSTEM
+access and nonce/client-process checks. An owned anonymous route is acceptable.
+Assignment/ownership failure is a failed probe, not permission to bypass runner
+controls. No broad process-name kill,
 detached numeric-PID timer, unowned signal or TerminateThread is allowed.
 
 Each real case has a monotonic 20-second owned-process deadline. A separate
-250-millisecond hung-child control must positively prove owned termination,
-wait/reap and bounded drainage. Keep at most 128 KiB translated output and
+250-millisecond hung-child control starts only after a positive HANG_READY
+acknowledgement, with setup separately bounded by 20 seconds, and must prove
+owned termination, wait/reap and bounded drainage. An outside supervisor has
+an overall 25-second bound including setup/teardown; report every clock and
+never count cold process startup as a proven hang. Keep at most 128 KiB translated output and
 64 KiB structured observations per case, and at most 32 MiB cumulative
 experiment captures/metadata/payload. Frozen compiled inputs/build caches are
 excluded and identified explicitly. Exceeding a limit stops later cases and
@@ -147,3 +156,8 @@ authority for the executed version.
 - [Microsoft VT model](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences)
   and [state-forwarding issue 6859](https://github.com/microsoft/terminal/issues/6859).
 - [Current Windows runner inventory](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md).
+
+- [Visual Studio developer shells](https://learn.microsoft.com/en-us/visualstudio/ide/reference/command-prompt-powershell?view=vs-2022)
+  and [Microsoft vswhere VC discovery](https://github.com/microsoft/vswhere/wiki/Find-VC)
+  support the installed-tool CI bootstrap; checked 25 October 2026. No install
+  or execution-policy change is part of this workflow.

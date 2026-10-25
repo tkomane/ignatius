@@ -1,5 +1,45 @@
 # Verification
 
+## W07-064 first Windows capability harness - 2026-10-25
+
+The integrated test-only C++/safe Rust/PowerShell harness is based on `d6d65e7`.
+Root verified all 32 freeze02 artifacts and all nine integrated helper files;
+one trailing space was removed during integration. Native independent review
+accepted the first-four-case source scope after two reproduced harness bugs
+were repaired: post-deadline cleanup waits and suppressed zero-byte failed
+reads. The repaired controller shares one 25-second stopwatch, reserves cleanup
+time and fails unconfirmed cleanup. Pending native I/O retains every referenced
+buffer/handle until completion or supervisor process exit. Input hashes are
+recorded before build and checked afterward.
+
+Actual integration checks passed: 26 pure C++ checks, 48 synthetic PowerShell
+receipt/deadline/identity checks, all 15 workflow contracts, standalone Rust
+formatting and digest-pinned network-disabled Actionlint. Earlier PowerShell
+AST checks covered all four scripts and the extracted CI step. Those checks
+exercise local arithmetic, validation and wiring; Windows SDK compilation and
+native runtime remain unverified. The complete local verifier passed 1,432
+outer harness cases, 1,127 library cases and 24 summaries, formatting,
+warnings-denied lints/API docs and PostgreSQL 18.6 plain/TLS. The macOS socket
+case remains a semantic skip. Log:
+`/private/tmp/ignatius-w07-064-integrated-verify-20261025.log`. Documentation
+was reconciled during/after this integration run; the installed pre-push gate
+will repeat checks against the clean committed source.
+
+Frozen source: `/private/tmp/ignatius-w07-064-d6d65e7-il6f_ql4/capability-control-freeze-02/`,
+manifest `fcd7cfeaa3fa8bacb8c2773555071b94c740663fc254253e5029bf2cc517490a`.
+Independent review: `/private/tmp/ignatius-w07-064-independent-review-02-20261025.md`,
+SHA-256 `40aaead5667e256bc306a340ec4c086663af67b980b33f7cba94bdb024d2e4eb`.
+Root integration receipt: `/private/tmp/ignatius-w07-064-root-integration-review-20261025.json`.
+Both original failures, earlier freeze and compiled inputs remain preserved.
+
+The primary admits only no-guard, known-unrestored, acknowledged hung-child and
+actual guard capability to the authorised Windows CI after the publication
+gate. Captures use the explicit synthetic metadata/trace upload allowlist,
+excluding binaries, caches and config/data. No Windows run has occurred yet.
+Wrong-ownership/native-error controls, the normal/error/uncaught-panic matrix,
+paste/full T055a, Windows 11/Windows Terminal hand use and release remain open.
+Four-case success alone cannot close W07-064.
+
 ## W10-012 integrated local verification - 2026-10-25
 
 The frozen isolated handoff passed 750 focused library cases and 32 actual
