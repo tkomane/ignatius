@@ -22,8 +22,9 @@ Expected outcomes:
 
 - Discovery context and empty-state tests pass for disconnected, connected,
   busy, empty, filtered, blocked, and populated states.
-- Hints change with focus, use active keys, stay at or below five entries, and
-  retain meaning in ASCII and no-colour rendering.
+- Hints change with focus, use active keys, stay at or below six entries in
+  comfortable density or four in compact density, and retain meaning in ASCII
+  and no-colour rendering. This follows Feature 025's 2026-10-25 clarification.
 - Command-palette searches find applicable intent and never emit an effect just
   by opening, searching, or dismissing.
 - Existing palette, keymap, renderer, documentation, script, and export tests

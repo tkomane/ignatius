@@ -4,7 +4,8 @@ The authority is `src/ui/keymap.rs`; this document mirrors it. Bindings are data
 checked for conflicts by a test, and listed in help at runtime.
 
 The first-frame copy, contextual footer and command palette use a read-only
-snapshot of the active keymap. The footer shows at most five complete
+snapshot of the active keymap. The footer shows at most
+six in comfortable density and four in compact density, using complete
 action/key pairs, selected for the current focus and state. A configured key
 therefore replaces the default everywhere discovery names that action; the
 command palette remains the route to actions that do not fit in the footer.

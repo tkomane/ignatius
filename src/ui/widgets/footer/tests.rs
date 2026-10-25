@@ -17,6 +17,90 @@ fn presentation(theme: ThemeChoice, color: bool, tier: GlyphTier) -> Presentatio
 }
 
 #[test]
+fn density_footer_uses_render_override_caps_remaps_and_complete_pairs() {
+    use crate::app::{Action, model::Focus};
+    use crate::config::{Density, schema::KeySpec};
+    use crate::query::result::{Execution, ExecutionStatus, JobId, ResultSet, StatementResult};
+    use crate::query::value::Cell;
+    use std::time::Duration;
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    let mut set = ResultSet::new(vec!["value".into()], 100);
+    set.push(vec![Cell::Text("data".into())]);
+    model.last_execution = Some(Execution {
+        job: JobId(1),
+        statements: vec![StatementResult {
+            result_set: Some(set),
+            rows_affected: None,
+            elapsed: Duration::ZERO,
+            notices: Vec::new(),
+        }],
+        status: ExecutionStatus::Succeeded,
+        elapsed: Duration::ZERO,
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+    });
+    let keymap = Keymap::from_config(&std::collections::BTreeMap::from([
+        ("narrow-column".into(), KeySpec::One("alt+f10".into())),
+        ("open-result-grid".into(), KeySpec::One("alt+f11".into())),
+    ]))
+    .unwrap();
+    let draw = |model: &Model, p: &Presentation, width: u16| {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buffer = Buffer::empty(area);
+        render_footer(model, &keymap, p, area, &mut buffer);
+        crate::ui::layout::buffer_to_string(&buffer)
+    };
+    for density in [Density::Comfortable, Density::Compact] {
+        model.presentation =
+            model
+                .presentation
+                .clone()
+                .with_density(if density == Density::Comfortable {
+                    Density::Compact
+                } else {
+                    Density::Comfortable
+                });
+        let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+        let actions = crate::app::discovery::hint_actions_for(&model, &p);
+        assert_eq!(
+            actions.len(),
+            if density == Density::Comfortable {
+                6
+            } else {
+                4
+            }
+        );
+        let wide = draw(&model, &p, 400);
+        for action in &actions {
+            let (key, label) = keymap.contextual_hint(action).unwrap();
+            assert!(wide.contains(&format!("{key} {label}")), "{wide}");
+        }
+        assert!(!wide.contains("Widen column"));
+        if density == Density::Comfortable {
+            assert!(
+                wide.contains("Alt+F10 Narrow column") && wide.contains("Alt+F11 Grid controls")
+            );
+        } else {
+            assert!(!wide.contains("Alt+F10") && !wide.contains("Alt+F11"));
+        }
+        for width in (20..150).step_by(7) {
+            let line = draw(&model, &p, width);
+            for action in &actions {
+                let (key, label) = keymap.contextual_hint(action).unwrap();
+                if line.contains(&key) || line.contains(label) {
+                    assert!(
+                        line.contains(&format!("{key} {label}")),
+                        "partial pair at {width}: {line}"
+                    );
+                }
+            }
+        }
+        assert!(actions.contains(&Action::CopyValue));
+    }
+}
+
+#[test]
 fn split_feedback_keeps_its_meaning_when_transaction_facts_fill_the_footer() {
     use crate::app::model::LayoutNotice;
     use crate::query::result::TransactionState;

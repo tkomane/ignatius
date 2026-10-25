@@ -3056,7 +3056,7 @@ fn asking_what_an_object_is_loads_its_definition_and_shows_where_it_came_from() 
     assert_eq!(open.lines().len(), 40);
 
     // Scrolling stops with the last line on screen, both ways.
-    let height = crate::ui::layout::definition_viewport(model.size).1;
+    let height = crate::ui::layout::definition_viewport(model.size, &model.presentation).1;
     for _ in 0..200 {
         update(&mut model, Message::Action(Action::Move(Direction::Down)));
     }

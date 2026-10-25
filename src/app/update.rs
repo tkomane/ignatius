@@ -1227,7 +1227,7 @@ fn dependency_entries(
 
 /// Handles input while a definition is on screen.
 fn definition_action(model: &mut Model, action: Action) -> Vec<Effect> {
-    let height = crate::ui::layout::definition_viewport(model.size).1;
+    let height = crate::ui::layout::definition_viewport(model.size, &model.presentation).1;
     match action {
         Action::Move(Direction::Down) | Action::MovePage(Direction::Down) => {
             let step = if matches!(action, Action::MovePage(_)) {
@@ -1391,7 +1391,7 @@ fn toggle_inspector(model: &mut Model) {
         model.inspector = None;
         return;
     }
-    let (width, _) = crate::ui::layout::inspector_viewport(model.size);
+    let (width, _) = crate::ui::layout::inspector_viewport(model.size, &model.presentation);
     let row = model.selected_source_row();
     let exists = row.is_some_and(|row| {
         model.visible_result().is_some_and(|set| {
@@ -1405,7 +1405,7 @@ fn toggle_inspector(model: &mut Model) {
 
 /// How many lines the selected value wraps to, and how many fit at once.
 fn inspected_extent(model: &Model) -> (usize, usize) {
-    let (width, height) = crate::ui::layout::inspector_viewport(model.size);
+    let (width, height) = crate::ui::layout::inspector_viewport(model.size, &model.presentation);
     let row = model.selected_source_row();
     let lines = row
         .and_then(|row| {

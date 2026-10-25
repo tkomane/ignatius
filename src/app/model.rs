@@ -850,6 +850,8 @@ impl FormatNotice {
 /// ordinary next frame. The renderer holds no copy.
 #[derive(Debug, Clone)]
 pub struct Presentation {
+    /// The configured spacing choice, independent of terminal layout tier.
+    pub density: crate::config::Density,
     /// Palette and whether colour may be emitted.
     pub theme: crate::ui::theme::Theme,
     /// Which icons and box characters may be drawn.
@@ -870,10 +872,27 @@ impl Presentation {
         reduced_motion: bool,
     ) -> Self {
         Self {
+            density: crate::config::Density::Comfortable,
             color_depth: theme.depth,
             theme,
             glyphs,
             reduced_motion,
+        }
+    }
+
+    /// Selects a contracted spacing table without changing existing defaults.
+    #[must_use]
+    pub const fn with_density(mut self, density: crate::config::Density) -> Self {
+        self.density = density;
+        self
+    }
+
+    /// All density-dependent spacing, from the single data table.
+    #[must_use]
+    pub const fn spacing(&self) -> Spacing {
+        match self.density {
+            crate::config::Density::Comfortable => SPACING_TABLE[0],
+            crate::config::Density::Compact => SPACING_TABLE[1],
         }
     }
 
@@ -888,6 +907,7 @@ impl Default for Presentation {
     /// detection at startup.
     fn default() -> Self {
         Self {
+            density: crate::config::Density::Comfortable,
             theme: crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, false),
             glyphs: crate::ui::glyphs::Glyphs::new(crate::ui::glyphs::GlyphTier::Unicode),
             reduced_motion: false,
@@ -895,6 +915,33 @@ impl Default for Presentation {
         }
     }
 }
+
+/// The complete density-dependent spacing contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spacing {
+    pub title_padding: u16,
+    pub grid_cell_padding: u16,
+    pub toolbar_blank_rows: u16,
+    pub footer_hint_cap: usize,
+    pub overlay_margin: u16,
+}
+
+pub(crate) const SPACING_TABLE: [Spacing; 2] = [
+    Spacing {
+        title_padding: 1,
+        grid_cell_padding: 1,
+        toolbar_blank_rows: 1,
+        footer_hint_cap: 6,
+        overlay_margin: 2,
+    },
+    Spacing {
+        title_padding: 0,
+        grid_cell_padding: 1,
+        toolbar_blank_rows: 0,
+        footer_hint_cap: 4,
+        overlay_margin: 1,
+    },
+];
 
 /// Session-local unzoomed preferences. Missing values retain the initial
 /// responsive heuristics; rendering clamps them without destroying them.

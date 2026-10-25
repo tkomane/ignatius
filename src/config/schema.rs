@@ -345,6 +345,9 @@ const fn default_schema_version() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct UiConfig {
+    /// The contracted comfortable or compact spacing table.
+    #[serde(default)]
+    pub density: Density,
     /// Which built-in theme to use.
     #[serde(default)]
     pub theme: ThemeChoice,
@@ -371,6 +374,7 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
+            density: Density::Comfortable,
             theme: ThemeChoice::Dark,
             glyphs: GlyphMode::Auto,
             color: ColorMode::Auto,
@@ -384,6 +388,17 @@ impl Default for UiConfig {
 
 const fn default_completion() -> bool {
     true
+}
+
+/// The two supported presentation densities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Density {
+    /// Default spacing with room to breathe.
+    #[default]
+    Comfortable,
+    /// The documented compact spacing table.
+    Compact,
 }
 
 /// Built-in themes.

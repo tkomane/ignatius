@@ -178,7 +178,7 @@ pub(crate) fn render_footer(
         }
     }
 
-    for action in crate::app::discovery::hint_actions(model) {
+    for action in crate::app::discovery::hint_actions_for(model, presentation) {
         let Some((key, label)) = keymap.contextual_hint(&action) else {
             continue;
         };

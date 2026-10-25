@@ -21,6 +21,47 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Color;
 use std::time::Duration;
 
+#[test]
+fn density_title_padding_preserves_content_whitespace_on_panes_and_overlays() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        let p = colour_off_presentation().with_density(density);
+        for overlay in [false, true] {
+            let area = Rect::new(0, 0, 30, 3);
+            let mut buf = Buffer::empty(area);
+            let block = if overlay {
+                super::overlay_block("  name  ".into(), &p)
+            } else {
+                super::pane_block("  name  ".into(), true, &p)
+            };
+            use ratatui::widgets::Widget;
+            block.render(area, &mut buf);
+            let line = crate::ui::layout::buffer_to_string(&buf)
+                .lines()
+                .next()
+                .unwrap()
+                .to_owned();
+            let n = line.chars().position(|ch| ch == 'n').unwrap();
+            assert_eq!(
+                n,
+                if density == crate::config::Density::Comfortable {
+                    3
+                } else {
+                    2
+                },
+                "{line}"
+            );
+            assert_eq!(
+                line.chars().nth(n + 4),
+                Some(' '),
+                "the content's final space survives: {line}"
+            );
+        }
+    }
+}
+
 // ------------------------------------------------- painted surfaces (T017)
 
 /// A presentation on one palette at a chosen colour depth.

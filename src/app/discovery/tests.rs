@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn density_comfortable_can_teach_six_available_actions() {
+    let mut model = Model::new(100);
+    connected(&mut model);
+    model.focus = Focus::Results;
+    model.last_execution = Some(rows_execution());
+    assert_eq!(hint_actions(&model).len(), 6);
+    let compact = model
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Compact);
+    assert_eq!(hint_actions_for(&model, &compact).len(), 4);
+    assert_eq!(
+        hint_actions(&model).len(),
+        6,
+        "an explicit override does not change the model"
+    );
+}
+
+#[test]
 fn pane_commands_are_discoverable_without_database_work_and_restore_is_current() {
     let mut model = Model::new(100);
     for action in [Action::ShrinkPane, Action::GrowPane, Action::ZoomPane] {

@@ -193,6 +193,39 @@ cell layout/styles under their stated font/DIM assumptions. Native Terminal
 computer use was blocked by tool policy; no native screenshot or hand-use
 acceptance is claimed.
 
+## Density integration - 2026-10-25
+
+Feature 025 T040 and the remaining T038 test implementation now use the single
+comfortable/compact spacing table. Focused config 36, app 305, UI 224, CLI one,
+documentation 15, warnings-denied Clippy and a fresh library build passed.
+Initial red checks cover strict parsing/template/caps, then widget spacing and
+overrides. Review also reproduced wrapped-password and typed-production-input
+clipping under preferred margins; the final geometry retains their previously
+usable height. Focused records and raw log links:
+`/private/tmp/ignatius-density-evidence-2026-10-25.md`.
+
+The complete locked verifier passed formatting, lints, API/workspace/doc tests
+and PostgreSQL 18.6 plain/TLS: 1,224 harness cases/22 summaries, including 950
+library cases and six terminal harness cases. The socket test still returns
+early on macOS and remains a semantic skip. Source was modified `b9a92d7` plus
+the reviewed density implementation and documentation; pending W04/W07
+specifications do not constitute their implementation. Log:
+`/private/tmp/ignatius-verify-2026-10-25-density.log`.
+
+A fresh non-test library with SHA-256
+`96e31138be4603e71638e473ff15c996bf61c4202b74968d1599df639e69a94c`
+produced 88 actual Ratatui buffers: 11 synthetic scenarios, both densities,
+dark/light/high-contrast truecolour Unicode and ASCII/no-colour. Captured
+symbols/styles and raster/font/DIM assumptions are retained under
+`/private/tmp/ignatius-density-styled-buffer-x9t8tv6x/`; source-input digest
+`2de4048cac30deb6aec2446ddd3983e2102c002eac2a41af15346d13880567cc`.
+The lead inspected grid/notice, password, production, help and completion
+contact sheets. Compact adds a row only when the toolbar row is empty; notices
+and previously visible protected inputs remain present. Baseline static-help
+clipping is tracked in Feature 015 T042; W04 review disclosure is separately
+tracked in Feature 018 T037-T040. No native screenshot, hand use, live clipboard,
+latest-source Linux/Windows or different-family acceptance is inferred.
+
 ## Unix startup-signal registration - 2026-10-25
 
 REL-001 now registers SIGTERM synchronously under the runtime before terminal

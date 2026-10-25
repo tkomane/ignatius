@@ -14,18 +14,31 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 /// Grid prelude rows, shared with paging and hit testing.
-pub(crate) fn grid_header_rows(model: &Model, set: &crate::query::result::ResultSet) -> usize {
-    5 + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+pub(crate) fn grid_header_rows(
+    model: &Model,
+    set: &crate::query::result::ResultSet,
+    spacing: crate::app::model::Spacing,
+) -> usize {
+    let notice = model.cell_update_notice.is_some()
+        || model.clipboard_notice.is_some()
+        || model.refresh_notice.is_some()
+        || model.result_grid.note.is_some();
+    4 + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+        + usize::from(u16::from(notice).max(spacing.toolbar_blank_rows))
 }
 
 /// Actual drawable rows, before imposing the navigation minimum of one.
-pub(crate) fn grid_capacity(model: &Model, pane: Rect) -> usize {
+pub(crate) fn grid_capacity(
+    model: &Model,
+    pane: Rect,
+    spacing: crate::app::model::Spacing,
+) -> usize {
     let inner = super::inner_rect(pane);
     if inner.width == 0 {
         return 0;
     }
     model.visible_result().map_or(0, |set| {
-        usize::from(inner.height).saturating_sub(grid_header_rows(model, set))
+        usize::from(inner.height).saturating_sub(grid_header_rows(model, set, spacing))
     })
 }
 
@@ -293,11 +306,11 @@ pub(crate) fn render_inspector(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let box_area = inspector_box(area);
+    let box_area = inspector_box(area, presentation);
     if box_area.width < 8 || box_area.height < 4 {
         return;
     }
-    let (width, height) = inspector_viewport((area.width, area.height));
+    let (width, height) = inspector_viewport((area.width, area.height), presentation);
 
     let Some(set) = model.visible_result() else {
         return;
@@ -540,13 +553,14 @@ fn render_grid(
 ) {
     let theme = &presentation.theme;
     let rule = presentation.glyphs.column_rule();
+    let padding = " ".repeat(usize::from(presentation.spacing().grid_cell_padding));
 
     // The filter and local sort produce source-row indices. The numbers in the
     // gutter stay those rows' own, so a sorted or filtered view still says where
     // each row is in the server result.
     let rows = model.displayed_rows();
     let has_type_row = model.result_grid.show_types && set.column_types.iter().any(Option::is_some);
-    let header_rows = grid_header_rows(model, set);
+    let header_rows = grid_header_rows(model, set, presentation.spacing());
     let visible_rows = (area.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (area.width as usize).saturating_sub(usize::from(needs_scrollbar));
@@ -557,7 +571,8 @@ fn render_grid(
         .selected_row
         .saturating_sub(visible_rows.saturating_sub(1));
     let gutter = set.rows.len().max(1).to_string().len().max(2);
-    let available = grid_width.saturating_sub(gutter + 1);
+    let available =
+        grid_width.saturating_sub(gutter + usize::from(presentation.spacing().grid_cell_padding));
     let automatic_widths: Vec<usize> = (0..set.columns.len())
         .map(|index| grid::automatic_column_width(set, index))
         .collect();
@@ -687,16 +702,19 @@ fn render_grid(
         // Keep the row/header offsets deterministic even when there is no
         // limitation note. The blank line gives a little breathing room between
         // state and values, like a compact GUI toolbar.
-        lines.push(Line::from(""));
+        lines.extend((0..presentation.spacing().toolbar_blank_rows).map(|_| Line::from("")));
     }
 
     let mut header_spans = vec![Span::styled(
-        format!("{} ", " ".repeat(gutter)),
+        format!("{}{padding}", " ".repeat(gutter)),
         theme.style(Token::Muted),
     )];
     for (position, index) in window.iter().enumerate() {
         if position > 0 {
-            header_spans.push(Span::styled(format!("{rule} "), theme.style(Token::Border)));
+            header_spans.push(Span::styled(
+                format!("{rule}{padding}"),
+                theme.style(Token::Border),
+            ));
         }
         let name = set.columns.get(*index).map_or("unknown", String::as_str);
         let width = widths
@@ -714,7 +732,7 @@ fn render_grid(
             theme.style(Token::Header)
         };
         header_spans.push(Span::styled(
-            format!("{} ", pad_to_width(&text, width)),
+            format!("{}{padding}", pad_to_width(&text, width)),
             header_style,
         ));
     }
@@ -722,12 +740,15 @@ fn render_grid(
 
     if has_type_row {
         let mut type_spans = vec![Span::styled(
-            format!("{} ", " ".repeat(gutter)),
+            format!("{}{padding}", " ".repeat(gutter)),
             theme.style(Token::Muted),
         )];
         for (position, index) in window.iter().enumerate() {
             if position > 0 {
-                type_spans.push(Span::styled(format!("{rule} "), theme.style(Token::Border)));
+                type_spans.push(Span::styled(
+                    format!("{rule}{padding}"),
+                    theme.style(Token::Border),
+                ));
             }
             let width = widths
                 .get(*index)
@@ -738,7 +759,7 @@ fn render_grid(
                 .map_or_else(|| "unavailable".to_owned(), sanitize_for_display);
             let text = truncate_to_width(&type_name, width, !presentation.glyphs.is_ascii());
             type_spans.push(Span::styled(
-                format!("{} ", pad_to_width(&text, width)),
+                format!("{}{padding}", pad_to_width(&text, width)),
                 theme.style(Token::Muted),
             ));
         }
@@ -764,14 +785,14 @@ fn render_grid(
         let striped = position % 2 == 1;
 
         let mut spans = vec![Span::styled(
-            format!("{:>gutter$} ", source + 1),
+            format!("{:>gutter$}{padding}", source + 1),
             cell_style(theme, Token::Muted, selected, striped),
         )];
 
         for (column_position, index) in window.iter().enumerate() {
             if column_position > 0 {
                 spans.push(Span::styled(
-                    format!("{rule} "),
+                    format!("{rule}{padding}"),
                     cell_style(theme, Token::Border, selected, striped),
                 ));
             }
@@ -781,7 +802,7 @@ fn render_grid(
                 .unwrap_or(grid::MIN_COLUMN_WIDTH);
             let Some(cell) = row.get(*index) else {
                 spans.push(Span::styled(
-                    format!("{} ", pad_to_width("[missing]", width)),
+                    format!("{}{padding}", pad_to_width("[missing]", width)),
                     cell_style(theme, Token::Warning, selected, striped),
                 ));
                 continue;
@@ -797,9 +818,9 @@ fn render_grid(
                 // Right-aligned by the shape of the value, not by its type. This
                 // remains a reading aid and is never described as type-aware.
                 let pad = width.saturating_sub(display_width(&rendered));
-                format!("{}{rendered} ", " ".repeat(pad))
+                format!("{}{rendered}{padding}", " ".repeat(pad))
             } else {
-                format!("{} ", pad_to_width(&rendered, width))
+                format!("{}{padding}", pad_to_width(&rendered, width))
             };
             spans.push(Span::styled(
                 padded,

@@ -109,7 +109,7 @@ to run when safe, and where results or object recovery actions will appear.
 whose keys and action labels come from the active keymap.
 
 **Independent Test**: Render Editor, Results, and Objects with empty, populated,
-filtered, and busy states. Confirm no more than five hints are shown, every key
+filtered, and busy states. Confirm the active density cap (six comfortable/four compact, superseding the original five) is respected, every key
 resolves to the adjacent action, and focus changes the priorities.
 
 ### Tests for User Story 2
@@ -121,7 +121,7 @@ resolves to the adjacent action, and focus changes the priorities.
   for editor, results, and objects focus, including busy cancellation,
   filtered results, hidden sidebar, empty tree, and no-result states
 - [x] T018 [P] [US2] Add footer renderer tests in `src/ui/layout.rs` proving the
-  five-action bound, focus-specific action words, actual configured keys, and
+  active density bound (originally five, superseded by Feature025 six/four), focus-specific action words, actual configured keys, and
   readable ASCII/no-colour output
 
 ### Implementation for User Story 2
@@ -290,6 +290,21 @@ gaps without claiming unavailable platform or live-server evidence.
 4. Close blocked-state recovery, documentation, and evidence gates.
 
 ## Notes
+
+### Rendered help follow-up - 2026-10-25
+
+- [ ] T042 Repair the observed static help clipping after the W04 sending-
+  review work: at 120x30 the fixed-width/fixed-height help buffer cuts off long
+  binding descriptions and later entries, and a long key label runs into its
+  action text. Specify local help navigation/input ownership first, preserve
+  active-key discovery and every existing command route, then add complete-
+  entry/long-key/narrow-size renderer and reducer checks in
+  `src/ui/widgets/overlays.rs`, `src/app/model.rs`, `src/app/update.rs` and
+  their sidecars, reusing the completed W04 wrapping/viewport boundary.
+  Retained paired
+  synthetic density buffers: `/private/tmp/ignatius-density-styled-buffer-x9t8tv6x/contact-help.png`.
+  This is a pre-existing daily-use gap, not a density acceptance regression or
+  evidence of native terminal appearance.
 
 - Every task is executable from the repository root and names its target file.
 - `[P]` marks only work that can proceed without an incomplete dependency or

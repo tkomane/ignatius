@@ -11,7 +11,7 @@ use crate::query::result::TransactionState;
 use crate::query::statements;
 
 /// The maximum number of actions the footer may teach at once.
-pub const MAX_CONTEXTUAL_HINTS: usize = 5;
+pub const MAX_CONTEXTUAL_HINTS: usize = crate::app::model::SPACING_TABLE[0].footer_hint_cap;
 
 /// A binding copied from the active keymap into the application boundary.
 ///
@@ -177,6 +177,15 @@ pub fn context(model: &Model) -> DiscoveryContext {
 /// list of labels for actions that would silently do nothing.
 #[must_use]
 pub fn hint_actions(model: &Model) -> Vec<Action> {
+    hint_actions_for(model, &model.presentation)
+}
+
+/// Uses the rendering presentation, including an explicit test override.
+#[must_use]
+pub fn hint_actions_for(
+    model: &Model,
+    presentation: &crate::app::model::Presentation,
+) -> Vec<Action> {
     let ctx = context(model);
     let mut candidates = match ctx.focus {
         Focus::Editor if model.phase.is_busy() => vec![
@@ -271,7 +280,7 @@ pub fn hint_actions(model: &Model) -> Vec<Action> {
     candidates
         .into_iter()
         .filter(|action| action_is_available(model, action))
-        .take(MAX_CONTEXTUAL_HINTS)
+        .take(presentation.spacing().footer_hint_cap)
         .collect()
 }
 

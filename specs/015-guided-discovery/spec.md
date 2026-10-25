@@ -225,7 +225,8 @@ effect.
 - **SC-001**: In a fresh 80-column by 24-row session, the first rendered frame
   names the current state and one valid next action without opening help.
 - **SC-002**: In every supported focus and tested state, the footer shows no
-  more than five contextual actions, and every shown key resolves to the action
+  more than six contextual actions in comfortable density or four in compact
+  density, and every shown key resolves to the action
   named beside it.
 - **SC-003**: Searching the command palette for each of `run`, `inspect`,
   `help`, `objects`, `save`, and `result` returns at least one relevant entry

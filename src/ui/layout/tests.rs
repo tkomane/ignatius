@@ -10,6 +10,435 @@ use crate::ui::theme::Theme;
 use std::time::Duration;
 
 #[test]
+fn density_compact_removes_only_the_empty_grid_toolbar_row() {
+    use crate::config::Density;
+    for typed in [false, true] {
+        for notice in 0..=4 {
+            let mut model = connected_model(Environment::Local);
+            model.size = (120, 40);
+            model.focus = Focus::Results;
+            let rows: Vec<Vec<Cell>> = (0..60)
+                .map(|n| vec![Cell::Text(format!("density-row-{n}"))])
+                .collect();
+            let borrowed: Vec<&[Cell]> = rows.iter().map(Vec::as_slice).collect();
+            with_rows(&mut model, &["value"], &borrowed);
+            model.result_grid.show_types = typed;
+            model.last_execution.as_mut().unwrap().statements[0]
+                .result_set
+                .as_mut()
+                .unwrap()
+                .column_types = vec![Some("text".into())];
+            match notice {
+                1 => model.result_grid.note = Some("Keep this notice".into()),
+                2 => model.cell_update_notice = Some("Keep this notice".into()),
+                3 => model.refresh_notice = Some("Keep this notice".into()),
+                4 => {
+                    model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Sent {
+                        bytes: 1,
+                        characters: 1,
+                    })
+                }
+                _ => {}
+            }
+            let comfortable =
+                render_to_string(&model, &Keymap::new(), &model.presentation, 120, 40);
+            let count = |text: &str| {
+                text.lines()
+                    .filter(|line| line.contains("density-row-"))
+                    .count()
+            };
+            let before = count(&comfortable);
+            model.presentation = model.presentation.clone().with_density(Density::Compact);
+            let compact = render_to_string(&model, &Keymap::new(), &model.presentation, 120, 40);
+            assert_eq!(
+                count(&compact),
+                before + usize::from(notice == 0),
+                "{typed}, {notice}"
+            );
+            assert_eq!(results_page(&model), count(&compact));
+            assert!(
+                notice == 0
+                    || compact.contains(if notice == 4 {
+                        "Sent 1 bytes"
+                    } else {
+                        "Keep this notice"
+                    })
+            );
+            let data_y = compact
+                .lines()
+                .position(|line| line.contains("density-row-0"))
+                .unwrap() as u16;
+            let x = pane_geometry(&model, Rect::new(0, 0, 120, 40))
+                .results
+                .unwrap()
+                .x
+                + 6;
+            assert_eq!(
+                crate::ui::widgets::region_at(&model, Rect::new(0, 0, 120, 40), x, data_y),
+                Some(crate::ui::widgets::Region::ResultsCell { row: 0, column: 0 })
+            );
+        }
+    }
+}
+
+#[test]
+fn density_render_override_controls_grid_spacing_without_changing_model() {
+    let mut model = connected_model(Environment::Local);
+    model.size = (120, 40);
+    let rows: Vec<Vec<Cell>> = (0..60)
+        .map(|n| vec![Cell::Text(format!("density-row-{n}"))])
+        .collect();
+    with_rows(
+        &mut model,
+        &["value"],
+        &rows.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+    );
+    let explicit = model
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Compact);
+    let count = |text: String| {
+        text.lines()
+            .filter(|line| line.contains("density-row-"))
+            .count()
+    };
+    assert_eq!(
+        count(render_to_string(&model, &Keymap::new(), &explicit, 120, 40)),
+        count(render_to_string(
+            &model,
+            &Keymap::new(),
+            &model.presentation,
+            120,
+            40
+        )) + 1
+    );
+}
+
+#[test]
+fn density_password_prefers_margin_but_keeps_mask_and_guidance_at_40x8() {
+    use crate::app::model::PasswordPrompt;
+    use crate::config::Density;
+    let mut model = Model::new(100);
+    let mut prompt = PasswordPrompt::new("demo", "Try again");
+    for ch in "secret".chars() {
+        prompt.push(ch);
+    }
+    model.password_prompt = Some(prompt);
+    for density in [Density::Comfortable, Density::Compact] {
+        let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+        let text = render_to_string(&model, &Keymap::new(), &p, 40, 8);
+        assert!(text.contains("Password: ******"), "{text}");
+        assert!(text.contains("Enter") && text.contains("Esc"), "{text}");
+        assert!(!text.contains("secret"));
+        let larger = render_to_string(&model, &Keymap::new(), &p, 40, 12);
+        let line = larger
+            .lines()
+            .find(|line| line.contains("Password") && line.contains("Enter"))
+            .unwrap();
+        let name = line.find("Password").unwrap();
+        let x = line[..name].rfind('+').expect("prompt border");
+        assert_eq!(
+            x,
+            if density == Density::Comfortable {
+                2
+            } else {
+                1
+            }
+        );
+    }
+}
+
+#[test]
+fn density_preserves_previously_visible_wrapped_password_and_confirmation_inputs() {
+    use crate::config::Density;
+    let mut password = Model::new(100);
+    let mut prompt = crate::app::model::PasswordPrompt::new(
+        "demo",
+        "This synthetic reason is long enough to wrap over three short terminal lines now.",
+    );
+    for ch in "abc".chars() {
+        prompt.push(ch);
+    }
+    password.password_prompt = Some(prompt);
+    let mut confirmation = connected_model(Environment::Production);
+    confirmation.pending_run = Some(crate::app::model::PendingRun {
+        sql: "DELETE FROM things;".into(),
+        impact: crate::query::Impact::Destructive,
+        typed: "partial-only".into(),
+        required: "orders".into(),
+        source: None,
+    });
+    for density in [Density::Comfortable, Density::Compact] {
+        let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+        let password_text = render_to_string(&password, &Keymap::new(), &p, 40, 10);
+        let confirmation_text = render_to_string(&confirmation, &Keymap::new(), &p, 100, 12);
+        assert_eq!(
+            (
+                password_text.contains("Password: ***"),
+                confirmation_text.contains("partial-only")
+            ),
+            (true, true),
+            "{density:?}: password\n{password_text}\nconfirmation\n{confirmation_text}"
+        );
+    }
+}
+
+fn density_overlay_models() -> Vec<(&'static str, Model)> {
+    use crate::app::model::*;
+    let mut base = connected_model(Environment::Local);
+    with_rows(
+        &mut base,
+        &["id", "value"],
+        &[&[Cell::Text("1".into()), Cell::Text("example".into())]],
+    );
+    base.selected_column = 1;
+    let mut cases = Vec::new();
+    let mut m = base.clone();
+    let mut p = PasswordPrompt::new("demo", "Try again");
+    for c in "secret-marker".chars() {
+        p.push(c);
+    }
+    m.password_prompt = Some(p);
+    cases.push(("password", m));
+    let mut m = base.clone();
+    let mut p = ParameterPrompt::new("SELECT :value;".into(), None, vec!["value".into()]);
+    for c in "secret-marker".chars() {
+        p.push(c);
+    }
+    m.parameter_prompt = Some(p);
+    cases.push(("parameter", m));
+    let mut m = base.clone();
+    m.name_prompt = Some(NamePrompt::for_query("demo"));
+    cases.push(("name", m));
+    let mut m = base.clone();
+    m.pending_run = Some(PendingRun {
+        sql: "SELECT 1;".into(),
+        impact: crate::query::Impact::Read,
+        typed: String::new(),
+        required: String::new(),
+        source: None,
+    });
+    cases.push(("run confirmation", m));
+    let mut m = base.clone();
+    m.pending_plan = Some(PendingPlan {
+        sql: "SELECT 1;".into(),
+        impact: crate::query::Impact::Read,
+        typed: String::new(),
+        required: String::new(),
+    });
+    cases.push(("plan confirmation", m));
+    let mut m = base.clone();
+    m.pending_copy = Some(PendingCopy {
+        result_job: JobId(1),
+        source_row: 0,
+        column: 1,
+        bytes: 7,
+        characters: 7,
+    });
+    cases.push(("copy confirmation", m));
+    let mut m = base.clone();
+    m.update_prompt = Some(UpdatePrompt::new(
+        update_candidate(),
+        update_source(),
+        update_relation(),
+    ));
+    cases.push(("update input", m));
+    let mut m = base.clone();
+    m.pending_update = Some(PendingUpdate {
+        candidate: update_candidate(),
+        relation: update_relation(),
+        plan: update_plan(),
+    });
+    cases.push(("update review", m));
+    let mut m = base.clone();
+    m.inspector = Some(crate::app::inspect::Inspector::new());
+    cases.push(("inspector", m));
+    let mut m = base.clone();
+    m.definition = Some(Definition {
+        pending: None,
+        heading: "demo".into(),
+        definition: None,
+        error: None,
+        scroll: 0,
+    });
+    cases.push(("definition", m));
+    let mut m = base.clone();
+    m.palette = Some(crate::app::palette::Palette::new(vec![
+        crate::app::palette::PaletteEntry {
+            label: "Example command".into(),
+            detail: "F1".into(),
+            group: "Session",
+            command: crate::app::palette::PaletteCommand::Run(crate::app::Action::ToggleHelp),
+        },
+    ]));
+    cases.push(("palette", m));
+    let mut m = base.clone();
+    m.connection_details = true;
+    cases.push(("connection details", m));
+    let mut m = base.clone();
+    m.help_open = true;
+    cases.push(("help", m));
+    let mut m = base.clone();
+    m.prefix_pending = true;
+    cases.push(("chords", m));
+    let mut m = base;
+    m.editor.set_text("SEL");
+    m.completion.menu = Some(crate::app::completion::CompletionMenu::new(
+        crate::query::completion::complete("SEL", 3, None),
+        true,
+    ));
+    cases.push(("completion", m));
+    cases
+}
+
+#[test]
+fn density_every_overlay_family_respects_preferred_margin_and_tiny_bounds() {
+    use crate::config::Density;
+    for (name, mut model) in density_overlay_models() {
+        for density in [Density::Comfortable, Density::Compact] {
+            let p = rich().with_density(density);
+            let area = Rect::new(0, 0, 80, 80);
+            let buffer = rendered_buffer(&model, &p, 80, 80);
+            let background = p.theme.surface(Token::SurfaceOverlay).bg.unwrap();
+            let cells: Vec<(u16, u16)> = (0..80)
+                .flat_map(|y| (0..80).map(move |x| (x, y)))
+                .filter(|(x, y)| buffer[(*x, *y)].bg == background)
+                .collect();
+            assert!(!cells.is_empty(), "{name}");
+            let margin = p.spacing().overlay_margin;
+            assert!(
+                cells.iter().all(|(x, y)| *x >= margin
+                    && *y >= margin
+                    && *x < area.width - margin
+                    && *y < area.height - margin),
+                "{name}: {density:?}"
+            );
+            for (width, height) in [
+                (0, 0),
+                (1, 1),
+                (7, 3),
+                (39, 7),
+                (40, 8),
+                (120, 40),
+                (200, 80),
+            ] {
+                model.size = (width, height);
+                let text = render_to_string(&model, &Keymap::new(), &p, width, height);
+                assert!(
+                    !text.contains("secret-marker"),
+                    "{name} leaked an input value"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn density_inspector_definition_and_palette_viewports_follow_the_same_boxes() {
+    use crate::config::Density;
+    for density in [Density::Comfortable, Density::Compact] {
+        let p = rich().with_density(density);
+        let size = (80, 24);
+        let area = Rect::new(0, 0, size.0, size.1);
+        let inspector = inspector_box(area, &p);
+        let definition = definition_box(area, &p);
+        assert_eq!(
+            inspector_viewport(size, &p),
+            (
+                usize::from(inspector.width.saturating_sub(4)),
+                usize::from(inspector.height.saturating_sub(5))
+            )
+        );
+        assert_eq!(
+            definition_viewport(size, &p),
+            (
+                usize::from(definition.width.saturating_sub(4)),
+                usize::from(definition.height.saturating_sub(5))
+            )
+        );
+        let mut model = density_overlay_models()
+            .into_iter()
+            .find(|(name, _)| *name == "palette")
+            .unwrap()
+            .1;
+        model.presentation = p.clone();
+        let palette = model.palette.as_ref().unwrap();
+        let pane = crate::ui::widgets::palette::palette_box(palette, &p, area);
+        let y = pane.y + 2;
+        assert_eq!(
+            crate::ui::widgets::region_at(&model, area, pane.x + 2, y),
+            Some(crate::ui::widgets::Region::OverlayItem { index: 0 })
+        );
+    }
+}
+
+#[test]
+fn density_grid_column_padding_and_meaning_are_stable_at_all_depths_and_themes() {
+    use crate::config::Density;
+    use crate::ui::theme::ColorDepth;
+    for choice in [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::HighContrast,
+    ] {
+        for depth in [
+            ColorDepth::TrueColor,
+            ColorDepth::Indexed256,
+            ColorDepth::Basic16,
+            ColorDepth::None,
+        ] {
+            let mut mappings = Vec::new();
+            for density in [Density::Comfortable, Density::Compact] {
+                let mut model = connected_model(Environment::Local);
+                model.size = (120, 40);
+                model.focus = Focus::Results;
+                model.presentation = presentation_at_depth(
+                    choice,
+                    depth != ColorDepth::None,
+                    GlyphTier::Ascii,
+                    depth,
+                )
+                .with_density(density);
+                with_rows(
+                    &mut model,
+                    &["id", "value"],
+                    &[&[Cell::Text("1".into()), Cell::Text("density-row".into())]],
+                );
+                let text = render_to_string(&model, &Keymap::new(), &model.presentation, 120, 40);
+                assert!(
+                    text.contains("SELECT 1;")
+                        && text.contains("density-row")
+                        && text.contains("LOCAL"),
+                    "{choice:?}, {depth:?}, {density:?}"
+                );
+                let y = text
+                    .lines()
+                    .position(|line| line.contains("density-row"))
+                    .unwrap() as u16;
+                mappings.push(
+                    (0..120)
+                        .map(|x| {
+                            match crate::ui::widgets::region_at(
+                                &model,
+                                Rect::new(0, 0, 120, 40),
+                                x,
+                                y,
+                            ) {
+                                Some(crate::ui::widgets::Region::ResultsCell {
+                                    column, ..
+                                }) => Some(column),
+                                _ => None,
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            assert_eq!(mappings[0], mappings[1]);
+        }
+    }
+}
+
+#[test]
 fn split_geometry_clamps_effective_rectangles_without_changing_preferences() {
     let mut model = Model::new(100);
     model.splits.sidebar_cells = Some(60);
@@ -116,7 +545,11 @@ fn split_completion_popup_follows_the_visible_editor_caret() {
     model.splits.editor_rows = Some(19);
     assert_eq!(popup_row(&model), 19);
     model.splits.zoomed = true;
-    assert_eq!(popup_row(&model), 32);
+    assert_eq!(
+        popup_row(&model),
+        23,
+        "preferred outer clearance puts the popup above the caret near the bottom"
+    );
 }
 
 #[test]

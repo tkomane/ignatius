@@ -210,7 +210,8 @@ async fn event_loop(
         Theme::new(config.ui.theme, presentation.color).with_depth(color_depth),
         crate::ui::Glyphs::new(tier),
         config.ui.reduced_motion,
-    );
+    )
+    .with_density(config.ui.density);
     model.keymap_snapshot = keymap.snapshot();
     let configured_providers = crate::cli::auth_providers(&config).unwrap_or_default();
     let providers = crate::connection::cloud::registry(&configured_providers);

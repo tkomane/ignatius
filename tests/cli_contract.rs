@@ -354,6 +354,47 @@ fn a_broken_configuration_file_exits_with_the_config_code() {
 }
 
 #[test]
+fn density_configuration_is_strict_and_refused_before_terminal_acquisition() {
+    let state = tempfile::tempdir().expect("isolated density configuration");
+    let dir = state.path();
+    for value in ["comfortable", "compact"] {
+        std::fs::write(
+            dir.join("config.toml"),
+            format!("schema_version = 1\n[ui]\ndensity = \"{value}\"\n"),
+        )
+        .unwrap();
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", dir)
+            .args(["config", "validate"])
+            .output()
+            .unwrap();
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+    }
+    std::fs::write(
+        dir.join("config.toml"),
+        "schema_version = 1\n[ui]\ndensity = \"dense\"\n",
+    )
+    .unwrap();
+    for args in [vec!["config", "validate"], vec!["connect"]] {
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(code(&output), 3, "{}", stderr(&output));
+        let text = format!("{}{}", stdout(&output), stderr(&output));
+        assert!(
+            text.contains("comfortable") && text.contains("compact"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("\u{1b}[?1049h"),
+            "configuration refusal entered alternate screen"
+        );
+    }
+}
+
+#[test]
 fn config_init_writes_a_file_this_build_accepts_and_refuses_to_overwrite() {
     let dir = std::env::temp_dir().join(format!("ignatius-init-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

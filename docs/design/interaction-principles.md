@@ -53,7 +53,9 @@ buffer and local reading preferences.
 **Density with room to breathe.** Every element earns its space. The header
 carries connection, environment, posture, transport and timing because a user
 running statements against a real database needs all five without opening a
-panel. It carries nothing else.
+panel. It carries nothing else. `ui.density` selects comfortable (default) or
+compact spacing from one table. The footer teaches at most six or four actions
+respectively, always as complete active-key/action pairs.
 
 **Feedback is immediate and honest.** Pressing cancel changes the status
 immediately, because the request was made immediately. It does not claim the

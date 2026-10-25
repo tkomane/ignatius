@@ -6,8 +6,9 @@
 
 **Status**: US1-US4 are implemented with dated evidence in `docs/status.md`.
 US7's keyboard split/zoom/shared-geometry core passed its integrated local
-verifier on 2026-10-25. Density, dragging and complete
-US7 acceptance, plus US5/US6/US8-US10, remain open. The feature originated in
+verifier on 2026-10-25. Density and its remaining T038 tests also passed the
+integrated local verifier that day. Dragging and complete US7 acceptance,
+plus US5/US6/US8-US10, remain open. The feature originated in
 one owner observation on 2026-09-17; automated checks add no participant sample
 or native hand-use claim.
 

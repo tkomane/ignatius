@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: `[ui] density = "comfortable"` (default) or `"compact"` selects
+  one consistent spacing table. Compact removes the empty grid toolbar row
+  while retaining notices; footer hints are capped at six or four complete
+  key/action pairs. Preferred overlay clearance preserves usable input rows.
 - Fixed: Unix SIGTERM handling is registered before full-screen terminal
   acquisition, closing the startup window where termination could bypass
   restoration. Registration failure refuses startup before taking terminal

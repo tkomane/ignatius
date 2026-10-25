@@ -326,7 +326,11 @@ pub fn results_page(model: &Model) -> usize {
             {
                 0
             } else {
-                crate::ui::widgets::results::grid_capacity(model, pane)
+                crate::ui::widgets::results::grid_capacity(
+                    model,
+                    pane,
+                    model.presentation.spacing(),
+                )
             }
         })
         .max(1)
@@ -445,6 +449,61 @@ fn render_too_small(presentation: &Presentation, area: Rect, buf: &mut Buffer) {
 
 // ---------------------------------------------------------------- inspector
 
+/// Positioning retained by the existing overlay families.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum OverlayAnchor {
+    Center,
+    Top,
+    Bottom,
+}
+
+/// Preferred clearance yields only when needed for usable interaction rows.
+pub(crate) fn overlay_box(
+    area: Rect,
+    presentation: &Presentation,
+    maximum: (u16, u16),
+    minimum_rows: u16,
+    anchor: OverlayAnchor,
+) -> Rect {
+    let margin = presentation.spacing().overlay_margin;
+    let horizontal = margin.min(area.width.saturating_sub(1) / 2);
+    let vertical = margin.min(area.height.saturating_sub(minimum_rows.min(area.height)) / 2);
+    let width = area
+        .width
+        .saturating_sub(horizontal.saturating_mul(2))
+        .min(maximum.0);
+    let height = area
+        .height
+        .saturating_sub(vertical.saturating_mul(2))
+        .min(maximum.1);
+    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
+    let y = match anchor {
+        OverlayAnchor::Center => area
+            .y
+            .saturating_add(area.height.saturating_sub(height) / 2),
+        OverlayAnchor::Top => area.y.saturating_add(vertical),
+        OverlayAnchor::Bottom => area
+            .bottom()
+            .saturating_sub(vertical)
+            .saturating_sub(height),
+    };
+    Rect::new(x, y, width, height)
+}
+
+/// Protected prompts keep every previously usable vertical interaction row.
+/// Preferred margins may widen the box, but may not push an input or review
+/// disclosure below the viewport merely to make room outside its border.
+pub(crate) fn prompt_box(area: Rect, presentation: &Presentation, maximum: (u16, u16)) -> Rect {
+    let height = maximum.1.min(area.height.saturating_sub(2));
+    overlay_box(
+        area,
+        presentation,
+        (maximum.0, height),
+        height,
+        OverlayAnchor::Center,
+    )
+}
+
 /// Widest the inspector is ever drawn, whatever the terminal allows.
 const INSPECTOR_MAX_WIDTH: u16 = 92;
 /// Tallest the inspector is ever drawn.
@@ -455,21 +514,14 @@ const INSPECTOR_CHROME_COLUMNS: u16 = 4;
 const INSPECTOR_CHROME_ROWS: u16 = 5;
 
 /// The box the inspector occupies inside an area.
-pub(crate) const fn inspector_box(area: Rect) -> Rect {
-    let mut width = area.width.saturating_sub(6);
-    if width > INSPECTOR_MAX_WIDTH {
-        width = INSPECTOR_MAX_WIDTH;
-    }
-    let mut height = area.height.saturating_sub(4);
-    if height > INSPECTOR_MAX_HEIGHT {
-        height = INSPECTOR_MAX_HEIGHT;
-    }
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    }
+pub(crate) fn inspector_box(area: Rect, presentation: &Presentation) -> Rect {
+    overlay_box(
+        area,
+        presentation,
+        (INSPECTOR_MAX_WIDTH, INSPECTOR_MAX_HEIGHT),
+        INSPECTOR_CHROME_ROWS + 1,
+        OverlayAnchor::Center,
+    )
 }
 
 /// How much of a value the inspector can show at a terminal size: width in
@@ -478,13 +530,16 @@ pub(crate) const fn inspector_box(area: Rect) -> Rect {
 /// The reducer clamps scrolling with this and the renderer lays out with it, so
 /// "how much fits" has one answer rather than two that drift apart.
 #[must_use]
-pub const fn inspector_viewport(size: (u16, u16)) -> (usize, usize) {
-    let box_area = inspector_box(Rect {
-        x: 0,
-        y: 0,
-        width: size.0,
-        height: size.1,
-    });
+pub fn inspector_viewport(size: (u16, u16), presentation: &Presentation) -> (usize, usize) {
+    let box_area = inspector_box(
+        Rect {
+            x: 0,
+            y: 0,
+            width: size.0,
+            height: size.1,
+        },
+        presentation,
+    );
     (
         box_area.width.saturating_sub(INSPECTOR_CHROME_COLUMNS) as usize,
         box_area.height.saturating_sub(INSPECTOR_CHROME_ROWS) as usize,
@@ -500,34 +555,30 @@ const DEFINITION_CHROME_ROWS: u16 = 5;
 ///
 /// Wider and taller than the value inspector, because a table definition is
 /// read as a whole rather than scanned for one value.
-pub(crate) const fn definition_box(area: Rect) -> Rect {
-    let mut width = area.width.saturating_sub(4);
-    if width > 100 {
-        width = 100;
-    }
-    let mut height = area.height.saturating_sub(2);
-    if height > 34 {
-        height = 34;
-    }
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    }
+pub(crate) fn definition_box(area: Rect, presentation: &Presentation) -> Rect {
+    overlay_box(
+        area,
+        presentation,
+        (100, 34),
+        DEFINITION_CHROME_ROWS + 1,
+        OverlayAnchor::Center,
+    )
 }
 
 /// How much of a definition is on screen: width in cells, height in lines.
 ///
 /// One function for the renderer and for the reducer that clamps scrolling.
 #[must_use]
-pub const fn definition_viewport(size: (u16, u16)) -> (usize, usize) {
-    let box_area = definition_box(Rect {
-        x: 0,
-        y: 0,
-        width: size.0,
-        height: size.1,
-    });
+pub fn definition_viewport(size: (u16, u16), presentation: &Presentation) -> (usize, usize) {
+    let box_area = definition_box(
+        Rect {
+            x: 0,
+            y: 0,
+            width: size.0,
+            height: size.1,
+        },
+        presentation,
+    );
     (
         box_area.width.saturating_sub(4) as usize,
         box_area.height.saturating_sub(DEFINITION_CHROME_ROWS) as usize,

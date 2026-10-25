@@ -283,6 +283,8 @@ pub const TEMPLATE: &str = r#"# Ignatius configuration.
 schema_version = 1
 
 [ui]
+# comfortable, compact. Changes only the interactive presentation.
+density = "comfortable"
 # dark, light, high-contrast
 theme = "dark"
 # auto, unicode, ascii, nerd-font. nerd-font is never chosen automatically:

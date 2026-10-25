@@ -63,25 +63,36 @@ Git state before taking an assignment; the day-long goal remains active.
   Log: `/private/tmp/ignatius-w07-owned-deadline-2026-10-25.log`. The integrated
   full repeat follows density; Linux/abnormal-exit/Windows proof is separate.
 
-Active assignments after clean planning commit `8de54a7`: the UI worker owns
-T040 density implementation/config/presentation/widgets and the single runtime
-density assignment, plus its named tests/parity documents. It may not change
-W07 registration or any query/credential behavior. The platform worker owns an
-independent clean `21511f1` clone and task-only Docker resources; its fresh
-pinned-Rust/Linux/MSRV/socket/PTY checks are green and cleanup is complete.
-Never edit either lane's files or
-tear down its fixture. The lead owns status, compatibility, changelog, feature
-authority and integration. Sixty styled synthetic buffers were captured and
-inspected; they do not establish native visual acceptance.
+- Density T040 and T038 test implementation passed their complete integrated
+  local gate: 1,224 harness cases/950 library across 22 summaries, PostgreSQL
+  18.6 plain/TLS, semantic macOS socket skip. Focused config 36/app 305/UI 224/
+  CLI one/docs 15 and final Clippy passed. The lead inspected 88 styled
+  synthetic buffers, including two reproduced/fixed protected-input regressions.
+  Log: `/private/tmp/ignatius-verify-2026-10-25-density.log`; buffer provenance
+  and scope are recorded in verification. Dragging and full US7 acceptance
+  remain open. Density's source/Cargo ownership has been handed back.
 
-The privacy worker now owns a read-only W04 confirmation audit while the UI
-worker finishes density. A 40x8 copy-confirmation buffer clips mandatory
-terminal-path/retention and acceptance-unconfirmed wording. No clipboard write
-was attempted. Feature 018 T037-T040 track the reopened disclosure gap and
-cross-check generated UPDATE and production/EXPLAIN review surfaces. This is
-an M1/M2 safety blocker until a specified repair is implemented and verified;
-preferred density margins alone cannot close it. Shared UI/reducer edits remain
-with the density worker until handoff.
+The read-only W04 audit reproduced clipped required disclosure with both
+acceptance actions on all five surfaces: copy, generated UPDATE, production
+run, EXPLAIN ANALYZE and named parameters, including below usable dimensions.
+Its 48 reducer probes and 24 synthetic buffers dispatched zero effects. A
+2,504-byte UPDATE lost its exact SQL tail even at 140x50; existing destructive
+PROD typed-name matching still held. Feature 018 T037/T038 record the audit and
+new shared scroll/admission contract; T039/T040 remain open. This is a P1
+disclosure failure and M1/M2 safety blocker. Density preserves baseline input
+visibility but does not repair authorization policy. The runtime also needs
+first-frame/backend size synchronization rather than the initial 80x24 model
+default.
+
+Next single writers: the privacy worker takes shared review implementation in
+app model/reducer and UI layout/overlays after the lead's checkpoint release.
+The lead alone owns the narrow runtime size fix in cli/interactive and its
+sidecar, plus documentation, compatibility, changelog and integration. The
+other worker takes W07-062 error/panic proof in an isolated source clone,
+limited to ui/terminal and its sidecar; no shared reducer/runtime writer.
+Linux's clean `21511f1` acceptance and task-only cleanup are complete and
+exclude density. No fixture may be torn down by a worker. Rendered-cell checks
+do not establish native terminal appearance or hand-use acceptance.
 
 No recursive agents or shared reducer/runtime writers. Root's PostgreSQL 18.6
 fixture pair remains available; unrelated COI services and original branches

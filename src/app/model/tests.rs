@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn density_existing_constructors_and_old_configuration_remain_comfortable() {
+    let old: crate::config::Config = toml::from_str("[ui]\ntheme=\"dark\"\n").unwrap();
+    assert_eq!(old.ui.density, crate::config::Density::Comfortable);
+    assert_eq!(
+        Presentation::default().density,
+        crate::config::Density::Comfortable
+    );
+    let p = Presentation::new(
+        crate::ui::Theme::new(crate::config::ThemeChoice::Dark, false),
+        crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+        false,
+    );
+    assert_eq!(p.density, crate::config::Density::Comfortable);
+    assert_eq!(p.spacing().grid_cell_padding, 1);
+    assert_eq!(
+        p.with_density(crate::config::Density::Compact)
+            .spacing()
+            .grid_cell_padding,
+        1
+    );
+}
+
+#[test]
 fn focus_cycles_through_the_panes_that_are_on_screen() {
     assert_eq!(Focus::Editor.next(true), Focus::Results);
     assert_eq!(Focus::Results.next(true), Focus::Objects);

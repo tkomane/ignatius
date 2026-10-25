@@ -506,9 +506,15 @@ surface. Chords retain modal input ownership until their action is resolved.
 At the minimum usable compact size, diagnostic text has a content row and
 layout feedback preserves transaction facts without covering pane content.
 
-These controls are never persisted. Mouse dragging and density settings remain
-open Feature 025 work. Rendered-buffer checks and actual native terminal use
-remain separate acceptance classes.
+Split/zoom preferences are never persisted. `[ui] density = "comfortable"`
+(default) or `"compact"` selects title padding, the empty grid toolbar row,
+footer hint caps (six/four) and preferred overlay clearance from one table.
+Notices and the existing one-cell grid padding remain present. Unknown density
+values are refused with configuration exit 3 before taking terminal modes;
+there is no density CLI flag or runtime toggle. Mouse dragging remains open
+Feature 025 work. Rendered-buffer checks and actual native terminal use remain
+separate acceptance classes. Existing confirmation disclosure gaps are tracked
+by Feature 018 T037-T040; density does not change acceptance policy.
 
 ## Terminals
 

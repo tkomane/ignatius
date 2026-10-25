@@ -84,6 +84,12 @@ pub(crate) fn overlay_block(title: String, presentation: &Presentation) -> Block
 /// The border, title and focus styling shared by panes and overlays.
 fn bordered_block(title: String, focused: bool, presentation: &Presentation) -> Block<'static> {
     let theme = &presentation.theme;
+    // Existing callers own at most one decorative edge space. Removing that
+    // wrapper, rather than trimming, preserves whitespace in title content.
+    let content = title.strip_prefix(' ').unwrap_or(&title);
+    let content = content.strip_suffix(' ').unwrap_or(content);
+    let padding = " ".repeat(usize::from(presentation.spacing().title_padding));
+    let title = format!("{padding}{content}{padding}");
     Block::bordered()
         .border_set(presentation.glyphs.borders(focused))
         .border_style(theme.style(if focused { Token::Focus } else { Token::Border }))
@@ -186,7 +192,7 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         return None;
     }
     if let Some(palette) = &model.palette {
-        return palette_item_at(palette, area, column, row);
+        return palette_item_at(model, palette, area, column, row);
     }
     if model.definition.is_some() || model.inspector.is_some() || model.help_open {
         return None;
@@ -314,7 +320,7 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
     }
 
     let rows = model.displayed_rows();
-    let header_rows = results::grid_header_rows(model, set);
+    let header_rows = results::grid_header_rows(model, set, model.presentation.spacing());
     let visible_rows = (inner.height as usize).saturating_sub(header_rows).max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (inner.width as usize).saturating_sub(usize::from(needs_scrollbar));
@@ -382,19 +388,14 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
 
 /// Maps a cell inside an overlay list to its item.
 fn palette_item_at(
+    model: &Model,
     palette: &crate::app::palette::Palette,
     area: Rect,
     column: u16,
     row: u16,
 ) -> Option<Region> {
-    let width = area.width.saturating_sub(8).min(76);
-    let height = area.height.saturating_sub(6).min(18);
-    let palette_area = Rect {
-        x: area.x.saturating_add(area.width.saturating_sub(width) / 2),
-        y: area.y.saturating_add(2),
-        width,
-        height,
-    };
+    let palette_area = palette::palette_box(palette, &model.presentation, area);
+    let height = palette_area.height;
     let inner = inner_rect(palette_area);
     if !in_rect(inner, column, row) {
         return None;

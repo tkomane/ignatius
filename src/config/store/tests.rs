@@ -1,4 +1,11 @@
 use super::*;
+
+#[test]
+fn density_template_carries_its_comfortable_default() {
+    assert!(TEMPLATE.contains("density = \"comfortable\""));
+    let config: Config = toml::from_str(TEMPLATE).unwrap();
+    assert_eq!(config, Config::default());
+}
 use crate::config::schema::{ColorDepthChoice, ThemeChoice};
 
 #[test]

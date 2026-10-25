@@ -1,8 +1,9 @@
 use super::{action_key_label, input_cursor, overlay_block, pane_block, syntax_token};
 use crate::app::model::{Focus, Model};
-use crate::query::value::{sanitize_for_display, truncate_to_width};
+use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
+use crate::ui::layout::{OverlayAnchor, overlay_box, prompt_box};
 use crate::ui::layout::{Presentation, definition_box, definition_viewport};
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
@@ -23,14 +24,7 @@ pub(crate) fn render_name_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(70);
-    let height = 7.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (70, 7));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let lines = vec![
@@ -74,14 +68,7 @@ pub(crate) fn render_parameter_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(84);
-    let height = 11.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (84, 11));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let dot = if presentation.glyphs.is_ascii() {
@@ -145,15 +132,14 @@ pub(crate) fn render_password_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(72);
-    let height = 9.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (72, 9));
     ratatui::widgets::Clear.render(box_area, buf);
+    let full_title = format!(
+        " {}Password  Enter to try again, Esc to cancel ",
+        presentation.icon(Icon::Role)
+    );
+    let title_width = display_width(&full_title).saturating_sub(2)
+        + usize::from(presentation.spacing().title_padding) * 2;
 
     let dot = if presentation.glyphs.is_ascii() {
         "*"
@@ -186,10 +172,11 @@ pub(crate) fn render_password_prompt(
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .block(overlay_block(
-            format!(
-                " {}Password  Enter to try again, Esc to cancel ",
-                presentation.icon(Icon::Role)
-            ),
+            if title_width > usize::from(box_area.width.saturating_sub(2)) {
+                " Password Enter try, Esc cancel ".to_owned()
+            } else {
+                full_title
+            },
             presentation,
         ))
         .render(box_area, buf);
@@ -208,14 +195,7 @@ pub(crate) fn render_confirmation(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(78);
-    let height = 12.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (78, 12));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let target = model
@@ -297,14 +277,7 @@ pub(crate) fn render_plan_confirmation(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(84);
-    let height = 14.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (84, 14));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let target = model
@@ -386,14 +359,7 @@ pub(crate) fn render_copy_confirmation(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(84);
-    let height = 11.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (84, 11));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let column = model
@@ -469,14 +435,7 @@ pub(crate) fn render_update_value_prompt(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(92);
-    let height = 12.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (92, 12));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let relation = format!(
@@ -539,14 +498,7 @@ pub(crate) fn render_update_review(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(6).min(104);
-    let height = 17.min(area.height.saturating_sub(2));
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let box_area = prompt_box(area, presentation, (104, 17));
     ratatui::widgets::Clear.render(box_area, buf);
 
     let bound = pending
@@ -1051,11 +1003,11 @@ pub(crate) fn render_definition(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let box_area = definition_box(area);
+    let box_area = definition_box(area, presentation);
     if box_area.width < 12 || box_area.height < 5 {
         return;
     }
-    let (_, height) = definition_viewport((area.width, area.height));
+    let (_, height) = definition_viewport((area.width, area.height), presentation);
     ratatui::widgets::Clear.render(box_area, buf);
 
     let mut lines = vec![Line::from(Span::styled(
@@ -1148,14 +1100,16 @@ pub(crate) fn render_chords(
 ) {
     let theme = &presentation.theme;
     let chords = crate::ui::keymap::CHORDS;
-    let width = area.width.saturating_sub(8).min(60);
-    let height = (u16::try_from(chords.len()).unwrap_or(6) + 2).min(area.height);
-    let chord_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + area.height.saturating_sub(height + 1),
-        width,
-        height,
-    };
+    let height = u16::try_from(chords.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let chord_area = overlay_box(
+        area,
+        presentation,
+        (60, height),
+        height.min(area.height),
+        OverlayAnchor::Bottom,
+    );
     ratatui::widgets::Clear.render(chord_area, buf);
 
     let lines: Vec<Line> = chords
@@ -1186,15 +1140,15 @@ pub(crate) fn render_help(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(4).min(70);
     let rows = keymap.bindings().len() + crate::ui::keymap::CHORDS.len() + 2;
-    let height = (u16::try_from(rows).unwrap_or(24) + 3).min(area.height.saturating_sub(2));
-    let help_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    };
+    let height = u16::try_from(rows).unwrap_or(u16::MAX).saturating_add(3);
+    let help_area = overlay_box(
+        area,
+        presentation,
+        (70, height),
+        height.min(area.height.saturating_sub(2)),
+        OverlayAnchor::Center,
+    );
 
     ratatui::widgets::Clear.render(help_area, buf);
     let mut lines = vec![Line::from(Span::styled(
