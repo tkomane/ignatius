@@ -232,6 +232,17 @@ Neither PTY run injects a signal during acquisition; deterministic preparation
 tests establish that ordering. Latest-source Linux/MSRV, Windows, panic/error
 process paths and native visuals remain separate gates.
 
+At clean saved checkpoint `21511f19ed25a15d078cc29ec4e1ce35eb75c7ca`, the
+reviewed Gitleaks 8.30.0 image ran with no network and read-only mounts. History
+scan covered all 250 commits/10.77 MB and found no leaks. A separate immutable
+417-file source snapshot covered 4.87 MB and also found no leaks. Its verified
+tree SHA-256 is
+`a1778b16636cb63b89614c11c1bd91b7057e9c037aca12f5883766a13af4ad4e`;
+manifest/source are under `/private/tmp/ignatius-source-21511f1-q24p8etp/`.
+Logs are `/private/tmp/ignatius-gitleaks-21511f1-history-2026-10-25.log` and
+`/private/tmp/ignatius-gitleaks-21511f1-source-2026-10-25.log`. Subsequent density
+work is outside those frozen source and history scopes.
+
 ## PTY profile isolation - 2026-10-25
 
 The Unix terminal harness previously overrode only configuration, leaving real

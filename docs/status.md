@@ -32,6 +32,7 @@ Git state before taking an assignment; the day-long goal remains active.
   lints, API/doc checks and PostgreSQL 18.6 plain/TLS. Its macOS socket case
   remains a semantic skip. Source was the modified integration tree based on
   `abe4aed`. Density T040, the rest of T038 and dragging T035 remain open.
+  The verified keyboard slice is saved in `4a7717b`.
 - W07-059 is saved in `abe4aed`: unique PTY config/data, inherited logging/PG
   routes removed, explicit absent passfile. A real child probe failed first;
   all four focused PTY contracts and the integrated repeat passed.
@@ -47,14 +48,21 @@ Git state before taking an assignment; the day-long goal remains active.
   integrated `4a7717b` modified binary also passed owned-PTY SIGTERM, restoration
   order, canonical/echo modes and exact stty after normal PENDIN recovery input.
   Latest-source Linux/MSRV, panic/error paths and Windows remain open.
+  The repair is saved in `21511f1`.
 
-UI code ownership is released. Its worker is preparing density contracts read-
-only; the W07 worker has released its patch and proof resources. Sixty styled
-synthetic buffers were captured and inspected, with no native visual claim.
-No recursive
-agents, Docker lifecycle overlap or shared reducer/runtime writers. The lead
-owns integration and these documents. Root's PostgreSQL 18.6 fixture pair
-remains available; unrelated COI services and original branches are preserved.
+Active assignments after clean planning commit `8de54a7`: the UI worker owns
+T040 density implementation/config/presentation/widgets and the single runtime
+density assignment, plus its named tests/parity documents. It may not change
+W07 registration or any query/credential behavior. The platform worker owns an
+independent clean `21511f1` clone and task-only Docker resources for a fresh
+pinned-Rust/Linux/MSRV/socket/PTY repeat. Never edit either lane's files or
+tear down its fixture. The lead owns status, compatibility, changelog, feature
+authority and integration. Sixty styled synthetic buffers were captured and
+inspected; they do not establish native visual acceptance.
+
+No recursive agents or shared reducer/runtime writers. Root's PostgreSQL 18.6
+fixture pair remains available; unrelated COI services and original branches
+are preserved. Required different-family review is still pending owner consent.
 
 Detailed sources, environments, exact logs and boundaries are in
 [verification](operations/verification.md). Synthetic buffer images establish
@@ -71,6 +79,12 @@ full hand-use and release acceptance are separate open gates.
   scanned 4.77 MB with no leaks. These cover their recorded source snapshots,
   not future commits. Local logs are `/private/tmp/ignatius-gitleaks-history-2026-10-25.log`
   and `/private/tmp/ignatius-gitleaks-wave2-source-2026-10-25.log`.
+- Fresh clean `21511f1` scans passed with no leaks: all 250 saved commits/
+  10.77 MB and a verified immutable 417-file source snapshot/4.87 MB. Snapshot
+  tree digest is `a1778b16636cb63b89614c11c1bd91b7057e9c037aca12f5883766a13af4ad4e`;
+  its manifest is under `/private/tmp/ignatius-source-21511f1-q24p8etp/`.
+  Logs use `/private/tmp/ignatius-gitleaks-21511f1-*-2026-10-25.log`. Later
+  density changes are outside these frozen scans.
 - Scheduled remote CI run `39226168252`, inspected read-only, failed actual
   rustls advisories and mutable PostgreSQL image drift on 19 October. Native
   OS jobs passed at remote `445ed82`; this is not today's local-candidate CI.
