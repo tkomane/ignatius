@@ -43,8 +43,48 @@ After receipt:
 `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-oarmp52a/receipt.json`.
 Full log: `/private/tmp/ignatius-t058-full-verify-20261025.log`
 (`03c40158ff7af92030466bd04d9ad3591c7b9b0bbbd0cfd502ee054ca0e8b462`).
-Commit, clean-source/history scans, normal publication and hosted acceptance
-are next; native appearance/hand use and release remain open.
+Published clean **`14d18ad`** in [draft PR36](https://github.com/tkomane/ignatius/pull/36),
+stacked on PR35. The unchanged normal pre-push hook repeated all 1,515 cases;
+pinned network-disabled Gitleaks passed all 446 clean-source files and 292
+non-merge revisions among 321 reachable local revisions. CI `40234580931` is
+completed on actual merge `42be23db`, whose tree matches head
+`384e26053d4653a51652b965c9bcad19103b0bd0`. All 13 executable jobs succeeded,
+with one intentional scheduled-fixture skip. Root verified eight platform and
+21 policy artifacts plus complete PG14/18/socket logs. All 18 T058 cases ran on
+Linux/macOS/Windows with Rust 1.97.1; harness/library totals are 1,515/1,207,
+1,515/1,207 and 1,459/1,188. Doctor retains three explicit skips per platform.
+Six permitted duplicate warnings and three conditional Python archive-test
+guards remain qualified; this is not native or release acceptance.
+The clean published local binary also passes the same 100x30 end/Home journey
+with normal quit, alternate-screen exit and unchanged config. A retained early
+repeat typed before the picker had observably closed; the final harness now
+waits for the underlying-owner repaint before typing. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-ni4f6ssl/receipt.json`.
+Only post-publication acceptance notes are now local edits. Native appearance,
+hand use, fresh main-targeted CodeQL, parent integration and release stay open.
+A bounded W10 diagnostic found a material T058 transient-allocation increase.
+With three fresh test-profile samples per revision/size, the 1 MiB line median
+render rose from 264.462 to 902.313 ms and process maximum RSS from 17.453 to
+146.500 MiB; at 16 KiB medians were 6.481/19.611 ms and 11.953/13.062 MiB.
+Root verified all 951 frozen baseline artifacts. One initial sandboxed observer
+failure is retained/excluded; 12 valid children all preserved source/state.
+This is not a process ceiling or release-build 100-action p95 result. Receipt:
+`/private/tmp/ignatius-editor-perf-2kfyw0q6/REPORT.md`.
+Root adopted FR-2530/T059 and the bounded-projection contract before delegating
+an isolated correction. Active branch is now
+`codex/bounded-editor-view-2026-10-25` from accepted PR36; only owned records and
+contracts are local edits. Worker source remains isolated until review. PR36's
+draft body discloses this follow-up. T059 is now locally accepted: final
+sanitizer-gated ASCII projection passed 83 widget/114 layout tests, lints and
+the full 1,520-harness / 1,212-library verifier. Root verified final 58 artifacts,
+original test preservation and every JSON field/cell in 21 frames/51,081 cells;
+independent review accepted the bounded projection and narrow ASCII delta.
+Final identical-harness samples give 16 KiB median 6.198 ms/12.156 MiB RSS and
+1 MiB 138.342 ms/17.063 MiB, preserving source/state and one visible caret.
+The 100x30 owned PTY end/Home/normal-quit/config control also passes. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-jzgapy6r/receipt.json`.
+These are local test-profile observations, not release p95, process ceilings
+or native hand use. Normal commit/scans/push and hosted acceptance are next.
 Read-only US6/US8/T032 readiness
 reviews are reflected in the roadmap; their unresolved policy dependencies
 remain open and mouse capture stays disabled.

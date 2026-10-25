@@ -312,3 +312,14 @@ included. Existing source text, source scalar columns, styles and vertical
 window remain authoritative. Independent review, rendered-cell inspection and
 the same-width owned-PTY repeat precede scoped acceptance; native hand use
 remains separate.
+
+### Bounded editor-view metadata - 2026-10-25
+
+W10's identical-harness diagnostic after T058 acceptance measures a material
+test-profile allocation/latency increase at 16 KiB/1 MiB. T059 projects only
+visible/caret units using the same pure mapper and one display sanitiser, with
+linear source scanning and no persistent cache. Root owns FR-2530, contract,
+review, integration and records; the isolated worker owns only editor view,
+its three consumers and sidecar tests. Preserve the already accepted exact
+styled cells and all source/edit semantics. Diagnostic observations are not
+process ceilings or the release-build 100-action p95 protocol.

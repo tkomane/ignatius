@@ -537,6 +537,23 @@ when it is not.
   PostgreSQL 18.6 plain/TLS ran; macOS socket remains skipped. Source/evidence
   and native/hosted qualifications are in `docs/operations/verification.md`.
 
+- [x] T059 [W10] Correct the measured T058 display-unit allocation increase
+  under FR-2530. Add the failing long-line projection bound, limit retained
+  metadata for caret/render/hit consumers, preserve T058's exact raw cells and
+  original tests, and repeat the identical diagnostic harness. Independent
+  review, focused/full verification and an owned-PTY control precede scoped
+  completion. Keep process ceilings and release p95 acceptance separate.
+
+  **Scoped local evidence - 2026-10-25:** the million-unit/64-cell red precedes
+  bounded projection and the independently reviewed sanitizer-gated ASCII
+  path. Final 83 widget and 114 layout cases, Clippy/formatting and the full
+  1,520-harness / 1,212-library local verifier pass. Root independently compares
+  all 21 retained frames/51,081 actual cells exactly and preserves prior tests.
+  An owned 100x30 PTY end/Home/quit/config control passes. The same hashed
+  six-child test-profile diagnostic gives 1 MiB median 138.342 ms/17.063 MiB
+  RSS versus 902.313 ms/146.500 MiB before. Small-sample process observations
+  are not a release p95 or memory ceiling. Hosted acceptance remains separate.
+
 - [ ] T046 Amend the narrative design documents in the same change as the
   final behaviour: `docs/design/theme-tokens.md` (painted surfaces,
   elevation, colour depth, the superseded Feature 007 override note),

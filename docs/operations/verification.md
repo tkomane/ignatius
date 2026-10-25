@@ -54,6 +54,109 @@ The owner's external-review skip remains in force; no different-family provider
 review is claimed. Hosted acceptance, native terminal/font/hand use, fresh
 main-targeted CodeQL, parent integration and release remain separate gates.
 
+Published clean `14d18ad97f1aafd4a4d953ea5e35f3b2f644b1a0` in draft PR36.
+The normal unmodified pre-push hook repeated all 1,515/1,207 cases and six gates,
+with the socket skip retained; log SHA-256
+`2715c9214280f72d6d9ac567a1f7fd7caefeee926f2ba31c2d6e909e89d9149a`.
+Pinned offline Gitleaks passed the exact 446-file clean Git archive, whose every
+blob was independently checked against Git; source digest is
+`3ac4e9d43c6aa65bc612d8e0a6868443bb97231eff72be28b4a9e380fa17bd71`.
+Its all-ref history scan reports 292 non-merge commits among 321 reachable
+local revisions; do not confuse those with head-only ancestry counts. Receipt:
+`/private/tmp/ignatius-t058-14d18ad-scan-source-20261025.json`.
+
+The clean local publication binary (SHA-256
+`a58af2e58b011334333ea2b932f59244d8121b407e82d41b2472d493561b7976`)
+passes a separate 100x30 PTY repeat. One retained early-owner harness race left
+typing in the picker; the corrected harness waits for actual owner-change
+repaint. It then shows the end sentinel and Home prefix, quits zero, restores
+the alternate screen and preserves config without profile selection or SQL
+submission. This supplements rather than relabels the identical-script
+before/modified-source pair above. Clean receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-ni4f6ssl/receipt.json`.
+
+Hosted run `40234580931` uses actual merge `42be23db`, with the same tree
+`384e26053d4653a51652b965c9bcad19103b0bd0` as the head. Root inspected complete
+PG14/18 and socket logs: 236 selected invocations per major plus one actual
+socket contract, 473 total including pure/local cases. Readiness and the
+plain/verified-TLS runtime-major/transport guard are positive. These are not
+473 live queries, and runtime patch versions were not printed.
+
+The run completed successfully with **13 successful jobs and one intentional
+schedule-only fixture skip**. Root verified all eight platform artifacts and
+21 policy artifacts. Every platform actually executed all 18 T058 cases with
+Rust 1.97.1. Full harness/library totals are Linux 1,515/1,207, macOS
+1,515/1,207 and Windows 1,459/1,188; compile, docs and startup/refusal smoke also
+passed. Doctor retains three explicit skips each. MSRV Rust 1.90 compilation
+passed; six allowed duplicate-version warnings remain. The release scope
+reports 93 cases but three conditional Python archive-helper branches are not
+independently runtime-proved; synthetic upload scope is not a real release.
+Platform manifest:
+`d0774396161695bfba219f4923217a8f22fc4810f08ddaa4b1d04d8cb5841c3b`
+at `/private/tmp/ignatius-pr36-platform-audit-int5fsm7/`.
+Policy manifest:
+`a9473fa7aa8294d1ad6d6c7a8ca983311ca52bd2d48c0a860fbce56380129b3d`
+at `/private/tmp/ignatius-pr36-policy-audit-hx59gy/`.
+CodeQL's main-base filter is unchanged; no fresh feature-base analysis is
+claimed. Native hand use, parent integration and release still require their
+own acceptance.
+
+### W10 long-line renderer diagnostic - 2026-10-25
+
+A single identical test-only harness, exact d92/14d source archives and 12 fresh
+children compare three samples per revision/size. At 16 KiB the parent/candidate
+median renderer times are 6.481/19.611 ms and process maximum RSS 11.953/13.062
+MiB. At 1 MiB they are 264.462/902.313 ms and 17.453/146.500 MiB. All children
+preserve source, scalar cursor, revision, modified and undo state; only the new
+view paints a visible caret. This is a material local test-profile regression,
+not release-build p95 acceptance or a whole-process ceiling.
+
+Root verified all 951 baseline artifacts. Compiler RSS is excluded; one
+sandbox-denied resource observer sample is retained/excluded, then normal
+reviewed escalation admits the valid observations. Exact host/tool/profile,
+raw timing/RSS and uncontrolled-background-load limits are in
+`/private/tmp/ignatius-editor-perf-2kfyw0q6/REPORT.md`, manifest
+`aaa9011c90d1a7f63127411da7d573c3a762fe41369d7dcf132f740aa31b512f`.
+FR-2530/T059's bounded projection is now locally accepted. Final 83 widget and
+114 layout cases, formatting and warnings-denied Clippy pass. Root verified
+all 80/58 artifacts in the two correction freezes, accepted independent source
+reviews, and independently compared every JSON field and all 51,081 cells in
+21 retained frames to the accepted T058 captures. Original widget tests are
+byte-identical and original view tests remain an exact prefix. Cell comparison:
+`/private/tmp/ignatius-t059-root-cell-comparison-20261025.json`.
+
+The final small ASCII path runs only after equality with the full existing
+sanitiser, then `is_ascii`; controls and Unicode retain their canonical paths.
+Caret discovery keeps scalar facts, and projection filters before retaining
+units. The metadata bound does not cover total source/sanitiser allocations or
+make an RSS-ceiling claim. Final freeze:
+`/private/tmp/ignatius-editor-projection-cjmu5kiy/freeze-02/`, manifest
+`6622e7cde8d4b6f07028b68b148344bd7df5567e1a948955c6ca0a81d193c578`.
+Independent microdelta review:
+`/private/tmp/ignatius-t059-freeze02-independent-review-t5zkt4zn/REVIEW.md`.
+
+With the exact same `4f3914b5785cf315a840964d52a7b3c3c04bca62bdfa47c6eed512ac0f37a322`
+harness, six fresh final processes preserve state and one visible caret.
+At 16 KiB, median renderer time/RSS is 6.198 ms/12.156 MiB; at 1 MiB,
+138.342 ms/17.063 MiB. Three-sample ranges are retained. The intermediate
+bounded-only 618.566 ms/16.031 MiB observations and non-identical formatted
+harness trials remain distinct; formatted trials are excluded. One earlier
+private-overlay failure log was overwritten; its tool tail and later complete
+failure are retained, not recreated or accepted. No diagnostic harness ships.
+These are unoptimized test-profile observations with uncontrolled host load,
+not release p95/100-action, process ceiling or native-terminal acceptance.
+
+The full integrated local verifier passes **1,520 harness cases, 1,212 library
+cases and 25 summaries**, zero failed/ignored, all six executed gates. Existing
+PostgreSQL 18.6 plain/TLS ran; macOS socket remains skipped. Log:
+`/private/tmp/ignatius-t059-full-verify-20261025.log`, SHA-256
+`9545a73faec3ab23d1560e4f7a65ed1d41c8038d7a1ee2997e0ad95d89f61107`.
+The actual 100x30 owned macOS PTY end/Home/quit/config control passes at the
+modified parent build with exact integrated final source. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-jzgapy6r/receipt.json`.
+Commit/scans/normal pre-push and hosted acceptance remain next; whole resource,
+native and release-performance acceptance remain open.
+
 ## Manual theme integration - 2026-10-25
 
 The manual FR-2513/2515/2516 slice integrates the immutable pure-theme and strict

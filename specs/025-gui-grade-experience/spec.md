@@ -593,6 +593,12 @@ output never contain banner bytes.
   display sanitisation. The dated editor-view section of
   `contracts/presentation.md` pins clipping and Unicode behaviour. This is
   the W09 correction for observed clipping, not mouse-dispatch acceptance.
+- **FR-2530**: Editor horizontal viewing MUST retain display-unit metadata
+  proportional to the visible text capacity plus the caret unit, rather than
+  one retained record for every scalar of a long off-screen line. Preserve
+  FR-2529's rendered cells, source identity and sanitisation. The dated
+  presentation contract defines the W10 / T059 resource correction; measured
+  diagnostic peaks do not establish a process-memory ceiling or release p95.
 
 ### Security and Compatibility Requirements
 

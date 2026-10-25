@@ -199,6 +199,35 @@ and hit alignment, both densities and colour/glyph degradation. Inspect actual
 rendered cells and repeat the owned 100x30 PTY journey. These proofs establish
 rendering and captured input, not native emulator/font appearance or whole W09.
 
+### Bounded display-unit projection - 2026-10-25
+
+FR-2530 / T059 follows a source-bound W10 diagnostic: the initial T058 view
+constructs a complete per-unit vector for caret discovery and another for
+rendering, although only a small window is visible; this does not assert
+simultaneous lifetimes. The 16 KiB/1 MiB three-sample local test-profile comparison
+found a material increase; it is not release-build p95 acceptance.
+
+Production caret discovery, rendering and hit mapping must project only the
+units needed by their requested cell window plus the caret. Retained unit
+metadata is bounded by positive visible-cell capacity plus one caret unit;
+zero-width units need not be retained unless they own that caret. Computing
+whole-line width/source columns may still scan the source line linearly. Keep
+ordinary source clusters borrowed, avoid rescanning whole prefixes per unit,
+and reuse the existing display sanitiser. A whole-line sanitisation fast path
+may avoid per-scalar allocation for unchanged safe text; do not duplicate the
+sanitiser's control/bidi rules or bypass sanitisation on a guessed character set.
+After the full sanitiser confirms unchanged text, an ASCII run may use one
+width-one unit per byte; control validation still happens before that path.
+
+Do not change T058 geometry, grapheme/escape boundaries, selected blank and
+focus rules, byte/scalar provenance, syntax/error styles, source text, undo or
+effects. Preserve every original case and compare the retained styled buffers
+exactly. Add a failing allocation-shape regression for a very long off-screen
+line, then repeat the same hashed diagnostic harness/profile/workloads with
+fresh processes and measured renderer time/RSS. Report observed values and
+small-sample limits; no fabricated absolute ceiling, 100-action p95 result or
+native terminal claim follows. Root owns independent review/full verification.
+
 ## Doctor reporting
 
 `ignatius doctor` reports, in this order, beside the existing detections:

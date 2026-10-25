@@ -1,4 +1,4 @@
-//! One display-cell view shared by editor painting, completion and hit testing.
+//! Cell-bounded projection shared by editor painting, completion and hit testing.
 
 use crate::app::editor::Editor;
 use crate::query::value::{display_width, sanitize_for_display};
@@ -37,6 +37,92 @@ impl Unit<'_> {
     }
 }
 
+/// Visits source units without retaining off-screen metadata.
+fn scan<'a>(source: &'a str, mut emit: impl FnMut(Unit<'a>)) -> (usize, usize) {
+    let safe = sanitize_for_display(source);
+    let mut cell = 0;
+    if safe == source {
+        // The existing sanitizer proved that this ASCII contains no controls.
+        // Each remaining byte is one renderer grapheme and one display cell.
+        if source.is_ascii() {
+            for byte in 0..source.len() {
+                emit(Unit {
+                    text: Cow::Borrowed(&source[byte..byte + 1]),
+                    source: byte..byte + 1,
+                    column: byte + 1,
+                    cell: byte,
+                    width: 1,
+                });
+            }
+            return (source.len(), source.len().saturating_add(1));
+        }
+        let end_column = graphemes(source, 0, 1, &mut cell, &mut emit);
+        return (cell, end_column);
+    }
+    let mut normal_start = 0;
+    let mut normal_column = 1;
+    let mut column = 1;
+    for (byte, ch) in source.char_indices() {
+        let original = ch.to_string();
+        let safe = sanitize_for_display(&original);
+        if safe != original {
+            graphemes(
+                &source[normal_start..byte],
+                normal_start,
+                normal_column,
+                &mut cell,
+                &mut emit,
+            );
+            let width = display_width(&safe);
+            emit(Unit {
+                text: Cow::Owned(safe),
+                source: byte..byte + ch.len_utf8(),
+                column,
+                cell,
+                width,
+            });
+            cell = cell.saturating_add(width);
+            normal_start = byte + ch.len_utf8();
+            normal_column = column + 1;
+        }
+        column += 1;
+    }
+    graphemes(
+        &source[normal_start..],
+        normal_start,
+        normal_column,
+        &mut cell,
+        &mut emit,
+    );
+    (cell, column)
+}
+
+fn graphemes<'a>(
+    text: &'a str,
+    source_start: usize,
+    mut column: usize,
+    cell: &mut usize,
+    emit: &mut impl FnMut(Unit<'a>),
+) -> usize {
+    let span = Span::raw(text);
+    let mut byte = 0;
+    for grapheme in span.styled_graphemes(Style::default()) {
+        let end = byte + grapheme.symbol.len();
+        let width = display_width(grapheme.symbol);
+        emit(Unit {
+            text: Cow::Borrowed(&text[byte..end]),
+            source: source_start + byte..source_start + end,
+            column,
+            cell: *cell,
+            width,
+        });
+        *cell = cell.saturating_add(width);
+        column += grapheme.symbol.chars().count();
+        byte = end;
+    }
+    column
+}
+
 #[derive(Debug)]
 pub(crate) struct LineView<'a> {
     pub units: Vec<Unit<'a>>,
@@ -45,61 +131,36 @@ pub(crate) struct LineView<'a> {
 }
 
 impl<'a> LineView<'a> {
-    pub fn new(source: &'a str) -> Self {
-        let mut result = Self {
-            units: Vec::new(),
-            width: 0,
-            end_column: 1,
-        };
-        let mut normal_start = 0;
-        let mut normal_column = 1;
-        let mut column = 1;
-        for (byte, ch) in source.char_indices() {
-            let original = ch.to_string();
-            let safe = sanitize_for_display(&original);
-            if safe != original {
-                result.push_graphemes(&source[normal_start..byte], normal_start, normal_column);
-                result.push(Cow::Owned(safe), byte..byte + ch.len_utf8(), column);
-                normal_start = byte + ch.len_utf8();
-                normal_column = column + 1;
+    /// Retains only intersecting positive-width units and at most one caret unit.
+    pub fn project(source: &'a str, offset: usize, capacity: usize, cursor: Option<usize>) -> Self {
+        let mut units = Vec::new();
+        let right = offset.saturating_add(capacity);
+        let (width, end_column) = scan(source, |unit| {
+            let visible = capacity > 0
+                && unit.width > 0
+                && unit.cell < right
+                && offset < unit.cell.saturating_add(unit.width);
+            if visible || cursor.is_some_and(|cursor| unit.source.contains(&cursor)) {
+                units.push(unit);
             }
-            column += 1;
-        }
-        result.push_graphemes(&source[normal_start..], normal_start, normal_column);
-        result.end_column = column;
-        result
-    }
-
-    fn push_graphemes(&mut self, text: &'a str, byte: usize, column: usize) {
-        let span = Span::raw(text);
-        let source_start = byte;
-        let mut byte = byte;
-        let mut column = column;
-        for grapheme in span.styled_graphemes(Style::default()) {
-            let end = byte + grapheme.symbol.len();
-            self.push(
-                Cow::Borrowed(&text[byte - source_start..end - source_start]),
-                byte..end,
-                column,
-            );
-            column += grapheme.symbol.chars().count();
-            byte = end;
-        }
-    }
-
-    fn push(&mut self, text: Cow<'a, str>, source: Range<usize>, column: usize) {
-        let width = display_width(&text);
-        self.units.push(Unit {
-            text,
-            source,
-            column,
-            cell: self.width,
-            width,
         });
-        self.width = self.width.saturating_add(width);
+        Self {
+            units,
+            width,
+            end_column,
+        }
+    }
+
+    /// Full small-fixture construction is test-only; production projects a window.
+    #[cfg(test)]
+    pub fn new(source: &'a str) -> Self {
+        Self::project(source, 0, usize::MAX, Some(0))
     }
 
     pub fn column_at(&self, cell: usize) -> usize {
+        if cell >= self.width {
+            return self.end_column;
+        }
         self.units
             .iter()
             .find(|unit| unit.cell <= cell && cell < unit.cell.saturating_add(unit.width))
@@ -117,10 +178,7 @@ pub(crate) struct Viewport {
 }
 
 impl Viewport {
-    pub fn new(line: &LineView<'_>, cursor: usize, capacity: usize) -> Self {
-        let unit = line.units.iter().find(|unit| unit.source.contains(&cursor));
-        let cell = unit.map_or(line.width, |unit| unit.cell);
-        let width = unit.map_or(0, |unit| unit.width);
+    fn from_parts(cell: usize, width: usize, column: usize, capacity: usize) -> Self {
         let blank_caret = width == 0 || width > capacity;
         let shown = if blank_caret { 1 } else { width };
         let offset = cell.saturating_add(shown).saturating_sub(capacity);
@@ -128,8 +186,31 @@ impl Viewport {
             offset,
             caret_cell: cell.saturating_sub(offset),
             blank_caret,
-            caret_column: unit.map_or(line.end_column, |unit| unit.column),
+            caret_column: column,
         }
+    }
+
+    /// Finds the caret in one scan, retaining only three scalar facts.
+    pub fn for_source(source: &str, cursor: usize, capacity: usize) -> Self {
+        let mut caret = None;
+        let (width, end_column) = scan(source, |unit| {
+            if unit.source.contains(&cursor) {
+                caret = Some((unit.cell, unit.width, unit.column));
+            }
+        });
+        let (cell, width, column) = caret.unwrap_or((width, 0, end_column));
+        Self::from_parts(cell, width, column, capacity)
+    }
+
+    #[cfg(test)]
+    pub fn new(line: &LineView<'_>, cursor: usize, capacity: usize) -> Self {
+        let unit = line.units.iter().find(|unit| unit.source.contains(&cursor));
+        Self::from_parts(
+            unit.map_or(line.width, |unit| unit.cell),
+            unit.map_or(0, |unit| unit.width),
+            unit.map_or(line.end_column, |unit| unit.column),
+            capacity,
+        )
     }
 }
 
@@ -145,7 +226,7 @@ pub(crate) fn caret_line(editor: &Editor) -> (&str, usize) {
 
 pub(crate) fn viewport(editor: &Editor, capacity: usize) -> Viewport {
     let (source, cursor) = caret_line(editor);
-    Viewport::new(&LineView::new(source), cursor, capacity)
+    Viewport::for_source(source, cursor, capacity)
 }
 
 #[cfg(test)]

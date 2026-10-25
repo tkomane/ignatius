@@ -596,6 +596,13 @@ or completion popup. This does not enable mouse dispatch. Feature025 FR-2529 /
 T058 records scoped implementation and evidence; native emulator/font and
 whole daily-use acceptance remain separate.
 
+T059 bounds retained display-unit metadata to the visible window plus a caret,
+while line width/scalar facts still scan the source. Sanitisation precedes the
+ASCII fast path; Unicode and escaped controls retain the same mapping. Exact
+styled-buffer parity and local large-line diagnostics are recorded in
+[verification](../operations/verification.md#w10-long-line-renderer-diagnostic---2026-10-25).
+Observed process RSS and renderer times are not memory ceilings or release p95.
+
 ## Manual themes
 
 The manual-theme slice supports `dark`, `light`, `high-contrast` and `custom`
