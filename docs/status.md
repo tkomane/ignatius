@@ -13,9 +13,21 @@ Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoints:
 (reachable help with local input ownership). The combined local verifier passed
 1,315 harness cases/1,027 library; clean `d8a3ac3` also passed fresh complete
 history/source secret scans. W10-011 real-writer pacing is now measured and
-reviewed; W10-012 bounded-notice implementation is active in isolation. All work
-remains local. Read Git state before taking an assignment; the day-long goal
+reviewed; W10-012's frozen implementation and proposed support/security/keymap/
+release prose have been applied to the canonical working tree. Its 129 artefact
+hashes and all 43 moved original test names were checked. Focused final evidence
+is 750 library plus 32 plain/verified-TLS invocations, no skips. Native review
+found doctor-guidance wording and pending-install replacement/old-profile loss;
+one bounded follow-up is in progress. Combined canonical verification and styled
+render review have not yet run for this source. Read Git state before taking
+an assignment; the day-long goal
 remains active.
+
+Owner steering on 25 October: skip external OpenCode review,
+continue with native independent review, and follow the normal DevOps workflow
+rather than keeping finished work local. The lead will push the task feature
+branch, open a draft PR and inspect hosted CI after integrated local checks.
+No release/production action follows from that workflow.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
   migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
@@ -146,16 +158,18 @@ or product memory-limit claim; the final ResultSet layout must be measured
 again. Evidence: `/private/tmp/ignatius-w10-013-budget-OJB7A3/`.
 Root adopted W10-012's complete notice policy under foundation REL-005, with fixed cumulative
 allowances, precision-safe pending counts and explicit acknowledgement. Privacy
-implements in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
+implemented in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
 snapshots. Admission/lifecycle reds and focused greens are retained. Independent
 review found probe/describe phase mixing and a dropped pending-shortening edge;
 contract `2918069` pins their repair plus nonmutating active-count snapshots at
 actual source retirement/quit. Core03 passed its focused repeat and independent
 peer re-review with no remaining core blocker; adapter/UI work now includes
 explicit captured source retirement and bounded main-loop session installation.
-Adapter/UI/live work and final root integration/
-full/rendered verification remain outstanding. Root owns shared records/policy;
-canonical product source is still `d8a3ac3`.
+The frozen adapter/UI/live handoff is now applied in the canonical working
+tree. Root inspected 128 styled buffers and is incorporating the bounded final
+runtime/doctor review repair plus live CI wiring. Canonical full verification
+is still pending. Root owns shared records/policy; the last committed
+application checkpoint is `d8a3ac3`, with notice changes currently uncommitted.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
