@@ -81,7 +81,7 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8
 - [x] T055 Automated terminal-restoration test in CI (pty on Unix)
 - [ ] T055a The same on Windows, which needs ConPTY
-- [ ] W07-061 Keep the Unix PTY deadline attached to its owned `Child`, with
+- [x] W07-061 Keep the Unix PTY deadline attached to its owned `Child`, with
   polling, termination and reaping before return. Remove the detached delayed
   numeric-PID kill, which could outlive a completed test and target a reused
   PID. Keep output capture bounded by child completion without pipe backpressure
@@ -173,3 +173,16 @@ pre-registration ordering is proven by the deterministic pre-poll child and
 failure callback; the PTY repeat proves steady-state restoration. Native
 Windows, panic/error process paths and a latest-source Linux/MSRV repeat remain
 separate open boundaries.
+
+W07-061 evidence on 2026-10-25: all six Unix terminal harness checks passed
+on macOS arm64 with Homebrew Rust 1.99.1 at the modified integration tree.
+The three actual PTY normal-quit/drawing/order checks and profile-isolation
+probe remain intact. An owned sleeping child was terminated and reaped at its
+50 ms deadline; a normal child completed with exactly 130,000 stdout bytes and
+the expected stderr, above ordinary pipe capacity. The parent captures output
+in private temporary files, polls its owned child and joins its input writer;
+no detached delayed numeric-PID signal survives a completed test. Native peer
+review found no blocker for the fixed test commands. Log:
+`/private/tmp/ignatius-w07-owned-deadline-2026-10-25.log`. Output is bounded by
+the deadline, not a hard byte quota. This is harness/normal-quit proof, not
+panic/error process, Windows, native visual or arbitrary process-tree proof.

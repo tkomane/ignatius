@@ -55,6 +55,13 @@ Git state before taking an assignment; the day-long goal remains active.
   confirmed clean source and exactly pinned Rust 1.97.1. Evidence is under
   `/private/tmp/ignatius-linux-21511-20261025-FWM0SW/`. Density remains outside
   that frozen source.
+- W07-061 removes the detached delayed numeric-PID kill from the PTY harness.
+  All six focused checks passed: the three existing actual macOS PTY checks,
+  profile isolation, an owned hung-child deadline/reap and normal completion
+  with 130,000 output bytes. Native peer review found no blocker. Private file
+  captures avoid pipe backpressure; no delayed watchdog survives completion.
+  Log: `/private/tmp/ignatius-w07-owned-deadline-2026-10-25.log`. The integrated
+  full repeat follows density; Linux/abnormal-exit/Windows proof is separate.
 
 Active assignments after clean planning commit `8de54a7`: the UI worker owns
 T040 density implementation/config/presentation/widgets and the single runtime

@@ -259,6 +259,24 @@ Safe logs and source/tool/image metadata are retained under
 frozen Linux proof through the pane and startup changes; subsequent density,
 native Windows, hand use and hosted acceptance remain separate.
 
+## Owned PTY test deadline - 2026-10-25
+
+W07-061 removes the detached 25-second numeric-PID kill thread, which could
+outlive normal child completion and signal a reused PID. The harness now polls
+the still-owned `Child`, terminates/reaps it at the deadline, and joins its
+bounded one-byte input writer. Private temporary regular files capture stdout
+and stderr without pipe backpressure or detached reader threads. Capture is
+deadline-bounded, not subject to a hard byte quota; this is not a general
+process-tree supervisor.
+
+All six checks passed on macOS arm64/Homebrew Rust 1.99.1 using the modified
+integration tree: the existing three actual PTY checks, the profile-isolation
+child probe, an owned hung-child deadline/reap, and normal completion with
+130,000 stdout bytes plus exact stderr. Native peer review found no blocker.
+Log: `/private/tmp/ignatius-w07-owned-deadline-2026-10-25.log`. This changes the
+test harness only. Linux repetition, panic/error process paths, Windows and
+native visual acceptance are separate evidence.
+
 ## PTY profile isolation - 2026-10-25
 
 The Unix terminal harness previously overrode only configuration, leaving real

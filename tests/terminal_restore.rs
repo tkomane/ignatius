@@ -11,9 +11,9 @@
 #![allow(clippy::print_stderr)]
 #![cfg(unix)]
 
-use std::io::Write;
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 /// A target that is refused immediately, so the client draws and then sits.
 const UNREACHABLE: &str = "postgres://someone@127.0.0.1:1/nothing?connect_timeout=2";
@@ -145,6 +145,80 @@ fi
     assert!(states.iter().all(|state| state.path().is_dir()));
 }
 
+/// Waits only while this still-unreaped child is owned by the test.
+///
+/// There is no detached watchdog holding a numeric PID after normal completion.
+/// At the deadline the child is terminated and reaped before this returns.
+fn wait_for_owned_child(child: &mut Child, timeout: Duration) -> (ExitStatus, bool) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().expect("poll owned terminal child") {
+            return (status, false);
+        }
+        if Instant::now() >= deadline {
+            // An exit racing this kill is harmless: the child remains unreaped,
+            // so its PID cannot have been assigned to an unrelated process.
+            let _ = child.kill();
+            return (child.wait().expect("reap timed-out terminal child"), true);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn captured_bytes(file: &mut std::fs::File) -> Vec<u8> {
+    file.seek(SeekFrom::Start(0))
+        .expect("rewind private capture");
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).expect("read private capture");
+    bytes
+}
+
+#[test]
+fn the_owned_deadline_reaps_a_hung_child_without_a_detached_pid_watchdog() {
+    let mut child = Command::new("sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn owned sleeping probe");
+    let (status, timed_out) = wait_for_owned_child(&mut child, Duration::from_millis(50));
+    assert!(
+        timed_out,
+        "the owned sleeping child must reach the deadline"
+    );
+    assert!(!status.success());
+    assert_eq!(
+        child.try_wait().expect("child has already been reaped"),
+        Some(status)
+    );
+}
+
+#[test]
+fn a_completed_child_and_large_capture_finish_without_pipe_backpressure() {
+    let mut stdout = tempfile::tempfile().expect("private stdout capture");
+    let mut stderr = tempfile::tempfile().expect("private stderr capture");
+    let mut child = Command::new("sh")
+        .args([
+            "-c",
+            "i=0; while [ \"$i\" -lt 10000 ]; do printf 'owned-output-'; i=$((i + 1)); done; printf 'owned-stderr' >&2",
+        ])
+        .stdin(Stdio::null())
+        .stdout(stdout.try_clone().expect("child stdout capture"))
+        .stderr(stderr.try_clone().expect("child stderr capture"))
+        .spawn()
+        .expect("spawn owned output probe");
+    let (status, timed_out) = wait_for_owned_child(&mut child, Duration::from_secs(5));
+    assert!(!timed_out, "large output must not block child completion");
+    assert!(status.success());
+    assert_eq!(captured_bytes(&mut stdout), b"owned-output-".repeat(10000));
+    assert_eq!(captured_bytes(&mut stderr), b"owned-stderr");
+    assert_eq!(
+        child.try_wait().expect("completed owned child"),
+        Some(status)
+    );
+}
+
 /// Runs the client under a pty and returns everything it wrote.
 fn run_in_pty(extra_args: &[&str], input: &'static [u8]) -> Option<String> {
     if Command::new("script").arg("--version").output().is_err()
@@ -173,10 +247,14 @@ fn run_in_pty(extra_args: &[&str], input: &'static [u8]) -> Option<String> {
     }
 
     let _state = isolate_terminal_command(&mut command);
+    // Private regular files cannot fill a pipe while the parent polls exit.
+    // They also avoid output-reader threads that could outlive a failed test.
+    let mut stdout = tempfile::tempfile().expect("private PTY stdout capture");
+    let mut stderr = tempfile::tempfile().expect("private PTY stderr capture");
     let mut child = command
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(stdout.try_clone().expect("PTY stdout capture"))
+        .stderr(stderr.try_clone().expect("PTY stderr capture"))
         .spawn()
         .expect("spawn under a pty");
 
@@ -189,26 +267,22 @@ fn run_in_pty(extra_args: &[&str], input: &'static [u8]) -> Option<String> {
         std::thread::sleep(Duration::from_secs(1));
     });
 
-    // A guard, so a client that ignores the quit key fails the test rather than
-    // hanging the suite.
-    let id = child.id();
-    let guard = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(25));
-        let _ = Command::new("kill")
-            .args(["-KILL", &id.to_string()])
-            .status();
-    });
-
-    let output = child.wait_with_output().expect("wait");
-    let _ = writer.join();
-    drop(guard);
+    let (status, timed_out) = wait_for_owned_child(&mut child, Duration::from_secs(25));
+    writer.join().expect("join bounded PTY input writer");
+    let stdout = captured_bytes(&mut stdout);
+    let stderr = captured_bytes(&mut stderr);
 
     assert!(
-        output.status.success(),
-        "the client did not exit cleanly: {:?}",
-        String::from_utf8_lossy(&output.stderr)
+        !timed_out,
+        "the owned PTY child exceeded its deadline: {:?}",
+        String::from_utf8_lossy(&stderr)
     );
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    assert!(
+        status.success(),
+        "the client did not exit cleanly: {:?}",
+        String::from_utf8_lossy(&stderr)
+    );
+    Some(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 #[test]
