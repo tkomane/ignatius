@@ -581,6 +581,54 @@ position; a real command choice reveals its target, including clearing covered
 reading panels before object insertion. `Space` is named visibly. Feature 015
 T042 records local implementation/rendered checks; native hand use is separate.
 
+## Long SQL lines
+
+The editor follows the caret horizontally while its line-number/statement
+gutter stays fixed. Completion anchoring and editor hit regions use the same
+sanitised display-cell view, including wide and combining graphemes and complete
+escaped-control representations. Source SQL, scalar cursor columns and undo
+state are unchanged; there is no soft wrap or persistent scroll setting.
+
+When text capacity is positive, an oversized or zero-width caret unit has a
+selected blank fallback. Partial wide/control units at a viewport edge become
+position-preserving blanks. No text capacity means no caret-visibility claim
+or completion popup. This does not enable mouse dispatch. Feature025 FR-2529 /
+T058 records scoped implementation and evidence; native emulator/font and
+whole daily-use acceptance remain separate.
+
+T059 bounds retained display-unit metadata to the visible window plus a caret,
+while line width/scalar facts still scan the source. Sanitisation precedes the
+ASCII fast path; Unicode and escaped controls retain the same mapping. Exact
+styled-buffer parity and local large-line diagnostics are recorded in
+[verification](../operations/verification.md#w10-long-line-renderer-diagnostic---2026-10-25).
+Observed process RSS and renderer times are not memory ceilings or release p95.
+
+## Manual themes
+
+The manual-theme slice supports `dark`, `light`, `high-contrast` and `custom`
+in `[ui] theme`. A single optional `[theme]` table inherits a built-in palette
+and overrides exact named RGB tokens. The complete resolved palette is checked
+even when inactive or colour is disabled. Invalid definitions refuse with
+configuration exit 3 before terminal acquisition or configuration writes.
+Existing ordinary configuration validation and migration behavior are retained.
+See [theme tokens](../design/theme-tokens.md) for grammar and contrast scope.
+
+The Session / Switch theme palette entry cycles the validated catalog without
+writing files or changing connection/query state. Direct bindings preserve input
+owners; palette cancellation retains covered reading positions. The choice
+survives resize and profile changes for the session. Rendered-buffer evidence
+includes five palettes and colour-off/depth/glyph/density combinations; native
+font, DIM, emulator appearance and hand use remain separate. Automatic background
+detection (`auto`, T032) remains unimplemented and is explicitly refused.
+The integrated manual source passed full local verification on 25 October 2026:
+1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
+The local macOS socket case is skipped. Published `d92c416` in draft PR35 passed
+hosted Linux/macOS/Windows, pinned/MSRV and PG14/18 plain/TLS plus a real Linux
+socket. Fresh main-targeted CodeQL and native hand use remain pending.
+T057 corrects the existing ignored `[ui] color` startup/doctor route. The final
+gate includes that correction; actual owned macOS PTY startup/quit probes show
+configured never emitting no painted SGRs, with explicit always/NO_COLOR controls.
+
 ## Terminals
 
 | Terminal | Status |
@@ -618,9 +666,16 @@ not upgrade full Windows restoration or release acceptance; see the
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | Dated local CLI, PostgreSQL and owned-PTY evidence; latest-source native visual/full hand-use acceptance remains open. Historical hosted results cover their recorded source only. |
-| Windows, GitHub `windows-latest` runner | At `65cf237`, workspace build/tests, three native ConPTY controls and the separate diagnostic completed. The retained sensor does not track alternate-VT visibility. Overall Windows CI still failed the original Guard cursor check on image `win25-vs2026`/`20261021.278.1`; the later startup/refusal smoke step did not run. Full restoration and hand use remain open. |
-| Linux, GitHub `ubuntu-latest` runner | At `65cf237`, the hosted platform gate and PG14/18 plain/verified-TLS/socket jobs passed. Accepted `54056c2` separately covers PG14-18. Full-screen native hand use and release installation remain open. |
+| macOS on Apple silicon | At `ffb86a1`, local full verification and styled Buffer inspection passed; hosted macOS 26 arm64 tests/startup passed with Rust 1.97.1, including all three T055 regressions. Native visual/full hand-use acceptance remains open. |
+| Windows, GitHub `windows-latest` runner | At `ffb86a1`, Windows Server 2025 build/tests/startup/refusal passed, including all three T055 Buffer regressions. Windows 11/Windows Terminal hand use and full ConPTY restoration remain open; separate PR33's cursor-sensor diagnostic does not close them. |
+| Linux, GitHub `ubuntu-latest` runner | At `ffb86a1`, hosted build/tests/startup, PG14/18 plain/verified-TLS and the real Unix-socket contract passed. Prior `54056c2` separately covers all five PostgreSQL majors. Full-screen hand use and release installation remain open. |
+
+Historical W07 source `65cf237` separately completed three native ConPTY controls
+and cursor calibration on image `win25-vs2026`/`20261021.278.1`. Its retained
+sensor did not track alternate-VT visibility, so its original Guard cursor
+assertion failed and its later startup smoke step did not run. The unchanged
+assertion remains in the explicit-dispatch ConPTY diagnostic workflow; product
+CI passing does not close native restoration acceptance.
 | Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
 

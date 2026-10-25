@@ -8,6 +8,28 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: long SQL lines retain only visible/caret display metadata, reducing
+  transient memory and render work while preserving the same SQL, gutter,
+  selection and completion geometry.
+- Fixed: long SQL lines keep the editor caret in view, with a fixed gutter
+  and matching completion/hit geometry for wide, combining and escaped-control
+  text. Horizontal viewing preserves source SQL, scalar columns and undo state.
+- New: manual custom themes inherit a built-in palette and validate every
+  resolved colour before use, including inactive definitions. The command
+  palette's Switch theme entry changes appearance for the current session,
+  preserving active SQL, query progress and input owners. Automatic background
+  detection remains pending.
+- Fixed: dark/light NULL and SQL comment colours meet the resolved 4.5:1 text
+  threshold on overlay surfaces as well as the frame, pane and striped rows.
+- Fixed: selected command-palette groups and details use the selection ink
+  instead of retaining pale text on a pale fill. Semantic emphasis and
+  colour-off selection remain available.
+- Fixed: full-screen startup and doctor honor `[ui] color`, with explicit
+  `--color` taking precedence. Plain, NO_COLOR and TERM=dumb keep colour off;
+  doctor distinguishes automatic policy from an explicit override.
+- Fixed: selected fields in expanded Results keep readable text on the selection
+  fill, including headers and NULL markers. Semantic emphasis and colour-off
+  selection are preserved.
 - Improved: buffered executions share a 32 MiB logical occupied-result-data
   allowance across result sets, alongside the existing row and per-cell caps.
   Complete retained prefixes and unavailable descriptions are reported without

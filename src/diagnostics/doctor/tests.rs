@@ -19,6 +19,7 @@ fn facts() -> TerminalFacts {
 fn ok_config() -> Result<Loaded, Diagnostic> {
     Ok(Loaded {
         config: Config::default(),
+        themes: crate::ui::theme::ValidatedThemes::default(),
         source: ConfigSource::Defaults,
         pending_migration: None,
     })
@@ -63,6 +64,7 @@ fn a_pending_migration_warns_rather_than_failing() {
     let dir = tempfile::tempdir().expect("temp dir");
     let loaded = Ok(Loaded {
         config: Config::default(),
+        themes: crate::ui::theme::ValidatedThemes::default(),
         source: ConfigSource::File,
         pending_migration: Some((0, 1)),
     });

@@ -32,3 +32,7 @@ pub const USABLE_COLUMNS: u16 = 40;
 
 /// Companion to [`USABLE_COLUMNS`].
 pub const USABLE_ROWS: u16 = 8;
+
+#[cfg(test)]
+#[path = "acceptance/tests.rs"]
+mod acceptance_tests;
