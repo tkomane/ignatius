@@ -111,6 +111,32 @@ returned no answer or no rows. A real server failure/unknown-outcome panel
 retains priority. No new modal or acknowledgement is added for ordinary result
 retention; the result pane/summary owns these facts.
 
+The TUI currently displays only the first result set. Preserve that selection,
+but retain a bounded scalar execution-level loss summary: number of limited/
+unavailable result sets, first affected result-set ordinal/reason and its known
+retained/received/source-column counts. Ordinals exclude non-result statements.
+Include row-cap losses as well as byte/description losses. A healthy first set
+must not make loss in later sets invisible. Do not build an unbounded ordinal
+list, copy result values or rescan/allocate the entire summary on every frame.
+
+Show a persistent complete warning in the Results pane before optional grid
+hints when any set in its retained Execution is limited, even when the first
+set is complete. Use the shared paging/layout geometry for every added/wrapped
+row. At narrow widths a complete `Data limited in N result set(s)` summary may
+replace full ordinal/count detail; show those details when space permits or
+when the existing result view is enlarged. Do not clip a displayed count into
+another meaning or imply the first set is the whole execution.
+
+Offer a complete compact loss badge in the common footer when room permits,
+including Editor/Objects zoom and Plan view. Query/transaction facts and
+protected prompt controls retain priority; if no complete badge fits, defer it
+without discarding the retained summary. Returning to Results exposes the
+warning again. No new switcher, modal or acknowledgement is added. A replacement
+Execution replaces its summary; a generated UPDATE that retains the prior
+snapshot retains the prior source's loss summary too. Stale completion must
+not replace a current summary. Test later-set loss with a complete first set,
+Plan/zoom return, both densities and 40x8/too-small/ASCII/no-color geometry.
+
 ## CLI and machine-output contract
 
 For available descriptions, all admitted data encoding, column order, NULL,

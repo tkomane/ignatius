@@ -136,7 +136,8 @@ Only the 12 verified owned payloads were removed. Sources/report/raw evidence:
 backpressure above BufWriter, not CLI cancellation, TLS or process ceilings.
 
 W10-008's incoming-frame design remains unadopted. Root specified W10-013's
-32-MiB logical retained-data allowance and typed-unavailability/output contract;
+32-MiB logical retained-data allowance and typed-unavailability/output contract,
+including execution-level disclosure when later nonvisible sets lose data;
 its implementation is serialized after W10-012 integration and remains open.
 Root adopted W10-012's complete notice policy under foundation REL-005, with fixed cumulative
 allowances, precision-safe pending counts and explicit acknowledgement. Privacy
