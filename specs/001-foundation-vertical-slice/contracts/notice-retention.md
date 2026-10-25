@@ -100,6 +100,7 @@ pub struct PlanResponse {
 }
 Session::take_connection_notice_report() -> Option<NoticeReport>
 Session::notice_checkpoint() -> NoticeCheckpoint
+Session::notice_retirement_counts() -> NoticeCounts
 connect_reported(...) -> Reported<Result<Session, Diagnostic>>
 ```
 
@@ -119,9 +120,12 @@ counters, so a missed/dropped completion does not erase known client loss and
 does not create a completed-report queue. Operation reports move payload once;
 checkpoint repetition is deduplicated, never added again by consumers.
 Checkpoint totals finalize on operation finish, idle report transfer or guard
-Drop. Polling during active work returns the last committed checkpoint; it
-does not publish a fresh per-notice report, reset spending or promise immediate
-mid-operation warning delivery. Pending active accounting remains bounded.
+Drop, subject to the pending-shortening rule below. Polling during active work
+returns the last committed checkpoint; it does not publish a fresh per-notice
+report, reset spending or promise immediate mid-operation warning delivery.
+Pending active accounting remains bounded. The distinct nonmutating retirement
+snapshot includes currently observed uncommitted counts before an intentional
+source retirement; it is not a normal polling checkpoint or budget reset.
 
 On successful connect, keep startup/bootstrap notices in the idle bucket for
 the first operation; return an empty connect report instead of draining and
@@ -143,9 +147,15 @@ unseen driver startup history.
    Unpublished shortening metadata from rewritten backlog is not reported as
    private message length evidence. Already delivered ordinary facts cannot be
    withdrawn. Privacy remains sticky until physical disconnect.
-3. Successful buffered statements take only the active statement inbox. The
-   guard records how many entries/bytes have moved, preserving spending. Idle
-   prelude and completion/probe/failure notices remain unattributed.
+3. Successful buffered statements take only the active statement inbox after
+   the actual row stream ends and before optional prepare/describe starts. The
+   guard records how many entries/bytes have moved, preserving spending. Move
+   notices observed during initial/inter-statement semantics probes and optional
+   prepare/describe into the bounded unattributed payload using in-memory phase
+   transfers. Idle prelude and final completion/probe/failure notices remain
+   unattributed. This separates client observation phases, not server causation;
+   add no SQL, wait or causal fence. Metadata sharing the same connection can
+   still overlap a phase and must not be claimed as proven statement provenance.
 4. Finish after the existing final transaction probe, on every return path,
    including empty SQL, binding/semantics refusal, server error, cancellation
    and connection loss. Move remaining payload into `notice_report`, record
@@ -155,11 +165,17 @@ unseen driver startup history.
    messages to invent a causal fence. Later messages enter the idle bucket.
 6. If the future is dropped before finish, guard Drop performs no I/O: terminate
    that active ownership, preserve pending bounded payload in the idle bucket,
-   commit counters and count already-drained prefix payload that the abandoned
-   future will drop as `abandoned`. Transfer cannot allocate a second unbounded
-   bucket; excess is counted. Starting a later *new* operation is an explicit
-   new allowance; ordinary drains never reset an active allowance. Do not reset
-   privacy. Abandonment is neither confirmed cancellation nor rollback.
+   and count already-drained prefix payload that the abandoned future will drop
+   as `abandoned`. Commit omission/abandonment and any shortening of already-
+   drained lost prefix. Keep shortening of untransferred pending payload with
+   that bounded payload, uncommitted until ordinary transfer: a first privacy
+   rewrite can suppress that unpublished metadata without decrementing a
+   cumulative published total. Track trusted per-entry shortening provenance,
+   never infer it from server-controlled suffix text. Ordinary later transfer
+   commits the pending shortening exactly once. Transfer cannot allocate a
+   second unbounded bucket; excess is counted. Starting a later *new* operation
+   is an explicit new allowance; ordinary drains never reset an active allowance.
+   Do not reset privacy. Abandonment is neither confirmed cancellation nor rollback.
 7. Reports transferred to an external caller are caller-owned; no API can prove
    that caller displayed/read them. Checkpoints preserve known client loss even
    when a completed outcome is dropped. No delivery guarantee on forced process
@@ -323,11 +339,20 @@ Never force unzoom or replace the error/cancellation/transaction status.
   active bucket. The TUI keeps client summaries only, preserving its current
   absence of a server-prose reader. Metadata methods keep their signatures;
   after each worker result the same path handles success and error.
-- Before profile-switch generation increment or Quit reduction, snapshot both
-  currently installed physical sessions and reduce those old-generation facts
-  first. Then carry pending fixed counts through the deliberate transition.
-  Do not wait for a busy query or new server traffic. Late old results retain
-  normal rejection, not relabeling.
+- At an actual profile/source retirement or Quit boundary, snapshot both
+  currently installed physical sessions before retiring their identities or
+  incrementing generation. `notice_retirement_counts` reads committed totals
+  plus that physical source's current uncommitted active/idle client counts,
+  without committing, draining, resetting spending, waiting for SQL or creating
+  payload copies. Do not silently substitute the ordinary last-committed-only
+  checkpoint, which would omit already observed in-flight loss. Merge the
+  retirement delta against the source's last seen totals once, then retire its
+  identity so duplicate/late reports cannot count it again. Poison is Unknown,
+  not zero. These counts cover the retirement instant; no claim includes
+  later/racing server messages or future-abandonment facts not yet observed.
+  Carry pending fixed counts through the deliberate transition. Do not wait
+  for a busy query or new server traffic. Late old results retain normal
+  rejection, not relabeling.
 - On ordinary quit/event-loop error, return fixed unacknowledged counts alongside
   the loop result. `run` already explicitly restores TerminalGuard at lines
   152-164; only **after restore** write remaining fixed report text to stderr,
