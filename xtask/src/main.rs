@@ -526,20 +526,20 @@ fn verify() -> Result<(), String> {
     if let Some(socket_uri) = socket_uri.as_deref() {
         env.push(("IGNATIUS_TEST_PG_SOCKET_URI", socket_uri));
     }
-    results.push((
-        "workspace tests",
-        run(
-            "cargo",
-            &[
-                "test",
-                "--locked",
-                "--workspace",
-                "--all-targets",
-                "--all-features",
-            ],
-            &env,
-        ),
-    ));
+    let workspace_result = run(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--no-fail-fast",
+        ],
+        &env,
+    );
+    let workspace_passed = workspace_result.is_ok();
+    results.push(("workspace tests", workspace_result));
 
     println!("\n== documentation tests ==");
     results.push((
@@ -564,8 +564,10 @@ fn verify() -> Result<(), String> {
     }
     if !database_available {
         println!("  skip  database-backed tests (no development database)");
-    } else {
+    } else if workspace_passed {
         println!("  pass  database-backed tests (plain and TLS PostgreSQL)");
+    } else {
+        println!("  info  database fixtures available; inspect failed workspace test results");
     }
     if !socket_available {
         let reason = if cfg!(unix) {
@@ -574,8 +576,10 @@ fn verify() -> Result<(), String> {
             "Unix sockets are not available on this platform"
         };
         println!("  skip  Unix socket integration ({reason})");
-    } else {
+    } else if workspace_passed {
         println!("  pass  Unix socket integration");
+    } else {
+        println!("  info  Unix socket configured; inspect failed workspace test results");
     }
 
     if failures.is_empty() {

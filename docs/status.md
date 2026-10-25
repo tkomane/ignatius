@@ -1,8 +1,85 @@
 # Status
 
-**Updated: 2026-09-30.** This file is the resumption point. Read it, then check
+**Updated: 2026-10-25.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Autonomous roadmap continuation - 2026-10-25 (in progress)
+
+Owner requested day-long autonomous development and a bounded team. Start:
+`39d7923cf3b7d132c12a98bc081a454e45e1ec58`, clean branch
+`w01/reconcile-1d841b4-onto-bd05b9d`, 16 commits ahead of the local tracked
+`origin/main`; no fresh remote comparison has been claimed. The prior local
+commits and unrelated COI Docker containers are preserved. The active-feature
+pointer was stale at 024 and now matches 025, whose US1-US4 are recorded in
+the historical sections below; US5-US10 remain unchecked.
+
+Current lanes (single writers, no recursive delegation): W02 async-envelope
+repair in the interactive runtime/reducer sidecar tests; W04 generated-UPDATE
+privacy probes in a new integration-test file; lead-owned W10 saved-query and
+atomic local-state recovery. Native workers inherit the lead's model settings.
+The existing OpenCode Go connection and configured GLM-5.3 reviewer are
+available for the required review on another model family; no overage or new
+provider is authorised. The roadmap now reflects the existing 025 work rather
+than describing 024 as the latest slice.
+
+Automatic approval review rejected the attempted read-only OpenCode review
+because transmitting unpublished repository changes to that external service
+needs explicit owner consent. No review payload was sent. An owner question is
+pending in this chat. Cross-lane native peer review found one W10 regression
+(temporary basename too long); it was reproduced, repaired and re-reviewed.
+The required different-family gate remains open even after those native reviews.
+
+Environment: macOS arm64, Homebrew Rust/Cargo 1.99.1 (the repository pins
+1.97.1 for rustup, so this is explicitly a different local toolchain),
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools`, existing build cache on
+the external SSD. Lead started only the repository's disposable PostgreSQL
+18.4 plain/TLS fixtures. A bounded keep-awake process covers today's local run.
+Phone pairing and mobile push delivery have not been verified; owner-only
+decisions must remain actual chat/approval requests, never simulated input.
+
+No new push, workflow dispatch, tag, signing, release, paid resource,
+governance change or production operation is authorised by this progress
+record. New local branch: `codex/autonomous-roadmap-2026-10-25`. The remote-main
+query returned `445ed8228d344a160928456659c7ba932d4cbdef`. SSH fetch could not
+use the existing signing agent; the authenticated GitHub connector confirmed
+the repository is public, and a read-only HTTPS fetch succeeded. Its only new
+changes since the shared baseline were lockfile dependency patches and CodeQL
+action pins. Local merge `4cdf96e` preserves both histories and changed only
+`Cargo.lock` and `.github/workflows/codeql.yml`. This did not merge anything on
+GitHub or publish today's changes.
+
+### First hardening batch - local verification
+
+| Field | Record |
+| --- | --- |
+| Changes | W02 queues profile failures/catalogue reloads with connection generation and rechecks the reconnect-target slot under its lock. W04 omits parameter-derived server prose from parameterized errors and enables sticky value-free notices. W10 uses private exclusive atomic replacements and refuses linked/non-regular saved-query leaves. |
+| Source | Starting commit `39d7923` plus the current explicitly modified/untracked files on the new local branch; no hosted or clean-candidate claim. |
+| Environment | macOS 27.0.1 arm64, Homebrew Rust/Cargo 1.99.1, CommandLineTools developer directory, existing external-SSD build cache; disposable server reports PostgreSQL 18.4. |
+| Focused evidence | W02 sender and target-lock regressions failed before fixes; interactive 19 and reducer 171 passed. W10 original temporary/link probes failed before fixes; configuration 13, history 14, query 10 and atomic helper 6 passed. W04 generated constraint failure leaked before the correction; 8 error units, 4 session units and 5 live plain PostgreSQL subprocess privacy contracts passed after it. |
+| Full gate | First run failed a roadmap phrase-parity assertion after 898 library tests passed. Corrected the meaningful Feature 024 reference. The repeat `cargo --locked xtask verify` passed formatting, warnings-denied lints, API docs, the complete workspace and doc tests, including plain/TLS PostgreSQL. The harness reports 1,152 passing cases across 21 summaries; its socket case returns early and remains a semantic skip, not live evidence. |
+| Verifier repair | Added workspace `--no-fail-fast` so later binaries run after failure. A failed workspace gate now labels configured fixtures as information rather than falsely reporting database/socket passes. |
+| Review | Cross-lane native peer review found and re-checked the repaired W10 long-basename regression and found no remaining blocking W02/W04/W10 issue in scope. Different-family review is still pending explicit consent for external code transmission. |
+| Retention | Safe local verifier logs: `/private/tmp/ignatius-verify-2026-10-25-wave1.log` and `/private/tmp/ignatius-verify-2026-10-25-wave1-recheck.log`; regressions retained in sidecar/integration tests. |
+| Open boundaries | Required external review, Unix socket, native Windows/Linux, real terminal/screen-reader use, packaged-candidate privacy and release gates. The separate verified-TLS repeat of all five privacy contracts passed with zero skips using the generated fixture CA and `sslmode=verify-full`. |
+
+Local commits: `f8cbce8` W02 identity, `2017f03` W10 replacement boundaries,
+`b845106` W04 privacy and its specified next W03 guard. The platform's existing
+inline tests were also moved unchanged to a sidecar to follow the CodeQL test
+path contract. The first full pass above used the pre-merge lockfile. The repeat
+`cargo --locked xtask verify` against integrated `4cdf96e` plus the verifier
+workflow/documentation edits also passed every enabled gate, with the same
+1,152 harness cases and semantic socket skip. Its retained local log is
+`/private/tmp/ignatius-verify-2026-10-25-wave1-upstream.log`. `actionlint` also
+passed against the integrated workflow definitions. Hosted CI, cargo-deny,
+gitleaks and CodeQL were not run in this batch.
+
+Next independent work: the specified FR-2215 fresh string-semantics guard
+(Feature 022 W03-034/035), W10 migration-backup exclusive reservation, and the
+remaining Feature 025 stories. US5 preparation found contract details to pin
+before coding: text-token contrast scope, exact theme-refusal rendering and
+missing custom-definition wording, and late OSC 11 reply filtering. No theme
+contract was silently changed to resolve those questions.
 
 ## W10 streaming export footprint 200k vs 2M rows - 2026-09-30
 

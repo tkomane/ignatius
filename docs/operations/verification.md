@@ -14,7 +14,7 @@ if any gate failed. Underneath it is exactly this:
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
-cargo test --locked --workspace --all-targets --all-features
+cargo test --locked --workspace --all-targets --all-features --no-fail-fast
 cargo test --locked --workspace --doc --all-features
 ```
 
@@ -24,6 +24,10 @@ suite. Without them the database-backed cases skip and say so. The Unix-socket
 case separately requires `IGNATIUS_TEST_PG_SOCKET_URI`. **A skip is not a
 pass.** The verifier lists each missing live boundary after the ordinary gate
 results.
+
+The workspace gate uses `--no-fail-fast` so a failing test binary does not hide
+later integration binaries. If that gate fails, fixture availability is labelled
+as information; it is not reported as a database/socket test pass.
 
 ## Required gates before merging
 

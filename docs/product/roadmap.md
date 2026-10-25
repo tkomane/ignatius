@@ -1,13 +1,18 @@
 # Roadmap
 
-**Replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-10-25; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
 The planned experience through Feature 024 is now implemented locally. The
 next phase integrates that work and proves product, platform and release claims.
 
-The latest completed local slice is **024 Explicit retained-result refresh**;
-its recorded plain/TLS verifier pass, semantic Unix-socket skip and outstanding
-terminal checks remain distinct in `docs/status.md`.
+The latest implemented experience slice is **025 GUI-grade experience, US4**:
+paste, painted surfaces, the workable grid and first-frame startup are recorded
+in `docs/status.md`. Feature 025 US5-US10 and final acceptance remain open in
+its task list. The current integration branch also contains W02 connection
+identity hardening, W05 local server-matrix evidence and W11 dry trust tooling.
+Those local results do not establish hosted acceptance or release readiness.
+**024 Explicit retained-result refresh** remains part of the integrated feature
+chain; the later experience work preserves its source-bound, deliberate action.
 
 | Read this for | Authority |
 | --- | --- |
@@ -69,9 +74,10 @@ flowchart LR
 
 ## Start here
 
-1. **W01:** recheck the current worktree and inherited Feature 024 completion
-   evidence, then prepare a reproducible integration baseline. Historical main
-   CI is not evidence for newer uncommitted features.
+1. **W01/W02/W04/W10:** preserve the current integration baseline, close any
+   remaining asynchronous connection-envelope gaps, probe generated-write
+   privacy and repair local-state confinement/recovery defects. Recheck
+   `docs/status.md` and actual source before reusing recorded evidence.
 2. **W02-W07 and W10:** resolve correctness, privacy, native-platform and
    resource/recovery gaps. Assign shared runtime files to one integrator;
    use isolated auth and terminal scopes where parallel work is authorized.
@@ -81,6 +87,11 @@ flowchart LR
 4. **W11 and W13 preparation can proceed alongside those steps.** Prepare
    concrete trust, support, naming and governance decisions before owner review.
    Proceed to W12/W14 only when their dependencies and authority exist.
+5. **Feature 025 US5-US10:** continue the already specified, observed-friction
+   work after immediate correctness/privacy defects are contained. Follow the
+   story dependencies and exact contracts; no additional feature is needed to
+   keep development moving. Final terminal/participant evidence stays open
+   until the named platform and journey have actually been exercised.
 
 Use full feature directory slugs in assignments. The historical `007` collision
 and old broad-theme numbers are documented in the inventory; neither justifies
