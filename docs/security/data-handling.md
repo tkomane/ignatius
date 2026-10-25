@@ -181,6 +181,15 @@ destination and removes only this attempt's temporary. Stale files from an
 interrupted earlier attempt are left for the owner to inspect. This does not
 claim directory-entry durability across power loss or multi-process locking.
 
+Migration backups reserve their timestamped name with exclusive creation,
+including Unix `0600` before the first byte. Up to 128 existing-entry collisions
+are skipped without following links. The backup contains the exact parsed
+configuration bytes and is flushed and synced before replacement; an incomplete
+backup is removed only by its own attempt, and a completed one remains available
+if replacement fails. Migration is a parsed-snapshot operation: a concurrent
+owner edit can still be overwritten. This does not provide compare-and-swap or
+multi-process migration coordination.
+
 Saved-query load/save refuses symbolic links and non-regular leaf entries;
 listings omit them. A regular file replaced through a hard link is replaced as
 a directory entry, leaving its other names unchanged. The configured library

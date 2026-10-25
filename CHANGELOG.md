@@ -14,6 +14,10 @@ source can generate user-facing notes.
   or rolling back. Streaming keeps PostgreSQL's whole-message transaction
   semantics. User-SQL operations on one session serialize the check and send;
   cancellation remains independent.
+- Security: configuration migration reserves private backup files exclusively,
+  preserves ordinary and dangling-link collisions, and syncs the exact parsed
+  source bytes before replacement. Failed writes remove only their own partial
+  backup; a completed backup survives a later configuration-replacement failure.
 - Security: parameterized execution and export omit server-controlled error
   text that can echo replacement/key values, including transformed values.
   SQLSTATE, failure classification and statement position remain available.

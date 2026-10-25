@@ -26,3 +26,25 @@ Load/list leaf checks do not defend against same-user path replacement races.
 The integrator owns these files, security documentation, changelog and status.
 Run focused platform/config/history/query tests, then the locked repository
 verifier. Record native Windows/Linux execution separately from macOS evidence.
+
+## Migration-backup follow-up - W10-006
+
+The review also identified a distinct unsafe route: migration selected its
+backup name with `exists()` and then copied by path. A dangling link could be
+followed, source permissions could be inherited, and a second source read could
+back up different bytes from the parsed configuration. Foundation REL-004 now
+states this boundary explicitly.
+
+Reuse the private exclusive-file primitive, independently of atomic replacement.
+Capture one timestamp; attempt its base name then numbered suffixes, at most
+128 times, retrying only `AlreadyExists`. Write the exact parsed source bytes
+through the reserved owner-only handle, flush and sync, and only then replace
+the configuration. On an incomplete backup, close and remove only that newly
+reserved file. Keep a complete backup if the later replacement fails.
+
+A private timestamp seam and narrow writer failure injection make ordinary and
+dangling-link collisions, reservation exhaustion, private initial permissions,
+partial-write cleanup and old-configuration preservation deterministic tests.
+They do not claim real power-loss recovery or protection from same-user path
+replacement races. Configuration source, backup and replacement remain inside
+the existing trusted directory; no new filesystem root or credential route.

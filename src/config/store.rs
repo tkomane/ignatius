@@ -13,6 +13,7 @@ use crate::config::paths::Paths;
 use crate::config::schema::{CURRENT_SCHEMA_VERSION, Config};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use std::fs;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// Where the loaded configuration came from.
@@ -132,6 +133,22 @@ pub struct MigrationReport {
 /// Safe to run repeatedly: an already-current file is reported as a no-op and
 /// nothing is written.
 pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnostic> {
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    migrate_at(paths, dry_run, &stamp)
+}
+
+fn migrate_at(paths: &Paths, dry_run: bool, stamp: &str) -> Result<MigrationReport, Diagnostic> {
+    migrate_with_backup_writer(paths, dry_run, stamp, |file, contents| {
+        file.write_all(contents)
+    })
+}
+
+fn migrate_with_backup_writer(
+    paths: &Paths,
+    dry_run: bool,
+    stamp: &str,
+    write_backup: impl FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+) -> Result<MigrationReport, Diagnostic> {
     let path = &paths.config_file;
     if !path.exists() {
         return Ok(MigrationReport {
@@ -212,17 +229,7 @@ pub fn migrate(paths: &Paths, dry_run: bool) -> Result<MigrationReport, Diagnost
         });
     }
 
-    let backup = backup_path(path);
-    fs::copy(path, &backup).map_err(|err| {
-        Diagnostic::new(
-            DiagnosticKind::Config,
-            "could not write a backup, so nothing was migrated",
-            "backing up configuration before migration",
-        )
-        .likely_cause(err.to_string())
-        .next_action("free space or fix permissions in the configuration directory, then retry")
-        .technical("Backup", backup.display().to_string())
-    })?;
+    let backup = backup_configuration(path, loaded_text.as_bytes(), stamp, write_backup)?;
 
     let rendered = toml::to_string_pretty(&config).map_err(|err| {
         Diagnostic::new(
@@ -397,16 +404,59 @@ fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     crate::platform::write_atomic(path, contents.as_bytes())
 }
 
-/// Builds a timestamped backup path that never overwrites an existing backup.
-fn backup_path(path: &Path) -> std::path::PathBuf {
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    let mut candidate = path.with_extension(format!("toml.{stamp}.bak"));
-    let mut counter = 1;
-    while candidate.exists() {
-        candidate = path.with_extension(format!("toml.{stamp}-{counter}.bak"));
-        counter += 1;
+/// Backs up the exact parsed bytes without reopening the configuration source.
+fn backup_configuration(
+    path: &Path,
+    contents: &[u8],
+    stamp: &str,
+    write_backup: impl FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+) -> Result<std::path::PathBuf, Diagnostic> {
+    for counter in 0..128 {
+        let candidate = backup_candidate(path, stamp, counter);
+        let mut file = match crate::platform::create_private_file(&candidate) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(backup_failure(&candidate, &error)),
+        };
+        let result = write_backup(&mut file, contents)
+            .and_then(|()| file.flush())
+            .and_then(|()| file.sync_all());
+        drop(file);
+        if let Err(error) = result {
+            let mut diagnostic = backup_failure(&candidate, &error);
+            if let Err(cleanup) = fs::remove_file(&candidate) {
+                diagnostic = diagnostic.technical("Partial backup cleanup", cleanup.to_string());
+            }
+            return Err(diagnostic);
+        }
+        return Ok(candidate);
     }
-    candidate
+    Err(backup_failure(
+        &backup_candidate(path, stamp, 127),
+        &io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not reserve a new configuration backup after 128 attempts",
+        ),
+    ))
+}
+
+fn backup_candidate(path: &Path, stamp: &str, counter: u32) -> std::path::PathBuf {
+    if counter == 0 {
+        path.with_extension(format!("toml.{stamp}.bak"))
+    } else {
+        path.with_extension(format!("toml.{stamp}-{counter}.bak"))
+    }
+}
+
+fn backup_failure(path: &Path, error: &io::Error) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Config,
+        "could not write a backup, so nothing was migrated",
+        "backing up configuration before migration",
+    )
+    .likely_cause(error.to_string())
+    .next_action("free space or fix permissions in the configuration directory, then retry")
+    .technical("Backup", path.display().to_string())
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ fn an_existing_temporary_is_never_reopened_or_truncated() {
     let temporary = root.path().join("reserved");
     fs::write(&temporary, b"earlier operation").expect("existing temporary");
     assert_eq!(
-        create_private_temporary(&temporary)
+        create_private_file(&temporary)
             .expect_err("exclusive creation")
             .kind(),
         io::ErrorKind::AlreadyExists
@@ -23,7 +23,7 @@ fn even_a_dangling_temporary_symlink_is_not_followed() {
     let temporary = root.path().join("reserved");
     symlink(&outside, &temporary).expect("dangling temporary");
     assert_eq!(
-        create_private_temporary(&temporary)
+        create_private_file(&temporary)
             .expect_err("exclusive creation")
             .kind(),
         io::ErrorKind::AlreadyExists
@@ -38,7 +38,7 @@ fn a_temporary_is_private_before_any_content_is_written() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().expect("temporary root");
     let temporary = root.path().join("private");
-    let file = create_private_temporary(&temporary).expect("exclusive temporary");
+    let file = create_private_file(&temporary).expect("exclusive temporary");
     assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
 }
 

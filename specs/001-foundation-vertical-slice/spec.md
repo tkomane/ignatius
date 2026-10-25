@@ -188,6 +188,14 @@ assert the exit code for both success and failure.
 - **REL-003**: A result belonging to a superseded job MUST be discarded.
 - **REL-004**: Configuration writes MUST be atomic and MUST take a backup before
   a migration.
+  A migration backup MUST contain the exact source bytes that were parsed,
+  use exclusive creation with Unix mode `0600` before its first write, and be
+  flushed and synced before replacing the configuration. Existing backup
+  entries, including dangling links, MUST remain untouched. Failure before
+  backup completion MUST leave the original configuration unchanged and clean
+  up only the newly reserved partial backup; failure after completion MUST
+  retain that backup for recovery. Timestamped candidate reservation is bounded
+  to 128 attempts and retries only an existing-entry collision.
 
 ### Performance
 

@@ -29,7 +29,7 @@ pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
             NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
         );
         let temporary = parent.join(temporary_name);
-        let mut file = match create_private_temporary(&temporary) {
+        let mut file = match create_private_file(&temporary) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
@@ -52,7 +52,9 @@ pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     ))
 }
 
-fn create_private_temporary(path: &Path) -> io::Result<fs::File> {
+/// Exclusively reserves a new file, private before any bytes are written.
+/// Existing entries, including dangling symlinks, are never opened.
+pub(crate) fn create_private_file(path: &Path) -> io::Result<fs::File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

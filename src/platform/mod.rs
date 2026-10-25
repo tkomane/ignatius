@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 
 mod atomic;
-pub(crate) use atomic::write_atomic;
+pub(crate) use atomic::{create_private_file, write_atomic};
 
 /// Restricts a file to its owner where the platform supports it.
 ///
