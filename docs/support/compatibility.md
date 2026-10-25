@@ -396,8 +396,13 @@ flushed, synced and renamed only when the export completes, so a file at the
 destination is always a complete file. An existing destination stops the export
 unless `--force` is given.
 
-An interrupted export exits 9, leaves the partial file, and reports how many rows
-reached it.
+An interrupted export exits 9 and leaves the partial file. Progress counts only
+complete row encodings accepted by the writer. When the partial-file flush
+succeeds, the existing written-row count is reported. If it fails, the message
+states that the file's row count is unconfirmed, separately from accepted-row
+progress. Best-effort buffered recovery is preserved. A partial file may contain
+an incomplete final row; inspect it before continuing. No database write outcome
+or automatic retry is inferred from a file failure.
 
 `Ctrl+K e` in the client writes **what is on screen** through a small
 save-as flow. A searchable format palette offers CSV, TSV, JSON, NDJSON and

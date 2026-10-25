@@ -59,13 +59,32 @@ interactive user can choose a file shape before naming its destination.
 
 ## W10-010 follow-up - 2026-10-25
 
-- [ ] T023 Add failing-first complete-row progress and abandonment-flush
+- [x] T023 Add failing-first complete-row progress and abandonment-flush
   regressions through real encoder/runtime/export boundaries, following the
   pinned contract. Keep injected I/O failures separate from native full-disk
   evidence and use no production trigger.
-- [ ] T024 Repair both premature counts and introduce typed flushed/unconfirmed
+- [x] T024 Repair both premature counts and introduce typed flushed/unconfirmed
   partial-file reporting without changing successful bytes, exit codes,
   transaction/cancellation semantics or retrying any row/SQL.
-- [ ] T025 Review the patch and run affected output/export/runtime/live checks,
+- [x] T025 Review the patch and run affected output/export/runtime/live checks,
   inspect partial-file/count evidence, update user/recovery/release docs and
   record the combined full gate with remaining platform boundaries.
+
+T023-T025 evidence on 2026-10-25: six behavioral reds/four controls preceded
+the repair; 24 writer faults cover before/mid/terminator failures on first and
+later rows across four formats. Final private output 30/export 11/runtime 29
+and three SELECT-only live contracts passed (73 cases, zero skips), with
+Clippy/fmt. All 33 original moved tests were independently checked unchanged.
+Primary retained existing best-effort Drop recovery rather than discarding
+accepted buffered data. Source/evidence/patch SHA:
+`/private/tmp/ignatius-w10-010-evidence-20261025.txt`.
+
+Primary and a separate native peer reviewed the applied patch without a
+remaining blocker. The combined modified `dd69f66` source passed the final
+locked verifier: 1,315 harness cases/1,027 library, PostgreSQL 18.6 plain/TLS,
+formatting, warnings-denied lints/API docs. Log:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+macOS 27.0.1 arm64/Homebrew Rust 1.99.1; socket remains a semantic skip.
+Injected I/O failures are not native full-disk evidence. The frozen Linux
+`871db73` proof excludes this repair; current-source Linux/MSRV/Windows,
+hosted and native hand use remain separate.

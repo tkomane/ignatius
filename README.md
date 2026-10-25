@@ -84,8 +84,9 @@ policies bolted onto the side; they are why it is built the way it is.
 
 - **Uncertainty is stated.** `Cancellation requested` until the server
   confirms. `Connection lost - query outcome unknown` when that is the truth.
-  An interrupted export leaves a `.partial` file, a row count and exit code 9,
+  An interrupted export leaves a `.partial` file, row progress and exit code 9,
   never a truncated file at the destination that looks finished.
+  A failed flush states that the file's row count is unconfirmed.
 - **The TLS state shown is the server's answer**, read back from
   `pg_stat_ssl`, not the one you asked for. `require` and `verify-full` are
   never described as the same thing, and a TLS failure is never retried

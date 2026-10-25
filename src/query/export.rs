@@ -8,12 +8,12 @@
 //!   at the destination is a complete file. An interrupted export leaves its
 //!   work behind under a `.partial` name rather than a truncated result that
 //!   looks finished.
-//! - **Say what happened.** An interrupted export reports how many rows reached
-//!   the partial file and where it is, rather than implying the whole thing is
-//!   gone.
+//! - **Say what happened.** An interrupted export distinguishes complete rows
+//!   accepted by its writer from a confirmed partial-file flush. It preserves
+//!   the partial path without claiming an unconfirmed on-disk row count.
 //!
-//! Rows are written as they arrive, so a hundred-million-row export uses the
-//! same memory as a one-row export.
+//! Rows are written as they arrive without retaining the complete result.
+//! Individual values, rows, driver frames, encoding and file buffers use memory.
 
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use std::fs::File;
@@ -46,8 +46,20 @@ pub struct Finished {
 pub struct Abandoned {
     /// Where the partial file is.
     pub partial: PathBuf,
-    /// How many rows reached it.
+    /// Complete row encodings accepted by the export writer. Consult `flush`
+    /// before claiming that this count reached the partial file.
     pub rows: u64,
+    /// Whether the buffered-file flush succeeded; this is not fsync durability.
+    pub flush: PartialFlush,
+}
+
+/// Confirmation available after attempting to flush an abandoned export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartialFlush {
+    /// The buffer was flushed successfully, without a durability guarantee.
+    Flushed,
+    /// Flushing failed, so the partial-file row count remains unconfirmed.
+    Unconfirmed,
 }
 
 impl Abandoned {
@@ -55,11 +67,18 @@ impl Abandoned {
     /// "the export failed" leaves them wondering whether anything was written.
     #[must_use]
     pub fn message(&self) -> String {
-        format!(
-            "Export incomplete - {} row(s) written to {}",
-            self.rows,
-            self.partial.display()
-        )
+        match self.flush {
+            PartialFlush::Flushed => format!(
+                "Export incomplete - {} row(s) written to {}",
+                self.rows,
+                self.partial.display()
+            ),
+            PartialFlush::Unconfirmed => format!(
+                "Export incomplete - {} complete row(s) accepted by the export writer; partial-file row count is unconfirmed because flushing failed: {}",
+                self.rows,
+                self.partial.display()
+            ),
+        }
     }
 }
 
@@ -130,12 +149,12 @@ impl Export {
         &mut self.writer
     }
 
-    /// Records that one more row reached the file.
+    /// Records one complete row encoding accepted by the export writer.
     pub const fn count_row(&mut self) {
         self.rows += 1;
     }
 
-    /// Rows written so far.
+    /// Complete row encodings accepted so far, without a durability claim.
     #[must_use]
     pub const fn rows(&self) -> u64 {
         self.rows
@@ -151,25 +170,31 @@ impl Export {
     ///
     /// The sync matters: a rename that completes before the data reaches the
     /// disk would leave a complete-looking file with missing rows after a crash.
-    pub fn finish(mut self) -> Result<Finished, Diagnostic> {
-        let outcome = self
-            .writer
-            .flush()
+    pub fn finish(self) -> Result<Finished, Diagnostic> {
+        self.finish_with(|writer| writer.flush())
+    }
+
+    fn finish_with(
+        mut self,
+        flush: impl FnOnce(&mut BufWriter<File>) -> std::io::Result<()>,
+    ) -> Result<Finished, Diagnostic> {
+        let outcome = flush(&mut self.writer)
             .and_then(|()| self.writer.get_ref().sync_all())
             .and_then(|()| std::fs::rename(&self.partial, &self.destination));
 
-        outcome.map_err(|err| {
-            Diagnostic::new(
+        if let Err(err) = outcome {
+            let diagnostic = Diagnostic::new(
                 DiagnosticKind::ExportInterrupted,
                 format!("could not finish writing {}", self.destination.display()),
                 "completing the export",
             )
             .likely_cause(err.to_string())
             .next_action(format!(
-                "the rows written so far are in {}",
+                "the partial file remains at {}; its on-disk row count is unconfirmed; inspect it before continuing",
                 self.partial.display()
-            ))
-        })?;
+            ));
+            return Err(diagnostic);
+        }
 
         Ok(Finished {
             path: self.destination.clone(),
@@ -178,13 +203,25 @@ impl Export {
     }
 
     /// Gives up, leaving the partial file where the user can find it.
-    pub fn abandon(mut self) -> Abandoned {
-        // Best effort: the point is to keep whatever was written, so a failure
-        // to flush here changes nothing that can still be reported.
-        let _ = self.writer.flush();
+    pub fn abandon(self) -> Abandoned {
+        self.abandon_with(|writer| writer.flush())
+    }
+
+    fn abandon_with(
+        mut self,
+        flush: impl FnOnce(&mut BufWriter<File>) -> std::io::Result<()>,
+    ) -> Abandoned {
+        let flush = if flush(&mut self.writer).is_ok() {
+            PartialFlush::Flushed
+        } else {
+            PartialFlush::Unconfirmed
+        };
+        // Preserve the buffered writer's existing best-effort close. Its result
+        // is not reported, so it cannot upgrade explicit flush confirmation.
         Abandoned {
             partial: self.partial.clone(),
             rows: self.rows,
+            flush,
         }
     }
 }
@@ -199,155 +236,4 @@ pub fn partial_path(destination: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_partial_file_is_named_after_its_destination() {
-        assert_eq!(
-            partial_path(Path::new("/tmp/report.csv")),
-            PathBuf::from("/tmp/report.csv.partial")
-        );
-        // The extension is added, not replaced, so the intended name is visible.
-        assert_eq!(
-            partial_path(Path::new("report")),
-            PathBuf::from("report.partial")
-        );
-    }
-
-    #[test]
-    fn rows_land_in_the_partial_file_and_only_move_on_completion() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let destination = dir.path().join("report.csv");
-
-        let mut export = Export::create(&destination, false).expect("create");
-        write!(export.writer(), "id\n1\n").expect("write");
-        export.count_row();
-
-        assert!(
-            !destination.exists(),
-            "nothing appears at the destination until it is complete"
-        );
-        assert!(
-            export.partial_path().exists(),
-            "the work is in the partial file"
-        );
-
-        let finished = export.finish().expect("finish");
-        assert_eq!(finished.rows, 1);
-        assert_eq!(finished.path, destination);
-        assert!(destination.exists());
-        assert!(
-            !partial_path(&destination).exists(),
-            "the partial file is gone once it is complete"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&destination).expect("read"),
-            "id\n1\n"
-        );
-    }
-
-    #[test]
-    fn abandoning_keeps_the_work_and_says_where_it_is() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let destination = dir.path().join("report.csv");
-
-        let mut export = Export::create(&destination, false).expect("create");
-        for row in 0..3 {
-            writeln!(export.writer(), "{row}").expect("write");
-            export.count_row();
-        }
-        let abandoned = export.abandon();
-
-        assert_eq!(abandoned.rows, 3);
-        assert!(abandoned.partial.exists(), "the rows written are kept");
-        assert!(
-            !destination.exists(),
-            "an incomplete export never occupies the destination"
-        );
-        let message = abandoned.message();
-        assert!(message.contains("Export incomplete"), "{message}");
-        assert!(
-            message.contains("3 row(s)"),
-            "the count is stated: {message}"
-        );
-        assert!(
-            message.contains("report.csv.partial"),
-            "and the path: {message}"
-        );
-    }
-
-    #[test]
-    fn the_way_out_of_a_refusal_is_the_callers_to_word() {
-        // A flag is the answer in a script and no answer at all to someone in
-        // the full-screen client, who has no flags to pass.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let destination = dir.path().join("report.csv");
-        std::fs::write(&destination, "precious data").expect("write");
-
-        let error = Export::create_with_advice(&destination, false, "choose another name")
-            .expect_err("must refuse");
-        let action = error.next_action.expect("an action");
-        assert_eq!(action, "choose another name");
-        assert!(!action.contains("--force"));
-    }
-
-    #[test]
-    fn an_existing_file_is_never_replaced_by_accident() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let destination = dir.path().join("report.csv");
-        std::fs::write(&destination, "precious data").expect("write");
-
-        let error = Export::create(&destination, false).expect_err("must refuse");
-        assert_eq!(error.exit_code(), crate::ExitCode::Usage);
-        assert!(error.next_action.expect("action").contains("--force"));
-        assert_eq!(
-            std::fs::read_to_string(&destination).expect("read"),
-            "precious data",
-            "the existing file is untouched"
-        );
-    }
-
-    #[test]
-    fn force_replaces_the_file_but_only_once_the_new_one_is_complete() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let destination = dir.path().join("report.csv");
-        std::fs::write(&destination, "old data").expect("write");
-
-        let mut export = Export::create(&destination, true).expect("create with force");
-        write!(export.writer(), "new data").expect("write");
-        assert_eq!(
-            std::fs::read_to_string(&destination).expect("read"),
-            "old data",
-            "the old file survives until the new one is finished"
-        );
-
-        export.finish().expect("finish");
-        assert_eq!(
-            std::fs::read_to_string(&destination).expect("read"),
-            "new data"
-        );
-    }
-
-    #[test]
-    fn a_missing_parent_directory_is_created() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let destination = dir.path().join("nested").join("deeper").join("report.csv");
-        let export = Export::create(&destination, false).expect("create");
-        export.finish().expect("finish");
-        assert!(destination.exists());
-    }
-
-    #[test]
-    fn an_unwritable_destination_fails_with_an_action() {
-        // A path whose parent is a file, not a directory. Every platform
-        // refuses that, which is what makes it a portable test.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let blocker = dir.path().join("not-a-directory");
-        std::fs::write(&blocker, "in the way").expect("write");
-
-        let error = Export::create(&blocker.join("report.csv"), false).expect_err("must fail");
-        assert!(error.next_action.is_some(), "a failure must say what to do");
-        assert_eq!(error.exit_code(), crate::ExitCode::Usage);
-    }
-}
+mod tests;

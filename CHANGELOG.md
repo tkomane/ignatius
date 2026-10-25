@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: streaming exports count only complete accepted row encodings. Failed
+  or partial row writes no longer advance progress. An unsuccessful partial-
+  file flush reports an unconfirmed file-row count while preserving best-effort
+  recovery and the existing exit 9 and complete-file finish behavior.
 - Fixed: buffered CSV, TSV, NDJSON, Markdown and INSERT now disclose discarded
   rows on stderr with retained/received counts, including a completed prefix
   before a later error. Data bytes and execution exit codes stay unchanged;

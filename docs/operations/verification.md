@@ -199,10 +199,31 @@ After primary review/application to modified `871db73`, root passed 33 CLI
 units and all 14 actual CLI contracts on each plain and `verify-full` TLS
 PostgreSQL 18.6 route (61 focused passes, zero skips). Logs:
 `/private/tmp/ignatius-w10-009-root-{cli-unit,plain,verified-tls}-20261025.log`.
-No persistent schema/data or fixture lifecycle was changed. The combined full
-verifier follows W10-010 integration; the earlier 1,270-case review/panic gate
-does not cover this CLI change. Latest-source Linux/MSRV/Windows and hosted
-acceptance remain separate.
+No persistent schema/data or fixture lifecycle was changed by those focused
+checks. The combined final full verifier below passed after W10-010/help
+integration; the earlier 1,270-case review/panic gate does not cover this CLI
+change. Latest-source Linux/MSRV/Windows and hosted acceptance remain separate.
+
+## Complete-row export accounting - 2026-10-25
+
+W10-010 first reproduced six progress/flush failures while four controls passed,
+with 24 before/mid/terminator write faults across first/later rows and four
+formats. Its private output 30/export 11/runtime 29 plus three SELECT-only live
+contracts passed (73 cases, zero skips), Clippy and formatting. The primary and
+a native peer checked the complete-row/original-error path, typed flush state,
+unchanged successful bytes and preservation of all 33 moved original tests.
+Best-effort BufWriter Drop salvage remains; its unreported result never
+upgrades an explicitly failed flush. Evidence and exact patch SHA-256:
+`/private/tmp/ignatius-w10-010-evidence-20261025.txt`. These injected failures
+do not establish native ENOSPC, durability failure or another OS's behavior.
+
+Primary integration passed the combined modified `dd69f66` full verifier,
+including uncommitted T042 help work: 1,315 harness cases/1,027 library,
+PostgreSQL 18.6 plain/TLS, formatting and warnings-denied lints/API docs. Log:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+macOS 27.0.1 arm64/Homebrew Rust 1.99.1; socket remains a semantic skip.
+Frozen Linux `871db73` excludes this repair; current-source Linux/MSRV/Windows,
+hosted, native hand use and required different-family review remain separate.
 
 ## Local security maintenance - 2026-10-25
 

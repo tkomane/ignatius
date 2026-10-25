@@ -1,6 +1,89 @@
 use super::*;
 
 #[test]
+fn w10_actual_streaming_sink_does_not_count_rejected_insert_rows() {
+    use crate::cli::output::{Format, OutputOptions, StreamWriter};
+    use crate::postgres::StreamEvent;
+    use crate::query::value::Cell;
+    let mut wrong_counts = Vec::new();
+    for prefix in [0, 1] {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("runtime.sql");
+        let mut export = crate::query::export::Export::create(&destination, false).unwrap();
+        let mut writer = StreamWriter::new(OutputOptions {
+            format: Format::Insert,
+            insert_table: Some("snapshot".into()),
+            ..OutputOptions::default()
+        })
+        .unwrap();
+        write_export_event(
+            &mut export,
+            &mut writer,
+            StreamEvent::Columns(vec!["value".into()]),
+        )
+        .unwrap();
+        if prefix == 1 {
+            write_export_event(
+                &mut export,
+                &mut writer,
+                StreamEvent::Row(vec![Cell::Text("synthetic-prefix".into())]),
+            )
+            .unwrap();
+        }
+        assert_eq!(writer.rows(), prefix);
+        assert_eq!(export.rows(), prefix);
+        let error = write_export_event(
+            &mut export,
+            &mut writer,
+            StreamEvent::Row(vec![Cell::Text("synthetic\0rejected".into())]),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(writer.rows(), prefix);
+        if export.rows() != prefix {
+            wrong_counts.push((prefix, export.rows()));
+        }
+        let abandoned = export.abandon();
+        let expected = "INSERT INTO \"snapshot\" (\"value\") VALUES (E'synthetic-prefix');\n"
+            .repeat(usize::try_from(prefix).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&abandoned.partial).unwrap(),
+            expected
+        );
+        assert!(!destination.exists());
+    }
+    assert!(
+        wrong_counts.is_empty(),
+        "rejected runtime rows counted after (accepted-prefix, observed-count): {wrong_counts:?}"
+    );
+}
+
+#[test]
+fn w10_actual_streaming_sink_column_validation_failure_keeps_zero_counts() {
+    use crate::cli::output::{Format, OutputOptions, StreamWriter};
+    let dir = tempfile::tempdir().unwrap();
+    let destination = dir.path().join("columns.sql");
+    let mut export = crate::query::export::Export::create(&destination, false).unwrap();
+    let mut writer = StreamWriter::new(OutputOptions {
+        format: Format::Insert,
+        insert_table: Some("snapshot".into()),
+        ..OutputOptions::default()
+    })
+    .unwrap();
+    let result = write_export_event(
+        &mut export,
+        &mut writer,
+        crate::postgres::StreamEvent::Columns(vec!["same".into(), "same".into()]),
+    );
+    assert!(result.is_err());
+    assert_eq!(writer.rows(), 0);
+    assert_eq!(export.rows(), 0);
+    let abandoned = export.abandon();
+    assert!(std::fs::read(&abandoned.partial).unwrap().is_empty());
+    assert!(!destination.exists());
+}
+
+#[test]
 fn runtime_geometry_first_frame_synchronizes_model_with_the_actual_buffer() {
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8))
         .expect("owned in-memory terminal");

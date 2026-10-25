@@ -181,7 +181,7 @@ pub enum Command {
         ///
         /// The entire result is not retained in memory. Individual values,
         /// rows and driver frames still use memory. An interrupted export
-        /// leaves a `.partial` file and says how many rows reached it.
+        /// leaves a `.partial` file and reports row progress and flush uncertainty.
         #[arg(short = 'o', long, value_name = "PATH")]
         output: Option<PathBuf>,
         /// Replace the output file if it already exists.

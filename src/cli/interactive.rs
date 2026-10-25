@@ -1706,7 +1706,8 @@ pub enum ExportOutcome {
 
 /// Connects, streams one statement into a file, and closes.
 ///
-/// Nothing is buffered: rows go from the wire to the file. Ctrl+C asks the
+/// The complete result is not retained; individual rows and file writes are
+/// buffered. Ctrl+C asks the
 /// server to cancel and leaves the partial file behind, because rows that were
 /// written are worth keeping and a truncated file at the destination would look
 /// complete.
@@ -1736,20 +1737,7 @@ pub async fn export_once_with_parameters(
 
     let outcome = {
         let mut sink = |event: crate::postgres::StreamEvent| -> std::io::Result<()> {
-            match event {
-                crate::postgres::StreamEvent::Columns(columns) => {
-                    let destination = export.writer();
-                    writer.columns(destination, columns)
-                }
-                crate::postgres::StreamEvent::Row(row) => {
-                    let result = {
-                        let destination = export.writer();
-                        writer.row(destination, &row)
-                    };
-                    export.count_row();
-                    result
-                }
-            }
+            write_export_event(&mut export, &mut writer, event)
         };
 
         let stream = async {
@@ -1792,6 +1780,22 @@ pub async fn export_once_with_parameters(
                 .next_action("check free space and permissions"),
             ),
         }),
+    }
+}
+
+/// The streaming sink's actual file/encoder boundary, shared with its tests.
+fn write_export_event(
+    export: &mut crate::query::export::Export,
+    writer: &mut crate::cli::output::StreamWriter,
+    event: crate::postgres::StreamEvent,
+) -> std::io::Result<()> {
+    match event {
+        crate::postgres::StreamEvent::Columns(columns) => writer.columns(export.writer(), columns),
+        crate::postgres::StreamEvent::Row(row) => {
+            writer.row(export.writer(), &row)?;
+            export.count_row();
+            Ok(())
+        }
     }
 }
 

@@ -126,7 +126,7 @@ when the behaviour exists and a test or recorded evidence proves it.
   Identify a real slow-export-sink measurement seam; a slow server is not a slow
   sink. Add implementation tasks only after those contracts agree. A bounded
   notice slice alone cannot close the complete W10 memory requirement.
-- [ ] W10-009 Repair the measured silent buffered-query truncation route:
+- [x] W10-009 Repair the measured silent buffered-query truncation route:
   CSV/TSV/NDJSON/Markdown/INSERT must report retained versus received counts on
   stderr without changing data bytes, success exit codes or automatically
   rerunning SQL. Table/JSON keep their existing in-band counts; streaming file
@@ -178,7 +178,11 @@ nine expected baseline failures and 87 private focused passes. Root then passed
 33 CLI units plus 14 live contracts on each plain and verified-TLS PostgreSQL
 18.6 route (61 integrated focused passes, zero skips). Source was modified
 `871db73`; evidence and patch identities are in verification. The combined
-full gate follows W10-010, so this task remains open. That additional export
+full gate then passed after W10-010 and help integration: 1,315 harness cases/
+1,027 library on macOS 27.0.1 arm64/Homebrew Rust 1.99.1, PostgreSQL 18.6
+plain/TLS; the socket boundary remains a semantic skip. Final log:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+That additional export
 row/flush accounting repair is specified in Feature 021 FR-2112/T023-T025;
 notice and aggregate-memory contracts remain separate W10-008 work.
 
