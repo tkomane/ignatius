@@ -8,12 +8,13 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoint:
-`e9bf817` (complete review admission), after `b4dfdc0` (acquired-mode panic
-restoration). Both passed the combined local gate described below. Resource
-measurement/specification records follow as a documentation-only checkpoint.
-All work remains local. Read
-Git state before taking an assignment; the day-long goal remains active.
+Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoints:
+`918c0b1` (complete export-row progress and flush uncertainty) and `d8a3ac3`
+(reachable help with local input ownership). The combined local verifier passed
+1,315 harness cases/1,027 library; clean `d8a3ac3` also passed fresh complete
+history/source secret scans. Resource contracts and the W10-011 real-writer
+pacing experiment are next. All work remains local. Read Git state before
+taking an assignment; the day-long goal remains active.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
   migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
@@ -116,8 +117,11 @@ increasing notice retention and complete 8 MiB streaming values. Maximum
 observed RSS was 42.67 MiB; this is not a process ceiling. Owned export payloads
 were checked and removed. Source, helpers, manifest and results are retained
 under `/private/tmp/ignatius-w10-007-AFKZrb/`; verification records exact scope.
-W10-008's notice/frame proposal remains unadopted and incomplete for aggregate
-result bounds and slow-sink evidence.
+W10-008 has distinct notice/frame and aggregate-result design inputs, still
+unadopted. W10-011 pins the separate real-writer pacing experiment; the
+PostgreSQL worker is preparing its isolated helpers for primary inspection
+before measurement. The privacy worker is preparing exact notice-report
+consumer/API contracts without changing source. Root owns policy adoption.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
@@ -141,7 +145,8 @@ flushed/unconfirmed reporting. Private proof: six behavioral reds/four controls,
 no native disk-full claim. Exact patch/evidence are retained in
 `/private/tmp/ignatius-w10-010-evidence-20261025.txt`. A separate native peer
 found no blocker and verified all 33 original moved tests. Feature 021
-T023-T025 are checked after the final combined gate. Source awaits local commit.
+T023-T025 are checked after the final combined gate. The change is saved in
+`918c0b1`.
 
 Root also owns Feature015 T042's specified help follow-up. Four behavioral
 regressions reproduced hidden typing/paste/Enter edits and the unreachable final
@@ -151,7 +156,8 @@ passed 20 selected cases after additional peer findings, including actual-cell
 traversal with valid long/Unicode remaps. Native peer re-review found no remaining
 blocker in those fixes. T042 is checked after representative inspection from
 104 styled synthetic buffers and the final full gate. Both workers are idle
-after scoped reviews; root owns the local commits and next resource work.
+after scoped reviews. Help is saved in `d8a3ac3`; root owns the next resource
+contracts and coordinated measurement.
 
 The final full verifier at modified `dd69f66`, including W10-009/010/help, passed
 1,315 harness cases/1,027 library, formatting, lints/API docs and PostgreSQL 18.6
@@ -192,6 +198,12 @@ full hand-use and release acceptance are separate open gates.
 
 ### Current security and governance evidence - 2026-10-25
 
+- Fresh no-network/read-only Gitleaks 8.30.0 scans at clean `d8a3ac3`
+  found no leaks: all 266 saved commits/11.11 MB and a verified immutable
+  424-file tracked-source snapshot/5.14 MB scanned. Manifest tree digest:
+  `284fb26412b54b2c568b1c01626a21d568fc6971fbe050fe088e29428062da4d`.
+  Logs: `/private/tmp/ignatius-gitleaks-d8a3ac3-{history,source}-2026-10-25.log`.
+  These include W10-009/010 and help; later changes need their own boundary.
 - A no-network, read-only Gitleaks 8.30.0 history scan actually scanned 239
   commits/10.46 MB with no leaks. A separate 412-file modified-source snapshot
   (manifest tree digest `93b573dbfaffa6cf35d9b3f1346e362e4f03231fae37581a05942dd6ff6032f6`)
@@ -1968,19 +1980,22 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W10-009:** review/integrate the isolated five-format truncation disclosure
-   repair, preserve stdout/SQL/exit semantics and repeat affected live checks.
+1. **W10-011:** run the pinned real-writer pacing experiment at clean
+   `d8a3ac3`, using the existing Session/StreamWriter/Export library route.
+   Compare complete bytes/counts and fresh-child RSS for unpaced/paced small
+   rows and a large value. This does not prove top-level CLI cancellation.
 2. **W10-008:** finish and pin distinct notice, aggregate retained-result and
    incoming-allocation contracts after the measured baseline. A notice cap
    alone does not solve driver frames or startup backlogs; preserve cancellation,
-   sticky parameter privacy and unknown write outcomes. Measure a real slow sink.
-3. **W05/W07:** bind a fresh Linux socket, pinned compiler and Rust 1.90 repeat
-   to the saved review/panic source, and refresh secret scans. Existing five-major
-   database evidence remains frozen at `e5389f7`; repeat affected server paths
-   when session/protocol code changes. Native Windows/ConPTY stays open.
-4. **Feature 025/015:** specify and repair observed static help clipping before
-   continuing theme/pointer/daily-experience acceptance. Follow authoritative
-   story contracts; mouse capture stays off until pointer behavior/parity exists.
+   sticky parameter privacy and unknown write outcomes. W10-009/010 are saved
+   and complete for their specified local scope.
+3. **W05/W07:** retain the reviewed clean `871db73` Linux pinned/MSRV/socket/PTY
+   evidence and clean `d8a3ac3` secret scans. Existing five-major database evidence
+   remains frozen at `e5389f7`; repeat affected server paths when session/protocol
+   code changes. Native Windows/ConPTY stays open.
+4. **Feature 025/015:** help T042 is implemented and checked. Continue existing
+   theme/pointer/daily-experience contracts after resource work; mouse capture
+   stays off until pointer behavior/parity exists.
 5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence
    when access exists. Synthetic buffers and PTYs do not replace hand use.
 6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open;

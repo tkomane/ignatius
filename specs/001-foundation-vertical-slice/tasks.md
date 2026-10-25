@@ -133,6 +133,12 @@ when the behaviour exists and a test or recorded evidence proves it.
   exports remain complete and separate. Follow the exact `plan.md` policy,
   add failing-first focused/live contracts and correct the CLI's claim that
   streamed values never pass through memory.
+- [ ] W10-011 Measure real consumer backpressure through the actual
+  Session/StreamWriter/Export library path at clean `d8a3ac3`, using the exact
+  pacing/workload/stop contract in `plan.md`. Compare three fresh children per
+  unpaced/paced small-row/large-value case, complete file bytes/digests/counts
+  and peak RSS; preserve the synthetic fixture and remove only owned payloads.
+  Keep this distinct from top-level CLI cancellation, TLS and process ceilings.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion

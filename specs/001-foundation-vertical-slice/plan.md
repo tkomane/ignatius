@@ -262,3 +262,55 @@ environment-only synthetic credentials, no schema/data/lifecycle changes.
 Unit-test only the semantic helper cases needed for ordinals and stderr-write
 failure. No new dependency, flag, config key, exit code or result schema.
 Core paths: `src/cli/mod.rs`, its `tests.rs` sidecar and `tests/cli_contract.rs`.
+
+## W10-011 real-writer pacing experiment - 2026-10-25
+
+Measurement authority only. Use an independent clean clone of exact
+`d8a3ac34ea5a69fb957b04f94c5c90ffa27a1cef`, its own external-SSD target and
+Cargo cache, and isolated configuration/data/absent-passfile routes. Preserve
+all earlier evidence and root's source/build target. Use only the existing
+loopback PostgreSQL 18.6 synthetic fixture without lifecycle/schema/data
+changes. Read authenticated version and `orders` count before/after each probe;
+inject the synthetic credential through child environment, never logs/arguments.
+
+Build the optimized production library and identity binary with the existing
+lockfile and no new dependency or manifest change. Select actual non-test rlibs
+from Cargo JSON artifacts; record source, helper, binary, rlib, lockfile,
+toolchain and platform identities. An external helper uses Session streaming
+and the real `Export::writer()` wrapped by a small synchronous `PacedWrite`,
+then normal flush/sync/rename. Do not first buffer through `execute`. This is
+the public library path, not the top-level CLI `--output` function.
+
+Run three independent fresh child samples of each of these four cases:
+
+| Data | Unpaced control | Paced case |
+| --- | --- | --- |
+| Small rows | 8,192 CSV/no-header records from `SELECT repeat('x', 1023) AS value FROM generate_series(1, 8192)` | Identical SQL and encoding, 1 MiB/s accepted-byte pacing |
+| Large value | One CSV/no-header record from `SELECT repeat('x', 8 * 1024 * 1024) AS value` | Identical SQL and encoding, 1 MiB/s accepted-byte pacing |
+
+Pacing state persists across every write/event for the complete export. Use
+monotonic scheduling with zero initial credit and at most 8 KiB delegated per
+write; account actual accepted bytes and handle short/Interrupted writes
+correctly. Keep instrumentation constant-size, with no per-write log/queue.
+Record first/last accepted-write times, maximum call stall, actual accepted
+bytes, complete accepted rows, final closed-file bytes/digest, outcome, wall
+time and fresh-child peak RSS. Count a row only after complete encoder success,
+following W10-010. Expected files are exactly 8,388,608 and 8,388,609 bytes;
+compare complete synthetic bytes/digests with controls, not only lengths.
+
+One probe at a time, 30-second owned-child deadline/reap, at most 256 MiB task
+output, stop subsequent probes above 512 MiB completed-child peak RSS or any
+fixture version/count change. These are experiment stop thresholds, not enforced
+RAM ceilings. Use fresh per-probe measurement helpers and Darwin byte units;
+report medians/ranges for three samples, not p95. Inspect helpers before running.
+Retain safe metadata/logs and remove only explicitly owned synthetic payloads
+after checking them. Do not touch other clones, containers or cached evidence.
+
+This applies consumer backpressure above the real BufWriter, which can flush
+in bursts; it is not disk-bandwidth or whole-process memory proof. The large
+row retains its own allocations while paced. No cancellation injection is part
+of this experiment: a synchronous sink can block the top-level CLI select's
+signal polling, so do not imply responsive Ctrl+C, server-confirmed cancellation,
+native hand use, TLS, hostile-frame or cross-platform acceptance. No product
+flag, output/schema/SQL/transaction change, retry or automatic rollback is
+introduced. W10-008 remains open for distinct resource contracts.

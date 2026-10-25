@@ -325,6 +325,18 @@ Snapshot: `/private/tmp/ignatius-source-179e0f3-k9di6les/`; manifest tree SHA-25
 Logs: `/private/tmp/ignatius-gitleaks-179e0f3-{history,source}-2026-10-25.log`.
 Later W10-009/010 changes are outside this frozen source boundary.
 
+Fresh complete no-network/read-only Gitleaks 8.30.0 scans at clean
+`d8a3ac34ea5a69fb957b04f94c5c90ffa27a1cef` found no leaks: all 266 saved
+commits/11.11 MB and an immutable 424-file tracked-source snapshot/5.14 MB
+scanned. This includes W10-009/010 and help. Snapshot:
+`/private/tmp/ignatius-source-d8a3ac3-d8g0_s4q/`; manifest tree SHA-256:
+`284fb26412b54b2c568b1c01626a21d568fc6971fbe050fe088e29428062da4d`.
+The verified tracked input totals 5,147,682 bytes; scanner byte counts exclude
+some metadata/ignored content and are recorded separately. Logs:
+`/private/tmp/ignatius-gitleaks-d8a3ac3-{history,source}-2026-10-25.log`.
+Both task-owned scanner containers completed and were removed. Subsequent
+planning records do not expand this frozen source boundary.
+
 Current primary advisories and maintainer releases were checked on 25 October
 2026. Only these five lockfile package versions/checksums changed; existing
 dependency edges, including Windows-specific resolutions, were preserved.
