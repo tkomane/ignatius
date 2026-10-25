@@ -13,7 +13,6 @@ use crate::config::paths::Paths;
 use crate::config::schema::{CURRENT_SCHEMA_VERSION, Config};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 /// Where the loaded configuration came from.
@@ -395,22 +394,7 @@ fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
     let _ = crate::platform::restrict_to_owner(dir);
 
-    let temp = dir.join(format!(
-        ".{}.tmp",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("config")
-    ));
-    {
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(contents.as_bytes())?;
-        file.flush()?;
-        // Durability before the rename, so a crash cannot leave a truncated file.
-        file.sync_all()?;
-    }
-    crate::platform::restrict_to_owner(&temp)?;
-    fs::rename(&temp, path)?;
-    Ok(())
+    crate::platform::write_atomic(path, contents.as_bytes())
 }
 
 /// Builds a timestamped backup path that never overwrites an existing backup.

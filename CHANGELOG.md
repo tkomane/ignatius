@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: saved-query load/save refuses linked or non-regular entries, and
+  listings skip them. Query saves, configuration writes and history trimming
+  use exclusive, owner-only temporary files and synced atomic replacement,
+  preserving unrelated stale files and link targets after interrupted work.
 - Fixed: queued profile failures and initial catalogue reloads retain their
   connection generation. A superseded profile resolver also checks identity
   while holding the reconnect-target lock before installing its target.

@@ -1,6 +1,33 @@
 use super::*;
 use crate::config::schema::{ColorDepthChoice, ThemeChoice};
 
+#[test]
+fn config_save_preserves_a_stale_temporary_from_an_interrupted_write() {
+    let (_dir, paths) = temp_paths();
+    fs::create_dir_all(&paths.config_dir).expect("config directory");
+    let stale = paths.config_dir.join(".config.toml.tmp");
+    fs::write(&stale, "earlier state").expect("stale temporary");
+    save(&paths, &Config::default()).expect("save current state");
+    assert_eq!(fs::read_to_string(stale).unwrap(), "earlier state");
+    assert_eq!(load(&paths).unwrap().config, Config::default());
+}
+
+#[cfg(unix)]
+#[test]
+fn config_save_never_follows_a_stale_temporary_symlink() {
+    use std::os::unix::fs::symlink;
+    let (dir, paths) = temp_paths();
+    fs::create_dir_all(&paths.config_dir).expect("config directory");
+    let outside = dir.path().join("outside");
+    fs::write(&outside, "untouched").expect("outside file");
+    let stale = paths.config_dir.join(".config.toml.tmp");
+    symlink(&outside, &stale).expect("stale link");
+    save(&paths, &Config::default()).expect("save current state");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "untouched");
+    assert!(fs::symlink_metadata(stale).unwrap().is_symlink());
+    assert_eq!(load(&paths).unwrap().config, Config::default());
+}
+
 fn temp_paths() -> (tempfile::TempDir, Paths) {
     let dir = tempfile::tempdir().expect("temp dir");
     let paths = Paths::rooted_at(dir.path());

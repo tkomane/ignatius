@@ -119,6 +119,12 @@ Someone has found the rows they wanted and needs them in a file.
 - **SEC-1001**: No password may be echoed, stored, logged, or printed by any
   `Debug` implementation.
 - **SEC-1002**: A saved query's name may not escape its directory.
+  Existing symbolic-link and non-regular query entries MUST be refused for
+  load/save and omitted from listings. A replacement MUST use an exclusively
+  created, owner-only temporary file beside the destination, sync its contents
+  before rename, and leave the previous query intact on failure. The configured
+  library directory is trusted; defending against another process with the
+  owner's privileges replacing path entries is outside this boundary.
 - **SEC-1003**: A refusal's advice MUST name something the reader can do in the
   surface they are in. Advice naming a flag that does not exist there is the
   same failure as naming a status bar that is not there.
