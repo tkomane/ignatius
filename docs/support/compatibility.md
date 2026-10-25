@@ -669,6 +669,8 @@ not upgrade full Windows restoration or release acceptance; see the
 | macOS on Apple silicon | At `ffb86a1`, local full verification and styled Buffer inspection passed; hosted macOS 26 arm64 tests/startup passed with Rust 1.97.1, including all three T055 regressions. Native visual/full hand-use acceptance remains open. |
 | Windows, GitHub `windows-latest` runner | At `ffb86a1`, Windows Server 2025 build/tests/startup/refusal passed, including all three T055 Buffer regressions. Windows 11/Windows Terminal hand use and full ConPTY restoration remain open; separate PR33's cursor-sensor diagnostic does not close them. |
 | Linux, GitHub `ubuntu-latest` runner | At `ffb86a1`, hosted build/tests/startup, PG14/18 plain/verified-TLS and the real Unix-socket contract passed. Prior `54056c2` separately covers all five PostgreSQL majors. Full-screen hand use and release installation remain open. |
+| Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
+| Any other architecture | Not built anywhere yet |
 
 Historical W07 source `65cf237` separately completed three native ConPTY controls
 and cursor calibration on image `win25-vs2026`/`20261021.278.1`. Its retained
@@ -676,8 +678,6 @@ sensor did not track alternate-VT visibility, so its original Guard cursor
 assertion failed and its later startup smoke step did not run. The unchanged
 assertion remains in the explicit-dispatch ConPTY diagnostic workflow; product
 CI passing does not close native restoration acceptance.
-| Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
-| Any other architecture | Not built anywhere yet |
 
 Claims are stated by runner rather than by target triple, because the runner is
 what was actually exercised. Cross-architecture builds are release work and
