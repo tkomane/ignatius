@@ -91,10 +91,34 @@ CI omission red observed zero of two required routes; plain/verify-full wiring,
 the contract and pinned network-disabled Actionlint now pass. Source freeze:
 `/private/tmp/ignatius-w10-013-fda16f8-TfHH4z/milestone-03/`.
 
-W10-013 remains unchecked pending fresh affected-major/hosted acceptance.
-Next: commit/push through the unchanged pre-push gate, update draft PR32 and
-run the declared five-major workflow. The PostgreSQL lane is separately doing
-read-only incoming-allocation discovery; no frame/startup/RSS bound is adopted.
+Published clean checkpoint `54056c210ddfaa2c6c1629b0e7ab16caa7cbb8e2`
+to the task branch and updated draft PR32. The unchanged installed pre-push
+verifier again passed all 1,431 outer cases/24 summaries with the explicit
+macOS socket skip. Clean source (437 files) and 283 reachable Git revisions
+passed pinned Gitleaks. PR CI `40209111816`, CodeQL `40209111702` and the
+manually dispatched full five-major CI `40209244285` completed for exact
+head `54056c2`. All 35 check runs are now terminal: 33 succeeded and two
+schedule-only fixture-drift checks skipped deliberately. CodeQL's temporary
+missing-Rust state resolved to success with no new alerts. All platform/MSRV
+jobs, actual PG14-18 plain/verify-full and one real Linux socket passed.
+Each major ran 236 selected invocations (1,180 total); these include 60 actual
+new retained-result invocations. Session's 16 selected cases per route include
+two live and 14 pure cases; notice sidecar eight includes six live/two local.
+Runtime server majors are positively asserted; patch versions are immutable
+fixture-image provenance, not printed runtime strings. PR merge ref `dceeaeda`
+has the identical `54056c2` tree `6f32257cb8fbce7c36c6fe0ca50829c9639d878e`.
+Root verified the 11 hashed hosted receipts and full check listing. Evidence:
+`/private/tmp/ignatius-pr32-54056c2-five-major-20261025-Vo7bDf/`.
+W10-013 is checked for this scoped implementation/acceptance. Native Windows
+hand-use and other resource routes remain open. Source publication has not
+merged main or released. The next record commit changes documentation only.
+
+The team separately assessed incoming allocation and next-slice feasibility.
+No frame/startup/RSS bound is adopted: the locked driver has no single public
+all-transport hook; raw ownership also needs cancellation/dial parity. Auto
+background detection needs a truthful late-reply/restoration contract. W07's
+Windows ConPTY automation is being assessed against the existing hosted runner;
+none of those discovery notes changes product behavior or acceptance yet.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
   migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
@@ -217,12 +241,12 @@ backpressure above BufWriter, not CLI cancellation, TLS or process ceilings.
 W10-008's incoming-frame design remains unadopted. Root specified W10-013's
 32-MiB logical retained-data allowance and typed-unavailability/output contract,
 including execution-level disclosure when later nonvisible sets lose data;
-its implementation is serialized after W10-012 integration and remains open.
-A separate pure budget candidate passed 24 standalone arithmetic/admission
+its implementation was serialized after W10-012 and is now accepted above.
+The earlier separate pure budget candidate passed 24 standalone arithmetic/admission
 tests, a non-test warnings-denied build and formatting. The lead verified its
 13 recorded artefacts. It is preparation only, with no Session/UI integration
-or product memory-limit claim; the final ResultSet layout must be measured
-again. Evidence: `/private/tmp/ignatius-w10-013-budget-OJB7A3/`.
+or product memory-limit claim. The final macOS 64-bit ResultSet layout was
+subsequently measured as 104 bytes; the accepted code uses each target's layout. Evidence: `/private/tmp/ignatius-w10-013-budget-OJB7A3/`.
 Root adopted W10-012's complete notice policy under foundation REL-005, with fixed cumulative
 allowances, precision-safe pending counts and explicit acknowledgement. Privacy
 implemented in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
@@ -236,10 +260,10 @@ The frozen adapter/UI/live handoff is now applied in the canonical working
 tree. Root inspected 128 styled buffers, incorporated the bounded final
 runtime/doctor review repair and live CI wiring, and passed the full 1,370-case
 local verifier after its test-only transport correction. Root owns shared
-records/policy; the current committed application checkpoint is `d65024b`.
+records/policy; the notice implementation checkpoint is `d65024b`.
 Representative hosted platform/major acceptance has also passed at `fda16f8`;
-W10-012 is checked. W10-013 has an isolated assignment because source integration
-and its combined local gate are saved. Broader W05/native/release work stays open.
+W10-012 is checked. W10-013 subsequently completed its isolated assignment and
+is accepted at `54056c2` as recorded above. Native/release work stays open.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
@@ -2110,15 +2134,16 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W10-013:** inspect final frozen code/peer/live evidence, integrate the
-   retained-data slice, add both live CI routes and complete focused/full/styled
-   and affected-server acceptance. W10-012 is published with green hosted checks.
+1. **W07:** pin and implement the owned Windows ConPTY capability/guard
+   observation slice. Use actual native modes/cursor/buffer evidence; preserve
+   T055a's remaining mode gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
 2. **W10-008:** retain the separate notice and retained-data contracts; finish
    the incoming-allocation design without claiming driver/startup/RSS ceilings.
    Preserve cancellation, sticky privacy and unknown write outcomes.
-3. **W05/W07:** refresh affected server paths for final W10-013 source. Existing
-   five-major evidence remains frozen at `e5389f7`; published `fda16f8` adds hosted
-   PG14/18 and a bounded local PG15 smoke. Native Windows/ConPTY stays open.
+3. **W05/W07:** retain exact `54056c2` pinned five-major/plain/TLS/socket
+   acceptance, distinct from older frozen measurements. Repeat affected server
+   paths only after Session/protocol changes; Windows ConPTY and hand use remain
+   separately scoped.
 4. **Feature 025/015:** continue theme/pointer/daily-experience contracts after
    resource work; mouse capture stays off until pointer behavior/parity exists.
 5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence when

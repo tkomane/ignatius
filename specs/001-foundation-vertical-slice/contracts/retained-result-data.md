@@ -1,7 +1,7 @@
 # Contract: Execution-wide retained-result data allowance
 
 Specified and implemented locally on 25 October 2026, Africa/Johannesburg.
-W10-013 under foundation REL-002 records the remaining acceptance gates;
+W10-013 under foundation REL-002 records the implementation and acceptance scope;
 local verification is recorded in `docs/operations/verification.md`.
 W10-007 showed that row caps do not bound a single earlier driver allocation;
 W10-011 distinguished small-row backpressure from a large value's allocations.

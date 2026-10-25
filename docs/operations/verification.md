@@ -180,7 +180,47 @@ source-input digest
 `bf6f89ed7632919c050b1d0f2a8d3bcf2b6b1d6dc1665d209daea77bd662fc61`,
 non-test library SHA-256
 `8e81a2409e6c73e04326e3847d5c6549b72816042b228f3ac3b575dba0196575`.
-Fresh affected-major/hosted acceptance and clean publication are still pending.
+Clean publication checkpoint `54056c210ddfaa2c6c1629b0e7ab16caa7cbb8e2`
+passed the unchanged installed pre-push full gate again (1,431 outer cases/24
+summaries, explicit macOS socket skip). Successful push receipt/log:
+`/private/tmp/ignatius-push-54056c2-https-retry-20261025.{json,log}`.
+The exact clean 437-file source snapshot and 283 reachable Git revisions passed
+pinned Gitleaks. Snapshot `/private/tmp/ignatius-retained-publish-scan-avrkk8wv/`
+is byte-identical to clean `54056c2`, tree digest
+`df4280f1b71633407bdb106cc2706fdfd59ce24c810b8a5e9de6d2b08bc64717`.
+Logs: `/private/tmp/ignatius-gitleaks-retained-{source,history}-20261025.log`.
+Fresh PR CI `40209111816`, CodeQL `40209111702` and manual five-major CI
+`40209244285` completed for that exact head. All 35 check runs are terminal:
+33 success and two expected schedule-only fixture-drift skips. All platform,
+Rust1.90, lints/docs/dependencies/secrets/workflow/drift jobs and three CodeQL
+analyses passed. Built-in CodeQL resolved its temporary missing-Rust neutral
+state to success with no new alerts. No failure/cancellation/pending check remains.
+
+All PostgreSQL 14-18 jobs ran 236 selected invocations per major, 1,180 total.
+These include 60 actual retained-result executions: all six new cases once on
+plain and once on verify-full for every major. Session 16 per route comprises
+two live parameter-gate and 14 pure cases, including seven ingestion helpers;
+notice sidecar eight comprises six live lifecycle and two local cases. All ten
+notice integration cases per route passed. These counts overlap as stated;
+1,180 is not a live-test count. Supplied fixture environment plus positive
+major/orders/transport assertions prove admission. The complete logs contain
+no semantic-skip line. They do not print server patch versions: those remain
+immutable fixture-image provenance. The actual Linux socket contract ran once
+without skip and asserted socket transport plus SELECT1 result.
+
+Each PG/socket job used active Rust1.97.1, compiler
+`8bab26f4f68e0e26f0bb7960be334d5b520ea452`, x86_64 Linux, debug/unoptimized.
+Root verified all 11 compact receipt hashes and the independent source audit at
+`/private/tmp/ignatius-pr32-54056c2-five-major-20261025-Vo7bDf/`, manifest
+`b66c1e33cab5e8e040795fb927abc7cbb3128b42a3e643d6a1ed8f0a7cbf4c27`.
+Complete root check listing:
+`/private/tmp/ignatius-pr32-54056c2-all-checks-20261025.json`.
+PR checkout `dceeaeda771098248d55c2094193f7d6c691e696` and head `54056c2`
+have identical tree `6f32257cb8fbce7c36c6fe0ca50829c9639d878e`; manual CI
+checks out exact head. This is source-tree equivalence, not packaged-candidate
+acceptance. Platform DB early returns, schedule-only upstream comparison,
+native hand-use and process-memory ceilings remain separate. W10-013 closes
+for its scoped contract; no main merge or release follows from this evidence.
 
 ## The full command
 

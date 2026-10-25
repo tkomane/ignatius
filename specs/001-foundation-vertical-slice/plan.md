@@ -396,5 +396,7 @@ UI-only inner-pane warning repair followed; `docs/operations/verification.md`
 separates measured02 source from final03. Both new CI transport routes passed
 the missing-wiring regression and pinned Actionlint. The canonical full gate
 passed 1,431 outer cases/1,127 library across 24 summaries with the explicit
-macOS socket skip. Root captured 112 styled buffers and inspected 16 frame images; affected-major/hosted
-acceptance remains open. See verification for exact source/build boundaries.
+macOS socket skip. Root captured 112 styled buffers and inspected 16 frame
+images. Clean `54056c2` then passed pinned/MSRV/platform, PostgreSQL 14-18
+plain/verify-full, actual socket and CodeQL acceptance. See verification for
+exact source/build boundaries and live-versus-pure counts.

@@ -160,7 +160,7 @@ when the behaviour exists and a test or recorded evidence proves it.
   PG14/18 plain+verify-full notices/runtime/session paths and the real socket
   contract. Native hand-use, broader W05 matrix and other resource routes remain
   separate. External model review was owner-skipped; native peer review passed.
-- [ ] W10-013 After W10-012 source integration, implement REL-002's complete
+- [x] W10-013 After W10-012 source integration, implement REL-002's complete
   execution-wide retained-data allowance under `contracts/retained-result-data.md`:
   checked whole-description/whole-row admission, cumulative prefix closure,
   truthful typed description unavailability, compatible known data/output,
@@ -171,7 +171,11 @@ when the behaviour exists and a test or recorded evidence proves it.
   cases/1,127 library and 112 styled-buffer capture with eight contact sheets
   inspected. Milestone02's unchanged core/output passed 12 plain/verify-full
   cases and 24 CLI health children on PG18.6. Affected-major/hosted acceptance
-  remains open; the macOS full-gate socket case is a semantic skip.
+  passed at clean `54056c2`: all PostgreSQL 14-18 plain/verify-full routes,
+  60 new fixture-backed cases within 1,180 selected invocations, pinned Rust
+  1.97.1, all platform/MSRV jobs, real Linux socket and CodeQL. The macOS
+  full-gate socket case is still a semantic skip. Native hand-use, incoming
+  allocation and whole-process bounds remain separate from this closed slice.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
