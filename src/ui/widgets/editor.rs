@@ -351,7 +351,12 @@ pub(crate) fn render_editor(
             continue;
         }
         let text_x = inner.x + u16::try_from(gutter + 2).unwrap_or(0);
-        let line = view::LineView::new(source);
+        let line = view::LineView::project(
+            source,
+            viewport.offset,
+            capacity,
+            (number == cursor_line).then_some(cursor),
+        );
         for unit in &line.units {
             let is_cursor = focused && number == cursor_line && unit.source.contains(&cursor);
             let in_error_token = error_location

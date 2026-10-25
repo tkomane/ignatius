@@ -32,8 +32,23 @@ can clip its caret at the right edge. FR-2529 and the dated presentation
 contract now specify a shared horizontal view for drawing, completion and hit
 mapping. Its implementation and independent-review correction passed 78 widget
 and 114 layout cases, the full 1,515-case local gate and the same-width owned
-PTY repeat on `codex/editor-caret-2026-10-25`, based on PR35. Publication/hosted
-acceptance and native appearance/hand use remain separate next steps.
+PTY repeat on `codex/editor-caret-2026-10-25`, based on PR35. Published `14d18ad`
+in draft PR36 after the normal pre-push repeat and clean-source/history scans.
+Hosted acceptance passed 13 executable jobs with one intentional scheduled
+fixture skip; all 18 new cases ran on Linux/macOS/Windows. Native appearance/
+hand use remain separate. A follow-up W10 diagnostic found a material local
+test-profile long-line allocation/latency increase. FR-2530/T059 now specifies
+bounded visible/caret metadata while preserving the accepted cells; isolated
+implementation on `codex/bounded-editor-view-2026-10-25` passed local independent
+review, 83 widget/114 layout cases, the full 1,520-case gate, exact 51,081-cell
+parity and an owned-PTY control. Final 1 MiB diagnostic medians improve to
+138.342 ms/17.063 MiB RSS. Published clean `d2edce1` in draft PR37 after normal
+pre-push/source-history scanning. Hosted acceptance passed all 13 executable
+jobs with one intentional scheduled-fixture skip; all five T059 and 18 T058
+cases execute on Linux/macOS/Windows. PG14/18/socket, policy and MSRV are also
+accepted for this product source. The small diagnostic is not release-build
+p95 or a process-memory ceiling. The final documentation checkpoint preserves
+accepted product-source bytes and points to PR37 for current-head checks.
 
 Read-only readiness reviews at `d92c416` also bound the next assignments:
 

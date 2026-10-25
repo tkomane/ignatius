@@ -80,3 +80,85 @@ fn caret_line_tracks_utf8_relative_offset_and_empty_trailing_line() {
     editor.set_cursor(editor.text().len());
     assert_eq!(caret_line(&editor), ("abc", 3));
 }
+
+#[test]
+fn production_projection_retains_only_visible_units_plus_caret() {
+    let text = "x".repeat(1_048_576);
+    let capacity = 64;
+    let line = LineView::project(&text, 0, capacity, Some(text.len() - 1));
+    assert!(
+        line.units.len() <= capacity + 1,
+        "off-screen source units must not all remain allocated: {}",
+        line.units.len()
+    );
+}
+
+#[test]
+fn projected_units_keep_whole_provenance_width_and_far_caret() {
+    let text = "界\tX".repeat(1000);
+    for (offset, capacity) in [(1, 1), (2, 3), (100, 0), (4998, 4)] {
+        let line = LineView::project(&text, offset, capacity, Some(text.len() - 1));
+        assert!(line.units.len() <= capacity + 1);
+        assert_eq!(line.width, 5000);
+        assert_eq!(line.end_column, 3001);
+        for unit in &line.units {
+            assert!(
+                unit.source.contains(&(text.len() - 1))
+                    || (unit.width > 0
+                        && unit.cell < offset + capacity
+                        && offset < unit.cell + unit.width)
+            );
+        }
+    }
+}
+
+#[test]
+fn zero_width_offscreen_units_are_not_retained_unless_they_own_caret() {
+    let text = "\u{301}".repeat(70_000);
+    let none = LineView::project(&text, 0, 1, None);
+    assert!(none.units.is_empty());
+    let caret = LineView::project(&text, 0, 1, Some(2));
+    assert_eq!(caret.units.len(), 1);
+    assert_eq!(caret.units[0].source, 0..text.len());
+}
+
+#[test]
+fn unchanged_printable_ascii_matches_public_renderer_graphemes() {
+    let text = (b' '..=b'~').map(char::from).collect::<String>();
+    let span = Span::raw(&text);
+    let expected = span.styled_graphemes(Style::default()).collect::<Vec<_>>();
+    let actual = LineView::project(&text, 0, usize::MAX, None);
+    assert_eq!(actual.units.len(), expected.len());
+    for (byte, (unit, grapheme)) in actual.units.iter().zip(expected).enumerate() {
+        assert_eq!(unit.text, grapheme.symbol);
+        assert_eq!(unit.source, byte..byte + 1);
+        assert_eq!((unit.column, unit.cell, unit.width), (byte + 1, byte, 1));
+    }
+}
+
+#[test]
+fn real_controls_del_and_literal_escapes_preserve_sanitizer_boundaries() {
+    let controls = (0u8..=31)
+        .chain(std::iter::once(127))
+        .map(char::from)
+        .collect::<String>();
+    let actual = LineView::project(&controls, 0, usize::MAX, None);
+    assert_eq!(actual.units.len(), 33);
+    for (byte, unit) in actual.units.iter().enumerate() {
+        assert_eq!(unit.source, byte..byte + 1);
+        assert_eq!(unit.text, sanitize_for_display(&controls[byte..byte + 1]));
+        assert!(unit.width > 1);
+    }
+    let literal = r"\t\x7F\u{009B}";
+    let actual = LineView::project(literal, 0, usize::MAX, None);
+    assert_eq!(actual.units.len(), literal.len());
+    assert!(actual.units.iter().all(|unit| unit.width == 1));
+    assert_eq!(
+        actual
+            .units
+            .iter()
+            .map(|unit| unit.text.as_ref())
+            .collect::<String>(),
+        literal
+    );
+}

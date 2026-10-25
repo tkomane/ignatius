@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: long SQL lines retain only visible/caret display metadata, reducing
+  transient memory and render work while preserving the same SQL, gutter,
+  selection and completion geometry.
 - Fixed: long SQL lines keep the editor caret in view, with a fixed gutter
   and matching completion/hit geometry for wide, combining and escaped-control
   text. Horizontal viewing preserves source SQL, scalar columns and undo state.

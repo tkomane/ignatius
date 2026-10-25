@@ -312,7 +312,8 @@ fn editor_region(model: &Model, editor: Rect, column: u16, row: u16) -> Option<R
     {
         viewport.caret_column
     } else {
-        editor::view::LineView::new(line_text).column_at(viewport.offset.saturating_add(cell))
+        editor::view::LineView::project(line_text, viewport.offset.saturating_add(cell), 1, None)
+            .column_at(viewport.offset.saturating_add(cell))
     };
     Some(Region::EditorText { line, column })
 }
