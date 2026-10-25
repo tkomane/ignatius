@@ -296,6 +296,37 @@ This frozen source excludes W10-009/010 and later help work. Uncaught fatal
 panic/abort, latest-binary steady-state SIGTERM, native visual/hand use, Windows,
 hosted and a repeated major/TLS matrix remain separate.
 
+## W07-063 standalone uncaught panic process - 2026-10-25
+
+Eight standalone Rust main children ran outside libtest and without
+catch_unwind, against the actual production TerminalGuard/panic hook. Each
+acquired one of all eight mouse/paste/screen combinations, observed raw=true,
+then panicked with a fixed synthetic payload. All exited 101 with no five-second
+deadline or one-MiB capture stop. The inherited observing hook saw raw=false
+and actual canonical/echo/signal flags before delegating to the default hook;
+reverse cleanup sequences preceded that output and preserved the payload.
+
+Every immediate post-exit full stty comparison differed only in Darwin PENDIN,
+verified against the runtime's actual termios.PENDIN constant. Normal synthetic
+line input/read on the same PTY cleared it, after which every full stty snapshot
+matched exactly. No post-acquisition stty reset was used. All PTYs/children
+closed; no database, real profile, native app or OS permission was involved.
+
+Evidence/helper/manifest/transcripts: `/private/tmp/ignatius-w07-063-u329k7er/`.
+Manifest SHA-256: `883b1467c09cdac27e1e7f95659c96d1254a3f1c62e96c246838985e94bfba4b`;
+results SHA-256: `0003dc8da237061f0aa6fd4ca41db9d5bb9fe2d83d3f81b249408cd0b7a456c8`.
+Production-library rlib SHA-256:
+`2c3209ed13e67879d7e951311655752a471f25a09e89eac85c910a258d9a6633`.
+The lead inspected helper/driver before running and checked all transcript
+hashes and PENDIN-only deltas. Build base `74eb1553c41763fb379fdcef4275a34ebddd0bc0`
+had only recorded root-owned foundation plan/tasks changes; application inputs
+equal clean `d8a3ac3`. Actual macOS 27.0.1 arm64/Homebrew Rust 1.99.1, debug
+non-test library and helper. No production source changed; the 1,315-case
+application verifier remains its separately recorded run, not repeated here.
+This closes only W07-063's library-main process observation, not a full injected
+application crash, panic=abort, forced restore I/O failure, native appearance/
+hand use, Linux or Windows acceptance.
+
 ## Local security maintenance - 2026-10-25
 
 The first clean `e70cddf` repeat found one confirmed scanner false positive:

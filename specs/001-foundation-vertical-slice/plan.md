@@ -314,3 +314,31 @@ signal polling, so do not imply responsive Ctrl+C, server-confirmed cancellation
 native hand use, TLS, hostile-frame or cross-platform acceptance. No product
 flag, output/schema/SQL/transaction change, retry or automatic rollback is
 introduced. W10-008 remains open for distinct resource contracts.
+
+
+## W07-063 uncaught panic library-process observation - 2026-10-25
+
+Freeze application inputs from clean `74eb155` (equal to `d8a3ac3`) and use
+the actual Cargo JSON-selected non-test rlib and source/helper/toolchain digests.
+Record any root-owned planning-only diff at build time rather than claiming
+a clean build identity. Compile a standalone Rust main that acquires the real TerminalGuard,
+installs the production panic hook over an observing previous hook that delegates
+to the default hook, and panics without catch_unwind. No application panic flag,
+new dependency, unsafe FFI, database connection or real profile is introduced.
+
+Run one child per eight mouse/paste/alternate-screen combinations, each in an
+owned synthetic PTY with canonical state established/read beforehand, cleared
+inherited environment, private config/data and an absent passfile. Record raw
+state during acquisition, raw/canonical/echo/signal flags before previous-hook
+details, process exit and post-exit terminal flags. Require ordinary panic exit,
+restoration sequences matching acquired options in reverse order before the
+previous/default hook output, original fixed synthetic panic payload and actual
+post-exit flag recovery. Do not count a libtest-caught panic as this observation.
+
+Inspect the helper/driver before execution. Keep a five-second per-child owned
+deadline/kill/reap and a one-MiB transcript cap; never signal an unowned PID or
+leave a detached watcher. Retain only safe small synthetic transcripts/metadata.
+A Darwin PENDIN-only change must be recorded and resolved only by the existing
+normal same-PTY input recovery method if needed, not hidden by stty reset.
+This proves the library guard/hook process path, not an injected production-app
+crash, panic=abort, forced restore failure, native screenshot/hand use or Windows.

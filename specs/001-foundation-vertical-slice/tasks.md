@@ -114,6 +114,12 @@ when the behaviour exists and a test or recorded evidence proves it.
   hook/payload contract and all query behavior unchanged. Use no production
   panic flag, unsafe FFI, real profile, database write or signal to an unowned
   PID. Record exactly which modes/paths were observed; Windows stays separate.
+- [x] W07-063 Observe the production guard/hook during an uncaught panic in
+  a standalone owned Unix library-helper process, outside libtest and without
+  catch_unwind. Check all eight acquired mode combinations, before/after actual
+  PTY flags and restoration before previous/default hook details. Follow the
+  bounded `plan.md` probe; distinguish this from a full product crash, abort,
+  Windows or native visual acceptance.
 - [x] W10-007 Baseline oversized-value and notice memory at clean local
   `24db9c5` using the bounded experiment in `plan.md`, actual optimized binary
   identity, isolated state and the existing synthetic PostgreSQL fixture.
@@ -167,6 +173,18 @@ previous hook; the original payload survived. Logs/manifest/patch:
 patch; focused repeats and the combined full gate passed, recorded in
 verification. This proves guard/hook behavior, not a full uncaught product
 crash, forced OS-device failure, native visual acceptance or Windows behavior.
+
+W07-063 evidence on 2026-10-25: eight standalone Rust main processes outside
+libtest/catch_unwind linked the production guard/hook and all exited 101 after
+restoring acquired modes before previous/default panic output. Actual raw,
+canonical, echo and signal flags were checked. Immediate Darwin flags differed
+only by PENDIN; normal same-PTY line input cleared it and exact full flags then
+matched, without reset. Root inspected helpers and all transcript digests.
+Evidence: `/private/tmp/ignatius-w07-063-u329k7er/`; manifest SHA-256
+`883b1467c09cdac27e1e7f95659c96d1254a3f1c62e96c246838985e94bfba4b`.
+Application source equals clean `d8a3ac3`; build base `74eb155` had only the
+recorded planning plan/tasks diff. This is library-main uncaught-unwind proof,
+not a full injected product crash, abort, native hand use or Windows.
 
 W10-007 evidence on 2026-10-25: clean `24db9c5`, optimized local release,
 Homebrew Rust 1.99.1, macOS 27.0.1 arm64, Apple M2 Max/32 GiB and PostgreSQL

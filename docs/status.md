@@ -110,6 +110,15 @@ source/logs/manifest are under `/private/tmp/ignatius-w07-062-w2iPKH/`.
 The combined full verifier passed and W07-062 is checked for that exact scope;
 latest-source Linux/Windows, pinned/MSRV and native visuals remain separate.
 
+W07-063 now observes uncaught unwinding outside libtest: all eight standalone
+production-library guard/hook processes restored actual raw/canonical/echo/
+signal state before previous/default panic output and exited 101. Immediate
+Darwin PENDIN cleared after normal same-PTY line input, then full flags matched
+exactly without reset. Evidence: `/private/tmp/ignatius-w07-063-u329k7er/`.
+Only planning docs changed at the recorded `74eb155` build; application inputs
+equal `d8a3ac3`. This is not a full injected application crash, abort, native
+visual or Windows claim. Product source and the prior full-gate count unchanged.
+
 W10-007's reviewed clean-`24db9c5` optimized-binary experiment completed 27
 measured CLI children and 28 authenticated health/count checks without changing
 the fixture. Three samples per case show pre-retention value allocation,
