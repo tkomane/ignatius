@@ -248,3 +248,16 @@ types/notices, remapped hint bounds and minimum-size prompt visibility. Full
 verification and rendered inspection follow focused checks. Keep T038 open
 until its complete density test set is proven, and keep drag acceptance open
 until T035.
+
+### Selected-field correction - 2026-10-25
+
+Before manual custom themes, T055 repairs the actual expanded Results renderer's
+child-span foreground precedence. A source-bound actual Buffer probe found a
+selected HighContrast header white on white and NULL grey on white, while the
+Selection style specifies Surface ink. The worker owns only the existing
+Results renderer and its sidecar tests; root owns contract/records/integration.
+Keep the original red and prove the real renderer's selected/unselected cells,
+semantic modifiers and depth/glyph/density boundaries before full and rendered
+review. No RGB palette, custom parsing, runtime action, geometry or mouse change
+is included. W07's independently measured alternate-buffer cursor sensor gap
+remains open and is not resolved by this UI correction.

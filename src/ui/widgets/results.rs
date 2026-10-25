@@ -449,7 +449,13 @@ fn render_expanded_row(
             ),
         ]);
         if chosen {
-            line = line.style(theme.style(Token::Selection));
+            let selection = theme.style(Token::Selection);
+            // Child ink overrides a Line's ink, so apply selection last while
+            // retaining the header, focus and NULL emphasis modifiers.
+            for span in &mut line.spans {
+                span.style = span.style.patch(selection);
+            }
+            line = line.style(selection);
         }
         lines.push(line);
     }

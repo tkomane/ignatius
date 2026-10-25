@@ -20,6 +20,24 @@ with thousands separated by commas exactly as existing counts do:
 - The existing filter count line and truncation facts remain; this line
   extends them and never contradicts them.
 
+## Selected expanded fields - correction specified 2026-10-25
+
+In the existing expanded-row Results view, the selected field's header,
+selection arrow and value use the active Selection foreground and background
+at truecolor and 256-colour depth. Explicit child-span Header, Focus, Text or
+NullValue colours must not override that selected ink. Preserve their existing
+semantic modifiers, the selection arrow, field text and NULL/empty/literal-NULL
+distinction. An unselected field keeps its ordinary token styling.
+
+At basic16 and colour-off depths, retain the existing reversed selection and
+colour-depth rules; do not introduce a painted background or colour under
+colour-off. Selection movement, scrolling, source identity and all model state
+remain unchanged. This corrects a reproduced span-composition defect, without
+changing palette RGB values, geometry, bindings or the custom-theme contract.
+Prove actual rendered Buffer cells across the three built-ins, four depths,
+three glyph tiers and both densities. A palette contrast calculation alone
+does not prove the composed renderer.
+
 ## Sort
 
 - Cycle per column: ascending, descending, then original server order.

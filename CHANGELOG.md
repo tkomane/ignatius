@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: selected fields in expanded Results keep readable text on the selection
+  fill, including headers and NULL markers. Semantic emphasis and colour-off
+  selection are preserved.
 - Improved: buffered executions share a 32 MiB logical occupied-result-data
   allowance across result sets, alongside the existing row and per-cell caps.
   Complete retained prefixes and unavailable descriptions are reported without

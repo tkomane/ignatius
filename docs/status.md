@@ -8,7 +8,36 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
+Active branch: `codex/selected-field-contrast-2026-10-25`, isolated from exact
+reviewed D6 in PR32. Feature025 T055 corrects an actual expanded Results
+selection defect before manual custom themes: child Header/NullValue colours
+override Selection ink, producing white-on-white HighContrast text. Root
+verified all 16 immutable reproduction artifacts. The worker owns only
+`src/ui/widgets/results.rs` and its sidecar; contracts/spec/plan/tasks pin the
+correction and 72 presentation combinations before implementation. No palette,
+configuration, runtime action or geometry change is included. The exact two-file
+correction is integrated and independently reviewed. Root verified all 76 frozen
+artifacts; all eight original Results tests remain byte-identical. Focused
+Results 11/theme 20 passed, with the maintained actual-Buffer red preserved.
+Root inspected all 12 before/after synthetic rasters; only selected painted
+foregrounds change. These captures do not prove native terminal appearance.
+The complete local verifier passed **1,434 outer harness cases, 1,130 library
+cases and 24 summaries**, formatting, warnings-denied lints/API docs and actual
+PostgreSQL 18.6 plain/TLS. The first run's six TLS failures came from missing
+ignored synthetic fixture files in this new worktree; all affected cases passed
+after fixture wiring and a full repeat. The macOS socket case remains skipped.
+Source publication and hosted acceptance are pending. Local receipt:
+`/private/tmp/ignatius-t055-root-integration-20261025.json`.
+Repro: `/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`.
+
+Windows work continues separately in [draft PR33](https://github.com/tkomane/ignatius/pull/33):
+at `65cf237`, calibration follows native setters/main VT but cannot track
+alternate-VT visibility; the unchanged original cursor capability still fails.
+That harness is not part of this sibling branch. Parent PR32's protected-main
+merge still needs the already-requested specific owner approval. Nothing has
+merged or released. Earlier source-bound checkpoints follow.
+
+Parent branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
 `d65024b`. W10-012's integrated notice
 implementation passed the complete local verifier: **1,370 outer harness cases,
 1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and

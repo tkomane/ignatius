@@ -1,5 +1,52 @@
 # Verification
 
+## Expanded Results selection correction - 2026-10-25
+
+Feature025 T055 starts from reviewed D6 on its own sibling branch. The actual
+expanded Results renderer at equivalent D6/7d/65 production bytes produced a
+selected HighContrast header foreground/background `#ffffff/#ffffff` and NULL
+`#d0d0d0/#ffffff`; Selection specifies Surface ink `#000000` on that fill.
+Positive row/content/background and unselected controls precede the meaningful
+actual-Buffer failure. Root checked all 16 immutable reproduction artifacts;
+manifest SHA-256 `a5c5e55a6cdfaadb040adda91d803fe545bd0b901f487d3220a178b24845f920`.
+Evidence: `/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`.
+
+The scoped contract requires final Selection precedence on header/arrow/value
+spans, preserving semantic modifiers, ordinary unselected colours and existing
+basic16/colour-off reversed selection. Three built-ins, four depths, three glyph
+tiers and both densities form 72 actual-renderer combinations. The two-file
+correction is integrated byte-for-byte from immutable freeze01 (76 artifacts
+verified), manifest SHA-256
+`2d2f4b9608e87cdbc9161046f375d9f90361dca8b2a858a449a450f661c1da4d`.
+All eight original Results tests are byte-identical; 11 Results and 20 theme
+tests passed. Three maintained tests cover actual ink/modifiers, unselected and
+colour-off controls, and NULL/empty/literal-NULL distinctions. The maintained
+failing-first Header assertion is separate from the initial probe's qualified
+setup correction. Independent review found no blocker:
+`/private/tmp/ignatius-t055-peer-review-yojn9ktl/REVIEW.md`, SHA-256
+`2ee03e1b664aeea1feb183d0af235eaad97a7c28b00e8e6a77416bb7d86f50f4`.
+
+Root inspected the contact sheet's 12 before/after synthetic rasters and verified
+their source/JSON capture identities. Only selected painted foregrounds change;
+symbols, positions, backgrounds and modifiers match. Basic16/None/explicit
+colour-off scenes are byte-identical. Font, indexed/reset colour and DIM
+approximations remain explicit; this is not native terminal appearance evidence.
+
+The first full gate preserved six TLS failures: this new worktree lacked the
+ignored disposable CA/client certificate/key files used by the existing TLS
+container. Root inspected the read-only mount and copied only those three
+synthetic files, keeping the key 0600 and directory 0700. No container, test or
+product-policy change occurred. The full repeat passed **1,434 outer harness
+cases, 1,130 library and 24 summaries**, all six executed gates and actual
+PostgreSQL 18.6 plain/TLS. All six affected cases now pass. The macOS socket case
+remains a semantic skip. Actual local tools: macOS 27.0.1 arm64, Rust/Cargo 1.99.1;
+hosted pinned/MSRV/platform acceptance is pending. Repeat log SHA-256
+`dab6ff370743602b9dbdb18298c96d877f2b43e74d2a8cd6dfe8b13675f42fa3`.
+Logs: `/private/tmp/ignatius-t055-integrated-verify-20261025.log` and
+`/private/tmp/ignatius-t055-integrated-verify-repeat-20261025.log`; root receipt
+`/private/tmp/ignatius-t055-root-integration-20261025.json`.
+This is neither a palette correction nor broader US5/Windows acceptance.
+
 ## W10-012 integrated local verification - 2026-10-25
 
 The frozen isolated handoff passed 750 focused library cases and 32 actual
