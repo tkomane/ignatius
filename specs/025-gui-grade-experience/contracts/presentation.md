@@ -121,6 +121,40 @@ consumed by widgets as data:
 No other spacing varies by density. Unknown values are refused by the
 existing configuration rule (report before the terminal is taken, exit 3).
 
+### Density implementation clarification - 2026-10-25
+
+- The 6/4 hint bound supersedes Feature 015's original five-action bound.
+  Prioritisation, availability, active keys and complete-pair width fitting
+  remain unchanged. Apply the cap after filtering, using the presentation
+  actually supplied to the renderer. Live paging/hit testing uses the model's
+  presentation snapshot; explicit rendering overrides control their own
+  spacing.
+- Title padding applies to the bordered pane and overlay title helpers,
+  including Plan, error, failed-transaction and empty titles. It does not alter
+  capsule padding, tree indentation or the safety caption's existing corner
+  inset. Remove only caller-owned decorative edge padding; preserve whitespace
+  belonging to an object name or other title content, without blanket trimming.
+- Compact removes only an empty toolbar breathing row. A cell-update,
+  clipboard, refresh or grid-state notice retains one visible row in either
+  density. Grid prelude height is `4 + type_row + max(notice_row, blank_rows)`;
+  rendering, hit mapping, viewport wording and paging share that calculation.
+- Overlay margin is preferred clearance outside the outer border on each
+  axis, within existing family maximum dimensions and anchoring. Reduce that
+  clearance toward zero only when necessary to preserve a family's existing
+  usable interaction rows; never hide a previously visible password/input row
+  merely to satisfy the preferred margin. At 40x8, a short password prompt
+  still shows its masked field and accept/cancel guidance in both densities.
+  Completion keeps its caret anchor and existing five-row minimum when space
+  permits. Existing too-small behavior remains; report any newly exposed
+  confirmation-disclosure gap rather than silently changing authorization.
+- Plan occupies Results and receives no overlay margin. All actual overlay
+  families use shared boxes for drawing and hit/viewport calculations. Column
+  geometry retains its existing one-cell padding without adding another pair.
+- Only the optional `ui.density` setting and its template default are added.
+  Existing constructors remain comfortable by default; configuration selects
+  density at startup. There is no new toggle action, CLI flag, doctor field,
+  theme value, third density or mouse-capture change in T040.
+
 ## Doctor reporting
 
 `ignatius doctor` reports, in this order, beside the existing detections:

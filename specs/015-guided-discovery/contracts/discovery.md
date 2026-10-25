@@ -15,7 +15,9 @@ history, export, and connection contracts remain authoritative.
 ## Contextual hints
 
 - The footer changes when focus changes between Editor, Results, and Objects.
-- At most five contextual hints are shown.
+- At most six comfortable-density or four compact-density hints are shown,
+  superseding the original five-action bound under Feature 025's 2026-10-25
+  presentation clarification.
 - Each shown key is resolved by the active keymap, including configured
   replacements.
 - Hints include action words and retain meaning without colour or Unicode.

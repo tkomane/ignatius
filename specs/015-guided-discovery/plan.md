@@ -36,7 +36,7 @@ effects, and no onboarding state is persisted.
 
 **Performance Goals**: Derive and render discovery copy during the existing frame with no database, filesystem, subprocess, or network work; palette search remains bounded by the existing visible list
 
-**Constraints**: At most five contextual hints; active configured keys only; truthful prerequisites; no automatic SQL, metadata reload, file, history, clipboard, telemetry, or new persisted state effects
+**Constraints**: The original five-hint bound is superseded by Feature 025's six comfortable/four compact density cap; active configured keys only; truthful prerequisites; no automatic SQL, metadata reload, file, history, clipboard, telemetry, or new persisted state effects
 
 **Scale/Scope**: Existing Editor, Results, Objects, empty/blocked states, general command palette, and related documentation; no new database capability or machine-output change
 
