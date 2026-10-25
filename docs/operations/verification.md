@@ -86,6 +86,24 @@ this local run does not replace pinned-toolchain, Rust 1.90, Windows, hosted CI,
 different-family review or packaged-candidate evidence. Log:
 `/private/tmp/ignatius-verify-2026-10-25-wave2-security.log`.
 
+## Export-interruption harness repair - 2026-10-25
+
+The PostgreSQL 18.6 matrix exposed a harness timing assumption: exporting four
+million rows completed before the test's fixed 2.5-second interrupt. The child
+correctly reported a completed export with exit zero; the test expected nine.
+That failed run is retained in
+`/private/tmp/ignatius-matrix-2026-10-25-18-plain-and-transport.log`.
+
+The test now emits at most 1,000 prefix rows, blocks the tail in PostgreSQL,
+waits for more than 8 KiB of actual partial-file output with a ten-second
+deadline and early-child-exit detection, then sends SIGINT. It checks exit nine,
+the incomplete wording, absence of the complete destination and retained data
+rows rather than just a header. Its temporary directory cleans itself on
+failure. The focused live PostgreSQL 18.6 rerun passed in 0.70 seconds with no
+skip against unchanged application source `f99fe75` plus only this harness edit.
+Log: `/private/tmp/ignatius-export-interrupt-barrier-2026-10-25.log`.
+The complete matrix recheck remains separate until executed.
+
 ## CI execution contract prepared on 2026-09-02
 
 The hardened workflow makes failures complete and actionable: stale branch runs

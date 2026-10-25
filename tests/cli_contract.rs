@@ -1482,19 +1482,20 @@ mod with_server {
         use std::process::Stdio;
 
         let uri = uri_or_skip!();
-        let dir = std::env::temp_dir().join(format!("ignatius-partial-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        let destination = dir.join("big.csv");
-        let _ = std::fs::remove_file(&destination);
+        let dir = tempfile::tempdir().expect("isolated partial export");
+        let destination = dir.path().join("stream.csv");
+        let partial = std::path::PathBuf::from(format!("{}.partial", destination.display()));
 
-        // A result large enough that it is certainly still streaming when the
-        // interrupt arrives.
-        let child = binary()
+        // Emit a bounded prefix that exceeds both protocol and file buffers,
+        // then hold the tail on the server. Large row counts plus a fixed delay
+        // race fast servers and can interrupt an already completed export.
+        let mut child = binary()
             .args([
                 "query",
                 &uri,
                 "-c",
-                "SELECT generate_series(1, 4000000) AS n, repeat('x', 200) AS pad",
+                "SELECT n, repeat('x', 200) AS pad FROM generate_series(1, 1000) AS n \
+                 UNION ALL SELECT 1001, repeat('x', 200) FROM pg_sleep(30)",
                 "--format",
                 "csv",
                 "-o",
@@ -1505,12 +1506,29 @@ mod with_server {
             .spawn()
             .expect("spawn");
 
-        std::thread::sleep(std::time::Duration::from_millis(2500));
-        let status = Command::new("kill")
-            .args(["-INT", &child.id().to_string()])
-            .status()
-            .expect("send SIGINT");
-        assert!(status.success());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if std::fs::metadata(&partial).is_ok_and(|metadata| metadata.len() > 8192) {
+                break;
+            }
+            if child.try_wait().expect("poll export child").is_some() {
+                let output = child.wait_with_output().expect("read early exit");
+                panic!(
+                    "export ended before its written-row barrier: {}",
+                    stderr(&output)
+                );
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().expect("stop only the owned export child");
+                let output = child.wait_with_output().expect("read bounded failure");
+                panic!(
+                    "export did not write its bounded prefix: {}",
+                    stderr(&output)
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        unsafe_free_interrupt(child.id());
 
         let output = child.wait_with_output().expect("wait");
         assert_eq!(
@@ -1527,17 +1545,19 @@ mod with_server {
             "it names the partial file: {message}"
         );
 
-        let partial = std::path::PathBuf::from(format!("{}.partial", destination.display()));
         assert!(partial.exists(), "the rows already written are kept");
         assert!(
             !destination.exists(),
             "an incomplete export never occupies the destination, where it would look finished"
         );
+        let written = std::fs::read_to_string(&partial).expect("retained partial data");
+        let mut lines = written.lines();
+        assert_eq!(lines.next(), Some("n,pad"));
+        let rows = lines.count();
         assert!(
-            std::fs::metadata(&partial).expect("metadata").len() > 0,
-            "something was actually written before the interrupt"
+            (1..=1000).contains(&rows),
+            "the emitted prefix is retained: {rows}"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
