@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: update rustls 0.23.46, rustls-webpki 0.103.16, Tokio 1.53.3,
+  ctutils 0.4.4 and webpki-root-certs 1.0.11 to address the current TLS,
+  certificate, constant-time crypto and I/O-safety advisories. Direct rustls
+  and Tokio minimums exclude the affected releases; dependency policy is
+  unchanged and the broader workspace audit includes development tooling.
 - Security: named parameters now require a fresh confirmation that
   `standard_conforming_strings` is on. Buffered runs recheck between statements;
   a refusal keeps completed work without sending the suffix, changing settings

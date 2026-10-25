@@ -48,6 +48,44 @@ as information; it is not reported as a database/socket test pass.
 | Code scanning | CodeQL advanced setup in CI, test sources excluded | Yes |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
+## Local security maintenance - 2026-10-25
+
+Current primary advisories and maintainer releases were checked on 25 October
+2026. Only these five lockfile package versions/checksums changed; existing
+dependency edges, including Windows-specific resolutions, were preserved.
+
+| Package | Old -> new | Primary advisory evidence |
+| --- | --- | --- |
+| rustls | 0.23.45 -> 0.23.46 | [0346](https://rustsec.org/advisories/RUSTSEC-2026-0346), [0347](https://rustsec.org/advisories/RUSTSEC-2026-0347), [0348](https://rustsec.org/advisories/RUSTSEC-2026-0348), [0349](https://rustsec.org/advisories/RUSTSEC-2026-0349) |
+| rustls-webpki | 0.103.14 -> 0.103.16 | [0382](https://rustsec.org/advisories/RUSTSEC-2026-0382) |
+| Tokio | 1.53.1 -> 1.53.3 | [0386](https://github.com/RustSec/advisory-db/blob/main/crates/tokio/RUSTSEC-2026-0386.md) |
+| ctutils | 0.4.2 -> 0.4.4 | [0385](https://github.com/RustSec/advisory-db/blob/main/crates/ctutils/RUSTSEC-2026-0385.md) |
+| webpki-root-certs | 1.0.9 -> 1.0.11 | [0383](https://rustsec.org/advisories/RUSTSEC-2026-0383), [1.0.11 distrust rollup](https://github.com/rustls/webpki-roots/releases/tag/v/1.0.11) |
+
+Direct rustls and Tokio requirements exclude the affected releases. The root
+certificate package is a conditional WebAssembly input of the platform
+verifier; its presence in the audited lockfile does not establish its use on
+native platforms. Declared minimum compilers fit Rust 1.90 (ctutils now requires
+1.87); declarations alone do not prove an actual Rust 1.90 build. The xtask
+licence now explicitly matches the repository's Apache-2.0 licence.
+
+Cargo-deny 0.20.2 was downloaded to a task-only temporary directory and checked
+against the official release asset SHA-256. The all-features, all-workspace,
+locked audit passed advisories, licences and sources with zero errors or
+warnings, and bans with zero errors and six existing duplicate-version
+warnings. Repository policy was unchanged; the temporary policy copy only
+redirected the advisory database cache. Final-graph log:
+`/private/tmp/ignatius-cargo-deny-2026-10-25-final-graph.log`.
+
+The integrated modified source based on `294b5d4`, including W03, W10-006 and
+these dependency patches, passed `cargo --locked xtask verify` on macOS 27.0.1
+arm64 using Homebrew Rust/Cargo 1.99.1 and disposable PostgreSQL 18.4 plain/TLS.
+It reported 1,175 harness passes across 22 summaries. One socket test returned
+early and remains a semantic skip. The repository's pinned compiler is 1.97.1;
+this local run does not replace pinned-toolchain, Rust 1.90, Windows, hosted CI,
+different-family review or packaged-candidate evidence. Log:
+`/private/tmp/ignatius-verify-2026-10-25-wave2-security.log`.
+
 ## CI execution contract prepared on 2026-09-02
 
 The hardened workflow makes failures complete and actionable: stale branch runs
