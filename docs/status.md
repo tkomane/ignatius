@@ -1,10 +1,45 @@
 # Status
 
-**Updated: 2026-10-25.** This file is the resumption point. Read it, then check
+**Updated: 2026-10-26.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Autonomous roadmap continuation - 2026-10-25 (in progress)
+## Repository integration - 26 October 2026 (in progress)
+
+The day-long implementation goal is complete. Owner-authorized sequential
+integration has merged PR32 (`af2ad3f`), PR34 (`81d5f9e`), PR35 (`84e033f`),
+PR36 (`5efb685`) and PR37 (`50fee40`) into main. Each descendant was refreshed
+against the newly merged main and passed 17 checks, with only the deliberate
+schedule-only fixture check skipped. The latest application source is the
+bounded editor implementation `d2edce1`; merge commits preserve the full source
+history. There has been no release or deployment.
+
+PR33 now carries the separate Windows capability experiment plus the preserved
+W07 evidence and this integrated editor stack. Its native helpers/assertions
+are unchanged. The explicitly dispatched `windows-conpty-diagnostic.yml` keeps
+the known capability failure strict and retains bounded evidence; routine CI
+continues all three mandatory platform product suites. W07-064/T055a/T051 and
+Windows 11/Windows Terminal hand use remain open. The normal clean pre-push gate
+and fresh main-targeted CI are required before this integration is accepted.
+
+Dependency PR26, PR31 and replacement Cargo PR38 still need sequential refresh,
+checks and integration. Historical local main and older prototype branches are
+preserved in the verified local `.git/archives/20261026-before.bundle` and its
+ref inventory before cleanup. Those historical prototypes are recovery material,
+not new product or release acceptance. Final branch/worktree cleanup follows
+integration; check actual Git state rather than historical branch names below.
+
+Next product work remains the roadmap's scoped native terminal/provider and
+hand-use acceptance, followed by release evidence/trust, installation and p95
+gates. The US6/US8/T032 readiness notes remain planning inputs. The owner skipped
+external OpenCode review; no different-family review or release approval is
+implied by the merge task.
+
+## Autonomous roadmap continuation - 25 October 2026 (historical checkpoints)
+
+The dated snapshots below retain their source-bound observations. Their branch,
+PR and approval states describe the time of each checkpoint; current integration
+state is recorded above.
 
 ### Latest reviewable checkpoint
 
@@ -33,7 +68,7 @@ external OpenCode review was explicitly skipped. The canonical W07 checkout
 and its unpublished `9278db4` record are preserved. The active managed worktree
 is retained for review; only owned acceptance records enter this checkpoint.
 
-### Current local progress and active assignments
+### Dated local progress and assignments
 
 Historical W07 publication checkpoint:
 
