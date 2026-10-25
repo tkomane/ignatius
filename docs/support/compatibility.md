@@ -513,8 +513,17 @@ Notices and the existing one-cell grid padding remain present. Unknown density
 values are refused with configuration exit 3 before taking terminal modes;
 there is no density CLI flag or runtime toggle. Mouse dragging remains open
 Feature 025 work. Rendered-buffer checks and actual native terminal use remain
-separate acceptance classes. Existing confirmation disclosure gaps are tracked
-by Feature 018 T037-T040; density does not change acceptance policy.
+separate acceptance classes. Density itself does not change acceptance policy.
+
+Clipboard, generated UPDATE, production-run, EXPLAIN ANALYZE and named-parameter
+reviews now share scrollable content and a fixed input/command rail. Both
+acceptance aliases require usable geometry and the current final page, followed
+by existing typed-name/identity/posture checks. Home/End and page/move actions
+stay within the review. Actual resizing resets it; acceptance that first
+observes a changed backend size waits for repaint and another explicit key.
+Below 40x8 or without two readable body rows, the client explains how to enlarge
+or cancel and sends nothing. Late cell-update metadata cannot cover a newer
+input/review owner. Feature 018 T037-T040 records implementation and acceptance.
 
 ## Terminals
 
@@ -522,7 +531,7 @@ by Feature 018 T037-T040; density does not change acceptance policy.
 | --- | --- |
 | macOS, in a pseudo-terminal | Verified: full-screen render, Ctrl+R executed a query, Ctrl+Q restored the terminal, with the exact escape sequences captured |
 | Warp on macOS, interactive | **Not yet verified by hand.** The pty run above used a forced size, not Warp's own renderer |
-| Live terminal resize | **Not verified.** Covered only by a unit test on the resize message |
+| Live terminal resize | Actual Ratatui TestBackend frame/input/stale-event boundaries tested; native terminal resize remains unverified |
 | Windows Terminal with PowerShell 7 | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
 | Any VT-capable terminal on Linux | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |

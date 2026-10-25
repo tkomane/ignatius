@@ -1079,7 +1079,7 @@ fn copy_confirmation_names_the_cell_and_size_without_rendering_the_value() {
         "{text}"
     );
     assert!(text.contains("acceptance is unconfirmed"), "{text}");
-    assert!(text.contains("Enter to send once"), "{text}");
+    assert!(text.contains("Enter/Ctrl+R to send once"), "{text}");
     assert!(
         !text.contains("sensitive-result"),
         "the confirmation must not display the raw value: {text}"
@@ -1723,7 +1723,7 @@ fn the_parameter_prompt_shows_progress_literal_semantics_and_only_a_mask() {
     assert!(text.contains("Parameter 1 of 2: :customer_id"), "{text}");
     assert!(text.contains("literal text data"), "{text}");
     assert!(text.contains("text is valid"), "{text}");
-    assert!(text.contains("Enter to accept"), "{text}");
+    assert!(text.contains("Enter/Ctrl+R to accept"), "{text}");
     assert!(
         !text.contains("secret-marker"),
         "the value was rendered: {text}"
@@ -2949,7 +2949,7 @@ fn a_lesser_change_asks_without_making_anyone_type() {
         source: None,
     });
     let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
-    assert!(text.contains("Enter to run it"), "{text}");
+    assert!(text.contains("Enter/Ctrl+R to run it"), "{text}");
     assert!(
         !text.contains("Type the database name"),
         "typing a word for every write would train people to type it"
@@ -3063,7 +3063,7 @@ fn analyze_confirmation_states_execution_and_side_effects_before_enter() {
     assert!(text.contains("will execute the statement"), "{text}");
     assert!(text.contains("Side effects are possible"), "{text}");
     assert!(text.contains("not automatically roll it back"), "{text}");
-    assert!(text.contains("Enter to execute once"), "{text}");
+    assert!(text.contains("Enter/Ctrl+R to execute once"), "{text}");
 }
 
 #[test]

@@ -305,10 +305,10 @@ async fn event_loop(
             .unwrap_or_default(),
     ));
 
-    draw(&mut terminal, &model, &keymap)?;
+    draw(&mut terminal, &mut model, &keymap)?;
 
     while let Some(message) = rx.recv().await {
-        let effects = update(&mut model, message);
+        let effects = reduce_terminal_input(&terminal, &mut model, message)?;
         for effect in effects {
             match effect {
                 Effect::Quit => {
@@ -579,7 +579,7 @@ async fn event_loop(
             let _ = activity.send(None);
         }
 
-        draw(&mut terminal, &model, &keymap)?;
+        draw(&mut terminal, &mut model, &keymap)?;
     }
 
     Ok(ExitCode::Success)
@@ -671,14 +671,75 @@ fn spawn_ticker(
     });
 }
 
-fn draw(
-    terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
-    model: &Model,
+fn reduce_terminal_input<B: ratatui::backend::Backend>(
+    terminal: &ratatui::Terminal<B>,
+    model: &mut Model,
+    message: Message,
+) -> Result<Vec<Effect>, Diagnostic> {
+    reduce_input_with_size(model, message, || {
+        terminal.size().map_err(|err| {
+            Diagnostic::new(
+                DiagnosticKind::Internal,
+                "could not read the terminal size",
+                "preparing interactive input",
+            )
+            .likely_cause(err.to_string())
+        })
+    })
+}
+
+/// Sending and navigation use current backend geometry, not an initial default
+/// or a queued resize that may already be stale. Recovery keys need no size.
+fn reduce_input_with_size(
+    model: &mut Model,
+    message: Message,
+    read_size: impl FnOnce() -> Result<ratatui::layout::Size, Diagnostic>,
+) -> Result<Vec<Effect>, Diagnostic> {
+    match message {
+        Message::Action(
+            action @ (crate::app::Action::Quit
+            | crate::app::Action::Cancel
+            | crate::app::Action::Dismiss),
+        ) => Ok(update(model, Message::Action(action))),
+        Message::Action(action) => {
+            let size = read_size()?;
+            Ok(update(
+                model,
+                Message::InputAtSize {
+                    action,
+                    columns: size.width,
+                    rows: size.height,
+                },
+            ))
+        }
+        Message::Resized(..) => {
+            // The current backend replaces an older event's dimensions.
+            let size = read_size()?;
+            synchronize_model_size(model, size.width, size.height);
+            Ok(Vec::new())
+        }
+        message => Ok(update(model, message)),
+    }
+}
+
+fn synchronize_model_size(model: &mut Model, columns: u16, rows: u16) {
+    if model.size != (columns, rows) {
+        // Use the reducer's resize transition so review state and any future
+        // geometry-dependent state invalidate through the same pure boundary.
+        let effects = update(model, Message::Resized(columns, rows));
+        debug_assert!(effects.is_empty(), "resize is a local state transition");
+    }
+}
+
+fn draw<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+    model: &mut Model,
     keymap: &Keymap,
 ) -> Result<(), Diagnostic> {
     terminal
         .draw(|frame| {
             let area = frame.area();
+            synchronize_model_size(model, area.width, area.height);
             layout::render(model, keymap, area, frame.buffer_mut());
         })
         .map(|_| ())

@@ -158,3 +158,6 @@ reduction, supersede stale queued resize dimensions, and fail closed before
 sending on a size-read error while preserving Quit/Cancel/Dismiss. The UI/app
 worker does not edit that runtime seam. Use the existing resize transition only
 on actual changes, so reading dimensions cannot repeatedly reset review.
+Runtime dispatches `InputAtSize` facts; the reducer applies size changes and
+owns any review acceptance suppression. Keep application policy out of the
+terminal I/O adapter. Recovery keys remain ordinary actions without a size read.

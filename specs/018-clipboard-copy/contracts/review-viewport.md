@@ -31,6 +31,13 @@ remain required. Plain/CLI routes retain their existing contracts.
   changing that wording cannot remove a body row while granting acceptance.
   Use `Model::keymap_snapshot` for identical reducer/render admission metrics;
   preserve the existing default fallback only for models without a snapshot.
+  At inner widths below 50 cells, use compact navigation wording with standard
+  PgUp/PgDn abbreviations for the existing PageUp/PageDown keys (including their
+  modifiers) and `top/end` for first/last. Preserve actual remapped keys. Measure
+  this wording after the shared width is known so a default 40x8 parameter or
+  typed-name review can retain its input and two body rows; verbosity alone
+  must not force an enlarge refusal. Larger/remapped layouts retain the same
+  stable-rail and no-clipping requirements.
 - Reuse existing move/page/first/last actions for local review navigation.
   They never affect the editor, retained rows, hidden palette or database.
   Home/End resolve to line-start/line-end actions by default; Ctrl+Home/End
@@ -71,6 +78,13 @@ remain required. Plain/CLI routes retain their existing contracts.
 - After the viewport gate, re-run all existing identity, connection, posture,
   typed-name and size checks immediately before the existing one-shot effect.
   No stale state becomes valid through scrolling or resizing.
+- A matching asynchronous cell-update metadata response must not put a
+  replacement prompt above a newer input/review owner. After validating request
+  identity, discard only that older lookup when another prompt, review, prefix,
+  palette, help or pane input owner exists. Preserve the current owner and its
+  input; show a value-free instruction to finish/cancel it and generate the
+  UPDATE again. Do not queue the response or automatically restart metadata/SQL.
+  Existing busy, plan, connection and source/selection guards still apply.
 
 ## Runtime size synchronization
 
@@ -82,10 +96,20 @@ Only send a resize transition when the observed size actually changes. Failure
 to obtain dimensions must refuse sending before reducer mutation. Quit, Cancel
 and Dismiss retain their escape/recovery behavior even if size cannot be read.
 This prevents a narrow displayed review being admitted using the model's
-initial 80x24 default. The runtime owns terminal I/O; the shared review helper
-and reducer remain pure. Test the actual draw/input boundary with Ratatui's
+initial 80x24 default. The runtime owns terminal I/O and supplies the fact
+message `InputAtSize { action, columns, rows }`; the pure reducer owns the
+review admission decision and modal precedence. No new Action is introduced.
+Test the actual draw/input boundary with Ratatui's
 test backend, including first-frame geometry and stale resize events, rather
 than treating manually synchronized model/buffer tests as runtime evidence.
+
+If fresh backend size changes immediately before Activate/RunBuffer while a
+sending review owns input, synchronize size but suppress that acceptance once
+without consuming its candidate or answer. Paint the new review first; the
+next explicit acceptance follows the normal viewport gate. This prevents a
+formerly clipped review becoming eligible on enlargement before any new frame
+was painted. Ordinary execution without a review owner and all recovery keys
+keep their existing behavior. This does not prove a person read the frame.
 
 ## Required body content
 
@@ -104,6 +128,10 @@ debug state. Regenerate intentional UPDATE review text only within the current
 in-memory review boundary; reuse the existing escaping, redaction and secret
 types. Clipboard metadata remains value-free. No new log, history, file,
 clipboard or database activity is authorized by rendering/navigation.
+Preserve existing Analyze preview/target/required/typed-name and copy-target
+redaction through the existing single redactor; extracting shared content must
+not replace those boundaries with control escaping alone. The exact generated
+UPDATE remains intentionally value-visible at its separate review boundary.
 
 Write failing-first renderer/reducer cases for all five surfaces, including
 40x8 and smaller, long/wide/control-containing names, long exact UPDATE SQL,

@@ -8,6 +8,1004 @@ use crate::query::value::Cell;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+fn review_viewport_case(family: &str, long: bool) -> Model {
+    let mut model = match family {
+        "copy" => {
+            let mut model = copy_model(vec![vec![
+                Cell::Text("1".into()),
+                Cell::Text("synthetic-copy-value".into()),
+            ]]);
+            model.clipboard_osc52 = true;
+            assert!(update(&mut model, Message::Action(Action::CopyValue)).is_empty());
+            model
+        }
+        "update" => {
+            let mut model = cell_update_model();
+            let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+            let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+                panic!("expected the ordinary metadata request");
+            };
+            update(
+                &mut model,
+                Message::UpdateTargetLoaded {
+                    request: *request,
+                    result: Box::new(Ok(update_relation())),
+                },
+            );
+            let replacement = if long {
+                format!("synthetic-head-{}-synthetic-tail", "x".repeat(2400))
+            } else {
+                "synthetic-note".into()
+            };
+            for character in replacement.chars() {
+                assert!(update(&mut model, Message::Action(Action::Insert(character))).is_empty());
+            }
+            assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+            assert!(model.pending_update.is_some());
+            model
+        }
+        "production" => {
+            let mut model = connected();
+            let mut info = session();
+            info.environment = Environment::Production;
+            update(&mut model, Message::Connected(info));
+            model.editor.set_text("UPDATE orders SET total = 0;");
+            assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+            assert!(model.pending_run.is_some());
+            model
+        }
+        "analyze" => {
+            let mut model = connected();
+            model.editor.set_text("SELECT 1;");
+            assert!(update(&mut model, Message::Action(Action::AnalyzePlan)).is_empty());
+            assert!(model.pending_plan.is_some());
+            model
+        }
+        "parameter" => {
+            let mut model = connected();
+            let name = if long {
+                "p".repeat(1400)
+            } else {
+                "note".into()
+            };
+            model.editor.set_text(format!("SELECT :{name};"));
+            assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+            assert!(model.parameter_prompt.is_some());
+            for character in "synthetic-answer".chars() {
+                assert!(update(&mut model, Message::Action(Action::Insert(character))).is_empty());
+            }
+            model
+        }
+        _ => panic!("unknown synthetic review family"),
+    };
+    if long
+        && matches!(family, "copy" | "production" | "analyze")
+        && let ConnectionState::Connected(info) = &mut model.connection
+    {
+        info.target = format!("synthetic-target-{}-target-tail", "x".repeat(1600));
+    }
+    model.splits.zoomed = true;
+    model
+}
+
+fn review_viewport_pending(model: &Model, family: &str) -> bool {
+    match family {
+        "copy" => model.pending_copy.is_some(),
+        "update" => model.pending_update.is_some(),
+        "production" => model.pending_run.is_some(),
+        "analyze" => model.pending_plan.is_some(),
+        "parameter" => model.parameter_prompt.is_some(),
+        _ => false,
+    }
+}
+
+fn review_viewport_refuses_hidden_content(family: &str) {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for size in [(40, 8), (20, 4), (0, 0)] {
+            for action in [Action::Activate, Action::RunBuffer] {
+                let mut model = review_viewport_case(family, false);
+                model.presentation = model.presentation.clone().with_density(density);
+                update(&mut model, Message::Resized(size.0, size.1));
+                let before_job = model.next_job;
+                let frame = split_frame(&model);
+                let effects = update(&mut model, Message::Action(action.clone()));
+                assert!(
+                    effects.is_empty(),
+                    "{family} {density:?} {size:?} {action:?}\n{frame}"
+                );
+                assert!(review_viewport_pending(&model, family));
+                assert_eq!(model.next_job, before_job);
+                assert_eq!(model.phase, QueryPhase::Idle);
+                assert!(update(&mut model, Message::Action(action)).is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn review_viewport_copy_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("copy");
+}
+
+#[test]
+fn review_viewport_update_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("update");
+}
+
+#[test]
+fn review_viewport_production_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("production");
+}
+
+#[test]
+fn review_viewport_analyze_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("analyze");
+}
+
+#[test]
+fn review_viewport_parameter_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("parameter");
+}
+
+fn review_viewport_kind(family: &str) -> crate::ui::review::Kind {
+    match family {
+        "copy" => crate::ui::review::Kind::Copy,
+        "update" => crate::ui::review::Kind::Update,
+        "production" => crate::ui::review::Kind::Production,
+        "analyze" => crate::ui::review::Kind::Analyze,
+        "parameter" => crate::ui::review::Kind::Parameter,
+        _ => unreachable!(),
+    }
+}
+
+fn review_viewport_overlay_frame(model: &Model, family: &str) -> String {
+    let view = review_viewport_view(model, family);
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    crate::ui::layout::render(model, &crate::ui::Keymap::new(), area, &mut buffer);
+    let mut overlay = ratatui::buffer::Buffer::empty(view.outer);
+    for y in view.outer.y..view.outer.bottom() {
+        for x in view.outer.x..view.outer.right() {
+            overlay[(x, y)] = buffer[(x, y)].clone();
+        }
+    }
+    crate::ui::layout::buffer_to_string(&overlay)
+}
+
+#[test]
+fn review_privacy_analyze_preserves_preview_metadata_and_typed_name_redaction() {
+    let mut model = review_viewport_case("analyze", false);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.target = "postgresql://audit:synthetic-target-secret@localhost/audit".into();
+    }
+    let pending = model.pending_plan.as_mut().unwrap();
+    pending.sql = "SELECT 'postgresql://audit:synthetic-preview-secret@localhost/audit';".into();
+    pending.impact = crate::query::Impact::Destructive;
+    pending.required = "password=synthetic-required-secret".into();
+    pending.typed = "password=synthetic-typed-secret".into();
+    update(&mut model, Message::Resized(140, 50));
+    let view = review_viewport_view(&model, "analyze");
+    let body = view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    let input = view.input.as_deref().unwrap();
+    let frame = review_viewport_overlay_frame(&model, "analyze");
+    assert!(frame.contains("EXPLAIN ANALYZE"));
+    assert!(body.contains("SELECT") && body.contains("Type the database name"));
+    let leaked = [
+        ("target", "synthetic-target-secret"),
+        ("preview", "synthetic-preview-secret"),
+        ("required", "synthetic-required-secret"),
+        ("typed", "synthetic-typed-secret"),
+    ]
+    .into_iter()
+    .filter_map(|(label, sentinel)| {
+        (body.contains(sentinel) || input.contains(sentinel) || frame.contains(sentinel))
+            .then_some(label)
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        leaked.is_empty(),
+        "credential-shaped Analyze fields leaked: {leaked:?}"
+    );
+    assert!(body.contains(crate::diagnostics::redaction::REDACTED));
+    assert!(input.contains(crate::diagnostics::redaction::REDACTED));
+}
+
+#[test]
+fn review_privacy_copy_preserves_the_redacted_terminal_target_boundary() {
+    let mut model = review_viewport_case("copy", false);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.target = "postgresql://audit:synthetic-copy-target-secret@localhost/audit".into();
+    }
+    update(&mut model, Message::Resized(140, 50));
+    let view = review_viewport_view(&model, "copy");
+    let body = view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    let frame = review_viewport_overlay_frame(&model, "copy");
+    assert!(body.contains("Path:") && body.contains("terminal clipboard sequence"));
+    assert!(!body.contains("synthetic-copy-value"));
+    assert!(!body.contains("synthetic-copy-target-secret"));
+    assert!(!frame.contains("synthetic-copy-target-secret"));
+    assert!(body.contains(crate::diagnostics::redaction::REDACTED));
+}
+
+#[test]
+fn review_privacy_exact_update_keeps_intentionally_reviewed_literal_values() {
+    let mut model = review_viewport_case("update", false);
+    let pending = model.pending_update.as_mut().unwrap();
+    pending.plan.parameters = crate::query::ParameterBindings::from_secrets(
+        pending
+            .plan
+            .parameters
+            .names()
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        vec![
+            secrecy::SecretString::from(
+                "postgresql://audit:synthetic-update-secret@localhost/audit".to_owned(),
+            ),
+            secrecy::SecretString::from("7".to_owned()),
+        ],
+    )
+    .unwrap();
+    let exact = pending.plan.bound_sql().unwrap();
+    update(&mut model, Message::Resized(140, 50));
+    let view = review_viewport_view(&model, "update");
+    let body = view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    assert!(body.contains(&exact));
+    assert!(body.contains("synthetic-update-secret"));
+    assert!(!format!("{model:?}").contains("synthetic-update-secret"));
+}
+
+#[test]
+fn review_privacy_late_metadata_cannot_shadow_the_current_copy_owner() {
+    let mut model = cell_update_model();
+    model.clipboard_osc52 = true;
+    model.splits.zoomed = true;
+    update(&mut model, Message::Resized(140, 50));
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("the ordinary update action must request metadata");
+    };
+    assert!(model.update_lookup.is_some());
+    assert!(update(&mut model, Message::Action(Action::CopyValue)).is_empty());
+    assert!(model.pending_copy.is_some());
+    update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    let frame = split_frame(&model);
+    let shadowed = frame.contains("Edit result cell") && frame.contains("Replacement");
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(
+        matches!(effects.as_slice(), [Effect::CopyValue { .. }]),
+        "inspect only; never dispatch"
+    );
+    assert!(
+        !shadowed,
+        "late metadata rendered a replacement prompt above the copy owner; inspected_effect=CopyValue; dispatched_effects=0\n{frame}"
+    );
+}
+
+#[test]
+fn review_late_metadata_discards_only_its_intent_and_preserves_newer_input() {
+    for owner in [
+        "parameter",
+        "name",
+        "prefix",
+        "palette",
+        "inspector",
+        "help",
+        "analyze",
+    ] {
+        for failure in [false, true] {
+            let mut model = cell_update_model();
+            let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+            let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+                unreachable!()
+            };
+            match owner {
+                "parameter" => {
+                    model
+                        .editor
+                        .set_text(format!("SELECT :{};", "p".repeat(600)));
+                    update(&mut model, Message::Action(Action::RunBuffer));
+                    update(&mut model, Message::Pasted("synthetic-answer".into()));
+                    update(&mut model, Message::Action(Action::MoveLineEnd));
+                    assert!(model.parameter_prompt.is_some());
+                }
+                "name" => {
+                    model.editor.set_text("SELECT 1;");
+                    update(&mut model, Message::Action(Action::SaveQuery));
+                    update(&mut model, Message::Pasted("synthetic-name".into()));
+                    assert!(model.name_prompt.is_some());
+                }
+                "prefix" => {
+                    update(&mut model, Message::Action(Action::BeginPrefix));
+                    assert!(model.prefix_pending);
+                }
+                "palette" => {
+                    update(&mut model, Message::Action(Action::OpenPalette));
+                    update(&mut model, Message::Pasted("synthetic-filter".into()));
+                    assert!(model.palette.is_some());
+                }
+                "inspector" => {
+                    update(&mut model, Message::Action(Action::ToggleInspector));
+                    assert!(model.inspector.is_some());
+                }
+                "help" => {
+                    update(&mut model, Message::Action(Action::ToggleHelp));
+                    assert!(model.help_open);
+                }
+                "analyze" => {
+                    model.editor.set_text("SELECT 1;");
+                    update(&mut model, Message::Action(Action::AnalyzePlan));
+                    assert!(model.pending_plan.is_some());
+                }
+                _ => unreachable!(),
+            }
+            let before = model.clone();
+            let result = if failure {
+                Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "synthetic-server-detail",
+                    "loading synthetic relation",
+                ))
+            } else {
+                Ok(update_relation())
+            };
+            assert!(
+                update(
+                    &mut model,
+                    Message::UpdateTargetLoaded {
+                        request: *request,
+                        result: Box::new(result)
+                    }
+                )
+                .is_empty()
+            );
+            assert!(model.update_lookup.is_none());
+            assert!(model.update_prompt.is_none());
+            assert_eq!(model.name_prompt, before.name_prompt);
+            assert_eq!(model.palette, before.palette);
+            assert_eq!(model.inspector, before.inspector);
+            assert_eq!(model.prefix_pending, before.prefix_pending);
+            assert_eq!(model.help_open, before.help_open);
+            assert_eq!(model.pending_plan, before.pending_plan);
+            assert_eq!(model.review_scroll, before.review_scroll);
+            let bindings =
+                |prompt: Option<ParameterPrompt>| prompt.map(|mut prompt| prompt.accept().unwrap());
+            assert_eq!(
+                bindings(model.parameter_prompt.clone()),
+                bindings(before.parameter_prompt)
+            );
+            let notice = model.cell_update_notice.as_deref().unwrap();
+            assert!(notice.contains("Finish or cancel") && notice.contains("regenerate"));
+            assert!(
+                !notice.contains("synthetic-server-detail") && !notice.contains("synthetic-answer")
+            );
+        }
+    }
+}
+
+#[test]
+fn review_late_metadata_unknown_requests_preserve_the_live_lookup_and_owner() {
+    let mut model = cell_update_model();
+    model.clipboard_osc52 = true;
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        unreachable!()
+    };
+    update(&mut model, Message::Action(Action::CopyValue));
+    let lookup = model.update_lookup.clone();
+    let copy = model.pending_copy;
+    let notice = model.cell_update_notice.clone();
+    for unrelated in [request.saturating_sub(1), request.saturating_add(1)] {
+        assert!(
+            update(
+                &mut model,
+                Message::UpdateTargetLoaded {
+                    request: unrelated,
+                    result: Box::new(Ok(update_relation()))
+                }
+            )
+            .is_empty()
+        );
+        assert_eq!(model.update_lookup, lookup);
+        assert_eq!(model.pending_copy, copy);
+        assert_eq!(model.cell_update_notice, notice);
+    }
+    assert!(
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request: *request,
+                result: Box::new(Ok(update_relation()))
+            }
+        )
+        .is_empty()
+    );
+    assert!(model.update_lookup.is_none());
+    assert_eq!(model.pending_copy, copy);
+    assert!(model.update_prompt.is_none());
+}
+
+fn review_viewport_view(model: &Model, family: &str) -> crate::ui::review::View {
+    crate::ui::review::build(
+        model,
+        review_viewport_kind(family),
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    )
+    .unwrap()
+}
+
+#[test]
+fn review_viewport_final_current_page_is_required_for_both_aliases_and_every_family() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        for density in [
+            crate::config::Density::Comfortable,
+            crate::config::Density::Compact,
+        ] {
+            let mut model = review_viewport_case(family, true);
+            model.presentation = model.presentation.clone().with_density(density);
+            update(&mut model, Message::Resized(40, 12));
+            let first_frame = split_frame(&model);
+            assert!(review_viewport_view(&model, family).usable);
+            assert!(!review_viewport_view(&model, family).ready);
+            let old_job = model.next_job;
+            for action in [Action::Activate, Action::RunBuffer] {
+                assert!(update(&mut model, Message::Action(action)).is_empty());
+                assert!(review_viewport_pending(&model, family));
+                assert_eq!(model.next_job, old_job);
+            }
+            assert!(
+                update(
+                    &mut model,
+                    Message::Action(Action::MovePage(Direction::Down))
+                )
+                .is_empty()
+            );
+            assert_ne!(
+                split_frame(&model),
+                first_frame,
+                "{family}: PageDown must traverse real content"
+            );
+            assert!(update(&mut model, Message::Action(Action::MoveLineEnd)).is_empty());
+            let end = review_viewport_view(&model, family);
+            assert!(end.ready, "{family}");
+            let end_frame = split_frame(&model);
+            assert!(end_frame.contains(&end.window().last().unwrap().text));
+            let mut earlier = model.clone();
+            update(&mut earlier, Message::Action(Action::MoveBufferStart));
+            assert!(!review_viewport_view(&earlier, family).ready);
+            assert!(update(&mut earlier, Message::Action(Action::Activate)).is_empty());
+            for action in [Action::Activate, Action::RunBuffer] {
+                let mut accepted = model.clone();
+                let expected = accepted
+                    .pending_update
+                    .as_ref()
+                    .map(|pending| pending.plan.bound_sql().unwrap());
+                let effects = update(&mut accepted, Message::Action(action));
+                assert_eq!(effects.len(), 1, "{family}");
+                assert!(matches!(
+                    (family, effects.as_slice()),
+                    ("copy", [Effect::CopyValue { .. }])
+                        | (
+                            "update" | "parameter",
+                            [Effect::ExecuteParameterized { .. }]
+                        )
+                        | ("production", [Effect::Execute { .. }])
+                        | ("analyze", [Effect::Explain { .. }])
+                ));
+                if let Some(expected) = expected {
+                    let [
+                        Effect::ExecuteParameterized {
+                            sql, parameters, ..
+                        },
+                    ] = effects.as_slice()
+                    else {
+                        unreachable!()
+                    };
+                    assert_eq!(
+                        crate::query::discover_parameters(sql)
+                            .unwrap()
+                            .bind(sql, parameters)
+                            .unwrap(),
+                        expected
+                    );
+                }
+                assert!(!review_viewport_pending(&accepted, family));
+            }
+        }
+    }
+}
+
+#[test]
+fn review_viewport_real_resize_resets_but_ticks_and_same_size_do_not() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        let offset = model.review_scroll;
+        assert!(offset > 0);
+        update(&mut model, Message::Tick { running_for: None });
+        update(&mut model, Message::HistoryLoaded(Vec::new()));
+        update(&mut model, Message::Resized(40, 12));
+        assert_eq!(model.review_scroll, offset);
+        update(&mut model, Message::Resized(41, 12));
+        assert_eq!(model.review_scroll, 0);
+        assert!(!review_viewport_view(&model, family).ready);
+        assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+        assert!(review_viewport_pending(&model, family));
+    }
+}
+
+#[test]
+fn review_viewport_fresh_input_geometry_requires_another_explicit_accept_after_paint() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        for action in [Action::Activate, Action::RunBuffer] {
+            let mut model = review_viewport_case(family, false);
+            update(&mut model, Message::Resized(40, 8));
+            let job = model.next_job;
+            let effects = update(
+                &mut model,
+                Message::InputAtSize {
+                    action: action.clone(),
+                    columns: 140,
+                    rows: 50,
+                },
+            );
+            assert!(effects.is_empty());
+            assert!(review_viewport_pending(&model, family));
+            assert_eq!(model.next_job, job);
+            assert_eq!(model.size, (140, 50));
+            assert_eq!(model.review_scroll, 0);
+            assert!(review_viewport_view(&model, family).ready);
+            assert!(
+                !split_frame(&model).is_empty(),
+                "paint the synchronized review"
+            );
+            assert_eq!(
+                update(
+                    &mut model,
+                    Message::InputAtSize {
+                        action,
+                        columns: 140,
+                        rows: 50
+                    }
+                )
+                .len(),
+                1
+            );
+        }
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(60, 20));
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(review_viewport_view(&model, family).ready);
+        for _ in 0..2 {
+            assert!(
+                update(
+                    &mut model,
+                    Message::InputAtSize {
+                        action: Action::Activate,
+                        columns: 20,
+                        rows: 4
+                    }
+                )
+                .is_empty()
+            );
+            assert!(review_viewport_pending(&model, family));
+            assert_eq!(model.review_scroll, 0);
+        }
+    }
+}
+
+#[test]
+fn review_viewport_fresh_input_size_does_not_suppress_ordinary_sql() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    let effects = update(
+        &mut model,
+        Message::InputAtSize {
+            action: Action::RunBuffer,
+            columns: 100,
+            rows: 30,
+        },
+    );
+    assert!(matches!(effects.as_slice(), [Effect::Execute { .. }]));
+    assert_eq!(model.size, (100, 30));
+}
+
+#[test]
+fn review_viewport_cancel_and_quit_remain_available_without_geometry() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        for action in [Action::Cancel, Action::Dismiss, Action::Quit] {
+            let mut model = review_viewport_case(family, true);
+            update(&mut model, Message::Resized(0, 0));
+            let effects = update(&mut model, Message::Action(action.clone()));
+            if action == Action::Quit {
+                assert!(matches!(effects.as_slice(), [Effect::Quit]));
+            } else {
+                assert!(effects.is_empty());
+                assert!(!review_viewport_pending(&model, family));
+            }
+        }
+    }
+}
+
+#[test]
+fn review_viewport_each_new_candidate_starts_at_zero() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(model.review_scroll > 0);
+        update(&mut model, Message::Action(Action::Cancel));
+        match family {
+            "copy" => {
+                update(&mut model, Message::Action(Action::CopyValue));
+            }
+            "production" | "parameter" => {
+                update(&mut model, Message::Action(Action::RunBuffer));
+            }
+            "analyze" => {
+                update(&mut model, Message::Action(Action::AnalyzePlan));
+            }
+            "update" => {
+                let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+                let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+                    unreachable!()
+                };
+                update(
+                    &mut model,
+                    Message::UpdateTargetLoaded {
+                        request: *request,
+                        result: Box::new(Ok(update_relation())),
+                    },
+                );
+                update(&mut model, Message::Pasted("synthetic-next-value".into()));
+                update(&mut model, Message::Action(Action::Activate));
+            }
+            _ => unreachable!(),
+        }
+        assert!(review_viewport_pending(&model, family), "{family}");
+        assert_eq!(model.review_scroll, 0, "{family}");
+    }
+}
+
+#[test]
+fn review_viewport_density_rewrap_cannot_authorize_the_new_unreachable_tail() {
+    let mut model = review_viewport_case("copy", true);
+    model.presentation = model
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Compact);
+    update(&mut model, Message::Resized(40, 12));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    assert!(review_viewport_view(&model, "copy").ready);
+    model.presentation = model
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Comfortable);
+    assert!(!review_viewport_view(&model, "copy").ready);
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    assert!(review_viewport_view(&model, "copy").ready);
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Activate)).len(),
+        1
+    );
+}
+
+#[test]
+fn review_viewport_parameter_progression_resets_scroll_without_changing_the_answer() {
+    let mut model = connected();
+    let first = "first".repeat(150);
+    let last = "last".repeat(150);
+    let template = format!("SELECT :{first}, :{last};");
+    model.editor.set_text(&template);
+    update(&mut model, Message::Action(Action::RunBuffer));
+    update(&mut model, Message::Resized(40, 12));
+    update(&mut model, Message::Pasted("synthetic-answer".repeat(40)));
+    let length = model.parameter_prompt.as_ref().unwrap().typed_length();
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert_eq!(
+        model.parameter_prompt.as_ref().unwrap().typed_length(),
+        length
+    );
+    update(&mut model, Message::Action(Action::MoveLineEnd));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert_eq!(model.review_scroll, 0);
+    assert_eq!(
+        model.parameter_prompt.as_ref().unwrap().active_name(),
+        Some(last.as_str())
+    );
+    assert_eq!(model.parameter_prompt.as_ref().unwrap().typed_length(), 0);
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [
+        Effect::ExecuteParameterized {
+            sql, parameters, ..
+        },
+    ] = effects.as_slice()
+    else {
+        panic!("one explicit final-parameter effect")
+    };
+    assert_eq!(sql, &template);
+    let bound = crate::query::discover_parameters(sql)
+        .unwrap()
+        .bind(sql, parameters)
+        .unwrap();
+    assert!(bound.contains(&"synthetic-answer".repeat(40)));
+    assert!(bound.ends_with(", E'';"));
+}
+
+#[test]
+fn review_viewport_current_remaps_ascii_and_no_colour_keep_visible_acceptance_truthful() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let keys = BTreeMap::from([
+        (
+            "run-buffer".into(),
+            crate::config::schema::KeySpec::One("alt+f12".into()),
+        ),
+        (
+            "move-line-end".into(),
+            crate::config::schema::KeySpec::One("ctrl+alt+end".into()),
+        ),
+    ]);
+    let keymap = crate::ui::Keymap::from_config(&keys).unwrap();
+    let accept = keymap
+        .resolve(&KeyEvent::new(KeyCode::F(12), KeyModifiers::ALT))
+        .unwrap();
+    let last = keymap
+        .resolve(&KeyEvent::new(
+            KeyCode::End,
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ))
+        .unwrap();
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for family in ["copy", "update", "production", "analyze", "parameter"] {
+            let mut model = review_viewport_case(family, true);
+            model.presentation = crate::ui::Presentation::new(
+                crate::ui::Theme::new(crate::config::ThemeChoice::Dark, false),
+                crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+                true,
+            )
+            .with_density(density);
+            model.keymap_snapshot = keymap.snapshot();
+            update(&mut model, Message::Resized(60, 16));
+            assert!(update(&mut model, Message::Action(accept.clone())).is_empty());
+            update(&mut model, Message::Action(last.clone()));
+            let view = review_viewport_view(&model, family);
+            assert!(view.ready);
+            let rail = view.rail.concat();
+            assert!(rail.contains("Alt+F12 to"), "{family}: {rail}");
+            assert!(rail.contains("Ctrl+Alt+End"));
+            assert!(!rail.contains("Enter to"));
+            let frame =
+                crate::ui::layout::render_to_string(&model, &keymap, &model.presentation, 60, 16);
+            assert!(!frame.contains("synthetic-answer"));
+            assert_eq!(update(&mut model, Message::Action(accept.clone())).len(), 1);
+        }
+    }
+}
+
+#[test]
+fn review_viewport_end_does_not_replace_typed_name_or_stale_posture_guards() {
+    for family in ["production", "analyze"] {
+        let mut model = review_viewport_case(family, true);
+        match family {
+            "production" => {
+                let pending = model.pending_run.as_mut().unwrap();
+                pending.impact = crate::query::Impact::Destructive;
+                pending.required = "orders".into();
+            }
+            _ => {
+                let pending = model.pending_plan.as_mut().unwrap();
+                pending.impact = crate::query::Impact::Destructive;
+                pending.required = "orders".into();
+            }
+        }
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveLineEnd));
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        for character in "orders".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+        assert_eq!(
+            update(&mut model, Message::Action(Action::Activate)).len(),
+            1
+        );
+    }
+    for family in ["copy", "update"] {
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveLineEnd));
+        model.selected_column = 0;
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(review_viewport_view(&model, family).ready);
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(!review_viewport_pending(&model, family));
+    }
+    for posture in ["production", "read-only", "failed"] {
+        let mut model = review_viewport_case("update", true);
+        update(&mut model, Message::Resized(40, 12));
+        match posture {
+            "production" => {
+                if let ConnectionState::Connected(info) = &mut model.connection {
+                    info.environment = Environment::Production;
+                }
+            }
+            "read-only" => {
+                if let ConnectionState::Connected(info) = &mut model.connection {
+                    info.read_only = true;
+                }
+            }
+            _ => model.transaction = crate::query::result::TransactionState::Failed,
+        }
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(review_viewport_view(&model, "update").ready);
+        assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+        assert!(model.pending_update.is_none());
+    }
+}
+
+#[test]
+fn review_viewport_all_wrapped_control_and_wide_metadata_rows_are_actually_rendered() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        let mut model = review_viewport_case("copy", false);
+        let name = format!("{}-metadata-tail", "界e\u{301}\x1b\u{202e}".repeat(30));
+        model.last_execution.as_mut().unwrap().statements[0]
+            .result_set
+            .as_mut()
+            .unwrap()
+            .columns[1] = name.clone();
+        model.presentation = model.presentation.clone().with_density(density);
+        update(&mut model, Message::Resized(40, 12));
+        let complete = review_viewport_view(&model, "copy")
+            .rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<String>();
+        assert!(complete.contains(&crate::query::value::sanitize_for_display(&name)));
+        assert!(complete.contains("acceptance is unconfirmed"));
+        assert!(!complete.contains("synthetic-copy-value"));
+        let mut visited = std::collections::BTreeSet::new();
+        loop {
+            let view = review_viewport_view(&model, "copy");
+            let frame = split_frame(&model);
+            assert!(!frame.contains('\x1b') && !frame.contains('\u{202e}'));
+            for (index, row) in view.window().iter().enumerate() {
+                assert!(
+                    frame.contains(row.text.trim_end()),
+                    "missing row {index}: {}\n{frame}",
+                    row.text
+                );
+                visited.insert(view.offset + index);
+            }
+            if view.offset == view.max_scroll {
+                assert_eq!(visited.len(), view.rows.len());
+                assert!(view.ready);
+                break;
+            }
+            assert!(
+                update(
+                    &mut model,
+                    Message::Action(Action::MovePage(Direction::Down))
+                )
+                .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn review_viewport_entire_existing_update_bound_is_reachable_without_caching_sql() {
+    let baseline = review_viewport_case("update", false);
+    let baseline_sql = baseline
+        .pending_update
+        .as_ref()
+        .unwrap()
+        .plan
+        .bound_sql()
+        .unwrap();
+    let overhead = baseline_sql.len() - "synthetic-note".len();
+    let mut model = cell_update_model();
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        unreachable!()
+    };
+    update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    update(
+        &mut model,
+        Message::Pasted("x".repeat(crate::query::update::MAX_UPDATE_SQL_BYTES - overhead)),
+    );
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    let exact = model
+        .pending_update
+        .as_ref()
+        .unwrap()
+        .plan
+        .bound_sql()
+        .unwrap();
+    assert_eq!(exact.len(), crate::query::update::MAX_UPDATE_SQL_BYTES);
+    assert!(!format!("{model:?}").contains(&exact));
+    update(&mut model, Message::Resized(40, 12));
+    let complete = review_viewport_view(&model, "update")
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    assert!(complete.contains(&exact));
+    assert!(complete.contains("Selected retained source row: 1"));
+    assert!(complete.contains("literal text data"));
+    assert!(complete.contains("Nothing has been sent yet"));
+    let mut visited = std::collections::BTreeSet::new();
+    loop {
+        let view = review_viewport_view(&model, "update");
+        let frame = split_frame(&model);
+        for (index, row) in view.window().iter().enumerate() {
+            assert!(frame.contains(row.text.trim_end()));
+            visited.insert(view.offset + index);
+        }
+        if view.ready {
+            assert_eq!(visited.len(), view.rows.len());
+            break;
+        }
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+    }
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    let [
+        Effect::ExecuteParameterized {
+            sql, parameters, ..
+        },
+    ] = effects.as_slice()
+    else {
+        panic!("one reviewed update")
+    };
+    assert_eq!(
+        crate::query::discover_parameters(sql)
+            .unwrap()
+            .bind(sql, parameters)
+            .unwrap(),
+        exact
+    );
+}
+
 fn split_key(model: &mut Model, key: char) {
     assert!(update(model, Message::Action(Action::BeginPrefix)).is_empty());
     assert!(update(model, Message::Action(Action::Insert(key))).is_empty());

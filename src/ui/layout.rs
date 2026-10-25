@@ -123,23 +123,23 @@ fn render_with(
     if model.prefix_pending {
         render_chords(keymap, presentation, area, buf);
     }
-    if let Some(pending) = &model.pending_run {
-        render_confirmation(model, pending, presentation, area, buf);
+    if model.pending_run.is_some() {
+        render_confirmation(model, presentation, area, buf);
     }
-    if let Some(pending) = &model.pending_plan {
-        render_plan_confirmation(model, pending, presentation, area, buf);
+    if model.pending_plan.is_some() {
+        render_plan_confirmation(model, presentation, area, buf);
     }
-    if let Some(pending) = &model.pending_copy {
-        render_copy_confirmation(model, pending, presentation, area, buf);
+    if model.pending_copy.is_some() {
+        render_copy_confirmation(model, presentation, area, buf);
     }
-    if let Some(pending) = &model.pending_update {
-        render_update_review(pending, presentation, area, buf);
+    if model.pending_update.is_some() {
+        render_update_review(model, presentation, area, buf);
     }
     if let Some(prompt) = &model.update_prompt {
         render_update_value_prompt(prompt, presentation, area, buf);
     }
-    if let Some(prompt) = &model.parameter_prompt {
-        render_parameter_prompt(prompt, presentation, area, buf);
+    if model.parameter_prompt.is_some() {
+        render_parameter_prompt(model, presentation, area, buf);
     }
     if let Some(prompt) = &model.name_prompt {
         render_name_prompt(prompt, presentation, area, buf);

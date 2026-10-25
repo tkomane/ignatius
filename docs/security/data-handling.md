@@ -130,6 +130,17 @@ multiplexer may observe or retain the value. NULL, stale, oversized, disabled,
 and failed writes send no value; use an explicit export when a file is the
 intended boundary.
 
+All five sending-review surfaces share one transient wrapped view: clipboard,
+generated UPDATE, production run, EXPLAIN ANALYZE and named parameters. The body
+can be scrolled with the active navigation keys; acceptance requires its current
+final page and enough room for review, input and complete command guidance.
+Input stays fixed and parameter answers remain masked. Too-small geometry
+refuses sending; actual resizing resets review and a newly observed input-time
+resize cannot accept before a new frame. Existing identity, typed-name and
+posture checks still run before the one-shot effect. Analyze/copy-target
+redaction remains in force; the exact generated UPDATE is intentional review
+output. This makes content reachable, not proof that someone read it.
+
 ## Interactive cell updates
 
 Cell updates are TUI-only and are not an implicit edit mode. The analyzer
@@ -145,6 +156,9 @@ review Enter creates one `ExecuteParameterized` effect. Esc creates none. The
 generated template is what can enter statement history; bound values remain in
 secret memory until the adapter binds them at the existing simple-query
 boundary. The prior result remains a snapshot and is never rerun automatically.
+If its older metadata response arrives while another input/review owns the
+screen, the client discards only that lookup, preserves the current input and
+explains how to generate the cell update again. It does not queue or retry SQL.
 
 ## Interactive retained-result refresh
 

@@ -306,6 +306,15 @@ pub enum Message {
     },
     /// A user intent.
     Action(Action),
+    /// A user intent accompanied by the runtime's fresh terminal dimensions.
+    InputAtSize {
+        /// The existing intent resolved by the active keymap.
+        action: Action,
+        /// Currently observed terminal columns.
+        columns: u16,
+        /// Currently observed terminal rows.
+        rows: u16,
+    },
     /// The terminal was resized.
     Resized(u16, u16),
     /// A mouse event, with zero-based screen coordinates.

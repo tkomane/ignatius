@@ -8,7 +8,9 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. All work remains local. Read
+Branch: `codex/autonomous-roadmap-2026-10-25`. Latest clean density checkpoint:
+`24db9c554254cce963688b759e86039a30118fd6`. Subsequent W04/W07 source is
+currently uncommitted and under integration. All work remains local. Read
 Git state before taking an assignment; the day-long goal remains active.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
@@ -72,24 +74,59 @@ Git state before taking an assignment; the day-long goal remains active.
   and scope are recorded in verification. Dragging and full US7 acceptance
   remain open. Density's source/Cargo ownership has been handed back.
 
-The read-only W04 audit reproduced clipped required disclosure with both
-acceptance actions on all five surfaces: copy, generated UPDATE, production
-run, EXPLAIN ANALYZE and named parameters, including below usable dimensions.
-Its 48 reducer probes and 24 synthetic buffers dispatched zero effects. A
-2,504-byte UPDATE lost its exact SQL tail even at 140x50; existing destructive
-PROD typed-name matching still held. Feature 018 T037/T038 record the audit and
-new shared scroll/admission contract; T039/T040 remain open. This is a P1
-disclosure failure and M1/M2 safety blocker. Density preserves baseline input
-visibility but does not repair authorization policy. The runtime also needs
-first-frame/backend size synchronization rather than the initial 80x24 model
-default.
+W04 now shares scrollable content, wrapping and admission across copy,
+generated UPDATE, production run, EXPLAIN ANALYZE and named parameters. Both
+acceptance aliases stay blocked before the current final page or below usable
+dimensions; inputs and complete command rails stay fixed. The lead reproduced
+and repaired extraction regressions in redaction, late update-metadata modal
+ownership and enlargement before repaint. Runtime supplies actual frame/backend
+dimensions; the pure reducer owns the new `InputAtSize` admission policy.
+The final focused repeat passed app 328/UI 241/runtime 27 (596 cases, zero
+skips), Clippy and formatting. All source ownership is handed back to the lead.
 
-Next single writers: the privacy worker takes shared review implementation in
-app model/reducer and UI layout/overlays after the lead's checkpoint release.
-The lead alone owns the narrow runtime size fix in cli/interactive and its
-sidecar, plus documentation, compatibility, changelog and integration. The
-other worker takes W07-062 error/panic proof in an isolated source clone,
-limited to ui/terminal and its sidecar; no shared reducer/runtime writer.
+The lead inspected representative first/end/middle styled frames from 152
+actual synthetic Ratatui buffers across both densities, three truecolour themes
+and ASCII/no-colour. Default 40x8 parameter and typed-PROD prompts retain input,
+two body rows and command rails; the exact UPDATE tail is reachable. Evidence:
+`/private/tmp/ignatius-w04-styled-reviewed-lay5bval/`. These are rendered-cell
+checks, not native screenshots or proof of reading. Feature 018 T039/T040 are
+checked after the combined locked full verifier passed 1,270 harness cases/996
+library across 22 summaries, formatting, lints/API docs and PostgreSQL 18.6
+plain/TLS. Its macOS socket remains a semantic skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-review-and-panic.log`.
+
+W07-062's isolated error/panic repair was reviewed and applied to root's two
+terminal files. It retains actual acquired options atomically, restores them
+before previous-hook output, and removes unsupported panic claims. The HOME-
+free private clone passed 13 ordinary units, two PTY drivers and one inert
+parent helper; the drivers exercised 16 actual owned macOS PTY children across
+all mouse/paste/screen combinations, with canonical/echo/signal and raw-state
+observations. It also passed Clippy/formatting. Patch SHA-256:
+`cf3570a569025794995da01bffacfa9b1102036db75f14e5abf6350ad350b763`;
+source/logs/manifest are under `/private/tmp/ignatius-w07-062-w2iPKH/`.
+The combined full verifier passed and W07-062 is checked for that exact scope;
+latest-source Linux/Windows, pinned/MSRV and native visuals remain separate.
+
+W10-007's reviewed clean-`24db9c5` optimized-binary experiment completed 27
+measured CLI children and 28 authenticated health/count checks without changing
+the fixture. Three samples per case show pre-retention value allocation,
+increasing notice retention and complete 8 MiB streaming values. Maximum
+observed RSS was 42.67 MiB; this is not a process ceiling. Owned export payloads
+were checked and removed. Source, helpers, manifest and results are retained
+under `/private/tmp/ignatius-w10-007-AFKZrb/`; verification records exact scope.
+W10-008's notice/frame proposal remains unadopted and incomplete for aggregate
+result bounds and slow-sink evidence.
+
+W10-009 is a measured P1 follow-up: buffered CSV with a one-row cap received
+two rows, printed only one, exited zero and gave no truncation status. The
+privacy worker owns an independent exact-`24db9c5` clone, isolated Cargo target
+and read-only CLI probes for the pinned five-format stderr disclosure repair.
+No canonical source/cache writes or fixture lifecycle are assigned. The other
+worker owns read-only aggregate-result/slow-sink design. Root owns canonical
+integration, docs and the full gate; no concurrent canonical Cargo writer.
+
+The lead alone owns CLI/runtime-sidecar writes, documentation, compatibility,
+changelog and integration. No shared reducer/runtime writer is permitted.
 Linux's clean `21511f1` acceptance and task-only cleanup are complete and
 exclude density. No fixture may be torn down by a worker. Rendered-cell checks
 do not establish native terminal appearance or hand-use acceptance.
@@ -1883,27 +1920,21 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W02:** the reducer transition matrix is covered; no runtime test harness
-   exists for `event_loop`, so decide between a message-injection seam and
-   extended pty or live evidence before adding tests. Do not rewrite the state
-   architecture to make a harness convenient.
-2. **W03 continued:** decide the `standard_conforming_strings` boundary. The
-   bootstrap query already reads server facts once per session; reading the
-   setting there and refusing parameter binding when it is `off` is the
-   smallest design that satisfies "never silently bind under incompatible
-   semantics". A specification change comes first. Also collect live TUI
-   evidence for the update review and run the new evidence on PostgreSQL 14-17.
-3. **W04:** the parameter-expansion, provider stderr and provider timeout
-   probes are done, along with the authorization-header redaction fix they
-   found. The generated update bound-SQL log audit, refresh, clipboard
-   confirmation and the panic path remain.
-4. **W05:** run the current source against the PostgreSQL 14-18 matrix with
-   plain and TLS fixtures and a real Linux socket; the Unix-socket gate is still
-   a skip on this machine.
-5. **W06-W07:** blocked on a controlled cloud account and a Windows host; the
-   portable subprocess portions can proceed locally.
-6. **W08-W10:** hand-verify terminals, accessibility and daily use once the
-   relevant behaviour is stable; measure resource and recovery boundaries.
-7. **W11/W13:** prepare the release trust, support, naming and governance
-   decisions. **W12/W14:** assemble the candidate and obtain the owner's
-   decision. No release claim is earned by waiting.
+1. **W10-009:** review/integrate the isolated five-format truncation disclosure
+   repair, preserve stdout/SQL/exit semantics and repeat affected live checks.
+2. **W10-008:** finish and pin distinct notice, aggregate retained-result and
+   incoming-allocation contracts after the measured baseline. A notice cap
+   alone does not solve driver frames or startup backlogs; preserve cancellation,
+   sticky parameter privacy and unknown write outcomes. Measure a real slow sink.
+3. **W05/W07:** bind a fresh Linux socket, pinned compiler and Rust 1.90 repeat
+   to the saved review/panic source, and refresh secret scans. Existing five-major
+   database evidence remains frozen at `e5389f7`; repeat affected server paths
+   when session/protocol code changes. Native Windows/ConPTY stays open.
+4. **Feature 025/015:** specify and repair observed static help clipping before
+   continuing theme/pointer/daily-experience acceptance. Follow authoritative
+   story contracts; mouse capture stays off until pointer behavior/parity exists.
+5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence
+   when access exists. Synthetic buffers and PTYs do not replace hand use.
+6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open;
+   require actual consent for different-family external review and exact external
+   actions. No hosted acceptance, push, signing or release is implied.

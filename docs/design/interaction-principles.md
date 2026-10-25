@@ -115,6 +115,14 @@ written in ASCII and no-colour modes.
 that deserve them. A confirmation people dismiss reflexively is worse than none,
 because it trains the reflex.
 
+**A confirmation must expose what it authorizes.** Required disclosure is
+scrollable, with a fixed input and command rail. Acceptance is blocked before
+the final page and below usable dimensions. A real resize restarts review;
+an acceptance key that first observes new dimensions waits for a new painted
+frame. Exact generated UPDATE SQL remains inspectable, while copy review
+excludes the selected value. Existing redaction and production typed-name
+matching still apply. Scrolling sends nothing and does not prove reading.
+
 ## What is deliberately avoided
 
 - ASCII art on launch, gradients made of glyphs, spinners without text.

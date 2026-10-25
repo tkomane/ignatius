@@ -60,64 +60,82 @@ pub(crate) fn render_name_prompt(
         .render(box_area, buf);
 }
 
-/// Asks for one named value without changing the SQL editor underneath.
-pub(crate) fn render_parameter_prompt(
-    prompt: &crate::app::model::ParameterPrompt,
+/// Draws precisely the rows and fixed interaction areas used for admission.
+fn render_sending_review(
+    model: &Model,
+    kind: crate::ui::review::Kind,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let box_area = prompt_box(area, presentation, (84, 11));
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let dot = if presentation.glyphs.is_ascii() {
-        "*"
-    } else {
-        "\u{2022}"
+    let Some(view) = crate::ui::review::build(model, kind, presentation, area) else {
+        return;
     };
-    let name = prompt
-        .active_name()
-        .map_or_else(|| "unknown".to_owned(), sanitize_for_display);
-    let progress = format!(
-        "Parameter {} of {}: :{name}",
-        prompt.active_index() + 1,
-        prompt.total()
+    ratatui::widgets::Clear.render(view.outer, buf);
+    overlay_block(format!(" {} ", view.title), presentation).render(view.outer, buf);
+    if !view.usable {
+        if view.outer.width > 2 && view.outer.height > 2 {
+            let inner = Rect::new(
+                view.outer.x.saturating_add(1),
+                view.outer.y.saturating_add(1),
+                view.outer.width.saturating_sub(2),
+                view.outer.height.saturating_sub(2),
+            );
+            Paragraph::new(
+                view.refusal
+                    .iter()
+                    .map(|line| Line::from(line.as_str()))
+                    .collect::<Vec<_>>(),
+            )
+            .style(presentation.theme.style(Token::Warning))
+            .render(inner, buf);
+        }
+        return;
+    }
+    let body = view
+        .window()
+        .iter()
+        .map(|row| {
+            Line::from(Span::styled(
+                row.text.as_str(),
+                presentation.theme.style(row.token),
+            ))
+        })
+        .collect::<Vec<_>>();
+    Paragraph::new(body).render(view.body, buf);
+    if let (Some(input), Some(input_area)) = (&view.input, view.input_area) {
+        Paragraph::new(input.as_str())
+            .style(presentation.theme.style(Token::Focus))
+            .render(input_area, buf);
+    }
+    Paragraph::new(
+        view.rail
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .style(presentation.theme.style(if view.ready {
+        Token::Info
+    } else {
+        Token::Warning
+    }))
+    .render(view.rail_area, buf);
+}
+
+/// Asks for one named value without changing the SQL editor underneath.
+pub(crate) fn render_parameter_prompt(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Parameter,
+        presentation,
+        area,
+        buf,
     );
-    let value = if prompt.typed_length() == 0 {
-        "(empty)".to_owned()
-    } else {
-        dot.repeat(prompt.typed_length())
-    };
-    let lines = vec![
-        Line::from(Span::styled(progress, theme.style(Token::Focus))),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Value: ", theme.style(Token::Text)),
-            Span::styled(value, theme.style(Token::Focus)),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "The answer is literal text data. Quotes, punctuation and newlines stay data; empty text is valid.",
-            theme.style(Token::Muted),
-        )),
-        Line::from(Span::styled(
-            "The SQL template stays unchanged and prompted values are kept nowhere in history.",
-            theme.style(Token::Muted),
-        )),
-    ];
-
-    Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .block(overlay_block(
-            format!(
-                " {}Parameter  Enter to accept, Esc to cancel ",
-                presentation.icon(Icon::Editor)
-            ),
-            presentation,
-        ))
-        .render(box_area, buf);
 }
 
 /// Asks for a password the server has demanded.
@@ -189,161 +207,33 @@ pub(crate) fn render_password_prompt(
 /// distrust it, which costs more than it saves.
 pub(crate) fn render_confirmation(
     model: &Model,
-    pending: &crate::app::model::PendingRun,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let box_area = prompt_box(area, presentation, (78, 12));
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let target = model
-        .connection
-        .info()
-        .map_or_else(|| "this database".to_owned(), |info| info.target.clone());
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!(
-                    " {}[{}] ",
-                    presentation.icon(Icon::Production),
-                    model.environment().label()
-                ),
-                theme.capsule(Token::EnvironmentProduction),
-            ),
-            Span::styled(format!(" {target}"), theme.style(Token::Text)),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("This statement {}.", pending.impact.label()),
-            theme.style(Token::Danger),
-        )),
-    ];
-
-    for line in pending.sql.lines().take(4) {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", sanitize_for_display(line)),
-            theme.style(Token::Muted),
-        )));
-    }
-
-    lines.push(Line::from(""));
-    if pending.impact.needs_typed_confirmation() {
-        lines.push(Line::from(Span::styled(
-            format!("Type the database name to continue: {}", pending.required),
-            theme.style(Token::Warning),
-        )));
-        lines.push(Line::from(vec![
-            Span::styled("  ", theme.style(Token::Text)),
-            Span::styled(
-                sanitize_for_display(&pending.typed),
-                theme.style(if pending.is_satisfied() {
-                    Token::Success
-                } else {
-                    Token::Text
-                }),
-            ),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        ]));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Enter to run it, Esc to cancel.",
-            theme.style(Token::Info),
-        )));
-    }
-
-    lines.push(Line::from(Span::styled(
-        "This reads leading keywords only. Database permissions are the real control.",
-        theme.style(Token::Muted),
-    )));
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Production,
+        presentation,
+        area,
+        buf,
+    );
 }
 
 /// Explains the one-shot side effect before EXPLAIN ANALYZE is sent.
 pub(crate) fn render_plan_confirmation(
     model: &Model,
-    pending: &crate::app::model::PendingPlan,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let box_area = prompt_box(area, presentation, (84, 14));
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let target = model
-        .connection
-        .info()
-        .map_or_else(|| "this database".to_owned(), |info| info.target.clone());
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "EXPLAIN ANALYZE will execute the statement to measure it.",
-            theme.style(Token::Danger),
-        )),
-        Line::from(Span::styled(
-            "Side effects are possible. This client will not automatically roll it back.",
-            theme.style(Token::Warning),
-        )),
-        Line::from(Span::styled(
-            format!("Target: {}", safe_plan_text(&target)),
-            theme.style(Token::Muted),
-        )),
-        Line::from(""),
-    ];
-    for line in pending.sql.lines().take(4) {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", safe_plan_text(line)),
-            theme.style(Token::Muted),
-        )));
-    }
-    lines.push(Line::from(""));
-    if pending.impact.needs_typed_confirmation() {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "Type the database name to continue: {}",
-                safe_plan_text(&pending.required)
-            ),
-            theme.style(Token::Warning),
-        )));
-        lines.push(Line::from(vec![
-            Span::styled("  ", theme.style(Token::Text)),
-            Span::styled(
-                safe_plan_text(&pending.typed),
-                theme.style(if pending.is_satisfied() {
-                    Token::Success
-                } else {
-                    Token::Text
-                }),
-            ),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        ]));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Enter to execute once and measure it. Esc to cancel.",
-            theme.style(Token::Info),
-        )));
-    }
-    lines.push(Line::from(Span::styled(
-        "Classification is advisory: database permissions remain the real control.",
-        theme.style(Token::Muted),
-    )));
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm analyzed plan  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Analyze,
+        presentation,
+        area,
+        buf,
+    );
 }
 
 /// Asks before a result value leaves through the terminal.
@@ -353,78 +243,17 @@ pub(crate) fn render_plan_confirmation(
 /// never rendered in this overlay.
 pub(crate) fn render_copy_confirmation(
     model: &Model,
-    pending: &crate::app::model::PendingCopy,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let box_area = prompt_box(area, presentation, (84, 11));
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let column = model
-        .visible_result()
-        .and_then(|set| set.columns.get(pending.column))
-        .map_or_else(
-            || format!("column {}", pending.column + 1),
-            |name| {
-                format!(
-                    "column {} ({})",
-                    pending.column + 1,
-                    sanitize_for_display(name)
-                )
-            },
-        );
-    let target = model.connection.info().map_or_else(
-        || "this terminal".to_owned(),
-        |info| safe_plan_text(&info.target),
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Copy,
+        presentation,
+        area,
+        buf,
     );
-    let lines = vec![
-        Line::from(Span::styled(
-            "Send one selected text value through the terminal?",
-            theme.style(Token::Warning),
-        )),
-        Line::from(Span::styled(
-            format!("Cell: row {}, {column}", pending.source_row + 1),
-            theme.style(Token::Text),
-        )),
-        Line::from(Span::styled(
-            format!(
-                "Size: {} UTF-8 bytes, {} characters",
-                pending.bytes, pending.characters
-            ),
-            theme.style(Token::Info),
-        )),
-        Line::from(Span::styled(
-            format!("Path: {target} -> terminal clipboard sequence"),
-            theme.style(Token::Muted),
-        )),
-        Line::from(Span::styled(
-            "The terminal, SSH path, or multiplexer may observe or retain it.",
-            theme.style(Token::Danger),
-        )),
-        Line::from(Span::styled(
-            "Ignatius writes only; it never reads or clears the clipboard.",
-            theme.style(Token::Muted),
-        )),
-        Line::from(Span::styled(
-            "Terminal acceptance is unconfirmed: this client can only know its write and flush.",
-            theme.style(Token::Muted),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Enter to send once. Esc to cancel.",
-            theme.style(Token::Info),
-        )),
-    ];
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm copy  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
 }
 
 /// Collects the replacement before showing the exact generated statement.
@@ -492,73 +321,18 @@ pub(crate) fn render_update_value_prompt(
 
 /// Shows the literal-bound statement immediately before the one write effect.
 pub(crate) fn render_update_review(
-    pending: &crate::app::model::PendingUpdate,
+    model: &Model,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let box_area = prompt_box(area, presentation, (104, 17));
-    ratatui::widgets::Clear.render(box_area, buf);
-
-    let bound = pending
-        .plan
-        .bound_sql()
-        .map(|sql| sanitize_for_display(&sql))
-        .unwrap_or_else(|_| "The generated statement could not be rendered for review.".into());
-    let keys = if pending.plan.key_columns.is_empty() {
-        "none".to_owned()
-    } else {
-        pending
-            .plan
-            .key_columns
-            .iter()
-            .map(|name| sanitize_for_display(name))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let lines = vec![
-        Line::from(Span::styled(
-            "Review generated UPDATE",
-            theme.style(Token::Warning),
-        )),
-        Line::from(Span::styled(
-            format!(
-                "Target: {}.{}; column: {}",
-                sanitize_for_display(&pending.relation.schema),
-                sanitize_for_display(&pending.relation.relation),
-                sanitize_for_display(&pending.plan.target_column)
-            ),
-            theme.style(Token::Text),
-        )),
-        Line::from(Span::styled(
-            format!("Primary-key identity: {keys}"),
-            theme.style(Token::Muted),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Exact bound statement:",
-            theme.style(Token::Header),
-        )),
-        Line::from(Span::styled(bound, theme.style(Token::Text))),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Nothing has been sent yet. Enter runs this UPDATE once; Esc cancels.",
-            theme.style(Token::Info),
-        )),
-        Line::from(Span::styled(
-            "The prior SELECT is a snapshot and will not be rerun automatically.",
-            theme.style(Token::Muted),
-        )),
-    ];
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            " Confirm cell update  Esc to cancel ".to_owned(),
-            presentation,
-        ))
-        .wrap(Wrap { trim: true })
-        .render(box_area, buf);
+    render_sending_review(
+        model,
+        crate::ui::review::Kind::Update,
+        presentation,
+        area,
+        buf,
+    );
 }
 /// Renders the plan surface over the Results pane without changing the retained
 /// ordinary execution underneath it.

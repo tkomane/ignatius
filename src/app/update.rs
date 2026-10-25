@@ -34,8 +34,30 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             update(model, *message)
         }
         Message::Action(action) => apply_action(model, action),
+        Message::InputAtSize {
+            action,
+            columns,
+            rows,
+        } => {
+            let changed = model.size != (columns, rows);
+            let accepting_review = matches!(action, Action::Activate | Action::RunBuffer)
+                && crate::ui::review::active_kind(model).is_some();
+            if changed {
+                update(model, Message::Resized(columns, rows));
+            }
+            if changed && accepting_review {
+                // The newly observed geometry has not been painted yet. A
+                // second explicit action follows the next frame and its gate.
+                Vec::new()
+            } else {
+                apply_action(model, action)
+            }
+        }
         Message::Resized(columns, rows) => {
-            model.size = (columns, rows);
+            if model.size != (columns, rows) {
+                model.size = (columns, rows);
+                model.review_scroll = 0;
+            }
             Vec::new()
         }
         // Mouse stays inert until the pointer phase; a paste routes to the
@@ -1571,8 +1593,42 @@ fn password_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// Consumes only review navigation or refused acceptance, before the owning
+/// handler can consume a candidate, accept an answer or allocate a job.
+fn review_action(model: &mut Model, kind: crate::ui::review::Kind, action: &Action) -> bool {
+    if !matches!(
+        action,
+        Action::Activate
+            | Action::RunBuffer
+            | Action::Move(Direction::Up | Direction::Down)
+            | Action::MovePage(_)
+            | Action::MoveLineStart
+            | Action::MoveLineEnd
+            | Action::MoveBufferStart
+            | Action::MoveBufferEnd
+    ) {
+        return false;
+    }
+    let Some(view) = crate::ui::review::build(
+        model,
+        kind,
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    ) else {
+        return false;
+    };
+    if let Some(scroll) = view.navigate(action) {
+        model.review_scroll = scroll;
+        return true;
+    }
+    !view.ready
+}
+
 /// Handles input while named parameter values are being collected.
 fn parameter_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Parameter, &action) {
+        return Vec::new();
+    }
     match action {
         Action::Insert(character) => {
             if let Some(prompt) = model.parameter_prompt.as_mut() {
@@ -1589,7 +1645,10 @@ fn parameter_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Activate | Action::RunBuffer => {
             let accepted = model.parameter_prompt.as_mut().map(ParameterPrompt::accept);
             match accepted {
-                Some(Ok(None)) => Vec::new(),
+                Some(Ok(None)) => {
+                    model.review_scroll = 0;
+                    Vec::new()
+                }
                 Some(Ok(Some(parameters))) => {
                     let prompt = model
                         .parameter_prompt
@@ -1681,6 +1740,9 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
 
 /// Handles input while a run is waiting to be confirmed.
 fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Production, &action) {
+        return Vec::new();
+    }
     let Some(pending) = model.pending_run.as_mut() else {
         return Vec::new();
     };
@@ -1720,6 +1782,9 @@ fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
 /// sent. A plain Enter is enough for read-looking statements; destructive
 /// impact still requires the database name, just as an ordinary run does.
 fn plan_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Analyze, &action) {
+        return Vec::new();
+    }
     let Some(pending) = model.pending_plan.as_mut() else {
         return Vec::new();
     };
@@ -1755,9 +1820,12 @@ fn plan_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
 
 /// Handles input while a result value is waiting for explicit copy approval.
 ///
-/// This is a stricter modal than the inspector: typing and navigation are
-/// swallowed, and Enter rechecks the retained result before a payload exists.
+/// Typing is swallowed, review navigation stays local, and acceptance rechecks
+/// the retained result before a payload exists.
 fn copy_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Copy, &action) {
+        return Vec::new();
+    }
     let Some(candidate) = model.pending_copy.take() else {
         return Vec::new();
     };
@@ -1841,6 +1909,7 @@ fn begin_copy(model: &mut Model) -> Vec<Effect> {
     }
 
     model.clipboard_notice = None;
+    model.review_scroll = 0;
     model.pending_copy = Some(crate::app::model::PendingCopy {
         result_job,
         source_row,
@@ -1949,6 +2018,7 @@ fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
             );
             match plan {
                 Ok(plan) => {
+                    model.review_scroll = 0;
                     model.pending_update = Some(PendingUpdate {
                         candidate: prompt.candidate,
                         relation: prompt.relation,
@@ -1982,6 +2052,9 @@ fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
 
 /// Handles the final, one-shot confirmation of a generated update.
 fn pending_update_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Update, &action) {
+        return Vec::new();
+    }
     let Some(pending) = model.pending_update.take() else {
         return Vec::new();
     };
@@ -2220,6 +2293,13 @@ fn finish_update_target(
         .update_lookup
         .take()
         .expect("checked update lookup identity");
+    if update_lookup_has_newer_owner(model) {
+        model.cell_update_notice = Some(
+            "Cell update metadata was discarded because another input or review is active. Finish or cancel it, then regenerate the cell update; nothing was sent."
+                .to_owned(),
+        );
+        return Vec::new();
+    }
     if !update_candidate_is_current(model, &lookup.candidate) {
         model.cell_update_notice =
             Some("The result or selection changed; the cell update was discarded.".to_owned());
@@ -2264,6 +2344,20 @@ fn finish_update_target(
     Vec::new()
 }
 
+/// An asynchronous lookup may not replace a newer input owner. Its candidate
+/// identity can still be current even though the user opened another prompt.
+fn update_lookup_has_newer_owner(model: &Model) -> bool {
+    crate::ui::review::active_kind(model).is_some()
+        || model.password_prompt.is_some()
+        || model.name_prompt.is_some()
+        || model.connection_details
+        || model.prefix_pending
+        || model.update_prompt.is_some()
+        || model.palette.is_some()
+        || model.help_open
+        || pane_input_owned(model)
+}
+
 /// Starts a plain plan immediately or stages an analyzed plan for confirmation.
 fn begin_plan(model: &mut Model, analyze: bool) -> Vec<Effect> {
     if !model.connection.is_usable()
@@ -2292,6 +2386,7 @@ fn begin_plan(model: &mut Model, analyze: bool) -> Vec<Effect> {
             .connection
             .info()
             .map_or_else(String::new, |info| info.database.clone());
+        model.review_scroll = 0;
         model.pending_plan = Some(crate::app::model::PendingPlan {
             sql,
             impact,
@@ -2413,6 +2508,7 @@ fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<E
             .connection
             .info()
             .map_or_else(String::new, |info| info.database.clone());
+        model.review_scroll = 0;
         model.pending_run = Some(crate::app::model::PendingRun {
             sql,
             impact,
@@ -2447,6 +2543,7 @@ fn start(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec
         }
     };
     if !template.is_empty() {
+        model.review_scroll = 0;
         model.parameter_prompt = Some(ParameterPrompt::new(sql, source, template.names().to_vec()));
         model.error = None;
         clear_error_location(model);

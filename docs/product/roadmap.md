@@ -14,9 +14,14 @@ Those local results do not establish hosted acceptance or release readiness.
 On 25 October, local M1 work also patched the current dependency advisories,
 refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
 window. Feature 025 keyboard panes T039/T041 and density T040 are implemented
-locally, with T038 test implementation complete. A newly reproduced minimum-size clipboard disclosure gap is
-tracked in Feature 018 T037-T040 and blocks M1/M2 safety acceptance until its
-confirmation contracts and affected review surfaces are repaired. Keep these
+locally, with T038 test implementation complete. Feature 018 T037-T040 now
+repair the reproduced narrow-review disclosure failure across five sending
+surfaces and passed the complete local verifier (1,270 harness cases). W07-062
+also proves actual error/panic guard restoration in owned macOS PTYs. W10-007
+measured oversized-value/notice retention and exposed silent CSV truncation;
+the specified W10-009 disclosure repair precedes further experience work.
+W10-008 retains distinct notice, aggregate-result and incoming-allocation
+contracts; observed RSS peaks are not memory ceilings. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature
 chain; the later experience work preserves its source-bound, deliberate action.
@@ -103,8 +108,10 @@ flowchart LR
    the task plan now records this previously omitted dependency. Mouse capture
    stays off until complete pointer behavior and keyboard parity are verified.
    T039/T041's keyboard split/zoom core passed local integration on 25 October
-   2026. Density T040 and complete T038 acceptance remain next; dragging still
-   belongs to T035. Full US7, native visual and hosted acceptance remain open.
+   2026. Density T040 and T038 test implementation also passed the complete
+   local gate. Dragging still belongs to T035. Full US7, native visual and
+   hosted acceptance remain open. Static help clipping is tracked in Feature
+   015 T042; specify its local navigation/ownership before changing the UI.
 
 Use full feature directory slugs in assignments. The historical `007` collision
 and old broad-theme numbers are documented in the inventory; neither justifies

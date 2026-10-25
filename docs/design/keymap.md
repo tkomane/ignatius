@@ -94,6 +94,17 @@ replacement, then shows the exact bound statement. Enter on that review sends
 one parameterized update; Esc sends nothing, and the prior result is never
 rerun automatically. Printable `u` remains editor input outside the chord.
 
+Copy, generated UPDATE, production-run, analyzed-plan and parameter prompts
+share a scrollable review. Up/Down and PageUp/PageDown move through its text;
+Home/End and Ctrl+Home/Ctrl+End go to its beginning/end. The prompt names the
+active configured keys. Acceptance stays blocked until the final page is
+visible, and returning to an earlier page blocks it again. A new candidate,
+next parameter or actual resize restarts that review. Typed input stays in a
+fixed row. Below 40 columns by 8 rows, or without room for two body rows and
+the complete command rail, enlarge the terminal or cancel. Esc and Ctrl+C
+remain available. Reaching the last page establishes visibility, not that the
+user read the text.
+
 With the editor focused, `Ctrl+Shift+F` or `Ctrl+K q` formats the complete SQL
 buffer locally. It changes only whitespace and layout outside strings, quoted
 identifiers, dollar bodies, and comments; it is deterministic and one Undo

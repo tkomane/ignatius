@@ -195,14 +195,14 @@ repair it. No clipboard write was performed. Retained repro:
   implementation, including resize, Unicode wrapping, alternate keymaps,
   density, no-colour/ASCII and stale-candidate behavior. Do not silently weaken
   existing confirmation or exact-statement review requirements.
-- [ ] T039 Add failing-first renderer/reducer regressions, implement the pinned
+- [x] T039 Add failing-first renderer/reducer regressions, implement the pinned
   repair after the density worker releases the shared files, and prove that
   hidden mandatory review content cannot authorize a transfer or statement.
   The lead owns the first-frame/fresh-backend/stale-resize runtime seam and
   tests in `src/cli/interactive.rs` and its sidecar; shared UI/app work remains
   single-writer. Manually synchronized model/buffer probes do not prove that
   runtime boundary.
-- [ ] T040 Run affected focused and full checks, inspect actual rendered
+- [x] T040 Run affected focused and full checks, inspect actual rendered
   buffers, update the affected feature contracts, data handling, compatibility,
   changelog and status, and retain native/platform acceptance as separate gates.
 
@@ -218,4 +218,44 @@ This is a P1 disclosure failure, not a typed-name bypass or native acceptance.
 T038 pins `contracts/review-viewport.md` after native read-only review: stable
 rail height, identical active-key metrics, gate before mutation, complete
 shared wrapping, final-current-page admission, resize/new-candidate reset and
-bounded masking. T039/T040 remain open; a specification alone repairs nothing.
+bounded masking. Implementation and evidence follow below.
+
+T039 runtime progress: three actual Ratatui TestBackend regressions failed
+before the size repair (first frame, input without a resize event, stale queued
+resize). A further valid-session enlargement probe emitted Explain before any
+fresh frame was painted. Its repair and the original runtime checks passed
+27 focused cases before the final pure fact-message extraction. Logs:
+`/private/tmp/ignatius-w04-runtime-geometry-{red,green,final}-2026-10-25.log`
+and `/private/tmp/ignatius-w04-runtime-resize-admission-red-2026-10-25.log`.
+`InputAtSize` keeps admission in the pure reducer. Five initial coupled app/UI
+regressions also failed as expected at 40x8; no effect was dispatched. No native
+visual or live sending proof is inferred.
+
+Lead review then found two blockers before handoff. The extraction lost the
+existing Analyze/copy-target redaction boundary; synthetic credential-shaped
+preview/metadata/typed-name probes failed while exact UPDATE remained a positive
+value-visible control. A real GenerateCellUpdate -> CopyValue -> matching
+UpdateTargetLoaded sequence also rendered replacement input above the copy
+owner while Enter produced CopyValue. No effect was dispatched. Raw red log:
+`/private/tmp/ignatius-w04-privacy-red-20261025.log`. The shared contract now
+preserves those redaction routes and discards only an older metadata lookup
+when a newer input/review owner exists, with explicit retry guidance. These
+repairs were included before handoff and integrated acceptance.
+
+T039/T040 evidence: final focused app 328/UI 241/runtime 27 (596 cases, zero
+skips), Clippy and formatting passed. Three actual 40x8 typed-input/rail reds
+then passed after width-aware navigation wording; arbitrary remapped keys stay
+intact. Final scoped evidence is `/private/tmp/ignatius-w04-minimum-evidence-20261025.txt`.
+The lead inspected representative first/end/middle frames from 152 actual
+styled Ratatui buffers across both densities, three truecolour themes and
+ASCII/no-colour, including every review family, minimum typed input and exact
+UPDATE tail. Provenance: `/private/tmp/ignatius-w04-styled-reviewed-lay5bval/`.
+
+The complete integrated locked verifier passed 1,270 harness cases/996 library
+across 22 summaries, formatting, warnings-denied lints/API docs and PostgreSQL
+18.6 plain/TLS. Log: `/private/tmp/ignatius-verify-2026-10-25-review-and-panic.log`.
+Source was modified `24db9c5`, including the reviewed W07 panic repair, on
+macOS 27.0.1 arm64/Homebrew Rust 1.99.1. The socket case remains a semantic
+skip; the inert W07 parent helper is not terminal proof. Latest-source Linux,
+pinned/MSRV, Windows, hosted, native visual/hand-use and different-family
+review remain separate gates. No real clipboard or production write was used.

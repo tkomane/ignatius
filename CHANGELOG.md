@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: interactive sending reviews keep complete warning and exact UPDATE
+  content reachable by keyboard, retain a fixed input/command area, and refuse
+  acceptance until the current final page is visible. Insufficient terminal
+  space refuses sending. New frame/backend size facts govern admission; a
+  resize that first arrives with confirmation requires a fresh confirmation
+  after repaint. Older cell-update metadata cannot replace a newer input owner.
 - Fixed: panic cleanup uses the modes actually acquired, including mouse
   capture, before previous-hook details. Notices distinguish successful cleanup
   from a failed attempt and do not assert a database write outcome.

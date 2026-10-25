@@ -40,8 +40,10 @@ and admission before accepting a value. Shared W04 work is tracked in Feature
 018 T037-T040. Plain and environment-backed CLI routes remain separate.
 
 - The prompt opens only after any required production confirmation.
-- The prompt title names the current `:name` and progress, and the body states
-  that the answer is literal text data.
+- Under the 2026-10-25 shared review contract, the fixed title identifies the
+  parameter surface; its scrollable body names the full current `:name` and
+  progress and states that the answer is literal text data. This supersedes
+  the older title-only wording without clipping long names or masked input.
 - Enter accepts empty text and advances; Esc, Cancel and Quit have their normal
   modal semantics.
 - The editor, template SQL, history and result state do not change while the

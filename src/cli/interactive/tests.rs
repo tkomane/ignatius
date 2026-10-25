@@ -1,5 +1,165 @@
 use super::*;
 
+#[test]
+fn runtime_geometry_first_frame_synchronizes_model_with_the_actual_buffer() {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8))
+        .expect("owned in-memory terminal");
+    let mut model = Model::new(100);
+    assert_eq!(model.size, (80, 24), "reproduce the initial model default");
+    draw(&mut terminal, &mut model, &Keymap::new()).expect("first actual frame");
+    assert_eq!(model.size, (40, 8));
+    assert_eq!(
+        terminal.backend().buffer().area,
+        ratatui::layout::Rect::new(0, 0, 40, 8)
+    );
+}
+
+#[test]
+fn runtime_geometry_input_observes_backend_changes_without_a_resize_message() {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8))
+        .expect("owned in-memory terminal");
+    let mut model = Model::new(100);
+    assert!(
+        reduce_terminal_input(
+            &terminal,
+            &mut model,
+            Message::Action(crate::app::Action::FocusNext),
+        )
+        .unwrap()
+        .is_empty()
+    );
+    assert_eq!(model.size, (40, 8));
+    terminal.backend_mut().resize(60, 20);
+    assert!(
+        reduce_terminal_input(
+            &terminal,
+            &mut model,
+            Message::Action(crate::app::Action::FocusNext),
+        )
+        .unwrap()
+        .is_empty()
+    );
+    assert_eq!(model.size, (60, 20));
+}
+
+#[test]
+fn runtime_geometry_stale_queued_resize_cannot_replace_current_backend_size() {
+    let terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8))
+        .expect("owned in-memory terminal");
+    let mut model = Model::new(100);
+    assert!(
+        reduce_terminal_input(&terminal, &mut model, Message::Resized(140, 50))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(model.size, (40, 8));
+}
+
+#[test]
+fn runtime_geometry_size_failure_keeps_the_pending_statement_unsent() {
+    let mut model = Model::new(100);
+    model.pending_run = Some(crate::app::model::PendingRun {
+        sql: "UPDATE synthetic_table SET value = 1;".into(),
+        impact: crate::query::Impact::Write,
+        typed: String::new(),
+        required: String::new(),
+        source: None,
+    });
+    let result = reduce_input_with_size(
+        &mut model,
+        Message::Action(crate::app::Action::Activate),
+        || {
+            Err(Diagnostic::new(
+                DiagnosticKind::Internal,
+                "size unavailable",
+                "synthetic terminal",
+            ))
+        },
+    );
+    assert!(result.is_err());
+    assert!(
+        model.pending_run.is_some(),
+        "admission must precede candidate mutation"
+    );
+    assert!(!model.phase.is_busy());
+}
+
+#[test]
+fn runtime_geometry_recovery_actions_do_not_require_a_working_size_query() {
+    for action in [
+        crate::app::Action::Quit,
+        crate::app::Action::Cancel,
+        crate::app::Action::Dismiss,
+    ] {
+        let mut model = Model::new(100);
+        model.pending_run = Some(crate::app::model::PendingRun {
+            sql: "UPDATE synthetic_table SET value = 1;".into(),
+            impact: crate::query::Impact::Write,
+            typed: String::new(),
+            required: String::new(),
+            source: None,
+        });
+        let queried = std::cell::Cell::new(false);
+        let effects = reduce_input_with_size(&mut model, Message::Action(action.clone()), || {
+            queried.set(true);
+            Err(Diagnostic::new(
+                DiagnosticKind::Internal,
+                "size unavailable",
+                "synthetic terminal",
+            ))
+        })
+        .expect("recovery must remain available");
+        assert!(!queried.get());
+        if action == crate::app::Action::Quit {
+            assert!(matches!(effects.as_slice(), [Effect::Quit]));
+            assert!(model.should_quit);
+        } else {
+            assert!(effects.is_empty());
+            assert!(model.pending_run.is_none());
+        }
+    }
+}
+
+#[test]
+fn runtime_geometry_changed_input_cannot_accept_before_the_new_frame_is_painted() {
+    for action in [crate::app::Action::Activate, crate::app::Action::RunBuffer] {
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 50))
+            .expect("owned in-memory terminal");
+        let mut model = Model::new(100);
+        model.size = (40, 8);
+        model.connection =
+            crate::app::model::ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+                target: "sample@localhost:55432/example".into(),
+                database: "example".into(),
+                user: "sample".into(),
+                server_version: "18.6".into(),
+                backend_pid: "123".into(),
+                search_path: "public".into(),
+                read_only: false,
+                tls: crate::postgres::TlsState::Disabled,
+                environment: crate::connection::Environment::Local,
+            }));
+        model.pending_plan = Some(crate::app::model::PendingPlan {
+            sql: "SELECT 1;".into(),
+            impact: crate::query::Impact::Read,
+            typed: String::new(),
+            required: String::new(),
+        });
+        let effects = reduce_terminal_input(&terminal, &mut model, Message::Action(action.clone()))
+            .expect("observe fresh dimensions");
+        assert!(
+            effects.is_empty(),
+            "a newly fitting review has not been painted yet"
+        );
+        assert!(model.pending_plan.is_some());
+        assert_eq!(model.size, (140, 50));
+        draw(&mut terminal, &mut model, &Keymap::new()).expect("paint fresh review");
+        let effects = reduce_terminal_input(&terminal, &mut model, Message::Action(action))
+            .expect("explicit confirmation after painting");
+        assert!(matches!(effects.as_slice(), [Effect::Explain { .. }]));
+    }
+}
+
 #[cfg(unix)]
 fn wait_for_owned_signal_child(
     child: &mut std::process::Child,

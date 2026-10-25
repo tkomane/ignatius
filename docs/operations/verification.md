@@ -48,6 +48,53 @@ as information; it is not reported as a database/socket test pass.
 | Code scanning | CodeQL advanced setup in CI, test sources excluded | Yes |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
+## Complete interactive review admission - 2026-10-25
+
+Feature 018 T037-T040 now implements the pinned shared review contract for
+copy, generated UPDATE, production run, EXPLAIN ANALYZE and named parameters.
+Falling short of the current final page, 40x8 minimum or two body rows produces
+no sending effect. Both acceptance aliases are gated before candidate/input/job
+mutation. Local navigation, fixed input/rail, active remaps, resize reset,
+bounded masks and full exact UPDATE wrapping use the same pure geometry.
+
+Five coupled narrow-review cases failed first. Lead review additionally
+reproduced extraction loss of Analyze/copy-target redaction and a real late
+metadata response covering a newer copy owner. Fixed regressions preserve the
+single redactor and discard only the older lookup, without automatic retry.
+Actual TestBackend first-frame, fresh-size and stale-resize cases failed first;
+a valid enlargement-before-paint case emitted Explain before the repair.
+Runtime now supplies `InputAtSize` facts and reducer policy suppresses that
+first acceptance after a newly observed resize, retaining candidate/input.
+
+Final focused scope: app 328, UI 241, interactive runtime 27 (596 cases, zero
+skips), Clippy and formatting. Three actual 40x8 typed-input/rail reds passed
+after compact standard navigation labels, without truncating custom keys.
+Logs and exact scoped source hashes:
+`/private/tmp/ignatius-w04-minimum-evidence-20261025.txt`.
+
+The lead inspected representative first/end/middle styled frames from 152
+actual synthetic Ratatui buffers: nine scenarios, both densities, dark/light/
+high-contrast truecolour and ASCII/no-colour. Inspection included all five
+review families, 40x8 copy/parameter/typed-PROD, too-small refusal and complete
+UPDATE tail. Buffers, symbols/styles, font/DIM/Reset assumptions and linked-
+library provenance: `/private/tmp/ignatius-w04-styled-reviewed-lay5bval/`.
+Source-input SHA-256:
+`4c64afe28ae5549e167b3c351f1544689de775f1448dd7f7a87b5b0617cd2995`;
+linked non-test library SHA-256:
+`6d36e4423f2f35d8fb0de14ba30100272c7b07a749f912153763e29e986abb58`.
+No effects were dispatched for these synthetic captures. They establish drawn
+cells and reachable disclosure, not native appearance or proof of reading.
+
+The combined modified `24db9c5` source, including W07-062 below, passed the
+complete locked verifier on macOS 27.0.1 arm64/Homebrew Rust 1.99.1: 1,270
+harness cases/996 library across 22 summaries, formatting, warnings-denied
+lints/API docs and PostgreSQL 18.6 plain/TLS. Log:
+`/private/tmp/ignatius-verify-2026-10-25-review-and-panic.log`.
+The Unix-socket case remains a semantic skip, and the inert W07 parent helper
+is not terminal evidence. Later code needs fresh acceptance. Current-source
+Linux, pinned/MSRV, Windows, hosted, native hand use and required different-
+family review remain separate. No real clipboard or production write was used.
+
 ## Panic and error acquired-mode restoration - 2026-10-25
 
 W07-062's original mouse-enabled panic failed before prior-hook output: the
@@ -71,7 +118,7 @@ Evidence and red/green logs: `/private/tmp/ignatius-w07-062-w2iPKH/`.
 Final two-file patch SHA-256:
 `cf3570a569025794995da01bffacfa9b1102036db75f14e5abf6350ad350b763`.
 The lead reviewed/applied it; focused integration and the combined full gate
-at the modified W04/W07 integration tree passed (recorded separately). This is actual Unix guard/hook restoration evidence, not a full
+above passed. This is actual Unix guard/hook restoration evidence, not a full
 uncaught application crash or native visual acceptance. Forced output/raw-mode
 failures were unit-injected, not induced on an OS device. Windows, Linux and
 latest-source pinned/MSRV proof remain separate at this checkpoint.

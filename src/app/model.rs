@@ -1063,6 +1063,9 @@ pub struct Model {
     pub next_update_request: u64,
     /// Last known terminal size.
     pub size: (u16, u16),
+    /// First wrapped row of the owning one-shot sending review. Content is
+    /// derived transiently; SQL and prompted answers are never cached here.
+    pub review_scroll: usize,
     /// How long the last execution took, kept for the status bar.
     pub last_elapsed: Option<Duration>,
     /// Row cap applied to results.
