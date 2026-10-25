@@ -178,6 +178,32 @@ zero remaining export/partial payloads. Manifest SHA-256:
 The results motivate distinct notice, retained-result and incoming-allocation
 contracts in W10-008; they do not close that requirement.
 
+## Buffered truncation disclosure - 2026-10-25
+
+W10-009's clean-base `24db9c5` clone first reproduced nine missing-disclosure
+failures while five compatibility controls passed. Its three-file patch emits
+the pinned value-free stderr line only after successful buffered writing for
+CSV, TSV, NDJSON, Markdown and INSERT. Counts describe received rows and
+result-set ordinals; no SQL is replayed. Table/JSON stay in-band, error-prefix
+status is preserved and successful file streaming remains complete at cap zero.
+Streaming help now states the individual-value/row/frame memory boundary.
+
+Private focused results: live 14, CLI 33, output 25, documentation parity 15
+(87 cases, zero skips), Clippy, formatting and whitespace checks. Environment:
+macOS arm64/Homebrew Rust 1.99.1, PostgreSQL 18.6 read-only/plain fixture,
+isolated state/absent passfile, no HOME override/history. Evidence:
+`/private/tmp/ignatius-w10-009-evidence-20261025.txt`; patch SHA-256:
+`27718e2ee946e7719d86ac9535a5993ea3f3d2e12405fdf1d1e91146bcc634a8`.
+
+After primary review/application to modified `871db73`, root passed 33 CLI
+units and all 14 actual CLI contracts on each plain and `verify-full` TLS
+PostgreSQL 18.6 route (61 focused passes, zero skips). Logs:
+`/private/tmp/ignatius-w10-009-root-{cli-unit,plain,verified-tls}-20261025.log`.
+No persistent schema/data or fixture lifecycle was changed. The combined full
+verifier follows W10-010 integration; the earlier 1,270-case review/panic gate
+does not cover this CLI change. Latest-source Linux/MSRV/Windows and hosted
+acceptance remain separate.
+
 ## Local security maintenance - 2026-10-25
 
 The first clean `e70cddf` repeat found one confirmed scanner false positive:
@@ -198,6 +224,14 @@ Configuration behavior was checked on 25 October 2026 against the
 [pinned vendor parser](https://github.com/gitleaks/gitleaks/blob/v8.30.0/config/config.go).
 This makes no change to product output, scan rules or other test-file coverage;
 fresh complete scans follow the saved policy checkpoint.
+
+Fresh complete no-network/read-only Gitleaks 8.30.0 scans at clean
+`179e0f32808fafbf46ddaa7151e4e1495c7a1a3d` passed with no leaks: all 261
+commits/10.99 MB and the immutable 420-file tracked-source snapshot/5.06 MB.
+Snapshot: `/private/tmp/ignatius-source-179e0f3-k9di6les/`; manifest tree SHA-256:
+`dc0f50cef225613cf990f0a9196678b6518befa20f25918674ba293a6617dc0d`.
+Logs: `/private/tmp/ignatius-gitleaks-179e0f3-{history,source}-2026-10-25.log`.
+Later W10-009/010 changes are outside this frozen source boundary.
 
 Current primary advisories and maintainer releases were checked on 25 October
 2026. Only these five lockfile package versions/checksums changed; existing

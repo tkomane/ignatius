@@ -278,14 +278,17 @@ cargo xtask sql "SELECT order_id, note FROM orders ORDER BY order_id" \
   --format insert --insert-table orders
 cargo xtask sql "SELECT order_id, note FROM orders ORDER BY order_id" \
   --format insert --insert-table orders --output /private/tmp/ignatius-orders.sql
+cargo xtask sql "SELECT generate_series(1, 3) AS n" --format csv --max-rows 1
 cargo run -- query -c "SELECT 1" --format insert
 cargo run -- query -c "SELECT 1" --format insert --insert-table orders --no-header
 ```
 
 The first command prints quoted SQL data to stdout; it does not execute the
-generated statements. The second uses the bounded `.partial` and atomic-finish
-path, so inspect the file before applying it and remove it after the check. The
-last two commands must refuse before any connection attempt. In the full-screen
+generated statements. The second streams through `.partial` and atomic finish,
+so inspect the file before applying it and remove it after the check. Individual
+values, rows and driver frames still use memory. The third keeps only one row
+and reports `retained 1 of 3 received rows` on stderr while stdout remains CSV.
+The last two commands must refuse before any connection attempt. In the full-screen
 client, run a synthetic result, press `Ctrl+K e`, choose a format, type a path
 with a misleading extension, and confirm that the selected shape wins. Cancel
 the path prompt once and verify that neither the destination nor a partial file

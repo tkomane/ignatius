@@ -1,6 +1,129 @@
 use super::*;
 use clap::Parser;
 
+fn retention_status_execution() -> crate::query::result::Execution {
+    use crate::query::result::{
+        Execution, ExecutionStatus, JobId, ResultSet, StatementResult, TransactionState,
+    };
+    use crate::query::value::Cell;
+    let mut full = ResultSet::new(vec!["value".into()], 2);
+    full.push(vec![Cell::Text("synthetic-private-row".into())]);
+    let mut capped = ResultSet::new(vec!["value".into()], 1);
+    for _ in 0..3 {
+        capped.push(vec![Cell::Text("synthetic-private-row".into())]);
+    }
+    let mut empty = ResultSet::new(vec!["value".into()], 0);
+    for _ in 0..2 {
+        empty.push(vec![Cell::Text("synthetic-private-row".into())]);
+    }
+    let statement = |result_set: Option<ResultSet>| StatementResult {
+        rows_affected: Some(result_set.as_ref().map_or(9, |set| set.rows_seen)),
+        result_set,
+        elapsed: std::time::Duration::ZERO,
+        notices: Vec::new(),
+    };
+    Execution {
+        job: JobId(1),
+        statements: vec![
+            statement(None),
+            statement(Some(full)),
+            statement(None),
+            statement(Some(capped)),
+            statement(Some(empty)),
+        ],
+        status: ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::ZERO,
+        error: None,
+        transaction: TransactionState::Autocommit,
+    }
+}
+
+#[test]
+fn buffered_truncation_ordinals_include_untruncated_sets_but_ignore_dml_tags() {
+    let mut status = Vec::new();
+    write_buffered_truncation(&mut status, &retention_status_execution(), Format::Csv).unwrap();
+    let status = String::from_utf8(status).unwrap();
+    assert_eq!(
+        status,
+        "Result set 2 truncated: retained 1 of 3 received rows. For a future complete streaming export, choose --output before execution.\nResult set 3 truncated: retained 0 of 2 received rows. For a future complete streaming export, choose --output before execution.\n"
+    );
+    assert!(!status.contains("synthetic-private-row"));
+}
+
+struct FailedStatus(std::io::ErrorKind);
+
+impl std::io::Write for FailedStatus {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(self.0))
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn buffered_truncation_stderr_failures_keep_the_ordinary_io_boundary() {
+    for kind in [
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::BrokenPipe,
+    ] {
+        let error = write_buffered_truncation(
+            &mut FailedStatus(kind),
+            &retention_status_execution(),
+            Format::Csv,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), kind);
+        let diagnostic = io_diagnostic(error);
+        assert_eq!(diagnostic.kind, DiagnosticKind::Internal);
+        assert_eq!(diagnostic.exit_code(), ExitCode::Internal);
+    }
+}
+
+#[test]
+fn buffered_truncation_does_not_write_for_inband_or_nontruncated_results() {
+    let mut execution = retention_status_execution();
+    for format in [Format::Table, Format::Json] {
+        assert!(
+            write_buffered_truncation(
+                &mut FailedStatus(std::io::ErrorKind::Other),
+                &execution,
+                format
+            )
+            .is_ok()
+        );
+    }
+    execution.statements.retain(|statement| {
+        statement
+            .result_set
+            .as_ref()
+            .is_some_and(|set| !set.is_truncated())
+    });
+    assert!(
+        write_buffered_truncation(
+            &mut FailedStatus(std::io::ErrorKind::Other),
+            &execution,
+            Format::Csv
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn streamed_output_help_states_the_value_row_and_driver_memory_boundary() {
+    let mut tree = Cli::command();
+    let help = tree
+        .find_subcommand_mut("query")
+        .unwrap()
+        .render_long_help()
+        .to_string();
+    let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(help.contains("entire result is not retained in memory"));
+    assert!(help.contains("Individual values, rows and driver frames still use memory"));
+    assert!(!help.contains("rows never pass through memory"));
+    assert!(!help.contains("size of the result does not matter"));
+}
+
 #[test]
 fn the_command_tree_parses_and_has_no_conflicting_definitions() {
     Cli::command().debug_assert();

@@ -119,13 +119,20 @@ under `/private/tmp/ignatius-w10-007-AFKZrb/`; verification records exact scope.
 W10-008's notice/frame proposal remains unadopted and incomplete for aggregate
 result bounds and slow-sink evidence.
 
-W10-009 is a measured P1 follow-up: buffered CSV with a one-row cap received
-two rows, printed only one, exited zero and gave no truncation status. The
-privacy worker owns an independent exact-`24db9c5` clone, isolated Cargo target
-and read-only CLI probes for the pinned five-format stderr disclosure repair.
-No canonical source/cache writes or fixture lifecycle are assigned. The other
-worker owns read-only aggregate-result/slow-sink design. Root owns canonical
-integration, docs and the full gate; no concurrent canonical Cargo writer.
+W10-009 is integrated after primary review: 87 private focused passes, followed
+by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
+PostgreSQL 18.6 route (61 integrated focused passes, zero skips). The canonical
+three-file source/docs change awaits the combined full gate after W10-010.
+Task remains unchecked until then. No persistent schema/data changed.
+
+Current workers: privacy owns W10-010 only in a new independent exact-`871db73`
+clone/new SSD target: encoder/runtime progress must not count failed rows;
+typed abandonment distinguishes confirmed flush from unknown file-row count.
+Feature 021 FR-2112/T023-T025 pin scope before code. PostgreSQL worker owns
+frozen Linux arm64 pinned/MSRV/socket/PTY verification at clean `871db73`,
+with only its new labelled resources and explicit root/COI preservation. That
+frozen source excludes W10-009. Both workers leave canonical source/cache and
+docs alone; root owns integration and the combined full gate.
 
 The lead alone owns CLI/runtime-sidecar writes, documentation, compatibility,
 changelog and integration. No shared reducer/runtime writer is permitted.

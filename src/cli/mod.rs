@@ -179,9 +179,9 @@ pub enum Command {
         max_rows: Option<usize>,
         /// Stream the result into a file instead of standard output.
         ///
-        /// The rows never pass through memory, so the size of the result does
-        /// not matter. An interrupted export leaves a `.partial` file and says
-        /// how many rows reached it.
+        /// The entire result is not retained in memory. Individual values,
+        /// rows and driver frames still use memory. An interrupted export
+        /// leaves a `.partial` file and says how many rows reached it.
         #[arg(short = 'o', long, value_name = "PATH")]
         output: Option<PathBuf>,
         /// Replace the output file if it already exists.
@@ -1094,7 +1094,7 @@ fn query_command(
         }
     }
 
-    // An export streams rows straight to a file and never holds the result.
+    // An export streams to a file without retaining the complete result.
     if let Some(destination) = request.output {
         let writer = output::StreamWriter::new(request.options.clone())?;
         let export = crate::query::export::Export::create(destination, request.force)?;
@@ -1165,6 +1165,8 @@ fn query_command(
         };
     }
 
+    write_buffered_truncation(err, &execution, request.options.format).map_err(io_diagnostic)?;
+
     if let Some(error) = &execution.error {
         if request.options.format == Format::Json {
             // JSON diagnostics are written to stderr because stdout remains a
@@ -1176,6 +1178,38 @@ fn query_command(
         return Err(error.clone());
     }
     Ok(ExitCode::Success)
+}
+
+/// Reports client retention only after buffered data writing succeeds. Counts
+/// describe received rows, never an unknown server total or a reason to replay.
+fn write_buffered_truncation(
+    err: &mut impl Write,
+    execution: &crate::query::result::Execution,
+    format: Format,
+) -> std::io::Result<()> {
+    if !matches!(
+        format,
+        Format::Csv | Format::Tsv | Format::Ndjson | Format::Markdown | Format::Insert
+    ) {
+        return Ok(());
+    }
+    for (index, set) in execution
+        .statements
+        .iter()
+        .filter_map(|statement| statement.result_set.as_ref())
+        .enumerate()
+    {
+        if set.is_truncated() {
+            writeln!(
+                err,
+                "Result set {} truncated: retained {} of {} received rows. For a future complete streaming export, choose --output before execution.",
+                index + 1,
+                set.rows.len(),
+                set.rows_seen,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Opens the plain, line-oriented client.

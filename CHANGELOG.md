@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: buffered CSV, TSV, NDJSON, Markdown and INSERT now disclose discarded
+  rows on stderr with retained/received counts, including a completed prefix
+  before a later error. Data bytes and execution exit codes stay unchanged;
+  table/JSON keep existing in-band counts. Streaming help now states that
+  individual values, rows and driver frames still use memory.
 - Security: interactive sending reviews keep complete warning and exact UPDATE
   content reachable by keyboard, retain a fixed input/command area, and refuse
   acceptance until the current final page is visible. Insufficient terminal

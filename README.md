@@ -109,8 +109,8 @@ ignatius query "$DATABASE_URL" -c "SELECT count(*) FROM orders" --format csv
 ignatius query "$DATABASE_URL" -f report.sql --format json | jq '.[0].rows'
 echo "SELECT 1" | ignatius query "$DATABASE_URL" --format ndjson
 
-# Stream a large result straight to a file. The rows never pass through
-# memory, so the size of the result does not matter.
+# Stream without retaining the entire result. Individual values, rows
+# and driver frames still use memory.
 ignatius query "$DATABASE_URL" -c "SELECT * FROM orders" --format csv -o orders.csv
 ```
 
@@ -120,6 +120,11 @@ whose first byte is correct before the last row is read. Exit codes tell a
 script which kind of failure happened: 2 usage, 3 configuration, 4 connection,
 5 authentication, 6 TLS, 7 query, 8 cancelled, 9 interrupted export,
 70 internal.
+
+Buffered CSV, TSV, NDJSON, Markdown and INSERT write truncation status to
+stderr when a row limit discards data, stating retained and received counts.
+Table and JSON include that metadata in their data shape. For a future complete
+streaming export, choose `--output` before execution; no statement is replayed.
 
 ## Plain mode, and the screen reader question
 

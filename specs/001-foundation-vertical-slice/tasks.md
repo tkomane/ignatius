@@ -173,6 +173,15 @@ Evidence: `/private/tmp/ignatius-w10-007-AFKZrb/evidence/`; detailed results and
 limits are in verification. These observed peaks establish no strict process,
 frame, notice or aggregate-result ceiling. W10-008 remains open.
 
+W10-009 integration progress: the three-file patch was reviewed/applied, after
+nine expected baseline failures and 87 private focused passes. Root then passed
+33 CLI units plus 14 live contracts on each plain and verified-TLS PostgreSQL
+18.6 route (61 integrated focused passes, zero skips). Source was modified
+`871db73`; evidence and patch identities are in verification. The combined
+full gate follows W10-010, so this task remains open. That additional export
+row/flush accounting repair is specified in Feature 021 FR-2112/T023-T025;
+notice and aggregate-memory contracts remain separate W10-008 work.
+
 Partial T052 evidence on 2026-08-16: the focused
 `tests/postgres_socket_integration.rs` check passed inside a disposable Linux
 container against a real PostgreSQL Unix socket, executing `SELECT 1` through

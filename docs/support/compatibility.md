@@ -370,9 +370,17 @@ response remains an unavailable or incomplete plan with a recovery action.
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson
-and insert**. json, markdown and the aligned table are refused, because each
-needs the whole result before its first byte is correct and buffering it would
-give up the bounded memory that makes an export worth having.
+and insert**. json, markdown and the aligned table are refused for this route;
+their current encoders use buffered results. Streaming avoids retaining the
+entire result. Individual values, rows and driver frames still use memory;
+there is no whole-process memory ceiling.
+
+Buffered CSV, TSV, NDJSON, Markdown and INSERT keep stdout as data and report
+one stderr line per truncated result set, using retained versus received rows.
+Result-set ordinals exclude command-only statements. A successful prefix keeps
+its disclosure before a later query error; the actual error/exit code is
+preserved. Table and JSON already carry their in-band counts. Successful query
+execution remains exit zero even when client retention is explicitly limited.
 
 `--format insert` is deliberately explicit: it requires a non-empty
 `--insert-table TABLE` and rejects `--no-header`. The table and every result
@@ -396,9 +404,9 @@ save-as flow. A searchable format palette offers CSV, TSV, JSON, NDJSON and
 Markdown, names the retained and filtered row scope, and opens the path prompt
 only after a format is chosen. The selected format wins even when the path has
 no familiar extension; the client never guesses from the filename. No file is
-created while the palette is open or while the path is being edited. To write
-the whole result, run the statement with `--output`, which streams from the
-server and never holds it in memory.
+created while the palette is open or while the path is being edited. For a
+future complete streaming export, choose `--output` before execution. No
+completed statement is automatically replayed to recover discarded rows.
 
 ## Interactive clipboard copy
 
