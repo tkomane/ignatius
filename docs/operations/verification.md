@@ -243,6 +243,22 @@ Logs are `/private/tmp/ignatius-gitleaks-21511f1-history-2026-10-25.log` and
 `/private/tmp/ignatius-gitleaks-21511f1-source-2026-10-25.log`. Subsequent density
 work is outside those frozen source and history scopes.
 
+Fresh Linux acceptance of clean `21511f19ed25a15d078cc29ec4e1ce35eb75c7ca`
+also passed on aarch64-unknown-linux-gnu: app 303, UI 215, interactive 21
+(including pre-poll SIGTERM delivery), PostgreSQL 18.6 socket one, and isolated
+PTY four, all with zero skips. Actual Rust/Cargo 1.97.1 built the production
+binary, which reported the exact clean source and build identity
+`local-linux-21511f19-20261025`; SHA-256:
+`35fa6466eb8afe9e6a8e3b8b01c43ccd096717233d8eec612ddd5e6d4a8d2954`.
+The separate actual Rust 1.90.0 locked/offline workspace/all-targets/all-features
+check passed. A task-only Debian procps utility supplied real external `kill`
+for the owned-child signal regression; no fake signal tool or skipped test was
+used. Source/vendor mounts were read-only and acceptance had no network.
+Safe logs and source/tool/image metadata are retained under
+`/private/tmp/ignatius-linux-21511-20261025-FWM0SW/`. This updates the earlier
+frozen Linux proof through the pane and startup changes; subsequent density,
+native Windows, hand use and hosted acceptance remain separate.
+
 ## PTY profile isolation - 2026-10-25
 
 The Unix terminal harness previously overrode only configuration, leaving real

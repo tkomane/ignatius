@@ -47,15 +47,22 @@ Git state before taking an assignment; the day-long goal remains active.
   Log: `/private/tmp/ignatius-verify-2026-10-25-signal-startup.log`. The actual
   integrated `4a7717b` modified binary also passed owned-PTY SIGTERM, restoration
   order, canonical/echo modes and exact stty after normal PENDIN recovery input.
-  Latest-source Linux/MSRV, panic/error paths and Windows remain open.
-  The repair is saved in `21511f1`.
+  Panic/error process paths and Windows remain open.
+  The repair is saved in `21511f1`. A fresh clean Linux arm64 repeat at that
+  commit passed app 303, UI 215, interactive 21, socket one and PTY four
+  (544 focused cases, zero skips), plus actual Rust 1.90.0 locked/offline
+  workspace/all-targets/all-features compilation. Its production binary
+  confirmed clean source and exactly pinned Rust 1.97.1. Evidence is under
+  `/private/tmp/ignatius-linux-21511-20261025-FWM0SW/`. Density remains outside
+  that frozen source.
 
 Active assignments after clean planning commit `8de54a7`: the UI worker owns
 T040 density implementation/config/presentation/widgets and the single runtime
 density assignment, plus its named tests/parity documents. It may not change
 W07 registration or any query/credential behavior. The platform worker owns an
-independent clean `21511f1` clone and task-only Docker resources for a fresh
-pinned-Rust/Linux/MSRV/socket/PTY repeat. Never edit either lane's files or
+independent clean `21511f1` clone and task-only Docker resources; its fresh
+pinned-Rust/Linux/MSRV/socket/PTY checks are green and cleanup is finishing.
+Never edit either lane's files or
 tear down its fixture. The lead owns status, compatibility, changelog, feature
 authority and integration. Sixty styled synthetic buffers were captured and
 inspected; they do not establish native visual acceptance.
