@@ -90,9 +90,14 @@ also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; nativ
 hand-use remains separate. W10-013's execution-wide retained-data contract is
 accepted at published `54056c2`: local 1,431 outer cases/112 styled buffers,
 all five PostgreSQL majors plain/TLS, actual socket, pinned/MSRV/platform and
-CodeQL checks. W07's Windows ConPTY diagnostic in draft PR33 measured a cursor
-sensor limitation; native alternate-screen cursor acceptance remains open.
-CLI cancellation and complete resource acceptance remain separate. Keep these
+CodeQL checks. W07's published `65cf237` repeats three native Windows ConPTY
+control passes and completes separate cursor calibration. The retained sensor
+tracks native setters/main VT but not alternate VT; the original cursor
+capability still fails. Faithful alternate cursor observation is required before
+the option/path matrix. The strict experiment is now explicitly dispatched via
+`windows-conpty-diagnostic.yml`; routine CI retains all platform product suites.
+Full Windows restoration and hand use remain open. CLI cancellation and complete
+resource acceptance remain separate. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature
 chain; the later experience work preserves its source-bound, deliberate action.

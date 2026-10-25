@@ -1,5 +1,170 @@
 # Verification
 
+## ConPTY integration boundary - 26 October 2026
+
+The diagnostic now has a separate explicit-dispatch workflow,
+`.github/workflows/windows-conpty-diagnostic.yml`. It retains the unchanged
+native helper/control assertions and bounded evidence, including failed cases.
+There is no `continue-on-error`, accepted constant observation or replacement
+sensor. Routine CI keeps mandatory Windows product tests; the experimental
+capability failure remains a W07-064/T055a/T051 gap. Existing source-bound native
+results below remain historical evidence, not a new runtime result for this
+workflow relocation. Local workflow contracts and Actionlint pass for the new
+boundary; hosted acceptance is recorded after CI completes.
+
+## W07-064 first Windows capability harness - 2026-10-25
+
+The integrated test-only C++/safe Rust/PowerShell harness is based on `d6d65e7`.
+Root verified all 32 freeze02 artifacts and all nine integrated helper files;
+one trailing space was removed during integration. Native independent review
+accepted the first-four-case source scope after two reproduced harness bugs
+were repaired: post-deadline cleanup waits and suppressed zero-byte failed
+reads. The repaired controller shares one 25-second stopwatch, reserves cleanup
+time and fails unconfirmed cleanup. Pending native I/O retains every referenced
+buffer/handle until completion or supervisor process exit. Input hashes are
+recorded before build and checked afterward.
+
+Actual integration checks passed: 26 pure C++ checks, 48 synthetic PowerShell
+receipt/deadline/identity checks, all 15 workflow contracts, standalone Rust
+formatting and digest-pinned network-disabled Actionlint. Earlier PowerShell
+AST checks covered all four scripts and the extracted CI step. Those checks
+exercise local arithmetic, validation and wiring; hosted compilation and
+runtime results are recorded separately below. The complete local verifier passed 1,432
+outer harness cases, 1,127 library cases and 24 summaries, formatting,
+warnings-denied lints/API docs and PostgreSQL 18.6 plain/TLS. The macOS socket
+case remains a semantic skip. Log:
+`/private/tmp/ignatius-w07-064-integrated-verify-20261025.log`. Documentation
+was reconciled during/after this integration run; the installed pre-push gate
+will repeat checks against the clean committed source.
+
+Frozen source: `/private/tmp/ignatius-w07-064-d6d65e7-il6f_ql4/capability-control-freeze-02/`,
+manifest `fcd7cfeaa3fa8bacb8c2773555071b94c740663fc254253e5029bf2cc517490a`.
+Independent review: `/private/tmp/ignatius-w07-064-independent-review-02-20261025.md`,
+SHA-256 `40aaead5667e256bc306a340ec4c086663af67b980b33f7cba94bdb024d2e4eb`.
+Root integration receipt: `/private/tmp/ignatius-w07-064-root-integration-review-20261025.json`.
+Both original failures, earlier freeze and compiled inputs remain preserved.
+
+The primary admits only no-guard, known-unrestored, acknowledged hung-child and
+actual guard capability to the authorised Windows CI after the publication
+gate. Captures use the explicit synthetic metadata/trace upload allowlist,
+excluding binaries, caches and config/data. No ConPTY child has run yet.
+Wrong-ownership/native-error controls, the normal/error/uncaught-panic matrix,
+paste/full T055a, Windows 11/Windows Terminal hand use and release remain open.
+Four-case success alone cannot close W07-064.
+
+Clean source `69f4de6` is published in draft PR33, stacked on unchanged D6.
+The installed pre-push verifier repeated all 1,432 outer cases/24 summaries
+successfully, with the same semantic socket skip. Digest-pinned Gitleaks passed
+447 clean source files and 286 reachable revisions. CI run `40215610812` is
+complete with 12 successes, one deliberate schedule-only skip and one Windows
+controller failure before any case. Actual native helper compilation passed
+Rust1.97.1 x86_64-pc-windows-msvc and MSVC toolset14.51/SDK10.0.26100,
+Windows build26100 (runner image `win25-vs2026`/`20261021.278.1`).
+Root verified the 94,212-byte archive digest and all 447 source/nine helper
+hashes against `69f4de6`; summary cases are empty and post-input hashes match.
+The initial empty capture inventory produced an array-index error. The literal
+published expression reproduced that failure under local PowerShell StrictMode.
+A three-script shared accumulator repair passed 52 checks, including all prior
+48 and four real tiny owned-file/directory inventories, plus four script AST
+checks. Independent review accepted it; root verified all 14 frozen artifacts
+and exact integrated bytes. The 32 MiB admission, deadlines, first-four and
+native ownership/code remain unchanged. The primary admits the same four-case
+repeat after the normal pre-push gate. Repair source:
+`/private/tmp/ignatius-w07-inventory-69f4de6-tblan28y/final-freeze/`; review
+`/private/tmp/ignatius-w07-inventory-independent-review-20261025.md`, SHA-256
+`736b89b6db7bb2023b17dc3f0dfd2172ed35657623243397a4f2a970720433cc`.
+First failed Windows evidence:
+`/private/tmp/ignatius-pr33-windows-first-40215610812-1/`. No ConPTY child ran.
+The repaired clean head `7d167a9` is published after the unchanged full pre-push
+gate passed all 1,432 cases/24 summaries with the same macOS socket skip.
+Pinned source/history scans passed 447 files and 287 revisions. The hosted
+repeat CI `40216991785` completed with 12 successful jobs, one deliberate
+schedule-only skip and the failed Windows capability check. Four fresh native
+children actually ran. No-guard, known-unrestored and acknowledged hung-child
+controls passed; capability failed because acquired cursor visibility stayed1.
+Actual Guard input masks were423/152/423 and native main/alternate/main sentinel
+reads1/0/1. Cursor query success with constant1/1/1 does not prove cursor hiding
+or identify a product defect. The observation method is under investigation.
+
+All four exact Jobs were empty, guard/worker processes positively waited,
+translated output complete/bounded and reader/HPCON/control-I/O cleanup
+confirmed. Native durations were41.3788/34.0117/297.3594/48.9785ms, controller
+95/81/340/92ms; the acknowledged hung interval was257.6195ms before owned
+termination and actual exit124. Root verified the 101,380-byte archive SHA-256
+`c55cfc2975541e6f2bf133bc85e32fd6f93eeb31b60637f029e8b25b96b8f1e4`,
+all27 files,17 capture-manifest entries and447 source/nine helper hashes against
+`7d167a9`. Actual checkout `da1283e4` has the identical head tree
+`a2a46e4933966baedd0ad49ee5c979be17f1f7de`; revision identity differs normally.
+Evidence: `/private/tmp/ignatius-pr33-windows-second-40216991785-1/`, root review
+`/private/tmp/ignatius-pr33-7d167a9-second-windows-review-20261025.json`.
+No assertion was weakened, product source changed or later matrix admitted.
+Independent native audit:
+`/private/tmp/ignatius-w07-windows-second-independent-review-9e8kfug0/REVIEW.md`,
+SHA-256 `8170f35388d47964ef6b3e52cf3d0b0786dac8f977026b827e21f71892a96680`.
+Root verified its two hashed review artifacts. The separate locked-Crossterm/
+Microsoft routing assessment is
+`/private/tmp/ignatius-w07-cursor-sensor-assessment-q4rnegi5/ASSESSMENT.md`.
+It supports a sensor hypothesis but cannot identify the shipped26100 source.
+The adopted one-actor calibration is integrated from repaired immutable02,
+manifest `c44d1f1f3f8ea4e9c7455051cf32ccd447dd8a07ba80581f71c52a6ea7c810bc`.
+Root verified all 75 artifact hashes and nine exact integrated source files.
+Review01 caught successful-short sentinel reads masquerading as alternate
+absence and incomplete restoration-query records. The repair independently
+requires full nonce-derived sentinel counts and retains every verification
+query/error/fact/clock. Both have C++/PowerShell failing-first evidence.
+Native independent review accepted the repair; root's integrated repeat passed
+74 portable C++ and 103 PowerShell cases. Six exact-emitter synthetic cases,
+two exact wire roundtrips, four AST parses and Rust formatting are separately
+qualified worker evidence. These checks are not Windows compilation/runtime.
+Root's diagnostic-before-capability CI contract failed first, then passed;
+formatting, pinned Actionlint, extracted PowerShell AST and independent review
+also passed. Uploads add only six fixed diagnostic paths to the prior15 patterns.
+The original four assertions and all ownership/deadline/environment protections
+remain. The primary admits only calibration followed by the unchanged first
+four on the reviewed source after the normal full pre-push gate. Published
+`65cf237` passed that gate with 1,432 outer harness cases, 1,127 library cases
+and 24 summaries; the macOS socket case remains skipped. The clean 447-file
+source and 288 reachable revisions passed pinned Gitleaks. Actual PR merge ref
+`dfe46f52` and head have identical tree `4ce8f1f7cf0b8e704294578d76fb1531b963dc21`.
+CI `40221850172` completed: 12 jobs passed, one scheduled drift check skipped,
+and Windows failed the unchanged Guard cursor capability after the diagnostic
+completed. The one retained actor observed native-setter and main-VT hidden/
+shown transitions, but alternate-VT visibility stayed 1/1. All stage writes,
+marker readbacks and 36/36 sentinel reads completed, with masks 423/7 and cursor
+size 25. Independent baseline verification succeeded before the final query.
+Diagnostic duration was 54.2058 ms native/157 ms controller; actual alternate cursor
+state remains unproved. The original no-guard/known-unrestored/hung-child controls
+again passed and original capability failed. All five exact Jobs emptied and
+owned process/drain/control-I/O cleanup was confirmed. No later matrix or
+assertion change is admitted. Root verified 33 files, 22 capture entries and all
+447 Git source/nine helper identities; archive 105,445 bytes SHA-256
+`c78a505aa9c1994b8300080963e6e8268e3e1173e866a809f2527f1bb0fbac20`.
+Evidence: `/private/tmp/ignatius-pr33-windows-calibration-40221850172-1/`;
+root `/private/tmp/ignatius-pr33-65cf237-calibration-windows-review-20261025.json`.
+This supports the sensor-routing limitation, not a diagnosed product defect or
+proof that the installed 26100 binaries match current Microsoft source.
+Independent native audit accepted the same limits and found no integrity or
+adopted-scope inconsistency:
+`/private/tmp/ignatius-w07-calibration-65cf237-native-review-j2f4lx0v/REVIEW.md`,
+SHA-256 `64a56107cda058b343d6434393054bca603a91c94e99d9688b6f8bdbad5496a1`.
+Executable/link hashes are recorded by the build/controller; their bytes are
+excluded from the upload and cannot be independently rehashed from this archive.
+Publication receipt:
+`/private/tmp/ignatius-w07-65cf237-publication-20261025.json`.
+Source: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`;
+peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-20261025.md`,
+SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.
+New-head CodeQL remains pending until a main-targeted PR triggers the
+unchanged filter. Overall capability and W07-064/T055a/T051 remain incomplete.
+
+The separate read-only audit verified complete PG14/18/socket logs: each TCP
+job ran 236 selected invocations, plus one actual socket query (473 combined).
+Those include 24 actual retained-result and 40 notice invocations across both
+TCP routes/majors. Selected counts also include pure/local controls; successful
+libtest capture does not alone exclude every miscellaneous early return. Actual
+major assertions are 14/18; patch labels remain reviewed image provenance.
+Evidence: `/private/tmp/ignatius-pr33-db-hosted-audit-51oq6q99/RECEIPT.md`.
+
 ## Long-line editor correction - 2026-10-25
 
 Feature025 FR-2529 / T058 is integrated from clean `d92c416` with five owned

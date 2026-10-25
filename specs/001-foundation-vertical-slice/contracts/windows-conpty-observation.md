@@ -52,6 +52,70 @@ or unsupported answers. Record unsupported observations as gaps, never passes.
   and full T055a acceptance open. Do not claim that every current ConPTY drops
   2004 merely because a historical state-forwarding issue exists.
 
+## Cursor sensor calibration after the first native run
+
+Run `40216991785` at `7d167a9` passed the three controls but failed acquired
+cursor visibility. Raw/mouse masks and buffer sentinels transitioned/restored;
+the successful cursor query stayed visible in all phases. Preserve that failed
+capability and its assertion. Current Microsoft host source suggests that
+classic cursor visibility can refer to main-buffer context while VT output
+changes the active alternate cursor. This is a hypothesis for installed
+build26100, not an established product defect or a faithful alternate sensor.
+
+Before any matrix expansion, implement one separate calibration case in a
+fresh owned pseudoconsole. Keep one authenticated native actor attached from
+before baseline through all measurements, retaining its stable Child/Job and
+console handles. No new actor starts between Hide and its primary measurement.
+Reuse the existing containment, environment, absolute deadline, drainage,
+source identities and capture bounds; do not duplicate an ownership path.
+
+Record native cursor size/visibility, full input/output masks, API results and
+errors, active-buffer sentinel/phase marker, writer/handle route and monotonic
+phase acknowledgements. On main, compare native SetConsoleCursorInfo hidden/
+shown with fixed VT Hide/Show. Enter VT alternate, verify the sentinel change,
+repeat fixed Hide/Show observations and restore the main baseline. Preserve
+native setter outcomes as calibration facts, never insert a setter into an
+actual Guard observation to manufacture its result.
+
+For VT stages, verify a complete synchronous console write containing the
+sequence followed by a unique controlled marker, then read that marker from
+the active buffer before the query. This fences parser/buffer processing;
+neither that fence nor side-channel acknowledgement proves cursor state or
+external rendering. Do not infer readiness from sleeps or block indefinitely
+in FlushFileBuffers. Any paired leave-alternate experiment or real Guard with
+alternate=false is a later admission if this minimal calibration leaves an
+ambiguity; do not silently add it or a mode-25 query/reply emulator now.
+
+Select calibration explicitly and separately from the unchanged first-four
+runner. Its receipt distinguishes diagnostic completion, observed sensor
+capability and product acceptance. Constant/unsupported observations remain
+gaps. Successful cleanup or diagnostic completion cannot turn the existing
+capability failure into success or close W07-064/T055a/T051. Root reviews the
+immutable delta and CI/evidence interface before admitting a Windows run.
+
+Primary evidence checked 25 October 2026: Microsoft
+[output handle routing](https://raw.githubusercontent.com/microsoft/terminal/main/src/server/IoDispatchers.cpp),
+[cursor query](https://raw.githubusercontent.com/microsoft/terminal/main/src/host/getset.cpp),
+[VT cursor dispatch](https://raw.githubusercontent.com/microsoft/terminal/main/src/terminal/adapter/adaptDispatch.cpp)
+and [buffer routing](https://raw.githubusercontent.com/microsoft/terminal/main/src/host/screenInfo.cpp).
+Current main is not proven identical to the installed Windows binary.
+
+## Integration boundary - 26 October 2026
+
+The capability experiment is retained in the explicitly dispatched
+`windows-conpty-diagnostic.yml` workflow. The lead reviewed this integration
+boundary during repository consolidation. It runs the unchanged cursor
+calibration followed by the unchanged first-four capability controls, retains
+the bounded source-bound evidence even on failure, and has no error override.
+The installed runner's unsupported alternate cursor sensor still fails the
+capability assertion; dispatch completion is not capability acceptance.
+
+Routine CI retains the mandatory Linux, macOS and Windows product suites.
+The experimental probe has never been an accepted main-branch product gate.
+Moving its execution out of routine CI does not close W07-064, T055a or T051,
+change any native assertion, admit the full matrix or establish release
+readiness. A future sensor change still needs its scoped native evidence.
+
 ## Cases and ordering
 
 After capability admission, use one fresh process/console per normal return,
@@ -79,13 +143,22 @@ covered. Existing reporting and restoration order remain authoritative.
 Only task-owned process/thread/job/pipe/console handles may be changed. Assign
 the controlled process tree to a kill-on-close Job Object before it can run
 uncontrolled instructions, using suspended creation where required. Preserve
-the runner's existing job membership. Assignment/ownership failure is a failed
-probe, not permission to bypass runner controls. No broad process-name kill,
+the runner's existing job membership. Keep the Job handle solely in an outside
+supervisor; a contained descendant retaining that handle can defeat last-close
+containment. Verify membership of the exact owned Job before resuming through
+stable owned process handles; an any-job check is insufficient. Local named
+control pipes require reject-remote/first-instance flags, explicit owner/SYSTEM
+access and nonce/client-process checks. An owned anonymous route is acceptable.
+Assignment/ownership failure is a failed probe, not permission to bypass runner
+controls. No broad process-name kill,
 detached numeric-PID timer, unowned signal or TerminateThread is allowed.
 
 Each real case has a monotonic 20-second owned-process deadline. A separate
-250-millisecond hung-child control must positively prove owned termination,
-wait/reap and bounded drainage. Keep at most 128 KiB translated output and
+250-millisecond hung-child control starts only after a positive HANG_READY
+acknowledgement, with setup separately bounded by 20 seconds, and must prove
+owned termination, wait/reap and bounded drainage. An outside supervisor has
+an overall 25-second bound including setup/teardown; report every clock and
+never count cold process startup as a proven hang. Keep at most 128 KiB translated output and
 64 KiB structured observations per case, and at most 32 MiB cumulative
 experiment captures/metadata/payload. Frozen compiled inputs/build caches are
 excluded and identified explicitly. Exceeding a limit stops later cases and
@@ -147,3 +220,8 @@ authority for the executed version.
 - [Microsoft VT model](https://learn.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences)
   and [state-forwarding issue 6859](https://github.com/microsoft/terminal/issues/6859).
 - [Current Windows runner inventory](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md).
+
+- [Visual Studio developer shells](https://learn.microsoft.com/en-us/visualstudio/ide/reference/command-prompt-powershell?view=vs-2022)
+  and [Microsoft vswhere VC discovery](https://github.com/microsoft/vswhere/wiki/Find-VC)
+  support the installed-tool CI bootstrap; checked 25 October 2026. No install
+  or execution-policy change is part of this workflow.

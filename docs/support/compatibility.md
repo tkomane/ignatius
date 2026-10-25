@@ -652,6 +652,16 @@ reports failed cleanup truthfully. This is separate from native visual use, a
 full uncaught product crash and Windows ConPTY acceptance. Crash details may
 contain sensitive information and cannot prove a database write outcome.
 
+At published `7d167a9` on 25 October 2026, the owned Windows ConPTY no-guard,
+known-unrestored and acknowledged hung-child controls passed. Actual Guard
+raw/mouse and alternate-buffer observations are partial evidence; its acquired
+cursor-visibility assertion failed. At `65cf237`, separate cursor calibration
+completed: native setters/main VT are observable but this retained sensor does
+not track alternate-VT visibility. The original capability still fails; the full
+option/path matrix and Windows 11/Windows Terminal hand use remain open. These results do
+not upgrade full Windows restoration or release acceptance; see the
+[dated verification record](../operations/verification.md).
+
 ## Platforms
 
 | Platform | Status |
@@ -661,6 +671,13 @@ contain sensitive information and cannot prove a database write outcome.
 | Linux, GitHub `ubuntu-latest` runner | At `ffb86a1`, hosted build/tests/startup, PG14/18 plain/verified-TLS and the real Unix-socket contract passed. Prior `54056c2` separately covers all five PostgreSQL majors. Full-screen hand use and release installation remain open. |
 | Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
+
+Historical W07 source `65cf237` separately completed three native ConPTY controls
+and cursor calibration on image `win25-vs2026`/`20261021.278.1`. Its retained
+sensor did not track alternate-VT visibility, so its original Guard cursor
+assertion failed and its later startup smoke step did not run. The unchanged
+assertion remains in the explicit-dispatch ConPTY diagnostic workflow; product
+CI passing does not close native restoration acceptance.
 
 Claims are stated by runner rather than by target triple, because the runner is
 what was actually exercised. Cross-architecture builds are release work and
