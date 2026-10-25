@@ -199,6 +199,22 @@ bounds and zero executions.
   and parity assertions in the same change.
 - [x] T023 [US3] Assert NULL, empty and literal-NULL distinction on
   painted stripes at every depth in `src/ui/widgets/results.rs` tests.
+- [x] T055 [US3] Repair the observed expanded-field selection foreground
+  precedence under `contracts/grid.md`. Retain the meaningful actual-Buffer
+  red, apply Selection ink after child token colours while preserving their
+  modifiers, and prove selected header/arrow/NULL/text cells plus unselected
+  and colour-off/basic16 controls across built-ins/depths/glyphs/densities.
+  Own only `src/ui/widgets/results.rs` and its sidecar `results/tests.rs`;
+  no palette/configuration/reducer change. Root owns records, rendered review,
+  full integration and publication. The reproduced white-on-white header is
+  evidence of this composition defect, not a new custom-theme acceptance claim.
+
+**T055 local evidence - 2026-10-25:** 31 unique focused cases, 72 presentation
+combinations, unchanged eight original tests and independent source review.
+Root inspected the 12 before/after synthetic rasters; the full repeat passed
+1,434 outer cases/1,130 library/24 summaries after fixing missing ignored TLS
+fixture files. Socket remains skipped; publication/hosted/native acceptance are
+separate. See `docs/operations/verification.md`'s dated T055 record.
 
 **Checkpoint**: The grid is workable by keyboard alone; mouse verbs attach
 in Phase 8.

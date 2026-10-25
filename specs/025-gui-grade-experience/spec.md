@@ -139,6 +139,11 @@ execution effects.
    text and the literal text NULL appear, **then** the three remain
    distinguishable by words and markers exactly as the existing rules
    require, with colour and striping as reinforcement only.
+7. **Given** the expanded-row Results view, **when** a field is selected,
+   **then** its header, arrow and value use Selection ink on its painted fill,
+   retaining semantic emphasis and the explicit value markers. Unselected
+   fields keep their token styles; basic16 and colour-off retain reversed
+   selection without adding a painted background or colour-off colours.
 
 ### User Story 4 - The first frame is already useful (Priority: P1)
 

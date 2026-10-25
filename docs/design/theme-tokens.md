@@ -47,13 +47,17 @@ invisible element.
 
 ## Fills
 
-Two styles use a token as a background rather than a foreground:
+These styles use a token as a background rather than a foreground:
 
 - **Capsules**, for the production marker. The token becomes the background and
   the surface becomes the text. Contrast is the same pair the palette tests
   already hold to a threshold, so a capsule cannot drift into illegibility.
 - **Stripes**, for alternating result rows. Text on a striped row is held to the
   same contrast thresholds as text on the main surface, by its own test.
+- **Selection**, with Surface ink on Selection fill at truecolor/256 depth.
+  Expanded Results applies that ink after the field's Header, Focus and value
+  token styles, preserving their bold/dim emphasis. Actual rendered-buffer tests
+  check the composed styles; palette arithmetic alone cannot establish them.
 
 With colour off, a capsule becomes reversed text and striping is dropped rather
 than faked. A modifier applied to every second row would be noise, not help.
