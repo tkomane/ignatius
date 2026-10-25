@@ -86,6 +86,13 @@ saturated/unknown baseline prevents an exact delta, report `Unknown` rather
 than inventing a difference. A revision that saturates cannot be treated as
 proof that subsequent snapshots are unchanged.
 
+Advance the checkpoint revision for every actual committed observation window,
+including a returned zero-loss window, so older zero-loss summaries cannot
+replace newer ones. Empty idle polling advances nothing. A normal older revision
+or an equal-revision conflicting checkpoint is stale and must not overwrite
+pending counts, the baseline or latest summary. Keep saturation/unknown handling
+conservative; a saturated revision is not proof that no new loss occurred.
+
 First-party boundaries:
 
 ```rust
@@ -294,7 +301,11 @@ page sending-review gate is added. Text/paste cannot edit the covered editor;
 palette can cover it and cancel returns to it. Reuse shared wrapped-row/help
 geometry patterns, not the sending-review acceptance gate. Follow connection
 details modal priority: protected password/parameter/name/sending reviews,
-prefix and palette remain higher. Reader never sends SQL/clipboard/file effects.
+prefix and palette remain higher. Reader never executes SQL or starts clipboard/file effects. Explicit global
+Cancel remains available while a query runs: close only the reader without
+acknowledgement and use the existing single cancellation transition/effect,
+retaining duplicate suppression and requested-versus-confirmed semantics.
+Quit remains available. These explicit recovery paths do not clear pending loss.
 
 When no higher owner is drawn, show a complete compact footer badge
 `Notices: O4 S1` (A for abandoned) after immutable query/transaction facts and
@@ -440,8 +451,13 @@ individual floods at or below 1,024 notices/2 MiB message text, never an open-
 ended flood. Explicit cancellation may target only the helper's own running
 Session, with joined owned controllers and bounded deadlines; it is not a
 server/fixture lifecycle action. Do not terminate unrelated backends or mutate
-shared data to create a failure. Model/protocol fault tests may prove other
-boundaries when live control is unavailable; label those separately.
+shared data to create a failure. Existing `tests/runtime_privacy_contract.rs`
+fixtures are explicitly permitted to create their own session-lifetime TEMP
+tables and pg_temp helper function, perform their existing synthetic inserts/
+updates and change their own search_path. Preserve those positive privacy
+scenarios; they do not authorize persistent/shared objects or a fixture restart.
+Model/protocol fault tests may prove other boundaries when live control is
+unavailable; label those separately.
 
 Run focused tests, fmt and Clippy with warnings denied in the isolated lane.
 Return source/base, reviewed patch, helper/test/evidence digests, failures and
