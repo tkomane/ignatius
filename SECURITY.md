@@ -14,6 +14,15 @@ does.
 Expect an acknowledgement within seven days and an assessment within thirty. If a
 fix is warranted, you will be credited unless you prefer otherwise.
 
+The maintainer owns triage: identify the affected version or source revision,
+assess confidentiality and correctness impact, record a safe synthetic
+reproduction, and coordinate the fix and affected verification. Keep the report
+and any accidentally supplied data private. Public disclosure, release timing
+and changes to access or reporting controls require the owner's decision.
+The acknowledgement and assessment targets above do not promise a resolution
+date. The reporting setting was confirmed enabled on 25 October 2026;
+submission and notification handling have not been tested by sending a report.
+
 ## What this project protects
 
 - Database credentials never appear in output, logs, diagnostics, `Debug`

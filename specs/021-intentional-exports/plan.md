@@ -99,3 +99,16 @@ tests/documentation_matches_the_build.rs
 | A format change breaks scripts | Keep existing formats byte-stable and add focused machine-output contracts. |
 | Streamed and buffered encoders diverge | Use one literal/row encoder and compare bytes in tests. |
 | Format choice leaks values or writes early | Palette carries only enum state; file work starts after path acceptance. |
+
+## W10-010 follow-up - 2026-10-25
+
+Follow the pinned complete-row/partial-file accounting contract in
+`contracts/exports.md` before modifying `src/cli/output.rs`,
+`src/query/export.rs` or the streaming sink in `src/cli/interactive.rs`.
+Reproduce premature progress and unconfirmed flush wording first, preserve
+successful format bytes and retain private writer-failure seams. No new
+dependency, flag, output schema, export path policy or database behavior.
+Root owns integration/docs; use a clean independent clone and separate build
+target if a worker is assigned. Run focused output/export/runtime tests and
+real existing export contracts, then the combined full gate and final platform
+checks after integration. Do not infer on-disk durability from a writer return.

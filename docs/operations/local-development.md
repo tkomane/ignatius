@@ -20,14 +20,14 @@ cargo xtask db down      # stop it and delete its data
 ```
 
 `cargo xtask` is a small Rust program in `xtask/`, not a shell script, so the
-same commands work on macOS, Windows and Linux. It has no dependencies of its
-own, because it runs before anything else is known to work.
+same commands work on macOS, Windows and Linux. Its dependencies are included
+in the workspace's committed lockfile and security checks.
 
 ## Every task
 
 | Command | What it does |
 | --- | --- |
-| `cargo xtask db up` | Starts `postgres:18.4-alpine` on port 55432, waits until it is really accepting connections, loads the synthetic fixtures, and prints the URI |
+| `cargo xtask db up` | Starts `postgres:18.6-alpine` on port 55432, waits until it is really accepting connections, loads the synthetic fixtures, and prints the URI |
 | `cargo xtask db down` | Stops it and deletes its data |
 | `cargo xtask db status` | Whether it is running and ready |
 | `cargo xtask run [args]` | Opens the full-screen client against it |
@@ -278,14 +278,17 @@ cargo xtask sql "SELECT order_id, note FROM orders ORDER BY order_id" \
   --format insert --insert-table orders
 cargo xtask sql "SELECT order_id, note FROM orders ORDER BY order_id" \
   --format insert --insert-table orders --output /private/tmp/ignatius-orders.sql
+cargo xtask sql "SELECT generate_series(1, 3) AS n" --format csv --max-rows 1
 cargo run -- query -c "SELECT 1" --format insert
 cargo run -- query -c "SELECT 1" --format insert --insert-table orders --no-header
 ```
 
 The first command prints quoted SQL data to stdout; it does not execute the
-generated statements. The second uses the bounded `.partial` and atomic-finish
-path, so inspect the file before applying it and remove it after the check. The
-last two commands must refuse before any connection attempt. In the full-screen
+generated statements. The second streams through `.partial` and atomic finish,
+so inspect the file before applying it and remove it after the check. Individual
+values, rows and driver frames still use memory. The third keeps only one row
+and reports `retained 1 of 3 received rows` on stderr while stdout remains CSV.
+The last two commands must refuse before any connection attempt. In the full-screen
 client, run a synthetic result, press `Ctrl+K e`, choose a format, type a path
 with a misleading extension, and confirm that the selected shape wins. Cancel
 the path prompt once and verify that neither the destination nor a partial file

@@ -164,7 +164,10 @@ fn every_field_a_profile_understands_is_documented() {
 fn guided_discovery_documents_its_active_key_and_machine_output_boundary() {
     for (document, expected) in [
         (KEYMAP, "active keymap"),
-        (KEYMAP, "at most five"),
+        (
+            KEYMAP,
+            "six in comfortable density and four in compact density",
+        ),
         (KEYMAP, "command palette"),
         (INTERACTION, "Discovery follows the state"),
         (

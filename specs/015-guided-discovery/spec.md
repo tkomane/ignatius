@@ -166,9 +166,11 @@ effect.
   filtered-empty, and failed-transaction states.
 - **FR-003**: The interface MUST show a contextual hint rail whose actions are
   selected from the actual active key bindings and the current focus.
-- **FR-004**: The contextual hint rail MUST prioritise no more than five actions
-  at a time, remain readable within the available footer width, and retain the
-  full action meaning in ASCII and no-colour modes.
+- **FR-004**: The contextual hint rail MUST prioritise no more than the active
+  density's action cap at a time, remain readable within the available footer
+  width, and retain full action meaning in ASCII and no-colour modes. Feature
+  025's 2026-10-25 density clarification supersedes the original five-action
+  limit with six for comfortable and four for compact; all other rules remain.
 - **FR-005**: Editor hints MUST expose a discoverable path to run, complete,
   move focus, open the command palette, and get help, subject to the current
   state.
@@ -223,7 +225,8 @@ effect.
 - **SC-001**: In a fresh 80-column by 24-row session, the first rendered frame
   names the current state and one valid next action without opening help.
 - **SC-002**: In every supported focus and tested state, the footer shows no
-  more than five contextual actions, and every shown key resolves to the action
+  more than six contextual actions in comfortable density or four in compact
+  density, and every shown key resolves to the action
   named beside it.
 - **SC-003**: Searching the command palette for each of `run`, `inspect`,
   `help`, `objects`, `save`, and `result` returns at least one relevant entry

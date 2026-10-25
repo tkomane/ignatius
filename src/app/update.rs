@@ -14,8 +14,8 @@
 use crate::app::grid::GridCommand;
 use crate::app::message::{Action, Direction, Effect, Message};
 use crate::app::model::{
-    ConnectingStep, ConnectionState, ExportFormat, Focus, Model, ParameterPrompt, PasteNotice,
-    PendingUpdate, QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
+    ConnectingStep, ConnectionState, ExportFormat, Focus, LayoutNotice, Model, ParameterPrompt,
+    PasteNotice, PendingUpdate, QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
 };
 use crate::query::error_location::{self, StatementSource};
 use crate::query::result::ExecutionStatus;
@@ -23,16 +23,54 @@ use crate::query::statements;
 
 /// Applies a message to the model and returns the effects to perform.
 pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
-    match message {
+    let effects = match message {
+        Message::ForConnection {
+            generation,
+            message,
+        } => {
+            if model.connection_generation != generation {
+                return Vec::new();
+            }
+            update(model, *message)
+        }
         Message::Action(action) => apply_action(model, action),
+        Message::InputAtSize {
+            action,
+            columns,
+            rows,
+        } => {
+            let changed = model.size != (columns, rows);
+            let accepting_review = matches!(action, Action::Activate | Action::RunBuffer)
+                && crate::ui::review::active_kind(model).is_some();
+            if changed {
+                update(model, Message::Resized(columns, rows));
+            }
+            if changed && accepting_review {
+                // The newly observed geometry has not been painted yet. A
+                // second explicit action follows the next frame and its gate.
+                Vec::new()
+            } else {
+                apply_action(model, action)
+            }
+        }
         Message::Resized(columns, rows) => {
-            model.size = (columns, rows);
+            if model.size != (columns, rows) {
+                model.size = (columns, rows);
+                model.review_scroll = 0;
+                model.help_scroll = 0;
+                if let Some(details) = model.notice_details.as_mut() {
+                    details.scroll = 0;
+                }
+            }
             Vec::new()
         }
         // Mouse stays inert until the pointer phase; a paste routes to the
         // surface that owns input, or says it was ignored.
         Message::Mouse { .. } => Vec::new(),
-        Message::Pasted(text) => paste_action(model, text),
+        Message::Pasted(text) => {
+            model.layout_notice = None;
+            paste_action(model, text)
+        }
         Message::Connected(info) => {
             let was_connecting = matches!(model.connection, ConnectionState::Connecting { .. });
             model.connection = ConnectionState::Connected(info);
@@ -172,11 +210,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.editor.set_cursor(location.cursor);
                 model.focus = Focus::Editor;
             }
-            model.notices = execution
-                .statements
-                .iter()
-                .flat_map(|s| s.notices.clone())
-                .collect();
+            model.notices.clear();
             if execution.status == ExecutionStatus::ConnectionLost
                 && let Some(info) = model.connection.info()
             {
@@ -234,6 +268,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     }
                 });
             } else {
+                model.retained_data_loss =
+                    crate::query::result::RetentionLossSummary::from_execution(&execution);
                 model.last_execution = Some(*execution);
                 model.last_sql = completed_sql.clone();
                 model.cell_update_notice = None;
@@ -276,6 +312,10 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 Some(crate::app::model::ClipboardNotice::Sent { bytes, characters });
             Vec::new()
         }
+        Message::RetainedDataUnavailable => {
+            refuse_unavailable_result(model);
+            Vec::new()
+        }
         Message::ClipboardFailed(diagnostic) => {
             model.pending_copy = None;
             model.error_expanded = false;
@@ -289,8 +329,127 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             clear_error_location(model);
             Vec::new()
         }
-        Message::Notices(notices) => {
-            model.notices.extend(notices);
+        Message::NoticeSourceInstalled { source, session_id } => {
+            model
+                .notice_state
+                .install(source, model.connection_generation, session_id);
+            Vec::new()
+        }
+        Message::NoticeStatus {
+            source,
+            session_id,
+            checkpoint,
+            latest,
+        } => {
+            model.notice_state.observe(
+                source,
+                model.connection_generation,
+                &session_id,
+                checkpoint,
+                latest,
+            );
+            Vec::new()
+        }
+        Message::NoticeAttemptReport {
+            source,
+            attempt_id,
+            summary,
+        } => {
+            let index = source.index();
+            if model.notice_state.last_attempt[index].as_ref() != Some(&attempt_id) {
+                model.notice_state.last_attempt[index] = Some(attempt_id);
+                model.notice_state.pending = model.notice_state.pending.plus(summary.counts);
+                model.notice_state.previous = model.notice_state.previous.plus(summary.counts);
+                if summary.counts.needs_report() {
+                    model.notice_state.revision = model.notice_state.revision.saturating_add(1);
+                }
+            }
+            Vec::new()
+        }
+        Message::NoticeUninstalledRetirementStarted(generation) => {
+            if generation == model.connection_generation
+                || model.notice_state.retiring_generation == Some(generation)
+            {
+                if model.notice_state.uninstalled_token_generation != Some(generation) {
+                    model.notice_state.uninstalled_tokens = [None, None, None, None];
+                    model.notice_state.uninstalled_token_generation = Some(generation);
+                }
+                model.notice_state.uninstalled_retirement = Some(generation);
+            }
+            Vec::new()
+        }
+        Message::NoticeUninstalledRetired {
+            generation,
+            session_id,
+            counts,
+        } => {
+            if (generation == model.connection_generation
+                || model.notice_state.retiring_generation == Some(generation))
+                && model.notice_state.uninstalled_retirement == Some(generation)
+                && !model
+                    .notice_state
+                    .uninstalled_tokens
+                    .iter()
+                    .flatten()
+                    .any(|known| *known == session_id)
+            {
+                if let Some(empty) = model
+                    .notice_state
+                    .uninstalled_tokens
+                    .iter_mut()
+                    .find(|slot| slot.is_none())
+                {
+                    *empty = Some(session_id);
+                    model.notice_state.pending = model.notice_state.pending.plus(counts);
+                    model.notice_state.previous = model.notice_state.previous.plus(counts);
+                    if counts.needs_report() {
+                        model.notice_state.revision = model.notice_state.revision.saturating_add(1);
+                    }
+                } else {
+                    model.notice_state.pending = crate::query::result::NoticeCounts::UNKNOWN;
+                    model.notice_state.previous = crate::query::result::NoticeCounts::UNKNOWN;
+                    model.notice_state.revision = model.notice_state.revision.saturating_add(1);
+                }
+            }
+            Vec::new()
+        }
+        Message::NoticeUninstalledRetirementFinished(generation) => {
+            if model.notice_state.uninstalled_retirement == Some(generation) {
+                model.notice_state.uninstalled_retirement = None;
+            }
+            Vec::new()
+        }
+        Message::NoticeRetirementStarted(generation) => {
+            if generation == model.connection_generation {
+                model.notice_state.begin_retirement(generation);
+            }
+            Vec::new()
+        }
+        Message::NoticeRetiringSourceInstalled {
+            generation,
+            source,
+            session_id,
+        } => {
+            if model.notice_state.retiring_generation == Some(generation)
+                && model.notice_state.retirement_open[source.index()]
+            {
+                model.notice_state.install(source, generation, session_id);
+            }
+            Vec::new()
+        }
+        Message::NoticeRetired {
+            generation,
+            source,
+            session_id,
+            counts,
+        } => {
+            model
+                .notice_state
+                .retire(source, generation, &session_id, counts);
+            Vec::new()
+        }
+        Message::NoticeRetirementFinished(generation) => {
+            model.notice_state.finish_retirement(generation);
             Vec::new()
         }
         Message::SchemasLoaded(result) => {
@@ -471,7 +630,22 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.running_for = running_for;
             Vec::new()
         }
+    };
+    if effects.iter().any(|effect| matches!(effect, Effect::Quit)) {
+        model
+            .notice_state
+            .begin_retirement(model.connection_generation);
     }
+    // All diagnostic origins share this safety boundary. Restore the saved
+    // shape without stealing editor focus or changing transaction semantics.
+    if model.focus != Focus::Results && needs_safety_details(model) {
+        model.splits.zoomed = false;
+    }
+    effects
+}
+
+fn needs_safety_details(model: &Model) -> bool {
+    model.error.is_some() || model.transaction == crate::query::result::TransactionState::Failed
 }
 
 /// Maps a server error only when its source buffer is still the one on screen.
@@ -613,7 +787,76 @@ fn format_buffer(model: &mut Model) {
     });
 }
 
+/// Help owns reading/navigation, while explicit commands reveal their target
+/// surface before using the existing handler and its safety checks.
+fn help_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let view = crate::ui::help::build(
+        model,
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    );
+    if let Some(offset) = view.navigate(&action) {
+        model.help_scroll = offset;
+        return Vec::new();
+    }
+    match action {
+        Action::ToggleHelp | Action::Dismiss | Action::Activate => {
+            model.help_open = false;
+            Vec::new()
+        }
+        Action::OpenPalette => {
+            model.palette = Some(crate::app::palette::Palette::over_commands(
+                palette_entries(model),
+                crate::app::discovery::palette_note(model),
+            ));
+            Vec::new()
+        }
+        Action::BeginPrefix => {
+            // Retain help until the continuation identifies the command.
+            // Pane chords must still respect their existing modal no-op rule.
+            model.prefix_pending = true;
+            Vec::new()
+        }
+        Action::Insert(_)
+        | Action::Backspace
+        | Action::DeleteForward
+        | Action::DeleteWordLeft
+        | Action::Undo
+        | Action::Redo
+        | Action::Move(_)
+        | Action::MovePage(_)
+        | Action::MoveWord(_)
+        | Action::FocusNext
+        | Action::ShrinkPane
+        | Action::GrowPane
+        | Action::ZoomPane => Vec::new(),
+        other => {
+            model.help_open = false;
+            apply_action(model, other)
+        }
+    }
+}
+
+fn pane_input_owned(model: &Model) -> bool {
+    model.notice_details.is_some()
+        || model.inspector.is_some()
+        || model.definition.is_some()
+        || model.completion.menu.is_some()
+        || model.tree.filtering
+        || model.result_filtering
+}
+
 fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    model.layout_notice = None;
+    // Reshaping a pane must not dismiss an input owner and act underneath it.
+    if (model.help_open || pane_input_owned(model))
+        && matches!(
+            action,
+            Action::ShrinkPane | Action::GrowPane | Action::ZoomPane
+        )
+    {
+        return Vec::new();
+    }
     // Modes are peeled in a fixed order, highest first. Getting this wrong is
     // how typing in the editor starts doing surprising things, so the order is
     // stated once here and tested directly.
@@ -653,6 +896,18 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.palette.is_some() {
         return palette_action(model, action);
     }
+    if model.notice_details.is_some() {
+        return notice_details_action(model, action);
+    }
+    if model.help_open {
+        return help_action(model, action);
+    }
+    // Keep the owner until the continuation identifies the command. Layout
+    // actions then remain no-ops; other commands retain their normal handler.
+    if matches!(action, Action::BeginPrefix) && pane_input_owned(model) {
+        model.prefix_pending = true;
+        return Vec::new();
+    }
     if model.completion.menu.is_some() {
         return completion_action(model, action);
     }
@@ -682,6 +937,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::ToggleHelp => {
             model.help_open = !model.help_open;
+            if model.help_open {
+                model.help_scroll = 0;
+            }
             Vec::new()
         }
         Action::Dismiss => {
@@ -707,6 +965,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::FocusNext => {
             model.focus = model.focus.next(model.sidebar_visible);
+            Vec::new()
+        }
+        Action::ShrinkPane | Action::GrowPane | Action::ZoomPane => {
+            adjust_panes(model, &action);
             Vec::new()
         }
         Action::ToggleSidebar => {
@@ -798,6 +1060,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::ExportRows => {
+            if refuse_unavailable_result(model) {
+                return Vec::new();
+            }
             if model.plan.is_visible() {
                 return Vec::new();
             }
@@ -866,14 +1131,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 .unwrap_or_default();
             run(model, sql, source)
         }
-        Action::Cancel => match model.phase {
-            QueryPhase::Running { job, .. } => {
-                model.phase = QueryPhase::CancellationRequested { job };
-                vec![Effect::Cancel { job }]
-            }
-            // Cancelling twice must not send a second request or change wording.
-            QueryPhase::CancellationRequested { .. } | QueryPhase::Idle => Vec::new(),
-        },
+        Action::Cancel => cancel_query(model),
         Action::Insert(ch) if model.focus == Focus::Editor => {
             edit_editor(model, |editor| editor.insert(ch));
             open_completion(model, false);
@@ -1027,6 +1285,17 @@ fn automatic_completion_should_open(result: &crate::query::completion::Completio
             .eq_ignore_ascii_case(result.prefix.trim()))
 }
 
+/// The existing cancellation transition, also used by read-only notice recovery.
+fn cancel_query(model: &mut Model) -> Vec<Effect> {
+    match model.phase {
+        QueryPhase::Running { job, .. } => {
+            model.phase = QueryPhase::CancellationRequested { job };
+            vec![Effect::Cancel { job }]
+        }
+        QueryPhase::CancellationRequested { .. } | QueryPhase::Idle => Vec::new(),
+    }
+}
+
 /// Handles input while the completion menu is open.
 fn completion_action(model: &mut Model, action: Action) -> Vec<Effect> {
     match action {
@@ -1177,7 +1446,7 @@ fn dependency_entries(
 
 /// Handles input while a definition is on screen.
 fn definition_action(model: &mut Model, action: Action) -> Vec<Effect> {
-    let height = crate::ui::layout::definition_viewport(model.size).1;
+    let height = crate::ui::layout::definition_viewport(model.size, &model.presentation).1;
     match action {
         Action::Move(Direction::Down) | Action::MovePage(Direction::Down) => {
             let step = if matches!(action, Action::MovePage(_)) {
@@ -1243,13 +1512,49 @@ fn history_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         .collect()
 }
 
-/// Moves by a screenful in whichever pane has focus.
-///
-/// The height comes from the terminal size the model already knows, through the
-/// same layout functions the renderer uses, so a page here is the page the user
-/// can see rather than a number chosen in advance.
+/// Changes the session shape, restoring before a visible split adjustment.
+fn adjust_panes(model: &mut Model, action: &Action) {
+    use crate::ui::layout::{LayoutMode, layout_mode, pane_geometry};
+    use ratatui::layout::Rect;
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+    if layout_mode(area) != LayoutMode::Full {
+        model.layout_notice = Some(LayoutNotice::SinglePane);
+        return;
+    }
+    if matches!(action, Action::ZoomPane) {
+        if model.focus != Focus::Results && needs_safety_details(model) {
+            model.layout_notice = Some(LayoutNotice::SafetyDetails);
+            return;
+        }
+        model.splits.zoomed = !model.splits.zoomed;
+        return;
+    }
+    model.splits.zoomed = false;
+    let geometry = pane_geometry(model, area);
+    let grow = matches!(action, Action::GrowPane);
+    if model.focus == Focus::Objects {
+        if let Some(sidebar) = geometry.objects {
+            let desired = if grow {
+                sidebar.width.saturating_add(2)
+            } else {
+                sidebar.width.saturating_sub(2)
+            };
+            model.splits.sidebar_cells =
+                Some(desired.clamp(20, 60.min(geometry.body.width.saturating_sub(30))));
+        }
+    } else if let Some(editor) = geometry.editor {
+        let desired = if grow {
+            editor.height.saturating_add(1)
+        } else {
+            editor.height.saturating_sub(1)
+        };
+        model.splits.editor_rows = Some(desired.clamp(3, geometry.body.height.saturating_sub(3)));
+    }
+}
+
+/// Moves by the current renderer-owned content capacity of the focused pane.
 fn page(model: &mut Model, direction: Direction) {
-    let lines = crate::ui::layout::editor_page(model.size);
+    let lines = crate::ui::layout::editor_page(model);
     match model.focus {
         Focus::Editor => match direction {
             Direction::Up => model.editor.move_page_up(lines),
@@ -1257,16 +1562,21 @@ fn page(model: &mut Model, direction: Direction) {
             Direction::Left | Direction::Right => {}
         },
         Focus::Results => {
+            if model.plan.is_visible() && model.plan.document().is_none() {
+                return;
+            }
             if model.plan.document().is_some() {
+                let step =
+                    isize::try_from(crate::ui::layout::results_page(model)).unwrap_or(isize::MAX);
                 match direction {
-                    Direction::Up => model.plan.move_selection(-1),
-                    Direction::Down => model.plan.move_selection(1),
+                    Direction::Up => model.plan.move_selection(-step),
+                    Direction::Down => model.plan.move_selection(step),
                     Direction::Left | Direction::Right => {}
                 }
                 return;
             }
             let rows = model.displayed_rows().len();
-            let step = crate::ui::layout::results_page(model.size);
+            let step = crate::ui::layout::results_page(model);
             match direction {
                 Direction::Up => model.selected_row = model.selected_row.saturating_sub(step),
                 Direction::Down => {
@@ -1276,7 +1586,8 @@ fn page(model: &mut Model, direction: Direction) {
             }
         }
         Focus::Objects => {
-            let step = isize::try_from(crate::ui::layout::results_page(model.size)).unwrap_or(10);
+            let step =
+                isize::try_from(crate::ui::layout::objects_page(model)).unwrap_or(isize::MAX);
             match direction {
                 Direction::Up => model.tree.move_selection(-step),
                 Direction::Down => model.tree.move_selection(step),
@@ -1292,6 +1603,9 @@ fn page(model: &mut Model, direction: Direction) {
 /// no rows would be a window onto nothing, and the selection can outlive the
 /// result it was made in, so the cell is looked up rather than assumed.
 fn toggle_inspector(model: &mut Model) {
+    if refuse_unavailable_result(model) {
+        return;
+    }
     if model.plan.is_visible() {
         return;
     }
@@ -1299,7 +1613,7 @@ fn toggle_inspector(model: &mut Model) {
         model.inspector = None;
         return;
     }
-    let (width, _) = crate::ui::layout::inspector_viewport(model.size);
+    let (width, _) = crate::ui::layout::inspector_viewport(model.size, &model.presentation);
     let row = model.selected_source_row();
     let exists = row.is_some_and(|row| {
         model.visible_result().is_some_and(|set| {
@@ -1313,7 +1627,7 @@ fn toggle_inspector(model: &mut Model) {
 
 /// How many lines the selected value wraps to, and how many fit at once.
 fn inspected_extent(model: &Model) -> (usize, usize) {
-    let (width, height) = crate::ui::layout::inspector_viewport(model.size);
+    let (width, height) = crate::ui::layout::inspector_viewport(model.size, &model.presentation);
     let row = model.selected_source_row();
     let lines = row
         .and_then(|row| {
@@ -1409,6 +1723,9 @@ fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::ToggleHelp => {
             model.help_open = !model.help_open;
+            if model.help_open {
+                model.help_scroll = 0;
+            }
         }
         // Typing is swallowed: the editor is underneath, and a keystroke that
         // silently edits SQL the user cannot see is the worst outcome here.
@@ -1479,8 +1796,42 @@ fn password_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// Consumes only review navigation or refused acceptance, before the owning
+/// handler can consume a candidate, accept an answer or allocate a job.
+fn review_action(model: &mut Model, kind: crate::ui::review::Kind, action: &Action) -> bool {
+    if !matches!(
+        action,
+        Action::Activate
+            | Action::RunBuffer
+            | Action::Move(Direction::Up | Direction::Down)
+            | Action::MovePage(_)
+            | Action::MoveLineStart
+            | Action::MoveLineEnd
+            | Action::MoveBufferStart
+            | Action::MoveBufferEnd
+    ) {
+        return false;
+    }
+    let Some(view) = crate::ui::review::build(
+        model,
+        kind,
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    ) else {
+        return false;
+    };
+    if let Some(scroll) = view.navigate(action) {
+        model.review_scroll = scroll;
+        return true;
+    }
+    !view.ready
+}
+
 /// Handles input while named parameter values are being collected.
 fn parameter_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Parameter, &action) {
+        return Vec::new();
+    }
     match action {
         Action::Insert(character) => {
             if let Some(prompt) = model.parameter_prompt.as_mut() {
@@ -1497,7 +1848,10 @@ fn parameter_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Activate | Action::RunBuffer => {
             let accepted = model.parameter_prompt.as_mut().map(ParameterPrompt::accept);
             match accepted {
-                Some(Ok(None)) => Vec::new(),
+                Some(Ok(None)) => {
+                    model.review_scroll = 0;
+                    Vec::new()
+                }
                 Some(Ok(Some(parameters))) => {
                     let prompt = model
                         .parameter_prompt
@@ -1568,6 +1922,9 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     }]
                 }
                 crate::app::model::NamePurpose::ExportRows => {
+                    if refuse_unavailable_result(model) {
+                        return Vec::new();
+                    }
                     let Some(format) = export_format else {
                         return Vec::new();
                     };
@@ -1589,6 +1946,9 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
 
 /// Handles input while a run is waiting to be confirmed.
 fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Production, &action) {
+        return Vec::new();
+    }
     let Some(pending) = model.pending_run.as_mut() else {
         return Vec::new();
     };
@@ -1628,6 +1988,9 @@ fn confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
 /// sent. A plain Enter is enough for read-looking statements; destructive
 /// impact still requires the database name, just as an ordinary run does.
 fn plan_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Analyze, &action) {
+        return Vec::new();
+    }
     let Some(pending) = model.pending_plan.as_mut() else {
         return Vec::new();
     };
@@ -1663,9 +2026,12 @@ fn plan_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
 
 /// Handles input while a result value is waiting for explicit copy approval.
 ///
-/// This is a stricter modal than the inspector: typing and navigation are
-/// swallowed, and Enter rechecks the retained result before a payload exists.
+/// Typing is swallowed, review navigation stays local, and acceptance rechecks
+/// the retained result before a payload exists.
 fn copy_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Copy, &action) {
+        return Vec::new();
+    }
     let Some(candidate) = model.pending_copy.take() else {
         return Vec::new();
     };
@@ -1697,8 +2063,27 @@ fn copy_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+/// A local refusal keeps PostgreSQL outcome and diagnostic priority untouched.
+fn refuse_unavailable_result(model: &mut Model) -> bool {
+    if !model
+        .visible_result()
+        .is_some_and(|set| !set.is_available())
+    {
+        return false;
+    }
+    model.result_grid.note = Some(format!(
+        "{}. {}",
+        crate::query::result::RETAINED_DATA_UNAVAILABLE,
+        crate::query::result::RETAINED_DATA_GUIDANCE
+    ));
+    true
+}
+
 /// Opens a value-free copy confirmation for the selected retained cell.
 fn begin_copy(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
     if model.focus != Focus::Results
         || model.phase.is_busy()
         || model.plan.is_visible()
@@ -1749,6 +2134,7 @@ fn begin_copy(model: &mut Model) -> Vec<Effect> {
     }
 
     model.clipboard_notice = None;
+    model.review_scroll = 0;
     model.pending_copy = Some(crate::app::model::PendingCopy {
         result_job,
         source_row,
@@ -1774,7 +2160,7 @@ fn copy_payload_for_candidate(
     {
         return None;
     }
-    let set = model.visible_result()?;
+    let set = model.visible_result().filter(|set| set.is_available())?;
     if !model
         .result_grid
         .visible_columns(set.columns.len())
@@ -1857,6 +2243,7 @@ fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
             );
             match plan {
                 Ok(plan) => {
+                    model.review_scroll = 0;
                     model.pending_update = Some(PendingUpdate {
                         candidate: prompt.candidate,
                         relation: prompt.relation,
@@ -1890,6 +2277,9 @@ fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
 
 /// Handles the final, one-shot confirmation of a generated update.
 fn pending_update_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if review_action(model, crate::ui::review::Kind::Update, &action) {
+        return Vec::new();
+    }
     let Some(pending) = model.pending_update.take() else {
         return Vec::new();
     };
@@ -2011,6 +2401,9 @@ fn begin_refresh_result(model: &mut Model) -> Vec<Effect> {
 
 /// Starts the value-free source analysis and live metadata lookup for a cell.
 fn begin_cell_update(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
     if model.focus != Focus::Results
         || model.phase.is_busy()
         || model.plan.is_visible()
@@ -2128,6 +2521,13 @@ fn finish_update_target(
         .update_lookup
         .take()
         .expect("checked update lookup identity");
+    if update_lookup_has_newer_owner(model) {
+        model.cell_update_notice = Some(
+            "Cell update metadata was discarded because another input or review is active. Finish or cancel it, then regenerate the cell update; nothing was sent."
+                .to_owned(),
+        );
+        return Vec::new();
+    }
     if !update_candidate_is_current(model, &lookup.candidate) {
         model.cell_update_notice =
             Some("The result or selection changed; the cell update was discarded.".to_owned());
@@ -2172,6 +2572,20 @@ fn finish_update_target(
     Vec::new()
 }
 
+/// An asynchronous lookup may not replace a newer input owner. Its candidate
+/// identity can still be current even though the user opened another prompt.
+fn update_lookup_has_newer_owner(model: &Model) -> bool {
+    crate::ui::review::active_kind(model).is_some()
+        || model.password_prompt.is_some()
+        || model.name_prompt.is_some()
+        || model.connection_details
+        || model.prefix_pending
+        || model.update_prompt.is_some()
+        || model.palette.is_some()
+        || model.help_open
+        || pane_input_owned(model)
+}
+
 /// Starts a plain plan immediately or stages an analyzed plan for confirmation.
 fn begin_plan(model: &mut Model, analyze: bool) -> Vec<Effect> {
     if !model.connection.is_usable()
@@ -2200,6 +2614,7 @@ fn begin_plan(model: &mut Model, analyze: bool) -> Vec<Effect> {
             .connection
             .info()
             .map_or_else(String::new, |info| info.database.clone());
+        model.review_scroll = 0;
         model.pending_plan = Some(crate::app::model::PendingPlan {
             sql,
             impact,
@@ -2321,6 +2736,7 @@ fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<E
             .connection
             .info()
             .map_or_else(String::new, |info| info.database.clone());
+        model.review_scroll = 0;
         model.pending_run = Some(crate::app::model::PendingRun {
             sql,
             impact,
@@ -2355,6 +2771,7 @@ fn start(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec
         }
     };
     if !template.is_empty() {
+        model.review_scroll = 0;
         model.parameter_prompt = Some(ParameterPrompt::new(sql, source, template.names().to_vec()));
         model.error = None;
         clear_error_location(model);
@@ -2793,8 +3210,24 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Activate => {
             let chosen = palette.selected_entry();
             model.palette = None;
+            let had_help = model.help_open;
+            let had_notice_details = model.notice_details.is_some();
+            if chosen.is_some() {
+                model.help_open = false;
+                model.notice_details = None;
+            }
             match chosen.map(|entry| entry.command) {
+                Some(crate::app::palette::PaletteCommand::Run(Action::ToggleHelp)) if had_help => {
+                    Vec::new()
+                }
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::NoticeDetails) => {
+                    model.notice_details = Some(crate::app::model::NoticeDetails {
+                        snapshot: model.notice_state.snapshot(),
+                        scroll: 0,
+                    });
+                    Vec::new()
+                }
                 Some(crate::app::palette::PaletteCommand::ConnectionDetails) => {
                     model.connection_details = true;
                     Vec::new()
@@ -2806,11 +3239,14 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     begin_export_format(model, format)
                 }
                 Some(crate::app::palette::PaletteCommand::Open(name)) => {
+                    if had_help || had_notice_details {
+                        reveal_palette_editor(model);
+                    }
                     model.loaded_query = Some(name.clone());
                     vec![Effect::LoadQuery { name }]
                 }
                 Some(crate::app::palette::PaletteCommand::Insert(text)) => {
-                    model.focus = Focus::Editor;
+                    reveal_palette_editor(model);
                     edit_editor(model, |editor| {
                         for ch in text.chars() {
                             editor.insert(ch);
@@ -2843,6 +3279,57 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Direct editor-target palette entries bypass action dispatch. Reveal that
+/// target after selection, preserving covered reading state on cancellation.
+fn reveal_palette_editor(model: &mut Model) {
+    model.focus = Focus::Editor;
+    model.inspector = None;
+    model.definition = None;
+    model.completion.menu = None;
+    model.tree.filtering = false;
+    model.result_filtering = false;
+}
+
+/// Read-only client accounting has no SQL/clipboard/file action route.
+fn notice_details_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let view = crate::ui::notices::build(
+        model,
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    );
+    if let Some(offset) = view.as_ref().and_then(|view| view.navigate(&action)) {
+        if let Some(details) = model.notice_details.as_mut() {
+            details.scroll = offset;
+        }
+        return Vec::new();
+    }
+    match action {
+        Action::Dismiss | Action::ToggleHelp => model.notice_details = None,
+        Action::Cancel => {
+            model.notice_details = None;
+            return cancel_query(model);
+        }
+        Action::Activate if view.is_some_and(|view| view.usable) => {
+            if let Some(details) = model.notice_details.take() {
+                model.notice_state.acknowledge(&details.snapshot);
+            }
+        }
+        Action::OpenPalette => {
+            model.palette = Some(crate::app::palette::Palette::over_commands(
+                palette_entries(model),
+                crate::app::discovery::palette_note(model),
+            ))
+        }
+        Action::BeginPrefix => model.prefix_pending = true,
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        _ => {}
+    }
+    Vec::new()
 }
 
 /// Handles input while the read-only connection trust surface is open.
@@ -2942,6 +3429,11 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
             palette.push(character);
         }
         model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.help_open || model.notice_details.is_some() {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
         return Vec::new();
     }
     if model.tree.filtering {
@@ -3129,6 +3621,10 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
             .iter()
             .find(|item| item.name == name)
     });
+    model
+        .notice_state
+        .begin_retirement(model.connection_generation);
+    model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
     model.credential_provider = summary.and_then(|item| item.auth.clone());
     model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
     model.connection = ConnectionState::Connecting {
@@ -3138,6 +3634,7 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.connecting_step = Some(ConnectingStep::ResolvingProfile);
     model.phase = QueryPhase::Idle;
     model.last_execution = None;
+    model.retained_data_loss = crate::query::result::RetentionLossSummary::default();
     model.last_elapsed = None;
     model.running_for = None;
     model.running_sql = None;
@@ -3217,6 +3714,9 @@ fn export_note(model: &Model, set: &crate::query::result::ResultSet, matching: u
 }
 
 fn begin_export_format(model: &mut Model, format: ExportFormat) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
     let Some(note) = (|| {
         let set = model.visible_result()?;
         let matching = model.filtered_rows().len();
@@ -3250,6 +3750,23 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         group: "Session",
         command: PaletteCommand::ConnectionDetails,
     }];
+
+    entries.push(PaletteEntry {
+        label: "Server notice retention".into(),
+        detail: format!(
+            "{} omitted, {} shortened, {} abandoned; {}",
+            model.notice_state.pending.omitted.words(),
+            model.notice_state.pending.shortened.words(),
+            model.notice_state.pending.abandoned.words(),
+            if model.notice_state.pending.needs_report() {
+                "pending"
+            } else {
+                "client accounting"
+            }
+        ),
+        group: "Session",
+        command: PaletteCommand::NoticeDetails,
+    });
 
     // A command appears once even when several active keys invoke it. The
     // detail keeps every active direct key, with configured replacements first.

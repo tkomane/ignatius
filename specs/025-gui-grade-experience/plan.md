@@ -212,3 +212,39 @@ No constitution violations. Two structural costs are accepted knowingly:
    focused checks, then the locked verifier with the database fixture, and
    record focused, full, live and unverified evidence separately in
    `docs/status.md`.
+
+### Dependency reconciliation - 2026-10-25
+
+The US6 drag contract consumes US7's split state and keyboard split actions.
+T039's keyboard/shared-geometry core is now locally verified; keep it before
+T035's drag dispatch and retain final drag acceptance in both stories. This
+corrects an omitted dependency rather than adding a capability.
+US7 can proceed independently of US5 after the completed extraction.
+
+Mouse-wheel integration also needs explicit viewport state because existing
+arrow/page actions change selection or caret. Do not simulate viewport-only
+scrolling by replaying selection actions. Keep capture disabled until the whole
+verb table, keyboard parity, hit alignment and restoration are proven. Before
+T035, clarify the input-event timing seam and reconcile it with existing tick
+and asynchronous messages; do not let a render tick cancel a valid drag by
+accident. No numerical contract or theme decision changes in this preparation.
+
+### Density handoff - 2026-10-25
+
+T040 now follows the verified T039/T041 core. The presentation contract pins
+two-value configuration, one spacing table, the superseding 6/4 discovery cap,
+notice-preserving grid rows, title-content ownership and responsive overlay
+margin exceptions. No new theme, mouse, doctor or runtime-toggle behavior is
+included. Keep rendering overrides authoritative and share boxes/capacities
+with hit mapping and navigation. Existing constructors remain comfortable by
+default; the runtime reads the optional setting once at startup.
+
+The density implementer owns config schema/template, presentation/model,
+discovery and UI widgets/layout, one runtime initialization assignment, relevant
+sidecars and focused documentation/parity updates. The lead retains status,
+compatibility, changelog, review and integration. Watch tests fail first for
+strict parsing, template parity, each table knob, every overlay family, grid
+types/notices, remapped hint bounds and minimum-size prompt visibility. Full
+verification and rendered inspection follow focused checks. Keep T038 open
+until its complete density test set is proven, and keep drag acceptance open
+until T035.

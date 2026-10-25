@@ -35,6 +35,7 @@ fn model_with(columns: &[&str], rows: &[Vec<Cell>]) -> Model {
     model.sidebar_visible = false;
     model.focus = Focus::Results;
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),

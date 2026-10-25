@@ -1,2 +1,3 @@
-# One owner, and it is a real one. Everything requires their review.
+# Requested review owner. Enforced approval depends on the active GitHub ruleset;
+# the 2026-10-25 ruleset requires PRs/checks but sets required approvals to zero.
 * @tkomane

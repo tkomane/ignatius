@@ -1,8 +1,547 @@
 # Status
 
-**Updated: 2026-09-18.** This file is the resumption point. Read it, then check
+**Updated: 2026-10-25.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Autonomous roadmap continuation - 2026-10-25 (in progress)
+
+### Current local progress and active assignments
+
+Branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
+`d65024b`. W10-012's integrated notice
+implementation passed the complete local verifier: **1,370 outer harness cases,
+1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and
+PostgreSQL 18.6 plain/TLS. The macOS socket case remains a semantic skip.
+The initial full run exposed a new fixture assertion's incorrect Disable/Prefer
+assumption; three actual transport probes and independent review accepted the
+test-only correction before the full repeat. Log:
+`/private/tmp/ignatius-verify-2026-10-25-notices-recheck.log`.
+
+Root verified the immutable 129-file handoff and 29-file repair evidence, all
+43 moved original test names, and inspected 128 styled synthetic buffers. Peer
+review accepted the repaired doctor guidance, pending replacement/profile/Quit
+accounting and weak-reference deduplication. CLI/server outcomes remain intact.
+Live CI wiring now includes notice contracts and runtime lifecycle cases on
+both plain and verified TLS. Source publication, hosted/other-major/native
+acceptance are still separate. Prior application checkpoints are `918c0b1`
+(export progress) and `d8a3ac3` (help ownership); W10-011 pacing is measured and
+reviewed. Read Git state before taking an assignment; the day-long goal remains
+active.
+
+Owner steering on 25 October: skip external OpenCode review,
+continue with native independent review, and follow the normal DevOps workflow
+rather than keeping finished work local. The lead will push the task feature
+branch, open a draft PR and inspect hosted CI after integrated local checks.
+No release/production action follows from that workflow.
+
+Published clean checkpoint `fda16f8` to the task feature branch and opened
+[draft PR #32](https://github.com/tkomane/ignatius/pull/32). The installed
+pre-push hook repeated all 1,370 outer cases/23 summaries successfully before
+upload; the macOS socket skip remains explicit. Clean-source/history Gitleaks
+also passed (434 files/282 reachable revisions). Hosted CI run `40202770798`
+and CodeQL run `40202770715` completed for exact head `fda16f8`: 16 workflow jobs
+succeeded, one schedule-only drift job skipped, and the separate built-in
+CodeQL check succeeded with no new alerts. All three hosted platform jobs,
+Rust1.90, PG14/18 plain/verify-full and the real socket contract passed.
+The weekly fixture-drift job is deliberately schedule-only and skipped on this
+PR; that is not a passing upstream-manifest comparison. Hosted platform DB
+early returns are not live evidence; the separate PG jobs each ran 210 selected
+invocations across both routes. The socket job ran one real test without skip.
+PR merge ref `d9198a7` and head `fda16f8` have identical source tree
+`a561e457e7e9ab6923edc39e065e9459f5d38146`. Native Windows terminal/hand-use,
+all-major refresh beyond the representative PR matrix and release remain open.
+Reviewed evidence: `/private/tmp/ignatius-pr32-ci-fda16-20261025/`.
+
+A separate bounded smoke of published `fda16f8` passed PostgreSQL 15.19 plain
+and verify-full TLS, including exact 257-notice omission/output checks and
+before/after server-version/orders health. The isolated lifecycle controller
+removed only its two labelled containers/anonymous volumes; all five pre-existing
+running containers were preserved. Root verified both output digests and absence
+of task-labelled containers. Evidence:
+`/private/tmp/ignatius-resource-fixture-proof-mmfwivkh/`. This is notice-source
+PG15 smoke, not W10-013 or a full five-major repeat.
+
+W10-013 is integrated and locally verified. Root checked all 268 final
+milestone03 artifact hashes and exact equality for its 24 canonical code paths.
+Native independent review accepted the final patch, including the reproduced
+one/two-inner-row warning-clipping repair. All original sidecar assertions were
+preserved. The complete canonical verifier passed **1,431 outer harness cases,
+1,127 library, 24 summaries**, formatting, warnings-denied Clippy/API docs and
+PostgreSQL18.6-backed tests. Its macOS socket case remains a semantic skip.
+Log: `/private/tmp/ignatius-verify-2026-10-25-retained-result.log`.
+
+The unchanged core/output of milestone02 passed 12 fresh case children and 24
+separate CLI health children on PG18.6 plain/verify-full, without skips. Buffered
+40-MiB input retained 31/received 40/affected 40, including an owned TEMP write and
+subsequent positive same-session count; real SQLSTATE22012 remained true. Both
+complete streams verified 41,943,080 bytes before owned payload removal. Root
+verified 72 capture hashes and all 448 inputs after execution, then confirmed
+only the two authorised UI files changed in final03. Removed stream bytes were
+checked by Rust/controller; root inspected receipts and path absence.
+
+Root captured 112 styled synthetic Ratatui buffers in both densities/four
+presentations, verified all 354 artifact hashes and inspected eight contact
+sheets (16 frame images), including the reachable one/two-inner-row panes.
+No remaining scoped warning/count/ownership issue was found; native appearance
+and hand use remain separate. Evidence:
+`/private/tmp/ignatius-retained-styled-3rtx76kd/`, final manifest
+`a93728fabc53bfc56b7ce4b229d418a7bddc41317ef334fd9d60e321d22cb851`.
+CI omission red observed zero of two required routes; plain/verify-full wiring,
+the contract and pinned network-disabled Actionlint now pass. Source freeze:
+`/private/tmp/ignatius-w10-013-fda16f8-TfHH4z/milestone-03/`.
+
+Published clean checkpoint `54056c210ddfaa2c6c1629b0e7ab16caa7cbb8e2`
+to the task branch and updated draft PR32. The unchanged installed pre-push
+verifier again passed all 1,431 outer cases/24 summaries with the explicit
+macOS socket skip. Clean source (437 files) and 283 reachable Git revisions
+passed pinned Gitleaks. PR CI `40209111816`, CodeQL `40209111702` and the
+manually dispatched full five-major CI `40209244285` completed for exact
+head `54056c2`. All 35 check runs are now terminal: 33 succeeded and two
+schedule-only fixture-drift checks skipped deliberately. CodeQL's temporary
+missing-Rust state resolved to success with no new alerts. All platform/MSRV
+jobs, actual PG14-18 plain/verify-full and one real Linux socket passed.
+Each major ran 236 selected invocations (1,180 total); these include 60 actual
+new retained-result invocations. Session's 16 selected cases per route include
+two live and 14 pure cases; notice sidecar eight includes six live/two local.
+Runtime server majors are positively asserted; patch versions are immutable
+fixture-image provenance, not printed runtime strings. PR merge ref `dceeaeda`
+has the identical `54056c2` tree `6f32257cb8fbce7c36c6fe0ca50829c9639d878e`.
+Root verified the 11 hashed hosted receipts and full check listing. Evidence:
+`/private/tmp/ignatius-pr32-54056c2-five-major-20261025-Vo7bDf/`.
+W10-013 is checked for this scoped implementation/acceptance. Native Windows
+hand-use and other resource routes remain open. Source publication has not
+merged main or released. The next record commit changes documentation only.
+
+W07-064 is now specified as the next isolated assignment under foundation
+REL-001 and `contracts/windows-conpty-observation.md`. Use a test-only native
+SDK observer plus the selected safe Rust guard/hook process; establish native
+capability and negative ownership/state controls before the full option/path
+matrix. Root owns CI and acceptance. Unsupported paste/buffer observations
+cannot close T055a; Windows 11/Windows Terminal hand use stays T051. No Windows
+ConPTY runtime evidence has run yet.
+
+The team separately assessed incoming allocation and next-slice feasibility.
+No frame/startup/RSS bound is adopted: the locked driver has no single public
+all-transport hook; raw ownership also needs cancellation/dial parity. Auto
+background detection needs a truthful late-reply/restoration contract. W07's
+Windows ConPTY automation is being assessed against the existing hosted runner;
+none of those discovery notes changes product behavior or acceptance yet.
+
+- W03's fresh string-semantics guard and W10-006's private parsed-snapshot
+  migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
+  probes, plain/TLS checks and native peer review are recorded in their tasks.
+- `f99fe75` patches exactly five security packages without other dependency-edge
+  changes. All-workspace/all-features locked cargo-deny passed with zero errors
+  and six existing duplicate warnings; policy was unchanged.
+- W05's final clean `e5389f7` source passed 155 scoped contracts on each of
+  PostgreSQL 14.24, 15.19, 16.15, 17.11 and 18.6 (775 total), including verified
+  TLS. Application code matches `f99fe75`; `e5389f7` repairs a reproduced fixed-
+  delay export-test race. Reviewed digests/default 18.6 are saved in `5e6d232`.
+- Clean `f99fe75` passed actual Linux arm64 PostgreSQL 18.6 socket, Rust 1.90.0
+  locked/offline workspace/all-targets/all-features compilation and three
+  normal-quit PTY cases. Those frozen results exclude later UI work.
+- Feature 025 T039/T041 keyboard panes are implemented: reversible splits/zoom,
+  shared geometry and accurate paging, modal ownership through chords, visible
+  error/recovery state, minimum-size diagnostic content and readable feedback.
+  Full local verifier `/private/tmp/ignatius-verify-2026-10-25-panes.log` passed
+  1,206 harness cases (935 library, four isolated PTY, 14 workflow), formatting,
+  lints, API/doc checks and PostgreSQL 18.6 plain/TLS. Its macOS socket case
+  remains a semantic skip. Source was the modified integration tree based on
+  `abe4aed`. Density T040, the rest of T038 and dragging T035 remain open.
+  The verified keyboard slice is saved in `4a7717b`.
+- W07-059 is saved in `abe4aed`: unique PTY config/data, inherited logging/PG
+  routes removed, explicit absent passfile. A real child probe failed first;
+  all four focused PTY contracts and the integrated repeat passed.
+- A separate owned-PTY probe at clean `e5389f7` passed macOS SIGTERM after first
+  paint, restoration order and actual canonical/echo/signal-mode recovery.
+  Initial Darwin PENDIN state cleared after a same-PTY line read; full stty
+  then matched without reset. Startup registration still had a window.
+- W07-060's owned self-exec red died by SIGTERM before runtime polling. The
+  pre-terminal registration repair passed 21 focused runtime tests, was reviewed
+  and integrated, then passed the latest full locked verifier: 1,208 harness
+  cases/937 library, PostgreSQL 18.6 plain/TLS, semantic macOS socket skip.
+  Log: `/private/tmp/ignatius-verify-2026-10-25-signal-startup.log`. The actual
+  integrated `4a7717b` modified binary also passed owned-PTY SIGTERM, restoration
+  order, canonical/echo modes and exact stty after normal PENDIN recovery input.
+  Panic/error process paths and Windows remain open.
+  The repair is saved in `21511f1`. A fresh clean Linux arm64 repeat at that
+  commit passed app 303, UI 215, interactive 21, socket one and PTY four
+  (544 focused cases, zero skips), plus actual Rust 1.90.0 locked/offline
+  workspace/all-targets/all-features compilation. Its production binary
+  confirmed clean source and exactly pinned Rust 1.97.1. Evidence is under
+  `/private/tmp/ignatius-linux-21511-20261025-FWM0SW/`. Density remains outside
+  that frozen source.
+- W07-061 removes the detached delayed numeric-PID kill from the PTY harness.
+  All six focused checks passed: the three existing actual macOS PTY checks,
+  profile isolation, an owned hung-child deadline/reap and normal completion
+  with 130,000 output bytes. Native peer review found no blocker. Private file
+  captures avoid pipe backpressure; no delayed watchdog survives completion.
+  Log: `/private/tmp/ignatius-w07-owned-deadline-2026-10-25.log`. The integrated
+  full repeat follows density; Linux/abnormal-exit/Windows proof is separate.
+
+- Density T040 and T038 test implementation passed their complete integrated
+  local gate: 1,224 harness cases/950 library across 22 summaries, PostgreSQL
+  18.6 plain/TLS, semantic macOS socket skip. Focused config 36/app 305/UI 224/
+  CLI one/docs 15 and final Clippy passed. The lead inspected 88 styled
+  synthetic buffers, including two reproduced/fixed protected-input regressions.
+  Log: `/private/tmp/ignatius-verify-2026-10-25-density.log`; buffer provenance
+  and scope are recorded in verification. Dragging and full US7 acceptance
+  remain open. Density's source/Cargo ownership has been handed back.
+
+W04 now shares scrollable content, wrapping and admission across copy,
+generated UPDATE, production run, EXPLAIN ANALYZE and named parameters. Both
+acceptance aliases stay blocked before the current final page or below usable
+dimensions; inputs and complete command rails stay fixed. The lead reproduced
+and repaired extraction regressions in redaction, late update-metadata modal
+ownership and enlargement before repaint. Runtime supplies actual frame/backend
+dimensions; the pure reducer owns the new `InputAtSize` admission policy.
+The final focused repeat passed app 328/UI 241/runtime 27 (596 cases, zero
+skips), Clippy and formatting. All source ownership is handed back to the lead.
+
+The lead inspected representative first/end/middle styled frames from 152
+actual synthetic Ratatui buffers across both densities, three truecolour themes
+and ASCII/no-colour. Default 40x8 parameter and typed-PROD prompts retain input,
+two body rows and command rails; the exact UPDATE tail is reachable. Evidence:
+`/private/tmp/ignatius-w04-styled-reviewed-lay5bval/`. These are rendered-cell
+checks, not native screenshots or proof of reading. Feature 018 T039/T040 are
+checked after the combined locked full verifier passed 1,270 harness cases/996
+library across 22 summaries, formatting, lints/API docs and PostgreSQL 18.6
+plain/TLS. Its macOS socket remains a semantic skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-review-and-panic.log`.
+
+W07-062's isolated error/panic repair was reviewed and applied to root's two
+terminal files. It retains actual acquired options atomically, restores them
+before previous-hook output, and removes unsupported panic claims. The HOME-
+free private clone passed 13 ordinary units, two PTY drivers and one inert
+parent helper; the drivers exercised 16 actual owned macOS PTY children across
+all mouse/paste/screen combinations, with canonical/echo/signal and raw-state
+observations. It also passed Clippy/formatting. Patch SHA-256:
+`cf3570a569025794995da01bffacfa9b1102036db75f14e5abf6350ad350b763`;
+source/logs/manifest are under `/private/tmp/ignatius-w07-062-w2iPKH/`.
+The combined full verifier passed and W07-062 is checked for that exact scope;
+latest-source Linux/Windows, pinned/MSRV and native visuals remain separate.
+
+W07-063 now observes uncaught unwinding outside libtest: all eight standalone
+production-library guard/hook processes restored actual raw/canonical/echo/
+signal state before previous/default panic output and exited 101. Immediate
+Darwin PENDIN cleared after normal same-PTY line input, then full flags matched
+exactly without reset. Evidence: `/private/tmp/ignatius-w07-063-u329k7er/`.
+Only planning docs changed at the recorded `74eb155` build; application inputs
+equal `d8a3ac3`. This is not a full injected application crash, abort, native
+visual or Windows claim. Product source and the prior full-gate count unchanged.
+
+W10-007's reviewed clean-`24db9c5` optimized-binary experiment completed 27
+measured CLI children and 28 authenticated health/count checks without changing
+the fixture. Three samples per case show pre-retention value allocation,
+increasing notice retention and complete 8 MiB streaming values. Maximum
+observed RSS was 42.67 MiB; this is not a process ceiling. Owned export payloads
+were checked and removed. Source, helpers, manifest and results are retained
+under `/private/tmp/ignatius-w10-007-AFKZrb/`; verification records exact scope.
+W10-011's exact-clean-`d8a3ac3` real-writer experiment is complete and reviewed:
+12 fresh exports plus 24 unchanged PostgreSQL 18.6/orders=3 checks, no stops,
+retries or skips. Small/large paced medians were 8.031/8.109 s with
+6.797/40.812 MiB peak RSS; all complete bytes/digests/four counters matched.
+Only the 12 verified owned payloads were removed. Sources/report/raw evidence:
+`/private/tmp/ignatius-w10-011-d8a3ac3-JVcSVr/`. This proves library-path
+backpressure above BufWriter, not CLI cancellation, TLS or process ceilings.
+
+W10-008's incoming-frame design remains unadopted. Root specified W10-013's
+32-MiB logical retained-data allowance and typed-unavailability/output contract,
+including execution-level disclosure when later nonvisible sets lose data;
+its implementation was serialized after W10-012 and is now accepted above.
+The earlier separate pure budget candidate passed 24 standalone arithmetic/admission
+tests, a non-test warnings-denied build and formatting. The lead verified its
+13 recorded artefacts. It is preparation only, with no Session/UI integration
+or product memory-limit claim. The final macOS 64-bit ResultSet layout was
+subsequently measured as 104 bytes; the accepted code uses each target's layout. Evidence: `/private/tmp/ignatius-w10-013-budget-OJB7A3/`.
+Root adopted W10-012's complete notice policy under foundation REL-005, with fixed cumulative
+allowances, precision-safe pending counts and explicit acknowledgement. Privacy
+implemented in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
+snapshots. Admission/lifecycle reds and focused greens are retained. Independent
+review found probe/describe phase mixing and a dropped pending-shortening edge;
+contract `2918069` pins their repair plus nonmutating active-count snapshots at
+actual source retirement/quit. Core03 passed its focused repeat and independent
+peer re-review with no remaining core blocker; adapter/UI work now includes
+explicit captured source retirement and bounded main-loop session installation.
+The frozen adapter/UI/live handoff is now applied in the canonical working
+tree. Root inspected 128 styled buffers, incorporated the bounded final
+runtime/doctor review repair and live CI wiring, and passed the full 1,370-case
+local verifier after its test-only transport correction. Root owns shared
+records/policy; the notice implementation checkpoint is `d65024b`.
+Representative hosted platform/major acceptance has also passed at `fda16f8`;
+W10-012 is checked. W10-013 subsequently completed its isolated assignment and
+is accepted at `54056c2` as recorded above. Native/release work stays open.
+
+W10-009 is integrated after primary review: 87 private focused passes, followed
+by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
+PostgreSQL 18.6 route (61 integrated focused passes, zero skips). The canonical
+three-file source/docs change passed the final combined full gate below and
+W10-009 is checked. No persistent schema/data changed by its focused checks.
+
+Completed worker lanes: privacy implemented W10-010 in an independent exact-`871db73`
+clone/new SSD target: encoder/runtime progress must not count failed rows;
+typed abandonment distinguishes confirmed flush from unknown file-row count.
+Feature 021 FR-2112/T023-T025 pinned scope before code. PostgreSQL worker completed
+frozen Linux arm64 pinned/MSRV/socket/PTY verification at clean `871db73`,
+with only its new labelled resources and explicit root/COI preservation. That
+frozen source excludes W10-009. Both workers leave canonical source/cache and
+docs alone; root owns integration and the combined full gate.
+
+W10-010's six-file patch is now primary-reviewed and applied. It preserves
+BufWriter Drop salvage, counts only accepted complete rows and adds typed
+flushed/unconfirmed reporting. Private proof: six behavioral reds/four controls,
+73 focused passes including three read-only live export contracts, Clippy/fmt;
+no native disk-full claim. Exact patch/evidence are retained in
+`/private/tmp/ignatius-w10-010-evidence-20261025.txt`. A separate native peer
+found no blocker and verified all 33 original moved tests. Feature 021
+T023-T025 are checked after the final combined gate. The change is saved in
+`918c0b1`.
+
+Root also owns Feature015 T042's specified help follow-up. Four behavioral
+regressions reproduced hidden typing/paste/Enter edits and the unreachable final
+chord. One additional red proved the blank Space key label. A pure shared help
+viewport, local navigation, matching overlay ownership and visible Space names
+passed 20 selected cases after additional peer findings, including actual-cell
+traversal with valid long/Unicode remaps. Native peer re-review found no remaining
+blocker in those fixes. T042 is checked after representative inspection from
+104 styled synthetic buffers and the final full gate. Both workers completed
+their scoped reviews before the new resource assignments. Help is saved in `d8a3ac3`; root owns the next resource
+contracts and coordinated measurement.
+
+The final full verifier at modified `dd69f66`, including W10-009/010/help, passed
+1,315 harness cases/1,027 library, formatting, lints/API docs and PostgreSQL 18.6
+plain/TLS. The macOS socket remains a semantic skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+The earlier 1,310-case run excludes five later peer regressions/repairs: actual
+object Insert choices with/without an inspector, a chosen pane command and long
+40x8 controls. All were reproduced, repaired and re-reviewed. The strengthened
+actual-last-chord assertion also passed separately after the full run, without
+production changes. Styled provenance: `/private/tmp/ignatius-help-styled-_hofm3y7/`.
+These are local implementation/focused/full/live/rendered-cell results, not
+current hosted/native-platform/hand-use or different-family acceptance.
+
+Frozen `871db73` Linux acceptance/cleanup is complete: full library 996, socket
+one, terminal six (1,003 outer harness cases, zero skips), actual pinned Rust
+1.97.1 and Rust 1.90 compilation. Sixteen nested guard/hook PTY children are
+separate observations, not additional outer passes. Exact scope, source/binary
+identity, initdb-auth caveat and reviewed cleanup are in verification.
+
+The lead alone owns CLI/runtime-sidecar writes, documentation, compatibility,
+changelog and integration. No shared reducer/runtime writer is permitted.
+Linux's clean `871db73` acceptance and task-only cleanup are complete and
+exclude later CLI/export/help work. No shared/root fixture may be torn down by
+a worker; only its explicitly assigned labelled resources may be cleaned.
+Rendered-cell checks
+do not establish native terminal appearance or hand-use acceptance.
+
+No recursive agents or shared reducer/runtime writers. Root's PostgreSQL 18.6
+fixture pair remains available; unrelated COI services and original branches
+are preserved. The owner approved scoped OpenCode Go GLM-5.3 source review on
+25 October, using included allowance only, then explicitly chose `Skip external
+review` when the paid-fallback setting could not be verified. No code was sent.
+This is the owner's exception to different-family review for today's work;
+native independent review and local verification remain required.
+
+Detailed sources, environments, exact logs and boundaries are in
+[verification](operations/verification.md). Synthetic buffer images establish
+rendered cells, not native terminal appearance. Native Terminal computer use
+was blocked by tool policy. Scoped external source transmission now has owner
+consent, then was cancelled by the owner's `Skip external review` instruction.
+Different-family review was not performed. Hosted, Windows, participant,
+full hand-use and release acceptance are separate open gates.
+
+### Current security and governance evidence - 2026-10-25
+
+- Fresh no-network/read-only Gitleaks 8.30.0 scans at clean `d8a3ac3`
+  found no leaks: all 266 saved commits/11.11 MB and a verified immutable
+  424-file tracked-source snapshot/5.14 MB scanned. Manifest tree digest:
+  `284fb26412b54b2c568b1c01626a21d568fc6971fbe050fe088e29428062da4d`.
+  Logs: `/private/tmp/ignatius-gitleaks-d8a3ac3-{history,source}-2026-10-25.log`.
+  These include W10-009/010 and help; later changes need their own boundary.
+- A no-network, read-only Gitleaks 8.30.0 history scan actually scanned 239
+  commits/10.46 MB with no leaks. A separate 412-file modified-source snapshot
+  (manifest tree digest `93b573dbfaffa6cf35d9b3f1346e362e4f03231fae37581a05942dd6ff6032f6`)
+  scanned 4.77 MB with no leaks. These cover their recorded source snapshots,
+  not future commits. Local logs are `/private/tmp/ignatius-gitleaks-history-2026-10-25.log`
+  and `/private/tmp/ignatius-gitleaks-wave2-source-2026-10-25.log`.
+- Fresh clean `21511f1` scans passed with no leaks: all 250 saved commits/
+  10.77 MB and a verified immutable 417-file source snapshot/4.87 MB. Snapshot
+  tree digest is `a1778b16636cb63b89614c11c1bd91b7057e9c037aca12f5883766a13af4ad4e`;
+  its manifest is under `/private/tmp/ignatius-source-21511f1-q24p8etp/`.
+  Logs use `/private/tmp/ignatius-gitleaks-21511f1-*-2026-10-25.log`. Later
+  density changes are outside these frozen scans.
+- Scheduled remote CI run `39226168252`, inspected read-only, failed actual
+  rustls advisories and mutable PostgreSQL image drift on 19 October. Native
+  OS jobs passed at remote `445ed82`; this is not today's local-candidate CI.
+  Its drift loop stopped at 14, so that run proves nothing about 15-18 drift.
+- Fresh maintainer/advisory checks led to precise patches: rustls 0.23.46,
+  rustls-webpki 0.103.16, ctutils 0.4.4, Tokio 1.53.3 and webpki-root-certs
+  1.0.11. All other lockfile versions and dependency edges were preserved.
+  The all-workspace/all-features locked cargo-deny 0.20.2 audit passed with zero
+  errors; six existing duplicate-version warnings remain. The same broader
+  audit found missing xtask licence metadata, now the existing Apache-2.0
+  licence. No audit exception or allowance was added. See
+  [verification](operations/verification.md#local-security-maintenance---2026-10-25)
+  for primary advisory sources and exact local scope.
+- Live GitHub readback confirms public visibility; active main ruleset
+  `22835887` requires PRs, resolved review threads and 13 CI contexts, with no
+  bypass actors. Required approvals are zero, code-owner approval and strict
+  up-to-date checks are off, and the three observed CodeQL contexts are absent.
+  The `v*` tag ruleset `22835888` prevents updates/deletion. No setting changed.
+- Private vulnerability reporting, secret scanning, push protection and
+  Dependabot security updates are enabled. The private reporting route was not
+  submitted to or tested for notification/response. Classic protection reads
+  returned 403 through the integration and 404 through the owner CLI; neither
+  negates the independently observed active rulesets. The release collection
+  was empty. Naming/legal/domain and exact release actions remain owner gates.
+
+Owner requested day-long autonomous development and a bounded team. Start:
+`39d7923cf3b7d132c12a98bc081a454e45e1ec58`, clean branch
+`w01/reconcile-1d841b4-onto-bd05b9d`, 16 commits ahead of the local tracked
+`origin/main` before the read-only remote refresh described below. The prior local
+commits and unrelated COI Docker containers are preserved. The active-feature
+pointer was stale at 024 and now matches 025, whose US1-US4 are recorded in
+the historical sections below; US5-US10 remain unchecked.
+
+First-batch lanes (single writers, no recursive delegation) were W02 async-envelope
+repair in the interactive runtime/reducer sidecar tests; W04 generated-UPDATE
+privacy probes in a new integration-test file; lead-owned W10 saved-query and
+atomic local-state recovery. Native workers inherit the lead's model settings.
+The existing OpenCode Go connection and configured GLM-5.3 reviewer are
+available for the required review on another model family; no overage or new
+provider is authorised. The roadmap now reflects the existing 025 work rather
+than describing 024 as the latest slice.
+
+Automatic approval review rejected the attempted read-only OpenCode review
+because transmitting unpublished repository changes to that external service
+needs explicit owner consent. No review payload was sent then. The owner
+subsequently approved scoped OpenCode Go GLM-5.3 review, limited to included
+subscription allowance. Current vendor documentation says Extra Usage can
+fall back to paid Console credit; the CLI does not expose that setting and
+the browser Console requires sign-in. The owner answered the billing-fact
+question with `Skip external review`. No inference or source transmission ran;
+that instruction is the owner's exception to today's different-family gate.
+Cross-lane native peer review found one W10 regression
+(temporary basename too long); it was reproduced, repaired and re-reviewed.
+Native independent review and local acceptance still apply; no different-family
+review result is claimed.
+
+Environment: macOS arm64, Homebrew Rust/Cargo 1.99.1 (the repository pins
+1.97.1 for rustup, so this is explicitly a different local toolchain),
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools`, existing build cache on
+the external SSD. Lead started only the repository's disposable PostgreSQL
+18.4 plain/TLS fixtures. A bounded keep-awake process covers today's local run.
+Phone pairing and mobile push delivery have not been verified; owner-only
+decisions must remain actual chat/approval requests, never simulated input.
+
+No new push, workflow dispatch, tag, signing, release, paid resource,
+governance change or production operation is authorised by this progress
+record. New local branch: `codex/autonomous-roadmap-2026-10-25`. The remote-main
+query returned `445ed8228d344a160928456659c7ba932d4cbdef`. SSH fetch could not
+use the existing signing agent; the authenticated GitHub connector confirmed
+the repository is public, and a read-only HTTPS fetch succeeded. Its only new
+changes since the shared baseline were lockfile dependency patches and CodeQL
+action pins. Local merge `4cdf96e` preserves both histories and changed only
+`Cargo.lock` and `.github/workflows/codeql.yml`. This did not merge anything on
+GitHub or publish today's changes.
+
+### First hardening batch - local verification
+
+| Field | Record |
+| --- | --- |
+| Changes | W02 queues profile failures/catalogue reloads with connection generation and rechecks the reconnect-target slot under its lock. W04 omits parameter-derived server prose from parameterized errors and enables sticky value-free notices. W10 uses private exclusive atomic replacements and refuses linked/non-regular saved-query leaves. |
+| Source | Starting commit `39d7923` plus the current explicitly modified/untracked files on the new local branch; no hosted or clean-candidate claim. |
+| Environment | macOS 27.0.1 arm64, Homebrew Rust/Cargo 1.99.1, CommandLineTools developer directory, existing external-SSD build cache; disposable server reports PostgreSQL 18.4. |
+| Focused evidence | W02 sender and target-lock regressions failed before fixes; interactive 19 and reducer 171 passed. W10 original temporary/link probes failed before fixes; configuration 13, history 14, query 10 and atomic helper 6 passed. W04 generated constraint failure leaked before the correction; 8 error units, 4 session units and 5 live plain PostgreSQL subprocess privacy contracts passed after it. |
+| Full gate | First run failed a roadmap phrase-parity assertion after 898 library tests passed. Corrected the meaningful Feature 024 reference. The repeat `cargo --locked xtask verify` passed formatting, warnings-denied lints, API docs, the complete workspace and doc tests, including plain/TLS PostgreSQL. The harness reports 1,152 passing cases across 21 summaries; its socket case returns early and remains a semantic skip, not live evidence. |
+| Verifier repair | Added workspace `--no-fail-fast` so later binaries run after failure. A failed workspace gate now labels configured fixtures as information rather than falsely reporting database/socket passes. |
+| Review | Cross-lane native peer review found and re-checked the repaired W10 long-basename regression and found no remaining blocking W02/W04/W10 issue in scope. The owner subsequently chose `Skip external review`; different-family review was not performed, under that explicit exception. |
+| Retention | Safe local verifier logs: `/private/tmp/ignatius-verify-2026-10-25-wave1.log` and `/private/tmp/ignatius-verify-2026-10-25-wave1-recheck.log`; regressions retained in sidecar/integration tests. |
+| Open boundaries | Unix socket, native Windows/Linux, real terminal/screen-reader use, packaged-candidate privacy and release gates. External review was later skipped by explicit owner instruction. The separate verified-TLS repeat of all five privacy contracts passed with zero skips using the generated fixture CA and `sslmode=verify-full`. |
+
+Local commits: `f8cbce8` W02 identity, `2017f03` W10 replacement boundaries,
+`b845106` W04 privacy and its specified next W03 guard. The platform's existing
+inline tests were also moved unchanged to a sidecar to follow the CodeQL test
+path contract. The first full pass above used the pre-merge lockfile. The repeat
+`cargo --locked xtask verify` against integrated `4cdf96e` plus the verifier
+workflow/documentation edits also passed every enabled gate, with the same
+1,152 harness cases and semantic socket skip. Its retained local log is
+`/private/tmp/ignatius-verify-2026-10-25-wave1-upstream.log`. `actionlint` also
+passed against the integrated workflow definitions. Hosted CI, cargo-deny,
+gitleaks and CodeQL were not run in this batch.
+
+Next independent work: the specified FR-2215 fresh string-semantics guard
+(Feature 022 W03-034/035), W10 migration-backup exclusive reservation, and the
+remaining Feature 025 stories. US5 preparation found contract details to pin
+before coding: text-token contrast scope, exact theme-refusal rendering and
+missing custom-definition wording, and late OSC 11 reply filtering. No theme
+contract was silently changed to resolve those questions.
+
+## W10 streaming export footprint 200k vs 2M rows - 2026-09-30
+
+Measured the acceptance streaming-growth scenario on branch
+`w01/reconcile-1d841b4-onto-bd05b9d` with the release binary against
+disposable PostgreSQL 18.4 on localhost: `SELECT g, md5(g::text) FROM
+generate_series(...)`, two fixed columns, CSV to a file, peak RSS from
+`/usr/bin/time -l`. Machine: Mac Studio arm64, rustc 1.98.1, ignatius 0.1.0
+release profile.
+
+| Rows | Output bytes | Wall time | Peak RSS |
+| --- | --- | --- | --- |
+| 200,000 | 7,888,903 | 0.22 s | 2,933,216 |
+| 2,000,000 | 80,888,904 | 1.77 s | 2,916,832 |
+
+Ten times the rows adds sixteen kilobytes of peak memory: retained growth is
+flat, not proportional. Time scales with bytes at roughly 45 MB/s on
+localhost. Still open in W10: whole-process ceiling for one oversized value
+or notice, p95 input/grid latency baselines, and the recovery matrix.
+
+## W05 local server matrix 14-18 on the integration branch - 2026-09-30
+
+Ran the full 53-test plain/TLS integration suite on branch
+`w01/reconcile-1d841b4-onto-bd05b9d` against each supported major from the
+reviewed digest map in `docker/postgres-images.env`, one disposable server at
+a time on macOS arm64 with Docker Desktop. Every major passed 53/53:
+
+| Major | Server version | Result |
+| --- | --- | --- |
+| 14 | 14.24 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 15 | 15.19 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 16 | 16.15 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 17 | 17.11 on aarch64-unknown-linux-musl (Alpine) | 53 passed |
+| 18 | 18.4 (existing `cargo xtask verify` gates) | pass |
+
+One procedural note: the tests read the password from `IGNATIUS_TEST_PG_URI`
+itself, so the URIs were exported with the synthetic fixture password via a
+variable reference, never on the command line. The Unix-socket gate stays
+skipped and the hosted matrix at candidate source stays open.
+
+## W01/W02 integration branch: connection identity and bounds on the 025 base - 2026-09-30
+
+Branch `w01/reconcile-1d841b4-onto-bd05b9d` (based on `origin/main` bd05b9d)
+ports the local-only hardening onto the 025 base without dropping remote
+behaviour: the reducer `ForConnection` envelope with generation increment on
+profile switch, runtime generation checks plus envelope wrapping in connect,
+execute, parameterized, explain, and cancel workers, provider `kill_on_drop`
+with ms-aware timeout wording, 1 MiB retained-value refusal, 64 KiB notice
+cap, and partial-acquisition terminal restore. The xtask second redactor was
+deliberately not ported; the central redactor remains the single
+implementation. Grid MIN/STEP stay at the remote 4/2. A direct merge into
+local `main` 1d841b4 was attempted with `--allow-unrelated-histories` and
+aborted: the histories share no merge base, every file conflicts, and an
+automatic merge would risk dropping one side. Old `main` is retained
+untouched; the forward line is this branch via pull request.
+
+| Field | Record |
+| --- | --- |
+| Claim | W01 behaviour preservation plus W02 envelope/worker scoping and regression tests |
+| Source | `w01/reconcile-1d841b4-onto-bd05b9d` e7b8059, pushed to origin; local `main` 1d841b4 retained |
+| Environment | macOS arm64, Docker Desktop `desktop-linux`, disposable `postgres:18.4-alpine` plain/TLS fixtures |
+| Method | `cargo xtask db up`; `cargo xtask verify`; `cargo xtask db down`; focused `app::update` envelope tests (2 new) |
+| Result | Pass. Formatting, lints, API docs, workspace tests, doc tests, and database-backed plain/TLS gates all passed. Unix-socket slot skipped because `IGNATIUS_TEST_PG_SOCKET_URI` is not set. Pre-push hook passed with DB gates skipped (no development database in hook context) |
+| Scope | Proves reducer envelope rejection and worker generation checks on the current branch. Does not prove hosted Linux matrix, socket job, Windows ConPTY, hand-terminal, provider-account, signing, provenance, or publication readiness |
+| Retention | This section, the pushed branch, and PR https://github.com/tkomane/ignatius/pull/new/w01/reconcile-1d841b4-onto-bd05b9d |
 
 ## Feature 025 Phase 6: the first frame is useful (US4) - 2026-09-18
 
@@ -1549,10 +2088,12 @@ These are real and none of them is hidden anywhere else:
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
    full history for that job. Every earlier green run of that gate should be read
    as "did not run".
-9. **Main is not protected.** GitHub readback on 2026-09-04 reports
-   `protected: false`. Local hooks and CI do not enforce server-side required
-   checks. W13 prepares the governance proposal against current hosting
-   capabilities; no hosting-plan entitlement is assumed by this observation.
+9. **Main is protected by an active ruleset as of 2026-10-25.** The older
+   2026-09-04 `protected: false` snapshot is superseded. Current required PRs,
+   13 CI contexts and resolved threads are enforced without bypass actors;
+   approvals are zero and strict up-to-date/code-owner approval are off. The
+   three CodeQL contexts are absent despite the documented blocking gate.
+   W13 has prepared the exact owner decision; no remote setting was changed.
 10. **`rust-toolchain.toml` is inert on the development machine**, which uses a
    Homebrew rustc rather than rustup. This is an environment limitation, not a
    defect.
@@ -1601,27 +2142,20 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W02:** the reducer transition matrix is covered; no runtime test harness
-   exists for `event_loop`, so decide between a message-injection seam and
-   extended pty or live evidence before adding tests. Do not rewrite the state
-   architecture to make a harness convenient.
-2. **W03 continued:** decide the `standard_conforming_strings` boundary. The
-   bootstrap query already reads server facts once per session; reading the
-   setting there and refusing parameter binding when it is `off` is the
-   smallest design that satisfies "never silently bind under incompatible
-   semantics". A specification change comes first. Also collect live TUI
-   evidence for the update review and run the new evidence on PostgreSQL 14-17.
-3. **W04:** the parameter-expansion, provider stderr and provider timeout
-   probes are done, along with the authorization-header redaction fix they
-   found. The generated update bound-SQL log audit, refresh, clipboard
-   confirmation and the panic path remain.
-4. **W05:** run the current source against the PostgreSQL 14-18 matrix with
-   plain and TLS fixtures and a real Linux socket; the Unix-socket gate is still
-   a skip on this machine.
-5. **W06-W07:** blocked on a controlled cloud account and a Windows host; the
-   portable subprocess portions can proceed locally.
-6. **W08-W10:** hand-verify terminals, accessibility and daily use once the
-   relevant behaviour is stable; measure resource and recovery boundaries.
-7. **W11/W13:** prepare the release trust, support, naming and governance
-   decisions. **W12/W14:** assemble the candidate and obtain the owner's
-   decision. No release claim is earned by waiting.
+1. **W07:** pin and implement the owned Windows ConPTY capability/guard
+   observation slice. Use actual native modes/cursor/buffer evidence; preserve
+   T055a's remaining mode gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
+2. **W10-008:** retain the separate notice and retained-data contracts; finish
+   the incoming-allocation design without claiming driver/startup/RSS ceilings.
+   Preserve cancellation, sticky privacy and unknown write outcomes.
+3. **W05/W07:** retain exact `54056c2` pinned five-major/plain/TLS/socket
+   acceptance, distinct from older frozen measurements. Repeat affected server
+   paths only after Session/protocol changes; Windows ConPTY and hand use remain
+   separately scoped.
+4. **Feature 025/015:** continue theme/pointer/daily-experience contracts after
+   resource work; mouse capture stays off until pointer behavior/parity exists.
+5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence when
+   access exists. Synthetic buffers and PTYs do not replace hand use.
+6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open and
+   today's owner-skipped external review explicit. Branch push, draft PR and CI
+   are authorised; merge, signing and release remain separate owner decisions.

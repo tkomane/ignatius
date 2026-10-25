@@ -3,7 +3,9 @@ use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
-use crate::ui::layout::{LayoutMode, Presentation, body_area, layout_mode, main_panes};
+use crate::ui::layout::{
+    LayoutMode, OverlayAnchor, Presentation, layout_mode, overlay_box, pane_geometry,
+};
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -13,12 +15,18 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 /// The editor's content rectangle in the current layout.
 fn editor_content_area(model: &Model, presentation: &Presentation, area: Rect) -> Rect {
-    let editor = match layout_mode(area) {
-        LayoutMode::Compact => body_area(area),
-        LayoutMode::Full => main_panes(body_area(area), model.sidebar_visible).0,
-        LayoutMode::TooSmall => area,
-    };
+    let editor = pane_geometry(model, area).editor.unwrap_or_default();
     pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor)
+}
+
+/// Text rows inside the pane border; zero means no text can be drawn.
+pub(crate) fn content_capacity(pane: Rect) -> usize {
+    let inner = super::inner_rect(pane);
+    if inner.width == 0 {
+        0
+    } else {
+        usize::from(inner.height)
+    }
 }
 
 /// Draws the local completion menu next to the editor caret.
@@ -69,22 +77,29 @@ pub(crate) fn render_completion(
         .max()
         .unwrap_or(12)
         .clamp(12, 28);
-    let max_width = area.width.saturating_sub(2).max(12);
+    let bounds = overlay_box(
+        area,
+        presentation,
+        (u16::MAX, u16::MAX),
+        5,
+        OverlayAnchor::Center,
+    );
+    let max_width = bounds.width;
     let desired_width = u16::try_from(name_width + 44).unwrap_or(max_width);
     let width = desired_width.clamp(28, 78).min(max_width);
     let desired_height = u16::try_from(menu.result.candidates.len() + 7).unwrap_or(16);
-    let max_height = area.height.saturating_sub(1).max(5);
+    let max_height = bounds.height;
     let height = desired_height.clamp(5, 20).min(max_height);
 
-    let right = area.x.saturating_add(area.width);
-    let left_limit = right.saturating_sub(width).max(area.x);
-    let x = cursor_x.saturating_sub(1).clamp(area.x, left_limit);
+    let right = bounds.right();
+    let left_limit = right.saturating_sub(width).max(bounds.x);
+    let x = cursor_x.saturating_sub(1).clamp(bounds.x, left_limit);
     let below = cursor_y.saturating_add(1);
-    let bottom = area.y.saturating_add(area.height);
+    let bottom = bounds.bottom();
     let y = if below.saturating_add(height) <= bottom {
         below
     } else {
-        cursor_y.saturating_sub(height).max(area.y)
+        cursor_y.saturating_sub(height).max(bounds.y)
     };
     let popup = Rect::new(x, y, width, height);
     ratatui::widgets::Clear.render(popup, buf);
@@ -163,6 +178,9 @@ pub(crate) fn render_editor(
         " {}Editor  line {line}, column {column} ",
         presentation.icon(Icon::Editor)
     );
+    if model.splits.zoomed && focused {
+        title.insert_str(0, " (zoomed)");
+    }
     if model.editor.is_modified() {
         title.push_str("[modified] ");
     }

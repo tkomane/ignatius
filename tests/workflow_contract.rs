@@ -8,6 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+#[path = "support/workflow_socket_readiness.rs"]
+mod socket_readiness;
+
 #[derive(Debug)]
 struct ActionReference {
     action: String,
@@ -391,6 +395,11 @@ fn shared_ci_runs_the_complete_declared_coverage() {
         "--test cli_contract",
         "--test password_prompt",
         "--test cloud_identity_integration",
+        "--test parameter_semantics_contract",
+        "--test runtime_privacy_contract",
+        "--test notice_retention_contract",
+        "cargo test --locked --lib postgres::session",
+        "sslmode=verify-full&sslrootcert=${{ github.workspace }}/docker/tls/generated/ca.crt",
     ] {
         assert!(
             integration.contains(expected),
@@ -398,11 +407,34 @@ fn shared_ci_runs_the_complete_declared_coverage() {
         );
     }
 
+    assert_eq!(
+        integration
+            .matches("--test retained_result_contract")
+            .count(),
+        2,
+        "retained-result contracts must use real endpoints over both plain and verified TLS"
+    );
+    assert_eq!(
+        integration
+            .matches("--test notice_retention_contract")
+            .count(),
+        2,
+        "notice contracts must use real endpoints over both plain and verified TLS"
+    );
+    assert_eq!(
+        integration
+            .matches("cli::interactive::tests::notice_")
+            .count(),
+        2,
+        "runtime notice retirement must use real endpoints over both routes"
+    );
+
     let socket = job_block(&workflow, "socket-integration");
     for expected in [
         "IGNATIUS_TEST_PG_SOCKET_URI=\"host='$IGNATIUS_SOCKET_DIR'",
         "cargo test --locked --test postgres_socket_integration",
         "Start the socket fixture",
+        "pg_isready -h 127.0.0.1",
     ] {
         assert!(
             socket.contains(expected),
@@ -508,6 +540,285 @@ fn shared_ci_uses_reviewed_immutable_postgresql_fixtures() {
         majors,
         BTreeSet::from(["14", "15", "16", "17", "18"]),
         "fixture map must cover exactly the supported PostgreSQL majors"
+    );
+}
+
+/// Execute the checked-in shell body, with registry reads replaced by a local
+/// fake. The real reviewed-map resolver still runs against an isolated copy.
+#[cfg(unix)]
+fn fixture_drift_run(scenario: &str) -> (std::process::Output, String, Vec<String>) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflow = workflow_text(&root.join(".github/workflows/ci.yml"));
+    let job = job_block(&workflow, "postgres-fixture-drift");
+    let lines: Vec<_> = job.lines().collect();
+    let blocks: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| **line == "        run: |")
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(
+        blocks.len(),
+        1,
+        "the drift check has one literal shell body"
+    );
+    let script = lines[blocks[0] + 1..]
+        .iter()
+        .take_while(|line| line.trim().is_empty() || line.starts_with("          "))
+        .map(|line| line.strip_prefix("          ").unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!script.is_empty(), "the real drift shell must execute");
+
+    let isolated = tempfile::tempdir().expect("isolated fixture drift test");
+    let docker_dir = isolated.path().join("docker");
+    let bin = isolated.path().join("bin");
+    fs::create_dir(&docker_dir).expect("isolated resolver directory");
+    fs::create_dir(&bin).expect("fake registry client directory");
+    let resolver = docker_dir.join("postgres-image.sh");
+    fs::copy(root.join("docker/postgres-image.sh"), &resolver).expect("copy real resolver");
+    fs::set_permissions(&resolver, fs::Permissions::from_mode(0o755)).expect("executable resolver");
+
+    let map = fs::read_to_string(root.join("docker/postgres-images.env")).expect("reviewed map");
+    let mut command = std::process::Command::new("bash");
+    for line in map
+        .lines()
+        .filter(|line| line.starts_with("IGNATIUS_POSTGRES_IMAGE_"))
+    {
+        let (name, image) = line.split_once('=').expect("reviewed image assignment");
+        let major = name
+            .strip_prefix("IGNATIUS_POSTGRES_IMAGE_")
+            .expect("major");
+        let (_, digest) = image.rsplit_once('@').expect("immutable reviewed digest");
+        command.env(format!("EXPECTED_{major}"), digest);
+    }
+    let map = if scenario == "resolver-failure" {
+        map.lines()
+            .filter(|line| !line.starts_with("IGNATIUS_POSTGRES_IMAGE_15="))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        map
+    };
+    fs::write(docker_dir.join("postgres-images.env"), map).expect("isolated reviewed map");
+
+    let fake = bin.join("docker");
+    fs::write(&fake, r#"#!/bin/bash
+set -euo pipefail
+if [[ "$#" -ne 6 || "$1" != buildx || "$2" != imagetools || "$3" != inspect || "$4" != --format || "$5" != '{{.Manifest.Digest}}' ]]; then
+  echo 'unexpected registry-client invocation' >&2
+  exit 97
+fi
+printf '%s\n' "$6" >> "$MOCK_INSPECTIONS"
+major="${6#postgres:}"
+major="${major%-alpine}"
+case "$MOCK_SCENARIO:$major" in
+  drift:14|drift:18)
+    printf 'sha256:%064d\n' 0
+    ;;
+  inspection-failure:15)
+    echo 'synthetic registry inspection failure' >&2
+    exit 1
+    ;;
+  malformed:16)
+    printf 'UNTRUSTED | registry response\n| injected row |\n'
+    ;;
+  *)
+    key="EXPECTED_$major"
+    printf '%s\n' "${!key}"
+    ;;
+esac
+"#).expect("fake registry client");
+    fs::set_permissions(fake, fs::Permissions::from_mode(0o755)).expect("executable fake client");
+    let summary_path = isolated.path().join("summary.md");
+    let inspections_path = isolated.path().join("inspections.txt");
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").expect("system executable path"),
+    )))
+    .expect("fake-client-first executable path");
+    let output = command
+        .current_dir(isolated.path())
+        .args(["-c", &script])
+        .env("PATH", path)
+        .env("GITHUB_STEP_SUMMARY", &summary_path)
+        .env("MOCK_INSPECTIONS", &inspections_path)
+        .env("MOCK_SCENARIO", scenario)
+        .output()
+        .expect("run real drift shell without Docker or network");
+    let summary = fs::read_to_string(summary_path).expect("workflow summary");
+    let inspections = fs::read_to_string(inspections_path)
+        .expect("fake registry invocation log")
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    (output, summary, inspections)
+}
+
+#[cfg(unix)]
+fn assert_every_fixture_major_is_reported(summary: &str) {
+    for major in 14..=18 {
+        assert_eq!(
+            summary
+                .lines()
+                .filter(|line| line.starts_with(&format!("| {major} |")))
+                .count(),
+            1,
+            "PostgreSQL {major} must have exactly one summary row: {summary}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_drift_reports_every_matching_major_and_succeeds() {
+    let (output, summary, inspections) = fixture_drift_run("matching");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_every_fixture_major_is_reported(&summary);
+    assert_eq!(
+        inspections,
+        [
+            "postgres:14-alpine",
+            "postgres:15-alpine",
+            "postgres:16-alpine",
+            "postgres:17-alpine",
+            "postgres:18-alpine"
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_drift_reports_simultaneous_14_and_18_changes_before_failing() {
+    let (output, summary, inspections) = fixture_drift_run("drift");
+    assert!(!output.status.success());
+    assert_every_fixture_major_is_reported(&summary);
+    assert_eq!(inspections.len(), 5);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("PostgreSQL 14-alpine moved"));
+    assert!(stderr.contains("PostgreSQL 18-alpine moved"));
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_drift_reports_an_inspection_failure_without_hiding_later_majors() {
+    let (output, summary, inspections) = fixture_drift_run("inspection-failure");
+    assert!(!output.status.success());
+    assert_every_fixture_major_is_reported(&summary);
+    assert_eq!(
+        inspections,
+        [
+            "postgres:14-alpine",
+            "postgres:15-alpine",
+            "postgres:16-alpine",
+            "postgres:17-alpine",
+            "postgres:18-alpine"
+        ]
+    );
+    assert!(summary.contains("inspection failed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_drift_rejects_malformed_registry_output_without_injecting_summary_rows() {
+    let (output, summary, inspections) = fixture_drift_run("malformed");
+    assert!(!output.status.success());
+    assert_every_fixture_major_is_reported(&summary);
+    assert_eq!(inspections.len(), 5);
+    assert!(summary.contains("invalid digest"));
+    assert!(!summary.contains("UNTRUSTED"));
+    assert!(!summary.contains("injected row"));
+}
+
+#[cfg(unix)]
+#[test]
+fn fixture_drift_reports_a_resolver_failure_and_continues_other_majors() {
+    let (output, summary, inspections) = fixture_drift_run("resolver-failure");
+    assert!(!output.status.success());
+    assert_every_fixture_major_is_reported(&summary);
+    assert_eq!(
+        inspections,
+        [
+            "postgres:14-alpine",
+            "postgres:16-alpine",
+            "postgres:17-alpine",
+            "postgres:18-alpine"
+        ]
+    );
+    assert!(summary.contains("resolver failed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn socket_readiness_waits_for_final_tcp_server_after_temporary_socket_start() {
+    let previous = socket_readiness::run("eventually-ready", true);
+    assert!(previous.output.status.success());
+    assert_eq!(previous.events, ["start", "probe:/var/run/postgresql"]);
+    assert!(previous.sleeps.is_empty());
+
+    let current = socket_readiness::run("eventually-ready", false);
+    assert!(
+        current.output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&current.output.stderr)
+    );
+    assert_eq!(
+        current.events,
+        [
+            "start",
+            "probe:127.0.0.1",
+            "probe:127.0.0.1",
+            "probe:127.0.0.1"
+        ],
+        "initialization's socket listener must not satisfy final-server readiness"
+    );
+    assert_eq!(current.sleeps, ["1", "1"]);
+    let stdout = String::from_utf8_lossy(&current.output.stdout);
+    assert!(stdout.contains("socket fixture ready on attempt 3"));
+    assert!(!stdout.contains("synthetic socket fixture diagnostic"));
+    assert_eq!(current.published_env.lines().count(), 2);
+    assert!(current.published_env.contains("IGNATIUS_SOCKET_DIR="));
+    assert!(
+        current
+            .published_env
+            .contains("IGNATIUS_SOCKET_CONTAINER=ignatius-postgres-socket-123-1")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn socket_readiness_fails_after_all_60_tcp_attempts_with_diagnostics() {
+    let previous = socket_readiness::run("never-ready", true);
+    assert!(previous.output.status.success());
+    assert_eq!(previous.events, ["start", "probe:/var/run/postgresql"]);
+
+    let current = socket_readiness::run("never-ready", false);
+    assert_eq!(
+        current.output.status.code(),
+        Some(1),
+        "a temporary socket must not hide a final server that never starts"
+    );
+    assert_eq!(current.events.first().map(String::as_str), Some("start"));
+    assert_eq!(current.events.last().map(String::as_str), Some("logs"));
+    assert_eq!(current.events.len(), 62);
+    assert!(
+        current.events[1..61]
+            .iter()
+            .all(|event| event == "probe:127.0.0.1")
+    );
+    assert_eq!(current.sleeps.len(), 60);
+    assert!(current.sleeps.iter().all(|delay| delay == "1"));
+    let stdout = String::from_utf8_lossy(&current.output.stdout);
+    assert!(stdout.contains("synthetic socket fixture diagnostic"));
+    assert!(!stdout.contains("socket fixture ready on attempt"));
+    assert!(
+        String::from_utf8_lossy(&current.output.stderr)
+            .contains("PostgreSQL socket fixture was not ready after 60 attempts")
     );
 }
 

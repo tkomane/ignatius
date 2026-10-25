@@ -316,28 +316,70 @@ tables and the compact-layout explanation.
 
 ### Tests for User Story 7
 
-- [ ] T038 [US7] Add failing tests for split bounds and steps, zoom
+- [x] T038 [US7] Add failing tests for split bounds and steps, zoom
   save-and-exact-restore, paging that follows resized panes, density
   spacing tables, session-locality and the single-pane explanation, in
   `src/app/update/tests.rs` and `src/ui/layout.rs` tests.
 
 ### Implementation for User Story 7
 
-- [ ] T039 [US7] The integrator adds `Model::splits` in
+- [x] T039 [US7] The integrator adds `Model::splits` in
   `src/app/model.rs`, the `shrink-pane`, `grow-pane` and `zoom-pane`
   actions in `src/app/message.rs` and `src/app/update.rs`, and split-aware
   geometry in `src/ui/layout.rs` (`main_panes`, `body_area`, paging
   helpers).
-- [ ] T040 [P] [US7] Add `ui.density` to `src/config/schema.rs` and the
+- [x] T040 [P] [US7] Add `ui.density` to `src/config/schema.rs` and the
   template in `src/config/store.rs`, and consume the spacing table in
   `src/ui/widgets/*.rs`.
-- [ ] T041 [US7] Add the key defaults (`Ctrl+K ,`, `Ctrl+K .`,
+- [x] T041 [US7] Add the key defaults (`Ctrl+K ,`, `Ctrl+K .`,
   `Ctrl+K z`) in `src/ui/keymap.rs`, palette entries in
   `src/app/palette.rs`, hints in `src/app/discovery.rs`, and reachability
   tests; the integrator lands the matching `docs/design/keymap.md` rows
   and parity assertions in the same change.
 
-**Checkpoint**: Layout serves the task, and a new session starts clean.
+**Keyboard-core evidence - 2026-10-25:** T039/T041 are implemented with their
+portion of T038. Initial seven behavior regressions failed before the feature;
+later review reproduced hidden diagnostics under zoom, modal ownership lost
+through default chords, a border-only error at 40x8 and clipped unknown-state
+feedback. The corresponding fixes preserve saved geometry, error/recovery
+visibility and input ownership. Native cross-lane review found these issues
+before integration; required different-family review remains open.
+
+Focused app 303 and final UI 215 cases passed. The integrated locked verifier
+passed formatting, warnings-denied lints, API docs, complete workspace/doc tests
+and live PostgreSQL 18.6 plain/TLS checks: 1,206 harness cases across 22
+summaries, with one semantic macOS socket skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-panes.log`. Four touched inline unit
+modules moved to sidecars with every original test name retained.
+
+**Density implementation evidence - 2026-10-25:** T040 and the remaining T038
+tests are implemented. Strict two-value configuration, one spacing table,
+notice-preserving grid capacity, shared overlay/viewports, title padding and
+active-key 6/4 footer caps passed config 36, app 305, UI 224, real CLI one and
+documentation 15 focused cases plus warnings-denied Clippy. Failing-first
+checks include config/template/caps, widget spacing/overrides and minimum input
+guidance. Review then reproduced hidden wrapped-password and typed-PROD inputs;
+the final preferred-margin fallback preserves their legacy usable height.
+Raw logs and exact focused scope are indexed in
+`/private/tmp/ignatius-density-evidence-2026-10-25.md`.
+
+The complete integrated locked verifier passed 1,224 harness cases/22 summaries,
+formatting, lints, API/workspace/doc tests and PostgreSQL 18.6 plain/TLS, with
+the macOS socket still a semantic skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-density.log`. The lead inspected 88
+actual styled synthetic buffers, including the formerly hidden inputs, grid
+notices, help and completion. Retention:
+`/private/tmp/ignatius-density-styled-buffer-x9t8tv6x/`, source-input digest
+`2de4048cac30deb6aec2446ddd3983e2102c002eac2a41af15346d13880567cc`.
+These are rendered-cell proofs, not native terminal screenshots or hand use.
+
+Dragging still depends on T035. Required different-family review and full
+independent/native/platform acceptance remain open. The pre-existing sending-
+review clipping gap is tracked separately in Feature 018 T037-T040; density
+does not alter authorization. This is not complete US7 acceptance.
+
+**Checkpoint**: Keyboard layout controls and density are implemented locally;
+dragging and the remaining acceptance gates precede the full story checkpoint.
 
 ## Phase 10: User Story 8 - Quiet chrome (Priority: P3)
 
@@ -456,8 +498,12 @@ when it is not.
   integrator.
 - Phase 7 follows Phase 4 (it swaps model-owned presentation built there).
   Phase 8 follows Phases 5 and 6 (its verbs dispatch to grid and layout
-  actions). Phase 9 follows Phase 2 only, but its T039 queues in the
-  integrator lane. Phases 10 and 11 follow Phase 4.
+  actions); its split-drag implementation additionally requires the keyboard
+  split core and shared geometry from T039. Phase 9 follows Phase 2 only,
+  so T038/T039's keyboard/geometry subset can precede Phase 8. Mouse-drag
+  acceptance for both stories follows T035; neither story is fully accepted
+  before its complete independent test. T039 queues in the integrator lane.
+  Phases 10 and 11 follow Phase 4.
 - T046-T048 land together after all behaviour is stable; T049 precedes
   T050; T051 is last. US10 (T052-T054) follows Phases 4 and 6, the
   colour-depth machinery and the connecting shell it builds on, and
@@ -469,8 +515,9 @@ when it is not.
   anything outside `src/diagnostics/`; T030 with T040; T042-T043 with
   T044-T045; T047 with T046 (distinct documents).
 - The integrator lane is the bottleneck by design: T011, T017, T025, T026,
-  T031, T032, T035, T039 and T046 serialize through it in that preferred
-  order.
+  T031, T032, T039's keyboard split core, T035's mouse integration and T046
+  serialize through it. Shared geometry precedes pointer dragging; the
+  capture-default flip remains last after keyboard parity and restoration.
 
 ## Implementation strategy
 

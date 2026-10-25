@@ -44,8 +44,9 @@ connected empty editor says to type SQL, names the active run key, and points to
 the command palette. Results and Objects use the same pattern: they distinguish
 waiting, empty, filtered-empty and failed states, then name the next safe action.
 
-Tab changes focus, and the footer follows it with no more than five useful
-action/key pairs. The pairs come from the configured keymap, so a replacement
+Tab changes focus, and the footer follows it with no more than six useful
+action/key pairs in comfortable density, or four in compact density. The pairs
+come from the configured keymap, so a replacement
 such as `F2` is what the screen displays. Escape closes a discovery overlay one
 layer at a time without changing the buffer, selection, connection, history or
 result.

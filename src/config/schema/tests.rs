@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn density_accepts_only_the_two_contract_values_and_round_trips() {
+    for value in ["comfortable", "compact"] {
+        let config: Config =
+            toml::from_str(&format!("[ui]\ndensity = \"{value}\"\n")).expect("supported density");
+        assert!(
+            toml::to_string(&config)
+                .unwrap()
+                .contains(&format!("density = \"{value}\""))
+        );
+    }
+    for value in ["dense", "Comfortable", "", "auto"] {
+        assert!(toml::from_str::<Config>(&format!("[ui]\ndensity = \"{value}\"\n")).is_err());
+    }
+    assert!(toml::from_str::<Config>("[ui]\ndensity = 1\n").is_err());
+}
+
+#[test]
 fn defaults_are_valid_and_current() {
     let config = Config::default();
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);

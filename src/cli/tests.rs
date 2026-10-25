@@ -1,6 +1,130 @@
 use super::*;
 use clap::Parser;
 
+fn retention_status_execution() -> crate::query::result::Execution {
+    use crate::query::result::{
+        Execution, ExecutionStatus, JobId, ResultSet, StatementResult, TransactionState,
+    };
+    use crate::query::value::Cell;
+    let mut full = ResultSet::new(vec!["value".into()], 2);
+    full.push(vec![Cell::Text("synthetic-private-row".into())]);
+    let mut capped = ResultSet::new(vec!["value".into()], 1);
+    for _ in 0..3 {
+        capped.push(vec![Cell::Text("synthetic-private-row".into())]);
+    }
+    let mut empty = ResultSet::new(vec!["value".into()], 0);
+    for _ in 0..2 {
+        empty.push(vec![Cell::Text("synthetic-private-row".into())]);
+    }
+    let statement = |result_set: Option<ResultSet>| StatementResult {
+        rows_affected: Some(result_set.as_ref().map_or(9, |set| set.rows_seen)),
+        result_set,
+        elapsed: std::time::Duration::ZERO,
+        notices: Vec::new(),
+    };
+    Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
+        job: JobId(1),
+        statements: vec![
+            statement(None),
+            statement(Some(full)),
+            statement(None),
+            statement(Some(capped)),
+            statement(Some(empty)),
+        ],
+        status: ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::ZERO,
+        error: None,
+        transaction: TransactionState::Autocommit,
+    }
+}
+
+#[test]
+fn buffered_truncation_ordinals_include_untruncated_sets_but_ignore_dml_tags() {
+    let mut status = Vec::new();
+    write_buffered_truncation(&mut status, &retention_status_execution(), Format::Csv).unwrap();
+    let status = String::from_utf8(status).unwrap();
+    assert_eq!(
+        status,
+        "Result set 2 truncated: retained 1 of 3 received rows. For a future complete streaming export, choose --output before execution.\nResult set 3 truncated: retained 0 of 2 received rows. For a future complete streaming export, choose --output before execution.\n"
+    );
+    assert!(!status.contains("synthetic-private-row"));
+}
+
+struct FailedStatus(std::io::ErrorKind);
+
+impl std::io::Write for FailedStatus {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(self.0))
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn buffered_truncation_stderr_failures_keep_the_ordinary_io_boundary() {
+    for kind in [
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::BrokenPipe,
+    ] {
+        let error = write_buffered_truncation(
+            &mut FailedStatus(kind),
+            &retention_status_execution(),
+            Format::Csv,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), kind);
+        let diagnostic = io_diagnostic(error);
+        assert_eq!(diagnostic.kind, DiagnosticKind::Internal);
+        assert_eq!(diagnostic.exit_code(), ExitCode::Internal);
+    }
+}
+
+#[test]
+fn buffered_truncation_does_not_write_for_inband_or_nontruncated_results() {
+    let mut execution = retention_status_execution();
+    for format in [Format::Table, Format::Json] {
+        assert!(
+            write_buffered_truncation(
+                &mut FailedStatus(std::io::ErrorKind::Other),
+                &execution,
+                format
+            )
+            .is_ok()
+        );
+    }
+    execution.statements.retain(|statement| {
+        statement
+            .result_set
+            .as_ref()
+            .is_some_and(|set| !set.is_truncated())
+    });
+    assert!(
+        write_buffered_truncation(
+            &mut FailedStatus(std::io::ErrorKind::Other),
+            &execution,
+            Format::Csv
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn streamed_output_help_states_the_value_row_and_driver_memory_boundary() {
+    let mut tree = Cli::command();
+    let help = tree
+        .find_subcommand_mut("query")
+        .unwrap()
+        .render_long_help()
+        .to_string();
+    let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(help.contains("entire result is not retained in memory"));
+    assert!(help.contains("Individual values, rows and driver frames still use memory"));
+    assert!(!help.contains("rows never pass through memory"));
+    assert!(!help.contains("size of the result does not matter"));
+}
+
 #[test]
 fn the_command_tree_parses_and_has_no_conflicting_definitions() {
     Cli::command().debug_assert();
@@ -636,6 +760,205 @@ fn a_target_that_requires_encryption_names_the_tls_stage() {
             super::interactive::connecting_step_for(sslmode),
             expected,
             "{sslmode:?}"
+        );
+    }
+}
+
+fn notice_output_execution() -> crate::query::result::Execution {
+    use crate::query::result::{NoticeCount, NoticeCounts, NoticeReport, NoticeScope};
+    let mut execution = retention_status_execution();
+    execution.statements = vec![execution.statements.remove(1)];
+    execution.notice_report = NoticeReport {
+        scope: NoticeScope::Query,
+        retained: Some(256),
+        counts: NoticeCounts {
+            omitted: NoticeCount::Exact(1),
+            ..NoticeCounts::default()
+        },
+        ..NoticeReport::default()
+    };
+    execution
+}
+
+#[test]
+fn notice_output_preserves_data_in_every_format_and_json_has_one_status() {
+    for format in [
+        Format::Table,
+        Format::Csv,
+        Format::Tsv,
+        Format::Ndjson,
+        Format::Json,
+        Format::Markdown,
+        Format::Insert,
+    ] {
+        let execution = notice_output_execution();
+        let options = output::OutputOptions {
+            format,
+            insert_table: Some("synthetic_snapshot".into()),
+            ..output::OutputOptions::default()
+        };
+        let mut expected = Vec::new();
+        output::write_execution(&mut expected, &execution, &options).unwrap();
+        let (mut data, mut status) = (Vec::new(), Vec::new());
+        assert_eq!(
+            write_query_execution(&mut data, &mut status, &execution, &options).unwrap(),
+            ExitCode::Success
+        );
+        assert_eq!(data, expected, "{format:?} bytes must be unchanged");
+        if format == Format::Json {
+            let json: serde_json::Value = serde_json::from_slice(&status).unwrap();
+            assert_eq!(json["notice_report"]["omitted"]["count"], 1);
+            assert!(json.get("exit_code").is_none());
+        } else {
+            assert_eq!(
+                String::from_utf8(status).unwrap(),
+                execution.notice_report.counts.lines().join("\n") + "\n"
+            );
+        }
+    }
+}
+
+#[test]
+fn notice_output_errors_keep_one_json_diagnostic_and_reporting_io_is_ordinary() {
+    let execution = notice_output_execution();
+    let options = output::OutputOptions {
+        format: Format::Json,
+        ..output::OutputOptions::default()
+    };
+    let mut status = Vec::new();
+    assert_eq!(
+        write_query_execution(
+            &mut FailedStatus(std::io::ErrorKind::PermissionDenied),
+            &mut status,
+            &execution,
+            &options
+        )
+        .unwrap(),
+        ExitCode::Internal
+    );
+    let json: serde_json::Value = serde_json::from_slice(&status).unwrap();
+    assert_eq!(json["exit_code"], 70);
+    assert_eq!(json["notice_report"]["retained"], 256);
+    assert_eq!(
+        execution.status,
+        crate::query::result::ExecutionStatus::Succeeded,
+        "I/O does not rewrite SQL outcome"
+    );
+    let options = output::OutputOptions {
+        format: Format::Csv,
+        ..output::OutputOptions::default()
+    };
+    let error = write_query_execution(
+        &mut Vec::new(),
+        &mut FailedStatus(std::io::ErrorKind::BrokenPipe),
+        &execution,
+        &options,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, DiagnosticKind::Internal);
+    let mut status = Vec::new();
+    assert_eq!(
+        write_query_execution(
+            &mut FailedStatus(std::io::ErrorKind::BrokenPipe),
+            &mut status,
+            &execution,
+            &options
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    assert!(
+        status.is_empty(),
+        "closed data sink preserves the documented non-delivery boundary"
+    );
+}
+
+#[test]
+fn notice_output_unknown_retained_is_null_and_zero_reports_are_silent() {
+    let mut execution = notice_output_execution();
+    execution.notice_report =
+        crate::query::result::NoticeReport::unavailable(crate::query::result::NoticeScope::Query);
+    let options = output::OutputOptions {
+        format: Format::Json,
+        ..output::OutputOptions::default()
+    };
+    let mut status = Vec::new();
+    write_query_execution(&mut Vec::new(), &mut status, &execution, &options).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&status).unwrap();
+    assert!(json["notice_report"]["retained"].is_null());
+    execution.notice_report = crate::query::result::NoticeReport::default();
+    let mut status = Vec::new();
+    write_query_execution(&mut Vec::new(), &mut status, &execution, &options).unwrap();
+    assert!(status.is_empty());
+}
+
+#[test]
+fn unavailable_description_status_is_exact_once_instead_of_row_truncation() {
+    let mut execution = retention_status_execution();
+    let mut set = crate::query::result::ResultSet::unavailable(3, 100);
+    set.rows_seen = 7;
+    execution.statements[3].result_set = Some(set);
+    let mut out = Vec::new();
+    write_buffered_truncation(&mut out, &execution, Format::Csv).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.starts_with("Result set 2 data unavailable: retained no description for 3 source columns and 7 received rows because the retained-result limit was reached. For a future complete streaming export, choose --output before execution.\n"), "{text}");
+    assert!(!text.contains("Result set 2 truncated"));
+    assert_eq!(text.lines().count(), 2);
+}
+
+#[test]
+fn unavailable_description_json_keeps_completed_prefix_and_single_notice_failure_status() {
+    use crate::query::result::{ExecutionStatus, ResultSet, TransactionState};
+    for kind in [
+        None,
+        Some(DiagnosticKind::Query),
+        Some(DiagnosticKind::Cancelled),
+        Some(DiagnosticKind::Connection),
+    ] {
+        let mut execution = notice_output_execution();
+        let mut set = ResultSet::unavailable(3, 100);
+        set.rows_seen = 7;
+        execution.statements[0].result_set = Some(set);
+        execution.error = kind.map(|kind| {
+            Diagnostic::new(
+                kind,
+                "synthetic server outcome",
+                "reading the requested statement",
+            )
+        });
+        execution.status = match kind {
+            None => ExecutionStatus::Succeeded,
+            Some(DiagnosticKind::Cancelled) => ExecutionStatus::Cancelled,
+            Some(DiagnosticKind::Connection) => ExecutionStatus::ConnectionLost,
+            _ => ExecutionStatus::Failed,
+        };
+        if kind == Some(DiagnosticKind::Connection) {
+            execution.transaction = TransactionState::Unknown;
+        }
+        let expected_exit = execution
+            .error
+            .as_ref()
+            .map_or(ExitCode::Success, Diagnostic::exit_code);
+        let (mut data, mut status) = (Vec::new(), Vec::new());
+        let options = output::OutputOptions {
+            format: Format::Json,
+            ..output::OutputOptions::default()
+        };
+        assert_eq!(
+            write_query_execution(&mut data, &mut status, &execution, &options).unwrap(),
+            expected_exit
+        );
+        let payload: serde_json::Value = serde_json::from_slice(&data).unwrap();
+        assert_eq!(payload[0]["data_unavailable"], "retained_result_limit");
+        assert_eq!(payload[0]["source_column_count"], 3);
+        assert_eq!(payload[0]["rows_seen"], 7);
+        let diagnostic: serde_json::Value = serde_json::from_slice(&status).unwrap();
+        assert_eq!(diagnostic["notice_report"]["omitted"]["count"], 1);
+        assert_eq!(status.iter().filter(|b| **b == b'\n').count(), 1);
+        assert!(
+            !String::from_utf8(status)
+                .unwrap()
+                .contains("data unavailable:")
         );
     }
 }

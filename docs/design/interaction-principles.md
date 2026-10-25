@@ -53,7 +53,9 @@ buffer and local reading preferences.
 **Density with room to breathe.** Every element earns its space. The header
 carries connection, environment, posture, transport and timing because a user
 running statements against a real database needs all five without opening a
-panel. It carries nothing else.
+panel. It carries nothing else. `ui.density` selects comfortable (default) or
+compact spacing from one table. The footer teaches at most six or four actions
+respectively, always as complete active-key/action pairs.
 
 **Feedback is immediate and honest.** Pressing cancel changes the status
 immediately, because the request was made immediately. It does not claim the
@@ -112,6 +114,14 @@ written in ASCII and no-colour modes.
 **Nothing modal for anything harmless.** Confirmations are reserved for actions
 that deserve them. A confirmation people dismiss reflexively is worse than none,
 because it trains the reflex.
+
+**A confirmation must expose what it authorizes.** Required disclosure is
+scrollable, with a fixed input and command rail. Acceptance is blocked before
+the final page and below usable dimensions. A real resize restarts review;
+an acceptance key that first observes new dimensions waits for a new painted
+frame. Exact generated UPDATE SQL remains inspectable, while copy review
+excludes the selected value. Existing redaction and production typed-name
+matching still apply. Scrolling sends nothing and does not prove reading.
 
 ## What is deliberately avoided
 

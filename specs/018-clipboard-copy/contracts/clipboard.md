@@ -27,6 +27,11 @@ may observe or retain the value.
 
 ## Confirmation contract
 
+The shared [review viewport contract](review-viewport.md), pinned 2026-10-25,
+governs scrolling, visible guidance, minimum geometry and admission before the
+existing one-shot effect. Its W04 implementation/verification tasks are
+T037-T040; the older completed tasks do not close this reproduced gap.
+
 1. The reducer validates focus, retained result, source cell, busy state, plan
    visibility, NULL state, size bound, and the opt-in setting.
 2. For an enabled text cell, it opens a topmost confirmation without rendering

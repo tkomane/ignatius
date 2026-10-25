@@ -1231,6 +1231,31 @@ fn server_notices_reach_the_client() {
 }
 
 #[test]
+fn a_value_over_the_retained_bound_is_refused_without_keeping_it() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let execution = fx.block_on(fx.session.execute(
+        "SELECT repeat('x', 2 * 1024 * 1024) AS big",
+        100,
+        JobId(1),
+    ));
+
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Failed,
+        "{:?}",
+        execution.error
+    );
+    let error = execution.error.expect("refusal diagnostic");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert!(error.headline.contains("too large to retain"), "{error:?}");
+    assert!(
+        !format!("{error:?}").contains(&"x".repeat(64)),
+        "the refused value itself must not ride along in the diagnostic"
+    );
+}
+
+#[test]
 fn a_failed_transaction_is_reported_and_rollback_recovers_it() {
     let uri = target_or_skip!();
     let fx = fixture(&uri);

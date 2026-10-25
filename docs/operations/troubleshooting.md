@@ -2,9 +2,11 @@
 
 ## The terminal is broken after a crash
 
-Run `reset`. The program installs a panic hook that restores the terminal before
-printing anything, so this should not happen; if it does, it is a defect worth
-reporting with the output of `ignatius version --verbose`.
+Run `reset`. The panic hook attempts to restore the modes actually acquired
+before printing details and says when cleanup did not complete. Report the
+failure with `ignatius version --verbose`, after checking panic details for
+sensitive information. A crash does not establish whether a database write
+committed; inspect the server state before deciding what to run next.
 
 ## "the interactive client needs a terminal"
 

@@ -6,8 +6,8 @@
 //!   values arrive in the server's own text rendering. That preserves numeric
 //!   precision, timestamp offsets, and every extension type without this client
 //!   needing to know the type exists.
-//! - Rows are consumed from a stream and dropped once the row cap is reached, so
-//!   a large result cannot exhaust memory. The count is still accurate.
+//! - Rows beyond the cap are consumed without retention. Individual values and
+//!   driver frames still allocate; a row cap is not a process-memory ceiling.
 //! - Cancellation uses PostgreSQL's own cancellation request on a second
 //!   connection. Nothing is ever replayed or retried.
 //! - Whether the connection is really encrypted is read back from the server
@@ -15,15 +15,25 @@
 
 use crate::connection::{ConnectionTarget, Host, SslMode};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
-use crate::postgres::error::{from_connect_error, from_query_error};
+use crate::postgres::error::{
+    from_connect_error, from_parameterized_query_error, from_query_error, safe_sqlstate,
+};
+use crate::postgres::notices::{Notices, Operation};
 use crate::postgres::tls::{TlsState, client_config};
-use crate::query::result::{Execution, ExecutionStatus, JobId, Notice, ResultSet, StatementResult};
+use crate::query::result::RetentionReason;
+use crate::query::result::retention_budget::{
+    DescriptionAdmission, RetentionBudget, RowAdmission, TypeAdmission,
+};
+use crate::query::result::{
+    Execution, ExecutionStatus, JobId, Notice, NoticeCheckpoint, NoticeReport, NoticeScope,
+    Reported, ResultSet, StatementResult,
+};
 use crate::query::statements;
 use crate::query::value::Cell;
 use futures_util::StreamExt;
 use secrecy::ExposeSecret;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
 use tokio_postgres::{AsyncMessage, Client, Socket, config::SslMode as PgSslMode};
@@ -67,10 +77,64 @@ impl SessionInfo {
 #[derive(Debug)]
 pub struct Session {
     client: Client,
+    /// Serializes arbitrary user SQL without blocking cancellation or metadata.
+    user_sql_gate: tokio::sync::Mutex<()>,
     info: SessionInfo,
     tls: crate::postgres::tls::TlsOptions,
-    notices: Arc<Mutex<Vec<Notice>>>,
+    notices: Arc<Notices>,
+    notice_privacy: Arc<AtomicBool>,
     connection_lost: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum QueryPrivacy {
+    Ordinary,
+    Parameterized,
+}
+
+impl QueryPrivacy {
+    fn diagnostic(self, error: &tokio_postgres::Error, statement_number: usize) -> Diagnostic {
+        match self {
+            Self::Ordinary => from_query_error(error, statement_number),
+            Self::Parameterized => from_parameterized_query_error(error, statement_number),
+        }
+    }
+}
+
+pub(super) const PRIVATE_NOTICE_MESSAGE: &str =
+    "Server notice text omitted to protect parameter values.";
+
+pub(super) fn private_notice(code: Option<&str>) -> Notice {
+    Notice {
+        severity: "NOTICE".to_owned(),
+        message: PRIVATE_NOTICE_MESSAGE.to_owned(),
+        code: code.and_then(safe_sqlstate).map(str::to_owned),
+    }
+}
+
+fn activate_notice_privacy(notices: &Notices, privacy: &AtomicBool) {
+    notices.activate_privacy(privacy);
+}
+
+fn retain_notice(
+    notices: &Notices,
+    privacy: &AtomicBool,
+    severity: &str,
+    message: &str,
+    code: &str,
+) {
+    notices.retain(privacy, severity, message, code);
+}
+
+/// Plan result and the existing post-request transaction facts.
+#[derive(Debug)]
+pub struct PlanResponse {
+    /// Structured server JSON or the original diagnostic.
+    pub result: Result<String, Diagnostic>,
+    /// State observed by the preserved final probe.
+    pub transaction: crate::query::result::TransactionState,
+    /// Whether this physical session closed.
+    pub connection_lost: bool,
 }
 
 /// One thing that happened while streaming.
@@ -163,12 +227,30 @@ impl Session {
         self.client.is_closed() || self.connection_lost.load(Ordering::SeqCst)
     }
 
-    /// Takes the notices received since the last call.
+    /// Payload-only compatibility boundary for idle notices. Does not drain
+    /// active operations or erase cumulative accounting. First-party consumers
+    /// use [`Self::take_connection_notice_report`] instead.
     pub fn take_notices(&self) -> Vec<Notice> {
-        self.notices
-            .lock()
-            .map(|mut held| std::mem::take(&mut *held))
-            .unwrap_or_default()
+        self.take_connection_notice_report()
+            .map_or_else(Vec::new, |report| report.unattributed)
+    }
+
+    /// Moves one bounded idle report; active statement spending is untouched.
+    pub fn take_connection_notice_report(&self) -> Option<NoticeReport> {
+        self.notices.take_idle()
+    }
+
+    /// Committed client accounting for this physical connection, without payload.
+    #[must_use]
+    pub fn notice_checkpoint(&self) -> NoticeCheckpoint {
+        self.notices.checkpoint()
+    }
+
+    /// Nonmutating counts observed at actual retirement, including uncommitted
+    /// active/idle accounting. It does not reset spending or imply later delivery.
+    #[must_use]
+    pub fn notice_retirement_counts(&self) -> crate::query::result::NoticeCounts {
+        self.notices.retirement_counts()
     }
 
     /// Schemas visible to this session, with counts by object kind.
@@ -237,13 +319,39 @@ impl Session {
         crate::postgres::metadata::dependencies(&self.client, object).await
     }
 
-    /// Reads one statement's structured PostgreSQL plan.
+    /// Reads one statement's structured PostgreSQL plan (payload-only compatibility).
+    /// Use [`Self::explain_reported`] for observed notice accounting.
     ///
     /// This is deliberately separate from [`Self::execute`]. The generated
     /// EXPLAIN command must not become an ordinary result, history entry, or
     /// export, and keeping the boundary here makes that distinction visible at
     /// the only place that can send it to PostgreSQL.
     pub async fn explain(&self, sql: &str, analyze: bool) -> Result<String, Diagnostic> {
+        self.explain_reported(sql, analyze).await.value.result
+    }
+
+    /// Plan outcome plus observed notice accounting on every return path.
+    pub async fn explain_reported(&self, sql: &str, analyze: bool) -> Reported<PlanResponse> {
+        let _gate = self.user_sql_gate.lock().await;
+        let operation = self.notices.begin(NoticeScope::Plan);
+        let result = self.explain_inner(sql, analyze).await;
+        let connection_lost = self.is_closed();
+        let transaction = if connection_lost {
+            crate::query::result::TransactionState::Unknown
+        } else {
+            self.transaction_state().await
+        };
+        Reported {
+            value: PlanResponse {
+                result,
+                transaction,
+                connection_lost,
+            },
+            notice_report: operation.finish(),
+        }
+    }
+
+    async fn explain_inner(&self, sql: &str, analyze: bool) -> Result<String, Diagnostic> {
         const PLAIN_OPTIONS: &str = "ANALYZE false, COSTS true, SUMMARY true, FORMAT JSON";
         const ANALYZE_OPTIONS: &str =
             "ANALYZE true, COSTS true, SUMMARY true, TIMING true, FORMAT JSON";
@@ -361,19 +469,45 @@ impl Session {
 
     /// Streams a single statement's rows without retaining any of them.
     ///
-    /// This is the path an export takes. Nothing is buffered, so the memory a
-    /// hundred-million-row export uses is the memory one row uses. The sink is
-    /// called for each event in order and may fail, which stops the stream.
+    /// The full result is not retained. Individual values, driver frames,
+    /// the bounded notice inbox and downstream encoders still allocate; this
+    /// is not a process-memory ceiling. The sink receives events in order and
+    /// may fail. This compatibility adapter returns payload only; use
+    /// [`Self::stream_reported`] for observed notice accounting.
     pub async fn stream(
         &self,
         sql: &str,
         sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
     ) -> Result<u64, StreamStop> {
+        self.stream_reported(sql, sink).await.value
+    }
+
+    /// Streams unchanged Query protocol bytes and returns accounting on every stop.
+    pub async fn stream_reported(
+        &self,
+        sql: &str,
+        sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
+    ) -> Reported<Result<u64, StreamStop>> {
+        let _gate = self.user_sql_gate.lock().await;
+        let operation = self.notices.begin(NoticeScope::Export);
+        let value = self.stream_bound(sql, sink, QueryPrivacy::Ordinary).await;
+        Reported {
+            value,
+            notice_report: operation.finish(),
+        }
+    }
+
+    async fn stream_bound(
+        &self,
+        sql: &str,
+        sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
+        privacy: QueryPrivacy,
+    ) -> Result<u64, StreamStop> {
         let stream = self
             .client
             .simple_query_raw(sql)
             .await
-            .map_err(|err| StreamStop::Server(Box::new(from_query_error(&err, 1))))?;
+            .map_err(|err| StreamStop::Server(Box::new(privacy.diagnostic(&err, 1))))?;
         tokio::pin!(stream);
 
         let mut rows = 0u64;
@@ -381,7 +515,7 @@ impl Session {
 
         while let Some(message) = stream.next().await {
             let message =
-                message.map_err(|err| StreamStop::Server(Box::new(from_query_error(&err, 1))))?;
+                message.map_err(|err| StreamStop::Server(Box::new(privacy.diagnostic(&err, 1))))?;
             match message {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
                     if seen_columns {
@@ -420,20 +554,47 @@ impl Session {
     ///
     /// The template is the only SQL descriptor retained by callers. The bound
     /// text exists only for this request and is never logged or put in history.
+    /// Payload-only compatibility adapter; use the reported form for client accounting.
     pub async fn stream_with_parameters(
         &self,
         sql: &str,
         parameters: &crate::query::ParameterBindings,
         sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
     ) -> Result<u64, StreamStop> {
-        let bound = crate::query::discover_parameters(sql)
-            .and_then(|template| template.bind(sql, parameters))
-            .map_err(|error| {
-                StreamStop::Server(Box::new(
-                    error.diagnostic("binding named parameters for export"),
-                ))
-            })?;
-        self.stream(&bound, sink).await
+        self.stream_with_parameters_reported(sql, parameters, sink)
+            .await
+            .value
+    }
+
+    /// Parameterized streaming with sticky privacy before probe, binding and adoption.
+    pub async fn stream_with_parameters_reported(
+        &self,
+        sql: &str,
+        parameters: &crate::query::ParameterBindings,
+        sink: &mut dyn FnMut(StreamEvent) -> std::io::Result<()>,
+    ) -> Reported<Result<u64, StreamStop>> {
+        let _gate = self.user_sql_gate.lock().await;
+        activate_notice_privacy(&self.notices, &self.notice_privacy);
+        let operation = self.notices.begin(NoticeScope::Export);
+        let value = async {
+            self.require_parameter_semantics(1)
+                .await
+                .map_err(|error| StreamStop::Server(Box::new(error)))?;
+            let bound = crate::query::discover_parameters(sql)
+                .and_then(|template| template.bind(sql, parameters))
+                .map_err(|error| {
+                    StreamStop::Server(Box::new(
+                        error.diagnostic("binding named parameters for export"),
+                    ))
+                })?;
+            self.stream_bound(&bound, sink, QueryPrivacy::Parameterized)
+                .await
+        }
+        .await;
+        Reported {
+            value,
+            notice_report: operation.finish(),
+        }
     }
 
     /// Executes every statement in a buffer, in order.
@@ -441,12 +602,18 @@ impl Session {
     /// Statements after a failure do not run. Results produced before the failure
     /// are kept and returned along with the diagnostic, because they happened.
     pub async fn execute(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
+        let _operation = self.user_sql_gate.lock().await;
         tracing::debug!(
             target: "ignatius::query",
             "{}",
             crate::diagnostics::logging::statement_descriptor(job.0, sql)
         );
-        self.execute_bound(sql, row_cap, job).await
+        let operation = self.notices.begin(NoticeScope::Query);
+        let mut execution = self
+            .execute_bound(sql, row_cap, job, QueryPrivacy::Ordinary, &operation)
+            .await;
+        execution.notice_report = operation.finish();
+        execution
     }
 
     /// Binds named values and executes the resulting simple query.
@@ -461,37 +628,146 @@ impl Session {
         row_cap: usize,
         job: JobId,
     ) -> Execution {
-        tracing::debug!(
-            target: "ignatius::query",
-            "{}",
-            crate::diagnostics::logging::statement_descriptor(job.0, sql)
-        );
-        let started = Instant::now();
-        let bound = match crate::query::discover_parameters(sql)
-            .and_then(|template| template.bind(sql, parameters))
-        {
-            Ok(bound) => bound,
-            Err(error) => {
-                return Execution {
-                    job,
-                    statements: Vec::new(),
-                    status: ExecutionStatus::Failed,
-                    elapsed: started.elapsed(),
-                    error: Some(error.diagnostic("binding named parameters for execution")),
-                    transaction: self.transaction_state().await,
-                };
+        let _operation = self.user_sql_gate.lock().await;
+        activate_notice_privacy(&self.notices, &self.notice_privacy);
+        let operation = self.notices.begin(NoticeScope::Query);
+        let mut execution = async {
+            tracing::debug!(
+                target: "ignatius::query",
+                "{}",
+                crate::diagnostics::logging::statement_descriptor(job.0, sql)
+            );
+            let started = Instant::now();
+            if let Err(diagnostic) = self.require_parameter_semantics(1).await {
+                return self
+                    .failed_execution(job, started, Vec::new(), diagnostic)
+                    .await;
             }
-        };
-        self.execute_bound(&bound, row_cap, job).await
+            let bound = match crate::query::discover_parameters(sql)
+                .and_then(|template| template.bind(sql, parameters))
+            {
+                Ok(bound) => bound,
+                Err(error) => {
+                    return Execution {
+                        notice_report: crate::query::result::NoticeReport::default(),
+                        job,
+                        statements: Vec::new(),
+                        status: ExecutionStatus::Failed,
+                        elapsed: started.elapsed(),
+                        error: Some(error.diagnostic("binding named parameters for execution")),
+                        transaction: self.transaction_state().await,
+                    };
+                }
+            };
+            let mut execution = self
+                .execute_bound(
+                    &bound,
+                    row_cap,
+                    job,
+                    QueryPrivacy::Parameterized,
+                    &operation,
+                )
+                .await;
+            execution.elapsed = started.elapsed();
+            execution
+        }
+        .await;
+        execution.notice_report = operation.finish();
+        execution
     }
 
-    async fn execute_bound(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
+    /// Checks the live lexer setting while the user-SQL gate is held.
+    ///
+    /// A connection-time snapshot is insufficient: preceding SQL can change
+    /// this setting. The probe never changes it and uses the value-free error
+    /// route even when PostgreSQL cannot answer (for example a failed txn).
+    async fn require_parameter_semantics(&self, statement_number: usize) -> Result<(), Diagnostic> {
+        let messages = self
+            .client
+            .simple_query("SHOW standard_conforming_strings")
+            .await
+            .map_err(|error| {
+                let mut diagnostic = from_parameterized_query_error(&error, statement_number);
+                // A fatal ErrorResponse can reach its waiter before the
+                // connection task has marked the socket closed. Its severity
+                // is used only for classification, never displayed.
+                if self.is_closed() || error.as_db_error().is_some_and(|db| matches!(db.severity(), "FATAL" | "PANIC")) {
+                    diagnostic.kind = DiagnosticKind::Connection;
+                }
+                diagnostic.attempted = format!(
+                    "checking standard_conforming_strings before statement {statement_number}"
+                );
+                diagnostic.headline = match diagnostic.kind {
+                    DiagnosticKind::Cancelled => "the server cancelled the string-semantics check; the requested statement was not sent",
+                    DiagnosticKind::Connection => "the connection closed during the string-semantics check; the requested statement was not sent",
+                    _ => "the string-semantics check failed; the requested statement was not sent (server text omitted for privacy)",
+                }.to_owned();
+                if diagnostic.kind == DiagnosticKind::Connection {
+                    diagnostic.likely_cause = Some("the connection ended before the requested statement could be sent".to_owned());
+                    diagnostic.next_action = Some("reconnect and inspect any earlier statements before trying again; nothing was retried".to_owned());
+                }
+                diagnostic
+            })?;
+        let mut rows = messages.iter().filter_map(|message| match message {
+            tokio_postgres::SimpleQueryMessage::Row(row) => Some(row),
+            _ => None,
+        });
+        let setting = rows
+            .next()
+            .filter(|row| row.len() == 1)
+            .and_then(|row| row.get(0));
+        // More than one answer is an unknown response, not permission to guess.
+        let setting = if rows.next().is_some() { None } else { setting };
+        validate_parameter_semantics(setting, statement_number)
+    }
+
+    /// Builds an execution failure without re-entering the user-SQL gate.
+    async fn failed_execution(
+        &self,
+        job: JobId,
+        started: Instant,
+        statements: Vec<StatementResult>,
+        diagnostic: Diagnostic,
+    ) -> Execution {
+        let status = if diagnostic.kind == DiagnosticKind::Cancelled {
+            ExecutionStatus::Cancelled
+        } else if diagnostic.kind == DiagnosticKind::Connection || self.is_closed() {
+            ExecutionStatus::ConnectionLost
+        } else {
+            ExecutionStatus::Failed
+        };
+        let transaction = if status == ExecutionStatus::ConnectionLost {
+            crate::query::result::TransactionState::Unknown
+        } else {
+            self.transaction_state().await
+        };
+        Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
+            job,
+            statements,
+            status,
+            elapsed: started.elapsed(),
+            error: Some(diagnostic),
+            transaction,
+        }
+    }
+
+    async fn execute_bound(
+        &self,
+        sql: &str,
+        row_cap: usize,
+        job: JobId,
+        privacy: QueryPrivacy,
+        operation: &Operation<'_>,
+    ) -> Execution {
         let started = Instant::now();
         let parsed = statements::split(sql);
         let mut results = Vec::new();
+        let mut budget = RetentionBudget::new();
 
         if parsed.is_empty() {
             return Execution {
+                notice_report: crate::query::result::NoticeReport::default(),
                 job,
                 statements: results,
                 status: ExecutionStatus::Succeeded,
@@ -502,47 +778,49 @@ impl Session {
         }
 
         for (index, statement) in parsed.iter().enumerate() {
-            let _ = self.take_notices();
+            // The initial check precedes binding and covers the first send.
+            // No arbitrary SQL can intervene while the gate is held. A prior
+            // statement in this same buffer may change the setting, however.
+            if index > 0
+                && matches!(privacy, QueryPrivacy::Parameterized)
+                && let Err(diagnostic) = self.require_parameter_semantics(index + 1).await
+            {
+                return self
+                    .failed_execution(job, started, results, diagnostic)
+                    .await;
+            }
+            operation.hold_unattributed();
             let statement_started = Instant::now();
-            match self.execute_one(&statement.text, row_cap).await {
-                Ok((result_set, rows_affected)) => {
+            match self
+                .execute_one(
+                    &statement.text,
+                    row_cap,
+                    index + 1,
+                    privacy,
+                    operation,
+                    &mut budget,
+                )
+                .await
+            {
+                Ok((result_set, rows_affected, notices)) => {
                     results.push(StatementResult {
                         result_set,
                         rows_affected,
                         elapsed: statement_started.elapsed(),
-                        notices: self.take_notices(),
+                        notices,
                     });
                 }
-                Err(err) => {
-                    let diagnostic = from_query_error(&err, index + 1);
-                    let status = if diagnostic.kind == DiagnosticKind::Cancelled {
-                        ExecutionStatus::Cancelled
-                    } else if err.is_closed() || self.is_closed() {
-                        ExecutionStatus::ConnectionLost
-                    } else {
-                        ExecutionStatus::Failed
-                    };
-                    let transaction = if status == ExecutionStatus::ConnectionLost {
-                        // Asking a closed connection would only produce another
-                        // failure, and the honest answer is that we do not know.
-                        crate::query::result::TransactionState::Unknown
-                    } else {
-                        self.transaction_state().await
-                    };
-                    return Execution {
-                        job,
-                        statements: results,
-                        status,
-                        elapsed: started.elapsed(),
-                        error: Some(diagnostic),
-                        transaction,
-                    };
+                Err(diagnostic) => {
+                    return self
+                        .failed_execution(job, started, results, diagnostic)
+                        .await;
                 }
             }
         }
 
         let transaction = self.transaction_state().await;
         Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: results,
             status: ExecutionStatus::Succeeded,
@@ -557,27 +835,38 @@ impl Session {
         &self,
         sql: &str,
         row_cap: usize,
-    ) -> Result<(Option<ResultSet>, Option<u64>), tokio_postgres::Error> {
-        let stream = self.client.simple_query_raw(sql).await?;
+        statement_number: usize,
+        privacy: QueryPrivacy,
+        operation: &Operation<'_>,
+        budget: &mut RetentionBudget,
+    ) -> Result<(Option<ResultSet>, Option<u64>, Vec<Notice>), Diagnostic> {
+        let stream = self
+            .client
+            .simple_query_raw(sql)
+            .await
+            .map_err(|err| privacy.diagnostic(&err, statement_number))?;
         tokio::pin!(stream);
 
         let mut result_set: Option<ResultSet> = None;
         let mut rows_affected = None;
 
         while let Some(message) = stream.next().await {
-            match message? {
+            match message.map_err(|err| privacy.diagnostic(&err, statement_number))? {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
-                    let names = columns.iter().map(|c| c.name().to_owned()).collect();
-                    result_set = Some(ResultSet::new(names, row_cap));
+                    result_set = Some(retain_description(
+                        columns.iter().map(|c| c.name()),
+                        columns.len(),
+                        row_cap,
+                        budget,
+                    ));
                 }
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
-                    let set = result_set.get_or_insert_with(|| ResultSet::new(Vec::new(), row_cap));
-                    let cells = (0..row.len())
-                        .map(|i| Cell::from_option(row.get(i)))
-                        .collect();
-                    // Rows past the cap are counted and dropped here, which is
-                    // what keeps memory bounded on a large result.
-                    set.push(cells);
+                    let set = result_set.get_or_insert_with(|| {
+                        retain_description(std::iter::empty(), 0, row_cap, budget)
+                    });
+                    retain_buffered_row(set, (0..row.len()).map(|i| row.get(i)), budget).map_err(
+                        |bytes| retained_value_limit_diagnostic(statement_number, bytes),
+                    )?;
                 }
                 tokio_postgres::SimpleQueryMessage::CommandComplete(count) => {
                     rows_affected = Some(count);
@@ -586,21 +875,25 @@ impl Session {
             }
         }
 
+        // Capture only the completed query phase before prepare/describe.
+        // This is an observation boundary, not a causal protocol fence.
+        let notices = operation.take_statement();
+
         // The simple-query protocol gives us faithful text values and column
         // names, but not type OIDs. Parse/describe is deliberately after the
         // result has arrived: it does not execute the statement, and a failure
         // here must never turn a successful query into a failed one.
-        if let Some(names) = result_set
-            .as_ref()
-            .filter(|set| !set.columns.is_empty())
-            .map(|set| set.columns.clone())
-            && let Some(types) = self.describe_columns(sql, &names).await
-            && let Some(set) = result_set.as_mut()
+        if !budget.data_is_closed()
+            && let Some(set) = result_set
+                .as_mut()
+                .filter(|set| set.is_available() && !set.columns.is_empty())
+            && let Some(types) = self.describe_columns(sql, &set.columns, budget).await
         {
             let _ = set.set_column_types(types);
         }
 
-        Ok((result_set, rows_affected))
+        operation.hold_unattributed();
+        Ok((result_set, rows_affected, notices))
     }
 
     /// Describes one already-received result without replaying its SQL.
@@ -609,7 +902,12 @@ impl Session {
     /// accepted against the wrong shape would make a truthful type label into a
     /// quiet lie. A failed prepare or mismatch is ordinary unavailability for
     /// the grid, not a query failure.
-    async fn describe_columns(&self, sql: &str, names: &[String]) -> Option<Vec<Option<String>>> {
+    async fn describe_columns(
+        &self,
+        sql: &str,
+        names: &[String],
+        budget: &mut RetentionBudget,
+    ) -> Option<Vec<Option<String>>> {
         let statement = self.client.prepare(sql).await.ok()?;
         let columns = statement.columns();
         if columns.len() != names.len()
@@ -618,6 +916,15 @@ impl Session {
                 .zip(names)
                 .any(|(column, name)| column.name() != name)
         {
+            return None;
+        }
+        if !matches!(
+            budget.admit_type_names(
+                columns.len(),
+                columns.iter().map(|column| Some(column.type_().name()))
+            ),
+            TypeAdmission::Admitted { .. }
+        ) {
             return None;
         }
         Some(
@@ -629,18 +936,101 @@ impl Session {
     }
 }
 
+/// The actual borrowed-name admission boundary, before owned names/type slots.
+fn retain_description<'a>(
+    names: impl Iterator<Item = &'a str> + Clone,
+    source_columns: usize,
+    cap: usize,
+    budget: &mut RetentionBudget,
+) -> ResultSet {
+    match budget.admit_description(names.clone()) {
+        DescriptionAdmission::Admitted { .. } => {
+            ResultSet::new(names.map(str::to_owned).collect(), cap)
+        }
+        DescriptionAdmission::Unavailable => ResultSet::unavailable(source_columns, cap),
+    }
+}
+
+/// Counts each delivered row once, without owned copies for a refused row.
+fn retain_buffered_row<'a>(
+    set: &mut ResultSet,
+    cells: impl Iterator<Item = Option<&'a str>> + Clone,
+    budget: &mut RetentionBudget,
+) -> Result<(), usize> {
+    if !set.is_available() {
+        set.discard_row(RetentionReason::DescriptionUnavailable);
+    } else if set.retained() >= set.cap {
+        set.discard_row(RetentionReason::RowCap);
+    } else {
+        match budget.admit_row(cells.clone()) {
+            RowAdmission::Admitted { .. } => {
+                set.push(cells.map(Cell::from_option).collect());
+            }
+            RowAdmission::DataLimit => set.discard_row(RetentionReason::RetainedResultLimit),
+            RowAdmission::OversizedCell { bytes } => return Err(bytes),
+        }
+    }
+    Ok(())
+}
+
+fn validate_parameter_semantics(
+    setting: Option<&str>,
+    statement_number: usize,
+) -> Result<(), Diagnostic> {
+    if setting == Some("on") {
+        return Ok(());
+    }
+    Err(Diagnostic::new(
+        DiagnosticKind::Query,
+        "named parameters require standard_conforming_strings = on",
+        format!("checking standard_conforming_strings before statement {statement_number}"),
+    )
+    .in_statement(statement_number)
+    .likely_cause("the server did not confirm the supported string-literal semantics")
+    .next_action("restore standard_conforming_strings = on separately, then run the statement again; nothing was changed or retried"))
+}
+
+fn retained_value_limit_diagnostic(statement_number: usize, bytes: usize) -> Diagnostic {
+    let limit = crate::query::value::MAX_RETAINED_VALUE_BYTES;
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        "a result value is too large to retain",
+        format!("retaining result values from statement {statement_number}"),
+    )
+    .in_statement(statement_number)
+    .likely_cause(format!(
+        "one server-rendered value is {bytes} bytes; the retained-value limit is {limit} bytes"
+    ))
+    .next_action(
+        "use streaming export as csv, tsv, ndjson or insert, or select a smaller value before \
+         running it in the interactive result view",
+    )
+    .technical("Limit", limit.to_string())
+}
+
 /// Opens a session, applying the resolved target's policy.
+/// Payload-only compatibility adapter. Use [`connect_reported`] for accounting.
 pub async fn connect(
     target: &ConnectionTarget,
     statement_timeout: Duration,
 ) -> Result<Session, Diagnostic> {
-    // A backstop, not a feature. Every path that opens a connection is supposed
-    // to have run `connection::cloud::authenticate` first; a path that forgot
-    // would otherwise connect without the token and fall through to the password
-    // prompt, asking a person for something no person has. Failing here instead
-    // makes the omission loud and keeps the prompt honest.
-    if target.auth.is_some() && target.password.is_none() {
-        return Err(Diagnostic::new(
+    connect_reported(target, statement_timeout).await.value
+}
+
+/// Connects with a report on bootstrap failure, preserving successful idle notices.
+pub async fn connect_reported(
+    target: &ConnectionTarget,
+    statement_timeout: Duration,
+) -> Reported<Result<Session, Diagnostic>> {
+    let mut observed = None;
+    let value = async {
+        // A backstop, not a feature. Every path that opens a connection is supposed
+        // to have run `connection::cloud::authenticate` first; a path that forgot
+        // would otherwise connect without the token and fall through to the password
+        // prompt, asking a person for something no person has. Failing here instead
+        // makes the omission loud and keeps the prompt honest.
+        if target.auth.is_some() && target.password.is_none() {
+            return Err(Diagnostic::new(
             crate::diagnostics::DiagnosticKind::Internal,
             "a connection using a cloud identity provider was opened without a credential",
             "connecting to PostgreSQL",
@@ -651,63 +1041,91 @@ pub async fn connect(
         )
         .next_action("report it, and connect without --auth as a way through in the meantime")
         .technical_opt("Provider", target.auth.clone()));
-    }
-
-    let config = build_config(target);
-    let tls = crate::postgres::tls::TlsOptions {
-        mode: target.sslmode,
-        root_cert: target.root_cert.clone(),
-        client_cert: target.client_cert.clone(),
-        client_key: target.client_key.clone(),
-    };
-    let tls_config = client_config(&tls)?;
-
-    let (client, notices, connection_lost) = match tls_config {
-        None => establish(&config, tokio_postgres::NoTls, target).await?,
-        Some(rustls_config) => {
-            establish(
-                &config,
-                tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config),
-                target,
-            )
-            .await?
         }
+
+        let config = build_config(target);
+        let tls = crate::postgres::tls::TlsOptions {
+            mode: target.sslmode,
+            root_cert: target.root_cert.clone(),
+            client_cert: target.client_cert.clone(),
+            client_key: target.client_key.clone(),
+        };
+        let tls_config = client_config(&tls)?;
+        let notice_privacy = Arc::new(AtomicBool::new(false));
+
+        let (client, notices, connection_lost) = match tls_config {
+            None => {
+                establish(
+                    &config,
+                    tokio_postgres::NoTls,
+                    target,
+                    Arc::clone(&notice_privacy),
+                )
+                .await?
+            }
+            Some(rustls_config) => {
+                establish(
+                    &config,
+                    tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config),
+                    target,
+                    Arc::clone(&notice_privacy),
+                )
+                .await?
+            }
+        };
+
+        observed = Some(Arc::clone(&notices));
+
+        // Asked for before anything else runs, and enforced by the server rather
+        // than by this client guessing at what a statement does.
+        if target.read_only {
+            client
+                .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+                .await
+                .map_err(|err| from_query_error(&err, 0))?;
+        }
+
+        if statement_timeout > Duration::ZERO {
+            let millis = statement_timeout.as_millis();
+            client
+                .batch_execute(&format!("SET statement_timeout = {millis}"))
+                .await
+                .map_err(|err| from_query_error(&err, 0))?;
+        }
+
+        let info = bootstrap(&client, target).await?;
+        Ok(Session {
+            client,
+            user_sql_gate: tokio::sync::Mutex::new(()),
+            info,
+            tls,
+            notices,
+            notice_privacy,
+            connection_lost,
+        })
+    }
+    .await;
+    let notice_report = if value.is_err() {
+        observed
+            .and_then(|notices: Arc<Notices>| notices.take_idle())
+            .unwrap_or_else(|| NoticeReport::empty(NoticeScope::Connection))
+    } else {
+        NoticeReport::empty(NoticeScope::Connection)
     };
-
-    // Asked for before anything else runs, and enforced by the server rather
-    // than by this client guessing at what a statement does.
-    if target.read_only {
-        client
-            .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
-            .await
-            .map_err(|err| from_query_error(&err, 0))?;
+    Reported {
+        value,
+        notice_report,
     }
-
-    if statement_timeout > Duration::ZERO {
-        let millis = statement_timeout.as_millis();
-        client
-            .batch_execute(&format!("SET statement_timeout = {millis}"))
-            .await
-            .map_err(|err| from_query_error(&err, 0))?;
-    }
-
-    let info = bootstrap(&client, target).await?;
-    Ok(Session {
-        client,
-        info,
-        tls,
-        notices,
-        connection_lost,
-    })
 }
 
-type Established = (Client, Arc<Mutex<Vec<Notice>>>, Arc<AtomicBool>);
+type Established = (Client, Arc<Notices>, Arc<AtomicBool>);
 
 /// Connects, then moves the connection onto a task that forwards notices.
 async fn establish<T>(
     config: &tokio_postgres::Config,
     tls: T,
     target: &ConnectionTarget,
+    notice_privacy: Arc<AtomicBool>,
 ) -> Result<Established, Diagnostic>
 where
     T: MakeTlsConnect<Socket> + Send + 'static,
@@ -740,7 +1158,7 @@ where
         }
     };
 
-    let notices = Arc::new(Mutex::new(Vec::new()));
+    let notices = Arc::new(Notices::default());
     let connection_lost = Arc::new(AtomicBool::new(false));
     let task_notices = Arc::clone(&notices);
     let task_lost = Arc::clone(&connection_lost);
@@ -752,13 +1170,13 @@ where
         while let Some(message) = stream.next().await {
             match message {
                 Ok(AsyncMessage::Notice(notice)) => {
-                    if let Ok(mut held) = task_notices.lock() {
-                        held.push(Notice {
-                            severity: notice.severity().to_owned(),
-                            message: notice.message().to_owned(),
-                            code: Some(notice.code().code().to_owned()),
-                        });
-                    }
+                    retain_notice(
+                        &task_notices,
+                        &notice_privacy,
+                        notice.severity(),
+                        notice.message(),
+                        notice.code().code(),
+                    );
                 }
                 Ok(_) => {}
                 Err(_) => break,
@@ -901,70 +1319,4 @@ fn non_empty(value: String, fallback: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::connection::{ConnectionArgs, EnvSnapshot, resolve};
-
-    fn target(uri: &str) -> ConnectionTarget {
-        resolve(
-            Some(uri),
-            &ConnectionArgs::default(),
-            &EnvSnapshot::default(),
-            &crate::config::ConnectionConfig::default(),
-        )
-        .expect("resolve")
-    }
-
-    #[test]
-    fn the_driver_configuration_mirrors_the_resolved_target() {
-        let target = target("postgres://app@db.example.net:6432/orders?sslmode=require");
-        let config = build_config(&target);
-        assert_eq!(config.get_ports(), [6432]);
-        assert_eq!(config.get_user(), Some("app"));
-        assert_eq!(config.get_dbname(), Some("orders"));
-        assert_eq!(config.get_ssl_mode(), PgSslMode::Require);
-        assert_eq!(
-            config.get_application_name(),
-            Some(crate::branding::DEFAULT_APPLICATION_NAME)
-        );
-    }
-
-    #[test]
-    fn verifying_modes_still_require_tls_at_the_protocol_level() {
-        for uri in [
-            "postgres://app@db.example.net/orders?sslmode=verify-full",
-            "postgres://app@db.example.net/orders?sslmode=require",
-        ] {
-            assert_eq!(
-                build_config(&target(uri)).get_ssl_mode(),
-                PgSslMode::Require
-            );
-        }
-        assert_eq!(
-            build_config(&target("postgres://app@localhost/orders?sslmode=disable")).get_ssl_mode(),
-            PgSslMode::Disable
-        );
-        assert_eq!(
-            build_config(&target("postgres://app@localhost/orders")).get_ssl_mode(),
-            PgSslMode::Prefer
-        );
-    }
-
-    #[test]
-    fn posture_is_stated_in_words() {
-        let mut info = SessionInfo {
-            target: "app@localhost:5432/orders".into(),
-            database: "orders".into(),
-            user: "app".into(),
-            server_version: "18.6".into(),
-            backend_pid: "123".into(),
-            search_path: "\"$user\", public".into(),
-            read_only: false,
-            tls: TlsState::Disabled,
-            environment: crate::connection::Environment::Local,
-        };
-        assert_eq!(info.posture(), "read-write");
-        info.read_only = true;
-        assert_eq!(info.posture(), "read-only");
-    }
-}
+mod tests;

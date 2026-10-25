@@ -67,7 +67,8 @@ Warp renderer checks remain separate evidence gates.
 
 Feature 015 guided discovery is now implemented in the local working tree. The
 first frame, empty panes and blocked states explain a safe next action; the
-footer follows focus with no more than five contextual hints; and the general
+footer follows focus with no more than six comfortable or four compact
+contextual hints; and the general
 palette searches by intent while retaining prerequisite guidance. Discovery uses
 the active configured keymap and is presentation-only, so opening or searching
 does not run SQL, reload metadata, write files, record history, or persist a
@@ -244,7 +245,8 @@ do" rather than a list of commands you already knew. An empty state that
 suggests the next thing rather than sitting blank.
 
 The implementation keeps this local and bounded: the first frame and empty
-states are state-specific, the footer shows at most five complete pairs, and the
+states are state-specific, the footer shows at most six comfortable or four
+compact complete pairs, and the
 palette searches labels and intent details while explaining prerequisites for
 unavailable actions. The active configured keymap is the only source for every
 advertised key.
