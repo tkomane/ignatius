@@ -155,6 +155,8 @@ when the behaviour exists and a test or recorded evidence proves it.
   boundaries fail first, retain existing sidecar tests, obtain independent peer
   review, inspect rendered output and pass required combined gates. Do not
   relabel this as a frame/aggregate-result/process-memory ceiling.
+  Local source: `d65024b`; peer/rendered review and full 1,370-case gate passed.
+  Hosted/platform/affected-major acceptance remains open; checkbox stays open.
 - [ ] W10-013 After W10-012 source integration, implement REL-002's complete
   execution-wide retained-data allowance under `contracts/retained-result-data.md`:
   checked whole-description/whole-row admission, cumulative prefix closure,

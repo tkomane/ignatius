@@ -8,7 +8,8 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. W10-012's integrated notice
+Branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
+`d65024b`. W10-012's integrated notice
 implementation passed the complete local verifier: **1,370 outer harness cases,
 1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and
 PostgreSQL 18.6 plain/TLS. The macOS socket case remains a semantic skip.
@@ -174,8 +175,10 @@ The frozen adapter/UI/live handoff is now applied in the canonical working
 tree. Root inspected 128 styled buffers, incorporated the bounded final
 runtime/doctor review repair and live CI wiring, and passed the full 1,370-case
 local verifier after its test-only transport correction. Root owns shared
-records/policy; the last committed
-application checkpoint is `d8a3ac3`, with notice changes currently uncommitted.
+records/policy; the current committed application checkpoint is `d65024b`.
+Hosted/platform/affected-major acceptance remains open; W10-013 may now take
+an isolated assignment because source integration and its combined local gate
+are saved.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
