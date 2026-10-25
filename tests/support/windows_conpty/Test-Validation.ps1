@@ -1,4 +1,4 @@
-# Portable pure validator tests. No processes, terminals, native calls or DB.
+# Portable validator/owned-file tests. No controlled children, terminal or DB.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Validation.ps1')
@@ -77,4 +77,23 @@ try {
     try { Assert-W07FrozenInputs $frozen } catch { $rejected=$true }
     Assert-W07 $rejected 'changed source between prehash/postcheck must be rejected'; ++$script:Checks
 } finally { [IO.File]::Delete($inputFile); [IO.Directory]::Delete($owned) }
-Write-Output "$script:Checks receipt/deadline/identity checks passed; only one owned temporary hash fixture; no Windows/native execution"
+# Actual tiny owned filesystem inventories, under the same StrictMode as CI.
+$inventory=[IO.Path]::Combine([IO.Path]::GetTempPath(),'ignatius-w07-inventory-'+[Guid]::NewGuid().ToString('N'))
+$null=[IO.Directory]::CreateDirectory($inventory)
+$nested=[IO.Path]::Combine($inventory,'nested'); $deeper=[IO.Path]::Combine($nested,'deeper')
+$emptyA=[IO.Path]::Combine($inventory,'empty-a'); $emptyB=[IO.Path]::Combine($inventory,'empty-b')
+$one=[IO.Path]::Combine($inventory,'one.bin'); $two=[IO.Path]::Combine($nested,'two.bin'); $three=[IO.Path]::Combine($deeper,'three.bin')
+try {
+    Assert-W07 ((Get-W07InventoryBytes $inventory) -eq 0) 'empty owned directory inventory is zero'; ++$script:Checks
+    [IO.File]::WriteAllBytes($one,[byte[]](1,2,3))
+    Assert-W07 ((Get-W07InventoryBytes $inventory) -eq 3) 'one actual file inventory counts bytes'; ++$script:Checks
+    $null=[IO.Directory]::CreateDirectory($deeper)
+    [IO.File]::WriteAllBytes($two,[byte[]](1,2,3,4)); [IO.File]::WriteAllBytes($three,[byte[]](1,2,3,4,5))
+    Assert-W07 ((Get-W07InventoryBytes $inventory) -eq 12) 'nested actual files inventory sums all bytes'; ++$script:Checks
+    $null=[IO.Directory]::CreateDirectory($emptyA); $null=[IO.Directory]::CreateDirectory($emptyB)
+    Assert-W07 ((Get-W07InventoryBytes $inventory) -eq 12) 'directory entries do not contribute inventory bytes'; ++$script:Checks
+} finally {
+    foreach ($file in @($one,$two,$three)) { [IO.File]::Delete($file) }
+    foreach ($directory in @($deeper,$nested,$emptyA,$emptyB,$inventory)) { if ([IO.Directory]::Exists($directory)) { [IO.Directory]::Delete($directory) } }
+}
+Write-Output "$script:Checks receipt/deadline/identity/inventory checks passed; only tiny owned temporary fixtures; no Windows/native execution"

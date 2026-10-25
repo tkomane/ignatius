@@ -140,7 +140,7 @@ $summary = [ordered]@{schema=1;scope='first-capability-controls-only';build_mani
 try {
     Assert-Inputs
     foreach ($case in @('no-guard','known-unrestored','hung-child','capability')) {
-        $used = [long](@(Get-ChildItem -LiteralPath $evidence -File -Recurse | Measure-Object Length -Sum)[0].Sum)
+        $used = Get-W07InventoryBytes $evidence
         Assert-W07 (($used + 262144) -le 33554432) 'experiment budget admission'
         $directory = Join-Path $evidence $case; $null=New-Item -ItemType Directory -Path $directory
         $result = Invoke-OwnedCase $case $directory (33554432-$used)

@@ -168,7 +168,30 @@ also passed. The complete local verifier passed 1,432 outer harness cases,
 1,127 library cases and 24 summaries, formatting, warnings-denied lints/API
 docs and PostgreSQL 18.6 plain/TLS. The macOS socket case remains a semantic
 skip. Log: `/private/tmp/ignatius-w07-064-integrated-verify-20261025.log`.
-Nothing in this new slice has been published or executed on Windows yet.
+Published clean `69f4de6` and opened [draft PR33](https://github.com/tkomane/ignatius/pull/33)
+against unchanged parent D6 for a scoped 14-file review. The unchanged pre-push
+gate passed all 1,432 cases again, with the same macOS socket skip. Pinned
+Gitleaks passed the exact 447-file clean snapshot and 286 reachable revisions.
+CI `40215610812` finished: 12 jobs succeeded, one schedule-only job skipped and
+Windows failed in the new controller before any native child. Actual pinned
+Rust 1.97.1 and MSVC toolset 14.51/SDK 10.0.26100 helper builds succeeded. Root verified
+the 94,212-byte artifact digest and all 447 source/nine helper hashes against
+the committed source. Its summary records empty cases, unchanged inputs and
+`Index was outside the bounds of the array.` The exact empty-directory failure
+reproduced under local PowerShell StrictMode. The three-script inventory repair
+passed 52 checks (all prior 48 plus four actual file/directory cases), four AST
+checks and independent review. Root verified the 14 frozen artifacts and
+integrated source bytes. Budget/ownership/native code and first-four scope are
+unchanged; the primary admits the repeat after the normal pre-push gate.
+The failed run remains preserved and no native result is
+claimed. First evidence: `/private/tmp/ignatius-pr33-windows-first-40215610812-1/`.
+Fresh CodeQL is pending retargeting to main because its existing base-main
+filter is preserved.
+The independent integration review accepted the installed-tool bootstrap and
+15-pattern evidence allowlist; receipt:
+`/private/tmp/ignatius-w07-064-independent-integration-review-20261025.md`.
+The next wrong-owned-Job and one deliberate Guard error-return controls are
+proposed privately, not implemented or admitted before first-four results.
 
 The team separately assessed incoming allocation and next-slice feasibility.
 No frame/startup/RSS bound is adopted: the locked driver has no single public

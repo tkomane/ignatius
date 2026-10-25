@@ -90,3 +90,14 @@ function Assert-W07FrozenInputs([object[]] $Inputs) {
         Assert-W07 ((Get-FileHash -Algorithm SHA256 -LiteralPath $item.path).Hash.ToLowerInvariant() -ceq $item.sha256) "prehashed build input changed: $($item.path)"
     }
 }
+
+function Get-W07InventoryBytes([string] $Directory) {
+    # An empty pipeline is a valid zero-byte inventory, not an indexed result.
+    [long]$bytes=0
+    foreach ($file in (Get-ChildItem -LiteralPath $Directory -File -Recurse -ErrorAction Stop)) {
+        [long]$length=$file.Length
+        Assert-W07 ($length -ge 0 -and $bytes -le [long]::MaxValue-$length) 'inventory byte count overflow'
+        $bytes+=$length
+    }
+    return $bytes
+}

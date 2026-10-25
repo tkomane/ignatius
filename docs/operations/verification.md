@@ -16,8 +16,8 @@ Actual integration checks passed: 26 pure C++ checks, 48 synthetic PowerShell
 receipt/deadline/identity checks, all 15 workflow contracts, standalone Rust
 formatting and digest-pinned network-disabled Actionlint. Earlier PowerShell
 AST checks covered all four scripts and the extracted CI step. Those checks
-exercise local arithmetic, validation and wiring; Windows SDK compilation and
-native runtime remain unverified. The complete local verifier passed 1,432
+exercise local arithmetic, validation and wiring; hosted compilation and
+runtime results are recorded separately below. The complete local verifier passed 1,432
 outer harness cases, 1,127 library cases and 24 summaries, formatting,
 warnings-denied lints/API docs and PostgreSQL 18.6 plain/TLS. The macOS socket
 case remains a semantic skip. Log:
@@ -35,10 +35,44 @@ Both original failures, earlier freeze and compiled inputs remain preserved.
 The primary admits only no-guard, known-unrestored, acknowledged hung-child and
 actual guard capability to the authorised Windows CI after the publication
 gate. Captures use the explicit synthetic metadata/trace upload allowlist,
-excluding binaries, caches and config/data. No Windows run has occurred yet.
+excluding binaries, caches and config/data. No ConPTY child has run yet.
 Wrong-ownership/native-error controls, the normal/error/uncaught-panic matrix,
 paste/full T055a, Windows 11/Windows Terminal hand use and release remain open.
 Four-case success alone cannot close W07-064.
+
+Clean source `69f4de6` is published in draft PR33, stacked on unchanged D6.
+The installed pre-push verifier repeated all 1,432 outer cases/24 summaries
+successfully, with the same semantic socket skip. Digest-pinned Gitleaks passed
+447 clean source files and 286 reachable revisions. CI run `40215610812` is
+complete with 12 successes, one deliberate schedule-only skip and one Windows
+controller failure before any case. Actual native helper compilation passed
+Rust1.97.1 x86_64-pc-windows-msvc and MSVC toolset14.51/SDK10.0.26100,
+Windows build26100 (runner image `win25-vs2026`/`20261021.278.1`).
+Root verified the 94,212-byte archive digest and all 447 source/nine helper
+hashes against `69f4de6`; summary cases are empty and post-input hashes match.
+The initial empty capture inventory produced an array-index error. The literal
+published expression reproduced that failure under local PowerShell StrictMode.
+A three-script shared accumulator repair passed 52 checks, including all prior
+48 and four real tiny owned-file/directory inventories, plus four script AST
+checks. Independent review accepted it; root verified all 14 frozen artifacts
+and exact integrated bytes. The 32 MiB admission, deadlines, first-four and
+native ownership/code remain unchanged. The primary admits the same four-case
+repeat after the normal pre-push gate. Repair source:
+`/private/tmp/ignatius-w07-inventory-69f4de6-tblan28y/final-freeze/`; review
+`/private/tmp/ignatius-w07-inventory-independent-review-20261025.md`, SHA-256
+`736b89b6db7bb2023b17dc3f0dfd2172ed35657623243397a4f2a970720433cc`.
+First failed Windows evidence:
+`/private/tmp/ignatius-pr33-windows-first-40215610812-1/`. No ConPTY child ran.
+New-head CodeQL remains pending until a main-targeted PR triggers the
+unchanged filter. No ConPTY runtime result or completed platform task is claimed.
+
+The separate read-only audit verified complete PG14/18/socket logs: each TCP
+job ran 236 selected invocations, plus one actual socket query (473 combined).
+Those include 24 actual retained-result and 40 notice invocations across both
+TCP routes/majors. Selected counts also include pure/local controls; successful
+libtest capture does not alone exclude every miscellaneous early return. Actual
+major assertions are 14/18; patch labels remain reviewed image provenance.
+Evidence: `/private/tmp/ignatius-pr33-db-hosted-audit-51oq6q99/RECEIPT.md`.
 
 ## W10-012 integrated local verification - 2026-10-25
 
