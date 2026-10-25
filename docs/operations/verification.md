@@ -109,8 +109,36 @@ formatting, pinned Actionlint, extracted PowerShell AST and independent review
 also passed. Uploads add only six fixed diagnostic paths to the prior15 patterns.
 The original four assertions and all ownership/deadline/environment protections
 remain. The primary admits only calibration followed by the unchanged first
-four on the reviewed source after the normal full pre-push gate. No calibration
-runtime result exists yet, and no later matrix is admitted.
+four on the reviewed source after the normal full pre-push gate. Published
+`65cf237` passed that gate with 1,432 outer harness cases, 1,127 library cases
+and 24 summaries; the macOS socket case remains skipped. The clean 447-file
+source and 288 reachable revisions passed pinned Gitleaks. Actual PR merge ref
+`dfe46f52` and head have identical tree `4ce8f1f7cf0b8e704294578d76fb1531b963dc21`.
+CI `40221850172` completed: 12 jobs passed, one scheduled drift check skipped,
+and Windows failed the unchanged Guard cursor capability after the diagnostic
+completed. The one retained actor observed native-setter and main-VT hidden/
+shown transitions, but alternate-VT visibility stayed 1/1. All stage writes,
+marker readbacks and 36/36 sentinel reads completed, with masks 423/7 and cursor
+size 25. Independent baseline verification succeeded before the final query.
+Diagnostic duration was 54.2058 ms native/157 ms controller; actual alternate cursor
+state remains unproved. The original no-guard/known-unrestored/hung-child controls
+again passed and original capability failed. All five exact Jobs emptied and
+owned process/drain/control-I/O cleanup was confirmed. No later matrix or
+assertion change is admitted. Root verified 33 files, 22 capture entries and all
+447 Git source/nine helper identities; archive 105,445 bytes SHA-256
+`c78a505aa9c1994b8300080963e6e8268e3e1173e866a809f2527f1bb0fbac20`.
+Evidence: `/private/tmp/ignatius-pr33-windows-calibration-40221850172-1/`;
+root `/private/tmp/ignatius-pr33-65cf237-calibration-windows-review-20261025.json`.
+This supports the sensor-routing limitation, not a diagnosed product defect or
+proof that the installed 26100 binaries match current Microsoft source.
+Independent native audit accepted the same limits and found no integrity or
+adopted-scope inconsistency:
+`/private/tmp/ignatius-w07-calibration-65cf237-native-review-j2f4lx0v/REVIEW.md`,
+SHA-256 `64a56107cda058b343d6434393054bca603a91c94e99d9688b6f8bdbad5496a1`.
+Executable/link hashes are recorded by the build/controller; their bytes are
+excluded from the upload and cannot be independently rehashed from this archive.
+Publication receipt:
+`/private/tmp/ignatius-w07-65cf237-publication-20261025.json`.
 Source: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`;
 peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-20261025.md`,
 SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.

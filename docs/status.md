@@ -9,10 +9,13 @@ before trusting anything else.
 ### Current local progress and active assignments
 
 Current branch: `codex/windows-conpty-observation-2026-10-25`, published
-`7d167a9` in draft PR33, stacked on unchanged D6 in PR32. Windows has three
-native control passes and a failed cursor capability; the separate calibration
-is integrated locally after repaired source review. Root's calibration CI/contract/record changes
-are unpublished. Parent PR32's exact protected-main merge approval is pending.
+`65cf237` in draft PR33, stacked on unchanged D6 in PR32. The separate cursor
+calibration and reviewed CI wiring are published after the normal full pre-push
+gate passed. CI `40221850172` completed with 12 successful jobs, one scheduled
+skip and the unchanged Windows capability failure. The separate diagnostic
+completed: native setters and main VT are observable, alternate VT is not
+tracked by this sensor. Full Windows acceptance stays open. Parent PR32's
+exact protected-main merge approval is pending.
 Earlier source-bound checkpoints follow. Notice source is saved in
 `d65024b`. W10-012's integrated notice
 implementation passed the complete local verifier: **1,370 outer harness cases,
@@ -209,8 +212,8 @@ one persistent authenticated actor compares native setters and VT main/alternate
 cursor operations, with controlled marker readback and complete native facts.
 The implementation lane now owns only test-support changes in a fresh private
 `7d167a9` snapshot. The independent lane reviews the calibration design. Root
-owns canonical source/CI and any next native admission after frozen review;
-calibration source is integrated but no native run is admitted yet. Frozen contract input:
+owns canonical source/CI and native admission after frozen review;
+the exact published calibration is now admitted under the bounded scope below. Frozen contract input:
 `/private/tmp/ignatius-w07-cursor-calibration-contract-20261025.md`, SHA-256
 `0cc81e4bdcd68692a155911463cd7aba279e7d03afac300c41b0811c5df5f286`.
 Candidate freeze01 contains 60 root-verified artifacts and reported 53 portable
@@ -224,11 +227,35 @@ review accepted both repairs; 74 C++ and 103 PowerShell checks passed again in
 the canonical tree. Worker evidence separately records six synthetic emitter
 cases, two exact wire-emitter roundtrips, four AST parses and Rust formatting.
 The original immutable candidate remains preserved. The primary admits only
-the separate calibration and unchanged first four on this reviewed source,
-subject to the normal full pre-push publication gate; none has run yet.
+the separate calibration and unchanged first four on this reviewed source.
+Published `65cf237` passed the normal full pre-push gate: 1,432 outer harness
+cases, 1,127 library cases, 24 summaries and all six executed gates. The macOS
+socket case remains a semantic skip. Pinned Gitleaks passed the exact 447-file
+source and 288 reachable revisions. PR merge ref `dfe46f52` has identical tree
+`4ce8f1f7cf0b8e704294578d76fb1531b963dc21`. CI `40221850172` finished with 12
+successful jobs, one deliberate schedule-only skip and a Windows failure.
+The separate nine-stage diagnostic completed with one authenticated retained
+actor: native setters and main VT produced hidden/shown transitions, while
+alternate VT remained visible 1/1 despite complete writes, unique phase marker
+readback and 36/36 sentinel reads. Baseline 423/7, cursor size 25 and visibility 1
+were independently restored before the distinct final query. Diagnostic duration
+was 54.2058 ms native/157 ms controller. The unchanged original four again produced
+three control passes and failed cursor capability; all five exact Jobs emptied
+and actual process/drain/control-I/O cleanup completed. Root verified the
+105,445-byte ZIP SHA-256 `c78a505aa9c1994b8300080963e6e8268e3e1173e866a809f2527f1bb0fbac20`,
+all 33 files, 22 capture entries, 447 Git source blobs and nine helpers. This
+measures a sensor/routing limitation, not actual alternate cursor state or a
+product defect. No matrix expansion or weaker assertion is admitted. Evidence:
+`/private/tmp/ignatius-pr33-windows-calibration-40221850172-1/`; root receipt
+`/private/tmp/ignatius-pr33-65cf237-calibration-windows-review-20261025.json`.
+Independent native audit found no integrity or adopted-scope inconsistency:
+`/private/tmp/ignatius-w07-calibration-65cf237-native-review-j2f4lx0v/REVIEW.md`,
+SHA-256 `64a56107cda058b343d6434393054bca603a91c94e99d9688b6f8bdbad5496a1`.
+Compiler/link binary hashes remain build/controller-recorded identities because
+their bytes are intentionally excluded from the narrow archive.
 Root's separate diagnostic-before-capability CI wiring passed its meaningful
 red/green workflow contract, formatting, pinned Actionlint, PS AST and independent
-review. The 21-pattern evidence allowlist remains unpublished with the source.
+review. The 21-pattern evidence allowlist is published with the source.
 Freeze01: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-01/`.
 Accepted repair:
 `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`,
@@ -237,6 +264,22 @@ peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-2026102
 SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.
 Fresh CodeQL is pending retargeting to main because its existing base-main
 filter is preserved.
+The independent roadmap preparation now assesses Feature025 US5's manual
+custom-theme/startup/runtime-switch journey; auto/T032 and whole-US5 acceptance
+remain open. Its unadopted contract proposal is
+`/private/tmp/ignatius-us5-manual-contract-proposal-afimm9za/PROPOSED-PINS.md`
+(SHA-256 `0fbc914b56ad2e38beac198dc728868cdd0a143f04b45698c8dd068a9406d9e8`).
+Root verified both planning artifact hashes. The actual-library probe confirmed
+a P2 expanded-field selection defect: HighContrast header white on white and
+NULL grey on white, instead of Selection's Surface ink. Root verified all 16
+frozen repro artifacts; the meaningful real-Buffer red remains preserved in
+`/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`. T055 specifies
+the narrow composition correction before custom themes, with no palette change.
+Active isolated worktree:
+`/Users/tshiamo/.codex/worktrees/selected-field-contrast/ignatius-psql-client`,
+branch `codex/selected-field-contrast-2026-10-25` from D6, independent of PR33.
+The worker owns only Results renderer/sidecar; root owns contracts, integration,
+rendered review and publication. The fix is not integrated or accepted yet.
 The independent integration review accepted the installed-tool bootstrap and
 15-pattern evidence allowlist; receipt:
 `/private/tmp/ignatius-w07-064-independent-integration-review-20261025.md`.

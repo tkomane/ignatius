@@ -234,6 +234,13 @@ the hosted Windows runner. No-guard, known-unrestored and acknowledged hung-chil
 controls passed; actual Guard raw/mouse and buffer observations are partial
 evidence. The hidden-cursor capability failed. W07-064's adopted contract now
 pins one persistent-actor cursor calibration before further matrix admission.
+Published `65cf237` completes that separate diagnostic: native setters/main VT
+are observable, alternate VT is not tracked by the retained sensor. The original
+capability remains failed, with all five owned trees cleaned up. A different
+faithful observation seam is required before matrix admission; no product defect
+or installed-source cause is established. Feature025 T055's independently
+reproduced Results selection defect proceeds on a sibling branch before custom
+themes, without changing this Windows gate.
 Keep W07/T055a and Windows 11/Windows Terminal hand use open; see the
 [dated verification record](../operations/verification.md).
 

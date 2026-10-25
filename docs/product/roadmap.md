@@ -32,9 +32,12 @@ also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; nativ
 hand-use remains separate. W10-013's execution-wide retained-data contract is
 accepted at published `54056c2`: local 1,431 outer cases/112 styled buffers,
 all five PostgreSQL majors plain/TLS, actual socket, pinned/MSRV/platform and
-CodeQL checks. W07's published `7d167a9` has three native Windows ConPTY control
-passes and partial Guard raw/mouse/buffer evidence. The cursor capability fails;
-the next bounded slice calibrates that sensor before the option/path matrix.
+CodeQL checks. W07's published `65cf237` repeats three native Windows ConPTY
+control passes and completes separate cursor calibration. The retained sensor
+tracks native setters/main VT but not alternate VT; the original cursor
+capability still fails. Faithful alternate cursor observation is required before
+the option/path matrix. An independent T055 Results selection correction can
+proceed before the proposed manual custom-theme slice.
 Full Windows restoration and hand use remain open. CLI cancellation and complete
 resource acceptance remain separate. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
