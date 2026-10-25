@@ -178,6 +178,72 @@ zero remaining export/partial payloads. Manifest SHA-256:
 The results motivate distinct notice, retained-result and incoming-allocation
 contracts in W10-008; they do not close that requirement.
 
+## W10-011 real-writer pacing evidence - 2026-10-25
+
+At exact clean `d8a3ac34ea5a69fb957b04f94c5c90ffa27a1cef`, an optimized
+external helper used actual Session.stream, StreamWriter, PacedWrite over
+Export.writer and normal flush/sync/rename. Its persistent state paced accepted
+bytes at 1 MiB/s with zero initial credit and at most 8 KiB delegated per write.
+Controls used identical chunking/instrumentation. No product source changed.
+
+Exactly 12 fresh measured export children (three per case) and 24 before/after
+health checks completed once, all exit zero, no stderr/skips/retries/stops.
+All health checks reported PostgreSQL 18.6/version_number 180006/orders=3.
+Actual environment: macOS 27.0.1 arm64, Mac14,13/M2 Max/32 GiB, Homebrew
+Rust/Cargo 1.99.1, own locked/offline release library/binary/target/registry.
+This host measurement did not use the repository's pinned Rust 1.97.1.
+
+| Case | Wall seconds median (min-max) | Peak RSS MiB median (min-max) |
+| --- | --- | --- |
+| Small rows, unpaced | 0.090 (0.077-0.501) | 6.812 (6.797-6.859) |
+| Small rows, paced | 8.031 (8.025-8.033) | 6.797 (6.766-6.859) |
+| One large value, unpaced | 0.114 (0.111-0.117) | 40.828 (40.812-40.828) |
+| One large value, paced | 8.109 (8.109-8.113) | 40.812 (40.781-40.828) |
+
+The first unpaced small sample took 0.501 s; it remains in the range rather
+than being discarded. Cold-start/order/concurrent host and fixture effects
+were not isolated. Fresh one-child observers used Darwin ru_maxrss bytes;
+these are medians/ranges for three observations, not p95 or enforced ceilings.
+
+Every small CSV matched exactly 8,388,608 bytes/8,192 complete rows and SHA-256
+`0482a1492daed9d2f7ee7921f5742c5b38db026fb507bc078f8edcb7a245eaa6`.
+Every large CSV matched exactly 8,388,609 bytes/one complete row and SHA-256
+`6ebd215f5992adfd7ea049e317a4c23bb6fff7653ca01e2f8f3e174d32f764e9`.
+Session, encoder, Export and finished-file counters agreed, as did accepted
+bytes and closed-file sizes. The controller checked every synthetic byte,
+then removed only those 12 verified owned payloads/100,663,302 bytes. Outputs
+and partials were empty at handoff; source/build/safe evidence remain retained.
+
+The lead inspected all four helper/controller/build sources and verified 17
+frozen inspection inputs and 193 link inputs before authorizing execution.
+Afterwards the lead read the report, verified all 38 final artifact hashes,
+recomputed all four RSS/wall medians/ranges from 36 raw records, independently
+regenerated both expected digests and checked all row/byte/deadline metadata
+and empty outputs. Removed-file byte checks are the retained controller
+assertions, not a second lead read of absent payloads.
+
+Evidence: `/private/tmp/ignatius-w10-011-d8a3ac3-JVcSVr/`.
+Preparation manifest SHA-256:
+`0238a31d34a18f7ecad40356293e6adbfd96840c1ae85b20b7946bcbc52f0f67`;
+report SHA-256: `e6f760dacb2c42e12fa6b67ca74eef9be2f43523f9b0665f4f4711f252930b51`;
+summary SHA-256: `01c99b46f42131fa2b0935fd9cfe44234594028b2ce1bba4e22310918bc85964`.
+Production optimized binary SHA-256:
+`44913b4cb2924b8236b52ab7017c30f6c9a58a80b65b2d95affce86e483f3420`;
+standalone helper SHA-256:
+`9c43f1b56914ed266708c7c1701d0cf85bb9163be17c51b1ac14c19095a29819`.
+Build identity `w10-011-d8a3ac3-jvcsvr-local`; source/rlib/lock/toolchain and
+all raw timing/stall/finish fields are retained. SDK/linker temporary-directory
+fallback warnings are recorded; no source workaround was introduced.
+
+This measures application Write acceptance above BufWriter, which may flush
+and catch up in bursts. All observed inner writes were full; short/Interrupted
+handling was source-reviewed, not fault-injected. It establishes complete
+streaming consumer backpressure and the distinct large-value allocation cost,
+not instantaneous/disk bandwidth, top-level CLI responsiveness/cancellation,
+TLS, hostile-frame bounds, native hand use, cross-platform or whole-process
+memory acceptance. No application full-suite repeat was required for this
+measurement-only work. W10-008's remaining resource contracts stay open.
+
 ## Buffered truncation disclosure - 2026-10-25
 
 W10-009's clean-base `24db9c5` clone first reproduced nine missing-disclosure

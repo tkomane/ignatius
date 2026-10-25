@@ -12,8 +12,8 @@ Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoints:
 `918c0b1` (complete export-row progress and flush uncertainty) and `d8a3ac3`
 (reachable help with local input ownership). The combined local verifier passed
 1,315 harness cases/1,027 library; clean `d8a3ac3` also passed fresh complete
-history/source secret scans. Resource contracts and the W10-011 real-writer
-pacing experiment are next. All work remains local. Read Git state before
+history/source secret scans. W10-011 real-writer pacing is now measured and
+reviewed; W10-012 bounded-notice implementation is active in isolation. All work remains local. Read Git state before
 taking an assignment; the day-long goal remains active.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
@@ -126,13 +126,24 @@ increasing notice retention and complete 8 MiB streaming values. Maximum
 observed RSS was 42.67 MiB; this is not a process ceiling. Owned export payloads
 were checked and removed. Source, helpers, manifest and results are retained
 under `/private/tmp/ignatius-w10-007-AFKZrb/`; verification records exact scope.
-W10-008 has distinct notice/frame and aggregate-result design inputs, still
-unadopted. W10-011 pins the separate real-writer pacing experiment; the
-PostgreSQL worker is preparing its isolated helpers for primary inspection
-before measurement. Root adopted W10-012's complete notice policy in the
-foundation contract, including pending precision-safe counts and explicit
-acknowledgement; the privacy lane takes isolated implementation after the
-contract checkpoint. Root owns shared records, independent review and integration.
+W10-011's exact-clean-`d8a3ac3` real-writer experiment is complete and reviewed:
+12 fresh exports plus 24 unchanged PostgreSQL 18.6/orders=3 checks, no stops,
+retries or skips. Small/large paced medians were 8.031/8.109 s with
+6.797/40.812 MiB peak RSS; all complete bytes/digests/four counters matched.
+Only the 12 verified owned payloads were removed. Sources/report/raw evidence:
+`/private/tmp/ignatius-w10-011-d8a3ac3-JVcSVr/`. This proves library-path
+backpressure above BufWriter, not CLI cancellation, TLS or process ceilings.
+
+W10-008's distinct frame/aggregate design inputs remain unadopted. Root adopted
+W10-012's complete notice policy under foundation REL-005, with fixed cumulative
+allowances, precision-safe pending counts and explicit acknowledgement. Privacy
+implements in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
+snapshots. Admission/lifecycle reds and focused greens are retained. Independent
+review found probe/describe phase mixing and a dropped pending-shortening edge;
+contract `2918069` pins their repair plus nonmutating active-count snapshots at
+actual source retirement/quit. Adapter/UI/live work and final root integration/
+full/rendered verification remain outstanding. Root owns shared records/policy;
+canonical product source is still `d8a3ac3`.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
@@ -1991,10 +2002,11 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W10-011:** run the pinned real-writer pacing experiment at clean
-   `d8a3ac3`, using the existing Session/StreamWriter/Export library route.
-   Compare complete bytes/counts and fresh-child RSS for unpaced/paced small
-   rows and a large value. This does not prove top-level CLI cancellation.
+1. **W10-012:** review repaired core03 and complete the isolated end-to-end
+   bounded-notice slice under the pinned contract. Preserve every outcome and
+   protected input owner; integrate only after peer review and affected combined
+   focused/full/live/rendered checks. W10-011 measurement is complete and frozen
+   at clean `d8a3ac3`; it does not prove top-level CLI cancellation.
 2. **W10-008:** finish and pin distinct notice, aggregate retained-result and
    incoming-allocation contracts after the measured baseline. A notice cap
    alone does not solve driver frames or startup backlogs; preserve cancellation,

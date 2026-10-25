@@ -140,7 +140,7 @@ when the behaviour exists and a test or recorded evidence proves it.
   exports remain complete and separate. Follow the exact `plan.md` policy,
   add failing-first focused/live contracts and correct the CLI's claim that
   streamed values never pass through memory.
-- [ ] W10-011 Measure real consumer backpressure through the actual
+- [x] W10-011 Measure real consumer backpressure through the actual
   Session/StreamWriter/Export library path at clean `d8a3ac3`, using the exact
   pacing/workload/stop contract in `plan.md`. Compare three fresh children per
   unpaced/paced small-row/large-value case, complete file bytes/digests/counts
@@ -219,6 +219,19 @@ plain/TLS; the socket boundary remains a semantic skip. Final log:
 That additional export
 row/flush accounting repair is specified in Feature 021 FR-2112/T023-T025;
 notice and aggregate-memory contracts remain separate W10-008 work.
+
+W10-011 evidence on 2026-10-25: exact clean `d8a3ac3`, optimized production
+library/helper, macOS 27.0.1 arm64/Homebrew Rust 1.99.1. Twelve fresh export
+children and 24 before/after PostgreSQL 18.6/orders=3 checks completed once,
+without retries/stops/skips. All complete bytes/digests/four row counters
+matched; only the 12 verified owned CSVs (100,663,302 bytes) were removed.
+Paced small/large medians were 8.031/8.109 s and 6.797/40.812 MiB peak RSS.
+Root inspected sources before execution and verified all 38 final artifact
+hashes, raw derived statistics, expected digests and empty outputs afterwards.
+Evidence: `/private/tmp/ignatius-w10-011-d8a3ac3-JVcSVr/`; report SHA-256
+`e6f760dacb2c42e12fa6b67ca74eef9be2f43523f9b0665f4f4711f252930b51`.
+This is real library-writer backpressure above BufWriter with complete data,
+not top-level CLI cancellation, disk bandwidth, TLS or a process-memory ceiling.
 
 Partial T052 evidence on 2026-08-16: the focused
 `tests/postgres_socket_integration.rs` check passed inside a disposable Linux

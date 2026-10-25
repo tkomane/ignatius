@@ -24,8 +24,10 @@ partial-flush reporting. Both passed the combined local gate with Feature 015
 T042's scrollable, input-owning help (1,315 harness cases). Native/platform and
 different-family acceptance remain distinct from those implementation tasks.
 W10-008 retains distinct notice, aggregate-result and incoming-allocation
-contracts; observed RSS peaks are not memory ceilings. W10-011 now pins a
-real-writer pacing comparison without claiming CLI cancellation. Keep these
+contracts; observed RSS peaks are not memory ceilings. W10-011's 12 real-writer
+pacing samples preserve all output bytes with distinct small/large-value RSS.
+W10-012 notice admission/accounting is specified and in isolated implementation;
+CLI cancellation and complete resource acceptance remain separate. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature
 chain; the later experience work preserves its source-bound, deliberate action.
