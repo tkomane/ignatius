@@ -756,7 +756,7 @@ fn socket_readiness_waits_for_final_tcp_server_after_temporary_socket_start() {
     );
     assert_eq!(current.sleeps, ["1", "1"]);
     let stdout = String::from_utf8_lossy(&current.output.stdout);
-    assert!(stdout.contains("socket fixture ready after 3s"));
+    assert!(stdout.contains("socket fixture ready on attempt 3"));
     assert!(!stdout.contains("synthetic socket fixture diagnostic"));
     assert_eq!(current.published_env.lines().count(), 2);
     assert!(current.published_env.contains("IGNATIUS_SOCKET_DIR="));
@@ -792,10 +792,10 @@ fn socket_readiness_fails_after_all_60_tcp_attempts_with_diagnostics() {
     assert!(current.sleeps.iter().all(|delay| delay == "1"));
     let stdout = String::from_utf8_lossy(&current.output.stdout);
     assert!(stdout.contains("synthetic socket fixture diagnostic"));
-    assert!(!stdout.contains("socket fixture ready after"));
+    assert!(!stdout.contains("socket fixture ready on attempt"));
     assert!(
         String::from_utf8_lossy(&current.output.stderr)
-            .contains("PostgreSQL socket fixture was not ready after 60 seconds")
+            .contains("PostgreSQL socket fixture was not ready after 60 attempts")
     );
 }
 

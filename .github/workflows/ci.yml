@@ -194,14 +194,14 @@ jobs:
             fi
             if [[ "$plain" == yes && "$tls" == yes ]]; then
               ready=yes
-              echo "both fixtures ready after ${attempt}s"
+              echo "both fixtures ready on attempt ${attempt}"
               break
             fi
             sleep 1
           done
 
           if [[ "$ready" != yes ]]; then
-            echo "PostgreSQL $IGNATIUS_PG_VERSION fixtures were not ready after 60 seconds" >&2
+            echo "PostgreSQL $IGNATIUS_PG_VERSION fixtures were not ready after 60 attempts" >&2
             docker compose -f docker/compose.yaml ps
             docker compose -f docker/compose.yaml logs --no-color
             exit 1
@@ -288,13 +288,13 @@ jobs:
             if docker exec "$container" \
               pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
               ready=yes
-              echo "socket fixture ready after ${attempt}s"
+              echo "socket fixture ready on attempt ${attempt}"
               break
             fi
             sleep 1
           done
           if [[ "$ready" != yes ]]; then
-            echo "PostgreSQL socket fixture was not ready after 60 seconds" >&2
+            echo "PostgreSQL socket fixture was not ready after 60 attempts" >&2
             docker logs "$container"
             exit 1
           fi
