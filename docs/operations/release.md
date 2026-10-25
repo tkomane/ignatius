@@ -763,11 +763,17 @@ performed none of those publication operations.
 
 ## Before any public release
 
-- Finish the naming work in `docs/product/landscape.md`: the name is confirmed
-  and the availability check is done, but no trademark search has been run.
-- Publish `SECURITY.md` with a working private reporting route.
-- Generate an SBOM and decide on signing and provenance. Until both are real, say
-  so plainly rather than omitting the subject.
+- Finish the naming work in `docs/product/landscape.md`: the name is confirmed,
+  but the dated research does not establish trademark clearance or registrar
+  availability. Obtain the owner's domain/distribution decision before acting.
+- Verify `SECURITY.md` and the private reporting route. The setting was enabled
+  on 2026-10-25; submission, notification and response handling remain untested.
+- Use ADR-0008's selected CycloneDX, Sigstore keyless and GitHub OIDC/SLSA
+  mechanisms. Complete the outstanding verification identity, failure/revocation
+  handling, retention and independent-verification details, then generate and
+  validate the actual candidate evidence. Provider selection is not proof that
+  an artifact is signed or provenance is verified; live actions still require
+  the owner's explicit authority.
 
 ## Support and deprecation
 
