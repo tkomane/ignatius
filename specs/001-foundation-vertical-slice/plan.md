@@ -176,3 +176,89 @@ subprocess invocation; 9 has no producer at all until export lands in Feature
 ## Complexity Tracking
 
 None. No principle needed an exception for this feature.
+
+## W10-007 bounded resource experiment - 2026-10-25
+
+This is measurement authority, not a new product limit. The read-only source
+audit at `24db9c5` found post-driver cell/notice-message caps, response
+backpressure, no aggregate retained-byte cap and an unbounded session notice
+vector. The 200k/2M export evidence measures fixed-width retained growth only.
+
+Use one clean independent clone of exact `24db9c5`, an optimized binary with
+actual source/build identity, its own external-SSD target and isolated
+configuration/data/passfile routes. Preserve the W07 clone/patch evidence and
+root's source/build target. Use only the existing loopback PostgreSQL 18.6
+synthetic fixture; no schema/data/configuration changes or lifecycle actions.
+Read authenticated server version and `orders` count before/after. Inject only
+its synthetic credential through child environment, never arguments or logs.
+
+Measure three independent child invocations per case, with no captured result
+values except deliberate synthetic stream files. Record actual per-child peak
+RSS (including the platform's units), wall time, exit code and output counts.
+Use fresh per-probe measurement helpers or an equivalent method that does not
+mistake cumulative child high-water marks for individual results. Record the
+host/toolchain, release binary/lock/source digests and concurrent-load limits.
+
+| Case | Bounded synthetic workload |
+| --- | --- |
+| Baseline | One small SELECT row |
+| One oversized retained value | One 2 MiB value, then one 8 MiB value, with a one-row retained cap |
+| Oversized value after retention cap | One small row followed by one 8 MiB value, retaining only the first row |
+| One oversized notice | One 2 MiB NOTICE, then one small SELECT row |
+| Notice-count growth | 256, 4,096 and 16,384 NOTICE messages, each carrying 256 synthetic characters, followed by one small row |
+| Complete streaming output | One 8 MiB value through the real CLI file-export route; verify complete bytes/count and remove only that owned disposable payload after recording its digest |
+
+Operational experiment bounds: one probe at a time; 30 seconds per probe with
+owned-child termination/reaping on expiry; at most 256 MiB of task output files;
+stop later cases if a completed child exceeds 512 MiB peak RSS or any fixture
+health/count check changes. These are experiment stop thresholds, not enforced
+process-memory ceilings or product promises. The bounded SQL has no persistent
+write. Retain safe small logs/metadata, and no delayed numeric-PID watchdog.
+Do not add an artificial slow-sink result if the real supported seam is absent.
+
+Report observed medians/ranges for three samples, not a statistically supported
+p95. Time/RSS observations are local macOS evidence at this frozen source;
+native Windows/Linux, TLS overhead, full UI retention, hostile-frame limits and
+the final source candidate need their own evidence. W10-008 pins follow-on
+operational contracts after this baseline rather than relabelling these
+measurements as complete resource bounds.
+
+## W10-009 buffered truncation disclosure - 2026-10-25
+
+W10-007's two-row query with `--max-rows 1 --format csv --no-header` returned
+one row, exit zero and no stderr. `ResultSet::rows_seen` correctly counted two;
+CSV discarded that metadata. This contradicts REL-002/constitutional truthful
+truncation and the current `--max-rows` help, despite valid row-cap enforcement.
+
+After successful buffered data writing in `cli::query_command`, emit one
+value-free stderr line per truncated result set for CSV, TSV, NDJSON, Markdown
+and INSERT. Pin wording:
+
+`Result set 1 truncated: retained 1 of 2 received rows. For a future complete streaming export, choose --output before execution.`
+
+Numbers are the one-based result-set ordinal (excluding statements with no
+result set), retained row length and server-delivered `rows_seen`. This does not
+claim the total rows of a failed query. Include all truncated sets, including
+a successful prefix before a later error; preserve that error's existing exit
+and diagnostic. Table and JSON already carry in-band retention metadata and
+receive no duplicate sideband warning. Non-truncated runs emit no new warning.
+Broken-pipe behavior remains the existing intentional-success path. Failure to
+write the required stderr status follows the existing I/O diagnostic boundary.
+
+Keep stdout byte-for-byte compatible, including JSON/NDJSON schemas, NULL and
+insert escaping. Query success remains exit zero: the server execution was
+successful and the status explicitly reports client retention. Do not cancel,
+retry or silently rerun a query, especially a write with RETURNING. The wording
+refers to a future export choice, never an instruction to replay the completed
+statement. The `--output` route still streams every row independently of the
+buffered cap. Its help must say it avoids retaining the entire result while
+individual values/rows and driver frames still use memory; remove the current
+false claim that result size cannot matter.
+
+Write failing-first actual CLI checks against the existing synthetic fixture
+for every affected format, multiple sets, a successful prefix then error,
+no truncation, zero-row cap and complete file streaming. Use isolated state and
+environment-only synthetic credentials, no schema/data/lifecycle changes.
+Unit-test only the semantic helper cases needed for ordinals and stderr-write
+failure. No new dependency, flag, config key, exit code or result schema.
+Core paths: `src/cli/mod.rs`, its `tests.rs` sidecar and `tests/cli_contract.rs`.

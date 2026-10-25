@@ -114,6 +114,25 @@ when the behaviour exists and a test or recorded evidence proves it.
   hook/payload contract and all query behavior unchanged. Use no production
   panic flag, unsafe FFI, real profile, database write or signal to an unowned
   PID. Record exactly which modes/paths were observed; Windows stays separate.
+- [x] W10-007 Baseline oversized-value and notice memory at clean local
+  `24db9c5` using the bounded experiment in `plan.md`, actual optimized binary
+  identity, isolated state and the existing synthetic PostgreSQL fixture.
+  Separate retained-row behavior, pre-retention driver allocation, notice-count
+  growth and complete streaming output; record peak RSS, byte/row counts,
+  medians/ranges and failures without inventing a whole-process ceiling.
+- [ ] W10-008 Use W10-007 evidence to specify distinct operational bounds for
+  notice retention, aggregate retained-result bytes and incoming frame/value
+  allocation, including truthful refusal, unknown-outcome and recovery wording.
+  Identify a real slow-export-sink measurement seam; a slow server is not a slow
+  sink. Add implementation tasks only after those contracts agree. A bounded
+  notice slice alone cannot close the complete W10 memory requirement.
+- [ ] W10-009 Repair the measured silent buffered-query truncation route:
+  CSV/TSV/NDJSON/Markdown/INSERT must report retained versus received counts on
+  stderr without changing data bytes, success exit codes or automatically
+  rerunning SQL. Table/JSON keep their existing in-band counts; streaming file
+  exports remain complete and separate. Follow the exact `plan.md` policy,
+  add failing-first focused/live contracts and correct the CLI's claim that
+  streamed values never pass through memory.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
@@ -142,6 +161,17 @@ previous hook; the original payload survived. Logs/manifest/patch:
 patch; focused repeats and the combined full gate passed, recorded in
 verification. This proves guard/hook behavior, not a full uncaught product
 crash, forced OS-device failure, native visual acceptance or Windows behavior.
+
+W10-007 evidence on 2026-10-25: clean `24db9c5`, optimized local release,
+Homebrew Rust 1.99.1, macOS 27.0.1 arm64, Apple M2 Max/32 GiB and PostgreSQL
+18.6. Twenty-seven measured CLI children (three per workload) and 28
+authenticated version/count checks completed without fixture changes or stop
+thresholds. Maximum observed RSS was 44,744,704 bytes, including a complete
+8,388,609-byte CSV export. The lead reviewed the helpers, manifest, all six
+artifact digests and removal of only the three owned export payloads.
+Evidence: `/private/tmp/ignatius-w10-007-AFKZrb/evidence/`; detailed results and
+limits are in verification. These observed peaks establish no strict process,
+frame, notice or aggregate-result ceiling. W10-008 remains open.
 
 Partial T052 evidence on 2026-08-16: the focused
 `tests/postgres_socket_integration.rs` check passed inside a disposable Linux

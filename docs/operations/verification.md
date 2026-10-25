@@ -95,6 +95,10 @@ is not terminal evidence. Later code needs fresh acceptance. Current-source
 Linux, pinned/MSRV, Windows, hosted, native hand use and required different-
 family review remain separate. No real clipboard or production write was used.
 
+After the final keymap/recovery prose edits, all 15 documentation-against-build
+contracts passed again. Log:
+`/private/tmp/ignatius-docs-after-review-2026-10-25.log`.
+
 ## Panic and error acquired-mode restoration - 2026-10-25
 
 W07-062's original mouse-enabled panic failed before prior-hook output: the
@@ -122,6 +126,57 @@ above passed. This is actual Unix guard/hook restoration evidence, not a full
 uncaught application crash or native visual acceptance. Forced output/raw-mode
 failures were unit-injected, not induced on an OS device. Windows, Linux and
 latest-source pinned/MSRV proof remain separate at this checkpoint.
+
+## Bounded resource baseline - 2026-10-25
+
+W10-007 used clean `24db9c554254cce963688b759e86039a30118fd6`, an optimized
+release binary built with actual Homebrew Rust/Cargo 1.99.1, macOS 27.0.1 arm64
+on Apple M2 Max/32 GiB, and the existing synthetic PostgreSQL 18.6 plain fixture.
+Binary SHA-256: `ad458d843f10af073565a42d62f51e361661073cdb473e94140579f50b8f6773`;
+build identity: `w10-007-24db9c5-local`. Lockfile SHA-256:
+`f636a58ae72d8bf665829ee7ab14e482f17dd0cd58e889c2beae871ed3ac1c3f`.
+
+Each of nine bounded workloads ran three times in a fresh measurement helper
+with one directly owned CLI child. Darwin reports peak child RSS in bytes;
+the helper verified its initial child high-water mark was zero. Configuration,
+data and an absent passfile were task-local; synthetic credentials were injected
+only through child environment. Bounded concurrent pipe readers drained and
+hashed output. No real credentials, persistent writes or lifecycle actions were
+used. Twenty-eight authenticated version/`orders = 3` checks stayed unchanged.
+
+| Workload | Median peak RSS MiB [range] | Median wall ms [range] | Exit |
+| --- | --- | --- | --- |
+| Small row | 8.453 [8.438-8.453] | 18.62 [16.91-19.82] | 0 |
+| Retained 2 MiB value | 12.594 [12.562-12.625] | 40.17 [36.19-44.08] | 7 |
+| Retained 8 MiB value | 18.578 [18.500-18.578] | 91.97 [89.58-104.03] | 7 |
+| 8 MiB value after one-row cap | 18.562 [18.547-18.578] | 104.24 [100.22-106.34] | 0 |
+| One 2 MiB notice | 12.688 [12.656-12.703] | 41.64 [38.04-47.28] | 0 |
+| 256 notices of 256 characters | 8.672 [8.656-8.688] | 23.09 [20.54-23.50] | 0 |
+| 4,096 notices of 256 characters | 10.031 [10.016-10.078] | 30.28 [28.36-30.67] | 0 |
+| 16,384 notices of 256 characters | 14.438 [14.375-14.453] | 161.99 [49.31-253.57] | 0 |
+| Complete streamed 8 MiB value | 42.641 [42.609-42.672] | 109.01 [101.73-112.81] | 0 |
+
+The retained-value refusals produced no stdout and correctly named the existing
+cell limit. The after-cap case still received the oversized second value; its
+one retained row produced six CSV bytes and no stderr. This exposed the separate
+W10-009 silent truncation defect. Each complete export contained one row and
+8,388,609 bytes, SHA-256
+`6ebd215f5992adfd7ea049e317a4c23bb6fff7653ca01e2f8f3e174d32f764e9`.
+Only those three owned disposable payloads were removed after verification.
+
+No 30-second deadline, 512 MiB completed-child RSS stop threshold or 256 MiB
+task-output threshold was reached. These were experiment safeguards, not
+enforced product ceilings. Background host/root-build load was uncontrolled;
+three samples support medians/ranges, not p95. TLS overhead, a real slow sink,
+native Windows/Linux and the later integrated source were not measured.
+
+Retained evidence: `/private/tmp/ignatius-w10-007-AFKZrb/evidence/`, with helpers
+`measure_one.py` and `run_experiment.py` in its parent directory. The lead read
+the workload/measurement code, checked all six artifact digests and confirmed
+zero remaining export/partial payloads. Manifest SHA-256:
+`9ef3aea0a2888b9080022fc55a66af7b5cb818d960c21857678b4222a0645beb`.
+The results motivate distinct notice, retained-result and incoming-allocation
+contracts in W10-008; they do not close that requirement.
 
 ## Local security maintenance - 2026-10-25
 

@@ -8,9 +8,11 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. Latest clean density checkpoint:
-`24db9c554254cce963688b759e86039a30118fd6`. Subsequent W04/W07 source is
-currently uncommitted and under integration. All work remains local. Read
+Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoint:
+`e9bf817` (complete review admission), after `b4dfdc0` (acquired-mode panic
+restoration). Both passed the combined local gate described below. Resource
+measurement/specification records follow as a documentation-only checkpoint.
+All work remains local. Read
 Git state before taking an assignment; the day-long goal remains active.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
