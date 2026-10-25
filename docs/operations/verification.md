@@ -102,7 +102,64 @@ rows rather than just a header. Its temporary directory cleans itself on
 failure. The focused live PostgreSQL 18.6 rerun passed in 0.70 seconds with no
 skip against unchanged application source `f99fe75` plus only this harness edit.
 Log: `/private/tmp/ignatius-export-interrupt-barrier-2026-10-25.log`.
-The complete matrix recheck remains separate until executed.
+The subsequent complete five-major recheck passed as recorded below.
+
+## Frozen PostgreSQL and Linux acceptance - 2026-10-25
+
+The reviewed multi-platform digests in `docker/postgres-images.env` were read
+from the official registry on 25 October 2026. Official source annotations
+identified the versions below on Alpine 3.24 with amd64 and arm64 manifests;
+actual local execution then established the arm64 server facts. The local
+Compose default is now 18.6; CI still resolves an immutable reviewed digest.
+
+| Major | Actual plain/TLS server version | Combined contracts | Plain session | Verified-TLS parameter/privacy | Verified-TLS session |
+| --- | --- | --- | --- | --- | --- |
+| 14 | 14.24 | 127 | 7 | 14 | 7 |
+| 15 | 15.19 | 127 | 7 | 14 | 7 |
+| 16 | 16.15 | 127 | 7 | 14 | 7 |
+| 17 | 17.11 | 127 | 7 | 14 | 7 |
+| 18 | 18.6 | 127 | 7 | 14 | 7 |
+
+All 775 cases passed with configured live fixtures. Combined contracts are
+CLI, password prompt, controlled cloud-token simulator, PostgreSQL transport,
+parameter semantics and runtime privacy. They are not live cloud-provider
+account evidence or the complete workspace suite. Each fixture was recreated
+from its reviewed digest, waited for final TCP readiness, then authenticated to
+confirm its version and three synthetic orders before testing.
+
+Source: clean `e5389f763560eae843b0b7f948e679e653043bf0`, an independent local
+clone with unchanged application code from `f99fe75` and only the interruption
+harness/documentation repair. Its actual binary reports that clean revision,
+local build identity, aarch64-apple-darwin and Homebrew Rust 1.99.1. Debug symbols
+and incremental compilation were disabled in its isolated test target. The
+earlier failed 18.6 timing run is retained rather than relabelled a pass.
+Logs and structured per-major records:
+`/private/tmp/ignatius-matrix-recheck-2026-10-25.log` and
+`/private/tmp/ignatius-matrix-recheck-2026-10-25-results.json`.
+
+Separate Linux evidence used clean frozen
+`f99fe759c2ebe942d91d75c84f42e50f9e49526a`, read-only source/vendor mounts and
+task-only named Docker volumes. Actual Linux arm64 GNU results:
+
+- Rust/Cargo 1.97.1 on Debian 13.6 passed the production PostgreSQL 18.6 Unix-
+  socket contract: one test, zero skips, authenticated SCRAM socket transport
+  and `SELECT 1`. The actual binary confirmed its clean SHA and
+  `local-linux-socket-20261025-f99fe75` build identity.
+- Rust/Cargo 1.90.0 on Debian 13.1 passed the locked, offline complete workspace,
+  all-targets/all-features compilation check. This proves the declared minimum
+  on aarch64-unknown-linux-gnu, not every target's minimum build.
+- Rust/Cargo 1.97.1 passed the three unchanged normal-quit PTY restoration tests
+  with zero skips, real util-linux `script` 2.41, GNU `stty` 9.7 and
+  `TERM=xterm-256color`. Drawing, restoration sequences and their order were
+  exercised; panic/signal exits, raw-mode readback and hand use were not.
+
+Socket, MSRV, terminal logs and checksummed metadata are retained under
+`/private/tmp/ignatius-day-20261025-linux-yuxbGZ/`. Task containers, named
+volumes, vendor copies and the task MSRV addon image were removed; unrelated
+COI container identities were preserved. Frozen Git remained clean. These
+local Docker results do not establish hosted acceptance, x86-64/Windows,
+Linux full-screen hand use or release readiness. Ongoing UI work is outside
+both frozen revisions and needs its own integrated verification.
 
 ## Live database CI coverage repair - 2026-10-25
 

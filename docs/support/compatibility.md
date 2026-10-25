@@ -19,7 +19,16 @@ whose executed jobs were rechecked on 2026-09-04. Its PostgreSQL 18 Unix-socket
 job also executed successfully. **Local evidence: PostgreSQL 14.24, 15.19,
 16.15, 17.11 and 18.4 on macOS**, 53/53 plain/TLS integration tests on each
 major against the integration branch on 2026-09-30 (see `docs/status.md`),
-with an unconfigured socket gate. The hosted baseline does not cover the newer local worktree;
+with an unconfigured socket gate. Fresh local checks on 25 October 2026 passed
+155 scoped contracts per major over PostgreSQL 14.24, 15.19, 16.15, 17.11 and
+18.6 using reviewed immutable fixtures on macOS arm64, including verified-TLS
+parameter/privacy and session guards. Clean source was `e5389f7`, whose
+application code matches the security candidate `f99fe75`. The latter also
+passed a real PostgreSQL 18.6 socket test, three normal-quit PTY contracts and
+the Rust 1.90 workspace check in Linux arm64 containers. See
+[verification](../operations/verification.md#frozen-postgresql-and-linux-acceptance---2026-10-25)
+for exact scope and retained evidence. These frozen results exclude subsequent
+UI edits. The hosted baseline does not cover the newer local worktree;
 rerun the applicable matrix against the source to be released. Native Windows
 database and hand-terminal claims remain separate evidence requirements.
 

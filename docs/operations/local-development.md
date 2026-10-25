@@ -20,14 +20,14 @@ cargo xtask db down      # stop it and delete its data
 ```
 
 `cargo xtask` is a small Rust program in `xtask/`, not a shell script, so the
-same commands work on macOS, Windows and Linux. It has no dependencies of its
-own, because it runs before anything else is known to work.
+same commands work on macOS, Windows and Linux. Its dependencies are included
+in the workspace's committed lockfile and security checks.
 
 ## Every task
 
 | Command | What it does |
 | --- | --- |
-| `cargo xtask db up` | Starts `postgres:18.4-alpine` on port 55432, waits until it is really accepting connections, loads the synthetic fixtures, and prints the URI |
+| `cargo xtask db up` | Starts `postgres:18.6-alpine` on port 55432, waits until it is really accepting connections, loads the synthetic fixtures, and prints the URI |
 | `cargo xtask db down` | Stops it and deletes its data |
 | `cargo xtask db status` | Whether it is running and ready |
 | `cargo xtask run [args]` | Opens the full-screen client against it |
