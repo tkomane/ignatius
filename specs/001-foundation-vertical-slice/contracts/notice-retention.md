@@ -232,6 +232,17 @@ not appear before the next interaction; document that boundary rather than
 pretending a periodic reader exists. Reporting I/O errors stop through the
 ordinary I/O path; do not silently `.ok()` the new loss-report writes.
 
+`doctor --target` also uses reported connection outcomes. Before dropping a
+successful probe session, drain its bounded idle accounting. If accounting is
+nonzero/unknown, add a value-free warning check named `server notice retention`
+to the existing doctor report, preserving original connection/TLS/session
+checks and the single JSON report object. Use fixed client count text and the
+next action `Review server logs separately if complete notice history is
+required.` A failed connect keeps its original failing check plus available
+client accounting. Doctor already writes a diagnostic report to stdout; do
+not add a second stderr object or query-data payload. Plain connection retries
+must deliver each attempt's available report before the next prompt/attempt.
+
 ## 5. Concrete bounded TUI delivery policy
 
 Do **not** add a permanently reserved row or change W04 review geometry. Model
