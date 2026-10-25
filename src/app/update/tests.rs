@@ -1102,6 +1102,74 @@ fn an_old_envelope_cannot_deliver_a_stale_execution() {
 }
 
 #[test]
+fn a_queued_old_profile_failure_cannot_replace_the_current_connection() {
+    let mut model = connected();
+    model.connection_generation = 2;
+    let current = model.connection.clone();
+    let failure = || {
+        Message::ConnectionFailed(Box::new(Diagnostic::new(
+            DiagnosticKind::Config,
+            "the old selected profile does not exist",
+            "resolving the selected connection",
+        )))
+    };
+
+    let effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(failure()),
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(model.connection, current);
+    assert!(model.error.is_none());
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 2,
+            message: Box::new(failure()),
+        },
+    );
+    assert!(matches!(model.connection, ConnectionState::Failed(_)));
+    assert!(model.error.is_some());
+}
+
+#[test]
+fn a_queued_old_connect_reload_cannot_start_current_catalogue_work() {
+    let mut model = connected();
+    model.connection_generation = 2;
+    let tree = model.tree.clone();
+    let completion = model.completion.clone();
+
+    let effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::Action(Action::ReloadObjects)),
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(model.tree, tree);
+    assert_eq!(model.completion, completion);
+
+    let effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: 2,
+            message: Box::new(Message::Action(Action::ReloadObjects)),
+        },
+    );
+    assert!(model.tree.loading);
+    assert!(effects.contains(&Effect::LoadSchemas));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::LoadSchemas, Effect::LoadCompletionCatalog { .. }]
+    ));
+}
+
+#[test]
 fn cancelling_requests_but_does_not_claim_cancellation() {
     let mut model = connected();
     model.editor.set_text("SELECT pg_sleep(30);");

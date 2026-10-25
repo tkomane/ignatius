@@ -40,6 +40,93 @@ fn server_bound_results_carry_their_generation_into_the_envelope() {
 }
 
 #[test]
+fn queued_connection_failures_and_reloads_keep_their_source_generation() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    send_connection_message(
+        &tx,
+        7,
+        Message::ConnectionFailed(Box::new(Diagnostic::new(
+            DiagnosticKind::Config,
+            "the selected profile does not exist",
+            "resolving the selected connection",
+        ))),
+    );
+    send_connection_message(&tx, 7, Message::Action(crate::app::Action::ReloadObjects));
+
+    let failure = rx.try_recv().expect("queued profile failure");
+    assert!(matches!(
+        failure,
+        Message::ForConnection { generation: 7, message }
+            if matches!(*message, Message::ConnectionFailed(_))
+    ));
+    let reload = rx.try_recv().expect("queued initial catalogue reload");
+    assert!(matches!(
+        reload,
+        Message::ForConnection { generation: 7, message }
+            if matches!(*message, Message::Action(crate::app::Action::ReloadObjects))
+    ));
+    assert!(rx.try_recv().is_err(), "each outcome is queued once");
+}
+
+fn resolved_test_target(database: &str) -> Arc<ConnectionTarget> {
+    Arc::new(
+        crate::connection::resolve(
+            Some(&format!("postgres://app@127.0.0.1/{database}")),
+            &crate::connection::ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &Config::default().connection,
+        )
+        .expect("synthetic target resolves without connecting"),
+    )
+}
+
+#[tokio::test]
+async fn a_profile_resolver_waiting_for_the_target_lock_cannot_replace_a_new_target() {
+    let generation = std::sync::atomic::AtomicU64::new(7);
+    let slot = tokio::sync::RwLock::new(None);
+    let mut held = slot.write().await;
+    let mut installation = Box::pin(install_connection_target(
+        &slot,
+        resolved_test_target("obsolete"),
+        &generation,
+        7,
+    ));
+
+    // Poll the old resolver into the held lock before advancing the connection.
+    // This makes the interleaving deterministic without sleeping or a database.
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(installation.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    generation.store(8, std::sync::atomic::Ordering::SeqCst);
+    let current = resolved_test_target("current");
+    *held = Some(Arc::clone(&current));
+    drop(held);
+
+    assert!(!installation.await, "the old resolver is superseded");
+    let installed = slot.read().await;
+    assert!(
+        Arc::ptr_eq(installed.as_ref().expect("current target"), &current),
+        "a superseded resolver must not overwrite the current reconnect target"
+    );
+}
+
+#[tokio::test]
+async fn a_current_profile_resolver_installs_its_reconnect_target() {
+    let generation = std::sync::atomic::AtomicU64::new(8);
+    let slot = tokio::sync::RwLock::new(None);
+    let target = resolved_test_target("current");
+
+    assert!(install_connection_target(&slot, Arc::clone(&target), &generation, 8).await);
+    let installed = slot.read().await;
+    assert!(Arc::ptr_eq(
+        installed.as_ref().expect("resolved target"),
+        &target
+    ));
+}
+
+#[test]
 fn the_starter_buffer_is_useful_and_names_the_run_key() {
     let text = starter_query();
     assert!(text.contains("Ctrl+R"), "{text}");

@@ -348,9 +348,13 @@ async fn event_loop(
                         match result {
                             Ok(target) => {
                                 let target = Arc::new(target);
-                                *selected_target.write().await = Some(Arc::clone(&target));
-                                if selected_generation.load(std::sync::atomic::Ordering::SeqCst)
-                                    != generation
+                                if !install_connection_target(
+                                    &selected_target,
+                                    Arc::clone(&target),
+                                    &selected_generation,
+                                    generation,
+                                )
+                                .await
                                 {
                                     return;
                                 }
@@ -365,8 +369,11 @@ async fn event_loop(
                                 );
                             }
                             Err(diagnostic) => {
-                                let _ = selected_tx
-                                    .send(Message::ConnectionFailed(Box::new(diagnostic)));
+                                send_connection_message(
+                                    &selected_tx,
+                                    generation,
+                                    Message::ConnectionFailed(Box::new(diagnostic)),
+                                );
                             }
                         }
                     });
@@ -830,7 +837,11 @@ fn spawn_connect(
                 if !connection_generation_is_current(&generation, request) {
                     return;
                 }
-                let _ = tx.send(Message::Action(crate::app::Action::ReloadObjects));
+                send_connection_message(
+                    &tx,
+                    request,
+                    Message::Action(crate::app::Action::ReloadObjects),
+                );
                 spawn_metadata_connect(tx, metadata, target, timeout, generation, request);
             }
             Err(diagnostic) => {
@@ -889,6 +900,22 @@ fn connection_generation_is_current(
     generation.load(std::sync::atomic::Ordering::SeqCst) == request
 }
 
+/// Installs the resolved target used by a later reconnect.
+/// Check identity while holding the slot, since acquiring it may yield.
+async fn install_connection_target(
+    slot: &tokio::sync::RwLock<Option<Arc<ConnectionTarget>>>,
+    target: Arc<ConnectionTarget>,
+    generation: &std::sync::atomic::AtomicU64,
+    request: u64,
+) -> bool {
+    let mut held = slot.write().await;
+    if !connection_generation_is_current(generation, request) {
+        return false;
+    }
+    *held = Some(target);
+    true
+}
+
 /// Wraps a server-bound result before it enters the shared application queue.
 ///
 /// The atomic check in a worker prevents unnecessary work after a switch. The
@@ -899,6 +926,12 @@ fn connection_message(generation: u64, message: Message) -> Message {
         generation,
         message: Box::new(message),
     }
+}
+
+/// Queues an asynchronous connection outcome with its source identity.
+/// A pre-send generation check cannot protect a message already in the queue.
+fn send_connection_message(tx: &mpsc::UnboundedSender<Message>, generation: u64, message: Message) {
+    let _ = tx.send(connection_message(generation, message));
 }
 
 /// The connection generation a server-bound worker belongs to.

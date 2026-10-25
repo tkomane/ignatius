@@ -73,6 +73,12 @@ the editor and documented local reading preferences. It does not reconnect on
 loss automatically. `Reconnect` in the effect enum is the explicit password-
 prompt retry during authentication, not authorization to replay a query.
 
+Asynchronous profile-resolution failures and the initial catalogue-reload
+intent carry the same connection-generation envelope as server completions.
+The reducer rejects stale envelopes even when they were queued before a switch.
+Installing the target used by a reconnect also rechecks generation while
+holding its write lock: a check made before awaiting that lock is insufficient.
+
 ## Identity and confirmation boundaries
 
 | Identity | Protects | Agent rule |

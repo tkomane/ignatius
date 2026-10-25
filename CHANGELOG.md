@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: queued profile failures and initial catalogue reloads retain their
+  connection generation. A superseded profile resolver also checks identity
+  while holding the reconnect-target lock before installing its target.
 - Fixed: pasted text now reaches the interactive client. The terminal has
   requested bracketed paste since the first release and the runtime discarded
   every paste event, so pasting into the full-screen client did nothing. A
