@@ -8,6 +8,10 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Unix SIGTERM handling is registered before full-screen terminal
+  acquisition, closing the startup window where termination could bypass
+  restoration. Registration failure refuses startup before taking terminal
+  modes; received termination uses the existing quit path.
 - Improved: resize panes with `Ctrl+K ,` and `Ctrl+K .`, and zoom or restore
   the focused pane with `Ctrl+K z`. Paging follows the drawn editor, grid, tree
   or Plan area. Session-local preferences survive resizing, while errors and

@@ -1,5 +1,171 @@
 use super::*;
 
+#[cfg(unix)]
+fn wait_for_owned_signal_child(
+    child: &mut std::process::Child,
+) -> (std::process::ExitStatus, bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().expect("poll only the owned signal child") {
+            return (status, false);
+        }
+        if std::time::Instant::now() >= deadline {
+            // It may have exited since try_wait; the unreaped owned child
+            // cannot have its PID reused before the following wait.
+            let _ = child.kill();
+            let status = child.wait().expect("reap the owned signal child");
+            return (status, true);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_is_registered_before_the_runtime_is_polled() {
+    use std::io::{BufRead, Read, Write};
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+
+    const CHILD: &str = "IGNATIUS_TEST_STARTUP_SIGNAL_CHILD";
+    const READY: &str = "IGNATIUS_STARTUP_SIGNAL_READY";
+    if std::env::var_os(CHILD).is_some() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("unpolled current-thread runtime");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        {
+            let _entered = runtime.enter();
+            let ((), termination) = prepare_terminal(&runtime, || Ok(()))
+                .expect("synchronous production signal preparation");
+            spawn_signal_watcher(tx, termination);
+        }
+        // Neither the watcher task nor the current-thread driver has run.
+        writeln!(std::io::stdout(), "{READY}").expect("signal readiness marker");
+        std::io::stdout()
+            .flush()
+            .expect("flush readiness before blocking");
+        std::io::stdin()
+            .read_exact(&mut [0_u8])
+            .expect("parent permits the first driver poll");
+        let message = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("queued termination reaches the watcher")
+                .expect("watcher emits a quit message")
+        });
+        assert!(matches!(message, Message::Action(crate::app::Action::Quit)));
+        return;
+    }
+
+    let mut child = Command::new(std::env::current_exe().expect("current libtest executable"))
+        .args([
+            "--exact",
+            "cli::interactive::tests::sigterm_is_registered_before_the_runtime_is_polled",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the one owned startup signal probe");
+    let stdout = child.stdout.take().expect("child stdout");
+    let stderr = child.stderr.take().expect("child stderr");
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut transcript = String::new();
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).expect("read child stdout") == 0 {
+                break;
+            }
+            transcript.push_str(&line);
+            if line.contains(READY) {
+                let _ = ready_tx.send(());
+            }
+        }
+        transcript
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut transcript = String::new();
+        std::io::BufReader::new(stderr)
+            .read_to_string(&mut transcript)
+            .expect("read child stderr");
+        transcript
+    });
+    if let Err(error) = ready_rx.recv_timeout(Duration::from_secs(10)) {
+        if child.try_wait().expect("poll owned child").is_none() {
+            let _ = child.kill();
+        }
+        child.wait().expect("reap unready child");
+        let stdout = stdout_reader.join().expect("join stdout reader");
+        let stderr = stderr_reader.join().expect("join stderr reader");
+        panic!("startup signal readiness failed: {error}; {stdout}; {stderr}");
+    }
+    let was_blocked = child
+        .try_wait()
+        .expect("poll owned child before signal")
+        .is_none();
+    let sent = was_blocked.then(|| {
+        Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .output()
+    });
+    // The old implementation can already be dead, so retain its exit evidence.
+    let _ = child.stdin.take().expect("child stdin").write_all(b"p");
+    let (status, timed_out) = wait_for_owned_signal_child(&mut child);
+    let stdout = stdout_reader.join().expect("join stdout reader");
+    let stderr = stderr_reader.join().expect("join stderr reader");
+    assert!(was_blocked, "child must wait for the first driver poll");
+    assert!(
+        sent.is_some_and(|result| result.is_ok_and(|output| output.status.success())),
+        "SIGTERM must be sent successfully only to the owned child"
+    );
+    assert!(
+        !timed_out,
+        "owned child exceeded completion deadline; {stdout}; {stderr}"
+    );
+    assert!(
+        status.success(),
+        "SIGTERM before the first runtime poll must queue quit; status={status}, signal={:?}; {stdout}; {stderr}",
+        status.signal()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_signal_registration_failure_never_acquires_the_terminal() {
+    let acquired = std::cell::Cell::new(false);
+    let error = register_then_acquire(
+        || {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "synthetic signal registration denied",
+            ))
+        },
+        || {
+            acquired.set(true);
+            Ok(())
+        },
+    )
+    .expect_err("registration failure must refuse terminal acquisition");
+    assert!(!acquired.get(), "no terminal mode may be taken");
+    assert_eq!(error.kind, DiagnosticKind::Internal);
+    assert_eq!(error.kind.exit_code(), ExitCode::Internal);
+    assert_eq!(error.headline, "could not prepare SIGTERM handling");
+    assert_eq!(error.attempted, "opening the interactive client");
+    assert!(
+        error
+            .next_action
+            .as_deref()
+            .is_some_and(|action| action.contains("--plain"))
+    );
+}
+
 #[test]
 fn a_connection_switch_rejects_late_work_from_the_old_generation() {
     let generation = std::sync::atomic::AtomicU64::new(7);

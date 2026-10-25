@@ -183,6 +183,12 @@ assert the exit code for both success and failure.
 - **REL-001**: The terminal MUST be restored on normal exit, error, panic and
   SIGTERM: alternate screen, cursor visibility, raw mode, bracketed paste and
   mouse capture.
+  On Unix, SIGTERM reception MUST be registered synchronously before terminal
+  acquisition, not deferred to an asynchronously scheduled watcher. A
+  registration failure MUST return an ordinary safe diagnostic before any
+  terminal mode is taken. A signal received during startup remains queued for
+  the existing quit path when the event loop starts; it does not replay SQL or
+  introduce transaction recovery. Windows signal handling is unchanged.
 - **REL-002**: Result rows held in memory MUST be bounded by an explicit cap,
   with truncation visible and the true count preserved.
 - **REL-003**: A result belonging to a superseded job MUST be discarded.

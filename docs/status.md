@@ -39,13 +39,19 @@ Git state before taking an assignment; the day-long goal remains active.
   paint, restoration order and actual canonical/echo/signal-mode recovery.
   Initial Darwin PENDIN state cleared after a same-PTY line read; full stty
   then matched without reset. Startup registration still had a window.
-- W07-060 is specified and implemented only in an isolated clone based on
-  `abe4aed`; root has not applied its two-file patch yet. The owned self-exec
-  red died by SIGTERM before runtime polling; the repair passed 21 interactive
-  tests, four PTY cases and Clippy. Lead review/integration is next.
+- W07-060's owned self-exec red died by SIGTERM before runtime polling. The
+  pre-terminal registration repair passed 21 focused runtime tests, was reviewed
+  and integrated, then passed the latest full locked verifier: 1,208 harness
+  cases/937 library, PostgreSQL 18.6 plain/TLS, semantic macOS socket skip.
+  Log: `/private/tmp/ignatius-verify-2026-10-25-signal-startup.log`. The actual
+  integrated `4a7717b` modified binary also passed owned-PTY SIGTERM, restoration
+  order, canonical/echo modes and exact stty after normal PENDIN recovery input.
+  Latest-source Linux/MSRV, panic/error paths and Windows remain open.
 
-UI code ownership is released. Its worker is producing synthetic styled-buffer
-artifacts only; the W07 worker owns only its temporary clone. No recursive
+UI code ownership is released. Its worker is preparing density contracts read-
+only; the W07 worker has released its patch and proof resources. Sixty styled
+synthetic buffers were captured and inspected, with no native visual claim.
+No recursive
 agents, Docker lifecycle overlap or shared reducer/runtime writers. The lead
 owns integration and these documents. Root's PostgreSQL 18.6 fixture pair
 remains available; unrelated COI services and original branches are preserved.

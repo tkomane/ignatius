@@ -87,6 +87,15 @@ when the behaviour exists and a test or recorded evidence proves it.
   through the child lifetime. Prove the actual child receives that isolation
   without reading the developer's real history. Retain the existing live PTY
   render/normal-quit checks; do not count this as Windows or abnormal-exit proof.
+- [x] W07-060 Close the Unix startup registration window in REL-001. Register
+  SIGTERM under the runtime before acquiring the terminal; pass the registered
+  receiver into the existing watcher and preserve Windows/query cancellation.
+  First reproduce the old asynchronous-registration race in an isolated
+  self-exec child whose current-thread runtime has not been polled, then prove
+  buffered delivery through the production preparation/watcher path. Inject a
+  registration failure through a private callback seam and prove acquisition
+  is never called. Use no production trigger flag, unsafe FFI or parent-process
+  signal. Keep actual steady-state PTY restoration evidence separate.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
@@ -99,9 +108,10 @@ are independent of one another.
 
 ## Status
 
-Phases 1 to 7 are complete except the three open items above, which require
-platform hand evidence or the Windows ConPTY harness. They are
-carried in `docs/status.md` as the next actions.
+The original platform acceptance items T051, T052 and T055a remain open for
+hand evidence or the Windows ConPTY harness. The W07 follow-ups above track
+additional lifecycle findings without relabelling that platform acceptance.
+Current assignments and evidence are carried in `docs/status.md`.
 
 Partial T052 evidence on 2026-08-16: the focused
 `tests/postgres_socket_integration.rs` check passed inside a disposable Linux
@@ -136,3 +146,22 @@ environment, never process-global state or a real profile. Red/green logs:
 `/private/tmp/ignatius-w07-059-20261025-emhifp/`. The full integrated repeat is
 recorded separately after ongoing pane work. Panic/signal/raw-mode and Windows
 coverage are not inferred from this test.
+
+W07-060 evidence on 2026-10-25: an isolated self-exec regression first died by
+SIGTERM before its current-thread runtime was ever polled. The repair passed
+21 interactive sidecar tests, four PTY contracts and warnings-denied Clippy in
+its isolated modified clone. The lead reviewed/applied the two-file patch;
+the integrated locked verifier then passed 1,208 harness cases/22 summaries,
+including PostgreSQL 18.6 plain/TLS, with the macOS socket case still a semantic
+skip. Log: `/private/tmp/ignatius-verify-2026-10-25-signal-startup.log`.
+
+The actual integrated binary reported `4a7717b` modified, Homebrew Rust 1.99.1
+and aarch64-apple-darwin. A separate owned-PTY SIGTERM run after first paint
+exited zero, restored cursor/paste/alternate-screen order and canonical/echo/
+signal modes. Full stty matched after a normal recovery-line read cleared
+Darwin PENDIN state; no reset or forced cleanup was used. Evidence:
+`/private/tmp/ignatius-rel001-integrated-20261025-w3FUso/`. The production
+pre-registration ordering is proven by the deterministic pre-poll child and
+failure callback; the PTY repeat proves steady-state restoration. Native
+Windows, panic/error process paths and a latest-source Linux/MSRV repeat remain
+separate open boundaries.

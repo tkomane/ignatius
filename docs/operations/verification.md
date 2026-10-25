@@ -193,6 +193,45 @@ cell layout/styles under their stated font/DIM assumptions. Native Terminal
 computer use was blocked by tool policy; no native screenshot or hand-use
 acceptance is claimed.
 
+## Unix startup-signal registration - 2026-10-25
+
+REL-001 now registers SIGTERM synchronously under the runtime before terminal
+acquisition and passes that existing receiver into the watcher. A failure
+returns a safe ordinary diagnostic before acquisition. Windows's existing
+Ctrl+C route and query cancellation are unchanged. The private event loop's
+Unix-only eighth argument has a narrowly documented lint allowance to keep the
+prepared receiver's ownership explicit.
+
+The old deferred registration was reproduced deterministically: an owned
+self-exec child entered an unpolled current-thread runtime, emitted readiness,
+and died by SIGTERM before any watcher could register. The repair buffers that
+signal and emits the existing Quit message after polling. An injected
+registration failure proves the terminal-acquisition callback is never called.
+The isolated clone passed 21 interactive tests, four PTY contracts and Clippy;
+red/green/patch metadata remain under
+`/private/tmp/ignatius-w07-startup-20261025-9eLtPj/`.
+
+After lead review/integration, the complete locked verifier passed formatting,
+warnings-denied lints, API/workspace/doc checks and live PostgreSQL 18.6 plain/
+TLS: 1,208 harness cases across 22 summaries, including 937 library cases.
+Its macOS socket remains a semantic skip. Source was `4a7717b` plus the reviewed
+runtime patch and specification updates. Log:
+`/private/tmp/ignatius-verify-2026-10-25-signal-startup.log`.
+
+The integrated actual binary reported modified `4a7717b`, local build identity,
+macOS arm64 and Homebrew Rust 1.99.1. Its SHA-256 was
+`9487d4fceede4e73050736c72754003d845310b09e9333c31c7c4da96375850b`.
+A separate real owned-PTY run confirmed first paint before SIGTERM, product
+exit zero, restoration order, canonical input and echo, then exact stty state
+after a normal recovery-line read cleared transient Darwin PENDIN. No reset or
+forced cleanup was used. Evidence is retained under
+`/private/tmp/ignatius-rel001-integrated-20261025-w3FUso/`; earlier clean
+`e5389f7` steady-state proof and the failed default-sandbox acquisition attempt
+remain separately under `/private/tmp/ignatius-rel001-sigterm-20261025-Bj2c6M/`.
+Neither PTY run injects a signal during acquisition; deterministic preparation
+tests establish that ordering. Latest-source Linux/MSRV, Windows, panic/error
+process paths and native visuals remain separate gates.
+
 ## PTY profile isolation - 2026-10-25
 
 The Unix terminal harness previously overrode only configuration, leaving real

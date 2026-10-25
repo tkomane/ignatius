@@ -110,15 +110,23 @@ pub fn run(
         mouse: loaded.config.ui.mouse,
         ..crate::ui::TerminalOptions::default()
     };
-    let mut guard = crate::ui::TerminalGuard::acquire(options).map_err(|err| {
-        Diagnostic::new(
-            DiagnosticKind::Internal,
-            "could not take control of the terminal",
-            "opening the interactive client",
-        )
-        .likely_cause(err.to_string())
-        .next_action("check that the terminal supports full-screen applications, or use --plain")
-    })?;
+    let acquire = || {
+        crate::ui::TerminalGuard::acquire(options).map_err(|err| {
+            Diagnostic::new(
+                DiagnosticKind::Internal,
+                "could not take control of the terminal",
+                "opening the interactive client",
+            )
+            .likely_cause(err.to_string())
+            .next_action(
+                "check that the terminal supports full-screen applications, or use --plain",
+            )
+        })
+    };
+    #[cfg(unix)]
+    let (mut guard, termination) = prepare_terminal(&runtime, acquire)?;
+    #[cfg(not(unix))]
+    let mut guard = acquire()?;
 
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
     let library = crate::queries::Library::new(&paths.queries_dir);
@@ -136,6 +144,8 @@ pub fn run(
         color_depth,
         history,
         library,
+        #[cfg(unix)]
+        termination,
     ));
 
     // Restore explicitly so any error below is printed on a working terminal.
@@ -154,6 +164,9 @@ pub fn run(
     })
 }
 
+// The Unix receiver is prepared before terminal acquisition and moved with the
+// existing session resources; keeping it explicit avoids deferred registration.
+#[cfg_attr(unix, allow(clippy::too_many_arguments))]
 async fn event_loop(
     target: Option<ConnectionTarget>,
     config: Config,
@@ -162,6 +175,7 @@ async fn event_loop(
     color_depth: crate::ui::theme::ColorDepth,
     mut history: crate::history::History,
     library: crate::queries::Library,
+    #[cfg(unix)] termination: tokio::signal::unix::Signal,
 ) -> Result<ExitCode, Diagnostic> {
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend).map_err(|err| {
@@ -234,7 +248,11 @@ async fn event_loop(
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     spawn_input_thread(tx.clone(), Arc::clone(&input_stop), &keymap);
-    spawn_signal_watcher(tx.clone());
+    spawn_signal_watcher(
+        tx.clone(),
+        #[cfg(unix)]
+        termination,
+    );
 
     // The clock lives here, not in the reducer. The ticker measures how long the
     // current activity has been running and passes it in, which is what keeps
@@ -756,14 +774,48 @@ fn mouse_modifiers(modifiers: event::KeyModifiers) -> crate::app::message::Mouse
     }
 }
 
-/// Turns a termination signal into an ordinary quit, so the terminal is restored.
-fn spawn_signal_watcher(tx: mpsc::UnboundedSender<Message>) {
+/// Registers termination before acquisition, while the runtime is entered but
+/// does not need to have polled its driver or any spawned task.
+#[cfg(unix)]
+fn prepare_terminal<G>(
+    runtime: &tokio::runtime::Runtime,
+    acquire: impl FnOnce() -> Result<G, Diagnostic>,
+) -> Result<(G, tokio::signal::unix::Signal), Diagnostic> {
+    let _entered = runtime.enter();
+    register_then_acquire(
+        || tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()),
+        acquire,
+    )
+}
+
+/// The constructor boundary keeps a registration failure ahead of every
+/// terminal side effect without adding an application flag or signal mode.
+#[cfg(unix)]
+fn register_then_acquire<G>(
+    register: impl FnOnce() -> std::io::Result<tokio::signal::unix::Signal>,
+    acquire: impl FnOnce() -> Result<G, Diagnostic>,
+) -> Result<(G, tokio::signal::unix::Signal), Diagnostic> {
+    let termination = register().map_err(|error| {
+        Diagnostic::new(
+            DiagnosticKind::Internal,
+            "could not prepare SIGTERM handling",
+            "opening the interactive client",
+        )
+        .likely_cause(error.to_string())
+        .next_action("check operating system signal support, or use --plain")
+    })?;
+    let guard = acquire()?;
+    Ok((guard, termination))
+}
+
+/// Turns a registered termination signal into an ordinary quit, so the terminal
+/// is restored. Windows retains its existing Ctrl+C receiver.
+fn spawn_signal_watcher(
+    tx: mpsc::UnboundedSender<Message>,
+    #[cfg(unix)] mut term: tokio::signal::unix::Signal,
+) {
     #[cfg(unix)]
     tokio::spawn(async move {
-        use tokio::signal::unix::{SignalKind, signal};
-        let Ok(mut term) = signal(SignalKind::terminate()) else {
-            return;
-        };
         if term.recv().await.is_some() {
             let _ = tx.send(Message::Action(crate::app::Action::Quit));
         }
