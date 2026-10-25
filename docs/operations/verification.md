@@ -562,9 +562,10 @@ ownership, minimum-size diagnostic content and clipped transaction-state
 feedback. The lead also checked that all original test names survived the four
 inline-to-sidecar moves. Density, dragging, final native visuals and hosted
 acceptance remain separate. Native cross-lane review drove the repairs;
-required different-family review remains open. The owner subsequently approved
-scoped OpenCode Go GLM-5.3 transmission with included allowance only; verifying
-the paid-fallback setting and running that actual review are still pending.
+different-family review was not performed. The owner subsequently approved
+scoped OpenCode Go GLM-5.3 transmission with included allowance only, then chose
+`Skip external review` when paid fallback could not be verified. That explicit
+owner exception preserves native independent review and local checks.
 
 Rendered review captured 60 actual Ratatui buffers: 15 synthetic scenarios in
 dark/light/high-contrast truecolour Unicode and ASCII/no-colour modes. Raw JSON

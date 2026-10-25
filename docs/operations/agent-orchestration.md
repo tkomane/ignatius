@@ -121,8 +121,12 @@ checked 25 October, says enabled **Extra Usage** can fall back to paid Console
 credit after the included limit. The older table above is historical, not proof
 of current billing controls. Installed OpenCode 1.19.4 exposes the existing Go
 identity and GLM-5.3 model route but not that billing setting. Console requires
-sign-in in the available browser. A chat question asks the owner to confirm
-Extra Usage is off before inference; no code has been submitted yet.
+sign-in in the available browser. Asked to confirm Extra Usage was off before
+inference, the owner explicitly answered `Skip external review`. No inference
+or source transmission occurred. This is the owner's exception to the
+different-family requirement for today's work; native independent review and
+local verification still apply. Do not retry this external route without a
+new owner instruction.
 
 Task-private configuration readback confirmed model and small model both
 `opencode-go/glm-5.3`, only the Go provider enabled, sharing and updates disabled,
@@ -133,9 +137,9 @@ source bundles, hashes and sanitized configuration are under
 environment credentials and unrelated files. Version-tagged
 [CLI source](https://github.com/anomalyco/opencode/blob/v1.19.4/packages/opencode/src/cli/cmd/run.ts)
 confirms noninteractive stdin is sent as prompt text; a future authorized run
-can use that path without command-line source payloads or file-reading tools.
-Record actual model, source/bundle hashes, response and limits before closing
-the different-family review gate.
+could use that path without command-line source payloads or file-reading tools.
+No actual model execution, response, metered use or completed external review
+is claimed. The prepared bundles were left local when the owner cancelled.
 
 ## Current ownership
 
