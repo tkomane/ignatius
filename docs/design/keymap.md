@@ -10,6 +10,17 @@ action/key pairs, selected for the current focus and state. A configured key
 therefore replaces the default everywhere discovery names that action; the
 command palette remains the route to actions that do not fit in the footer.
 
+Help lists every active binding/chord with wrapped labels and descriptions.
+Up/Down, PageUp/PageDown, Home/End and Ctrl+Home/Ctrl+End scroll within it.
+Its fixed rail names the active keys, close route, position and searchable
+command palette. Esc, Enter or the help key closes only help. Text, paste and
+editing/navigation keys cannot change covered SQL; other explicit commands
+close help before using their usual handler. A palette or chord prefix can
+cover help and return to the same position; pane chords retain their modal
+no-op rule. Help opened from an inspector covers that inspector until dismissed.
+Opening help or resizing starts at the top. Space bindings are written as
+`Space`, including `Ctrl+Space`.
+
 | Key | Action | Advertised |
 | --- | --- | --- |
 | `Ctrl+R` | Run the whole buffer | Yes |

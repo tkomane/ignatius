@@ -49,6 +49,7 @@ impl Binding {
         }
         parts.push(match self.code {
             KeyCode::F(n) => format!("F{n}"),
+            KeyCode::Char(' ') => "Space".to_owned(),
             KeyCode::Char(c) => c.to_ascii_uppercase().to_string(),
             KeyCode::Esc => "Esc".to_owned(),
             KeyCode::Tab => "Tab".to_owned(),
@@ -67,9 +68,8 @@ impl Binding {
 /// Actions that can be bound from configuration, by the name used there.
 ///
 /// One table, used to parse the file, to report an unknown name with the list
-/// of real ones, and to generate the documentation. Movement keys are not here:
-/// they mean different things in each pane and rebinding them individually
-/// would produce an interface nobody could describe.
+/// of real ones, and to generate the documentation. Direction/page movement
+/// keeps its pane-relative defaults; line and buffer boundaries can be rebound.
 pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("run-buffer", Action::RunBuffer),
     ("run-statement", Action::RunStatement),

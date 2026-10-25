@@ -105,14 +105,14 @@ fn render_with(
     if model.completion.menu.is_some() {
         render_completion(model, presentation, area, buf);
     }
-    if model.help_open {
-        render_help(keymap, presentation, area, buf);
-    }
     if let Some(inspector) = &model.inspector {
         render_inspector(model, *inspector, presentation, area, buf);
     }
     if let Some(definition) = &model.definition {
         render_definition(definition, presentation, area, buf);
+    }
+    if model.help_open {
+        render_help(model, presentation, area, buf);
     }
     if let Some(palette) = &model.palette {
         render_palette(palette, presentation, area, buf);

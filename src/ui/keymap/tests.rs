@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn space_bindings_have_a_visible_key_name_without_changing_input() {
+    let keymap = Keymap::new();
+    let binding = keymap
+        .bindings()
+        .iter()
+        .find(|binding| binding.action == Action::Complete)
+        .unwrap();
+    assert_eq!(binding.key_label(), "Ctrl+Space");
+    assert_eq!(binding.code, KeyCode::Char(' '));
+    assert_eq!(binding.modifiers, KeyModifiers::CONTROL);
+}
+
+#[test]
 fn pane_chords_and_configured_replacements_preserve_plain_text() {
     for (key, name, action) in [
         (',', "shrink-pane", Action::ShrinkPane),

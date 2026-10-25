@@ -538,6 +538,15 @@ Below 40x8 or without two readable body rows, the client explains how to enlarge
 or cancel and sends nothing. Late cell-update metadata cannot cover a newer
 input/review owner. Feature 018 T037-T040 records implementation and acceptance.
 
+Help keeps every active binding/chord and complete description reachable by
+local scrolling, with a fixed navigation/close/palette rail. Long and Unicode
+key labels wrap without colliding with descriptions. At narrow widths the rail
+teaches page scrolling; first/last keys remain available. Ordinary typing/paste
+cannot edit covered SQL. A cancelled palette or prefix returns to its help
+position; a real command choice reveals its target, including clearing covered
+reading panels before object insertion. `Space` is named visibly. Feature 015
+T042 records local implementation/rendered checks; native hand use is separate.
+
 ## Terminals
 
 | Terminal | Status |
@@ -565,9 +574,10 @@ contain sensitive information and cannot prove a database write outcome.
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | Verified by hand, and by the CI macOS runner |
-| Windows, GitHub `windows-latest` runner | Builds and passes unit, layout and CLI contract tests, plus a startup smoke test |
-| Linux, GitHub `ubuntu-latest` runner | The same, plus the full PostgreSQL integration suite against 14, 16 and 18 |
+| macOS on Apple silicon | Dated local CLI, PostgreSQL and owned-PTY evidence; latest-source native visual/full hand-use acceptance remains open. Historical hosted results cover their recorded source only. |
+| Windows, GitHub `windows-latest` runner | Historical builds/unit/layout/CLI/startup results; today's local branch has no fresh hosted/native Windows acceptance. |
+| Linux, GitHub `ubuntu-latest` runner | Historical hosted PostgreSQL/CLI evidence covers its recorded source, not today's later local changes. |
+| Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
 
 Claims are stated by runner rather than by target triple, because the runner is

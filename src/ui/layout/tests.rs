@@ -3109,6 +3109,75 @@ fn a_tiny_terminal_explains_itself_and_offers_a_way_out() {
 }
 
 #[test]
+fn help_end_reaches_the_last_chord_in_the_actual_buffer() {
+    let mut model = connected_model(Environment::Local);
+    model.size = (120, 30);
+    let keymap = Keymap::new();
+    model.keymap_snapshot = keymap.snapshot();
+    crate::app::update(
+        &mut model,
+        crate::app::Message::Action(crate::app::Action::ToggleHelp),
+    );
+    crate::app::update(
+        &mut model,
+        crate::app::Message::Action(crate::app::Action::MoveBufferEnd),
+    );
+    let text = render_to_string(&model, &keymap, &rich(), 120, 30);
+    let (last, _, description) = crate::ui::keymap::CHORDS.last().unwrap();
+    assert!(
+        text.contains(&format!("Ctrl+K {last}")),
+        "the final chord is reachable: {text}"
+    );
+    assert!(
+        text.contains(description),
+        "the final description is reachable: {text}"
+    );
+    assert!(text.contains("Esc to close"));
+}
+
+#[test]
+fn help_opened_from_an_inspector_is_drawn_above_it_and_returns_to_it() {
+    let mut model = connected_model(Environment::Local);
+    with_rows(
+        &mut model,
+        &["value"],
+        &[&[Cell::Text("synthetic-inspector-value".into())]],
+    );
+    model.focus = Focus::Results;
+    let keymap = Keymap::new();
+    model.keymap_snapshot = keymap.snapshot();
+    model.size = (100, 30);
+    crate::app::update(
+        &mut model,
+        crate::app::Message::Action(crate::app::Action::ToggleInspector),
+    );
+    assert!(model.inspector.is_some());
+    crate::app::update(
+        &mut model,
+        crate::app::Message::Action(crate::app::Action::ToggleHelp),
+    );
+    assert!(model.help_open);
+    let area = Rect::new(0, 0, 100, 30);
+    let view = crate::ui::help::build(&model, &model.presentation, area);
+    let mut actual = Buffer::empty(area);
+    crate::ui::layout::render(&model, &keymap, area, &mut actual);
+    let mut help_only = model.clone();
+    help_only.inspector = None;
+    let mut expected = Buffer::empty(area);
+    crate::ui::layout::render(&help_only, &keymap, area, &mut expected);
+    for y in view.outer.y..view.outer.bottom() {
+        for x in view.outer.x..view.outer.right() {
+            assert_eq!(actual[(x, y)], expected[(x, y)]);
+        }
+    }
+    crate::app::update(
+        &mut model,
+        crate::app::Message::Action(crate::app::Action::Activate),
+    );
+    assert!(!model.help_open && model.inspector.is_some());
+}
+
+#[test]
 fn help_lists_every_binding_and_how_to_close_it() {
     let mut model = connected_model(Environment::Local);
     model.help_open = true;

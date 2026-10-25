@@ -908,62 +908,28 @@ pub(crate) fn render_chords(
         .render(chord_area, buf);
 }
 pub(crate) fn render_help(
-    keymap: &Keymap,
+    model: &crate::app::Model,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let rows = keymap.bindings().len() + crate::ui::keymap::CHORDS.len() + 2;
-    let height = u16::try_from(rows).unwrap_or(u16::MAX).saturating_add(3);
-    let help_area = overlay_box(
-        area,
+    let view = crate::ui::help::build(model, presentation, area);
+    ratatui::widgets::Clear.render(view.outer, buf);
+    overlay_block(
+        format!(" {}Help ", presentation.icon(Icon::Help)),
         presentation,
-        (70, height),
-        height.min(area.height.saturating_sub(2)),
-        OverlayAnchor::Center,
-    );
-
-    ratatui::widgets::Clear.render(help_area, buf);
-    let mut lines = vec![Line::from(Span::styled(
-        "Every action is reachable from the keyboard.",
-        theme.style(Token::Muted),
-    ))];
-    for binding in keymap.bindings() {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {:<12}", binding.key_label()),
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(binding.description, theme.style(Token::Text)),
-        ]));
-    }
-
-    // The chords belong here too. Reading help and still not knowing how to
-    // reach half the interface is the failure this overlay exists to prevent.
-    let prefix = keymap
-        .contextual_hint(&crate::app::Action::BeginPrefix)
-        .map(|(key, _)| key)
-        .unwrap_or_else(|| "Ctrl+K".to_owned());
-    lines.push(Line::from(Span::styled(
-        format!("{prefix} then:"),
-        theme.style(Token::Muted),
-    )));
-    for (key, _, description) in crate::ui::keymap::CHORDS {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {:<12}", format!("{prefix} {key}")),
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(*description, theme.style(Token::Text)),
-        ]));
-    }
-
-    Paragraph::new(lines)
-        .block(overlay_block(
-            format!(" {}Help  Esc to close ", presentation.icon(Icon::Help)),
-            presentation,
-        ))
-        .style(theme.style(Token::Text))
-        .render(help_area, buf);
+    )
+    .render(view.outer, buf);
+    Paragraph::new(view.window().to_vec())
+        .style(presentation.theme.style(Token::Text))
+        .render(view.body, buf);
+    Paragraph::new(
+        view.rail
+            .iter()
+            .cloned()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    )
+    .style(presentation.theme.style(Token::Focus))
+    .render(view.rail_area, buf);
 }

@@ -8,6 +8,196 @@ use crate::query::value::Cell;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[test]
+fn help_reading_never_edits_or_moves_the_covered_editor() {
+    for action in [
+        Action::Insert('z'),
+        Action::Backspace,
+        Action::DeleteForward,
+        Action::DeleteWordLeft,
+        Action::Undo,
+        Action::Redo,
+        Action::Move(Direction::Up),
+        Action::MovePage(Direction::Down),
+        Action::MoveLineStart,
+        Action::MoveBufferEnd,
+        Action::MoveWord(Direction::Left),
+        Action::FocusNext,
+    ] {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;\nSELECT 2;");
+        model.editor.set_cursor(8);
+        update(&mut model, Message::Action(Action::ToggleHelp));
+        let before = model.editor.clone();
+        let focus = model.focus;
+        assert!(update(&mut model, Message::Action(action.clone())).is_empty());
+        assert_eq!(model.editor.text(), before.text(), "{action:?}");
+        assert_eq!(model.editor.cursor(), before.cursor(), "{action:?}");
+        assert_eq!(model.focus, focus, "{action:?}");
+        assert!(model.help_open, "{action:?}");
+    }
+}
+
+#[test]
+fn help_reading_ignores_paste_with_the_existing_fixed_feedback() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert!(update(&mut model, Message::Pasted("synthetic-help-paste".into())).is_empty());
+    assert_eq!(model.editor.text(), "SELECT 1;");
+    assert_eq!(model.paste_notice, Some(PasteNotice::Ignored));
+}
+
+#[test]
+fn help_acceptance_closes_only_help_without_inserting_a_newline() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(!model.help_open);
+    assert_eq!(model.editor.text(), "SELECT 1;");
+}
+
+#[test]
+fn help_navigation_survives_ticks_and_a_nested_palette_but_restarts_after_resize() {
+    let mut model = connected();
+    model.size = (100, 30);
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let last = model.help_scroll;
+    assert!(last > 0);
+    update(&mut model, Message::Tick { running_for: None });
+    assert_eq!(model.help_scroll, last);
+    update(&mut model, Message::Action(Action::OpenPalette));
+    assert!(model.help_open && model.palette.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.help_open && model.palette.is_none());
+    assert_eq!(model.help_scroll, last);
+    update(&mut model, Message::Resized(100, 30));
+    assert_eq!(model.help_scroll, last);
+    update(&mut model, Message::Resized(40, 8));
+    assert_eq!(model.help_scroll, 0);
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    assert!(model.help_scroll > 0);
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert_eq!(model.help_scroll, 0);
+}
+
+#[test]
+fn explicit_run_reveals_its_surface_and_keeps_the_existing_one_shot_effect() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(!model.help_open);
+    assert!(matches!(effects.as_slice(), [Effect::Execute { .. }]));
+}
+
+#[test]
+fn help_stays_beneath_every_protected_sending_review() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut model = review_viewport_case(family, true);
+        model.size = (40, 8);
+        model.help_open = true;
+        assert!(update(&mut model, Message::Action(Action::MoveBufferEnd)).is_empty());
+        assert!(model.review_scroll > 0, "{family}");
+        assert_eq!(model.help_scroll, 0, "{family}");
+        assert!(model.help_open);
+    }
+}
+
+fn choose_help_palette_entry(
+    model: &mut Model,
+    predicate: impl Fn(&crate::app::palette::PaletteCommand) -> bool,
+) {
+    let index = model
+        .palette
+        .as_ref()
+        .unwrap()
+        .matches()
+        .iter()
+        .position(|entry| predicate(&entry.command))
+        .expect("actual available palette entry");
+    for _ in 0..index {
+        assert!(update(model, Message::Action(Action::Move(Direction::Down))).is_empty());
+    }
+    assert!(update(model, Message::Action(Action::Activate)).is_empty());
+}
+
+fn help_palette_object_insert(inspector: bool) {
+    let mut model = copy_model(vec![vec![
+        Cell::Text("1".into()),
+        Cell::Text("synthetic-view".into()),
+    ]]);
+    model.tree = with_selected_table().tree;
+    model.focus = Focus::Results;
+    model.editor.set_text("SELECT * FROM ");
+    if inspector {
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_some());
+    }
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert!(model.help_open);
+    update(&mut model, Message::Action(Action::OpenPalette));
+    choose_help_palette_entry(&mut model, |command| {
+        matches!(command, crate::app::palette::PaletteCommand::Insert(_))
+    });
+    assert_eq!(model.editor.text(), "SELECT * FROM \"public\".\"orders\"");
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(!model.help_open, "the chosen editor mutation is revealed");
+    assert!(
+        model.inspector.is_none(),
+        "an old inspector cannot cover the changed editor"
+    );
+}
+
+#[test]
+fn help_palette_object_selection_reveals_the_editor() {
+    help_palette_object_insert(false);
+}
+
+#[test]
+fn help_palette_object_selection_reveals_the_editor_beneath_an_inspector() {
+    help_palette_object_insert(true);
+}
+
+#[test]
+fn help_palette_selected_pane_command_uses_its_normal_handler() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let before = split_dividers(&model).1.unwrap();
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::OpenPalette));
+    choose_help_palette_entry(&mut model, |command| {
+        *command == crate::app::palette::PaletteCommand::Run(Action::GrowPane)
+    });
+    assert!(!model.help_open);
+    assert_eq!(split_dividers(&model).1, Some(before + 1));
+}
+
+#[test]
+fn help_palette_toggle_and_empty_choice_preserve_their_existing_meanings() {
+    let mut model = connected();
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let offset = model.help_scroll;
+    update(&mut model, Message::Action(Action::OpenPalette));
+    for character in "no-match-Q271828".chars() {
+        update(&mut model, Message::Action(Action::Insert(character)));
+    }
+    assert!(model.palette.as_ref().unwrap().matches().is_empty());
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.help_open);
+    assert_eq!(model.help_scroll, offset);
+    update(&mut model, Message::Action(Action::OpenPalette));
+    choose_help_palette_entry(&mut model, |command| {
+        *command == crate::app::palette::PaletteCommand::Run(Action::ToggleHelp)
+    });
+    assert!(!model.help_open);
+}
+
 fn review_viewport_case(family: &str, long: bool) -> Model {
     let mut model = match family {
         "copy" => {

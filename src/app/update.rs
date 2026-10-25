@@ -57,6 +57,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             if model.size != (columns, rows) {
                 model.size = (columns, rows);
                 model.review_scroll = 0;
+                model.help_scroll = 0;
             }
             Vec::new()
         }
@@ -657,6 +658,56 @@ fn format_buffer(model: &mut Model) {
     });
 }
 
+/// Help owns reading/navigation, while explicit commands reveal their target
+/// surface before using the existing handler and its safety checks.
+fn help_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let view = crate::ui::help::build(
+        model,
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    );
+    if let Some(offset) = view.navigate(&action) {
+        model.help_scroll = offset;
+        return Vec::new();
+    }
+    match action {
+        Action::ToggleHelp | Action::Dismiss | Action::Activate => {
+            model.help_open = false;
+            Vec::new()
+        }
+        Action::OpenPalette => {
+            model.palette = Some(crate::app::palette::Palette::over_commands(
+                palette_entries(model),
+                crate::app::discovery::palette_note(model),
+            ));
+            Vec::new()
+        }
+        Action::BeginPrefix => {
+            // Retain help until the continuation identifies the command.
+            // Pane chords must still respect their existing modal no-op rule.
+            model.prefix_pending = true;
+            Vec::new()
+        }
+        Action::Insert(_)
+        | Action::Backspace
+        | Action::DeleteForward
+        | Action::DeleteWordLeft
+        | Action::Undo
+        | Action::Redo
+        | Action::Move(_)
+        | Action::MovePage(_)
+        | Action::MoveWord(_)
+        | Action::FocusNext
+        | Action::ShrinkPane
+        | Action::GrowPane
+        | Action::ZoomPane => Vec::new(),
+        other => {
+            model.help_open = false;
+            apply_action(model, other)
+        }
+    }
+}
+
 fn pane_input_owned(model: &Model) -> bool {
     model.inspector.is_some()
         || model.definition.is_some()
@@ -715,6 +766,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.palette.is_some() {
         return palette_action(model, action);
     }
+    if model.help_open {
+        return help_action(model, action);
+    }
     // Keep the owner until the continuation identifies the command. Layout
     // actions then remain no-ops; other commands retain their normal handler.
     if matches!(action, Action::BeginPrefix) && pane_input_owned(model) {
@@ -750,6 +804,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::ToggleHelp => {
             model.help_open = !model.help_open;
+            if model.help_open {
+                model.help_scroll = 0;
+            }
             Vec::new()
         }
         Action::Dismiss => {
@@ -1523,6 +1580,9 @@ fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::ToggleHelp => {
             model.help_open = !model.help_open;
+            if model.help_open {
+                model.help_scroll = 0;
+            }
         }
         // Typing is swallowed: the editor is underneath, and a keystroke that
         // silently edits SQL the user cannot see is the worst outcome here.
@@ -2982,7 +3042,14 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Activate => {
             let chosen = palette.selected_entry();
             model.palette = None;
+            let had_help = model.help_open;
+            if chosen.is_some() {
+                model.help_open = false;
+            }
             match chosen.map(|entry| entry.command) {
+                Some(crate::app::palette::PaletteCommand::Run(Action::ToggleHelp)) if had_help => {
+                    Vec::new()
+                }
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
                 Some(crate::app::palette::PaletteCommand::ConnectionDetails) => {
                     model.connection_details = true;
@@ -2995,11 +3062,14 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     begin_export_format(model, format)
                 }
                 Some(crate::app::palette::PaletteCommand::Open(name)) => {
+                    if had_help {
+                        reveal_palette_editor(model);
+                    }
                     model.loaded_query = Some(name.clone());
                     vec![Effect::LoadQuery { name }]
                 }
                 Some(crate::app::palette::PaletteCommand::Insert(text)) => {
-                    model.focus = Focus::Editor;
+                    reveal_palette_editor(model);
                     edit_editor(model, |editor| {
                         for ch in text.chars() {
                             editor.insert(ch);
@@ -3032,6 +3102,17 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Direct editor-target palette entries bypass action dispatch. Reveal that
+/// target after selection, preserving covered reading state on cancellation.
+fn reveal_palette_editor(model: &mut Model) {
+    model.focus = Focus::Editor;
+    model.inspector = None;
+    model.definition = None;
+    model.completion.menu = None;
+    model.tree.filtering = false;
+    model.result_filtering = false;
 }
 
 /// Handles input while the read-only connection trust surface is open.
@@ -3131,6 +3212,11 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
             palette.push(character);
         }
         model.paste_notice = None;
+        return Vec::new();
+    }
+    if model.help_open {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
         return Vec::new();
     }
     if model.tree.filtering {

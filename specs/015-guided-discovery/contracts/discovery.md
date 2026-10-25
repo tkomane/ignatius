@@ -81,9 +81,21 @@ details and palette keep their existing higher ownership. Help sits above
 completion, filters, inspector and definition; opening help from an inspector
 must display help and preserve the inspector underneath. Closing it restores
 that owner. Do not bypass W04 sending gates or alter modal priority elsewhere.
+The chord prefix also opens above help without closing it; dismissing the
+prefix returns to help, and pane-resizing chords retain their modal no-op rule.
+At narrow widths the rail may teach just the complete page-scroll keys; first/
+last keys remain listed and functional in the body. Long valid control remaps
+must retain a body at 40x8 rather than replacing the binding list with refusal.
+Cancelling an unchosen palette preserves its help/inspector parent. A real
+selection closes help before normal dispatch; direct object insertion or saved-
+query opening reveals Editor and dismisses covered inspector/definition/
+completion/filter input without clearing filter criteria. Selecting the Help
+toggle from an already open help parent closes it rather than reopening it.
 Use the runtime's active keymap snapshot for shared metrics, preserving the
 existing default-only fallback for models without a snapshot. Displayed custom
 key labels are never replaced with assumed defaults.
+Space-key bindings must say `Space`, including `Ctrl+Space`, rather than an
+invisible trailing character. This changes display labels only, not input keys.
 
 Add failing-first real-buffer traversal and reducer cases for every entry,
 long remaps, Unicode, both densities, dark/light/high-contrast and ASCII/no-colour,

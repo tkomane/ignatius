@@ -122,22 +122,61 @@ result bounds and slow-sink evidence.
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
 PostgreSQL 18.6 route (61 integrated focused passes, zero skips). The canonical
-three-file source/docs change awaits the combined full gate after W10-010.
-Task remains unchecked until then. No persistent schema/data changed.
+three-file source/docs change passed the final combined full gate below and
+W10-009 is checked. No persistent schema/data changed by its focused checks.
 
-Current workers: privacy owns W10-010 only in a new independent exact-`871db73`
+Completed worker lanes: privacy implemented W10-010 in an independent exact-`871db73`
 clone/new SSD target: encoder/runtime progress must not count failed rows;
 typed abandonment distinguishes confirmed flush from unknown file-row count.
-Feature 021 FR-2112/T023-T025 pin scope before code. PostgreSQL worker owns
+Feature 021 FR-2112/T023-T025 pinned scope before code. PostgreSQL worker completed
 frozen Linux arm64 pinned/MSRV/socket/PTY verification at clean `871db73`,
 with only its new labelled resources and explicit root/COI preservation. That
 frozen source excludes W10-009. Both workers leave canonical source/cache and
 docs alone; root owns integration and the combined full gate.
 
+W10-010's six-file patch is now primary-reviewed and applied. It preserves
+BufWriter Drop salvage, counts only accepted complete rows and adds typed
+flushed/unconfirmed reporting. Private proof: six behavioral reds/four controls,
+73 focused passes including three read-only live export contracts, Clippy/fmt;
+no native disk-full claim. Exact patch/evidence are retained in
+`/private/tmp/ignatius-w10-010-evidence-20261025.txt`. A separate native peer
+found no blocker and verified all 33 original moved tests. Feature 021
+T023-T025 are checked after the final combined gate. Source awaits local commit.
+
+Root also owns Feature015 T042's specified help follow-up. Four behavioral
+regressions reproduced hidden typing/paste/Enter edits and the unreachable final
+chord. One additional red proved the blank Space key label. A pure shared help
+viewport, local navigation, matching overlay ownership and visible Space names
+passed 20 selected cases after additional peer findings, including actual-cell
+traversal with valid long/Unicode remaps. Native peer re-review found no remaining
+blocker in those fixes. T042 is checked after representative inspection from
+104 styled synthetic buffers and the final full gate. Both workers are idle
+after scoped reviews; root owns the local commits and next resource work.
+
+The final full verifier at modified `dd69f66`, including W10-009/010/help, passed
+1,315 harness cases/1,027 library, formatting, lints/API docs and PostgreSQL 18.6
+plain/TLS. The macOS socket remains a semantic skip. Log:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+The earlier 1,310-case run excludes five later peer regressions/repairs: actual
+object Insert choices with/without an inspector, a chosen pane command and long
+40x8 controls. All were reproduced, repaired and re-reviewed. The strengthened
+actual-last-chord assertion also passed separately after the full run, without
+production changes. Styled provenance: `/private/tmp/ignatius-help-styled-_hofm3y7/`.
+These are local implementation/focused/full/live/rendered-cell results, not
+current hosted/native-platform/hand-use or different-family acceptance.
+
+Frozen `871db73` Linux acceptance/cleanup is complete: full library 996, socket
+one, terminal six (1,003 outer harness cases, zero skips), actual pinned Rust
+1.97.1 and Rust 1.90 compilation. Sixteen nested guard/hook PTY children are
+separate observations, not additional outer passes. Exact scope, source/binary
+identity, initdb-auth caveat and reviewed cleanup are in verification.
+
 The lead alone owns CLI/runtime-sidecar writes, documentation, compatibility,
 changelog and integration. No shared reducer/runtime writer is permitted.
-Linux's clean `21511f1` acceptance and task-only cleanup are complete and
-exclude density. No fixture may be torn down by a worker. Rendered-cell checks
+Linux's clean `871db73` acceptance and task-only cleanup are complete and
+exclude later CLI/export/help work. No shared/root fixture may be torn down by
+a worker; only its explicitly assigned labelled resources may be cleaned.
+Rendered-cell checks
 do not establish native terminal appearance or hand-use acceptance.
 
 No recursive agents or shared reducer/runtime writers. Root's PostgreSQL 18.6

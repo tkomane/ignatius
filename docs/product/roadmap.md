@@ -19,7 +19,10 @@ repair the reproduced narrow-review disclosure failure across five sending
 surfaces and passed the complete local verifier (1,270 harness cases). W07-062
 also proves actual error/panic guard restoration in owned macOS PTYs. W10-007
 measured oversized-value/notice retention and exposed silent CSV truncation;
-the specified W10-009 disclosure repair precedes further experience work.
+W10-009 now discloses buffered truncation and W10-010 repairs complete-row/
+partial-flush reporting. Both passed the combined local gate with Feature 015
+T042's scrollable, input-owning help (1,315 harness cases). Native/platform and
+different-family acceptance remain distinct from those implementation tasks.
 W10-008 retains distinct notice, aggregate-result and incoming-allocation
 contracts; observed RSS peaks are not memory ceilings. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
@@ -110,8 +113,9 @@ flowchart LR
    T039/T041's keyboard split/zoom core passed local integration on 25 October
    2026. Density T040 and T038 test implementation also passed the complete
    local gate. Dragging still belongs to T035. Full US7, native visual and
-   hosted acceptance remain open. Static help clipping is tracked in Feature
-   015 T042; specify its local navigation/ownership before changing the UI.
+   hosted acceptance remain open. Feature 015 T042's observed help clipping and
+   hidden-input routes are repaired and locally verified. Continue the remaining
+   theme/pointer/daily-use contracts after the distinct W10 resource bounds.
 
 Use full feature directory slugs in assignments. The historical `007` collision
 and old broad-theme numbers are documented in the inventory; neither justifies

@@ -204,7 +204,17 @@ checks. The combined final full verifier below passed after W10-010/help
 integration; the earlier 1,270-case review/panic gate does not cover this CLI
 change. Latest-source Linux/MSRV/Windows and hosted acceptance remain separate.
 
-## Complete-row export accounting - 2026-10-25
+## Final local help/export integration - 2026-10-25
+
+The combined modified `dd69f66` source passed the complete locked verifier:
+1,315 outer harness cases/1,027 library across 22 summaries, formatting,
+warnings-denied lints/API documentation and PostgreSQL 18.6 plain/TLS. Actual
+environment: macOS 27.0.1 arm64/Homebrew Rust 1.99.1. Log:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+The macOS Unix-socket case remains a semantic skip; the inert terminal parent
+helper is not terminal evidence. The previous 1,310-case run passed before
+five additional peer-review regressions/repairs and is retained separately;
+it does not close those later findings.
 
 W10-010 first reproduced six progress/flush failures while four controls passed,
 with 24 before/mid/terminator write faults across first/later rows and four
@@ -217,13 +227,74 @@ upgrades an explicitly failed flush. Evidence and exact patch SHA-256:
 `/private/tmp/ignatius-w10-010-evidence-20261025.txt`. These injected failures
 do not establish native ENOSPC, durability failure or another OS's behavior.
 
-Primary integration passed the combined modified `dd69f66` full verifier,
-including uncommitted T042 help work: 1,315 harness cases/1,027 library,
-PostgreSQL 18.6 plain/TLS, formatting and warnings-denied lints/API docs. Log:
-`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
-macOS 27.0.1 arm64/Homebrew Rust 1.99.1; socket remains a semantic skip.
-Frozen Linux `871db73` excludes this repair; current-source Linux/MSRV/Windows,
-hosted, native hand use and required different-family review remain separate.
+Feature 015 T042 first reproduced four hidden-input/unreachable-content
+failures and the invisible Space label. Full library integration caught two
+old chord-owner regressions; their existing tests were kept and the code fixed.
+Native peer review then reproduced real palette Insert choices with/without an
+inspector, a swallowed selected pane command, and valid long-remap 40x8 loss of
+the binding list. Twenty selected help cases passed after the fixes. The
+unchosen palette/toggle control remained green; direct editor choices reveal
+their target, ordinary commands retain existing guards, and narrow navigation
+uses complete actual page-key labels. Reds/greens:
+`/private/tmp/ignatius-help-{red-behavioral,palette-red,remap-red,peer-fixes-green}-20261025.log`.
+
+The lead inspected representative frames from 104 actual styled Ratatui buffers
+across both densities, three truecolour themes and ASCII/no-colour. Inspection
+included late content, long/Unicode key rows, 40x8 default/long controls,
+inspector/palette return and 20x4 close recovery. Capture checks exclude the
+underlying footer when locating remapped key rows. All eight raw end/return-
+from-palette pairs match. Evidence:
+`/private/tmp/ignatius-help-styled-_hofm3y7/`; source-input SHA-256:
+`ddc57e904571a0d47a801b7e2965d44bb5b49b6ebeb7ae2f8029c79fae9c00db`;
+fresh Cargo-selected non-test library SHA-256:
+`24574a885e6e5a86135b7751ebe39cb83c0d6d60c486818934b25b7a00d87d69`.
+Reference fonts, Unicode fallback, DIM/Reset assumptions, raw symbols/styles
+and linked-library paths are retained. No effect was dispatched. The actual
+last-chord buffer assertion was strengthened after the full run and passed as
+one focused check, with production inputs unchanged:
+`/private/tmp/ignatius-help-actual-last-chord-20261025.log`.
+
+These are local focused/full/live/rendered-cell results. Frozen Linux `871db73`
+below excludes the later CLI/export/help implementation. Current-source
+Linux/pinned/MSRV/Windows, hosted, required different-family review and native
+visual/hand-use acceptance remain separate. Nothing was pushed or released.
+
+## Frozen review/panic Linux acceptance - 2026-10-25
+
+Clean `871db73673ebf4119cbc6bfcf3d39eeb2dfbadf3` (application/Cargo inputs equal
+`179e0f3`) passed on Debian 13/Linux arm64 with actual pinned Rust 1.97.1:
+996 full-library cases, one real PostgreSQL Unix-socket contract and six
+external terminal-restoration contracts, all zero skips. The 1,003 outer cases
+include two guard/hook drivers with 16 nested PTY children; those children are
+not added again to the total. Three separate application PTYs prove normal
+quit, while three external harness helpers cover isolation/deadline/capture.
+Actual Rust 1.90.0 locked/offline workspace/all-targets/all-features compilation
+also passed. The inert library parent helper is not terminal evidence.
+
+The production debug binary confirmed clean exact source, build
+`linux-871db73-xkko8x-197`, `aarch64-unknown-linux-gnu` and Rust 1.97.1. Its
+SHA-256 matched after both runtime phases:
+`a9093c7ed3eca365eb11cef31911f977541e060eb99f8df1ba4854f5434b625c`.
+The task-only PostgreSQL 18.6 role/database queries kept `orders = 3` unchanged.
+This fixture did not repeat compose's explicit SCRAM initdb flags, so these
+results do not independently prove its password-challenge method.
+
+Evidence/source/cleanup: `/private/tmp/ignatius-linux-871db73-20261025-xkKO8X/`.
+All containers used no network/host ports, with read-only frozen source/vendor
+mounts and separate Rust homes/targets. An initial SSD vendor-bind create
+request stalled before a test/container began; a task-local vendor copy worked
+and each actual suite ran once. Only five owned containers, six labelled
+volumes, two addon tags and owned vendor/Cargo-home copies were removed.
+Approved bases and root/COI IDs were preserved, without global prune/config
+changes. Minimum observed internal free space was 16,055,525,376 bytes
+(14.9529 GiB), above the six-GiB floor.
+
+The lead read the scope/cleanup records and checked retained artifact digests.
+Evidence SHA-256: `07d6f760d0b46557e94e1e2fd4d12d2c927706c4f99b6ad603fb2606f5a11da8`;
+cleanup SHA-256: `5415ed87a8dd0e46d00efec1ba9b68bde2c7982834d6f6556c624d56601090e9`.
+This frozen source excludes W10-009/010 and later help work. Uncaught fatal
+panic/abort, latest-binary steady-state SIGTERM, native visual/hand use, Windows,
+hosted and a repeated major/TLS matrix remain separate.
 
 ## Local security maintenance - 2026-10-25
 

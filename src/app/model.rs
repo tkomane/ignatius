@@ -1041,6 +1041,8 @@ pub struct Model {
     pub error: Option<Diagnostic>,
     /// Whether the help overlay is open.
     pub help_open: bool,
+    /// First wrapped help row, local to the current help visit.
+    pub help_scroll: usize,
     /// Whether the technical section of the error is expanded.
     pub error_expanded: bool,
     /// Validated location in the current editor buffer, when one exists.

@@ -293,7 +293,7 @@ gaps without claiming unavailable platform or live-server evidence.
 
 ### Rendered help follow-up - 2026-10-25
 
-- [ ] T042 Repair the observed static help clipping after the W04 sending-
+- [x] T042 Repair the observed static help clipping after the W04 sending-
   review work: at 120x30 the fixed-width/fixed-height help buffer cuts off long
   binding descriptions and later entries, and a long key label runs into its
   action text. Specify local help navigation/input ownership first, preserve
@@ -305,6 +305,28 @@ gaps without claiming unavailable platform or live-server evidence.
   synthetic density buffers: `/private/tmp/ignatius-density-styled-buffer-x9t8tv6x/contact-help.png`.
   This is a pre-existing daily-use gap, not a density acceptance regression or
   evidence of native terminal appearance.
+
+T042 evidence on 2026-10-25: four actual behavior reds reproduced hidden
+typing/paste/Enter edits and unreachable later help content. A separate Space
+formatter red proved the invisible label. Broad library integration caught two
+existing chord-owner regressions; they were preserved and repaired. Native
+peer review then found/reproduced three real palette-choice failures and one
+valid long-remap geometry failure; the existing toggle/empty-choice control
+stayed green. All 20 selected help checks passed after those repairs.
+
+The combined final locked verifier passed 1,315 harness cases/1,027 library,
+PostgreSQL 18.6 plain/TLS, formatting and warnings-denied lints/API docs:
+`/private/tmp/ignatius-verify-2026-10-25-help-and-export-final.log`.
+After a test-only strengthening to the authoritative actual last chord, that
+one actual-buffer check passed separately; production inputs were unchanged.
+The lead inspected representative frames from 104 styled synthetic Ratatui
+captures across both densities, three truecolour themes and ASCII/no-colour,
+including 40x8 long controls, real long/Unicode key rows, late content, palette/
+inspector return and 20x4 recovery. Evidence:
+`/private/tmp/ignatius-help-styled-_hofm3y7/`; source-input digest and linked
+library identity are in verification. Required different-family review,
+current-source Linux/MSRV/Windows, native visual and hand-use acceptance remain
+separate. No database, clipboard or export effect was dispatched by captures.
 
 - Every task is executable from the repository root and names its target file.
 - `[P]` marks only work that can proceed without an incomplete dependency or

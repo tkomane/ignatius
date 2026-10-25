@@ -5,6 +5,7 @@
 //! turns intent into effects.
 
 pub mod glyphs;
+pub(crate) mod help;
 pub mod keymap;
 pub mod layout;
 pub(crate) mod review;
