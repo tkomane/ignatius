@@ -11,6 +11,20 @@ in `docs/status.md`. Feature 025 US5-US10 and final acceptance remain open in
 its task list. The current integration branch also contains W02 connection
 identity hardening, W05 local server-matrix evidence and W11 dry trust tooling.
 Those local results do not establish hosted acceptance or release readiness.
+Feature025 T055's observed expanded-field selection defect is now corrected
+at published `ffb86a1` in draft PR34: actual Buffer evidence, independent review,
+the full local gate and all three hosted platform regressions passed. CI has
+13 successful jobs and one scheduled drift skip; PG14/18/socket also passed.
+Fresh main-targeted CodeQL and parent integration remain pending. Manual US5
+custom themes/runtime switching are in implementation on the isolated
+`codex/manual-themes-2026-10-25` branch: strict configuration/startup, runtime
+cycling and styled parity are integrated and the full local verifier passes
+1,497 harness cases. Hosted acceptance/publication are pending. Visual review
+also exposed and repaired T056's selected palette group/detail ink composition.
+Final integration review found the ignored configured-colour startup/doctor
+route; T057 now corrects it with a full repeat and actual owned-PTY route evidence.
+Automatic background detection, native hand use and release remain separate
+open work.
 On 25 October, local M1 work also patched the current dependency advisories,
 refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
 window. Feature 025 keyboard panes T039/T041 and density T040 are implemented
@@ -32,8 +46,9 @@ also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; nativ
 hand-use remains separate. W10-013's execution-wide retained-data contract is
 accepted at published `54056c2`: local 1,431 outer cases/112 styled buffers,
 all five PostgreSQL majors plain/TLS, actual socket, pinned/MSRV/platform and
-CodeQL checks. W07's Windows ConPTY observation is the next bounded slice. CLI cancellation and complete
-resource acceptance remain separate. Keep these
+CodeQL checks. W07's Windows ConPTY diagnostic in draft PR33 measured a cursor
+sensor limitation; native alternate-screen cursor acceptance remains open.
+CLI cancellation and complete resource acceptance remain separate. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature
 chain; the later experience work preserves its source-bound, deliberate action.

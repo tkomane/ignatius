@@ -9,6 +9,349 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 #[test]
+fn manual_theme_palette_is_reachable_without_a_default_key_and_deduplicates_aliases() {
+    use crate::app::palette::PaletteCommand;
+    use crate::config::schema::KeySpec;
+    use crate::ui::keymap::{Keymap, action_named};
+
+    let action = action_named("switch-theme").expect("manual theme switching is configurable");
+    assert!(
+        Keymap::new()
+            .bindings()
+            .iter()
+            .all(|binding| binding.action != action),
+        "theme switching has a palette route and no mandatory direct key"
+    );
+    for aliases in [vec![], vec!["alt+f12"], vec!["alt+f12", "alt+f11"]] {
+        let keys = if aliases.is_empty() {
+            BTreeMap::new()
+        } else {
+            BTreeMap::from([(
+                "switch-theme".to_owned(),
+                KeySpec::Many(aliases.iter().map(|key| (*key).to_owned()).collect()),
+            )])
+        };
+        let keymap = Keymap::from_config(&keys).expect("valid theme aliases");
+        let mut model = Model::new(100);
+        model.keymap_snapshot = keymap.snapshot();
+        let entries = palette_entries(&model);
+        let rows: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.command == PaletteCommand::Run(action.clone()))
+            .collect();
+        assert_eq!(rows.len(), 1, "one palette row for {aliases:?}");
+        assert_eq!(rows[0].label, "Switch theme");
+        assert_eq!(rows[0].group, "Session");
+        for binding in keymap
+            .bindings()
+            .iter()
+            .filter(|binding| binding.action == action)
+        {
+            assert!(
+                rows[0].detail.contains(&binding.key_label()),
+                "palette shows the actual configured alias"
+            );
+        }
+    }
+}
+
+#[test]
+fn manual_theme_cycle_preserves_the_complete_model_including_busy_sessions() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::{ColorDepth, Theme};
+
+    let action = crate::ui::keymap::action_named("switch-theme").expect("theme action exists");
+    for phase in [
+        QueryPhase::Idle,
+        QueryPhase::Running {
+            job: JobId(41),
+            statements: 2,
+        },
+        QueryPhase::CancellationRequested { job: JobId(41) },
+    ] {
+        for depth in [
+            ColorDepth::TrueColor,
+            ColorDepth::Indexed256,
+            ColorDepth::Basic16,
+            ColorDepth::None,
+        ] {
+            for color in [true, false] {
+                let mut model =
+                    with_grid(&["id", "note"], &[&[Cell::Text("1".into()), Cell::Null]]);
+                model.editor.set_text("SELECT 42;");
+                model.phase = phase.clone();
+                model.layout_notice = Some(LayoutNotice::SinglePane);
+                model.presentation = crate::ui::layout::Presentation::new(
+                    Theme::new(ThemeChoice::Dark, color).with_depth(depth),
+                    crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+                    true,
+                )
+                .with_density(crate::config::Density::Compact);
+                for choice in [
+                    ThemeChoice::Light,
+                    ThemeChoice::HighContrast,
+                    ThemeChoice::Dark,
+                ] {
+                    let before = format!("{model:?}");
+                    let previous_theme = model.presentation.theme.clone();
+                    assert!(update(&mut model, Message::Action(action.clone())).is_empty());
+                    assert_eq!(
+                        model.presentation.theme,
+                        Theme::new(choice, color).with_depth(depth)
+                    );
+                    model.presentation.theme = previous_theme;
+                    assert_eq!(
+                        format!("{model:?}"),
+                        before,
+                        "a theme switch changes only its palette"
+                    );
+                    model.presentation.theme = Theme::new(choice, color).with_depth(depth);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn manual_theme_direct_action_preserves_every_input_owner_and_pending_prefix() {
+    let action = crate::ui::keymap::action_named("switch-theme").expect("theme action exists");
+    let mut owners = split_modal_models();
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        owners.push(review_viewport_case(family, false));
+    }
+    let mut notice = notice_model_pending();
+    open_notice_details(&mut notice);
+    notice.notice_details.as_mut().unwrap().scroll = 7;
+    owners.push(notice);
+    let mut prefix = connected();
+    prefix.prefix_pending = true;
+    owners.push(prefix);
+    let mut prompt = cell_update_model();
+    let effects = update(&mut prompt, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("metadata request");
+    };
+    update(
+        &mut prompt,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    assert!(prompt.update_prompt.is_some());
+    owners.push(prompt);
+    for model in owners {
+        for prefix in [false, true] {
+            let mut candidate = model.clone();
+            candidate.prefix_pending |= prefix;
+            candidate.help_scroll = 9;
+            candidate.layout_notice = Some(LayoutNotice::SinglePane);
+            let before = format!("{candidate:?}");
+            assert!(update(&mut candidate, Message::Action(action.clone())).is_empty());
+            assert_eq!(
+                format!("{candidate:?}"),
+                before,
+                "direct theme keys cannot alter an owner"
+            );
+        }
+    }
+}
+
+#[test]
+fn manual_theme_palette_cancel_empty_and_choice_preserve_parent_and_notice_rules() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::{ColorDepth, Theme};
+
+    for parent in ["help", "notice"] {
+        for selection in ["cancel", "empty", "choose"] {
+            let mut model = notice_model_pending();
+            if parent == "help" {
+                model.help_open = true;
+                model.help_scroll = 9;
+            } else {
+                open_notice_details(&mut model);
+                model.notice_details.as_mut().unwrap().scroll = 7;
+            }
+            model.presentation.theme =
+                Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::Indexed256);
+            model.presentation.color_depth = ColorDepth::Indexed256;
+            let notice_state = format!("{:?}", model.notice_state);
+            assert!(update(&mut model, Message::Action(Action::OpenPalette)).is_empty());
+            if selection == "empty" {
+                model.palette.as_mut().unwrap().query =
+                    "synthetic-no-matching-command-987654".into();
+            }
+            if selection == "choose" {
+                model.palette.as_mut().unwrap().query = "Switch theme".into();
+                assert_eq!(
+                    model
+                        .palette
+                        .as_ref()
+                        .unwrap()
+                        .selected_entry()
+                        .unwrap()
+                        .label,
+                    "Switch theme"
+                );
+            }
+            let action = if selection == "cancel" {
+                Action::Dismiss
+            } else {
+                Action::Activate
+            };
+            assert!(update(&mut model, Message::Action(action)).is_empty());
+            assert!(model.palette.is_none());
+            assert_eq!(
+                format!("{:?}", model.notice_state),
+                notice_state,
+                "theme palette never acknowledges loss"
+            );
+            if selection == "choose" {
+                assert!(!model.help_open && model.notice_details.is_none());
+                assert_eq!(
+                    model.presentation.theme,
+                    Theme::new(ThemeChoice::Light, true).with_depth(ColorDepth::Indexed256)
+                );
+            } else {
+                assert_eq!(
+                    model.presentation.theme,
+                    Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::Indexed256)
+                );
+                if parent == "help" {
+                    assert!(model.help_open);
+                    assert_eq!(model.help_scroll, 9);
+                } else {
+                    assert_eq!(model.notice_details.as_ref().unwrap().scroll, 7);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn manual_theme_custom_cycle_preserves_state_and_discovery_during_queries() {
+    use crate::ui::theme::{ColorDepth, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let definition = ThemeDefinition::new(crate::config::ThemeChoice::Dark);
+    for busy in [false, true] {
+        let mut model = connected();
+        model.theme_catalog = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+            .expect("inherited custom is validated");
+        model.presentation.theme = model
+            .theme_catalog
+            .selected_theme(false, ColorDepth::Basic16);
+        model.editor.set_text("SELECT 42;");
+        if busy {
+            model.phase = QueryPhase::Running {
+                job: JobId(71),
+                statements: 1,
+            };
+        }
+        assert!(crate::app::discovery::action_is_available(
+            &model,
+            &Action::SwitchTheme
+        ));
+        assert_eq!(
+            crate::app::discovery::action_prerequisite(&model, &Action::SwitchTheme),
+            None
+        );
+        for selection in [
+            ThemeSelection::Dark,
+            ThemeSelection::Light,
+            ThemeSelection::HighContrast,
+            ThemeSelection::Custom,
+        ] {
+            let previous = model.presentation.theme.clone();
+            let before = format!("{model:?}");
+            assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+            let active = model.presentation.theme.clone();
+            assert_eq!(active.selection(), selection);
+            assert!(!active.color);
+            assert_eq!(active.depth, ColorDepth::Basic16);
+            model.presentation.theme = previous;
+            assert_eq!(format!("{model:?}"), before);
+            model.presentation.theme = active;
+        }
+    }
+}
+
+#[test]
+fn manual_theme_catalog_mismatch_keeps_palette_and_existing_query_diagnostic() {
+    use crate::ui::theme::{ColorDepth, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    for prior_query in [false, true] {
+        let definition = ThemeDefinition::new(crate::config::ThemeChoice::Dark);
+        let catalog = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition)).unwrap();
+        let mut model = connected();
+        model.presentation.theme = catalog.selected_theme(true, ColorDepth::Indexed256);
+        model.editor.set_text("SELECT missing;");
+        if prior_query {
+            model.error = Some(
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "column does not exist",
+                    "running SQL",
+                )
+                .technical("SQLSTATE", "42703")
+                .next_action("check the column name"),
+            );
+        }
+        let before = model.clone();
+        for _ in 0..3 {
+            assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+            assert_eq!(model.presentation.theme, before.presentation.theme);
+        }
+        let mut diagnostic = model.error.take().expect("mismatch is visible");
+        if prior_query {
+            assert_eq!(
+                diagnostic
+                    .technical
+                    .iter()
+                    .filter(|field| field.label == "Theme switching")
+                    .count(),
+                1
+            );
+            diagnostic
+                .technical
+                .retain(|field| field.label != "Theme switching");
+            assert_eq!(
+                format!("{diagnostic:?}"),
+                format!("{:?}", before.error.as_ref().unwrap())
+            );
+        } else {
+            assert_eq!(diagnostic.kind, DiagnosticKind::Internal);
+        }
+        model.error = before.error.clone();
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
+    }
+}
+
+#[test]
+fn manual_theme_custom_catalog_survives_profile_reset_resize_and_async_connection() {
+    use crate::ui::theme::{ColorDepth, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let definition = ThemeDefinition::new(crate::config::ThemeChoice::Light);
+    let mut model = connected();
+    model.theme_catalog =
+        ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition)).unwrap();
+    model.presentation.theme = model
+        .theme_catalog
+        .selected_theme(true, ColorDepth::TrueColor);
+    model.editor.set_text("SELECT 42;");
+    let catalog = model.theme_catalog.clone();
+    let theme = model.presentation.theme.clone();
+    assert!(matches!(
+        begin_connection(&mut model, None).as_slice(),
+        [Effect::ConnectProfile { profile: None }]
+    ));
+    update(&mut model, Message::Resized(80, 24));
+    update(&mut model, Message::Connected(session()));
+    update(&mut model, Message::Tick { running_for: None });
+    assert_eq!(model.theme_catalog, catalog);
+    assert_eq!(model.presentation.theme, theme);
+    assert_eq!(model.editor.text(), "SELECT 42;");
+    assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+    assert_eq!(model.presentation.theme.selection(), ThemeSelection::Dark);
+}
+
+#[test]
 fn help_reading_never_edits_or_moves_the_covered_editor() {
     for action in [
         Action::Insert('z'),

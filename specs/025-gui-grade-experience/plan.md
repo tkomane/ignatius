@@ -193,6 +193,41 @@ No constitution violations. Two structural costs are accepted knowingly:
 | Widget-module extraction before any visual change | 6,553-line single file makes parallel implementation impossible and hit regions unverifiable | Patching in place would serialize every story through one file and let hit-testing drift from drawing |
 | Presentation moves into `Model` | Runtime theme switching and depth-aware rendering must be reducible, testable state | Mutating a shared reference in the event loop would put presentation outside the reducer's evidence boundary |
 
+### Manual theme slice - 2026-10-25
+
+Deliver FR-2513/2515/2516 under the dated theme-config contract before the
+separate automatic-background protocol. T028a is the manual test subset;
+T028/T028b/T032 and whole-US5 acceptance remain open until their full scope runs.
+Do not change mouse capture, dependencies, query behavior or release controls.
+
+One strict generic schema declaration may parameterise only selection/definition
+leaves for a private pending parse. Prove original-source TOML syntax, duplicate
+and ordinary error/span behavior before admitting it. Existing load range gates
+remain; migrate/save gain theme checks only. Raw pending values have no printable
+Debug route. A typed theme-only diagnostic tag preserves other human/JSON/doctor
+envelopes. Serialize the actual typed definition, not its resolved cache.
+
+Theme resolution owns canonical token names/hex grammar, the complete RGB
+matrix, safe refusals and the immutable fixed-size custom cache. Active theme
+identity is derived from a private built-in/custom palette variant; built-in
+Theme::new stays infallible and cannot represent missing custom data. Root owns
+the model/catalog pair, startup before TerminalGuard, SwitchTheme action,
+owner-first handling, explicit palette discovery and actual CLI/parity evidence.
+No runtime action reads files or reparses raw maps. A cache mismatch reports an
+internal diagnostic without changing theme or emitting effects.
+
+Work is bounded in two isolated lanes from accepted ffb86a1. The configuration
+lane first proves parser preservation only in a private candidate. The pure-theme
+lane owns theme code/tests, including the four measured Null/comment adjustments
+after actual-library reds, and publishes a frozen API/source handoff. Then the
+configuration lane consumes that exact handoff for schema/store/diagnostic work.
+Root owns canonical integration and shared app/CLI files throughout. The sole
+out-of-module theme migration is the Results sidecar's debug identity accessor;
+its assertions and all T055 behavior stay unchanged. Cross-review the frozen
+combined source, run strict refusal subprocesses and styled parity, then the
+full verifier and normal publication gates. The existing independent-review
+exception and protected-main/release approval boundaries remain unchanged.
+
 ## Implementation Phases
 
 1. **Foundational (serialized, integrator only)**: extract

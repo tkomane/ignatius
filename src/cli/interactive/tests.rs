@@ -1,5 +1,138 @@
 use super::*;
 
+fn configured_colour_facts(is_terminal: bool) -> crate::diagnostics::doctor::TerminalFacts {
+    crate::diagnostics::doctor::TerminalFacts {
+        is_terminal,
+        term: Some("xterm-256color".into()),
+        term_program: None,
+        no_color: false,
+        colorterm: Some("truecolor".into()),
+        size: Some((100, 30)),
+        unicode: true,
+        color_depth: crate::ui::theme::ColorDepth::TrueColor,
+        color_depth_source: crate::ui::theme::DepthSource::Default,
+    }
+}
+
+#[test]
+fn configured_colour_bootstrap_uses_actual_loaded_config_before_depth_and_cache() {
+    use crate::ui::theme::{ColorDepth, ThemeSelection, Token};
+    for (selection, custom) in [("dark", ""), ("custom", "[theme]\nextends = \"dark\"\n")] {
+        for (configured, expected_without_flag) in [
+            ("auto", [true, false]),
+            ("never", [false, false]),
+            ("always", [true, true]),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("config.toml"), format!("schema_version = 1\n[ui]\ntheme = \"{selection}\"\ncolor = \"{configured}\"\n{custom}")).unwrap();
+            let loaded = crate::config::load(&crate::config::Paths::rooted_at(dir.path())).unwrap();
+            for (index, terminal) in [true, false].into_iter().enumerate() {
+                let facts = configured_colour_facts(terminal);
+                for (flag, expected) in [
+                    (None, expected_without_flag[index]),
+                    (Some(crate::cli::ColorChoice::Always), true),
+                    (Some(crate::cli::ColorChoice::Never), false),
+                    (Some(crate::cli::ColorChoice::Auto), terminal),
+                ] {
+                    let initial = crate::cli::resolve_presentation(
+                        &crate::cli::GlobalArgs {
+                            color: flag,
+                            ..Default::default()
+                        },
+                        &facts,
+                    );
+                    let (presentation, depth) = configured_presentation(&loaded, &initial, &facts);
+                    let theme = loaded.themes.selected_theme(presentation.color, depth);
+                    assert_eq!(
+                        theme.color, expected,
+                        "{selection}/{configured}/{flag:?}/terminal={terminal}"
+                    );
+                    assert_eq!(
+                        theme.selection(),
+                        if selection == "custom" {
+                            ThemeSelection::Custom
+                        } else {
+                            ThemeSelection::Dark
+                        }
+                    );
+                    assert_eq!(
+                        depth,
+                        if expected {
+                            ColorDepth::TrueColor
+                        } else {
+                            ColorDepth::None
+                        }
+                    );
+                    assert_eq!(theme.color(Token::Text).is_some(), expected);
+                    assert_eq!(presentation.glyphs, initial.glyphs);
+                    assert_eq!(presentation.glyph_override, initial.glyph_override);
+                    assert_eq!(presentation.unicode_capable, initial.unicode_capable);
+                    assert_eq!(presentation.verbose, initial.verbose);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn configured_colour_absolute_off_routes_win_without_mutating_facts() {
+    use crate::config::ColorMode;
+    for configured in [ColorMode::Auto, ColorMode::Always, ColorMode::Never] {
+        for flag in [
+            None,
+            Some(crate::cli::ColorChoice::Always),
+            Some(crate::cli::ColorChoice::Never),
+            Some(crate::cli::ColorChoice::Auto),
+        ] {
+            for route in ["plain", "no_color", "dumb"] {
+                let mut facts = configured_colour_facts(true);
+                facts.no_color = route == "no_color";
+                if route == "dumb" {
+                    facts.term = Some("dumb".into());
+                }
+                let before = facts.clone();
+                let initial = crate::cli::resolve_presentation(
+                    &crate::cli::GlobalArgs {
+                        color: flag,
+                        plain: route == "plain",
+                        ..Default::default()
+                    },
+                    &facts,
+                );
+                let presentation = initial.with_configured_color(configured, &facts);
+                assert!(!presentation.color, "{configured:?}/{flag:?}/{route}");
+                let (depth, source) = crate::cli::resolve_depth(
+                    Some(crate::config::ColorDepthChoice::TrueColor),
+                    crate::config::ColorDepthChoice::TrueColor,
+                    presentation.color,
+                    &facts,
+                );
+                assert_eq!(depth, crate::ui::theme::ColorDepth::None);
+                assert_eq!(source, crate::ui::theme::DepthSource::ForcedOff);
+                assert_eq!(facts.no_color, before.no_color);
+                assert_eq!(facts.term, before.term);
+                assert_eq!(facts.is_terminal, before.is_terminal);
+            }
+        }
+    }
+}
+
+#[test]
+fn configured_colour_builtin_never_is_honoured_by_the_real_bootstrap_seam() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        "schema_version = 1\n[ui]\ntheme = \"dark\"\ncolor = \"never\"\n",
+    )
+    .unwrap();
+    let loaded = crate::config::load(&crate::config::Paths::rooted_at(dir.path())).unwrap();
+    let facts = configured_colour_facts(true);
+    let initial = crate::cli::resolve_presentation(&crate::cli::GlobalArgs::default(), &facts);
+    let (presentation, depth) = configured_presentation(&loaded, &initial, &facts);
+    assert!(!presentation.color);
+    assert_eq!(depth, crate::ui::theme::ColorDepth::None);
+}
+
 #[test]
 fn w10_actual_streaming_sink_does_not_count_rejected_insert_rows() {
     use crate::cli::output::{Format, OutputOptions, StreamWriter};
@@ -200,6 +333,32 @@ fn runtime_geometry_recovery_actions_do_not_require_a_working_size_query() {
             assert!(effects.is_empty());
             assert!(model.pending_run.is_none());
         }
+    }
+}
+
+#[test]
+fn manual_theme_runtime_action_does_not_query_geometry_or_reset_covered_offsets() {
+    for help in [false, true] {
+        let mut model = crate::app::Model::new(100);
+        model.help_open = help;
+        model.help_scroll = 9;
+        model.layout_notice = Some(crate::app::model::LayoutNotice::SinglePane);
+        let before = model.clone();
+        let effects = reduce_input_with_size(
+            &mut model,
+            Message::Action(crate::app::Action::SwitchTheme),
+            || panic!("theme cycling has no geometry prerequisite"),
+        )
+        .unwrap();
+        assert!(effects.is_empty());
+        if !help {
+            assert_eq!(
+                model.presentation.theme.selection(),
+                crate::ui::theme::ThemeSelection::Light
+            );
+            model.presentation.theme = before.presentation.theme.clone();
+        }
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
     }
 }
 

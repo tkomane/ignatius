@@ -298,6 +298,7 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::GenerateCellUpdate,
         Action::RefreshResult,
         Action::FormatBuffer,
+        Action::SwitchTheme,
         Action::OpenConnectionPicker,
         Action::Cancel,
         Action::ToggleHelp,
@@ -409,6 +410,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::GrowPane
         | Action::ZoomPane
         | Action::OpenPalette
+        | Action::SwitchTheme
         | Action::Quit => true,
         Action::BeginPrefix => false,
         Action::ToggleErrorDetail => model.error.is_some(),
@@ -602,6 +604,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
             "history enabled in configuration".to_owned()
         }
         Action::OpenPalette
+        | Action::SwitchTheme
         | Action::ToggleHelp
         | Action::FocusNext
         | Action::ToggleSidebar
@@ -658,7 +661,7 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ShowDefinition
         | Action::ShowDependencies => "Objects",
         Action::OpenQuery | Action::OpenHistory | Action::ToggleHistoryRecording => "Files/History",
-        Action::OpenConnectionPicker => "Session",
+        Action::OpenConnectionPicker | Action::SwitchTheme => "Session",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

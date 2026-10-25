@@ -1,6 +1,100 @@
 use super::*;
 use clap::Parser;
 
+#[test]
+fn configured_colour_doctor_uses_loaded_mode_and_keeps_raw_capability_facts() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("config.toml"), "schema_version = 1\n[ui]\ntheme = \"custom\"\ncolor = \"never\"\n[theme]\nextends = \"dark\"\n").unwrap();
+    let paths = Paths::rooted_at(dir.path());
+    let facts = doctor::TerminalFacts {
+        is_terminal: true,
+        term: Some("xterm-256color".into()),
+        term_program: None,
+        no_color: false,
+        colorterm: Some("truecolor".into()),
+        size: Some((100, 30)),
+        unicode: true,
+        color_depth: crate::ui::theme::ColorDepth::TrueColor,
+        color_depth_source: crate::ui::theme::DepthSource::Default,
+    };
+    let initial = resolve_presentation(&GlobalArgs::default(), &facts);
+    let mut out = Vec::new();
+    assert_eq!(
+        doctor_command(true, None, &paths, &facts, &initial, &mut out).unwrap(),
+        ExitCode::Success
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let check = |name| {
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(check("colour depth")["detail"], "none, source forced off");
+    assert_eq!(
+        check("colour")["detail"],
+        "colour available; meaning is also carried by text labels"
+    );
+    assert!(!facts.no_color);
+    assert!(facts.is_terminal);
+    assert_eq!(facts.term.as_deref(), Some("xterm-256color"));
+}
+
+#[test]
+fn configured_colour_doctor_dumb_is_absolute_without_faking_no_color() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("config.toml"), "schema_version = 1\n[ui]\ntheme = \"custom\"\ncolor = \"always\"\n[theme]\nextends = \"dark\"\n").unwrap();
+    let facts = doctor::TerminalFacts {
+        is_terminal: true,
+        term: Some("dumb".into()),
+        term_program: None,
+        no_color: false,
+        colorterm: Some("truecolor".into()),
+        size: Some((100, 30)),
+        unicode: true,
+        color_depth: crate::ui::theme::ColorDepth::TrueColor,
+        color_depth_source: crate::ui::theme::DepthSource::Default,
+    };
+    let initial = resolve_presentation(
+        &GlobalArgs {
+            color: Some(ColorChoice::Always),
+            ..Default::default()
+        },
+        &facts,
+    );
+    let mut out = Vec::new();
+    assert_eq!(
+        doctor_command(
+            true,
+            None,
+            &Paths::rooted_at(dir.path()),
+            &facts,
+            &initial,
+            &mut out
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let check = |name| {
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(check("colour depth")["detail"], "none, source forced off");
+    let colour = check("colour")["detail"].as_str().unwrap();
+    assert!(colour.contains("TERM=dumb"), "{colour}");
+    assert!(!colour.contains("available") && !colour.contains("NO_COLOR"));
+    assert!(!facts.no_color);
+    assert!(facts.is_terminal);
+    assert_eq!(facts.term.as_deref(), Some("dumb"));
+}
+
 fn retention_status_execution() -> crate::query::result::Execution {
     use crate::query::result::{
         Execution, ExecutionStatus, JobId, ResultSet, StatementResult, TransactionState,

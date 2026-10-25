@@ -581,6 +581,30 @@ position; a real command choice reveals its target, including clearing covered
 reading panels before object insertion. `Space` is named visibly. Feature 015
 T042 records local implementation/rendered checks; native hand use is separate.
 
+## Manual themes
+
+The manual-theme slice supports `dark`, `light`, `high-contrast` and `custom`
+in `[ui] theme`. A single optional `[theme]` table inherits a built-in palette
+and overrides exact named RGB tokens. The complete resolved palette is checked
+even when inactive or colour is disabled. Invalid definitions refuse with
+configuration exit 3 before terminal acquisition or configuration writes.
+Existing ordinary configuration validation and migration behavior are retained.
+See [theme tokens](../design/theme-tokens.md) for grammar and contrast scope.
+
+The Session / Switch theme palette entry cycles the validated catalog without
+writing files or changing connection/query state. Direct bindings preserve input
+owners; palette cancellation retains covered reading positions. The choice
+survives resize and profile changes for the session. Rendered-buffer evidence
+includes five palettes and colour-off/depth/glyph/density combinations; native
+font, DIM, emulator appearance and hand use remain separate. Automatic background
+detection (`auto`, T032) remains unimplemented and is explicitly refused.
+The integrated manual source passed full local verification on 25 October 2026:
+1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
+The macOS socket case is skipped; publication and hosted acceptance are pending.
+T057 corrects the existing ignored `[ui] color` startup/doctor route. The final
+gate includes that correction; actual owned macOS PTY startup/quit probes show
+configured never emitting no painted SGRs, with explicit always/NO_COLOR controls.
+
 ## Terminals
 
 | Terminal | Status |
@@ -608,9 +632,9 @@ contain sensitive information and cannot prove a database write outcome.
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | Dated local CLI, PostgreSQL and owned-PTY evidence; latest-source native visual/full hand-use acceptance remains open. Historical hosted results cover their recorded source only. |
-| Windows, GitHub `windows-latest` runner | Historical builds/unit/layout/CLI/startup results; today's local branch has no fresh hosted/native Windows acceptance. |
-| Linux, GitHub `ubuntu-latest` runner | Historical hosted PostgreSQL/CLI evidence covers its recorded source, not today's later local changes. |
+| macOS on Apple silicon | At `ffb86a1`, local full verification and styled Buffer inspection passed; hosted macOS 26 arm64 tests/startup passed with Rust 1.97.1, including all three T055 regressions. Native visual/full hand-use acceptance remains open. |
+| Windows, GitHub `windows-latest` runner | At `ffb86a1`, Windows Server 2025 build/tests/startup/refusal passed, including all three T055 Buffer regressions. Windows 11/Windows Terminal hand use and full ConPTY restoration remain open; separate PR33's cursor-sensor diagnostic does not close them. |
+| Linux, GitHub `ubuntu-latest` runner | At `ffb86a1`, hosted build/tests/startup, PG14/18 plain/verified-TLS and the real Unix-socket contract passed. Prior `54056c2` separately covers all five PostgreSQL majors. Full-screen hand use and release installation remain open. |
 | Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
 

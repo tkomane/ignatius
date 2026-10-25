@@ -359,7 +359,7 @@ fn selected_expanded_fields_use_active_ink_and_keep_modifiers_across_presentatio
     for presentation in expanded_presentations(true) {
         let summary = format!(
             "{:?}/{:?}/{:?}/{:?}",
-            presentation.theme.choice,
+            presentation.theme.selection(),
             presentation.color_depth,
             presentation.glyphs.tier,
             presentation.density

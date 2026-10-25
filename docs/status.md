@@ -8,8 +8,80 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Active branch: `codex/selected-field-contrast-2026-10-25`, isolated from exact
-reviewed D6 in PR32. Feature025 T055 corrects an actual expanded Results
+Active branch: `codex/manual-themes-2026-10-25`, reusing the managed worktree
+from accepted `ffb86a1`. Root adopted the dated manual theme contract/plan and
+T028a test subset. Root integrated the five-file pure theme freeze after checking
+all 39 artifact hashes and reviewing the grammar, safe refusals and resolver.
+That lane passed 42 theme and 11 Results tests; four measured Null/comment
+contrast failures precede the four admitted RGB repairs. Root's seven reducer
+tests pass, including custom cycling, owners, busy queries, mismatch/query
+diagnostic preservation and profile/resize/async retention. Four original
+runtime/palette cases were observed red first. Independent runtime review found
+two missing exhaustive discovery arms; both are corrected. The 31 keymap tests
+pass after extending reachability coverage to open the actual palette.
+
+The strict-schema prerequisite preserved original TOML errors/spans; its final
+phase2 source is now integrated after root reviewed the actual admission code
+and verified all 127 artifacts. Root independently confirmed the normalized
+bodies of all 41 original configuration/diagnostic tests and the store helper.
+Four real-CLI cases were observed red first and now pass on the combined source:
+150 isolated child runs cover exact refusals across startup/query/show/validate/
+migrate, valid roundtrip, doctor JSON and bounded redacted reflection.
+
+The initial five-theme T033 matrix passed 2,520 actual frames. Root checked 101
+artifacts and inspected all seven sheets, then individual HighContrast palette
+inspection exposed selected group/detail ink retaining Muted on white fill.
+T056's failing-first correction and stronger assertions are integrated from a
+new 125-artifact freeze. Root inspected corrected HighContrast, inverted Custom
+and colour-off palette images and the comparison sheet. Its own comparison of
+12,096,000 cells confirms only 2,340 foregrounds change in 60 painted palette
+frames; all labels, backgrounds, modifiers, geometry, Basic16/off and non-palette
+frames are preserved. The rejected first candidate's extra Basic16 label change
+and all earlier evidence remain retained. Native appearance is still unverified.
+
+The final combined local verifier passed **1,497 outer harness cases, 1,189
+library cases and 25 summaries**, all six executed gates and actual PostgreSQL
+18.6 plain/TLS. Both existing synthetic servers were freshly queried as 18.6.
+The macOS socket case remains skipped. T028a/T029/T030/T031/T033/T056/T057 record
+manual local implementation, including the configured-colour route.
+T028/T028b/T032 and whole-US5 completion stay open.
+Current source is uncommitted; clean-source/history scans, final independent
+integration review, publication and hosted/pinned/MSRV acceptance are next.
+Full log: `/private/tmp/ignatius-manual-themes-t057-verify-20261025.log`
+(SHA-256 `965e7cd3662408e9da11c3d59a3647c1bdda22aac32bd20b5dccd418496da914`).
+
+Final independent integration review found an existing route omission after the
+earlier 1,492-case pass: full-screen startup and doctor ignored `[ui] color`.
+That pre-T057 pass did not prove the route. Root pinned exact precedence before
+delegating a narrow private CLI correction: explicit flag, configured choice,
+then auto facts, with plain/NO_COLOR/dumb absolute. Root reviewed and integrated
+the five-file correction after verifying all 208 frozen artifacts; 64 distinct
+focused cases and 27 actual doctor subprocess controls passed. The final full
+repeat above includes this correction. Publication/scans and hosted acceptance
+remain next.
+Root also confirmed T057 in the actual pre-fix local binary using three owned
+macOS PTYs and a synthetic profile picker: configured Custom/never emitted 119
+painted SGR sequences, explicit always emitted 119, and NO_COLOR plus always
+emitted zero. All three quit normally with alternate-screen enter/exit captured;
+no profile was chosen or SQL sent. This proves the route defect and controls,
+not native emulator/font appearance. Before evidence:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-3i9adtvz/`.
+The corrected binary changes configured never to zero painted SGRs. Explicit
+always and NO_COLOR control captures are byte-identical to before; all three
+sessions quit normally. After receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-qtg0xxks/receipt.json`.
+
+Theme freeze: `/private/tmp/ignatius-us5-theme-ffb86a1-z53t1vo8/pure-theme-freeze-01/`
+(manifest SHA-256 `edf823b9f4c69bb56ef2669e0501e3b230873a005a5197d12145a0fbfce11263`).
+Root runtime log: `/private/tmp/ignatius-us5-runtime-root-custom-green-20261025.log`.
+The runtime size-query regression was also observed red then green; theme keys
+now bypass the geometry prerequisite, preserving covered offsets. All six
+existing runtime geometry/review controls pass. Independent review found no
+remaining scoped blocker for that delta.
+CLI red: `/private/tmp/ignatius-us5-cli-root-red-20261025.log`.
+
+Previous branch `codex/selected-field-contrast-2026-10-25` is published in PR34,
+isolated from reviewed D6 in PR32. Feature025 T055 corrects an expanded Results
 selection defect before manual custom themes: child Header/NullValue colours
 override Selection ink, producing white-on-white HighContrast text. Root
 verified all 16 immutable reproduction artifacts. The worker owns only
@@ -26,9 +98,39 @@ cases and 24 summaries**, formatting, warnings-denied lints/API docs and actual
 PostgreSQL 18.6 plain/TLS. The first run's six TLS failures came from missing
 ignored synthetic fixture files in this new worktree; all affected cases passed
 after fixture wiring and a full repeat. The macOS socket case remains skipped.
-Source publication and hosted acceptance are pending. Local receipt:
+Published clean `ffb86a1` in [draft PR34](https://github.com/tkomane/ignatius/pull/34)
+after the installed full pre-push verifier again passed all 1,434 cases, with the
+same socket skip. Pinned Gitleaks passed the exact 438-file source and 290
+reachable revisions. PR merge ref `d38304f9` has the identical source tree
+`77c2add104a13c5bd20bca99eb687d0de9f0578a`. CI `40223833554` completed with
+13 successful jobs and one deliberate schedule-only drift skip. The three new
+Buffer cases ran and passed on Linux/macOS/Windows; library totals were
+1,130/1,130/1,111 under actual Rust 1.97.1. Startup/refusal smoke, Rust 1.90,
+PG14/18 plain/verified-TLS and the real Linux socket passed. Database jobs ran
+236 selected invocations per major plus one socket; these include pure/local
+cases and are not 473 live queries. Fresh main-targeted CodeQL remains pending.
+Local receipt:
 `/private/tmp/ignatius-t055-root-integration-20261025.json`.
+Publication: `/private/tmp/ignatius-t055-ffb86a1-publication-20261025.json`.
+Hosted platform audit:
+`/private/tmp/ignatius-pr34-platform-audit-kmb7tndf/RECEIPT.md` (SHA-256
+`8e2cd6155079190e78da21487a0c77089055410f976a462259215c62ac944095`);
+DB/socket audit: `/private/tmp/ignatius-pr34-ffb86a1-db-audit-20261025.json`.
 Repro: `/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`.
+
+Next: integrate configuration refusal/startup gates, complete styled parity and
+CLI checks, then run the full gate and publish the reviewed manual slice while
+keeping auto/T032 open.
+Read-only strict-parser/identity design brief:
+`/private/tmp/ignatius-us5-strict-identity-design-ffb86a1-20261025.md`, SHA-256
+`363f853c8c6245f2982b59eb89d482ea04b89a7dfc123be70c2917cbda9e33cc`.
+The design has been adopted in the dated contract with only theme leaves
+deferred and Custom identity inseparable from its validated cache. Exact
+reflection escaping, caller-specific precedence and the actual capsule contrast
+set are pinned. Preserve migrate/save's existing lack of ordinary range
+validation; add only theme checks there.
+Post-publication acceptance records are local owned documentation edits for the
+next meaningful source checkpoint; published application source remains `ffb86a1`.
 
 Windows work continues separately in [draft PR33](https://github.com/tkomane/ignatius/pull/33):
 at `65cf237`, calibration follows native setters/main VT but cannot track

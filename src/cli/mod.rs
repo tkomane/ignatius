@@ -506,6 +506,8 @@ pub enum ConfigAction {
 pub struct Presentation {
     /// Whether colour may be emitted.
     pub color: bool,
+    /// Explicit colour flag, or the absolute plain-mode request; None uses config.
+    pub color_override: Option<crate::config::ColorMode>,
     /// The `--color-depth` override, when the flag was given.
     pub color_depth: Option<crate::config::ColorDepthChoice>,
     /// The tier resolved from flags and the environment alone.
@@ -519,6 +521,18 @@ pub struct Presentation {
 }
 
 impl Presentation {
+    /// Resolves configured colour before depth or a validated theme is selected.
+    fn with_configured_color(
+        &self,
+        configured: crate::config::ColorMode,
+        facts: &doctor::TerminalFacts,
+    ) -> Self {
+        let mut presentation = self.clone();
+        presentation.color =
+            crate::ui::terminal::should_use_color(self.color_override.unwrap_or(configured), facts);
+        presentation
+    }
+
     /// Whether anything beyond ASCII may be drawn.
     #[must_use]
     pub fn unicode(&self) -> bool {
@@ -630,23 +644,28 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
     match result {
         Ok(code) => code,
         Err(diagnostic) => {
-            let _ = write!(err, "{}", diagnostic.render_plain(presentation.verbose));
+            if let Some(line) = diagnostic.theme_refusal_line() {
+                let _ = writeln!(err, "{line}");
+            } else {
+                let _ = write!(err, "{}", diagnostic.render_plain(presentation.verbose));
+            }
             diagnostic.exit_code()
         }
     }
 }
 
-/// Decides colour and glyphs from flags, configuration and the environment.
+/// Resolves flag/environment defaults; loaded configuration applies afterward.
 fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> Presentation {
-    let color_mode = if global.plain {
-        crate::config::ColorMode::Never
+    let color_override = if global.plain {
+        Some(crate::config::ColorMode::Never)
     } else {
-        match global.color {
-            Some(ColorChoice::Always) => crate::config::ColorMode::Always,
-            Some(ColorChoice::Never) => crate::config::ColorMode::Never,
-            Some(ColorChoice::Auto) | None => crate::config::ColorMode::Auto,
-        }
+        global.color.map(|choice| match choice {
+            ColorChoice::Always => crate::config::ColorMode::Always,
+            ColorChoice::Never => crate::config::ColorMode::Never,
+            ColorChoice::Auto => crate::config::ColorMode::Auto,
+        })
     };
+    let color_mode = color_override.unwrap_or(crate::config::ColorMode::Auto);
     // Plain and --ascii are absolute: they are what a user reaches for when the
     // terminal cannot cope, so configuration does not get to override them.
     let forced_ascii = global.plain || global.ascii;
@@ -659,6 +678,7 @@ fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> P
 
     Presentation {
         color: crate::ui::terminal::should_use_color(color_mode, facts),
+        color_override,
         color_depth: global.color_depth,
         glyphs: glyph_override.unwrap_or(if unicode_capable {
             crate::ui::GlyphTier::Unicode
@@ -837,6 +857,7 @@ fn doctor_command(
         .as_ref()
         .map(|l| l.config.clone())
         .unwrap_or_default();
+    let presentation = presentation.with_configured_color(configured.ui.color, facts);
     // Report the depth actually in use: the flag, then the configuration key,
     // then the environment, with colour-off routes defeating all of them.
     let mut facts = facts.clone();

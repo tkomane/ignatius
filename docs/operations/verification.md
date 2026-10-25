@@ -1,5 +1,94 @@
 # Verification
 
+## Manual theme integration - 2026-10-25
+
+The manual FR-2513/2515/2516 slice integrates the immutable pure-theme and strict
+configuration lanes with the root-owned startup cache, action, discovery and
+runtime handling. Automatic background detection/T032 remains open. Root read
+the parser/resolver/admission code and verified all 39 pure-theme and 127
+configuration artifacts. Original Theme/Results assertions are preserved after
+the diagnostic identity accessor migration; configuration preservation records
+cover 41 original cases and original TOML errors/spans. Runtime review caught
+two exhaustive discovery omissions, corrected before combined compilation.
+
+Focused evidence includes the configuration lane's 152 passing cases and 150
+actual isolated CLI child invocations. Root's four real-CLI tests pass again on
+the integrated source. Seven reducer cases prove custom/builtin cycling,
+busy-query and owner preservation, query-diagnostic mismatch handling and
+profile/resize/async retention. The size-independent runtime regression failed
+before correction and then passed; all six existing geometry/review controls
+pass. Keymap 31 and discovery 14 focused cases pass. These overlapping scopes
+are reported separately rather than added to a full-suite total.
+
+The initial T033 freeze passed two tests across 2,520 actual 120x40 buffers.
+Root verified 101 artifacts, inspected seven comparison sheets and four
+individual images, then found a selected palette group/detail ink defect that
+the initial assertions missed. The original captures remain pre-correction
+evidence. T056 records actual failing palette/full-frame tests, followed by a
+small span-style composition correction and stronger assertions. A first
+candidate's extra Basic16 label change was rejected; final label ink is exactly
+preserved. Root verified all 125 correction artifacts and inspected corrected
+HighContrast/inverted-custom/colour-off palette images.
+
+Root independently compared all 12,096,000 cells before/after: 2,340 foreground
+cells in 60 painted palette frames change, confined to selected group/detail.
+All symbols, geometry, backgrounds, modifiers and selected labels are unchanged;
+all 2,100 Basic16/off and 2,160 non-palette frames are exactly preserved. These
+overlapping counts must not be added. RGB/indexed/Reset/DIM/font approximations
+are explicit in the synthetic rasters; raw actual cells are primary. No native
+terminal appearance or participant-use claim follows from these captures.
+
+Pure freeze: `/private/tmp/ignatius-us5-theme-ffb86a1-z53t1vo8/pure-theme-freeze-01/`
+(manifest `edf823b9f4c69bb56ef2669e0501e3b230873a005a5197d12145a0fbfce11263`).
+Config: `/private/tmp/ignatius-us5-config-ffb86a1-gcucqbu1/config-phase2-freeze-01/`
+(`4d3b42e1232664a6c29c7f16b95462c468f0d4937664fec8e76a86376d10f873`).
+T056: `/private/tmp/ignatius-t056-palette-eigzhww5/t056-correction-freeze-01/`
+(`a710845a90ea43209a53e5d6d01506a8e77d5669f2ec1747f2f0698edeec8636`).
+Root cell comparison: `/private/tmp/ignatius-us5-root-t056-comparison-20261025.json`.
+The first combined local verifier passed **1,492 outer harness cases, 1,184
+library cases and 25 summaries**, with zero failures/ignored cases and all six
+executed gates green. PostgreSQL plain and verified-TLS ran; both existing
+synthetic containers were freshly queried as 18.6. The unconfigured macOS Unix
+socket is a semantic skip, not a pass. Actual local tools are macOS 27.0.1
+arm64 and Rust/Cargo 1.99.1. Log:
+`/private/tmp/ignatius-manual-themes-integrated-verify-20261025.log`, SHA-256
+`045db75e41363664e9fcf637cf5a0deb52b90a999fb651bd65fdef7bd6774997`.
+Root also independently confirmed the exact normalized bodies of all 41 original
+configuration/diagnostic tests and the store helper. Publication,
+hosted/pinned/MSRV and fresh CodeQL acceptance remain pending. Final integration
+review found the existing ignored `[ui] color` startup/doctor route after this
+pass. That pre-T057 pass does not establish configured-colour acceptance.
+Root's independent actual-binary PTY probe confirms the omission: Custom plus
+configured never paints 119 extended-colour SGRs, explicit always 119, and
+NO_COLOR plus always zero. Each owned macOS PTY uses a synthetic profile picker,
+chooses no connection and exits normally with alternate-screen entry/exit
+captured. No native emulator/font or full-mode restoration claim is inferred.
+Before receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-3i9adtvz/receipt.json`;
+binary SHA-256 `93242cfce604c9336df67eeb42dd05ff982ae31d3f295205611328629559bbb9`.
+
+T057 is now integrated after independent root review and verification of all
+208 frozen artifacts. It retains explicit colour flag presence until the loaded
+configuration is available and applies the existing resolver before depth/cache
+selection. Runtime and doctor share this policy; raw facts and report schemas
+remain unchanged. The lane passed 64 distinct focused cases and 27 actual doctor
+JSON subprocess controls, with watched runtime/doctor failures retained.
+Freeze: `/private/tmp/ignatius-t057-colour-route-vsz02y83/final-freeze-01/`, manifest
+`69c866f92f1e2ebc1c4dd0bb95c40a7b93152563ac9947051e4891d44969af5d`.
+
+The final combined repeat passed **1,497 outer cases, 1,189 library cases and
+25 summaries**, all six executed gates, zero failures/ignored cases and the same
+socket skip. Log: `/private/tmp/ignatius-manual-themes-t057-verify-20261025.log`,
+SHA-256 `965e7cd3662408e9da11c3d59a3647c1bdda22aac32bd20b5dccd418496da914`.
+The rebuilt actual binary's three owned PTY controls all exit normally with
+alternate-screen entry/exit captured. Configured never now emits zero painted
+SGRs; explicit always and NO_COLOR raw captures remain byte-identical to their
+pre-fix controls. After receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-qtg0xxks/receipt.json`,
+binary SHA-256 `3d0c50917ae5640bfda906be225314360c1ad015c18130319062c252eed01883`.
+These remain local macOS 27 arm64/Rust 1.99.1 results, with no native font or
+emulator claim. Hosted/pinned/MSRV, fresh CodeQL and publication remain pending.
+
 ## Expanded Results selection correction - 2026-10-25
 
 Feature025 T055 starts from reviewed D6 on its own sibling branch. The actual
@@ -46,6 +135,27 @@ Logs: `/private/tmp/ignatius-t055-integrated-verify-20261025.log` and
 `/private/tmp/ignatius-t055-integrated-verify-repeat-20261025.log`; root receipt
 `/private/tmp/ignatius-t055-root-integration-20261025.json`.
 This is neither a palette correction nor broader US5/Windows acceptance.
+
+Published clean `ffb86a1` in [draft PR34](https://github.com/tkomane/ignatius/pull/34)
+after the unchanged pre-push verifier again passed all 1,434 cases/24 summaries,
+with the same socket skip. Exact source 438 and reachable history 290 passed
+pinned Gitleaks. PR merge ref `d38304f9` matches head tree
+`77c2add104a13c5bd20bca99eb687d0de9f0578a`. CI `40223833554` completed with
+13 successful jobs and one deliberate schedule-only fixture-drift skip.
+Independent platform audit confirms every new T055 case ran on Linux, macOS
+and Windows with Rust 1.97.1; full library passes were 1,130/1,130/1,111.
+Startup/refusal smoke succeeded, with doctor's terminal/size/connection skips
+preserved as limits. Hosted runners do not establish native terminal appearance.
+PG14/18 plain/verify-full and one real Linux socket passed. The 473 selected
+invocations include pure/local cases; positive fixtures and runtime-major guards
+support the live claims, not a claim that all selected cases queried a server.
+Complete job logs/source-linked receipts:
+`/private/tmp/ignatius-pr34-platform-audit-kmb7tndf/RECEIPT.md` (SHA-256
+`8e2cd6155079190e78da21487a0c77089055410f976a462259215c62ac944095`) and
+`/private/tmp/ignatius-pr34-ffb86a1-db-audit-20261025.json`.
+Fresh CodeQL follows parent integration/retargeting under the unchanged
+main-target filter; it is not yet accepted. Publication receipt:
+`/private/tmp/ignatius-t055-ffb86a1-publication-20261025.json`.
 
 ## W10-012 integrated local verification - 2026-10-25
 
