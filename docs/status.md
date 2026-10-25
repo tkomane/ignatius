@@ -113,6 +113,14 @@ W10-013 is checked for this scoped implementation/acceptance. Native Windows
 hand-use and other resource routes remain open. Source publication has not
 merged main or released. The next record commit changes documentation only.
 
+W07-064 is now specified as the next isolated assignment under foundation
+REL-001 and `contracts/windows-conpty-observation.md`. Use a test-only native
+SDK observer plus the selected safe Rust guard/hook process; establish native
+capability and negative ownership/state controls before the full option/path
+matrix. Root owns CI and acceptance. Unsupported paste/buffer observations
+cannot close T055a; Windows 11/Windows Terminal hand use stays T051. No Windows
+ConPTY runtime evidence has run yet.
+
 The team separately assessed incoming allocation and next-slice feasibility.
 No frame/startup/RSS bound is adopted: the locked driver has no single public
 all-transport hook; raw ownership also needs cancellation/dial parity. Auto

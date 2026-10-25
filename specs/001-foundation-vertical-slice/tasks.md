@@ -120,6 +120,15 @@ when the behaviour exists and a test or recorded evidence proves it.
   PTY flags and restoration before previous/default hook details. Follow the
   bounded `plan.md` probe; distinguish this from a full product crash, abort,
   Windows or native visual acceptance.
+- [ ] W07-064 Implement the owned Windows ConPTY observation slice under
+  `contracts/windows-conpty-observation.md`: establish native mode/cursor/buffer
+  capability and no-guard/known-unrestored/hung-child controls before expanding
+  the actual guard normal/error/uncaught-panic option matrix. Use test-only
+  native SDK interop and the selected safe Rust library helper, owned jobs/
+  deadlines/drains and exact source/compiler/runner evidence. Preserve product
+  behavior and query/privacy contracts. Require actual Windows runtime and
+  independent review; leave unobservable paste/buffer modes and full T055a,
+  T051 hand use and release acceptance explicit.
 - [x] W10-007 Baseline oversized-value and notice memory at clean local
   `24db9c5` using the bounded experiment in `plan.md`, actual optimized binary
   identity, isolated state and the existing synthetic PostgreSQL fixture.

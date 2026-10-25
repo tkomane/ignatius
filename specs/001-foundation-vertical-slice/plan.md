@@ -400,3 +400,18 @@ macOS socket skip. Root captured 112 styled buffers and inspected 16 frame
 images. Clean `54056c2` then passed pinned/MSRV/platform, PostgreSQL 14-18
 plain/verify-full, actual socket and CodeQL acceptance. See verification for
 exact source/build boundaries and live-versus-pure counts.
+
+
+## W07-064 owned Windows observation - 2026-10-25
+
+After W10-013 acceptance, implement the existing REL-001 Windows evidence gap
+under [the ConPTY observation contract](contracts/windows-conpty-observation.md).
+Use a test-only SDK host/native observer and the actual selected non-test Rust
+guard/hook helper. Prove native capability and negative harness controls first,
+then normal/error/uncaught-panic cases with exact acquired options. Source,
+process/handle ownership, bounded drainage and before-previous-hook observation
+are review gates. No production behavior, dependency or unsafe Rust is added.
+Actual raw/mouse/cursor proof is mandatory; translated sequences cannot close
+unobservable buffer/paste modes. The real Windows runner is required for this
+slice, and Windows 11/Windows Terminal hand use remains separate. Root owns CI,
+canonical integration, final source-bound review and acceptance records.
