@@ -56,3 +56,16 @@ interactive user can choose a file shape before naming its destination.
 - `[P]` marks work that can proceed on separate files or boundaries.
 - Existing Features 013 through 020 working-tree changes are preserved.
 - No task authorizes commit, push, tag, signing, release or publication.
+
+## W10-010 follow-up - 2026-10-25
+
+- [ ] T023 Add failing-first complete-row progress and abandonment-flush
+  regressions through real encoder/runtime/export boundaries, following the
+  pinned contract. Keep injected I/O failures separate from native full-disk
+  evidence and use no production trigger.
+- [ ] T024 Repair both premature counts and introduce typed flushed/unconfirmed
+  partial-file reporting without changing successful bytes, exit codes,
+  transaction/cancellation semantics or retrying any row/SQL.
+- [ ] T025 Review the patch and run affected output/export/runtime/live checks,
+  inspect partial-file/count evidence, update user/recovery/release docs and
+  record the combined full gate with remaining platform boundaries.

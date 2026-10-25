@@ -132,6 +132,11 @@ that the result view, history and diagnostics do not alter machine output.
   retain their current byte and error contracts.
 - **FR-2111**: Export format selection and validation MUST not execute SQL,
   contact PostgreSQL, write history, transfer clipboard data or add telemetry.
+- **FR-2112**: A streamed row MUST advance output/export progress only after its
+  complete encoding is accepted by the writer. A failed or partial row write
+  MUST NOT count as a complete row. Interrupted export reporting MUST distinguish
+  successful partial-file flushing from an unconfirmed on-disk row count after
+  flush failure, without claiming a database execution or rollback outcome.
 
 ### Security and Compatibility Requirements
 
