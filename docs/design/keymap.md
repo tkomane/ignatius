@@ -58,6 +58,17 @@ Opening help or resizing starts at the top. Space bindings are written as
 | `/` | Filter what is in front of you: the rows when the results have focus, the object tree otherwise | No |
 | Any printable key | Type into the editor | No |
 
+The palette's **Server notice retention** entry opens a read-only snapshot of
+client omission/shortening/abandoned-delivery counts. Page keys and Home/End
+scroll locally using the active snapshot labels. Esc closes without
+acknowledgement. Enter/Activate explicitly acknowledges only that captured
+snapshot and closes; new loss remains pending, and unusable geometry refuses
+acknowledgement. Cancel closes this reader without acknowledgement and requests
+cancellation through the existing query recovery path when one is running.
+Palette cancel/empty choice returns to the same snapshot/offset. Reading and
+paste never edit covered SQL; protected prompts/reviews keep higher ownership.
+No new mandatory binding or configuration name is introduced.
+
 ## Chords
 
 `Ctrl+K` opens a popup listing every key that can follow it. Nothing is on a

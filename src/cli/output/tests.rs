@@ -131,6 +131,7 @@ use std::time::Duration;
 
 fn execution(sets: Vec<ResultSet>) -> Execution {
     Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: sets
             .into_iter()
@@ -591,6 +592,7 @@ fn a_failed_execution_writes_nothing_to_the_data_stream() {
     // The diagnostic goes to stderr. Anything written here would land in the
     // middle of whatever a script is parsing.
     let execution = Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: Vec::new(),
         status: ExecutionStatus::Failed,
@@ -614,6 +616,7 @@ fn a_failed_execution_writes_nothing_to_the_data_stream() {
 #[test]
 fn a_statement_with_no_rows_reports_what_it_did() {
     let execution = Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: None,
@@ -634,6 +637,7 @@ fn a_statement_with_no_rows_reports_what_it_did() {
 /// bad column name does.
 fn failed_execution() -> Execution {
     Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: Vec::new(),
         status: ExecutionStatus::Failed,

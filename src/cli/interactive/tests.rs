@@ -636,6 +636,7 @@ fn model_with_rows() -> Model {
 
     let mut model = Model::new(100);
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -893,4 +894,894 @@ impl Write for FailingWriter {
     fn flush(&mut self) -> std::io::Result<()> {
         Err(std::io::Error::other("synthetic terminal flush failure"))
     }
+}
+
+fn notice_adapter_report() -> NoticeReport {
+    use crate::query::result::{NoticeCount, NoticeCounts, NoticeScope};
+    NoticeReport {
+        scope: NoticeScope::Export,
+        retained: Some(256),
+        counts: NoticeCounts {
+            omitted: NoticeCount::Exact(1),
+            ..NoticeCounts::default()
+        },
+        ..NoticeReport::default()
+    }
+}
+
+#[test]
+fn notice_stream_report_survives_real_owned_rename_failure_and_each_stop() {
+    for case in ["complete", "rename", "server", "sink"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rows.csv");
+        let mut export = crate::query::export::Export::create(&path, false).unwrap();
+        let mut writer = crate::cli::output::StreamWriter::new(crate::cli::output::OutputOptions {
+            format: crate::cli::output::Format::Csv,
+            ..crate::cli::output::OutputOptions::default()
+        })
+        .unwrap();
+        write_export_event(
+            &mut export,
+            &mut writer,
+            crate::postgres::StreamEvent::Columns(vec!["value".into()]),
+        )
+        .unwrap();
+        write_export_event(
+            &mut export,
+            &mut writer,
+            crate::postgres::StreamEvent::Row(vec![crate::query::Cell::Text("42".into())]),
+        )
+        .unwrap();
+        let partial = export.partial_path().to_owned();
+        if case == "rename" {
+            std::fs::create_dir(&path).unwrap();
+        }
+        let value = match case {
+            "server" => Err(crate::postgres::StreamStop::Server(Box::new(
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "synthetic server failure",
+                    "streaming",
+                ),
+            ))),
+            "sink" => Err(crate::postgres::StreamStop::Sink(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            ))),
+            _ => Ok(1),
+        };
+        let result = finish_stream_export(
+            Reported {
+                value,
+                notice_report: notice_adapter_report(),
+            },
+            export,
+            crate::query::export::Export::finish,
+        );
+        assert_eq!(
+            result.notice_report,
+            notice_adapter_report(),
+            "{case} cannot discard stream accounting"
+        );
+        match (case, result.value) {
+            ("complete", Ok(ExportOutcome::Completed(finished))) => {
+                assert_eq!(finished.rows, 1);
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), "value\n42\n");
+            }
+            ("rename", Err(error)) => {
+                assert_eq!(error.exit_code(), ExitCode::ExportInterrupted);
+                assert_eq!(std::fs::read_to_string(&partial).unwrap(), "value\n42\n");
+            }
+            ("server" | "sink", Ok(ExportOutcome::Interrupted { abandoned, .. })) => {
+                assert_eq!(abandoned.rows, 1);
+                assert_eq!(
+                    std::fs::read_to_string(&abandoned.partial).unwrap(),
+                    "value\n42\n"
+                );
+            }
+            _ => panic!("unexpected {case} outcome"),
+        }
+    }
+}
+
+#[test]
+fn notice_doctor_warning_is_inside_existing_report_and_contains_only_client_facts() {
+    let mut checks = vec![Check::ok("postgres", "synthetic positive connection")];
+    add_notice_check(&mut checks, &notice_adapter_report());
+    assert_eq!(checks.len(), 2);
+    assert_eq!(checks[0].status, CheckStatus::Ok);
+    assert_eq!(checks[1].name, "server notice retention");
+    assert_eq!(checks[1].status, CheckStatus::Warn);
+    assert_eq!(
+        checks[1].next_action.as_deref(),
+        Some("Review server logs separately if complete notice history is required.")
+    );
+    assert_eq!(
+        checks[1].detail,
+        notice_adapter_report().counts.lines().join(" ")
+    );
+    add_notice_check(&mut checks, &NoticeReport::default());
+    assert_eq!(checks.len(), 2);
+}
+
+#[allow(clippy::print_stderr)]
+fn notice_runtime_fixture() -> Option<(tokio::runtime::Runtime, Session)> {
+    let Ok(uri) = std::env::var("IGNATIUS_TEST_PG_URI") else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_URI is not set");
+        return None;
+    };
+    if uri.is_empty() {
+        eprintln!("skipping: IGNATIUS_TEST_PG_URI is empty");
+        return None;
+    }
+    let mut target = crate::connection::resolve(
+        Some(&uri),
+        &crate::connection::ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &Config::default().connection,
+    )
+    .unwrap();
+    target.read_only = true;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let opened = runtime
+        .block_on(session::connect_reported(&target, Duration::from_secs(5)))
+        .value
+        .unwrap();
+    let major = opened
+        .info()
+        .server_version
+        .split('.')
+        .next()
+        .unwrap()
+        .parse::<u16>()
+        .expect("PostgreSQL version begins with a numeric major");
+    assert!(
+        (14..=18).contains(&major),
+        "supported PostgreSQL fixture major"
+    );
+    if let Ok(expected) = std::env::var("IGNATIUS_PG_VERSION") {
+        assert_eq!(
+            major,
+            expected
+                .parse::<u16>()
+                .expect("configured fixture major is numeric")
+        );
+    }
+    notice_runtime_health(&runtime, &opened);
+    Some((runtime, opened))
+}
+fn notice_runtime_health(runtime: &tokio::runtime::Runtime, session: &Session) {
+    let result =
+        runtime.block_on(session.execute("SELECT count(*) FROM public.orders", 1, JobId(9_900)));
+    assert_eq!(result.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        result.statements[0].result_set.as_ref().unwrap().rows[0],
+        vec![crate::query::Cell::Text("3".into())]
+    );
+}
+fn notice_installed(session: Session) -> Arc<InstalledSession> {
+    Arc::new(InstalledSession {
+        session: Arc::new(session),
+        session_id: crate::app::model::NoticeSessionId::new(),
+        generation: 1,
+        source: crate::app::model::NoticeSource::User,
+        retired: std::sync::atomic::AtomicBool::new(false),
+    })
+}
+
+#[test]
+fn notice_runtime_held_reader_defers_install_while_input_quit_and_ack_progress() {
+    let Some((runtime, opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let installed = notice_installed(opened);
+    runtime.block_on(async {
+        let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(None));
+        let held = slot.read().await;
+        let (acknowledged, mut ack) = tokio::sync::oneshot::channel();
+        let mut model = Model::new(10);
+        let install = SessionInstall {
+            opened: Arc::clone(&installed),
+            acknowledged,
+        };
+        let pending = try_session_install(install, &slot, &mut model, 1)
+            .expect("held reader defers without awaiting");
+        assert!(matches!(
+            ack.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        let effects = update(&mut model, Message::Action(crate::app::Action::Quit));
+        assert!(matches!(effects.as_slice(), [Effect::Quit]));
+        assert!(model.should_quit);
+        drop(pending);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), &mut ack)
+                .await
+                .unwrap()
+                .is_err(),
+            "dropping pending install wakes owned ack waiter"
+        );
+        drop(held);
+        let (acknowledged, ack) = tokio::sync::oneshot::channel();
+        let mut model = Model::new(10);
+        assert!(
+            try_session_install(
+                SessionInstall {
+                    opened: Arc::clone(&installed),
+                    acknowledged
+                },
+                &slot,
+                &mut model,
+                2
+            )
+            .is_none()
+        );
+        assert!(
+            !ack.await.unwrap(),
+            "stale install rejected before slot mutation"
+        );
+        assert!(slot.read().await.is_none());
+        let (tx, mut rx) = mpsc::channel::<SessionInstall>(2);
+        let (acknowledged, _) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::clone(&installed),
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        let (acknowledged, _) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::clone(&installed),
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        let (acknowledged, _) = tokio::sync::oneshot::channel();
+        let send = tx.send(SessionInstall {
+            opened: Arc::clone(&installed),
+            acknowledged,
+        });
+        tokio::pin!(send);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut send)
+                .await
+                .is_err(),
+            "capacity stays bounded"
+        );
+        rx.close();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), &mut send)
+                .await
+                .unwrap()
+                .is_err(),
+            "quit closes blocked sender"
+        );
+    });
+    notice_runtime_health(&runtime, &installed.session);
+}
+
+#[test]
+fn notice_runtime_physical_install_ahead_of_model_quit_and_profile_retirement_is_not_lost() {
+    use crate::query::result::NoticeCount;
+    for profile_switch in [false, true] {
+        let Some((runtime, opened)) = notice_runtime_fixture() else {
+            return;
+        };
+        let installed = notice_installed(opened);
+        let result=runtime.block_on(installed.execute("DO $$ BEGIN FOR i IN 1..257 LOOP RAISE NOTICE 'synthetic retirement %',i; END LOOP; END $$; SELECT 42",1,JobId(9_901)));
+        assert_eq!(result.status, ExecutionStatus::Succeeded);
+        assert_eq!(result.notice_report.counts.omitted, NoticeCount::Exact(1));
+        assert_eq!(
+            result.statements[1].result_set.as_ref().unwrap().rows[0],
+            vec![crate::query::Cell::Text("42".into())]
+        );
+        let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(Some(Arc::clone(&installed))));
+        let metadata: SessionSlot = Arc::new(tokio::sync::RwLock::new(None));
+        let mut model = Model::new(10);
+        // The physical slot exists, but neither its install nor Connected fact
+        // has been reduced yet. Retirement must synchronize it explicitly.
+        if profile_switch {
+            model.connection_profiles = crate::app::connection_picker::summaries(
+                &std::collections::BTreeMap::from([(
+                    "synthetic".into(),
+                    crate::config::schema::Profile::default(),
+                )]),
+                &std::collections::BTreeMap::new(),
+            );
+            update(
+                &mut model,
+                Message::Action(crate::app::Action::OpenConnectionPicker),
+            );
+            let effects = update(&mut model, Message::Action(crate::app::Action::Activate));
+            assert!(matches!(
+                effects.as_slice(),
+                [Effect::ConnectProfile { .. }]
+            ));
+            assert_eq!(model.connection_generation, 2);
+        } else {
+            assert!(matches!(
+                update(&mut model, Message::Action(crate::app::Action::Quit)).as_slice(),
+                [Effect::Quit]
+            ));
+        }
+        runtime.block_on(retire_notice_sources(&mut model, &slot, &metadata));
+        assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+        assert_eq!(model.notice_state.previous.omitted, NoticeCount::Exact(1));
+        assert!(model.notice_state.sources[0].is_none());
+        runtime.block_on(retire_notice_sources(&mut model, &slot, &metadata));
+        assert_eq!(
+            model.notice_state.pending.omitted,
+            NoticeCount::Exact(1),
+            "actual retirement is once per physical token"
+        );
+        update(
+            &mut model,
+            connection_message(
+                1,
+                Message::NoticeStatus {
+                    source: installed.source,
+                    session_id: installed.session_id.clone(),
+                    checkpoint: installed.notice_checkpoint(),
+                    latest: None,
+                },
+            ),
+        );
+        assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+        assert!(model.notice_state.sources[0].is_none());
+        notice_runtime_health(&runtime, &installed.session);
+    }
+}
+
+#[test]
+fn notice_runtime_shared_physical_fallback_is_polled_once_and_old_generation_is_ignored() {
+    use crate::query::result::NoticeCount;
+    let Some((runtime, opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let installed = notice_installed(opened);
+    let result = runtime.block_on(installed.execute(
+        "DO $$ BEGIN FOR i IN 1..257 LOOP RAISE NOTICE 'synthetic fallback %',i; END LOOP; END $$",
+        1,
+        JobId(9_902),
+    ));
+    assert_eq!(result.status, ExecutionStatus::Succeeded);
+    let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(Some(Arc::clone(&installed))));
+    let mut model = Model::new(10);
+    runtime.block_on(poll_notice_sources(&mut model, &slot, &slot));
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    runtime.block_on(poll_notice_sources(&mut model, &slot, &slot));
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    model.connection_generation = 2;
+    runtime.block_on(poll_notice_sources(&mut model, &slot, &slot));
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    notice_runtime_health(&runtime, &installed.session);
+}
+
+#[test]
+fn notice_runtime_pending_uninstalled_shutdown_keeps_known_loss_once_without_waiting() {
+    use crate::query::result::NoticeCount;
+    let Some((runtime, opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let installed = notice_installed(opened);
+    let result=runtime.block_on(installed.execute("DO $$ BEGIN FOR i IN 1..257 LOOP RAISE NOTICE 'synthetic pending %',i; END LOOP; END $$; SELECT 42",1,JobId(9_903)));
+    assert_eq!(result.status, ExecutionStatus::Succeeded);
+    assert_eq!(result.notice_report.counts.omitted, NoticeCount::Exact(1));
+    runtime.block_on(async {
+        let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(None));
+        let held = slot.read().await;
+        let (acknowledged, ack) = tokio::sync::oneshot::channel();
+        let mut model = Model::new(10);
+        let pending = try_session_install(
+            SessionInstall {
+                opened: Arc::clone(&installed),
+                acknowledged,
+            },
+            &slot,
+            &mut model,
+            1,
+        )
+        .expect("held reader defers install");
+        let (tx, mut receiver) = mpsc::channel(2);
+        let (alias_acknowledged, alias_ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::clone(&installed),
+            acknowledged: alias_acknowledged,
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            update(&mut model, Message::Action(crate::app::Action::Quit)).as_slice(),
+            [Effect::Quit]
+        ));
+        shutdown_pending_installs(
+            &mut model,
+            &mut receiver,
+            [Some(pending), None],
+            [None, None],
+            [None, None],
+        );
+        assert_eq!(
+            model.notice_state.pending.omitted,
+            NoticeCount::Exact(1),
+            "locally observed uninstalled loss survives Quit"
+        );
+        assert_eq!(
+            model.notice_state.previous.omitted,
+            NoticeCount::Exact(1),
+            "no current connection facts restored"
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), alias_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert!(model.should_quit);
+        assert!(slot.read().await.is_none());
+        drop(held);
+    });
+    runtime.block_on(async {
+        // A differently wrapped alias must not re-add an already installed
+        // physical Session, even if its opaque token is different.
+        let alias = Arc::new(InstalledSession {
+            session: Arc::clone(&installed.session),
+            session_id: crate::app::model::NoticeSessionId::new(),
+            generation: 1,
+            source: crate::app::model::NoticeSource::Metadata,
+            retired: std::sync::atomic::AtomicBool::new(false),
+        });
+        let (tx, mut receiver) = mpsc::channel(2);
+        let (acknowledged, ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: alias,
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        let mut model = Model::new(10);
+        model.notice_state.pending.omitted = NoticeCount::Exact(1);
+        model.notice_state.previous.omitted = NoticeCount::Exact(1);
+        shutdown_pending_installs(
+            &mut model,
+            &mut receiver,
+            [None, None],
+            [Some(Arc::clone(&installed)), None],
+            [None, None],
+        );
+        assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        let stale = Arc::new(InstalledSession {
+            session: Arc::clone(&installed.session),
+            session_id: crate::app::model::NoticeSessionId::new(),
+            generation: 1,
+            source: crate::app::model::NoticeSource::User,
+            retired: std::sync::atomic::AtomicBool::new(false),
+        });
+        let (tx, mut receiver) = mpsc::channel(2);
+        let (acknowledged, ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: stale,
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        let mut model = Model::new(10);
+        model.connection_generation = 2;
+        shutdown_pending_installs(
+            &mut model,
+            &mut receiver,
+            [None, None],
+            [None, None],
+            [None, None],
+        );
+        assert!(
+            !model.notice_state.pending.needs_report(),
+            "stale uninstalled work cannot become current loss"
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+    });
+    notice_runtime_health(&runtime, &installed.session);
+}
+
+#[test]
+fn notice_runtime_replacing_deferred_open_transfers_observed_loss_once() {
+    use crate::query::result::NoticeCount;
+    let Some((runtime, opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let old = notice_installed(opened);
+    let Some((new_runtime, new_opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let replacement = notice_installed(new_opened);
+    let result=runtime.block_on(old.execute("DO $$ BEGIN FOR i IN 1..257 LOOP RAISE NOTICE 'synthetic replaced %',i; END LOOP; END $$; SELECT 42",1,JobId(9_910)));
+    assert_eq!(result.status, ExecutionStatus::Succeeded);
+    assert_eq!(result.notice_report.counts.omitted, NoticeCount::Exact(1));
+    assert_eq!(
+        result.statements[1].result_set.as_ref().unwrap().rows[0],
+        vec![crate::query::Cell::Text("42".into())]
+    );
+    runtime.block_on(async {
+        let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(None));
+        let held = slot.read().await;
+        let mut model = Model::new(10);
+        let (acknowledged, old_ack) = tokio::sync::oneshot::channel();
+        let old_pending = try_session_install(
+            SessionInstall {
+                opened: Arc::clone(&old),
+                acknowledged,
+            },
+            &slot,
+            &mut model,
+            1,
+        )
+        .unwrap();
+        let mut pending = [Some(old_pending), None];
+        let mut remembered = [None, None];
+        for (label, candidate) in [
+            (
+                "stale",
+                Arc::new(InstalledSession {
+                    session: Arc::clone(&replacement.session),
+                    session_id: crate::app::model::NoticeSessionId::new(),
+                    generation: 0,
+                    source: old.source,
+                    retired: std::sync::atomic::AtomicBool::new(false),
+                }),
+            ),
+            (
+                "opaque alias",
+                Arc::new(InstalledSession {
+                    session: Arc::clone(&replacement.session),
+                    session_id: old.session_id.clone(),
+                    generation: 1,
+                    source: old.source,
+                    retired: std::sync::atomic::AtomicBool::new(false),
+                }),
+            ),
+            (
+                "physical alias",
+                Arc::new(InstalledSession {
+                    session: Arc::clone(&old.session),
+                    session_id: crate::app::model::NoticeSessionId::new(),
+                    generation: 1,
+                    source: old.source,
+                    retired: std::sync::atomic::AtomicBool::new(false),
+                }),
+            ),
+        ] {
+            let (acknowledged, rejected) = tokio::sync::oneshot::channel();
+            admit_pending_install(
+                &mut pending,
+                SessionInstall {
+                    opened: candidate,
+                    acknowledged,
+                },
+                &mut model,
+                &[None, None],
+                &mut remembered,
+                1,
+            );
+            assert_eq!(
+                pending[0].as_ref().unwrap().opened.session_id,
+                old.session_id,
+                "{label} preserves the existing owner"
+            );
+            assert!(
+                !tokio::time::timeout(Duration::from_secs(1), rejected)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "{label} is false-acknowledged"
+            );
+            assert!(
+                !model.notice_state.pending.needs_report(),
+                "{label} cannot retire or recount the original attempt"
+            );
+        }
+        let (acknowledged, new_ack) = tokio::sync::oneshot::channel();
+        admit_pending_install(
+            &mut pending,
+            SessionInstall {
+                opened: Arc::clone(&replacement),
+                acknowledged,
+            },
+            &mut model,
+            &[None, None],
+            &mut remembered,
+            1,
+        );
+        assert_eq!(
+            model.notice_state.pending.omitted,
+            NoticeCount::Exact(1),
+            "replaced current-generation opened session cannot lose known counts"
+        );
+        assert_eq!(model.notice_state.previous.omitted, NoticeCount::Exact(1));
+        assert!(model.notice_state.sources.iter().all(Option::is_none));
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), old_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            pending[0].as_ref().unwrap().opened.session_id,
+            replacement.session_id
+        );
+        // A newly wrapped alias of the just-replaced physical session must not
+        // displace the new owner or re-add the same previous debt.
+        let alias = Arc::new(InstalledSession {
+            session: Arc::clone(&old.session),
+            session_id: crate::app::model::NoticeSessionId::new(),
+            generation: 1,
+            source: old.source,
+            retired: std::sync::atomic::AtomicBool::new(false),
+        });
+        let (acknowledged, alias_ack) = tokio::sync::oneshot::channel();
+        admit_pending_install(
+            &mut pending,
+            SessionInstall {
+                opened: alias,
+                acknowledged,
+            },
+            &mut model,
+            &[None, None],
+            &mut remembered,
+            1,
+        );
+        assert_eq!(
+            pending[0].as_ref().unwrap().opened.session_id,
+            replacement.session_id,
+            "late physical alias cannot replace the distinct pending owner"
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), alias_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(model.notice_state.previous.omitted, NoticeCount::Exact(1));
+        let (tx, mut receiver) = mpsc::channel(2);
+        let (acknowledged, queued_alias_ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::new(InstalledSession {
+                session: Arc::clone(&old.session),
+                session_id: crate::app::model::NoticeSessionId::new(),
+                generation: 1,
+                source: old.source,
+                retired: std::sync::atomic::AtomicBool::new(false),
+            }),
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            update(&mut model, Message::Action(crate::app::Action::Quit)).as_slice(),
+            [Effect::Quit]
+        ));
+        shutdown_pending_installs(&mut model, &mut receiver, pending, [None, None], remembered);
+        assert_eq!(
+            model.notice_state.previous.omitted,
+            NoticeCount::Exact(1),
+            "queued alias of replaced attempt is not counted again at Quit"
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), new_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), queued_alias_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        drop(held);
+    });
+    notice_runtime_health(&runtime, &old.session);
+    notice_runtime_health(&new_runtime, &replacement.session);
+}
+
+#[test]
+fn notice_runtime_profile_retirement_preserves_pending_loss_and_keeps_install_port_open() {
+    use crate::query::result::NoticeCount;
+    let Some((runtime, opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let old = notice_installed(opened);
+    let Some((new_runtime, new_opened)) = notice_runtime_fixture() else {
+        return;
+    };
+    let new = Arc::new(InstalledSession {
+        session: Arc::new(new_opened),
+        session_id: crate::app::model::NoticeSessionId::new(),
+        generation: 2,
+        source: crate::app::model::NoticeSource::User,
+        retired: std::sync::atomic::AtomicBool::new(false),
+    });
+    let result=runtime.block_on(old.execute("DO $$ BEGIN FOR i IN 1..257 LOOP RAISE NOTICE 'synthetic profile pending %',i; END LOOP; END $$; SELECT 42",1,JobId(9_911)));
+    assert_eq!(result.status, ExecutionStatus::Succeeded);
+    assert_eq!(result.notice_report.counts.omitted, NoticeCount::Exact(1));
+    assert_eq!(
+        result.statements[1].result_set.as_ref().unwrap().rows[0],
+        vec![crate::query::Cell::Text("42".into())]
+    );
+    runtime.block_on(async {
+        let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(None));
+        let metadata: SessionSlot = Arc::new(tokio::sync::RwLock::new(None));
+        let held = slot.read().await;
+        let mut model = Model::new(10);
+        let (acknowledged, old_ack) = tokio::sync::oneshot::channel();
+        let deferred = try_session_install(
+            SessionInstall {
+                opened: Arc::clone(&old),
+                acknowledged,
+            },
+            &slot,
+            &mut model,
+            1,
+        )
+        .unwrap();
+        let mut pending = [Some(deferred), None];
+        let mut remembered = [None, None];
+        let (tx, mut receiver) = mpsc::channel(2);
+        let (acknowledged, queued_alias_ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::new(InstalledSession {
+                session: Arc::clone(&old.session),
+                session_id: crate::app::model::NoticeSessionId::new(),
+                generation: 1,
+                source: crate::app::model::NoticeSource::Metadata,
+                retired: std::sync::atomic::AtomicBool::new(false),
+            }),
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        let (acknowledged, stale_ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::new(InstalledSession {
+                session: Arc::clone(&new.session),
+                session_id: crate::app::model::NoticeSessionId::new(),
+                generation: 0,
+                source: new.source,
+                retired: std::sync::atomic::AtomicBool::new(false),
+            }),
+            acknowledged,
+        })
+        .await
+        .unwrap();
+        model.connection_profiles = crate::app::connection_picker::summaries(
+            &std::collections::BTreeMap::from([(
+                "synthetic".into(),
+                crate::config::schema::Profile::default(),
+            )]),
+            &std::collections::BTreeMap::new(),
+        );
+        update(
+            &mut model,
+            Message::Action(crate::app::Action::OpenConnectionPicker),
+        );
+        assert!(matches!(
+            update(&mut model, Message::Action(crate::app::Action::Activate)).as_slice(),
+            [Effect::ConnectProfile { .. }]
+        ));
+        assert_eq!(model.connection_generation, 2);
+        retire_profile_notice_sources(
+            &mut model,
+            &slot,
+            &metadata,
+            &mut receiver,
+            &mut pending,
+            &mut remembered,
+            1,
+        )
+        .await;
+        assert_eq!(
+            model.notice_state.pending.omitted,
+            NoticeCount::Exact(1),
+            "profile switch transfers locally held old-attempt counts before authority is retired"
+        );
+        assert_eq!(model.notice_state.previous.omitted, NoticeCount::Exact(1));
+        assert!(pending.iter().all(Option::is_none));
+        assert!(remembered.iter().all(Option::is_none));
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), queued_alias_ack)
+                .await
+                .unwrap()
+                .unwrap(),
+            "physical alias projected once"
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), stale_ack)
+                .await
+                .unwrap()
+                .unwrap(),
+            "stale attempt rejected"
+        );
+        assert_eq!(
+            model.notice_state.retiring_generation, None,
+            "old retirement authority ended"
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), old_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        update(
+            &mut model,
+            connection_message(
+                1,
+                Message::NoticeStatus {
+                    source: old.source,
+                    session_id: old.session_id.clone(),
+                    checkpoint: old.notice_checkpoint(),
+                    latest: None,
+                },
+            ),
+        );
+        assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+        update(
+            &mut model,
+            Message::NoticeUninstalledRetired {
+                generation: 1,
+                session_id: crate::app::model::NoticeSessionId::new(),
+                counts: result.notice_report.counts,
+            },
+        );
+        assert_eq!(
+            model.notice_state.pending.omitted,
+            NoticeCount::Exact(1),
+            "finished authority rejects late old special reports too"
+        );
+        let (acknowledged, new_ack) = tokio::sync::oneshot::channel();
+        tx.send(SessionInstall {
+            opened: Arc::clone(&new),
+            acknowledged,
+        })
+        .await
+        .expect("profile retirement keeps bounded port open");
+        let incoming = receiver.try_recv().unwrap();
+        admit_pending_install(
+            &mut pending,
+            incoming,
+            &mut model,
+            &[None, None],
+            &mut remembered,
+            2,
+        );
+        drop(held);
+        assert!(try_session_install(pending[0].take().unwrap(), &slot, &mut model, 2).is_none());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), new_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            slot.read().await.as_ref().unwrap().session_id,
+            new.session_id
+        );
+        assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    });
+    notice_runtime_health(&runtime, &old.session);
+    notice_runtime_health(&new_runtime, &new.session);
 }

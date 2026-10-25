@@ -28,6 +28,7 @@ fn density_footer_uses_render_override_caps_remaps_and_complete_pairs() {
     let mut set = ResultSet::new(vec!["value".into()], 100);
     set.push(vec![Cell::Text("data".into())]);
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),

@@ -58,6 +58,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.size = (columns, rows);
                 model.review_scroll = 0;
                 model.help_scroll = 0;
+                if let Some(details) = model.notice_details.as_mut() {
+                    details.scroll = 0;
+                }
             }
             Vec::new()
         }
@@ -207,11 +210,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.editor.set_cursor(location.cursor);
                 model.focus = Focus::Editor;
             }
-            model.notices = execution
-                .statements
-                .iter()
-                .flat_map(|s| s.notices.clone())
-                .collect();
+            model.notices.clear();
             if execution.status == ExecutionStatus::ConnectionLost
                 && let Some(info) = model.connection.info()
             {
@@ -324,8 +323,127 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             clear_error_location(model);
             Vec::new()
         }
-        Message::Notices(notices) => {
-            model.notices.extend(notices);
+        Message::NoticeSourceInstalled { source, session_id } => {
+            model
+                .notice_state
+                .install(source, model.connection_generation, session_id);
+            Vec::new()
+        }
+        Message::NoticeStatus {
+            source,
+            session_id,
+            checkpoint,
+            latest,
+        } => {
+            model.notice_state.observe(
+                source,
+                model.connection_generation,
+                &session_id,
+                checkpoint,
+                latest,
+            );
+            Vec::new()
+        }
+        Message::NoticeAttemptReport {
+            source,
+            attempt_id,
+            summary,
+        } => {
+            let index = source.index();
+            if model.notice_state.last_attempt[index].as_ref() != Some(&attempt_id) {
+                model.notice_state.last_attempt[index] = Some(attempt_id);
+                model.notice_state.pending = model.notice_state.pending.plus(summary.counts);
+                model.notice_state.previous = model.notice_state.previous.plus(summary.counts);
+                if summary.counts.needs_report() {
+                    model.notice_state.revision = model.notice_state.revision.saturating_add(1);
+                }
+            }
+            Vec::new()
+        }
+        Message::NoticeUninstalledRetirementStarted(generation) => {
+            if generation == model.connection_generation
+                || model.notice_state.retiring_generation == Some(generation)
+            {
+                if model.notice_state.uninstalled_token_generation != Some(generation) {
+                    model.notice_state.uninstalled_tokens = [None, None, None, None];
+                    model.notice_state.uninstalled_token_generation = Some(generation);
+                }
+                model.notice_state.uninstalled_retirement = Some(generation);
+            }
+            Vec::new()
+        }
+        Message::NoticeUninstalledRetired {
+            generation,
+            session_id,
+            counts,
+        } => {
+            if (generation == model.connection_generation
+                || model.notice_state.retiring_generation == Some(generation))
+                && model.notice_state.uninstalled_retirement == Some(generation)
+                && !model
+                    .notice_state
+                    .uninstalled_tokens
+                    .iter()
+                    .flatten()
+                    .any(|known| *known == session_id)
+            {
+                if let Some(empty) = model
+                    .notice_state
+                    .uninstalled_tokens
+                    .iter_mut()
+                    .find(|slot| slot.is_none())
+                {
+                    *empty = Some(session_id);
+                    model.notice_state.pending = model.notice_state.pending.plus(counts);
+                    model.notice_state.previous = model.notice_state.previous.plus(counts);
+                    if counts.needs_report() {
+                        model.notice_state.revision = model.notice_state.revision.saturating_add(1);
+                    }
+                } else {
+                    model.notice_state.pending = crate::query::result::NoticeCounts::UNKNOWN;
+                    model.notice_state.previous = crate::query::result::NoticeCounts::UNKNOWN;
+                    model.notice_state.revision = model.notice_state.revision.saturating_add(1);
+                }
+            }
+            Vec::new()
+        }
+        Message::NoticeUninstalledRetirementFinished(generation) => {
+            if model.notice_state.uninstalled_retirement == Some(generation) {
+                model.notice_state.uninstalled_retirement = None;
+            }
+            Vec::new()
+        }
+        Message::NoticeRetirementStarted(generation) => {
+            if generation == model.connection_generation {
+                model.notice_state.begin_retirement(generation);
+            }
+            Vec::new()
+        }
+        Message::NoticeRetiringSourceInstalled {
+            generation,
+            source,
+            session_id,
+        } => {
+            if model.notice_state.retiring_generation == Some(generation)
+                && model.notice_state.retirement_open[source.index()]
+            {
+                model.notice_state.install(source, generation, session_id);
+            }
+            Vec::new()
+        }
+        Message::NoticeRetired {
+            generation,
+            source,
+            session_id,
+            counts,
+        } => {
+            model
+                .notice_state
+                .retire(source, generation, &session_id, counts);
+            Vec::new()
+        }
+        Message::NoticeRetirementFinished(generation) => {
+            model.notice_state.finish_retirement(generation);
             Vec::new()
         }
         Message::SchemasLoaded(result) => {
@@ -507,6 +625,11 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
     };
+    if effects.iter().any(|effect| matches!(effect, Effect::Quit)) {
+        model
+            .notice_state
+            .begin_retirement(model.connection_generation);
+    }
     // All diagnostic origins share this safety boundary. Restore the saved
     // shape without stealing editor focus or changing transaction semantics.
     if model.focus != Focus::Results && needs_safety_details(model) {
@@ -709,7 +832,8 @@ fn help_action(model: &mut Model, action: Action) -> Vec<Effect> {
 }
 
 fn pane_input_owned(model: &Model) -> bool {
-    model.inspector.is_some()
+    model.notice_details.is_some()
+        || model.inspector.is_some()
         || model.definition.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
@@ -765,6 +889,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.palette.is_some() {
         return palette_action(model, action);
+    }
+    if model.notice_details.is_some() {
+        return notice_details_action(model, action);
     }
     if model.help_open {
         return help_action(model, action);
@@ -995,14 +1122,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 .unwrap_or_default();
             run(model, sql, source)
         }
-        Action::Cancel => match model.phase {
-            QueryPhase::Running { job, .. } => {
-                model.phase = QueryPhase::CancellationRequested { job };
-                vec![Effect::Cancel { job }]
-            }
-            // Cancelling twice must not send a second request or change wording.
-            QueryPhase::CancellationRequested { .. } | QueryPhase::Idle => Vec::new(),
-        },
+        Action::Cancel => cancel_query(model),
         Action::Insert(ch) if model.focus == Focus::Editor => {
             edit_editor(model, |editor| editor.insert(ch));
             open_completion(model, false);
@@ -1154,6 +1274,17 @@ fn automatic_completion_should_open(result: &crate::query::completion::Completio
         && result.candidates[0]
             .label
             .eq_ignore_ascii_case(result.prefix.trim()))
+}
+
+/// The existing cancellation transition, also used by read-only notice recovery.
+fn cancel_query(model: &mut Model) -> Vec<Effect> {
+    match model.phase {
+        QueryPhase::Running { job, .. } => {
+            model.phase = QueryPhase::CancellationRequested { job };
+            vec![Effect::Cancel { job }]
+        }
+        QueryPhase::CancellationRequested { .. } | QueryPhase::Idle => Vec::new(),
+    }
 }
 
 /// Handles input while the completion menu is open.
@@ -3043,14 +3174,23 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
             let chosen = palette.selected_entry();
             model.palette = None;
             let had_help = model.help_open;
+            let had_notice_details = model.notice_details.is_some();
             if chosen.is_some() {
                 model.help_open = false;
+                model.notice_details = None;
             }
             match chosen.map(|entry| entry.command) {
                 Some(crate::app::palette::PaletteCommand::Run(Action::ToggleHelp)) if had_help => {
                     Vec::new()
                 }
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::NoticeDetails) => {
+                    model.notice_details = Some(crate::app::model::NoticeDetails {
+                        snapshot: model.notice_state.snapshot(),
+                        scroll: 0,
+                    });
+                    Vec::new()
+                }
                 Some(crate::app::palette::PaletteCommand::ConnectionDetails) => {
                     model.connection_details = true;
                     Vec::new()
@@ -3062,7 +3202,7 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     begin_export_format(model, format)
                 }
                 Some(crate::app::palette::PaletteCommand::Open(name)) => {
-                    if had_help {
+                    if had_help || had_notice_details {
                         reveal_palette_editor(model);
                     }
                     model.loaded_query = Some(name.clone());
@@ -3113,6 +3253,46 @@ fn reveal_palette_editor(model: &mut Model) {
     model.completion.menu = None;
     model.tree.filtering = false;
     model.result_filtering = false;
+}
+
+/// Read-only client accounting has no SQL/clipboard/file action route.
+fn notice_details_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let view = crate::ui::notices::build(
+        model,
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    );
+    if let Some(offset) = view.as_ref().and_then(|view| view.navigate(&action)) {
+        if let Some(details) = model.notice_details.as_mut() {
+            details.scroll = offset;
+        }
+        return Vec::new();
+    }
+    match action {
+        Action::Dismiss | Action::ToggleHelp => model.notice_details = None,
+        Action::Cancel => {
+            model.notice_details = None;
+            return cancel_query(model);
+        }
+        Action::Activate if view.is_some_and(|view| view.usable) => {
+            if let Some(details) = model.notice_details.take() {
+                model.notice_state.acknowledge(&details.snapshot);
+            }
+        }
+        Action::OpenPalette => {
+            model.palette = Some(crate::app::palette::Palette::over_commands(
+                palette_entries(model),
+                crate::app::discovery::palette_note(model),
+            ))
+        }
+        Action::BeginPrefix => model.prefix_pending = true,
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        _ => {}
+    }
+    Vec::new()
 }
 
 /// Handles input while the read-only connection trust surface is open.
@@ -3214,7 +3394,7 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
         model.paste_notice = None;
         return Vec::new();
     }
-    if model.help_open {
+    if model.help_open || model.notice_details.is_some() {
         model.paste_notice = Some(PasteNotice::Ignored);
         model.format_notice = None;
         return Vec::new();
@@ -3404,6 +3584,9 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
             .iter()
             .find(|item| item.name == name)
     });
+    model
+        .notice_state
+        .begin_retirement(model.connection_generation);
     model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
     model.credential_provider = summary.and_then(|item| item.auth.clone());
     model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
@@ -3526,6 +3709,23 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         group: "Session",
         command: PaletteCommand::ConnectionDetails,
     }];
+
+    entries.push(PaletteEntry {
+        label: "Server notice retention".into(),
+        detail: format!(
+            "{} omitted, {} shortened, {} abandoned; {}",
+            model.notice_state.pending.omitted.words(),
+            model.notice_state.pending.shortened.words(),
+            model.notice_state.pending.abandoned.words(),
+            if model.notice_state.pending.needs_report() {
+                "pending"
+            } else {
+                "client accounting"
+            }
+        ),
+        group: "Session",
+        command: PaletteCommand::NoticeDetails,
+    });
 
     // A command appears once even when several active keys invoke it. The
     // detail keeps every active direct key, with configured replacements first.

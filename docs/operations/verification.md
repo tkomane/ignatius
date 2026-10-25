@@ -1,5 +1,63 @@
 # Verification
 
+## W10-012 integrated local verification - 2026-10-25
+
+The frozen isolated handoff passed 750 focused library cases and 32 actual
+PostgreSQL 18.6 integration invocations across plain and verified TLS, with no
+skips. The lead verified all 129 recorded artefact hashes and the original 43
+moved test names. Native peer review found doctor guidance and pending-attempt
+replacement/old-profile retirement gaps. The repaired freeze passed re-review:
+29 artefact hashes verified, 37 interactive cases on each plain/verify-full
+route and nine reducer cases inspected, with no remaining scoped blocker.
+
+The first canonical verifier collected one new harness failure: its transport
+assertion treated every non-verify-full target as explicitly TLS-disabled.
+The default local Prefer route correctly reports NotNegotiated. No product TLS
+policy changed. Corrected requested-versus-observed assertions passed three
+actual preferred-plain/disabled-plain/verified-TLS probes and native review.
+The complete repeat then passed **1,370 outer harness cases, 1,072 library cases,
+23 summaries**, formatting, warnings-denied workspace Clippy/API documentation,
+workspace/doc tests and PostgreSQL 18.6 plain/TLS. The macOS socket case remains
+a semantic skip. Logs:
+`/private/tmp/ignatius-verify-2026-10-25-notices-first-failure.log` and
+`/private/tmp/ignatius-verify-2026-10-25-notices-recheck.log`.
+The repeat records all 434 tracked/untracked source inputs, digest
+`a801a9edbd41ba19cde4f2ae76f1c889828e4ae47014bdcc38c026147ccb0476`;
+it observes the modified integration tree, not a clean/hosted candidate.
+Subsequent edits reconcile documentation; the installed pre-push gate will
+verify the clean committed source again before upload.
+
+The lead captured 128 styled synthetic Ratatui buffers from a fresh Cargo-
+selected non-test library and inspected representative normal, precision,
+small-size and protected-review images across both densities. Four modes cover
+dark/light/high-contrast truecolour Unicode and ASCII/no-colour. All 399 captured
+artefact hashes verify, with no unsupported glyphs. These establish rendered
+cells and pure action assertions, not native appearance, hand use or reading.
+The capture precedes the final runtime-only retirement repair; it is not an
+attestation of later application bytes. Evidence:
+`/private/tmp/ignatius-notices-styled-uakynqds/`, manifest SHA-256
+`fa64e7125ed30d7fdcb8f7d4e019abcbee7889c3c13cefa4161cdd6cf0c80b3b`;
+source-input digest
+`796ad74705923f3d4c188484a12af3f6d40b52d0b1a942c7068969e36f07e3f7`,
+non-test library SHA-256
+`37be5988221c6c91b53ba1f33611199f99f00be8ecc68eb743e657e59c745a0b`.
+The Inspector-to-palette harness assumption was corrected to preserve existing
+palette behavior; the covered-inspector case explicitly injects a synthetic
+snapshot. The raster manifest excludes its still-open stdout log.
+
+CI review reproduced a missing live-endpoint route for the new notice contracts.
+The existing workflow contract failed before repair and passed afterward:
+`/private/tmp/ignatius-notice-ci-wiring-{red,green}-20261025.log`. The PostgreSQL
+jobs now include notice ingestion and runtime lifecycle cases on both plain
+and verified TLS. Fixture-major assertions are being made portable for declared
+PostgreSQL 14-18; that is not evidence of those versions running. Digest-pinned,
+network-disabled actionlint passed locally. Fresh Gitleaks found no leaks in
+280 reachable Git revisions and the 434-file modified source snapshot. Logs:
+`/private/tmp/ignatius-gitleaks-notice-final-{history,source}-20261025.log`;
+snapshot `/private/tmp/ignatius-notice-final-scan-a2ncvln9/`. These precede the
+small transport-harness correction; a clean-source scan follows the commit.
+Hosted execution remains pending.
+
 ## The full command
 
 ```bash

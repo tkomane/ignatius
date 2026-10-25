@@ -66,7 +66,7 @@ fn posture_is_stated_in_words() {
 
 #[test]
 fn notice_privacy_scrubs_the_backlog_and_stays_active_for_later_notices() {
-    let notices = Mutex::new(Vec::new());
+    let notices = Notices::default();
     let privacy = AtomicBool::new(false);
     retain_notice(
         &notices,
@@ -76,7 +76,7 @@ fn notice_privacy_scrubs_the_backlog_and_stays_active_for_later_notices() {
         "00000",
     );
     assert_eq!(
-        notices.lock().expect("notices")[0].message,
+        notices.state_for_tests()[0].message,
         "ordinary visible notice"
     );
 
@@ -89,7 +89,7 @@ fn notice_privacy_scrubs_the_backlog_and_stays_active_for_later_notices() {
         "secret-derived notice",
         "bad-code",
     );
-    let held = notices.lock().expect("private notices");
+    let held = notices.state_for_tests();
     assert_eq!(held.len(), 2);
     for notice in held.iter() {
         assert_eq!(notice.severity, "NOTICE");
@@ -319,4 +319,50 @@ async fn parameter_semantics_gate_covers_every_user_sql_entry_point() {
             result.expect("analyzed statement").contains("Plan")
         )
     );
+}
+
+#[test]
+fn notice_retention_count_boundary_is_an_ordered_prefix() {
+    let notices = Notices::default();
+    let privacy = AtomicBool::new(false);
+    for index in 0..257 {
+        retain_notice(
+            &notices,
+            &privacy,
+            "NOTICE",
+            &format!("synthetic-{index}"),
+            "00000",
+        );
+    }
+    let held = notices.state_for_tests();
+    assert_eq!(
+        held.len(),
+        256,
+        "whole inbox must retain at most 256 entries"
+    );
+    assert_eq!(held.last().unwrap().message, "synthetic-255");
+}
+
+#[test]
+fn notice_retention_aggregate_fields_boundary_precedes_cloning() {
+    let notices = Notices::default();
+    let privacy = AtomicBool::new(false);
+    let message = "x".repeat(crate::query::result::MAX_NOTICE_MESSAGE_BYTES);
+    for _ in 0..17 {
+        retain_notice(&notices, &privacy, "NOTICE", &message, "00000");
+    }
+    let held = notices.state_for_tests();
+    let retained_bytes: usize = held
+        .iter()
+        .map(|notice| {
+            notice.severity.len()
+                + notice.message.len()
+                + notice.code.as_deref().map_or(0, str::len)
+        })
+        .sum();
+    assert!(
+        retained_bytes <= 1024 * 1024,
+        "all retained fields must fit 1 MiB, got {retained_bytes}"
+    );
+    assert_eq!(held.len(), 15);
 }

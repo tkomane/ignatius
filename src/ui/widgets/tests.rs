@@ -359,6 +359,7 @@ fn grid_model(column_count: usize, row_count: usize) -> Model {
     let mut model = Model::new(100);
     model.sidebar_visible = false;
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),

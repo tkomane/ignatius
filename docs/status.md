@@ -8,20 +8,25 @@ before trusting anything else.
 
 ### Current local progress and active assignments
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoints:
-`918c0b1` (complete export-row progress and flush uncertainty) and `d8a3ac3`
-(reachable help with local input ownership). The combined local verifier passed
-1,315 harness cases/1,027 library; clean `d8a3ac3` also passed fresh complete
-history/source secret scans. W10-011 real-writer pacing is now measured and
-reviewed; W10-012's frozen implementation and proposed support/security/keymap/
-release prose have been applied to the canonical working tree. Its 129 artefact
-hashes and all 43 moved original test names were checked. Focused final evidence
-is 750 library plus 32 plain/verified-TLS invocations, no skips. Native review
-found doctor-guidance wording and pending-install replacement/old-profile loss;
-one bounded follow-up is in progress. Combined canonical verification and styled
-render review have not yet run for this source. Read Git state before taking
-an assignment; the day-long goal
-remains active.
+Branch: `codex/autonomous-roadmap-2026-10-25`. W10-012's integrated notice
+implementation passed the complete local verifier: **1,370 outer harness cases,
+1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and
+PostgreSQL 18.6 plain/TLS. The macOS socket case remains a semantic skip.
+The initial full run exposed a new fixture assertion's incorrect Disable/Prefer
+assumption; three actual transport probes and independent review accepted the
+test-only correction before the full repeat. Log:
+`/private/tmp/ignatius-verify-2026-10-25-notices-recheck.log`.
+
+Root verified the immutable 129-file handoff and 29-file repair evidence, all
+43 moved original test names, and inspected 128 styled synthetic buffers. Peer
+review accepted the repaired doctor guidance, pending replacement/profile/Quit
+accounting and weak-reference deduplication. CLI/server outcomes remain intact.
+Live CI wiring now includes notice contracts and runtime lifecycle cases on
+both plain and verified TLS. Source publication, hosted/other-major/native
+acceptance are still separate. Prior application checkpoints are `918c0b1`
+(export progress) and `d8a3ac3` (help ownership); W10-011 pacing is measured and
+reviewed. Read Git state before taking an assignment; the day-long goal remains
+active.
 
 Owner steering on 25 October: skip external OpenCode review,
 continue with native independent review, and follow the normal DevOps workflow
@@ -166,9 +171,10 @@ actual source retirement/quit. Core03 passed its focused repeat and independent
 peer re-review with no remaining core blocker; adapter/UI work now includes
 explicit captured source retirement and bounded main-loop session installation.
 The frozen adapter/UI/live handoff is now applied in the canonical working
-tree. Root inspected 128 styled buffers and is incorporating the bounded final
-runtime/doctor review repair plus live CI wiring. Canonical full verification
-is still pending. Root owns shared records/policy; the last committed
+tree. Root inspected 128 styled buffers, incorporated the bounded final
+runtime/doctor review repair and live CI wiring, and passed the full 1,370-case
+local verifier after its test-only transport correction. Root owns shared
+records/policy; the last committed
 application checkpoint is `d8a3ac3`, with notice changes currently uncommitted.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed

@@ -114,6 +114,9 @@ fn render_with(
     if model.help_open {
         render_help(model, presentation, area, buf);
     }
+    if model.notice_details.is_some() {
+        crate::ui::notices::render(model, presentation, area, buf);
+    }
     if let Some(palette) = &model.palette {
         render_palette(palette, presentation, area, buf);
     }

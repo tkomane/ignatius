@@ -83,3 +83,109 @@ fn an_unclassified_connection_is_not_production() {
     assert_eq!(model.environment(), Environment::Unclassified);
     assert!(!model.environment().is_production());
 }
+
+#[test]
+fn notice_identity_checkpoints_retirement_and_acknowledgement_are_bounded_facts() {
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let counts = |n| NoticeCounts {
+        omitted: NoticeCount::Exact(n),
+        ..NoticeCounts::default()
+    };
+    let mut state = NoticeState::default();
+    let id = NoticeSessionId::new();
+    let stale = NoticeSessionId::new();
+    assert_eq!(id, id.clone());
+    assert_ne!(id, stale);
+    assert_eq!(format!("{id:?}"), "NoticeSessionId(..)");
+    state.install(NoticeSource::User, 1, id.clone());
+    state.observe(
+        NoticeSource::User,
+        1,
+        &stale,
+        NoticeCheckpoint {
+            revision: 1,
+            totals: counts(99),
+        },
+        None,
+    );
+    assert!(!state.pending.needs_report());
+    let checkpoint = NoticeCheckpoint {
+        revision: 1,
+        totals: counts(4),
+    };
+    state.observe(NoticeSource::User, 1, &id, checkpoint, None);
+    state.observe(NoticeSource::User, 1, &id, checkpoint, None);
+    assert_eq!(state.pending, counts(4));
+    let snapshot = state.snapshot();
+    state.observe(
+        NoticeSource::User,
+        1,
+        &id,
+        NoticeCheckpoint {
+            revision: 2,
+            totals: counts(7),
+        },
+        None,
+    );
+    state.acknowledge(&snapshot);
+    assert_eq!(state.pending, counts(3));
+    state.retire(NoticeSource::User, 1, &id, counts(9));
+    assert_eq!(state.pending, counts(5));
+    state.retire(NoticeSource::User, 1, &id, counts(99));
+    assert_eq!(state.pending, counts(5));
+    state.observe(
+        NoticeSource::User,
+        1,
+        &id,
+        NoticeCheckpoint {
+            revision: 3,
+            totals: counts(99),
+        },
+        None,
+    );
+    assert_eq!(state.pending, counts(5));
+    let snapshot = state.snapshot();
+    state.acknowledge(&snapshot);
+    assert!(!state.pending.needs_report());
+    assert_eq!(state.sources.iter().flatten().count(), 0);
+}
+
+#[test]
+fn notice_acknowledgement_after_source_retirement_keeps_new_loss_and_unknown_precision() {
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let counts = |n| NoticeCounts {
+        omitted: NoticeCount::Exact(n),
+        ..NoticeCounts::default()
+    };
+    let mut state = NoticeState::default();
+    let id = NoticeSessionId::new();
+    state.install(NoticeSource::User, 1, id.clone());
+    state.observe(
+        NoticeSource::User,
+        1,
+        &id,
+        NoticeCheckpoint {
+            revision: 1,
+            totals: counts(4),
+        },
+        None,
+    );
+    let snapshot = state.snapshot();
+    state.retire(NoticeSource::User, 1, &id, counts(6));
+    state.acknowledge(&snapshot);
+    assert_eq!(state.pending, counts(2));
+    assert_eq!(state.previous, counts(2));
+    state.revision = u64::MAX;
+    let snapshot = state.snapshot();
+    state.pending = state.pending.plus(counts(1));
+    state.acknowledge(&snapshot);
+    assert_eq!(
+        state.pending,
+        counts(1),
+        "saturated revision equality cannot erase new loss"
+    );
+    assert_eq!(
+        NoticeCounts::UNKNOWN.since(NoticeCounts::UNKNOWN),
+        NoticeCounts::UNKNOWN
+    );
+}

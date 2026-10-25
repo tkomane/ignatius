@@ -1098,15 +1098,16 @@ fn query_command(
     if let Some(destination) = request.output {
         let writer = output::StreamWriter::new(request.options.clone())?;
         let export = crate::query::export::Export::create(destination, request.force)?;
-        let outcome = runtime()?.block_on(interactive::export_once_with_parameters(
+        let outcome = runtime()?.block_on(interactive::export_once_with_parameters_reported(
             target,
             &loaded.config,
             sql,
             parameters,
             export,
             writer,
-        ))?;
-
+        ));
+        write_notice_counts(err, outcome.notice_report.counts).map_err(io_diagnostic)?;
+        let outcome = outcome.value?;
         return match outcome {
             interactive::ExportOutcome::Completed(finished) => {
                 // The summary is a diagnostic, not data, so it goes to stderr
@@ -1141,43 +1142,87 @@ fn query_command(
         };
     }
 
-    let execution = runtime()?.block_on(interactive::execute_once_with_parameters(
+    let execution = runtime()?.block_on(interactive::execute_once_with_parameters_reported(
         target,
         &loaded.config,
         sql,
         parameters,
         row_cap,
-    ))?;
+    ));
 
-    if let Err(err) = output::write_execution(out, &execution, &request.options) {
-        return match err.kind() {
-            // Piping into `head` closes the stream early. That is the pipeline
-            // working, not a failure, and it exits zero like every other tool.
-            std::io::ErrorKind::BrokenPipe => Ok(ExitCode::Success),
-            // The format refused to represent the result unambiguously.
-            std::io::ErrorKind::InvalidInput => Err(Diagnostic::new(
-                DiagnosticKind::Usage,
-                err.to_string(),
-                "writing results",
-            )
-            .next_action("run a single statement, or choose a format that carries result sets")),
-            _ => Err(io_diagnostic(err)),
-        };
-    }
-
-    write_buffered_truncation(err, &execution, request.options.format).map_err(io_diagnostic)?;
-
-    if let Some(error) = &execution.error {
-        if request.options.format == Format::Json {
-            // JSON diagnostics are written to stderr because stdout remains a
-            // data stream. The failed execution intentionally wrote no JSON
-            // result document, so a parser cannot mistake it for success.
-            writeln!(err, "{}", error.to_json()).map_err(io_diagnostic)?;
-            return Ok(error.exit_code());
+    let execution = match execution {
+        Ok(execution) => execution,
+        Err(failure) => {
+            return write_query_failure(
+                err,
+                failure.value,
+                &failure.notice_report,
+                request.options.format,
+            );
         }
-        return Err(error.clone());
+    };
+    write_query_execution(out, err, &execution, &request.options)
+}
+
+fn write_query_execution(
+    out: &mut impl Write,
+    err: &mut impl Write,
+    execution: &crate::query::result::Execution,
+    options: &output::OutputOptions,
+) -> Result<ExitCode, Diagnostic> {
+    if let Err(error) = output::write_execution(out, execution, options) {
+        let diagnostic = match error.kind() {
+            std::io::ErrorKind::BrokenPipe => return Ok(ExitCode::Success),
+            std::io::ErrorKind::InvalidInput => {
+                Diagnostic::new(DiagnosticKind::Usage, error.to_string(), "writing results")
+                    .next_action(
+                        "run a single statement, or choose a format that carries result sets",
+                    )
+            }
+            _ => io_diagnostic(error),
+        };
+        return write_query_failure(err, diagnostic, &execution.notice_report, options.format);
+    }
+    write_buffered_truncation(err, execution, options.format).map_err(io_diagnostic)?;
+    if let Some(error) = &execution.error {
+        return write_query_failure(err, error.clone(), &execution.notice_report, options.format);
+    }
+    if options.format == Format::Json && execution.notice_report.counts.needs_report() {
+        writeln!(err,"{}",serde_json::json!({"kind":"notice_retention","source":"client","notice_report":execution.notice_report.to_json()})).map_err(io_diagnostic)?;
+    } else {
+        write_notice_counts(err, execution.notice_report.counts).map_err(io_diagnostic)?;
     }
     Ok(ExitCode::Success)
+}
+
+fn write_query_failure(
+    err: &mut impl Write,
+    diagnostic: Diagnostic,
+    report: &crate::query::result::NoticeReport,
+    format: Format,
+) -> Result<ExitCode, Diagnostic> {
+    if format == Format::Json {
+        // Completed-prefix result bytes remain on stdout; stderr has one diagnostic.
+        let mut value = diagnostic.to_json();
+        if report.counts.needs_report() {
+            value["notice_report"] = report.to_json();
+        }
+        writeln!(err, "{value}").map_err(io_diagnostic)?;
+        Ok(diagnostic.exit_code())
+    } else {
+        write_notice_counts(err, report.counts).map_err(io_diagnostic)?;
+        Err(diagnostic)
+    }
+}
+
+pub(crate) fn write_notice_counts(
+    err: &mut impl Write,
+    counts: crate::query::result::NoticeCounts,
+) -> std::io::Result<()> {
+    for line in counts.lines() {
+        writeln!(err, "{line}")?;
+    }
+    Ok(())
 }
 
 /// Reports client retention only after buffered data writing succeeds. Counts

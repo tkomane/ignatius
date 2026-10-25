@@ -367,6 +367,40 @@ They do not issue another request, change the editor, alter the retained result,
 or add a history entry. A malformed, failed, connection-lost, or bounded plan
 response remains an unavailable or incomplete plan with a recovery action.
 
+## Server notice retention
+
+After the driver connects, each query, export or plan observation window admits
+at most 256 server notices and 1 MiB of retained UTF-8 severity/message/SQLSTATE
+fields. The existing 64 KiB per-message shortening remains. Successful statement
+drains do not replenish the whole-operation allowance; idle/metadata storage is
+separately bounded and pending idle entries are charged to the next operation.
+Later messages are counted as omitted rather than causing SQL replay, rollback,
+automatic cancellation or a server-setting change. These are application
+retention limits, not incoming-frame, aggregate-result or process-memory limits.
+
+Client omission, shortening and abandoned-delivery counts use explicit exact,
+lower-bound or unknown wording. Scripted formats keep stdout data unchanged.
+JSON success adds one client status object on stderr when needed; a JSON error
+keeps its existing single diagnostic object with additive `notice_report`.
+Plain mode adds accounting before its next prompt/interaction or exit. A closed
+or failed output stream does not establish that a report was visibly delivered.
+Public payload-only stream/explain/connect compatibility APIs do not return
+reports; first-party consumers use their report-carrying variants.
+
+The TUI retains fixed pending counts and offers **Server notice retention** in
+the palette. Its global badge yields to query/transaction facts and protected
+reviews rather than reducing their 40x8 input/body/command geometry. Opening the
+reader captures a snapshot and acknowledges nothing. Esc closes without
+acknowledging; its active Enter/Activate command explicitly acknowledges only
+that captured snapshot, with new loss kept pending. Insufficient reader geometry
+refuses acknowledgement. Cancel keeps its existing running-query recovery path.
+The latest source summary remains inspectable after acknowledgement. Known
+counts from locally held opened attempts survive replacement, profile change
+and ordinary quit, using captured identities; this does not include future or
+racing server observations after the retirement boundary.
+Counts cover observed messages, not complete server warning delivery or proof
+that a person read them. Metadata/idle observations do not prove statement cause.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson

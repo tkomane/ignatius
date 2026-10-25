@@ -19,7 +19,9 @@ use crate::connection::{ConnectionTarget, EnvSnapshot};
 use crate::diagnostics::doctor::{Check, CheckStatus};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::{Session, session};
-use crate::query::result::{Execution, ExecutionStatus, JobId};
+use crate::query::result::{
+    Execution, ExecutionStatus, JobId, NoticeCounts, NoticeReport, Reported,
+};
 use crate::ui::keymap::Keymap;
 use crate::ui::layout;
 use crate::ui::theme::Theme;
@@ -34,9 +36,425 @@ const INPUT_POLL: Duration = Duration::from_millis(100);
 
 /// How often the interface redraws while something is happening.
 ///
-/// Ticks are sent only while there is something to animate, so an idle client
-/// wakes nothing and costs nothing.
+/// Animation ticks pause while idle. Notice accounting has its own bounded
+/// polling interval below, independent of animation activity.
 const TICK: Duration = Duration::from_millis(90);
+
+type SessionSlot = Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>;
+
+#[derive(Debug)]
+struct InstalledSession {
+    session: Arc<Session>,
+    session_id: crate::app::model::NoticeSessionId,
+    generation: u64,
+    source: crate::app::model::NoticeSource,
+    retired: std::sync::atomic::AtomicBool,
+}
+impl std::ops::Deref for InstalledSession {
+    type Target = Session;
+    fn deref(&self) -> &Self::Target {
+        &self.session
+    }
+}
+struct SessionInstall {
+    opened: Arc<InstalledSession>,
+    acknowledged: tokio::sync::oneshot::Sender<bool>,
+}
+
+async fn request_session_install(
+    tx: &mpsc::Sender<SessionInstall>,
+    opened: Session,
+    source: crate::app::model::NoticeSource,
+    generation: u64,
+) -> bool {
+    let (acknowledged, result) = tokio::sync::oneshot::channel();
+    let install = SessionInstall {
+        opened: Arc::new(InstalledSession {
+            session: Arc::new(opened),
+            session_id: crate::app::model::NoticeSessionId::new(),
+            generation,
+            source,
+            retired: std::sync::atomic::AtomicBool::new(false),
+        }),
+        acknowledged,
+    };
+    if tx.send(install).await.is_err() {
+        return false;
+    }
+    result.await.unwrap_or(false)
+}
+
+/// Nonblocking installation keeps a held metadata reader from freezing input.
+fn try_session_install(
+    install: SessionInstall,
+    slot: &SessionSlot,
+    model: &mut Model,
+    generation: u64,
+) -> Option<SessionInstall> {
+    if model.should_quit
+        || install.opened.generation != generation
+        || model.connection_generation != generation
+    {
+        let _ = install.acknowledged.send(false);
+        return None;
+    }
+    let Ok(mut held) = slot.try_write() else {
+        return Some(install);
+    };
+    if let Some(old) = held.as_ref() {
+        retire_notice_source(model, old);
+        update(model, Message::NoticeRetirementFinished(old.generation));
+    }
+    let opened = Arc::clone(&install.opened);
+    update(
+        model,
+        connection_message(
+            opened.generation,
+            Message::NoticeSourceInstalled {
+                source: opened.source,
+                session_id: opened.session_id.clone(),
+            },
+        ),
+    );
+    *held = Some(opened);
+    let _ = install.acknowledged.send(true);
+    None
+}
+
+/// This is called only at actual replacement/Quit/error retirement boundaries.
+fn retire_notice_source(model: &mut Model, source: &InstalledSession) {
+    if source
+        .retired
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    let generation = source.generation;
+    if model.notice_state.retiring_generation != Some(generation) {
+        update(model, Message::NoticeRetirementStarted(generation));
+    }
+    // Explicit retiring-source authority covers a physical install whose Model
+    // event lagged, including a profile reducer that already advanced generation.
+    update(
+        model,
+        Message::NoticeRetiringSourceInstalled {
+            generation,
+            source: source.source,
+            session_id: source.session_id.clone(),
+        },
+    );
+    update(
+        model,
+        Message::NoticeRetired {
+            generation,
+            source: source.source,
+            session_id: source.session_id.clone(),
+            counts: source.notice_retirement_counts(),
+        },
+    );
+}
+
+async fn retire_notice_sources(
+    model: &mut Model,
+    user: &SessionSlot,
+    metadata: &SessionSlot,
+) -> [Option<Arc<InstalledSession>>; 2] {
+    let user = { user.read().await.clone() };
+    let metadata = { metadata.read().await.clone() };
+    if let Some(user) = user.as_ref() {
+        retire_notice_source(model, user);
+    }
+    if let Some(metadata) = metadata.as_ref().filter(|metadata| {
+        user.as_ref()
+            .is_none_or(|user| !Arc::ptr_eq(user, metadata))
+    }) {
+        retire_notice_source(model, metadata);
+    }
+    [user, metadata]
+}
+
+fn same_notice_session(left: &InstalledSession, right: &InstalledSession) -> bool {
+    left.session_id == right.session_id || Arc::ptr_eq(&left.session, &right.session)
+}
+
+/// Only the latest replaced attempt per route; weak identity does not retain a client.
+struct RetiredNoticeAttempt {
+    session: std::sync::Weak<Session>,
+    session_id: crate::app::model::NoticeSessionId,
+    generation: u64,
+}
+impl RetiredNoticeAttempt {
+    fn capture(opened: &InstalledSession) -> Self {
+        Self {
+            session: Arc::downgrade(&opened.session),
+            session_id: opened.session_id.clone(),
+            generation: opened.generation,
+        }
+    }
+    fn matches(&self, opened: &InstalledSession) -> bool {
+        self.session_id == opened.session_id
+            || std::sync::Weak::ptr_eq(&self.session, &Arc::downgrade(&opened.session))
+    }
+}
+
+/// One bounded admission point; current deferred loss is handed off before drop.
+fn admit_pending_install(
+    pending: &mut [Option<SessionInstall>; 2],
+    install: SessionInstall,
+    model: &mut Model,
+    installed: &[Option<Arc<InstalledSession>>; 2],
+    remembered: &mut [Option<RetiredNoticeAttempt>; 2],
+    generation: u64,
+) {
+    if model.should_quit
+        || generation != model.connection_generation
+        || install.opened.generation != generation
+        || install
+            .opened
+            .retired
+            .load(std::sync::atomic::Ordering::SeqCst)
+        || pending
+            .iter()
+            .flatten()
+            .any(|known| same_notice_session(&known.opened, &install.opened))
+        || installed
+            .iter()
+            .flatten()
+            .any(|known| same_notice_session(known, &install.opened))
+        || remembered
+            .iter()
+            .flatten()
+            .any(|known| known.generation == generation && known.matches(&install.opened))
+    {
+        let _ = install.acknowledged.send(false);
+        return;
+    }
+    let index = install.opened.source.index();
+    if let Some(replaced) = pending[index].take() {
+        let opened = &replaced.opened;
+        let still_owned = pending
+            .iter()
+            .flatten()
+            .any(|known| same_notice_session(&known.opened, opened))
+            || installed
+                .iter()
+                .flatten()
+                .any(|known| same_notice_session(known, opened));
+        if opened.generation == generation
+            && !still_owned
+            && !opened
+                .retired
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let counts = opened.notice_retirement_counts();
+            remembered[index] = Some(RetiredNoticeAttempt::capture(opened));
+            if counts.needs_report() {
+                update(
+                    model,
+                    connection_message(
+                        generation,
+                        Message::NoticeAttemptReport {
+                            source: opened.source,
+                            attempt_id: opened.session_id.clone(),
+                            // This projection supplies loss counts only, not an admitted-entry count.
+                            summary: crate::app::model::NoticeSummary {
+                                scope: crate::query::result::NoticeScope::Connection,
+                                retained: None,
+                                counts,
+                            },
+                        },
+                    ),
+                );
+            }
+        }
+        let _ = replaced.acknowledged.send(false);
+    }
+    pending[index] = Some(install);
+}
+
+async fn retire_profile_notice_sources(
+    model: &mut Model,
+    user: &SessionSlot,
+    metadata: &SessionSlot,
+    receiver: &mut mpsc::Receiver<SessionInstall>,
+    pending: &mut [Option<SessionInstall>; 2],
+    remembered: &mut [Option<RetiredNoticeAttempt>; 2],
+    generation: u64,
+) {
+    let installed = retire_notice_sources(model, user, metadata).await;
+    let pending = std::mem::take(pending);
+    let remembered = std::mem::take(remembered);
+    retire_pending_installs_at_boundary(
+        model, receiver, pending, installed, remembered, generation, false,
+    );
+}
+
+/// Bounded retirement of locally held install requests; no database await.
+fn retire_pending_installs_at_boundary(
+    model: &mut Model,
+    receiver: &mut mpsc::Receiver<SessionInstall>,
+    pending: [Option<SessionInstall>; 2],
+    installed: [Option<Arc<InstalledSession>>; 2],
+    remembered: [Option<RetiredNoticeAttempt>; 2],
+    generation: u64,
+    close: bool,
+) {
+    if close {
+        receiver.close();
+    }
+    update(
+        model,
+        Message::NoticeUninstalledRetirementStarted(generation),
+    );
+    // Installed2 plus remembered2 identities and only pending2/channel2. Weak
+    // control blocks prevent address reuse without retaining database clients.
+    let mut seen: [Option<RetiredNoticeAttempt>; 8] = std::array::from_fn(|_| None);
+    for (index, source) in installed.into_iter().enumerate() {
+        seen[index] = source.as_deref().map(RetiredNoticeAttempt::capture);
+    }
+    for (index, source) in remembered.into_iter().enumerate() {
+        seen[index + 2] = source.filter(|source| source.generation == generation);
+    }
+    let mut retire = |install: SessionInstall| {
+        let opened = install.opened;
+        let duplicate = seen.iter().flatten().any(|known| known.matches(&opened));
+        if opened.generation == generation
+            && !duplicate
+            && !opened
+                .retired
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            if let Some(empty) = seen.iter_mut().find(|slot| slot.is_none()) {
+                *empty = Some(RetiredNoticeAttempt::capture(&opened));
+            }
+            update(
+                model,
+                Message::NoticeUninstalledRetired {
+                    generation,
+                    session_id: opened.session_id.clone(),
+                    counts: opened.notice_retirement_counts(),
+                },
+            );
+        }
+        let _ = install.acknowledged.send(false);
+    };
+    for install in pending.into_iter().flatten() {
+        retire(install);
+    }
+    for _ in 0..2 {
+        match receiver.try_recv() {
+            Ok(install) => retire(install),
+            Err(_) => break,
+        }
+    }
+    update(
+        model,
+        Message::NoticeUninstalledRetirementFinished(generation),
+    );
+    update(model, Message::NoticeRetirementFinished(generation));
+}
+
+fn shutdown_pending_installs(
+    model: &mut Model,
+    receiver: &mut mpsc::Receiver<SessionInstall>,
+    pending: [Option<SessionInstall>; 2],
+    installed: [Option<Arc<InstalledSession>>; 2],
+    remembered: [Option<RetiredNoticeAttempt>; 2],
+) {
+    let generation = model.connection_generation;
+    retire_pending_installs_at_boundary(
+        model, receiver, pending, installed, remembered, generation, true,
+    );
+}
+
+async fn poll_notice_sources(
+    model: &mut Model,
+    user: &SessionSlot,
+    metadata: &SessionSlot,
+) -> bool {
+    let user = { user.read().await.clone() };
+    let metadata = { metadata.read().await.clone() };
+    let mut changed = false;
+    for (index, source) in [user.as_ref(), metadata.as_ref()]
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.map(|source| (index, source)))
+    {
+        if source.retired.load(std::sync::atomic::Ordering::SeqCst)
+            || source.generation != model.connection_generation
+        {
+            continue;
+        }
+        if index == 1 && user.as_ref().is_some_and(|user| Arc::ptr_eq(user, source)) {
+            continue;
+        }
+        let report = source.take_connection_notice_report();
+        let checkpoint = source.notice_checkpoint();
+        let prior = model.notice_state.sources[source.source.index()].as_ref();
+        changed |= report.is_some()
+            || prior.is_none_or(|prior| {
+                prior.session_id != source.session_id || prior.checkpoint != checkpoint
+            })
+            || checkpoint.revision == u64::MAX;
+        update(
+            model,
+            connection_message(
+                source.generation,
+                Message::NoticeSourceInstalled {
+                    source: source.source,
+                    session_id: source.session_id.clone(),
+                },
+            ),
+        );
+        update(
+            model,
+            connection_message(
+                source.generation,
+                Message::NoticeStatus {
+                    source: source.source,
+                    session_id: source.session_id.clone(),
+                    checkpoint,
+                    latest: report.as_ref().map(crate::app::model::NoticeSummary::from),
+                },
+            ),
+        );
+    }
+    changed
+}
+
+fn send_operation_notice(
+    tx: &mpsc::UnboundedSender<Message>,
+    source: &InstalledSession,
+    report: &NoticeReport,
+) {
+    let _ = tx.send(connection_message(
+        source.generation,
+        Message::NoticeStatus {
+            source: source.source,
+            session_id: source.session_id.clone(),
+            checkpoint: report.checkpoint,
+            latest: Some(crate::app::model::NoticeSummary::from(report)),
+        },
+    ));
+}
+
+fn send_attempt_notice(
+    tx: &mpsc::UnboundedSender<Message>,
+    generation: u64,
+    source: crate::app::model::NoticeSource,
+    report: &NoticeReport,
+) {
+    if report.counts.needs_report() {
+        let _ = tx.send(connection_message(
+            generation,
+            Message::NoticeAttemptReport {
+                source,
+                attempt_id: crate::app::model::NoticeSessionId::new(),
+                summary: crate::app::model::NoticeSummary::from(report),
+            },
+        ));
+    }
+}
 
 /// Opens the interactive client.
 pub fn run(
@@ -136,6 +554,7 @@ pub fn run(
         presentation.color,
         &facts,
     );
+    let mut exit_notice_counts = NoticeCounts::default();
     let result = runtime.block_on(event_loop(
         resolved,
         loaded.config,
@@ -144,12 +563,16 @@ pub fn run(
         color_depth,
         history,
         library,
+        &mut exit_notice_counts,
         #[cfg(unix)]
         termination,
     ));
 
     // Restore explicitly so any error below is printed on a working terminal.
     let restore = guard.restore();
+    let notice_output =
+        crate::cli::write_notice_counts(&mut std::io::stderr().lock(), exit_notice_counts)
+            .map_err(crate::cli::io_diagnostic);
     result.and_then(|code| {
         restore.map_err(|err| {
             Diagnostic::new(
@@ -160,13 +583,14 @@ pub fn run(
             .likely_cause(err.to_string())
             .next_action("run `reset` to return the terminal to a known state")
         })?;
+        notice_output?;
         Ok(code)
     })
 }
 
 // The Unix receiver is prepared before terminal acquisition and moved with the
 // existing session resources; keeping it explicit avoids deferred registration.
-#[cfg_attr(unix, allow(clippy::too_many_arguments))]
+#[allow(clippy::too_many_arguments)]
 async fn event_loop(
     target: Option<ConnectionTarget>,
     config: Config,
@@ -175,6 +599,7 @@ async fn event_loop(
     color_depth: crate::ui::theme::ColorDepth,
     mut history: crate::history::History,
     library: crate::queries::Library,
+    exit_notice_counts: &mut NoticeCounts,
     #[cfg(unix)] termination: tokio::signal::unix::Signal,
 ) -> Result<ExitCode, Diagnostic> {
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
@@ -247,6 +672,11 @@ async fn event_loop(
     });
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (install_tx, mut install_rx) = mpsc::channel::<SessionInstall>(2);
+    let mut pending_installs: [Option<SessionInstall>; 2] = [None, None];
+    let mut remembered_attempts: [Option<RetiredNoticeAttempt>; 2] = [None, None];
+    let mut notice_tick = tokio::time::interval(Duration::from_millis(250));
+    notice_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     spawn_input_thread(tx.clone(), Arc::clone(&input_stop), &keymap);
     spawn_signal_watcher(
@@ -264,13 +694,13 @@ async fn event_loop(
     // The connection is opened as an effect like any other, so the interface is
     // drawn and responsive while it happens. When the picker was shown, this
     // branch deliberately does not start a connection before a choice.
-    let session: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
+    let session: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
     // The tree gets a connection of its own so a long statement cannot delay it.
     // It is opened from the same resolved target, so it reaches the same server
     // by the same route with the same credentials and the same protection; the
     // only differences are deliberate and visible on the server.
-    let metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>> =
+    let metadata: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
     // Held so a retry with a password the user types can be made from exactly
     // the target that was resolved, rather than resolved again. It remains
@@ -283,8 +713,7 @@ async fn event_loop(
         *current_target.write().await = Some(Arc::clone(&target));
         spawn_connect(
             tx.clone(),
-            Arc::clone(&session),
-            Arc::clone(&metadata),
+            install_tx.clone(),
             target,
             config.clone(),
             Arc::clone(&connection_generation),
@@ -305,9 +734,34 @@ async fn event_loop(
             .unwrap_or_default(),
     ));
 
+    let result=async {
     draw(&mut terminal, &mut model, &keymap)?;
 
-    while let Some(message) = rx.recv().await {
+    loop {
+        for (index,pending) in pending_installs.iter_mut().enumerate() {
+            if let Some(install)=pending.take() {
+                let slot=if index==0{&session}else{&metadata};
+                *pending=try_session_install(install,slot,&mut model,connection_generation.load(std::sync::atomic::Ordering::SeqCst));
+            }
+        }
+        let message=tokio::select! {
+            install=install_rx.recv()=> {
+                if let Some(install)=install {
+                    let installed=[session.try_read().ok().and_then(|held|held.clone()),metadata.try_read().ok().and_then(|held|held.clone())];
+                    let revision=model.notice_state.revision;
+                    admit_pending_install(&mut pending_installs,install,&mut model,&installed,&mut remembered_attempts,connection_generation.load(std::sync::atomic::Ordering::SeqCst));
+                    if model.notice_state.revision!=revision {draw(&mut terminal,&mut model,&keymap)?;}
+                    continue;
+                }
+                continue;
+            },
+            _=notice_tick.tick()=> {
+                if poll_notice_sources(&mut model,&session,&metadata).await {draw(&mut terminal,&mut model,&keymap)?;}
+                continue;
+            },
+            message=rx.recv()=>match message {Some(message)=>message,None=>break},
+        };
+        poll_notice_sources(&mut model,&session,&metadata).await;
         let effects = reduce_terminal_input(&terminal, &mut model, message)?;
         for effect in effects {
             match effect {
@@ -333,8 +787,7 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst);
                     spawn_connect(
                         tx.clone(),
-                        Arc::clone(&session),
-                        Arc::clone(&metadata),
+                        install_tx.clone(),
                         retry,
                         config.clone(),
                         Arc::clone(&connection_generation),
@@ -342,6 +795,7 @@ async fn event_loop(
                     );
                 }
                 Effect::ConnectProfile { profile } => {
+                    retire_profile_notice_sources(&mut model,&session,&metadata,&mut install_rx,&mut pending_installs,&mut remembered_attempts,connection_generation.load(std::sync::atomic::Ordering::SeqCst)).await;
                     let generation =
                         connection_generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                     // Drop the old runtime routes before resolving the new one.
@@ -352,9 +806,8 @@ async fn event_loop(
                     *metadata.write().await = None;
                     let selected_config = config.clone();
                     let selected_tx = tx.clone();
+                    let selected_installs = install_tx.clone();
                     let selected_target = Arc::clone(&current_target);
-                    let selected_session = Arc::clone(&session);
-                    let selected_metadata = Arc::clone(&metadata);
                     let selected_generation = Arc::clone(&connection_generation);
                     tokio::spawn(async move {
                         let result =
@@ -379,8 +832,7 @@ async fn event_loop(
                                 }
                                 spawn_connect(
                                     selected_tx,
-                                    selected_session,
-                                    selected_metadata,
+                                    selected_installs,
                                     target,
                                     selected_config,
                                     selected_generation,
@@ -583,6 +1035,19 @@ async fn event_loop(
     }
 
     Ok(ExitCode::Success)
+    }.await;
+    install_rx.close();
+    let installed = retire_notice_sources(&mut model, &session, &metadata).await;
+    shutdown_pending_installs(
+        &mut model,
+        &mut install_rx,
+        pending_installs,
+        installed,
+        remembered_attempts,
+    );
+    *exit_notice_counts = model.notice_state.pending;
+    input_stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    result
 }
 
 /// Performs the one-way clipboard write at the already-held terminal boundary.
@@ -909,8 +1374,7 @@ pub(crate) fn connecting_step_for(
 
 fn spawn_connect(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
-    metadata: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    install_tx: mpsc::Sender<SessionInstall>,
     target: Arc<ConnectionTarget>,
     config: Config,
     generation: Arc<std::sync::atomic::AtomicU64>,
@@ -933,15 +1397,32 @@ fn spawn_connect(
                 target: target.safe_display(),
             },
         ));
-        match session::connect(&target, timeout).await {
+        let reported = session::connect_reported(&target, timeout).await;
+        send_attempt_notice(
+            &tx,
+            request,
+            crate::app::model::NoticeSource::User,
+            &reported.notice_report,
+        );
+        match reported.value {
             Ok(opened) => {
                 let info = opened.info().clone();
-                let mut held = slot.write().await;
                 if !connection_generation_is_current(&generation, request) {
                     return;
                 }
-                *held = Some(Arc::new(opened));
-                drop(held);
+                if !request_session_install(
+                    &install_tx,
+                    opened,
+                    crate::app::model::NoticeSource::User,
+                    request,
+                )
+                .await
+                {
+                    return;
+                }
+                if !connection_generation_is_current(&generation, request) {
+                    return;
+                }
                 let _ = tx.send(connection_message(
                     request,
                     Message::Connected(Box::new(info)),
@@ -956,7 +1437,7 @@ fn spawn_connect(
                     request,
                     Message::Action(crate::app::Action::ReloadObjects),
                 );
-                spawn_metadata_connect(tx, metadata, target, timeout, generation, request);
+                spawn_metadata_connect(tx, install_tx, target, timeout, generation, request);
             }
             Err(diagnostic) => {
                 if !connection_generation_is_current(&generation, request) {
@@ -1077,7 +1558,7 @@ impl ConnectionScope {
 /// connection to it.
 fn spawn_metadata_connect(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    install_tx: mpsc::Sender<SessionInstall>,
     target: Arc<ConnectionTarget>,
     timeout: Duration,
     generation: Arc<std::sync::atomic::AtomicU64>,
@@ -1092,13 +1573,31 @@ fn spawn_metadata_connect(
     ));
     tokio::spawn(async move {
         let target = target.for_object_tree();
-        let link = match session::connect(&target, timeout).await {
+        let reported = session::connect_reported(&target, timeout).await;
+        send_attempt_notice(
+            &tx,
+            request,
+            crate::app::model::NoticeSource::Metadata,
+            &reported.notice_report,
+        );
+        let link = match reported.value {
             Ok(opened) => {
-                let mut held = slot.write().await;
                 if !connection_generation_is_current(&generation, request) {
                     return;
                 }
-                *held = Some(Arc::new(opened));
+                if !request_session_install(
+                    &install_tx,
+                    opened,
+                    crate::app::model::NoticeSource::Metadata,
+                    request,
+                )
+                .await
+                {
+                    return;
+                }
+                if !connection_generation_is_current(&generation, request) {
+                    return;
+                }
                 crate::app::model::MetadataLink::Dedicated
             }
             Err(diagnostic) => crate::app::model::MetadataLink::Unavailable(diagnostic.headline),
@@ -1115,7 +1614,7 @@ fn spawn_metadata_connect(
 
 fn spawn_execute(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     job: JobId,
     sql: String,
     row_cap: usize,
@@ -1125,7 +1624,11 @@ fn spawn_execute(
         if !scope.is_current() {
             return;
         }
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         if !scope.is_current() {
@@ -1135,6 +1638,7 @@ fn spawn_execute(
         if !scope.is_current() {
             return;
         }
+        send_operation_notice(&tx, &session, &execution.notice_report);
         if execution.status == ExecutionStatus::ConnectionLost {
             let _ = tx.send(connection_message(scope.request, Message::ConnectionLost));
         }
@@ -1147,7 +1651,7 @@ fn spawn_execute(
 
 fn spawn_execute_parameterized(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     job: JobId,
     sql: String,
     parameters: crate::query::ParameterBindings,
@@ -1158,7 +1662,11 @@ fn spawn_execute_parameterized(
         if !scope.is_current() {
             return;
         }
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         if !scope.is_current() {
@@ -1170,6 +1678,7 @@ fn spawn_execute_parameterized(
         if !scope.is_current() {
             return;
         }
+        send_operation_notice(&tx, &session, &execution.notice_report);
         if execution.status == ExecutionStatus::ConnectionLost {
             let _ = tx.send(connection_message(scope.request, Message::ConnectionLost));
         }
@@ -1182,7 +1691,7 @@ fn spawn_execute_parameterized(
 
 fn spawn_explain(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     job: JobId,
     sql: String,
     analyzed: bool,
@@ -1192,10 +1701,15 @@ fn spawn_explain(
         if !scope.is_current() {
             return;
         }
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             let _ = tx.send(connection_message(
                 scope.request,
                 Message::PlanFinished(Box::new(crate::app::PlanExecution {
+                    notice_report: NoticeReport::default(),
                     job,
                     analyzed,
                     elapsed: Duration::ZERO,
@@ -1212,7 +1726,8 @@ fn spawn_explain(
             return;
         };
         let started = std::time::Instant::now();
-        let result = match session.explain(&sql, analyzed).await {
+        let reported = session.explain_reported(&sql, analyzed).await;
+        let result = match reported.value.result {
             Ok(json) => crate::query::PlanDocument::parse(&json, analyzed).map_err(|error| {
                 Diagnostic::new(
                     DiagnosticKind::Query,
@@ -1226,18 +1741,16 @@ fn spawn_explain(
             }),
             Err(error) => Err(error),
         };
-        let connection_lost = session.is_closed();
-        let transaction = if connection_lost {
-            crate::query::result::TransactionState::Unknown
-        } else {
-            session.transaction_state().await
-        };
+        let connection_lost = reported.value.connection_lost;
+        let transaction = reported.value.transaction;
         if !scope.is_current() {
             return;
         }
+        send_operation_notice(&tx, &session, &reported.notice_report);
         let _ = tx.send(connection_message(
             scope.request,
             Message::PlanFinished(Box::new(crate::app::PlanExecution {
+                notice_report: reported.notice_report,
                 job,
                 analyzed,
                 elapsed: started.elapsed(),
@@ -1251,7 +1764,7 @@ fn spawn_explain(
 
 fn spawn_cancel(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     job: JobId,
     scope: ConnectionScope,
 ) {
@@ -1259,7 +1772,11 @@ fn spawn_cancel(
         if !scope.is_current() {
             return;
         }
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         if !scope.is_current() {
@@ -1291,12 +1808,16 @@ fn spawn_cancel(
 
 fn spawn_load_schemas(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     generation: Arc<std::sync::atomic::AtomicU64>,
     request_generation: u64,
 ) {
     tokio::spawn(async move {
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         let result = session.schemas().await;
@@ -1312,13 +1833,17 @@ fn spawn_load_schemas(
 
 fn spawn_load_completion_catalog(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     request: u64,
     generation: Arc<std::sync::atomic::AtomicU64>,
     request_generation: u64,
 ) {
     tokio::spawn(async move {
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         let result = session.completion_catalog().await;
@@ -1341,7 +1866,7 @@ fn spawn_load_completion_catalog(
 
 fn spawn_load_metadata(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     request: crate::app::tree::RequestId,
     path: crate::app::tree::NodePath,
     query: crate::app::tree::MetadataQuery,
@@ -1350,7 +1875,11 @@ fn spawn_load_metadata(
 ) {
     use crate::app::tree::{MetadataPayload, MetadataQuery};
     tokio::spawn(async move {
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         // This runs on the tree's own connection where there is one, so a long
@@ -1401,14 +1930,18 @@ fn spawn_load_metadata(
 /// Reads the live relation facts for a pending result-cell update.
 fn spawn_load_update_target(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     request: u64,
     relation: crate::query::RelationReference,
     generation: Arc<std::sync::atomic::AtomicU64>,
     request_generation: u64,
 ) {
     tokio::spawn(async move {
-        let result = match slot.read().await.clone() {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let result = match opened {
             Some(session) => {
                 session
                     .update_relation(relation.schema.as_deref(), &relation.relation)
@@ -1440,9 +1973,9 @@ fn spawn_load_update_target(
 /// A tree that waits behind a long query is worse than one that does not, and
 /// both are better than no tree.
 fn reader(
-    session: &Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
-    metadata: &Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
-) -> Arc<tokio::sync::RwLock<Option<Arc<Session>>>> {
+    session: &Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    metadata: &Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+) -> Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>> {
     if metadata.try_read().is_ok_and(|held| held.is_some()) {
         Arc::clone(metadata)
     } else {
@@ -1453,14 +1986,18 @@ fn reader(
 /// Reads an object's definition.
 fn spawn_load_definition(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     request: crate::app::tree::RequestId,
     object: crate::postgres::metadata::ObjectSummary,
     generation: Arc<std::sync::atomic::AtomicU64>,
     request_generation: u64,
 ) {
     tokio::spawn(async move {
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         let result = session.definition(&object).await;
@@ -1518,6 +2055,7 @@ fn export_visible_rows(
         "choose another name, or move the file that is there",
     )?;
     let execution = crate::query::result::Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: crate::query::result::JobId(0),
         statements: vec![crate::query::result::StatementResult {
             result_set: Some(visible),
@@ -1584,14 +2122,18 @@ fn write_failure(path: &str, error: &std::io::Error) -> Diagnostic {
 /// Reads what an object depends on and what depends on it.
 fn spawn_load_dependencies(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Session>>>>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     request: crate::app::tree::RequestId,
     object: crate::postgres::metadata::ObjectSummary,
     generation: Arc<std::sync::atomic::AtomicU64>,
     request_generation: u64,
 ) {
     tokio::spawn(async move {
-        let Some(session) = slot.read().await.clone() else {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
             return;
         };
         let result = session.dependencies(&object).await;
@@ -1637,8 +2179,30 @@ pub async fn execute_once_with_parameters(
     parameters: Option<crate::query::ParameterBindings>,
     row_cap: usize,
 ) -> Result<Execution, Diagnostic> {
+    execute_once_with_parameters_reported(target, config, sql, parameters, row_cap)
+        .await
+        .map_err(|failure| failure.value)
+}
+
+/// Connects and executes while preserving observed notices on connection failure.
+pub async fn execute_once_with_parameters_reported(
+    target: ConnectionTarget,
+    config: &Config,
+    sql: String,
+    parameters: Option<crate::query::ParameterBindings>,
+    row_cap: usize,
+) -> Result<Execution, Reported<Diagnostic>> {
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
-    let session = session::connect(&target, timeout).await?;
+    let connected = session::connect_reported(&target, timeout).await;
+    let session = match connected.value {
+        Ok(session) => session,
+        Err(value) => {
+            return Err(Reported {
+                value,
+                notice_report: connected.notice_report,
+            });
+        }
+    };
     Ok(
         execute_cancellable_with_parameters(&session, &sql, parameters.as_ref(), row_cap, JobId(1))
             .await,
@@ -1728,11 +2292,34 @@ pub async fn export_once_with_parameters(
     config: &Config,
     sql: String,
     parameters: Option<crate::query::ParameterBindings>,
+    export: crate::query::export::Export,
+    writer: crate::cli::output::StreamWriter,
+) -> Result<ExportOutcome, Diagnostic> {
+    export_once_with_parameters_reported(target, config, sql, parameters, export, writer)
+        .await
+        .value
+}
+
+/// Streaming/finalization outcome with observed accounting even on a finish error.
+pub async fn export_once_with_parameters_reported(
+    target: ConnectionTarget,
+    config: &Config,
+    sql: String,
+    parameters: Option<crate::query::ParameterBindings>,
     mut export: crate::query::export::Export,
     mut writer: crate::cli::output::StreamWriter,
-) -> Result<ExportOutcome, Diagnostic> {
+) -> Reported<Result<ExportOutcome, Diagnostic>> {
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
-    let session = session::connect(&target, timeout).await?;
+    let connected = session::connect_reported(&target, timeout).await;
+    let session = match connected.value {
+        Ok(session) => session,
+        Err(error) => {
+            return Reported {
+                value: Err(error),
+                notice_report: connected.notice_report,
+            };
+        }
+    };
     let cancel = session.cancel_handle();
 
     let outcome = {
@@ -1744,10 +2331,10 @@ pub async fn export_once_with_parameters(
             match parameters.as_ref() {
                 Some(parameters) => {
                     session
-                        .stream_with_parameters(&sql, parameters, &mut sink)
+                        .stream_with_parameters_reported(&sql, parameters, &mut sink)
                         .await
                 }
-                None => session.stream(&sql, &mut sink).await,
+                None => session.stream_reported(&sql, &mut sink).await,
             }
         };
         tokio::pin!(stream);
@@ -1762,8 +2349,18 @@ pub async fn export_once_with_parameters(
         }
     };
 
-    match outcome {
-        Ok(_) => Ok(ExportOutcome::Completed(export.finish()?)),
+    finish_stream_export(outcome, export, crate::query::export::Export::finish)
+}
+
+fn finish_stream_export(
+    outcome: Reported<Result<u64, crate::postgres::StreamStop>>,
+    export: crate::query::export::Export,
+    finish: impl FnOnce(
+        crate::query::export::Export,
+    ) -> Result<crate::query::export::Finished, Diagnostic>,
+) -> Reported<Result<ExportOutcome, Diagnostic>> {
+    let value = match outcome.value {
+        Ok(_) => finish(export).map(ExportOutcome::Completed),
         Err(crate::postgres::StreamStop::Server(reason)) => Ok(ExportOutcome::Interrupted {
             abandoned: export.abandon(),
             reason,
@@ -1780,6 +2377,10 @@ pub async fn export_once_with_parameters(
                 .next_action("check free space and permissions"),
             ),
         }),
+    };
+    Reported {
+        value,
+        notice_report: outcome.notice_report,
     }
 }
 
@@ -1912,7 +2513,9 @@ pub async fn probe_target(
     }
 
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
-    match session::connect(&target, timeout).await {
+    let connected = session::connect_reported(&target, timeout).await;
+    add_notice_check(&mut checks, &connected.notice_report);
+    match connected.value {
         Ok(opened) => {
             let info = opened.info();
             checks.push(Check::ok(
@@ -1952,6 +2555,9 @@ pub async fn probe_target(
                     info.posture()
                 ),
             ));
+            if let Some(report) = opened.take_connection_notice_report() {
+                add_notice_check(&mut checks, &report);
+            }
         }
         Err(diagnostic) => {
             checks.push(Check::fail(
@@ -1984,6 +2590,16 @@ pub async fn probe_target(
     ));
 
     Ok(checks)
+}
+
+fn add_notice_check(checks: &mut Vec<Check>, report: &NoticeReport) {
+    if report.counts.needs_report() {
+        checks.push(Check::warn(
+            "server notice retention",
+            report.counts.lines().join(" "),
+            "Review server logs separately if complete notice history is required.",
+        ));
+    }
 }
 
 #[cfg(test)]

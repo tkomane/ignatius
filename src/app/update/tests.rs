@@ -1768,6 +1768,7 @@ fn execution(job: JobId, status: ExecutionStatus, rows: &[&str]) -> Box<Executio
         set.push(vec![Cell::Text((*row).to_owned())]);
     }
     Box::new(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job,
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -1785,6 +1786,7 @@ fn execution(job: JobId, status: ExecutionStatus, rows: &[&str]) -> Box<Executio
 
 fn failed_execution(job: JobId, error: Diagnostic) -> Box<Execution> {
     Box::new(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job,
         statements: Vec::new(),
         status: ExecutionStatus::Failed,
@@ -1802,6 +1804,7 @@ fn copy_model(rows: Vec<Vec<Cell>>) -> Model {
         set.push(row);
     }
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(7),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -1854,6 +1857,7 @@ fn cell_update_model() -> Model {
     let mut set = ResultSet::new(vec!["order_id".into(), "note".into()], 100);
     set.push(vec![Cell::Text("7".into()), Cell::Text("old".into())]);
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(77),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -2001,6 +2005,7 @@ fn refreshing_never_replays_multiple_or_write_classified_sources() {
 fn refreshing_a_zero_row_result_is_still_an_explicit_read() {
     let mut model = refresh_model("SELECT value FROM orders;");
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(7),
         statements: vec![StatementResult {
             result_set: Some(ResultSet::new(vec!["value".into()], 100)),
@@ -2919,6 +2924,7 @@ fn cancelling_requests_but_does_not_claim_cancellation() {
     update(
         &mut model,
         Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: Vec::new(),
             status: ExecutionStatus::Cancelled,
@@ -2965,6 +2971,7 @@ fn a_lost_connection_during_execution_is_recorded_on_the_connection_too() {
     update(
         &mut model,
         Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: Vec::new(),
             status: ExecutionStatus::ConnectionLost,
@@ -3123,6 +3130,7 @@ fn plan_finished(
     result: Result<crate::query::PlanDocument, Diagnostic>,
 ) -> Box<crate::app::PlanExecution> {
     Box::new(crate::app::PlanExecution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job,
         analyzed,
         elapsed: Duration::from_millis(2),
@@ -3300,6 +3308,7 @@ fn a_failed_execution_shows_its_diagnostic_collapsed() {
     update(
         &mut model,
         Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: Vec::new(),
             status: ExecutionStatus::Failed,
@@ -4586,6 +4595,7 @@ fn with_grid(columns: &[&str], rows: &[&[Cell]]) -> Model {
     }
     let signature = set.columns.clone();
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -6789,4 +6799,511 @@ fn a_connection_established_without_a_connecting_attempt_does_not_steal_focus() 
         "a fixture or restored session must not move focus"
     );
     assert!(!model.expand_first_schema_on_load);
+}
+
+#[test]
+fn notice_status_pending_survives_ticks_resize_and_paint_without_server_text_copy() {
+    use crate::app::model::{NoticeSessionId, NoticeSource};
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let mut model = connected();
+    let id = NoticeSessionId::new();
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+        },
+    );
+    let counts = NoticeCounts {
+        omitted: NoticeCount::Exact(4),
+        ..NoticeCounts::default()
+    };
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id,
+            checkpoint: NoticeCheckpoint {
+                revision: 1,
+                totals: counts,
+            },
+            latest: None,
+        },
+    );
+    assert_eq!(
+        model.notice_state.pending, counts,
+        "actual message must reach bounded pending state"
+    );
+    update(&mut model, Message::Tick { running_for: None });
+    update(&mut model, Message::Resized(40, 8));
+    let _ = crate::ui::layout::render_to_string(
+        &model,
+        &crate::ui::Keymap::new(),
+        &model.presentation,
+        40,
+        8,
+    );
+    assert_eq!(
+        model.notice_state.pending, counts,
+        "drawing is never acknowledgement"
+    );
+    assert!(
+        model.notices.is_empty(),
+        "server prose is not cloned into local message history"
+    );
+}
+
+fn notice_model_pending() -> Model {
+    use crate::app::model::{NoticeSessionId, NoticeSource};
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let mut model = connected();
+    let id = NoticeSessionId::new();
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+        },
+    );
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id,
+            checkpoint: NoticeCheckpoint {
+                revision: 1,
+                totals: NoticeCounts {
+                    omitted: NoticeCount::Exact(4),
+                    ..NoticeCounts::default()
+                },
+            },
+            latest: None,
+        },
+    );
+    model
+}
+fn open_notice_details(model: &mut Model) {
+    update(model, Message::Action(Action::OpenPalette));
+    let palette = model.palette.as_ref().unwrap();
+    let index = palette
+        .matches()
+        .iter()
+        .position(|entry| entry.command == crate::app::palette::PaletteCommand::NoticeDetails)
+        .unwrap();
+    for _ in 0..index {
+        update(model, Message::Action(Action::Move(Direction::Down)));
+    }
+    assert!(update(model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.notice_details.is_some());
+}
+#[test]
+fn notice_reader_open_escape_and_explicit_ack_only_affect_captured_snapshot() {
+    use crate::app::model::NoticeSource;
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let mut model = notice_model_pending();
+    model.size = (40, 8);
+    open_notice_details(&mut model);
+    assert_eq!(
+        model.notice_state.pending.omitted,
+        NoticeCount::Exact(4),
+        "opening is not acknowledgement"
+    );
+    let source = model.notice_state.sources[0]
+        .as_ref()
+        .unwrap()
+        .session_id
+        .clone();
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: source,
+            checkpoint: NoticeCheckpoint {
+                revision: 2,
+                totals: NoticeCounts {
+                    omitted: NoticeCount::Exact(7),
+                    ..NoticeCounts::default()
+                },
+            },
+            latest: None,
+        },
+    );
+    assert_eq!(
+        model
+            .notice_details
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .pending
+            .omitted,
+        NoticeCount::Exact(4),
+        "reader content is fixed"
+    );
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.notice_details.is_none());
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(3));
+    open_notice_details(&mut model);
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(3));
+    open_notice_details(&mut model);
+    update(&mut model, Message::Resized(39, 8));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.notice_details.is_some());
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(3));
+    update(&mut model, Message::Action(Action::Dismiss));
+}
+#[test]
+fn notice_reader_preserves_owners_paste_hidden_editor_and_palette_cancel() {
+    let mut model = notice_model_pending();
+    model.size = (80, 24);
+    model.editor.set_text("SELECT 42;");
+    open_notice_details(&mut model);
+    let before = model.editor.clone();
+    for action in [
+        Action::Insert('x'),
+        Action::Backspace,
+        Action::DeleteForward,
+        Action::RunBuffer,
+        Action::FocusNext,
+        Action::GrowPane,
+    ] {
+        assert!(update(&mut model, Message::Action(action)).is_empty());
+        assert_eq!(model.editor.text(), before.text());
+        assert_eq!(model.editor.cursor(), before.cursor());
+    }
+    update(&mut model, Message::Pasted("hidden-synthetic-paste".into()));
+    assert_eq!(model.editor.text(), before.text());
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let scroll = model.notice_details.as_ref().unwrap().scroll;
+    update(&mut model, Message::Action(Action::OpenPalette));
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert_eq!(model.notice_details.as_ref().unwrap().scroll, scroll);
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut guarded = review_viewport_case(family, true);
+        guarded.notice_details = model.notice_details.clone();
+        let pending = guarded.notice_state.pending;
+        assert!(update(&mut guarded, Message::Action(Action::MoveBufferEnd)).is_empty());
+        assert!(guarded.review_scroll > 0, "{family}");
+        assert_eq!(guarded.notice_state.pending, pending);
+        assert!(guarded.notice_details.is_some());
+    }
+}
+#[test]
+fn notice_retirement_authority_rejects_unknown_old_and_duplicate_transfer() {
+    use crate::app::model::{NoticeSessionId, NoticeSource};
+    use crate::query::result::{NoticeCount, NoticeCounts};
+    let mut model = notice_model_pending();
+    let old = model.notice_state.sources[0]
+        .as_ref()
+        .unwrap()
+        .session_id
+        .clone();
+    let counts = NoticeCounts {
+        omitted: NoticeCount::Exact(6),
+        ..NoticeCounts::default()
+    };
+    update(
+        &mut model,
+        Message::NoticeRetired {
+            generation: 1,
+            source: NoticeSource::User,
+            session_id: NoticeSessionId::new(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(4));
+    model.connection_profiles = connection_profiles();
+    update(&mut model, Message::Action(Action::OpenConnectionPicker));
+    update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(model.connection_generation, 2);
+    update(
+        &mut model,
+        Message::NoticeRetired {
+            generation: 1,
+            source: NoticeSource::User,
+            session_id: old.clone(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(6));
+    update(
+        &mut model,
+        Message::NoticeRetired {
+            generation: 1,
+            source: NoticeSource::User,
+            session_id: old.clone(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(6));
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::NoticeSourceInstalled {
+                source: NoticeSource::User,
+                session_id: old,
+            }),
+        },
+    );
+    assert!(model.notice_state.sources[0].is_none());
+}
+
+#[test]
+fn notice_peer_older_checkpoint_cannot_replace_counts_baseline_or_latest() {
+    use crate::app::model::{NoticeSessionId, NoticeSource, NoticeSummary};
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts, NoticeScope};
+    let mut model = connected();
+    let id = NoticeSessionId::new();
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+        },
+    );
+    let counts = |n| NoticeCounts {
+        omitted: NoticeCount::Exact(n),
+        ..NoticeCounts::default()
+    };
+    let latest = |n| {
+        Some(NoticeSummary {
+            scope: NoticeScope::Query,
+            retained: Some(n),
+            counts: NoticeCounts::default(),
+        })
+    };
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+            checkpoint: NoticeCheckpoint {
+                revision: 2,
+                totals: counts(2),
+            },
+            latest: latest(2),
+        },
+    );
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id,
+            checkpoint: NoticeCheckpoint {
+                revision: 1,
+                totals: counts(1),
+            },
+            latest: latest(1),
+        },
+    );
+    assert_eq!(model.notice_state.pending, counts(2));
+    let state = model.notice_state.sources[0].as_ref().unwrap();
+    assert_eq!(state.checkpoint.revision, 2);
+    assert_eq!(state.latest.as_ref().unwrap().retained, Some(2));
+}
+
+#[test]
+fn notice_peer_explicit_cancel_closes_reader_without_ack_and_uses_one_cancel_path() {
+    let mut model = notice_model_pending();
+    model.phase = QueryPhase::Running {
+        job: JobId(99),
+        statements: 1,
+    };
+    open_notice_details(&mut model);
+    let pending = model.notice_state.pending;
+    let effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Cancel { job: JobId(99) }]
+    ));
+    assert!(matches!(
+        model.phase,
+        QueryPhase::CancellationRequested { job: JobId(99) }
+    ));
+    assert!(model.notice_details.is_none());
+    assert_eq!(model.notice_state.pending, pending);
+    assert!(update(&mut model, Message::Action(Action::Cancel)).is_empty());
+    let mut idle = notice_model_pending();
+    open_notice_details(&mut idle);
+    let pending = idle.notice_state.pending;
+    assert!(update(&mut idle, Message::Action(Action::Cancel)).is_empty());
+    assert!(idle.notice_details.is_none());
+    assert_eq!(idle.notice_state.pending, pending);
+}
+
+#[test]
+fn notice_reader_saved_query_choice_reveals_covered_inspector_and_definition() {
+    for definition in [false, true] {
+        let mut model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("synthetic covered value".into()),
+        ]]);
+        model.notice_state = notice_model_pending().notice_state;
+        if definition {
+            model.definition = Some(crate::app::model::Definition {
+                pending: None,
+                heading: "synthetic definition".into(),
+                definition: Some(definition_of("orders")),
+                error: None,
+                scroll: 0,
+            });
+        } else {
+            update(&mut model, Message::Action(Action::ToggleInspector));
+            assert!(model.inspector.is_some());
+        }
+        // Preserve the existing lower owner while the newer client report owns
+        // input; the saved-query answer can arrive after the report was opened.
+        model.notice_details = Some(crate::app::model::NoticeDetails {
+            snapshot: model.notice_state.snapshot(),
+            scroll: 3,
+        });
+        update(&mut model, Message::Action(Action::OpenPalette));
+        update(
+            &mut model,
+            Message::QueriesListed(vec![crate::queries::SavedQuery {
+                name: "synthetic-saved".into(),
+                path: "/unused/synthetic.sql".into(),
+                summary: "SELECT 77".into(),
+            }]),
+        );
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(matches!(effects.as_slice(),[Effect::LoadQuery {name}] if name=="synthetic-saved"));
+        assert!(model.notice_details.is_none());
+        assert!(
+            model.inspector.is_none(),
+            "saved SQL must not change behind an old inspector"
+        );
+        assert!(
+            model.definition.is_none(),
+            "saved SQL must not change behind an old definition"
+        );
+        assert_eq!(model.focus, Focus::Editor);
+        update(
+            &mut model,
+            Message::QueryLoaded(Box::new(Ok("SELECT 77".into()))),
+        );
+        assert_eq!(model.editor.text(), "SELECT 77");
+    }
+}
+
+#[test]
+fn notice_reader_empty_or_cancelled_palette_preserves_snapshot_and_baseline_open_focus() {
+    let mut model = notice_model_pending();
+    open_notice_details(&mut model);
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let offset = model.notice_details.as_ref().unwrap().scroll;
+    let pending = model.notice_details.as_ref().unwrap().snapshot.pending;
+    for empty in [false, true] {
+        update(&mut model, Message::Action(Action::OpenPalette));
+        if empty {
+            for ch in "synthetic-no-command-98371".chars() {
+                update(&mut model, Message::Action(Action::Insert(ch)));
+            }
+            assert!(model.palette.as_ref().unwrap().matches().is_empty());
+            update(&mut model, Message::Action(Action::Activate));
+        } else {
+            update(&mut model, Message::Action(Action::Dismiss));
+        }
+        assert_eq!(model.notice_details.as_ref().unwrap().scroll, offset);
+        assert_eq!(
+            model.notice_details.as_ref().unwrap().snapshot.pending,
+            pending
+        );
+    }
+    let mut baseline = connected();
+    baseline.focus = Focus::Results;
+    update(
+        &mut baseline,
+        Message::QueriesListed(vec![crate::queries::SavedQuery {
+            name: "synthetic-saved".into(),
+            path: "/unused/synthetic.sql".into(),
+            summary: "SELECT 77".into(),
+        }]),
+    );
+    assert!(matches!(
+        update(&mut baseline, Message::Action(Action::Activate)).as_slice(),
+        [Effect::LoadQuery { .. }]
+    ));
+    assert_eq!(
+        baseline.focus,
+        Focus::Results,
+        "uncovered baseline Open does not steal focus early"
+    );
+}
+
+#[test]
+fn notice_uninstalled_retirement_is_current_generation_bounded_and_once() {
+    use crate::app::model::NoticeSessionId;
+    use crate::query::result::{NoticeCount, NoticeCounts};
+    let mut model = Model::new(10);
+    let id = NoticeSessionId::new();
+    let counts = NoticeCounts {
+        omitted: NoticeCount::Exact(1),
+        ..NoticeCounts::default()
+    };
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id.clone(),
+            counts,
+        },
+    );
+    assert!(
+        !model.notice_state.pending.needs_report(),
+        "ordinary unknown sources have no authority"
+    );
+    update(&mut model, Message::NoticeUninstalledRetirementStarted(1));
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 0,
+            session_id: NoticeSessionId::new(),
+            counts,
+        },
+    );
+    assert!(!model.notice_state.pending.needs_report());
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id.clone(),
+            counts,
+        },
+    );
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id.clone(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    update(&mut model, Message::NoticeUninstalledRetirementFinished(1));
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: NoticeSessionId::new(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    update(&mut model, Message::NoticeUninstalledRetirementStarted(1));
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id,
+            counts,
+        },
+    );
+    assert_eq!(
+        model.notice_state.pending.omitted,
+        NoticeCount::Exact(1),
+        "reopened same boundary cannot recount token"
+    );
+    assert!(model.notice_state.sources.iter().all(Option::is_none));
 }

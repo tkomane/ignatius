@@ -8,6 +8,7 @@ pub mod glyphs;
 pub(crate) mod help;
 pub mod keymap;
 pub mod layout;
+pub(crate) mod notices;
 pub(crate) mod review;
 pub mod terminal;
 pub mod theme;

@@ -440,35 +440,61 @@ fn parameterized_notice_privacy_covers_the_backlog_and_late_messages_after_strea
             JobId(701),
         ));
         assert_eq!(setup.status, ExecutionStatus::Succeeded);
-        fixture
-            .runtime
-            .block_on(fixture.session.stream(
-                "DO $$ BEGIN RAISE NOTICE 'backlog notice'; END $$",
-                &mut |_| Ok(()),
-            ))
-            .expect("leave one ordinary notice in the backlog");
+        // A controlled dropped ordinary stream leaves its received notice in
+        // the bounded idle inbox. A positive owned-backend PgSleep barrier
+        // avoids depending only on a scheduling delay for that pending state.
+        fixture.runtime.block_on(async {
+            let uri=std::env::var("IGNATIUS_TEST_PG_URI").expect("synthetic URI");
+            let target=resolve(Some(&uri),&ConnectionArgs::default(),&EnvSnapshot::default(),&Config::default().connection).unwrap().for_object_tree();
+            let monitor=session::connect_reported(&target,Duration::from_secs(5)).await.value.unwrap();
+            let pid=fixture.session.info().backend_pid.parse::<u32>().unwrap();
+            let cancel=fixture.session.cancel_handle();
+            let mut sink=|_| Ok(());
+            let mut pending=Box::pin(fixture.session.stream_reported(
+                "DO $$ BEGIN RAISE NOTICE 'backlog notice'; END $$; SELECT pg_sleep(5)",
+                &mut sink,
+            ));
+            let reached=tokio::time::timeout(Duration::from_secs(3),async {
+                loop {
+                    tokio::select! { _=&mut pending=>panic!("ordinary backlog stream completed before owned barrier"), _=tokio::time::sleep(Duration::from_millis(10))=>{} }
+                    let observed=monitor.execute(&format!("SELECT wait_event FROM pg_stat_activity WHERE pid={pid}"),1,JobId(702)).await;
+                    assert_eq!(observed.status,ExecutionStatus::Succeeded);
+                    if observed.statements[0].result_set.as_ref().is_some_and(|set|set.rows.iter().any(|row|row==&vec![Cell::Text("PgSleep".into())])) {break;}
+                }
+            }).await;
+            drop(pending);
+            let delivered=tokio::time::timeout(Duration::from_secs(2),cancel.cancel()).await;
+            assert!(delivered.is_ok_and(|result|result.is_ok()));
+            assert!(reached.is_ok(),"positive ordinary stream backlog barrier");
+            fixture.session.schemas().await.expect("owned cancellation protocol barrier");
+        });
 
         let stopped = fixture
             .runtime
-            .block_on(fixture.session.stream_with_parameters(
+            .block_on(fixture.session.stream_with_parameters_reported(
                 "SELECT :value AS intentional_result; SELECT pg_temp.runtime_privacy_emit(:value)",
                 &value_bindings(),
                 &mut |_| Err(std::io::Error::other("synthetic export sink stopped")),
             ));
         assert!(matches!(
-            stopped,
+            stopped.value,
             Err(ignatius::postgres::session::StreamStop::Sink(_))
         ));
-        // This round trip is a protocol barrier: the abandoned stream's later
-        // statement and notice must have arrived before its response can do so.
+        let mut notices = stopped.notice_report.unattributed;
+        // This round trip is a test protocol barrier: all later statements in
+        // the prior Query message precede it. Report ownership may span the
+        // stopped operation, the barrier operation, and a final typed idle drain.
+        let barrier = fixture
+            .runtime
+            .block_on(fixture.session.stream_reported("SELECT 1", &mut |_| Ok(())));
         assert_eq!(
-            fixture
-                .runtime
-                .block_on(fixture.session.stream("SELECT 1", &mut |_| Ok(())))
-                .expect("complete the notice protocol barrier"),
+            barrier.value.expect("complete the notice protocol barrier"),
             1
         );
-        let notices = fixture.session.take_notices();
+        notices.extend(barrier.notice_report.unattributed);
+        if let Some(report) = fixture.session.take_connection_notice_report() {
+            notices.extend(report.unattributed);
+        }
         assert_eq!(
             notices.len(),
             2,

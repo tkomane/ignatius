@@ -983,6 +983,280 @@ impl LayoutNotice {
     }
 }
 
+/// Runtime-minted physical-session identity. Queued clones prevent pointer reuse.
+#[derive(Clone)]
+pub struct NoticeSessionId(std::sync::Arc<()>);
+impl NoticeSessionId {
+    /// Mints one opaque local identity, without a global counter or server value.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(()))
+    }
+}
+impl Default for NoticeSessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl PartialEq for NoticeSessionId {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for NoticeSessionId {}
+impl std::fmt::Debug for NoticeSessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NoticeSessionId(..)")
+    }
+}
+
+/// Which physical runtime route produced client accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSource {
+    /// User SQL connection, including shared metadata fallback.
+    User,
+    /// Dedicated metadata connection.
+    Metadata,
+}
+impl NoticeSource {
+    /// Fixed slot; never a per-report history.
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::User => 0,
+            Self::Metadata => 1,
+        }
+    }
+    /// Safe built-in description.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::User => "user connection",
+            Self::Metadata => "metadata connection",
+        }
+    }
+}
+
+/// Latest client summary, with no retained server prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeSummary {
+    /// Client observation scope.
+    pub scope: crate::query::result::NoticeScope,
+    /// Admitted entries, unavailable when accounting failed.
+    pub retained: Option<u16>,
+    /// Client counts for that report.
+    pub counts: crate::query::result::NoticeCounts,
+}
+impl From<&crate::query::result::NoticeReport> for NoticeSummary {
+    fn from(report: &crate::query::result::NoticeReport) -> Self {
+        Self {
+            scope: report.scope,
+            retained: report.retained,
+            counts: report.counts,
+        }
+    }
+}
+
+/// Fixed accounting record for one installed physical session.
+#[derive(Debug, Clone)]
+pub struct NoticeSourceState {
+    /// Captured connection generation.
+    pub generation: u64,
+    /// Runtime identity, never a pointer/address display.
+    pub session_id: NoticeSessionId,
+    /// Last committed totals delivered to this model.
+    pub checkpoint: crate::query::result::NoticeCheckpoint,
+    /// Unacknowledged contribution of this physical source.
+    pub pending: crate::query::result::NoticeCounts,
+    /// Latest bounded fixed summary.
+    pub latest: Option<NoticeSummary>,
+}
+
+/// A fixed reader snapshot. Opening does not acknowledge it.
+#[derive(Debug, Clone)]
+pub struct NoticeSnapshot {
+    /// Pending aggregate at opening.
+    pub pending: crate::query::result::NoticeCounts,
+    /// Pending retired-source aggregate at opening.
+    pub previous: crate::query::result::NoticeCounts,
+    /// At most the two physical-source records, without server text.
+    pub sources: [Option<NoticeSourceState>; 2],
+    /// Local pending-state revision at opening.
+    pub revision: u64,
+}
+
+/// Read-only notice details, separate from sending-review state.
+#[derive(Debug, Clone)]
+pub struct NoticeDetails {
+    /// Captured report, unchanged by later arrivals.
+    pub snapshot: NoticeSnapshot,
+    /// First wrapped display row.
+    pub scroll: usize,
+}
+
+/// Fixed-size latest/pending accounting; no server text or report queue.
+#[derive(Debug, Clone, Default)]
+pub struct NoticeState {
+    /// At most two installed physical sources.
+    pub sources: [Option<NoticeSourceState>; 2],
+    /// All loss awaiting an explicit acknowledgement.
+    pub pending: crate::query::result::NoticeCounts,
+    /// Unacknowledged counts from retired connections.
+    pub previous: crate::query::result::NoticeCounts,
+    /// Changes to pending state, independent of draw/ticks.
+    pub revision: u64,
+    /// Explicit authority for a synchronous physical retirement handoff.
+    pub retiring_generation: Option<u64>,
+    /// Each source may hand off once at that boundary.
+    pub retirement_open: [bool; 2],
+    /// At most one latest failed-connect delivery identity per route.
+    pub last_attempt: [Option<NoticeSessionId>; 2],
+    /// Explicit current-generation authority for one bounded shutdown drain.
+    pub uninstalled_retirement: Option<u64>,
+    /// Generation whose fixed uninstalled-attempt tokens are retained.
+    pub uninstalled_token_generation: Option<u64>,
+    /// At most pending2 plus channel2 identities, never a report history.
+    pub uninstalled_tokens: [Option<NoticeSessionId>; 4],
+}
+impl NoticeState {
+    /// Begins a bounded retirement authority; ordinary old status stays invalid.
+    pub fn begin_retirement(&mut self, generation: u64) {
+        self.retiring_generation = Some(generation);
+        self.retirement_open = [true, true];
+    }
+    /// Ends the explicit handoff authority.
+    pub fn finish_retirement(&mut self, generation: u64) {
+        if self.retiring_generation == Some(generation) {
+            self.retiring_generation = None;
+            self.retirement_open = [false, false];
+        }
+    }
+    /// Installs only an explicitly observed physical source, preserving old debt.
+    pub fn install(&mut self, source: NoticeSource, generation: u64, session_id: NoticeSessionId) {
+        let index = source.index();
+        if self.sources[index]
+            .as_ref()
+            .is_some_and(|old| old.generation == generation && old.session_id == session_id)
+        {
+            return;
+        }
+        if let Some(old) = self.sources[index].as_ref() {
+            let (old_gen, old_id, totals) = (
+                old.generation,
+                old.session_id.clone(),
+                old.checkpoint.totals,
+            );
+            self.retire(source, old_gen, &old_id, totals);
+        }
+        self.sources[index] = Some(NoticeSourceState {
+            generation,
+            session_id,
+            checkpoint: crate::query::result::NoticeCheckpoint::default(),
+            pending: crate::query::result::NoticeCounts::default(),
+            latest: None,
+        });
+    }
+    /// Coalesces one committed checkpoint without double counting it.
+    pub fn observe(
+        &mut self,
+        source: NoticeSource,
+        generation: u64,
+        session_id: &NoticeSessionId,
+        checkpoint: crate::query::result::NoticeCheckpoint,
+        latest: Option<NoticeSummary>,
+    ) {
+        let Some(state) = self.sources[source.index()]
+            .as_mut()
+            .filter(|state| state.generation == generation && state.session_id == *session_id)
+        else {
+            return;
+        };
+        if checkpoint.revision < state.checkpoint.revision {
+            return;
+        }
+        if checkpoint.revision == state.checkpoint.revision && checkpoint.revision != u64::MAX {
+            if checkpoint.totals != state.checkpoint.totals {
+                return;
+            }
+            if latest.is_some() {
+                state.latest = latest;
+            }
+            return;
+        }
+        let delta = checkpoint.totals.since(state.checkpoint.totals);
+        state.checkpoint = checkpoint;
+        state.pending = state.pending.plus(delta);
+        if checkpoint.revision == u64::MAX && state.checkpoint.revision == u64::MAX {
+            state.latest = None;
+        } else if latest.is_some() {
+            state.latest = latest;
+        }
+        if delta.needs_report() {
+            self.pending = self.pending.plus(delta);
+            self.revision = self.revision.saturating_add(1);
+        }
+    }
+    /// Adds a nonmutating actual-retirement projection exactly once, then retires identity.
+    pub fn retire(
+        &mut self,
+        source: NoticeSource,
+        generation: u64,
+        session_id: &NoticeSessionId,
+        counts: crate::query::result::NoticeCounts,
+    ) {
+        let index = source.index();
+        if !self.sources[index]
+            .as_ref()
+            .is_some_and(|state| state.generation == generation && state.session_id == *session_id)
+        {
+            return;
+        }
+        let state = self.sources[index]
+            .take()
+            .expect("matched physical identity");
+        let delta = counts.since(state.checkpoint.totals);
+        self.pending = self.pending.plus(delta);
+        self.previous = self.previous.plus(state.pending.plus(delta));
+        self.retirement_open[index] = false;
+        if delta.needs_report() {
+            self.revision = self.revision.saturating_add(1);
+        }
+    }
+    /// Captures fixed counters/checkpoints without acknowledgement.
+    #[must_use]
+    pub fn snapshot(&self) -> NoticeSnapshot {
+        NoticeSnapshot {
+            pending: self.pending,
+            previous: self.previous,
+            sources: self.sources.clone(),
+            revision: self.revision,
+        }
+    }
+    /// Acknowledges only the displayed snapshot; new loss remains pending.
+    pub fn acknowledge(&mut self, snapshot: &NoticeSnapshot) {
+        if self.revision == snapshot.revision && self.revision != u64::MAX {
+            self.pending = crate::query::result::NoticeCounts::default();
+            self.previous = crate::query::result::NoticeCounts::default();
+            for source in self.sources.iter_mut().flatten() {
+                source.pending = crate::query::result::NoticeCounts::default();
+            }
+        } else {
+            self.pending = self.pending.since(snapshot.pending);
+            let mut previous_ack = snapshot.previous;
+            for (index, old) in snapshot.sources.iter().enumerate() {
+                if let Some(old) = old {
+                    match self.sources[index].as_mut().filter(|source| {
+                        source.generation == old.generation && source.session_id == old.session_id
+                    }) {
+                        Some(source) => source.pending = source.pending.since(old.pending),
+                        None => previous_ack = previous_ack.plus(old.pending),
+                    }
+                }
+            }
+            self.previous = self.previous.since(previous_ack);
+        }
+    }
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
@@ -1037,6 +1311,10 @@ pub struct Model {
     pub last_sql: Option<String>,
     /// Server messages from the most recent execution.
     pub notices: Vec<Notice>,
+    /// Fixed server-notice retention accounting, separate from local SAVED/WROTE messages.
+    pub notice_state: NoticeState,
+    /// Read-only client report captured on explicit opening.
+    pub notice_details: Option<NoticeDetails>,
     /// The error being shown, if any.
     pub error: Option<Diagnostic>,
     /// Whether the help overlay is open.
@@ -1240,7 +1518,7 @@ impl Model {
     /// filtered view.
     ///
     /// **The filter runs over retained rows only.** Rows beyond the cap were
-    /// never received, so they cannot be searched, and every count that mentions
+    /// never retained, so they cannot be searched, and every count that mentions
     /// the filter says so.
     #[must_use]
     pub fn filtered_rows(&self) -> Vec<usize> {

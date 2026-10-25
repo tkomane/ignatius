@@ -397,6 +397,7 @@ fn shared_ci_runs_the_complete_declared_coverage() {
         "--test cloud_identity_integration",
         "--test parameter_semantics_contract",
         "--test runtime_privacy_contract",
+        "--test notice_retention_contract",
         "cargo test --locked --lib postgres::session",
         "sslmode=verify-full&sslrootcert=${{ github.workspace }}/docker/tls/generated/ca.crt",
     ] {
@@ -405,6 +406,21 @@ fn shared_ci_runs_the_complete_declared_coverage() {
             "the TCP/TLS integration job is missing live-endpoint wiring: {expected}"
         );
     }
+
+    assert_eq!(
+        integration
+            .matches("--test notice_retention_contract")
+            .count(),
+        2,
+        "notice contracts must use real endpoints over both plain and verified TLS"
+    );
+    assert_eq!(
+        integration
+            .matches("cli::interactive::tests::notice_")
+            .count(),
+        2,
+        "runtime notice retirement must use real endpoints over both routes"
+    );
 
     let socket = job_block(&workflow, "socket-integration");
     for expected in [

@@ -53,7 +53,8 @@ pub(crate) fn render_footer(
         theme.style(transaction_token),
     ));
 
-    let showing_transient_notice = model.format_notice.is_some()
+    let showing_transient_notice = model.notice_state.pending.needs_report()
+        || model.format_notice.is_some()
         || model.paste_notice.is_some()
         || model.layout_notice.is_some();
     if let Some(info) = model
@@ -82,6 +83,16 @@ pub(crate) fn render_footer(
         .filter(|_| !showing_transient_notice)
     {
         used += display_width(&info.search_path) + 2;
+    }
+
+    if let Some(badge) =
+        crate::ui::notices::badge(model, usize::from(area.width).saturating_sub(used + 1))
+    {
+        used += display_width(&badge) + 1;
+        spans.push(Span::styled(
+            format!(" {badge}"),
+            theme.style(Token::Warning),
+        ));
     }
 
     if let Some(notice) = model.layout_notice {

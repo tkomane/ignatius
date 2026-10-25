@@ -698,6 +698,7 @@ fn with_rows(model: &mut Model, columns: &[&str], rows: &[&[Cell]]) {
         set.push((*row).to_vec());
     }
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -1347,6 +1348,7 @@ fn result_outcomes_keep_failure_cancellation_and_connection_loss_distinct() {
         let mut model = connected_model(Environment::Local);
         model.focus = Focus::Results;
         model.last_execution = Some(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job: JobId(1),
             statements: Vec::new(),
             status,
@@ -1389,6 +1391,7 @@ fn a_long_result_scrolls_to_keep_the_selection_visible() {
         set.push(vec![Cell::Text(format!("row-{i}"))]);
     }
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -3235,4 +3238,61 @@ fn every_size_renders_without_panicking() {
             let _ = render_to_string(&model, &Keymap::new(), &rich(), width, height);
         }
     }
+}
+
+#[test]
+fn notice_pending_badge_is_global_through_zoom_plan_and_ascii() {
+    use crate::query::result::{NoticeCount, NoticeCounts};
+    for size in [(40, 8), (100, 30)] {
+        for focus in [Focus::Editor, Focus::Objects, Focus::Results] {
+            let mut model = connected_model(Environment::Local);
+            model.size = size;
+            model.focus = focus;
+            model.splits.zoomed = true;
+            model.presentation = Presentation::new(
+                Theme::new(ThemeChoice::Dark, false),
+                Glyphs::new(GlyphTier::Ascii),
+                true,
+            );
+            model.notice_state.pending = NoticeCounts {
+                omitted: NoticeCount::Exact(4),
+                shortened: NoticeCount::Exact(1),
+                ..NoticeCounts::default()
+            };
+            let text =
+                render_to_string(&model, &Keymap::new(), &model.presentation, size.0, size.1);
+            assert!(
+                text.contains("Notices: O4 S1") || text.contains("Notices: 4 omitted, 1 shortened"),
+                "global client badge missing: {text}"
+            );
+            assert!(
+                text.contains(model.transaction.label()),
+                "query/transaction facts remain"
+            );
+        }
+    }
+}
+
+#[test]
+fn notice_pending_defers_under_help_and_each_review_without_changing_required_geometry() {
+    use crate::query::result::{NoticeCount, NoticeCounts};
+    let mut model = connected_model(Environment::Local);
+    model.size = (40, 8);
+    model.notice_state.pending = NoticeCounts {
+        omitted: NoticeCount::Exact(4),
+        ..NoticeCounts::default()
+    };
+    model.help_open = true;
+    let help = render_to_string(&model, &Keymap::new(), &model.presentation, 40, 8);
+    assert!(!help.contains("Notices: O4"));
+    assert!(model.notice_state.pending.needs_report());
+    model.help_open = false;
+    let ordinary = render_to_string(&model, &Keymap::new(), &model.presentation, 40, 8);
+    assert!(ordinary.contains("Notices: O4") || ordinary.contains("Notices: 4 omitted"));
+    // The shared review builder receives the unchanged whole frame; no global
+    // notice row is reserved from protected input/body/commands.
+    let before = crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8));
+    model.notice_state.pending = NoticeCounts::default();
+    let after = crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8));
+    assert_eq!(before.body, after.body);
 }

@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: server notice retention after driver connection is bounded by a
+  whole-operation count/retained-text allowance, with explicit omission,
+  shortening and uncertain accounting. Statements and transaction outcomes are
+  unchanged; driver allocation, aggregate results and process RSS remain
+  separate limits.
+- Improved: scripted/plain/export/plan paths retain client notice accounting on
+  failure as well as success. JSON adds accounting to the existing single error
+  object; the TUI keeps pending counts with an explicit snapshot reader and
+  acknowledgement while preserving protected review geometry.
 - Fixed: streaming exports count only complete accepted row encodings. Failed
   or partial row writes no longer advance progress. An unsuccessful partial-
   file flush reports an unconfirmed file-row count while preserving best-effort

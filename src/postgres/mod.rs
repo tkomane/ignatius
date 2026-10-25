@@ -5,9 +5,12 @@
 
 pub mod error;
 pub mod metadata;
+mod notices;
 pub mod session;
 pub mod tls;
 
 pub use metadata::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary, quote_identifier};
-pub use session::{CancelHandle, Session, SessionInfo, StreamEvent, StreamStop, connect};
+pub use session::{
+    CancelHandle, Session, SessionInfo, StreamEvent, StreamStop, connect, connect_reported,
+};
 pub use tls::TlsState;

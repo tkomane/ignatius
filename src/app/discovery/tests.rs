@@ -57,6 +57,7 @@ fn rows_execution() -> Execution {
     let mut set = ResultSet::new(vec!["value".into()], 100);
     set.push(vec![Cell::Text("one".into())]);
     Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),

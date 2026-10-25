@@ -23,6 +23,7 @@ fn retention_status_execution() -> crate::query::result::Execution {
         notices: Vec::new(),
     };
     Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![
             statement(None),
@@ -761,4 +762,132 @@ fn a_target_that_requires_encryption_names_the_tls_stage() {
             "{sslmode:?}"
         );
     }
+}
+
+fn notice_output_execution() -> crate::query::result::Execution {
+    use crate::query::result::{NoticeCount, NoticeCounts, NoticeReport, NoticeScope};
+    let mut execution = retention_status_execution();
+    execution.statements = vec![execution.statements.remove(1)];
+    execution.notice_report = NoticeReport {
+        scope: NoticeScope::Query,
+        retained: Some(256),
+        counts: NoticeCounts {
+            omitted: NoticeCount::Exact(1),
+            ..NoticeCounts::default()
+        },
+        ..NoticeReport::default()
+    };
+    execution
+}
+
+#[test]
+fn notice_output_preserves_data_in_every_format_and_json_has_one_status() {
+    for format in [
+        Format::Table,
+        Format::Csv,
+        Format::Tsv,
+        Format::Ndjson,
+        Format::Json,
+        Format::Markdown,
+        Format::Insert,
+    ] {
+        let execution = notice_output_execution();
+        let options = output::OutputOptions {
+            format,
+            insert_table: Some("synthetic_snapshot".into()),
+            ..output::OutputOptions::default()
+        };
+        let mut expected = Vec::new();
+        output::write_execution(&mut expected, &execution, &options).unwrap();
+        let (mut data, mut status) = (Vec::new(), Vec::new());
+        assert_eq!(
+            write_query_execution(&mut data, &mut status, &execution, &options).unwrap(),
+            ExitCode::Success
+        );
+        assert_eq!(data, expected, "{format:?} bytes must be unchanged");
+        if format == Format::Json {
+            let json: serde_json::Value = serde_json::from_slice(&status).unwrap();
+            assert_eq!(json["notice_report"]["omitted"]["count"], 1);
+            assert!(json.get("exit_code").is_none());
+        } else {
+            assert_eq!(
+                String::from_utf8(status).unwrap(),
+                execution.notice_report.counts.lines().join("\n") + "\n"
+            );
+        }
+    }
+}
+
+#[test]
+fn notice_output_errors_keep_one_json_diagnostic_and_reporting_io_is_ordinary() {
+    let execution = notice_output_execution();
+    let options = output::OutputOptions {
+        format: Format::Json,
+        ..output::OutputOptions::default()
+    };
+    let mut status = Vec::new();
+    assert_eq!(
+        write_query_execution(
+            &mut FailedStatus(std::io::ErrorKind::PermissionDenied),
+            &mut status,
+            &execution,
+            &options
+        )
+        .unwrap(),
+        ExitCode::Internal
+    );
+    let json: serde_json::Value = serde_json::from_slice(&status).unwrap();
+    assert_eq!(json["exit_code"], 70);
+    assert_eq!(json["notice_report"]["retained"], 256);
+    assert_eq!(
+        execution.status,
+        crate::query::result::ExecutionStatus::Succeeded,
+        "I/O does not rewrite SQL outcome"
+    );
+    let options = output::OutputOptions {
+        format: Format::Csv,
+        ..output::OutputOptions::default()
+    };
+    let error = write_query_execution(
+        &mut Vec::new(),
+        &mut FailedStatus(std::io::ErrorKind::BrokenPipe),
+        &execution,
+        &options,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, DiagnosticKind::Internal);
+    let mut status = Vec::new();
+    assert_eq!(
+        write_query_execution(
+            &mut FailedStatus(std::io::ErrorKind::BrokenPipe),
+            &mut status,
+            &execution,
+            &options
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    assert!(
+        status.is_empty(),
+        "closed data sink preserves the documented non-delivery boundary"
+    );
+}
+
+#[test]
+fn notice_output_unknown_retained_is_null_and_zero_reports_are_silent() {
+    let mut execution = notice_output_execution();
+    execution.notice_report =
+        crate::query::result::NoticeReport::unavailable(crate::query::result::NoticeScope::Query);
+    let options = output::OutputOptions {
+        format: Format::Json,
+        ..output::OutputOptions::default()
+    };
+    let mut status = Vec::new();
+    write_query_execution(&mut Vec::new(), &mut status, &execution, &options).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&status).unwrap();
+    assert!(json["notice_report"]["retained"].is_null());
+    execution.notice_report = crate::query::result::NoticeReport::default();
+    let mut status = Vec::new();
+    write_query_execution(&mut Vec::new(), &mut status, &execution, &options).unwrap();
+    assert!(status.is_empty());
 }

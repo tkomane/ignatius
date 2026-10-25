@@ -9,7 +9,7 @@ use crate::app::model::ConnectingStep;
 use crate::diagnostics::Diagnostic;
 use crate::postgres::SessionInfo;
 use crate::query::plan::PlanDocument;
-use crate::query::result::{Execution, JobId, Notice, TransactionState};
+use crate::query::result::{Execution, JobId, TransactionState};
 use std::time::Duration;
 
 /// A user intent, produced by the keymap or the command palette.
@@ -243,6 +243,8 @@ pub struct PlanExecution {
     pub result: Result<PlanDocument, Diagnostic>,
     /// Whether the session reported that the connection was lost.
     pub connection_lost: bool,
+    /// Bounded observed notices and client accounting for the plan request.
+    pub notice_report: crate::query::result::NoticeReport,
 }
 
 /// Which mouse button produced an event.
@@ -366,8 +368,70 @@ pub enum Message {
     CancellationDelivered(JobId),
     /// The cancellation request could not be delivered.
     CancellationFailed(Box<Diagnostic>),
-    /// Server messages arrived outside an execution.
-    Notices(Vec<Notice>),
+    /// A physical source was installed for this captured generation.
+    NoticeSourceInstalled {
+        /// Fixed runtime route.
+        source: crate::app::model::NoticeSource,
+        /// Opaque local physical identity.
+        session_id: crate::app::model::NoticeSessionId,
+    },
+    /// Committed client accounting, independently of a possibly stale query job.
+    NoticeStatus {
+        /// Fixed runtime route.
+        source: crate::app::model::NoticeSource,
+        /// Physical source identity.
+        session_id: crate::app::model::NoticeSessionId,
+        /// Fixed committed accounting.
+        checkpoint: crate::query::result::NoticeCheckpoint,
+        /// Latest value-free client summary.
+        latest: Option<crate::app::model::NoticeSummary>,
+    },
+    /// Fixed accounting from a failed connection attempt, not current session facts.
+    NoticeAttemptReport {
+        /// Fixed connection route.
+        source: crate::app::model::NoticeSource,
+        /// One delivery identity, not a server value.
+        attempt_id: crate::app::model::NoticeSessionId,
+        /// Client-only summary from the reported connect failure.
+        summary: crate::app::model::NoticeSummary,
+    },
+    /// Opens one bounded handoff for locally available uninstalled attempts.
+    NoticeUninstalledRetirementStarted(u64),
+    /// Known counts from a current-generation opened but uninstalled session.
+    NoticeUninstalledRetired {
+        /// Captured generation; stale attempts are rejected.
+        generation: u64,
+        /// Opaque local physical/attempt identity.
+        session_id: crate::app::model::NoticeSessionId,
+        /// Nonmutating observed retirement counts, never current SQL facts.
+        counts: crate::query::result::NoticeCounts,
+    },
+    /// Ends the bounded uninstalled-attempt handoff authority.
+    NoticeUninstalledRetirementFinished(u64),
+    /// Explicit retirement starts before physical replacement; no SQL is implied.
+    NoticeRetirementStarted(u64),
+    /// Synchronizes a current physical slot whose Model install event lagged.
+    NoticeRetiringSourceInstalled {
+        /// Still-owned retiring generation, never relabelled as current.
+        generation: u64,
+        /// Fixed runtime route.
+        source: crate::app::model::NoticeSource,
+        /// Runtime-observed opaque identity.
+        session_id: crate::app::model::NoticeSessionId,
+    },
+    /// Actual retirement projection can transfer previous debt only, exactly once.
+    NoticeRetired {
+        /// Captured retiring generation.
+        generation: u64,
+        /// Fixed runtime route.
+        source: crate::app::model::NoticeSource,
+        /// Still-owned opaque physical identity.
+        session_id: crate::app::model::NoticeSessionId,
+        /// Observed committed plus uncommitted counts at retirement.
+        counts: crate::query::result::NoticeCounts,
+    },
+    /// Ends explicit retirement authority.
+    NoticeRetirementFinished(u64),
     /// The schema list finished loading.
     SchemasLoaded(Box<Result<Vec<crate::postgres::metadata::SchemaSummary>, Diagnostic>>),
     /// The completion catalogue finished loading.
