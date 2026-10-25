@@ -110,8 +110,9 @@ assert the exit code for both success and failure.
 
 - A value containing terminal escape sequences is displayed without those
   sequences reaching the terminal.
-- A result larger than the row cap is bounded in memory while still reporting the
-  true row count.
+- A result larger than the row cap retains at most that many rows while
+  reporting received counts. REL-002 separately bounds named retained data;
+  earlier driver allocation and process RSS are different boundaries.
 - A buffer of only comments or stray semicolons sends nothing to the server.
 - An unterminated quote does not hang, panic, or split into two statements.
 - A `sslmode` the build does not implement fails with an explanation rather than
@@ -203,7 +204,13 @@ assert the exit code for both success and failure.
   arbitrary panic details contain no secrets. This changes no query retry,
   rollback or panic-payload handling contract.
 - **REL-002**: Result rows held in memory MUST be bounded by an explicit cap,
-  with truncation visible and the true count preserved.
+  with truncation visible and the true count preserved. Buffered Session
+  ingestion MUST additionally apply one 32-MiB logical occupied-result-data
+  allowance across the Execution, with atomic whole-description/row admission,
+  explicit typed unavailability and unchanged PostgreSQL outcomes under the
+  [retained-result contract](contracts/retained-result-data.md). This named
+  allowance excludes earlier driver allocation and is not a process-RAM ceiling.
+  W10-013 tracks implementation and acceptance; specification is not completion.
 - **REL-003**: A result belonging to a superseded job MUST be discarded.
 - **REL-004**: Configuration writes MUST be atomic and MUST take a backup before
   a migration.

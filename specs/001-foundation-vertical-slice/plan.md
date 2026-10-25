@@ -366,3 +366,25 @@ This closes one measured retention route. W10-008 remains open for aggregate
 retained data and earlier driver/startup allocation; W10-011 is measurement,
 not cancellation or process-memory proof. No new dependency, SQL replay,
 automatic rollback, credential path or external action is introduced.
+
+
+## W10-013 execution-wide retained-result data - 2026-10-25
+
+After W10-012 integration, implement REL-002's pinned
+[retained-data contract](contracts/retained-result-data.md). Use one checked
+32-MiB logical occupied-data allowance across all buffered result sets, counting
+native container/cell slots and retained UTF-8 fields before copying. Preserve
+existing row caps and oversized-cell refusal precedence. Whole-row admission
+latches a retained prefix; consume/count remaining explicit SQL normally.
+Essential-description refusal becomes typed data-unavailable with fixed counts,
+not an invented empty result or failed write. Known data bytes/schemas remain
+unchanged; Feature 021 FR-2110 explicitly admits the new unavailable-description
+JSON flag/source-column count and value-free sideband for other data formats.
+
+No new dependency/flag/configuration or server action is needed. Keep the
+existing NoticeReport, operation guards and stream/export contracts; root
+serializes shared seams. Test pure small budgets first, then bounded synthetic
+live outcomes, action refusals and actual rendered states, followed by the
+required combined gate and affected server evidence. Do not claim complete
+resource acceptance: driver frames/startup, output/display copies, metadata
+caches, control vectors and whole-process RSS remain separate boundaries.

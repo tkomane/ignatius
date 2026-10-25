@@ -13,8 +13,9 @@ Branch: `codex/autonomous-roadmap-2026-10-25`. Latest code checkpoints:
 (reachable help with local input ownership). The combined local verifier passed
 1,315 harness cases/1,027 library; clean `d8a3ac3` also passed fresh complete
 history/source secret scans. W10-011 real-writer pacing is now measured and
-reviewed; W10-012 bounded-notice implementation is active in isolation. All work remains local. Read Git state before
-taking an assignment; the day-long goal remains active.
+reviewed; W10-012 bounded-notice implementation is active in isolation. All work
+remains local. Read Git state before taking an assignment; the day-long goal
+remains active.
 
 - W03's fresh string-semantics guard and W10-006's private parsed-snapshot
   migration backups are saved in `4fc3357` and `ecdb9bb`. Their failing-first
@@ -134,14 +135,19 @@ Only the 12 verified owned payloads were removed. Sources/report/raw evidence:
 `/private/tmp/ignatius-w10-011-d8a3ac3-JVcSVr/`. This proves library-path
 backpressure above BufWriter, not CLI cancellation, TLS or process ceilings.
 
-W10-008's distinct frame/aggregate design inputs remain unadopted. Root adopted
-W10-012's complete notice policy under foundation REL-005, with fixed cumulative
+W10-008's incoming-frame design remains unadopted. Root specified W10-013's
+32-MiB logical retained-data allowance and typed-unavailability/output contract;
+its implementation is serialized after W10-012 integration and remains open.
+Root adopted W10-012's complete notice policy under foundation REL-005, with fixed cumulative
 allowances, precision-safe pending counts and explicit acknowledgement. Privacy
 implements in isolated exact `e5b8c72`; PostgreSQL peer reviews immutable core
 snapshots. Admission/lifecycle reds and focused greens are retained. Independent
 review found probe/describe phase mixing and a dropped pending-shortening edge;
 contract `2918069` pins their repair plus nonmutating active-count snapshots at
-actual source retirement/quit. Adapter/UI/live work and final root integration/
+actual source retirement/quit. Core03 passed its focused repeat and independent
+peer re-review with no remaining core blocker; adapter/UI work now includes
+explicit captured source retirement and bounded main-loop session installation.
+Adapter/UI/live work and final root integration/
 full/rendered verification remain outstanding. Root owns shared records/policy;
 canonical product source is still `d8a3ac3`.
 

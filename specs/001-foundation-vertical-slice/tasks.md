@@ -155,6 +155,13 @@ when the behaviour exists and a test or recorded evidence proves it.
   boundaries fail first, retain existing sidecar tests, obtain independent peer
   review, inspect rendered output and pass required combined gates. Do not
   relabel this as a frame/aggregate-result/process-memory ceiling.
+- [ ] W10-013 After W10-012 source integration, implement REL-002's complete
+  execution-wide retained-data allowance under `contracts/retained-result-data.md`:
+  checked whole-description/whole-row admission, cumulative prefix closure,
+  truthful typed description unavailability, compatible known data/output,
+  explicit new unavailable JSON/status case and pre-effect retained-data action
+  refusals. Preserve notice/SQL/transaction/cancellation/stream contracts; obtain
+  focused/live/peer/full/rendered and affected server evidence before closure.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
