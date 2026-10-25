@@ -129,8 +129,10 @@ under `/private/tmp/ignatius-w10-007-AFKZrb/`; verification records exact scope.
 W10-008 has distinct notice/frame and aggregate-result design inputs, still
 unadopted. W10-011 pins the separate real-writer pacing experiment; the
 PostgreSQL worker is preparing its isolated helpers for primary inspection
-before measurement. The privacy worker is preparing exact notice-report
-consumer/API contracts without changing source. Root owns policy adoption.
+before measurement. Root adopted W10-012's complete notice policy in the
+foundation contract, including pending precision-safe counts and explicit
+acknowledgement; the privacy lane takes isolated implementation after the
+contract checkpoint. Root owns shared records, independent review and integration.
 
 W10-009 is integrated after primary review: 87 private focused passes, followed
 by root's 33 CLI units and all 14 new contracts on each plain/verified-TLS
@@ -164,8 +166,8 @@ viewport, local navigation, matching overlay ownership and visible Space names
 passed 20 selected cases after additional peer findings, including actual-cell
 traversal with valid long/Unicode remaps. Native peer re-review found no remaining
 blocker in those fixes. T042 is checked after representative inspection from
-104 styled synthetic buffers and the final full gate. Both workers are idle
-after scoped reviews. Help is saved in `d8a3ac3`; root owns the next resource
+104 styled synthetic buffers and the final full gate. Both workers completed
+their scoped reviews before the new resource assignments. Help is saved in `d8a3ac3`; root owns the next resource
 contracts and coordinated measurement.
 
 The final full verifier at modified `dd69f66`, including W10-009/010/help, passed

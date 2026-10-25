@@ -342,3 +342,27 @@ A Darwin PENDIN-only change must be recorded and resolved only by the existing
 normal same-PTY input recovery method if needed, not hidden by stty reset.
 This proves the library guard/hook process path, not an injected production-app
 crash, panic=abort, forced restore failure, native screenshot/hand use or Windows.
+
+
+## W10-012 bounded notice admission and visible accounting - 2026-10-25
+
+Implement foundation REL-005 through the pinned
+[notice retention contract](contracts/notice-retention.md). A single isolated
+owner covers the producer, lifecycle, report-carrying APIs and all first-party
+consumers; the primary owns policy/shared records and final integration. Keep
+256-entry/1-MiB cumulative allowances, 64-KiB message shortening, sticky
+privacy before parameterized entry, fixed precision-safe checkpoints and
+unchanged PostgreSQL facts. A limit never sends SQL or resets on statement drain.
+
+The TUI holds fixed pending client counts and exposes an explicit read-only
+reader. Opening it does not acknowledge; Activate acknowledges only its captured
+snapshot, Escape preserves pending state. Protected reviews retain their current
+40x8 geometry. Existing public payload-only APIs stay available while first-party
+paths carry reports on success, error and export finish failure. JSON diagnostics
+remain one object; stdout data schemas/bytes remain unchanged. The contract pins
+exact surfaces, source/generation rejection, guard Drop and live-test bounds.
+
+This closes one measured retention route. W10-008 remains open for aggregate
+retained data and earlier driver/startup allocation; W10-011 is measurement,
+not cancellation or process-memory proof. No new dependency, SQL replay,
+automatic rollback, credential path or external action is introduced.

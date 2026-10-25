@@ -130,8 +130,9 @@ when the behaviour exists and a test or recorded evidence proves it.
   notice retention, aggregate retained-result bytes and incoming frame/value
   allocation, including truthful refusal, unknown-outcome and recovery wording.
   Identify a real slow-export-sink measurement seam; a slow server is not a slow
-  sink. Add implementation tasks only after those contracts agree. A bounded
-  notice slice alone cannot close the complete W10 memory requirement.
+  sink. Add each implementation task only after its relevant complete contract
+  agrees. A bounded notice slice alone cannot close the complete W10 memory
+  requirement.
 - [x] W10-009 Repair the measured silent buffered-query truncation route:
   CSV/TSV/NDJSON/Markdown/INSERT must report retained versus received counts on
   stderr without changing data bytes, success exit codes or automatically
@@ -145,6 +146,15 @@ when the behaviour exists and a test or recorded evidence proves it.
   unpaced/paced small-row/large-value case, complete file bytes/digests/counts
   and peak RSS; preserve the synthetic fixture and remove only owned payloads.
   Keep this distinct from top-level CLI cancellation, TLS and process ceilings.
+- [ ] W10-012 Implement REL-005's complete bounded notice slice under
+  `contracts/notice-retention.md`: cumulative admission and sticky privacy,
+  precision-safe guard/report/checkpoint lifecycle, report-carrying query/stream/
+  plan/connect outcomes, unchanged CLI stdout and single JSON diagnostics,
+  plain delivery and bounded persistent TUI pending status/explicit reader.
+  Preserve protected input/SQL/transaction/cancellation semantics. Watch focused
+  boundaries fail first, retain existing sidecar tests, obtain independent peer
+  review, inspect rendered output and pass required combined gates. Do not
+  relabel this as a frame/aggregate-result/process-memory ceiling.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion

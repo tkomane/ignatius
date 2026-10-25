@@ -216,6 +216,18 @@ assert the exit code for both success and failure.
   retain that backup for recovery. Timestamped candidate reservation is bounded
   to 128 attempts and retries only an existing-entry collision.
 
+- **REL-005**: Application-owned server-notice retention after driver
+  connection MUST use a cumulative observation-window allowance of 256 entries
+  and 1 MiB of retained UTF-8 fields, with the existing 64 KiB message rule.
+  Payload drains MUST NOT replenish an active allowance or reset sticky
+  parameter privacy. Client omissions, shortening and abandoned transferred
+  payload MUST be reported with exact/lower-bound/unknown precision through
+  query, export, plan and connection outcomes. CLI data bytes and database
+  execution/transaction/cancellation facts MUST remain unchanged. The complete
+  delivery, acknowledgement, API and residual-boundary contract is
+  [notice-retention.md](contracts/notice-retention.md). This is not a driver
+  startup/frame, aggregate-result or whole-process memory ceiling.
+
 ### Performance
 
 - **PERF-001**: Startup MUST NOT depend on the network; the interface draws
