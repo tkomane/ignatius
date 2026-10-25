@@ -113,3 +113,22 @@ feature does not create a second command or state system.
 |-----------|------------|-------------------------------------|
 | [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
 | [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+
+## T042 help follow-up - 2026-10-25
+
+Follow `contracts/discovery.md`'s pinned scrollable-help contract. Root owns
+canonical app model/reducer, help/layout/overlay and sidecar writes after W04
+handoff. Store one ephemeral scroll offset, derive active-key content/wrapping
+and viewport in a pure helper, and share it between reducer navigation and
+rendering. Reuse existing width wrapping, density overlay placement and action
+keys. Do not generalize the sending-review state machine or add dependencies,
+configuration, persistence or a second search system. Keep explicit command
+routes and higher prompt/review ownership unchanged.
+
+First reproduce hidden text/paste/editor navigation and unreachable help rows.
+Then prove complete buffer traversal, long-key separation, nested inspector/
+palette behavior and no-effects reading with both densities and narrow modes.
+Run focused app/UI/parity checks, inspect actual styled buffers and include the
+final source in the combined locked verifier. Native visual and hand-use gates
+remain open. W10 export workers own only their isolated clones; no canonical
+runtime/Cargo writer overlaps root.

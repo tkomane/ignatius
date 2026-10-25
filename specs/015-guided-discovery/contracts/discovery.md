@@ -52,3 +52,41 @@ history, export, and connection contracts remain authoritative.
   copies to the clipboard, contacts a cloud service, or persists onboarding
   state.
 - It does not add mouse-only capability or alter scripted output.
+
+## T042 scrollable help - 2026-10-25
+
+Help is a local reading surface. Every active direct binding and chord, its
+full key label and its complete description must be reachable without
+horizontal clipping. Reuse display-width wrapping and density-aware overlay
+geometry; long keys must not collide with action text. Reserve a fixed rail
+with active scroll/close/palette keys and current position. At 40x8, keep a
+readable body and the rail; at smaller/zero geometry retain a safe close route.
+Use a usize wrapped-row offset, clamped by the same geometry in rendering and
+the reducer. New help starts at the top; actual resize resets it. Tick and
+unrelated async results preserve the offset.
+
+Up/Down, PageUp/PageDown, Home/End and Ctrl+Home/Ctrl+End navigate only help.
+Text, paste, deletion, undo/redo, focus and pane reshaping must not mutate the
+covered editor/panes. Pasted text is ignored with the existing fixed feedback.
+Escape, Enter and the active help key close help without editing or changing
+an underlying plan/error/filter. Palette opening remains local and may cover
+help; dismissing that palette returns to the same help position. The palette
+is the searchable route to commands; no second search state is added here.
+Quit/Cancel and other explicit bound commands retain their existing actions,
+closing help before dispatch so it cannot keep covering the resulting state.
+No navigation or ordinary typing produces a database/file/clipboard effect.
+
+Match render/input precedence. Protected prompts/reviews, prefix, connection
+details and palette keep their existing higher ownership. Help sits above
+completion, filters, inspector and definition; opening help from an inspector
+must display help and preserve the inspector underneath. Closing it restores
+that owner. Do not bypass W04 sending gates or alter modal priority elsewhere.
+Use the runtime's active keymap snapshot for shared metrics, preserving the
+existing default-only fallback for models without a snapshot. Displayed custom
+key labels are never replaced with assumed defaults.
+
+Add failing-first real-buffer traversal and reducer cases for every entry,
+long remaps, Unicode, both densities, dark/light/high-contrast and ASCII/no-colour,
+40x8 and smaller, resize, nested owners, paste and no hidden SQL mutation.
+Inspect actual styled buffers. Rendered-cell evidence remains separate from
+native terminal appearance and hand-use acceptance.
