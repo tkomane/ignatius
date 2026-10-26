@@ -121,6 +121,113 @@ consumed by widgets as data:
 No other spacing varies by density. Unknown values are refused by the
 existing configuration rule (report before the terminal is taken, exit 3).
 
+### Density implementation clarification - 2026-10-25
+
+- The 6/4 hint bound supersedes Feature 015's original five-action bound.
+  Prioritisation, availability, active keys and complete-pair width fitting
+  remain unchanged. Apply the cap after filtering, using the presentation
+  actually supplied to the renderer. Live paging/hit testing uses the model's
+  presentation snapshot; explicit rendering overrides control their own
+  spacing.
+- Title padding applies to the bordered pane and overlay title helpers,
+  including Plan, error, failed-transaction and empty titles. It does not alter
+  capsule padding, tree indentation or the safety caption's existing corner
+  inset. Remove only caller-owned decorative edge padding; preserve whitespace
+  belonging to an object name or other title content, without blanket trimming.
+- Compact removes only an empty toolbar breathing row. A cell-update,
+  clipboard, refresh or grid-state notice retains one visible row in either
+  density. Grid prelude height is `4 + type_row + max(notice_row, blank_rows)`;
+  rendering, hit mapping, viewport wording and paging share that calculation.
+- Overlay margin is preferred clearance outside the outer border on each
+  axis, within existing family maximum dimensions and anchoring. Reduce that
+  clearance toward zero only when necessary to preserve a family's existing
+  usable interaction rows; never hide a previously visible password/input row
+  merely to satisfy the preferred margin. At 40x8, a short password prompt
+  still shows its masked field and accept/cancel guidance in both densities.
+  Completion keeps its caret anchor and existing five-row minimum when space
+  permits. Existing too-small behavior remains; report any newly exposed
+  confirmation-disclosure gap rather than silently changing authorization.
+- Plan occupies Results and receives no overlay margin. All actual overlay
+  families use shared boxes for drawing and hit/viewport calculations. Column
+  geometry retains its existing one-cell padding without adding another pair.
+- Only the optional `ui.density` setting and its template default are added.
+  Existing constructors remain comfortable by default; configuration selects
+  density at startup. There is no new toggle action, CLI flag, doctor field,
+  theme value, third density or mouse-capture change in T040.
+
+## Editor horizontal view - 2026-10-25
+
+FR-2529 / T058 corrects the observed long-line clipping independently of mouse
+dispatch. The existing line-number, space and statement/error-marker gutter
+stays fixed. The remaining inner width is text capacity. Keep the existing
+derived vertical window; derive one horizontal cell offset from the current
+caret line and use it for every visible line. Do not add stored viewport state,
+soft wrapping or changes to SQL, scalar cursor movement, revision or undo.
+
+- Apply the existing display sanitiser first. Map rendered graphemes and each
+  complete escaped-control representation back to their original source-byte
+  ranges and one-based scalar columns. Use the locked renderer's grapheme
+  semantics without adding a segmentation dependency. A scalar cursor inside
+  a combining/ZWJ cluster highlights that whole displayed cluster; this does
+  not introduce grapheme-based editing or change the title's scalar column.
+- When text capacity is positive, the focused caret has at least one visible
+  Selection cell. Fit its whole displayed unit when possible; an end-of-line
+  or zero-width-only caret uses a selected blank. If a caret unit is wider
+  than the entire text capacity, use a selected blank in that capacity instead
+  of drawing a partial wide glyph or partial control escape. With no text
+  capacity there is no visibility claim and no completion popup.
+- Clip non-caret units by display cells. A wide grapheme or escaped-control
+  unit intersecting an edge is replaced by the intersecting number of blank
+  cells, preserving following cell positions. Never emit a raw control or
+  split a UTF-8 scalar. Keep syntax/error styles, statement/error gutter
+  markers and theme/depth/glyph degradation; the caret retains Selection
+  precedence. An unfocused editor keeps the same derived view without a caret.
+- Completion anchors to this actual visible caret coordinate. Editor hit
+  mapping uses the same offset and units: any cell of a visible wide/escaped
+  unit maps to its first source scalar; trailing blank cells map to the line's
+  end position. The fixed gutter and existing vertical mapping retain their
+  meanings. This mapping alone does not enable mouse capture or dispatch.
+- Home/buffer-start, cursor movement and width changes recompute the view.
+  Reaching a prefix that fits returns its offset to zero. Do not clamp a long
+  line's source offset to a `u16` scroll limit or confuse display cells with
+  source scalars. Painting/geometry are pure and perform no I/O or effects.
+
+Acceptance retains the failing actual-Buffer baseline, then covers long ASCII,
+wide and combining/ZWJ text, escaped controls, end-of-line/interior carets,
+very long lines beyond 65,535 cells, tiny capacities, Home/resize, completion
+and hit alignment, both densities and colour/glyph degradation. Inspect actual
+rendered cells and repeat the owned 100x30 PTY journey. These proofs establish
+rendering and captured input, not native emulator/font appearance or whole W09.
+
+### Bounded display-unit projection - 2026-10-25
+
+FR-2530 / T059 follows a source-bound W10 diagnostic: the initial T058 view
+constructs a complete per-unit vector for caret discovery and another for
+rendering, although only a small window is visible; this does not assert
+simultaneous lifetimes. The 16 KiB/1 MiB three-sample local test-profile comparison
+found a material increase; it is not release-build p95 acceptance.
+
+Production caret discovery, rendering and hit mapping must project only the
+units needed by their requested cell window plus the caret. Retained unit
+metadata is bounded by positive visible-cell capacity plus one caret unit;
+zero-width units need not be retained unless they own that caret. Computing
+whole-line width/source columns may still scan the source line linearly. Keep
+ordinary source clusters borrowed, avoid rescanning whole prefixes per unit,
+and reuse the existing display sanitiser. A whole-line sanitisation fast path
+may avoid per-scalar allocation for unchanged safe text; do not duplicate the
+sanitiser's control/bidi rules or bypass sanitisation on a guessed character set.
+After the full sanitiser confirms unchanged text, an ASCII run may use one
+width-one unit per byte; control validation still happens before that path.
+
+Do not change T058 geometry, grapheme/escape boundaries, selected blank and
+focus rules, byte/scalar provenance, syntax/error styles, source text, undo or
+effects. Preserve every original case and compare the retained styled buffers
+exactly. Add a failing allocation-shape regression for a very long off-screen
+line, then repeat the same hashed diagnostic harness/profile/workloads with
+fresh processes and measured renderer time/RSS. Report observed values and
+small-sample limits; no fabricated absolute ceiling, 100-action p95 result or
+native terminal claim follows. Root owns independent review/full verification.
+
 ## Doctor reporting
 
 `ignatius doctor` reports, in this order, beside the existing detections:

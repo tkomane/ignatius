@@ -17,6 +17,219 @@ fn presentation(theme: ThemeChoice, color: bool, tier: GlyphTier) -> Presentatio
 }
 
 #[test]
+fn density_footer_uses_render_override_caps_remaps_and_complete_pairs() {
+    use crate::app::{Action, model::Focus};
+    use crate::config::{Density, schema::KeySpec};
+    use crate::query::result::{Execution, ExecutionStatus, JobId, ResultSet, StatementResult};
+    use crate::query::value::Cell;
+    use std::time::Duration;
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    let mut set = ResultSet::new(vec!["value".into()], 100);
+    set.push(vec![Cell::Text("data".into())]);
+    model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
+        job: JobId(1),
+        statements: vec![StatementResult {
+            result_set: Some(set),
+            rows_affected: None,
+            elapsed: Duration::ZERO,
+            notices: Vec::new(),
+        }],
+        status: ExecutionStatus::Succeeded,
+        elapsed: Duration::ZERO,
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+    });
+    let keymap = Keymap::from_config(&std::collections::BTreeMap::from([
+        ("narrow-column".into(), KeySpec::One("alt+f10".into())),
+        ("open-result-grid".into(), KeySpec::One("alt+f11".into())),
+    ]))
+    .unwrap();
+    let draw = |model: &Model, p: &Presentation, width: u16| {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buffer = Buffer::empty(area);
+        render_footer(model, &keymap, p, area, &mut buffer);
+        crate::ui::layout::buffer_to_string(&buffer)
+    };
+    for density in [Density::Comfortable, Density::Compact] {
+        model.presentation =
+            model
+                .presentation
+                .clone()
+                .with_density(if density == Density::Comfortable {
+                    Density::Compact
+                } else {
+                    Density::Comfortable
+                });
+        let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(density);
+        let actions = crate::app::discovery::hint_actions_for(&model, &p);
+        assert_eq!(
+            actions.len(),
+            if density == Density::Comfortable {
+                6
+            } else {
+                4
+            }
+        );
+        let wide = draw(&model, &p, 400);
+        for action in &actions {
+            let (key, label) = keymap.contextual_hint(action).unwrap();
+            assert!(wide.contains(&format!("{key} {label}")), "{wide}");
+        }
+        assert!(!wide.contains("Widen column"));
+        if density == Density::Comfortable {
+            assert!(
+                wide.contains("Alt+F10 Narrow column") && wide.contains("Alt+F11 Grid controls")
+            );
+        } else {
+            assert!(!wide.contains("Alt+F10") && !wide.contains("Alt+F11"));
+        }
+        for width in (20..150).step_by(7) {
+            let line = draw(&model, &p, width);
+            for action in &actions {
+                let (key, label) = keymap.contextual_hint(action).unwrap();
+                if line.contains(&key) || line.contains(label) {
+                    assert!(
+                        line.contains(&format!("{key} {label}")),
+                        "partial pair at {width}: {line}"
+                    );
+                }
+            }
+        }
+        assert!(actions.contains(&Action::CopyValue));
+    }
+}
+
+#[test]
+fn split_feedback_keeps_its_meaning_when_transaction_facts_fill_the_footer() {
+    use crate::app::model::LayoutNotice;
+    use crate::query::result::TransactionState;
+    for (color, tier) in [(false, GlyphTier::Ascii), (true, GlyphTier::Nerd)] {
+        for (notice, wording) in [
+            (LayoutNotice::SinglePane, "Already single-pane."),
+            (LayoutNotice::SafetyDetails, "Zoom Results for details."),
+        ] {
+            let mut model = Model::new(100);
+            model.size = (40, 8);
+            model.transaction = TransactionState::Unknown;
+            model.layout_notice = Some(notice);
+            model.editor.set_text("SELECT 1;");
+            let text = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                40,
+                8,
+            );
+            assert!(
+                text.contains(wording),
+                "the explanation was clipped: {text}"
+            );
+            assert!(
+                text.contains("SELECT 1;"),
+                "pane content was covered: {text}"
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(footer.contains("Ready") && footer.contains("Transaction state unknown"));
+            let baseline = crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8));
+            model.layout_notice = None;
+            assert_eq!(
+                crate::ui::layout::pane_geometry(&model, Rect::new(0, 0, 40, 8)),
+                baseline
+            );
+            let cleared = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                40,
+                8,
+            );
+            assert!(!cleared.contains(wording));
+        }
+    }
+}
+
+#[test]
+fn split_footer_feedback_fits_minimum_size_and_preserves_transaction_facts() {
+    use crate::app::{Action, Message, update};
+    use crate::query::result::TransactionState;
+    for (color, tier) in [(false, GlyphTier::Ascii), (true, GlyphTier::Nerd)] {
+        for state in [
+            TransactionState::Autocommit,
+            TransactionState::Failed,
+            TransactionState::Unknown,
+        ] {
+            let mut model = Model::new(100);
+            model.size = (40, 8);
+            model.transaction = state;
+            update(&mut model, Message::Action(Action::ZoomPane));
+            let text = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                40,
+                8,
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(footer.contains("Ready"), "{footer}");
+            assert!(footer.contains(state.label()), "{footer}");
+            if state != TransactionState::Unknown {
+                assert!(footer.to_lowercase().contains("single-pane"), "{footer}");
+            }
+            if !color && state == TransactionState::Autocommit {
+                assert!(footer.contains("Already single-pane."), "{footer}");
+            }
+            if !color && state == TransactionState::Failed {
+                assert!(footer.contains("Single-pane"), "{footer}");
+            }
+        }
+    }
+}
+
+#[test]
+fn split_footer_safety_refusal_uses_the_first_wording_that_fits() {
+    use crate::app::{Action, Message, update};
+    use crate::diagnostics::{Diagnostic, DiagnosticKind};
+    for (color, tier) in [(false, GlyphTier::Ascii), (true, GlyphTier::Nerd)] {
+        let mut model = Model::new(100);
+        model.size = (120, 40);
+        model.error = Some(Diagnostic::new(
+            DiagnosticKind::Query,
+            "Synthetic error",
+            "a synthetic operation",
+        ));
+        update(&mut model, Message::Action(Action::ZoomPane));
+        for (width, expected) in [
+            (40, "Zoom Results"),
+            (45, "Zoom Results for details."),
+            (
+                79,
+                "Zoom Results to keep error and recovery details visible.",
+            ),
+        ] {
+            update(&mut model, Message::Resized(width, 8));
+            let text = crate::ui::layout::render_to_string(
+                &model,
+                &Keymap::new(),
+                &presentation(ThemeChoice::Dark, color, tier),
+                width,
+                8,
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(
+                footer.contains("Ready") && footer.contains("Autocommit"),
+                "{footer}"
+            );
+            if !color {
+                assert!(footer.contains(expected), "{width}: {footer}");
+            }
+            assert!(footer.contains("Zoom Results"), "{footer}");
+        }
+    }
+}
+
+#[test]
 fn paste_refusal_renders_its_exact_wording() {
     let model = model_with(PasteNotice::Refused);
     let text = crate::ui::layout::render_to_string(
@@ -134,4 +347,40 @@ fn a_paste_notice_never_carries_sql_or_a_credential() {
         assert!(!text.contains("secret_table"), "{text}");
         assert!(!text.contains("hunter2"), "a credential was echoed: {text}");
     }
+}
+
+#[test]
+fn retained_data_footer_badge_is_complete_or_deferred_and_never_clears_facts() {
+    use crate::query::result::{RetentionLoss, RetentionLossSummary, RetentionReason};
+    let mut model = Model::new(100);
+    model.retained_data_loss = RetentionLossSummary {
+        limited_sets: 12,
+        first: Some(RetentionLoss {
+            ordinal: 2,
+            reason: RetentionReason::RetainedResultLimit,
+            retained: 1,
+            received: 3,
+            source_columns: 2,
+        }),
+    };
+    let before = model.retained_data_loss;
+    let p = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii);
+    let draw = |m: &Model, width| {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buffer = Buffer::empty(area);
+        render_footer(m, &Keymap::new(), &p, area, &mut buffer);
+        crate::ui::layout::buffer_to_string(&buffer)
+    };
+    let wide = draw(&model, 120);
+    assert!(wide.contains("Limited sets: 12"), "{wide}");
+    for width in 0..55 {
+        let text = draw(&model, width);
+        assert!(
+            !text.contains("Limited") || text.contains("Limited sets: 12"),
+            "{width}: {text}"
+        );
+    }
+    model.help_open = true;
+    assert!(!draw(&model, 120).contains("Limited sets"));
+    assert_eq!(model.retained_data_loss, before);
 }

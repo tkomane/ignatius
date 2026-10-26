@@ -17,6 +17,38 @@ template SQL remains the only history and editor value; parameterized server
 positions are reported without an editor marker because they refer to expanded
 SQL.
 
+### W04 runtime privacy correction - 2026-10-25
+
+A live generated-UPDATE constraint failure exposed bound key/replacement values
+through server diagnostics. Fix this at the existing PostgreSQL adapter/error
+boundary: parameterized requests retain safe classification, validated
+SQLSTATE, ordinal and numeric position but omit untrusted server prose/object
+fields. Preserve ordinary diagnostics. Before the first parameterized send,
+activate session-scoped value-free notices, including the backlog, because
+asynchronous notices may arrive after a request future ends. Use fixed wording
+and built-in advice rather than a second redactor or exact-value matching.
+
+Prove success and constraint/type failure using self-executed adapter subprocess
+tests, live PostgreSQL, real configured logs and template-only history. Include
+transformed values, streaming errors, successful-prefix/no-replay behavior and
+late notices. Preserve query/export result rows as deliberate output. The full
+verifier and independent review follow focused checks; TUI and exact packaged
+candidate evidence remain separate gates.
+
+### W03 string-semantics boundary - 2026-10-25
+
+FR-2215 adds a fresh server setting probe at authoritative runtime binding and
+before every separately sent buffered statement. Keep streaming as one Query
+message, whose initial parsing and implicit transaction semantics are defined
+by the official protocol reference retained in the parameter contract. A small
+per-session async gate covers all arbitrary user-SQL entry points so another
+caller cannot change the setting between probe and send. Metadata/cancellation
+do not acquire that gate; private transaction probes must not re-enter it.
+Never modify the setting or introduce rollback/replay. Error handling reuses
+the value-free parameterized policy. Test startup and later setting changes,
+same-session interleaving, completed prefix, whole-message stream parsing and
+rollback, and failed-transaction recovery. No new dependency or credential route.
+
 ## Technical Context
 
 **Language/Version**: Rust 2024 edition, minimum Rust 1.90, local verifier currently using Rust/Cargo 1.98.0

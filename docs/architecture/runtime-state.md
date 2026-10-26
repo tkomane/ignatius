@@ -73,6 +73,12 @@ the editor and documented local reading preferences. It does not reconnect on
 loss automatically. `Reconnect` in the effect enum is the explicit password-
 prompt retry during authentication, not authorization to replay a query.
 
+Asynchronous profile-resolution failures and the initial catalogue-reload
+intent carry the same connection-generation envelope as server completions.
+The reducer rejects stale envelopes even when they were queued before a switch.
+Installing the target used by a reconnect also rechecks generation while
+holding its write lock: a check made before awaiting that lock is insufficient.
+
 ## Identity and confirmation boundaries
 
 | Identity | Protects | Agent rule |
@@ -124,13 +130,16 @@ connection, since a second connection is a real cost on a constrained server.
 ## Terminal lifecycle
 
 Acquisition happens once, guarded by RAII, after a panic hook is installed.
-Restoration runs on every exit path and is idempotent, so an explicit restore
-followed by a drop is safe. Modes are undone in reverse order, with the alternate
-screen left last.
+Restoration is attempted on every supported exit path and is idempotent, so an
+explicit restore followed by a drop is safe. Modes are undone in reverse order,
+with the alternate screen left last. One atomic held/options mask lets the
+panic hook recover the acquired mouse, paste and screen options without locking
+during unwinding. It attempts all output cleanup and raw-mode cleanup before
+the previous hook prints, and reports incomplete restoration truthfully.
 
 ## What is deliberately absent
 
-- No global mutable state. The model is owned by the loop.
+- No global application model. The model is owned by the loop.
 - No automatic reconnection. It would risk misrepresenting a transaction.
 - No implicit re-execution, anywhere, for any reason.
 - No timing-dependent state transitions, which is why the reducer takes no clock.

@@ -5,8 +5,11 @@
 //! turns intent into effects.
 
 pub mod glyphs;
+pub(crate) mod help;
 pub mod keymap;
 pub mod layout;
+pub(crate) mod notices;
+pub(crate) mod review;
 pub mod terminal;
 pub mod theme;
 pub mod widgets;
@@ -29,3 +32,7 @@ pub const USABLE_COLUMNS: u16 = 40;
 
 /// Companion to [`USABLE_COLUMNS`].
 pub const USABLE_ROWS: u16 = 8;
+
+#[cfg(test)]
+#[path = "acceptance/tests.rs"]
+mod acceptance_tests;

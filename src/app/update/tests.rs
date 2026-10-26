@@ -8,6 +8,2083 @@ use crate::query::value::Cell;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[test]
+fn manual_theme_palette_is_reachable_without_a_default_key_and_deduplicates_aliases() {
+    use crate::app::palette::PaletteCommand;
+    use crate::config::schema::KeySpec;
+    use crate::ui::keymap::{Keymap, action_named};
+
+    let action = action_named("switch-theme").expect("manual theme switching is configurable");
+    assert!(
+        Keymap::new()
+            .bindings()
+            .iter()
+            .all(|binding| binding.action != action),
+        "theme switching has a palette route and no mandatory direct key"
+    );
+    for aliases in [vec![], vec!["alt+f12"], vec!["alt+f12", "alt+f11"]] {
+        let keys = if aliases.is_empty() {
+            BTreeMap::new()
+        } else {
+            BTreeMap::from([(
+                "switch-theme".to_owned(),
+                KeySpec::Many(aliases.iter().map(|key| (*key).to_owned()).collect()),
+            )])
+        };
+        let keymap = Keymap::from_config(&keys).expect("valid theme aliases");
+        let mut model = Model::new(100);
+        model.keymap_snapshot = keymap.snapshot();
+        let entries = palette_entries(&model);
+        let rows: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.command == PaletteCommand::Run(action.clone()))
+            .collect();
+        assert_eq!(rows.len(), 1, "one palette row for {aliases:?}");
+        assert_eq!(rows[0].label, "Switch theme");
+        assert_eq!(rows[0].group, "Session");
+        for binding in keymap
+            .bindings()
+            .iter()
+            .filter(|binding| binding.action == action)
+        {
+            assert!(
+                rows[0].detail.contains(&binding.key_label()),
+                "palette shows the actual configured alias"
+            );
+        }
+    }
+}
+
+#[test]
+fn manual_theme_cycle_preserves_the_complete_model_including_busy_sessions() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::{ColorDepth, Theme};
+
+    let action = crate::ui::keymap::action_named("switch-theme").expect("theme action exists");
+    for phase in [
+        QueryPhase::Idle,
+        QueryPhase::Running {
+            job: JobId(41),
+            statements: 2,
+        },
+        QueryPhase::CancellationRequested { job: JobId(41) },
+    ] {
+        for depth in [
+            ColorDepth::TrueColor,
+            ColorDepth::Indexed256,
+            ColorDepth::Basic16,
+            ColorDepth::None,
+        ] {
+            for color in [true, false] {
+                let mut model =
+                    with_grid(&["id", "note"], &[&[Cell::Text("1".into()), Cell::Null]]);
+                model.editor.set_text("SELECT 42;");
+                model.phase = phase.clone();
+                model.layout_notice = Some(LayoutNotice::SinglePane);
+                model.presentation = crate::ui::layout::Presentation::new(
+                    Theme::new(ThemeChoice::Dark, color).with_depth(depth),
+                    crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+                    true,
+                )
+                .with_density(crate::config::Density::Compact);
+                for choice in [
+                    ThemeChoice::Light,
+                    ThemeChoice::HighContrast,
+                    ThemeChoice::Dark,
+                ] {
+                    let before = format!("{model:?}");
+                    let previous_theme = model.presentation.theme.clone();
+                    assert!(update(&mut model, Message::Action(action.clone())).is_empty());
+                    assert_eq!(
+                        model.presentation.theme,
+                        Theme::new(choice, color).with_depth(depth)
+                    );
+                    model.presentation.theme = previous_theme;
+                    assert_eq!(
+                        format!("{model:?}"),
+                        before,
+                        "a theme switch changes only its palette"
+                    );
+                    model.presentation.theme = Theme::new(choice, color).with_depth(depth);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn manual_theme_direct_action_preserves_every_input_owner_and_pending_prefix() {
+    let action = crate::ui::keymap::action_named("switch-theme").expect("theme action exists");
+    let mut owners = split_modal_models();
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        owners.push(review_viewport_case(family, false));
+    }
+    let mut notice = notice_model_pending();
+    open_notice_details(&mut notice);
+    notice.notice_details.as_mut().unwrap().scroll = 7;
+    owners.push(notice);
+    let mut prefix = connected();
+    prefix.prefix_pending = true;
+    owners.push(prefix);
+    let mut prompt = cell_update_model();
+    let effects = update(&mut prompt, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("metadata request");
+    };
+    update(
+        &mut prompt,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    assert!(prompt.update_prompt.is_some());
+    owners.push(prompt);
+    for model in owners {
+        for prefix in [false, true] {
+            let mut candidate = model.clone();
+            candidate.prefix_pending |= prefix;
+            candidate.help_scroll = 9;
+            candidate.layout_notice = Some(LayoutNotice::SinglePane);
+            let before = format!("{candidate:?}");
+            assert!(update(&mut candidate, Message::Action(action.clone())).is_empty());
+            assert_eq!(
+                format!("{candidate:?}"),
+                before,
+                "direct theme keys cannot alter an owner"
+            );
+        }
+    }
+}
+
+#[test]
+fn manual_theme_palette_cancel_empty_and_choice_preserve_parent_and_notice_rules() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::{ColorDepth, Theme};
+
+    for parent in ["help", "notice"] {
+        for selection in ["cancel", "empty", "choose"] {
+            let mut model = notice_model_pending();
+            if parent == "help" {
+                model.help_open = true;
+                model.help_scroll = 9;
+            } else {
+                open_notice_details(&mut model);
+                model.notice_details.as_mut().unwrap().scroll = 7;
+            }
+            model.presentation.theme =
+                Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::Indexed256);
+            model.presentation.color_depth = ColorDepth::Indexed256;
+            let notice_state = format!("{:?}", model.notice_state);
+            assert!(update(&mut model, Message::Action(Action::OpenPalette)).is_empty());
+            if selection == "empty" {
+                model.palette.as_mut().unwrap().query =
+                    "synthetic-no-matching-command-987654".into();
+            }
+            if selection == "choose" {
+                model.palette.as_mut().unwrap().query = "Switch theme".into();
+                assert_eq!(
+                    model
+                        .palette
+                        .as_ref()
+                        .unwrap()
+                        .selected_entry()
+                        .unwrap()
+                        .label,
+                    "Switch theme"
+                );
+            }
+            let action = if selection == "cancel" {
+                Action::Dismiss
+            } else {
+                Action::Activate
+            };
+            assert!(update(&mut model, Message::Action(action)).is_empty());
+            assert!(model.palette.is_none());
+            assert_eq!(
+                format!("{:?}", model.notice_state),
+                notice_state,
+                "theme palette never acknowledges loss"
+            );
+            if selection == "choose" {
+                assert!(!model.help_open && model.notice_details.is_none());
+                assert_eq!(
+                    model.presentation.theme,
+                    Theme::new(ThemeChoice::Light, true).with_depth(ColorDepth::Indexed256)
+                );
+            } else {
+                assert_eq!(
+                    model.presentation.theme,
+                    Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::Indexed256)
+                );
+                if parent == "help" {
+                    assert!(model.help_open);
+                    assert_eq!(model.help_scroll, 9);
+                } else {
+                    assert_eq!(model.notice_details.as_ref().unwrap().scroll, 7);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn manual_theme_custom_cycle_preserves_state_and_discovery_during_queries() {
+    use crate::ui::theme::{ColorDepth, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let definition = ThemeDefinition::new(crate::config::ThemeChoice::Dark);
+    for busy in [false, true] {
+        let mut model = connected();
+        model.theme_catalog = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+            .expect("inherited custom is validated");
+        model.presentation.theme = model
+            .theme_catalog
+            .selected_theme(false, ColorDepth::Basic16);
+        model.editor.set_text("SELECT 42;");
+        if busy {
+            model.phase = QueryPhase::Running {
+                job: JobId(71),
+                statements: 1,
+            };
+        }
+        assert!(crate::app::discovery::action_is_available(
+            &model,
+            &Action::SwitchTheme
+        ));
+        assert_eq!(
+            crate::app::discovery::action_prerequisite(&model, &Action::SwitchTheme),
+            None
+        );
+        for selection in [
+            ThemeSelection::Dark,
+            ThemeSelection::Light,
+            ThemeSelection::HighContrast,
+            ThemeSelection::Custom,
+        ] {
+            let previous = model.presentation.theme.clone();
+            let before = format!("{model:?}");
+            assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+            let active = model.presentation.theme.clone();
+            assert_eq!(active.selection(), selection);
+            assert!(!active.color);
+            assert_eq!(active.depth, ColorDepth::Basic16);
+            model.presentation.theme = previous;
+            assert_eq!(format!("{model:?}"), before);
+            model.presentation.theme = active;
+        }
+    }
+}
+
+#[test]
+fn manual_theme_catalog_mismatch_keeps_palette_and_existing_query_diagnostic() {
+    use crate::ui::theme::{ColorDepth, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    for prior_query in [false, true] {
+        let definition = ThemeDefinition::new(crate::config::ThemeChoice::Dark);
+        let catalog = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition)).unwrap();
+        let mut model = connected();
+        model.presentation.theme = catalog.selected_theme(true, ColorDepth::Indexed256);
+        model.editor.set_text("SELECT missing;");
+        if prior_query {
+            model.error = Some(
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "column does not exist",
+                    "running SQL",
+                )
+                .technical("SQLSTATE", "42703")
+                .next_action("check the column name"),
+            );
+        }
+        let before = model.clone();
+        for _ in 0..3 {
+            assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+            assert_eq!(model.presentation.theme, before.presentation.theme);
+        }
+        let mut diagnostic = model.error.take().expect("mismatch is visible");
+        if prior_query {
+            assert_eq!(
+                diagnostic
+                    .technical
+                    .iter()
+                    .filter(|field| field.label == "Theme switching")
+                    .count(),
+                1
+            );
+            diagnostic
+                .technical
+                .retain(|field| field.label != "Theme switching");
+            assert_eq!(
+                format!("{diagnostic:?}"),
+                format!("{:?}", before.error.as_ref().unwrap())
+            );
+        } else {
+            assert_eq!(diagnostic.kind, DiagnosticKind::Internal);
+        }
+        model.error = before.error.clone();
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
+    }
+}
+
+#[test]
+fn manual_theme_custom_catalog_survives_profile_reset_resize_and_async_connection() {
+    use crate::ui::theme::{ColorDepth, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let definition = ThemeDefinition::new(crate::config::ThemeChoice::Light);
+    let mut model = connected();
+    model.theme_catalog =
+        ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition)).unwrap();
+    model.presentation.theme = model
+        .theme_catalog
+        .selected_theme(true, ColorDepth::TrueColor);
+    model.editor.set_text("SELECT 42;");
+    let catalog = model.theme_catalog.clone();
+    let theme = model.presentation.theme.clone();
+    assert!(matches!(
+        begin_connection(&mut model, None).as_slice(),
+        [Effect::ConnectProfile { profile: None }]
+    ));
+    update(&mut model, Message::Resized(80, 24));
+    update(&mut model, Message::Connected(session()));
+    update(&mut model, Message::Tick { running_for: None });
+    assert_eq!(model.theme_catalog, catalog);
+    assert_eq!(model.presentation.theme, theme);
+    assert_eq!(model.editor.text(), "SELECT 42;");
+    assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+    assert_eq!(model.presentation.theme.selection(), ThemeSelection::Dark);
+}
+
+#[test]
+fn help_reading_never_edits_or_moves_the_covered_editor() {
+    for action in [
+        Action::Insert('z'),
+        Action::Backspace,
+        Action::DeleteForward,
+        Action::DeleteWordLeft,
+        Action::Undo,
+        Action::Redo,
+        Action::Move(Direction::Up),
+        Action::MovePage(Direction::Down),
+        Action::MoveLineStart,
+        Action::MoveBufferEnd,
+        Action::MoveWord(Direction::Left),
+        Action::FocusNext,
+    ] {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;\nSELECT 2;");
+        model.editor.set_cursor(8);
+        update(&mut model, Message::Action(Action::ToggleHelp));
+        let before = model.editor.clone();
+        let focus = model.focus;
+        assert!(update(&mut model, Message::Action(action.clone())).is_empty());
+        assert_eq!(model.editor.text(), before.text(), "{action:?}");
+        assert_eq!(model.editor.cursor(), before.cursor(), "{action:?}");
+        assert_eq!(model.focus, focus, "{action:?}");
+        assert!(model.help_open, "{action:?}");
+    }
+}
+
+#[test]
+fn help_reading_ignores_paste_with_the_existing_fixed_feedback() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert!(update(&mut model, Message::Pasted("synthetic-help-paste".into())).is_empty());
+    assert_eq!(model.editor.text(), "SELECT 1;");
+    assert_eq!(model.paste_notice, Some(PasteNotice::Ignored));
+}
+
+#[test]
+fn help_acceptance_closes_only_help_without_inserting_a_newline() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(!model.help_open);
+    assert_eq!(model.editor.text(), "SELECT 1;");
+}
+
+#[test]
+fn help_navigation_survives_ticks_and_a_nested_palette_but_restarts_after_resize() {
+    let mut model = connected();
+    model.size = (100, 30);
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let last = model.help_scroll;
+    assert!(last > 0);
+    update(&mut model, Message::Tick { running_for: None });
+    assert_eq!(model.help_scroll, last);
+    update(&mut model, Message::Action(Action::OpenPalette));
+    assert!(model.help_open && model.palette.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.help_open && model.palette.is_none());
+    assert_eq!(model.help_scroll, last);
+    update(&mut model, Message::Resized(100, 30));
+    assert_eq!(model.help_scroll, last);
+    update(&mut model, Message::Resized(40, 8));
+    assert_eq!(model.help_scroll, 0);
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    assert!(model.help_scroll > 0);
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert_eq!(model.help_scroll, 0);
+}
+
+#[test]
+fn explicit_run_reveals_its_surface_and_keeps_the_existing_one_shot_effect() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(!model.help_open);
+    assert!(matches!(effects.as_slice(), [Effect::Execute { .. }]));
+}
+
+#[test]
+fn help_stays_beneath_every_protected_sending_review() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut model = review_viewport_case(family, true);
+        model.size = (40, 8);
+        model.help_open = true;
+        assert!(update(&mut model, Message::Action(Action::MoveBufferEnd)).is_empty());
+        assert!(model.review_scroll > 0, "{family}");
+        assert_eq!(model.help_scroll, 0, "{family}");
+        assert!(model.help_open);
+    }
+}
+
+fn choose_help_palette_entry(
+    model: &mut Model,
+    predicate: impl Fn(&crate::app::palette::PaletteCommand) -> bool,
+) {
+    let index = model
+        .palette
+        .as_ref()
+        .unwrap()
+        .matches()
+        .iter()
+        .position(|entry| predicate(&entry.command))
+        .expect("actual available palette entry");
+    for _ in 0..index {
+        assert!(update(model, Message::Action(Action::Move(Direction::Down))).is_empty());
+    }
+    assert!(update(model, Message::Action(Action::Activate)).is_empty());
+}
+
+fn help_palette_object_insert(inspector: bool) {
+    let mut model = copy_model(vec![vec![
+        Cell::Text("1".into()),
+        Cell::Text("synthetic-view".into()),
+    ]]);
+    model.tree = with_selected_table().tree;
+    model.focus = Focus::Results;
+    model.editor.set_text("SELECT * FROM ");
+    if inspector {
+        update(&mut model, Message::Action(Action::ToggleInspector));
+        assert!(model.inspector.is_some());
+    }
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    assert!(model.help_open);
+    update(&mut model, Message::Action(Action::OpenPalette));
+    choose_help_palette_entry(&mut model, |command| {
+        matches!(command, crate::app::palette::PaletteCommand::Insert(_))
+    });
+    assert_eq!(model.editor.text(), "SELECT * FROM \"public\".\"orders\"");
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(!model.help_open, "the chosen editor mutation is revealed");
+    assert!(
+        model.inspector.is_none(),
+        "an old inspector cannot cover the changed editor"
+    );
+}
+
+#[test]
+fn help_palette_object_selection_reveals_the_editor() {
+    help_palette_object_insert(false);
+}
+
+#[test]
+fn help_palette_object_selection_reveals_the_editor_beneath_an_inspector() {
+    help_palette_object_insert(true);
+}
+
+#[test]
+fn help_palette_selected_pane_command_uses_its_normal_handler() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let before = split_dividers(&model).1.unwrap();
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::OpenPalette));
+    choose_help_palette_entry(&mut model, |command| {
+        *command == crate::app::palette::PaletteCommand::Run(Action::GrowPane)
+    });
+    assert!(!model.help_open);
+    assert_eq!(split_dividers(&model).1, Some(before + 1));
+}
+
+#[test]
+fn help_palette_toggle_and_empty_choice_preserve_their_existing_meanings() {
+    let mut model = connected();
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let offset = model.help_scroll;
+    update(&mut model, Message::Action(Action::OpenPalette));
+    for character in "no-match-Q271828".chars() {
+        update(&mut model, Message::Action(Action::Insert(character)));
+    }
+    assert!(model.palette.as_ref().unwrap().matches().is_empty());
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.help_open);
+    assert_eq!(model.help_scroll, offset);
+    update(&mut model, Message::Action(Action::OpenPalette));
+    choose_help_palette_entry(&mut model, |command| {
+        *command == crate::app::palette::PaletteCommand::Run(Action::ToggleHelp)
+    });
+    assert!(!model.help_open);
+}
+
+fn review_viewport_case(family: &str, long: bool) -> Model {
+    let mut model = match family {
+        "copy" => {
+            let mut model = copy_model(vec![vec![
+                Cell::Text("1".into()),
+                Cell::Text("synthetic-copy-value".into()),
+            ]]);
+            model.clipboard_osc52 = true;
+            assert!(update(&mut model, Message::Action(Action::CopyValue)).is_empty());
+            model
+        }
+        "update" => {
+            let mut model = cell_update_model();
+            let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+            let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+                panic!("expected the ordinary metadata request");
+            };
+            update(
+                &mut model,
+                Message::UpdateTargetLoaded {
+                    request: *request,
+                    result: Box::new(Ok(update_relation())),
+                },
+            );
+            let replacement = if long {
+                format!("synthetic-head-{}-synthetic-tail", "x".repeat(2400))
+            } else {
+                "synthetic-note".into()
+            };
+            for character in replacement.chars() {
+                assert!(update(&mut model, Message::Action(Action::Insert(character))).is_empty());
+            }
+            assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+            assert!(model.pending_update.is_some());
+            model
+        }
+        "production" => {
+            let mut model = connected();
+            let mut info = session();
+            info.environment = Environment::Production;
+            update(&mut model, Message::Connected(info));
+            model.editor.set_text("UPDATE orders SET total = 0;");
+            assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+            assert!(model.pending_run.is_some());
+            model
+        }
+        "analyze" => {
+            let mut model = connected();
+            model.editor.set_text("SELECT 1;");
+            assert!(update(&mut model, Message::Action(Action::AnalyzePlan)).is_empty());
+            assert!(model.pending_plan.is_some());
+            model
+        }
+        "parameter" => {
+            let mut model = connected();
+            let name = if long {
+                "p".repeat(1400)
+            } else {
+                "note".into()
+            };
+            model.editor.set_text(format!("SELECT :{name};"));
+            assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+            assert!(model.parameter_prompt.is_some());
+            for character in "synthetic-answer".chars() {
+                assert!(update(&mut model, Message::Action(Action::Insert(character))).is_empty());
+            }
+            model
+        }
+        _ => panic!("unknown synthetic review family"),
+    };
+    if long
+        && matches!(family, "copy" | "production" | "analyze")
+        && let ConnectionState::Connected(info) = &mut model.connection
+    {
+        info.target = format!("synthetic-target-{}-target-tail", "x".repeat(1600));
+    }
+    model.splits.zoomed = true;
+    model
+}
+
+fn review_viewport_pending(model: &Model, family: &str) -> bool {
+    match family {
+        "copy" => model.pending_copy.is_some(),
+        "update" => model.pending_update.is_some(),
+        "production" => model.pending_run.is_some(),
+        "analyze" => model.pending_plan.is_some(),
+        "parameter" => model.parameter_prompt.is_some(),
+        _ => false,
+    }
+}
+
+fn review_viewport_refuses_hidden_content(family: &str) {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for size in [(40, 8), (20, 4), (0, 0)] {
+            for action in [Action::Activate, Action::RunBuffer] {
+                let mut model = review_viewport_case(family, false);
+                model.presentation = model.presentation.clone().with_density(density);
+                update(&mut model, Message::Resized(size.0, size.1));
+                let before_job = model.next_job;
+                let frame = split_frame(&model);
+                let effects = update(&mut model, Message::Action(action.clone()));
+                assert!(
+                    effects.is_empty(),
+                    "{family} {density:?} {size:?} {action:?}\n{frame}"
+                );
+                assert!(review_viewport_pending(&model, family));
+                assert_eq!(model.next_job, before_job);
+                assert_eq!(model.phase, QueryPhase::Idle);
+                assert!(update(&mut model, Message::Action(action)).is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn review_viewport_copy_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("copy");
+}
+
+#[test]
+fn review_viewport_update_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("update");
+}
+
+#[test]
+fn review_viewport_production_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("production");
+}
+
+#[test]
+fn review_viewport_analyze_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("analyze");
+}
+
+#[test]
+fn review_viewport_parameter_refuses_hidden_content() {
+    review_viewport_refuses_hidden_content("parameter");
+}
+
+fn review_viewport_kind(family: &str) -> crate::ui::review::Kind {
+    match family {
+        "copy" => crate::ui::review::Kind::Copy,
+        "update" => crate::ui::review::Kind::Update,
+        "production" => crate::ui::review::Kind::Production,
+        "analyze" => crate::ui::review::Kind::Analyze,
+        "parameter" => crate::ui::review::Kind::Parameter,
+        _ => unreachable!(),
+    }
+}
+
+fn review_viewport_overlay_frame(model: &Model, family: &str) -> String {
+    let view = review_viewport_view(model, family);
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    crate::ui::layout::render(model, &crate::ui::Keymap::new(), area, &mut buffer);
+    let mut overlay = ratatui::buffer::Buffer::empty(view.outer);
+    for y in view.outer.y..view.outer.bottom() {
+        for x in view.outer.x..view.outer.right() {
+            overlay[(x, y)] = buffer[(x, y)].clone();
+        }
+    }
+    crate::ui::layout::buffer_to_string(&overlay)
+}
+
+#[test]
+fn review_privacy_analyze_preserves_preview_metadata_and_typed_name_redaction() {
+    let mut model = review_viewport_case("analyze", false);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.target = "postgresql://audit:synthetic-target-secret@localhost/audit".into();
+    }
+    let pending = model.pending_plan.as_mut().unwrap();
+    pending.sql = "SELECT 'postgresql://audit:synthetic-preview-secret@localhost/audit';".into();
+    pending.impact = crate::query::Impact::Destructive;
+    pending.required = "password=synthetic-required-secret".into();
+    pending.typed = "password=synthetic-typed-secret".into();
+    update(&mut model, Message::Resized(140, 50));
+    let view = review_viewport_view(&model, "analyze");
+    let body = view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    let input = view.input.as_deref().unwrap();
+    let frame = review_viewport_overlay_frame(&model, "analyze");
+    assert!(frame.contains("EXPLAIN ANALYZE"));
+    assert!(body.contains("SELECT") && body.contains("Type the database name"));
+    let leaked = [
+        ("target", "synthetic-target-secret"),
+        ("preview", "synthetic-preview-secret"),
+        ("required", "synthetic-required-secret"),
+        ("typed", "synthetic-typed-secret"),
+    ]
+    .into_iter()
+    .filter_map(|(label, sentinel)| {
+        (body.contains(sentinel) || input.contains(sentinel) || frame.contains(sentinel))
+            .then_some(label)
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        leaked.is_empty(),
+        "credential-shaped Analyze fields leaked: {leaked:?}"
+    );
+    assert!(body.contains(crate::diagnostics::redaction::REDACTED));
+    assert!(input.contains(crate::diagnostics::redaction::REDACTED));
+}
+
+#[test]
+fn review_privacy_copy_preserves_the_redacted_terminal_target_boundary() {
+    let mut model = review_viewport_case("copy", false);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.target = "postgresql://audit:synthetic-copy-target-secret@localhost/audit".into();
+    }
+    update(&mut model, Message::Resized(140, 50));
+    let view = review_viewport_view(&model, "copy");
+    let body = view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    let frame = review_viewport_overlay_frame(&model, "copy");
+    assert!(body.contains("Path:") && body.contains("terminal clipboard sequence"));
+    assert!(!body.contains("synthetic-copy-value"));
+    assert!(!body.contains("synthetic-copy-target-secret"));
+    assert!(!frame.contains("synthetic-copy-target-secret"));
+    assert!(body.contains(crate::diagnostics::redaction::REDACTED));
+}
+
+#[test]
+fn review_privacy_exact_update_keeps_intentionally_reviewed_literal_values() {
+    let mut model = review_viewport_case("update", false);
+    let pending = model.pending_update.as_mut().unwrap();
+    pending.plan.parameters = crate::query::ParameterBindings::from_secrets(
+        pending
+            .plan
+            .parameters
+            .names()
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        vec![
+            secrecy::SecretString::from(
+                "postgresql://audit:synthetic-update-secret@localhost/audit".to_owned(),
+            ),
+            secrecy::SecretString::from("7".to_owned()),
+        ],
+    )
+    .unwrap();
+    let exact = pending.plan.bound_sql().unwrap();
+    update(&mut model, Message::Resized(140, 50));
+    let view = review_viewport_view(&model, "update");
+    let body = view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    assert!(body.contains(&exact));
+    assert!(body.contains("synthetic-update-secret"));
+    assert!(!format!("{model:?}").contains("synthetic-update-secret"));
+}
+
+#[test]
+fn review_privacy_late_metadata_cannot_shadow_the_current_copy_owner() {
+    let mut model = cell_update_model();
+    model.clipboard_osc52 = true;
+    model.splits.zoomed = true;
+    update(&mut model, Message::Resized(140, 50));
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("the ordinary update action must request metadata");
+    };
+    assert!(model.update_lookup.is_some());
+    assert!(update(&mut model, Message::Action(Action::CopyValue)).is_empty());
+    assert!(model.pending_copy.is_some());
+    update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    let frame = split_frame(&model);
+    let shadowed = frame.contains("Edit result cell") && frame.contains("Replacement");
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(
+        matches!(effects.as_slice(), [Effect::CopyValue { .. }]),
+        "inspect only; never dispatch"
+    );
+    assert!(
+        !shadowed,
+        "late metadata rendered a replacement prompt above the copy owner; inspected_effect=CopyValue; dispatched_effects=0\n{frame}"
+    );
+}
+
+#[test]
+fn review_late_metadata_discards_only_its_intent_and_preserves_newer_input() {
+    for owner in [
+        "parameter",
+        "name",
+        "prefix",
+        "palette",
+        "inspector",
+        "help",
+        "analyze",
+    ] {
+        for failure in [false, true] {
+            let mut model = cell_update_model();
+            let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+            let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+                unreachable!()
+            };
+            match owner {
+                "parameter" => {
+                    model
+                        .editor
+                        .set_text(format!("SELECT :{};", "p".repeat(600)));
+                    update(&mut model, Message::Action(Action::RunBuffer));
+                    update(&mut model, Message::Pasted("synthetic-answer".into()));
+                    update(&mut model, Message::Action(Action::MoveLineEnd));
+                    assert!(model.parameter_prompt.is_some());
+                }
+                "name" => {
+                    model.editor.set_text("SELECT 1;");
+                    update(&mut model, Message::Action(Action::SaveQuery));
+                    update(&mut model, Message::Pasted("synthetic-name".into()));
+                    assert!(model.name_prompt.is_some());
+                }
+                "prefix" => {
+                    update(&mut model, Message::Action(Action::BeginPrefix));
+                    assert!(model.prefix_pending);
+                }
+                "palette" => {
+                    update(&mut model, Message::Action(Action::OpenPalette));
+                    update(&mut model, Message::Pasted("synthetic-filter".into()));
+                    assert!(model.palette.is_some());
+                }
+                "inspector" => {
+                    update(&mut model, Message::Action(Action::ToggleInspector));
+                    assert!(model.inspector.is_some());
+                }
+                "help" => {
+                    update(&mut model, Message::Action(Action::ToggleHelp));
+                    assert!(model.help_open);
+                }
+                "analyze" => {
+                    model.editor.set_text("SELECT 1;");
+                    update(&mut model, Message::Action(Action::AnalyzePlan));
+                    assert!(model.pending_plan.is_some());
+                }
+                _ => unreachable!(),
+            }
+            let before = model.clone();
+            let result = if failure {
+                Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "synthetic-server-detail",
+                    "loading synthetic relation",
+                ))
+            } else {
+                Ok(update_relation())
+            };
+            assert!(
+                update(
+                    &mut model,
+                    Message::UpdateTargetLoaded {
+                        request: *request,
+                        result: Box::new(result)
+                    }
+                )
+                .is_empty()
+            );
+            assert!(model.update_lookup.is_none());
+            assert!(model.update_prompt.is_none());
+            assert_eq!(model.name_prompt, before.name_prompt);
+            assert_eq!(model.palette, before.palette);
+            assert_eq!(model.inspector, before.inspector);
+            assert_eq!(model.prefix_pending, before.prefix_pending);
+            assert_eq!(model.help_open, before.help_open);
+            assert_eq!(model.pending_plan, before.pending_plan);
+            assert_eq!(model.review_scroll, before.review_scroll);
+            let bindings =
+                |prompt: Option<ParameterPrompt>| prompt.map(|mut prompt| prompt.accept().unwrap());
+            assert_eq!(
+                bindings(model.parameter_prompt.clone()),
+                bindings(before.parameter_prompt)
+            );
+            let notice = model.cell_update_notice.as_deref().unwrap();
+            assert!(notice.contains("Finish or cancel") && notice.contains("regenerate"));
+            assert!(
+                !notice.contains("synthetic-server-detail") && !notice.contains("synthetic-answer")
+            );
+        }
+    }
+}
+
+#[test]
+fn review_late_metadata_unknown_requests_preserve_the_live_lookup_and_owner() {
+    let mut model = cell_update_model();
+    model.clipboard_osc52 = true;
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        unreachable!()
+    };
+    update(&mut model, Message::Action(Action::CopyValue));
+    let lookup = model.update_lookup.clone();
+    let copy = model.pending_copy;
+    let notice = model.cell_update_notice.clone();
+    for unrelated in [request.saturating_sub(1), request.saturating_add(1)] {
+        assert!(
+            update(
+                &mut model,
+                Message::UpdateTargetLoaded {
+                    request: unrelated,
+                    result: Box::new(Ok(update_relation()))
+                }
+            )
+            .is_empty()
+        );
+        assert_eq!(model.update_lookup, lookup);
+        assert_eq!(model.pending_copy, copy);
+        assert_eq!(model.cell_update_notice, notice);
+    }
+    assert!(
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request: *request,
+                result: Box::new(Ok(update_relation()))
+            }
+        )
+        .is_empty()
+    );
+    assert!(model.update_lookup.is_none());
+    assert_eq!(model.pending_copy, copy);
+    assert!(model.update_prompt.is_none());
+}
+
+fn review_viewport_view(model: &Model, family: &str) -> crate::ui::review::View {
+    crate::ui::review::build(
+        model,
+        review_viewport_kind(family),
+        &model.presentation,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    )
+    .unwrap()
+}
+
+#[test]
+fn review_viewport_final_current_page_is_required_for_both_aliases_and_every_family() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        for density in [
+            crate::config::Density::Comfortable,
+            crate::config::Density::Compact,
+        ] {
+            let mut model = review_viewport_case(family, true);
+            model.presentation = model.presentation.clone().with_density(density);
+            update(&mut model, Message::Resized(40, 12));
+            let first_frame = split_frame(&model);
+            assert!(review_viewport_view(&model, family).usable);
+            assert!(!review_viewport_view(&model, family).ready);
+            let old_job = model.next_job;
+            for action in [Action::Activate, Action::RunBuffer] {
+                assert!(update(&mut model, Message::Action(action)).is_empty());
+                assert!(review_viewport_pending(&model, family));
+                assert_eq!(model.next_job, old_job);
+            }
+            assert!(
+                update(
+                    &mut model,
+                    Message::Action(Action::MovePage(Direction::Down))
+                )
+                .is_empty()
+            );
+            assert_ne!(
+                split_frame(&model),
+                first_frame,
+                "{family}: PageDown must traverse real content"
+            );
+            assert!(update(&mut model, Message::Action(Action::MoveLineEnd)).is_empty());
+            let end = review_viewport_view(&model, family);
+            assert!(end.ready, "{family}");
+            let end_frame = split_frame(&model);
+            assert!(end_frame.contains(&end.window().last().unwrap().text));
+            let mut earlier = model.clone();
+            update(&mut earlier, Message::Action(Action::MoveBufferStart));
+            assert!(!review_viewport_view(&earlier, family).ready);
+            assert!(update(&mut earlier, Message::Action(Action::Activate)).is_empty());
+            for action in [Action::Activate, Action::RunBuffer] {
+                let mut accepted = model.clone();
+                let expected = accepted
+                    .pending_update
+                    .as_ref()
+                    .map(|pending| pending.plan.bound_sql().unwrap());
+                let effects = update(&mut accepted, Message::Action(action));
+                assert_eq!(effects.len(), 1, "{family}");
+                assert!(matches!(
+                    (family, effects.as_slice()),
+                    ("copy", [Effect::CopyValue { .. }])
+                        | (
+                            "update" | "parameter",
+                            [Effect::ExecuteParameterized { .. }]
+                        )
+                        | ("production", [Effect::Execute { .. }])
+                        | ("analyze", [Effect::Explain { .. }])
+                ));
+                if let Some(expected) = expected {
+                    let [
+                        Effect::ExecuteParameterized {
+                            sql, parameters, ..
+                        },
+                    ] = effects.as_slice()
+                    else {
+                        unreachable!()
+                    };
+                    assert_eq!(
+                        crate::query::discover_parameters(sql)
+                            .unwrap()
+                            .bind(sql, parameters)
+                            .unwrap(),
+                        expected
+                    );
+                }
+                assert!(!review_viewport_pending(&accepted, family));
+            }
+        }
+    }
+}
+
+#[test]
+fn review_viewport_real_resize_resets_but_ticks_and_same_size_do_not() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        let offset = model.review_scroll;
+        assert!(offset > 0);
+        update(&mut model, Message::Tick { running_for: None });
+        update(&mut model, Message::HistoryLoaded(Vec::new()));
+        update(&mut model, Message::Resized(40, 12));
+        assert_eq!(model.review_scroll, offset);
+        update(&mut model, Message::Resized(41, 12));
+        assert_eq!(model.review_scroll, 0);
+        assert!(!review_viewport_view(&model, family).ready);
+        assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+        assert!(review_viewport_pending(&model, family));
+    }
+}
+
+#[test]
+fn review_viewport_fresh_input_geometry_requires_another_explicit_accept_after_paint() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        for action in [Action::Activate, Action::RunBuffer] {
+            let mut model = review_viewport_case(family, false);
+            update(&mut model, Message::Resized(40, 8));
+            let job = model.next_job;
+            let effects = update(
+                &mut model,
+                Message::InputAtSize {
+                    action: action.clone(),
+                    columns: 140,
+                    rows: 50,
+                },
+            );
+            assert!(effects.is_empty());
+            assert!(review_viewport_pending(&model, family));
+            assert_eq!(model.next_job, job);
+            assert_eq!(model.size, (140, 50));
+            assert_eq!(model.review_scroll, 0);
+            assert!(review_viewport_view(&model, family).ready);
+            assert!(
+                !split_frame(&model).is_empty(),
+                "paint the synchronized review"
+            );
+            assert_eq!(
+                update(
+                    &mut model,
+                    Message::InputAtSize {
+                        action,
+                        columns: 140,
+                        rows: 50
+                    }
+                )
+                .len(),
+                1
+            );
+        }
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(60, 20));
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(review_viewport_view(&model, family).ready);
+        for _ in 0..2 {
+            assert!(
+                update(
+                    &mut model,
+                    Message::InputAtSize {
+                        action: Action::Activate,
+                        columns: 20,
+                        rows: 4
+                    }
+                )
+                .is_empty()
+            );
+            assert!(review_viewport_pending(&model, family));
+            assert_eq!(model.review_scroll, 0);
+        }
+    }
+}
+
+#[test]
+fn review_viewport_fresh_input_size_does_not_suppress_ordinary_sql() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    let effects = update(
+        &mut model,
+        Message::InputAtSize {
+            action: Action::RunBuffer,
+            columns: 100,
+            rows: 30,
+        },
+    );
+    assert!(matches!(effects.as_slice(), [Effect::Execute { .. }]));
+    assert_eq!(model.size, (100, 30));
+}
+
+#[test]
+fn review_viewport_cancel_and_quit_remain_available_without_geometry() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        for action in [Action::Cancel, Action::Dismiss, Action::Quit] {
+            let mut model = review_viewport_case(family, true);
+            update(&mut model, Message::Resized(0, 0));
+            let effects = update(&mut model, Message::Action(action.clone()));
+            if action == Action::Quit {
+                assert!(matches!(effects.as_slice(), [Effect::Quit]));
+            } else {
+                assert!(effects.is_empty());
+                assert!(!review_viewport_pending(&model, family));
+            }
+        }
+    }
+}
+
+#[test]
+fn review_viewport_each_new_candidate_starts_at_zero() {
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(model.review_scroll > 0);
+        update(&mut model, Message::Action(Action::Cancel));
+        match family {
+            "copy" => {
+                update(&mut model, Message::Action(Action::CopyValue));
+            }
+            "production" | "parameter" => {
+                update(&mut model, Message::Action(Action::RunBuffer));
+            }
+            "analyze" => {
+                update(&mut model, Message::Action(Action::AnalyzePlan));
+            }
+            "update" => {
+                let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+                let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+                    unreachable!()
+                };
+                update(
+                    &mut model,
+                    Message::UpdateTargetLoaded {
+                        request: *request,
+                        result: Box::new(Ok(update_relation())),
+                    },
+                );
+                update(&mut model, Message::Pasted("synthetic-next-value".into()));
+                update(&mut model, Message::Action(Action::Activate));
+            }
+            _ => unreachable!(),
+        }
+        assert!(review_viewport_pending(&model, family), "{family}");
+        assert_eq!(model.review_scroll, 0, "{family}");
+    }
+}
+
+#[test]
+fn review_viewport_density_rewrap_cannot_authorize_the_new_unreachable_tail() {
+    let mut model = review_viewport_case("copy", true);
+    model.presentation = model
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Compact);
+    update(&mut model, Message::Resized(40, 12));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    assert!(review_viewport_view(&model, "copy").ready);
+    model.presentation = model
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Comfortable);
+    assert!(!review_viewport_view(&model, "copy").ready);
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    assert!(review_viewport_view(&model, "copy").ready);
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Activate)).len(),
+        1
+    );
+}
+
+#[test]
+fn review_viewport_parameter_progression_resets_scroll_without_changing_the_answer() {
+    let mut model = connected();
+    let first = "first".repeat(150);
+    let last = "last".repeat(150);
+    let template = format!("SELECT :{first}, :{last};");
+    model.editor.set_text(&template);
+    update(&mut model, Message::Action(Action::RunBuffer));
+    update(&mut model, Message::Resized(40, 12));
+    update(&mut model, Message::Pasted("synthetic-answer".repeat(40)));
+    let length = model.parameter_prompt.as_ref().unwrap().typed_length();
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert_eq!(
+        model.parameter_prompt.as_ref().unwrap().typed_length(),
+        length
+    );
+    update(&mut model, Message::Action(Action::MoveLineEnd));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert_eq!(model.review_scroll, 0);
+    assert_eq!(
+        model.parameter_prompt.as_ref().unwrap().active_name(),
+        Some(last.as_str())
+    );
+    assert_eq!(model.parameter_prompt.as_ref().unwrap().typed_length(), 0);
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [
+        Effect::ExecuteParameterized {
+            sql, parameters, ..
+        },
+    ] = effects.as_slice()
+    else {
+        panic!("one explicit final-parameter effect")
+    };
+    assert_eq!(sql, &template);
+    let bound = crate::query::discover_parameters(sql)
+        .unwrap()
+        .bind(sql, parameters)
+        .unwrap();
+    assert!(bound.contains(&"synthetic-answer".repeat(40)));
+    assert!(bound.ends_with(", E'';"));
+}
+
+#[test]
+fn review_viewport_current_remaps_ascii_and_no_colour_keep_visible_acceptance_truthful() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let keys = BTreeMap::from([
+        (
+            "run-buffer".into(),
+            crate::config::schema::KeySpec::One("alt+f12".into()),
+        ),
+        (
+            "move-line-end".into(),
+            crate::config::schema::KeySpec::One("ctrl+alt+end".into()),
+        ),
+    ]);
+    let keymap = crate::ui::Keymap::from_config(&keys).unwrap();
+    let accept = keymap
+        .resolve(&KeyEvent::new(KeyCode::F(12), KeyModifiers::ALT))
+        .unwrap();
+    let last = keymap
+        .resolve(&KeyEvent::new(
+            KeyCode::End,
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ))
+        .unwrap();
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for family in ["copy", "update", "production", "analyze", "parameter"] {
+            let mut model = review_viewport_case(family, true);
+            model.presentation = crate::ui::Presentation::new(
+                crate::ui::Theme::new(crate::config::ThemeChoice::Dark, false),
+                crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+                true,
+            )
+            .with_density(density);
+            model.keymap_snapshot = keymap.snapshot();
+            update(&mut model, Message::Resized(60, 16));
+            assert!(update(&mut model, Message::Action(accept.clone())).is_empty());
+            update(&mut model, Message::Action(last.clone()));
+            let view = review_viewport_view(&model, family);
+            assert!(view.ready);
+            let rail = view.rail.concat();
+            assert!(rail.contains("Alt+F12 to"), "{family}: {rail}");
+            assert!(rail.contains("Ctrl+Alt+End"));
+            assert!(!rail.contains("Enter to"));
+            let frame =
+                crate::ui::layout::render_to_string(&model, &keymap, &model.presentation, 60, 16);
+            assert!(!frame.contains("synthetic-answer"));
+            assert_eq!(update(&mut model, Message::Action(accept.clone())).len(), 1);
+        }
+    }
+}
+
+#[test]
+fn review_viewport_end_does_not_replace_typed_name_or_stale_posture_guards() {
+    for family in ["production", "analyze"] {
+        let mut model = review_viewport_case(family, true);
+        match family {
+            "production" => {
+                let pending = model.pending_run.as_mut().unwrap();
+                pending.impact = crate::query::Impact::Destructive;
+                pending.required = "orders".into();
+            }
+            _ => {
+                let pending = model.pending_plan.as_mut().unwrap();
+                pending.impact = crate::query::Impact::Destructive;
+                pending.required = "orders".into();
+            }
+        }
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveLineEnd));
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        for character in "orders".chars() {
+            update(&mut model, Message::Action(Action::Insert(character)));
+        }
+        assert_eq!(
+            update(&mut model, Message::Action(Action::Activate)).len(),
+            1
+        );
+    }
+    for family in ["copy", "update"] {
+        let mut model = review_viewport_case(family, true);
+        update(&mut model, Message::Resized(40, 12));
+        update(&mut model, Message::Action(Action::MoveLineEnd));
+        model.selected_column = 0;
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(review_viewport_view(&model, family).ready);
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(!review_viewport_pending(&model, family));
+    }
+    for posture in ["production", "read-only", "failed"] {
+        let mut model = review_viewport_case("update", true);
+        update(&mut model, Message::Resized(40, 12));
+        match posture {
+            "production" => {
+                if let ConnectionState::Connected(info) = &mut model.connection {
+                    info.environment = Environment::Production;
+                }
+            }
+            "read-only" => {
+                if let ConnectionState::Connected(info) = &mut model.connection {
+                    info.read_only = true;
+                }
+            }
+            _ => model.transaction = crate::query::result::TransactionState::Failed,
+        }
+        update(&mut model, Message::Action(Action::MoveBufferEnd));
+        assert!(review_viewport_view(&model, "update").ready);
+        assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+        assert!(model.pending_update.is_none());
+    }
+}
+
+#[test]
+fn review_viewport_all_wrapped_control_and_wide_metadata_rows_are_actually_rendered() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        let mut model = review_viewport_case("copy", false);
+        let name = format!("{}-metadata-tail", "界e\u{301}\x1b\u{202e}".repeat(30));
+        model.last_execution.as_mut().unwrap().statements[0]
+            .result_set
+            .as_mut()
+            .unwrap()
+            .columns[1] = name.clone();
+        model.presentation = model.presentation.clone().with_density(density);
+        update(&mut model, Message::Resized(40, 12));
+        let complete = review_viewport_view(&model, "copy")
+            .rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<String>();
+        assert!(complete.contains(&crate::query::value::sanitize_for_display(&name)));
+        assert!(complete.contains("acceptance is unconfirmed"));
+        assert!(!complete.contains("synthetic-copy-value"));
+        let mut visited = std::collections::BTreeSet::new();
+        loop {
+            let view = review_viewport_view(&model, "copy");
+            let frame = split_frame(&model);
+            assert!(!frame.contains('\x1b') && !frame.contains('\u{202e}'));
+            for (index, row) in view.window().iter().enumerate() {
+                assert!(
+                    frame.contains(row.text.trim_end()),
+                    "missing row {index}: {}\n{frame}",
+                    row.text
+                );
+                visited.insert(view.offset + index);
+            }
+            if view.offset == view.max_scroll {
+                assert_eq!(visited.len(), view.rows.len());
+                assert!(view.ready);
+                break;
+            }
+            assert!(
+                update(
+                    &mut model,
+                    Message::Action(Action::MovePage(Direction::Down))
+                )
+                .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn review_viewport_entire_existing_update_bound_is_reachable_without_caching_sql() {
+    let baseline = review_viewport_case("update", false);
+    let baseline_sql = baseline
+        .pending_update
+        .as_ref()
+        .unwrap()
+        .plan
+        .bound_sql()
+        .unwrap();
+    let overhead = baseline_sql.len() - "synthetic-note".len();
+    let mut model = cell_update_model();
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        unreachable!()
+    };
+    update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    update(
+        &mut model,
+        Message::Pasted("x".repeat(crate::query::update::MAX_UPDATE_SQL_BYTES - overhead)),
+    );
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    let exact = model
+        .pending_update
+        .as_ref()
+        .unwrap()
+        .plan
+        .bound_sql()
+        .unwrap();
+    assert_eq!(exact.len(), crate::query::update::MAX_UPDATE_SQL_BYTES);
+    assert!(!format!("{model:?}").contains(&exact));
+    update(&mut model, Message::Resized(40, 12));
+    let complete = review_viewport_view(&model, "update")
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+    assert!(complete.contains(&exact));
+    assert!(complete.contains("Selected retained source row: 1"));
+    assert!(complete.contains("literal text data"));
+    assert!(complete.contains("Nothing has been sent yet"));
+    let mut visited = std::collections::BTreeSet::new();
+    loop {
+        let view = review_viewport_view(&model, "update");
+        let frame = split_frame(&model);
+        for (index, row) in view.window().iter().enumerate() {
+            assert!(frame.contains(row.text.trim_end()));
+            visited.insert(view.offset + index);
+        }
+        if view.ready {
+            assert_eq!(visited.len(), view.rows.len());
+            break;
+        }
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+    }
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    let [
+        Effect::ExecuteParameterized {
+            sql, parameters, ..
+        },
+    ] = effects.as_slice()
+    else {
+        panic!("one reviewed update")
+    };
+    assert_eq!(
+        crate::query::discover_parameters(sql)
+            .unwrap()
+            .bind(sql, parameters)
+            .unwrap(),
+        exact
+    );
+}
+
+fn split_key(model: &mut Model, key: char) {
+    assert!(update(model, Message::Action(Action::BeginPrefix)).is_empty());
+    assert!(update(model, Message::Action(Action::Insert(key))).is_empty());
+}
+
+fn split_frame(model: &Model) -> String {
+    crate::ui::layout::render_to_string(
+        model,
+        &crate::ui::Keymap::new(),
+        &model.presentation,
+        model.size.0,
+        model.size.1,
+    )
+}
+
+fn split_dividers(model: &Model) -> (Option<u16>, Option<u16>) {
+    use crate::ui::widgets::{Region, region_at};
+    use ratatui::layout::Rect;
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+    let sidebar =
+        (0..area.width).find(|x| region_at(model, area, *x, 2) == Some(Region::VerticalSplit));
+    let editor = (1..area.height.saturating_sub(1)).find(|y| {
+        region_at(model, area, area.width.saturating_sub(2), *y) == Some(Region::HorizontalSplit)
+    });
+    (sidebar.map(|x| x + 1), editor)
+}
+
+#[test]
+fn split_sidebar_keyboard_steps_and_bounds_preserve_main_column() {
+    let mut model = Model::new(100);
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    let initial = split_dividers(&model).0.expect("sidebar");
+    split_key(&mut model, '.');
+    assert_eq!(split_dividers(&model).0, Some(initial + 2));
+    for _ in 0..80 {
+        split_key(&mut model, '.');
+    }
+    assert_eq!(split_dividers(&model).0, Some(60));
+    model.size = (80, 24);
+    assert_eq!(split_dividers(&model).0, Some(50));
+    for _ in 0..80 {
+        split_key(&mut model, ',');
+    }
+    assert_eq!(split_dividers(&model).0, Some(20));
+}
+
+#[test]
+fn split_results_focus_adjusts_editor_and_page_matches_new_height() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let before = split_dividers(&model).1.expect("editor border");
+    split_key(&mut model, '.');
+    assert_eq!(split_dividers(&model).1, Some(before + 1));
+    model.focus = Focus::Editor;
+    model
+        .editor
+        .set_text((0..100).map(|_| "SELECT 1;").collect::<Vec<_>>().join("\n"));
+    update(&mut model, Message::Action(Action::MoveBufferStart));
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.editor.position().0, usize::from(before));
+}
+
+#[test]
+fn split_zoom_follows_focus_and_restores_exact_frame() {
+    let mut model = connected();
+    model.size = (120, 40);
+    let before = split_frame(&model);
+    split_key(&mut model, 'z');
+    assert!(split_frame(&model).contains("(zoomed)"));
+    assert_eq!(split_dividers(&model), (None, None));
+    update(&mut model, Message::Action(Action::FocusNext));
+    let text = split_frame(&model);
+    assert!(text.contains("Results") && text.contains("(zoomed)"));
+    assert!(!text.contains("Editor  line"));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert!(split_frame(&model).contains("Objects"));
+    update(&mut model, Message::Action(Action::FocusNext));
+    split_key(&mut model, 'z');
+    assert_eq!(split_frame(&model), before);
+}
+
+#[test]
+fn split_compact_feedback_survives_ticks_until_next_user_action() {
+    let mut model = connected();
+    model.size = (79, 24);
+    split_key(&mut model, 'z');
+    const NOTICE: &str = "Layout is already single-pane at this terminal size.";
+    assert!(split_frame(&model).contains(NOTICE));
+    update(&mut model, Message::Tick { running_for: None });
+    assert!(split_frame(&model).contains(NOTICE));
+    update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert!(!split_frame(&model).contains(NOTICE));
+}
+
+#[test]
+fn split_grid_page_uses_drawable_rows_including_types() {
+    for with_types in [false, true] {
+        let mut model = copy_model(
+            (0..100)
+                .map(|n| vec![Cell::Text(n.to_string()), Cell::Text("x".into())])
+                .collect(),
+        );
+        model.size = (120, 40);
+        model.result_grid.show_types = with_types;
+        model.last_execution.as_mut().unwrap().statements[0]
+            .result_set
+            .as_mut()
+            .unwrap()
+            .column_types = vec![Some("text".into()), Some("text".into())];
+        let editor = split_dividers(&model).1.unwrap();
+        let outer_results = model.size.1 - 2 - editor;
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(
+            model.selected_row,
+            usize::from(outer_results - 7 - u16::from(with_types))
+        );
+    }
+}
+
+#[test]
+fn split_tree_page_uses_its_own_content_height() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    model.tree.roots = (0..100)
+        .map(|n| {
+            crate::app::tree::Node::new(crate::app::tree::NodeKind::Message(format!("row {n}")))
+        })
+        .collect();
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.tree.selected, 36);
+}
+
+#[test]
+fn split_plan_page_uses_tree_capacity_and_zoom_title() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let children = (0..80)
+        .map(|_| r#"{"Node Type":"Result"}"#)
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"[{{"Plan":{{"Node Type":"Append","Plans":[{children}]}}}}]"#);
+    model
+        .plan
+        .ready(crate::query::PlanDocument::parse(&json, false).unwrap());
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.plan.selected_path, vec![13]);
+    split_key(&mut model, 'z');
+    let frame = split_frame(&model);
+    assert!(frame.contains("Plan") && frame.contains("(zoomed)"));
+}
+
+#[test]
+fn split_zoom_resize_preserves_preferences_and_split_restores_before_step() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    for _ in 0..20 {
+        split_key(&mut model, '.');
+    }
+    model.focus = Focus::Editor;
+    for _ in 0..10 {
+        split_key(&mut model, '.');
+    }
+    let before = split_dividers(&model);
+    let preferences = model.splits;
+    split_key(&mut model, 'z');
+    update(&mut model, Message::Resized(80, 24));
+    assert_eq!(model.splits.sidebar_cells, preferences.sidebar_cells);
+    assert_eq!(model.splits.editor_rows, preferences.editor_rows);
+    split_key(&mut model, 'z');
+    assert_eq!(model.splits, preferences);
+    assert_eq!(split_dividers(&model), (Some(50), Some(19)));
+    update(&mut model, Message::Resized(120, 40));
+    assert_eq!(split_dividers(&model), before);
+    split_key(&mut model, 'z');
+    split_key(&mut model, ',');
+    assert!(!model.splits.zoomed);
+    assert_eq!(split_dividers(&model).1, before.1.map(|height| height - 1));
+    assert_eq!(
+        Model::new(100).splits,
+        crate::app::model::SplitState::default()
+    );
+}
+
+#[test]
+fn split_editor_minimums_and_hidden_sidebar_are_coherent() {
+    let mut model = connected();
+    model.size = (80, 24);
+    for _ in 0..60 {
+        split_key(&mut model, ',');
+    }
+    assert_eq!(split_dividers(&model).1, Some(3));
+    for _ in 0..60 {
+        split_key(&mut model, '.');
+    }
+    assert_eq!(split_dividers(&model).1, Some(19));
+    model.focus = Focus::Objects;
+    split_key(&mut model, '.');
+    let sidebar = model.splits.sidebar_cells;
+    split_key(&mut model, 'z');
+    update(&mut model, Message::Action(Action::ToggleSidebar));
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(model.splits.zoomed);
+    assert_eq!(split_dividers(&model), (None, None));
+    split_key(&mut model, 'z');
+    assert_eq!(split_dividers(&model).0, None);
+    assert_eq!(model.splits.sidebar_cells, sidebar);
+    update(&mut model, Message::Action(Action::FocusNext));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Editor);
+}
+
+fn split_modal_models() -> Vec<Model> {
+    let base = connected();
+    let mut cases = Vec::new();
+    let mut help = base.clone();
+    help.help_open = true;
+    cases.push(help);
+    let mut password = base.clone();
+    password.password_prompt = Some(crate::app::model::PasswordPrompt::new("target", "reason"));
+    cases.push(password);
+    let mut name = base.clone();
+    name.name_prompt = Some(crate::app::model::NamePrompt::for_query(""));
+    cases.push(name);
+    let mut details = base.clone();
+    details.connection_details = true;
+    cases.push(details);
+    let mut inspector = base.clone();
+    inspector.inspector = Some(crate::app::inspect::Inspector::new());
+    cases.push(inspector);
+    let mut definition = base.clone();
+    definition.definition = Some(crate::app::model::Definition {
+        pending: None,
+        heading: "view".into(),
+        definition: None,
+        error: None,
+        scroll: 0,
+    });
+    cases.push(definition);
+    let mut completion = base.clone();
+    completion.completion.menu = Some(crate::app::completion::CompletionMenu::new(
+        crate::query::completion::complete("SEL", 3, None),
+        true,
+    ));
+    cases.push(completion);
+    let mut filtering = base.clone();
+    filtering.tree.filtering = true;
+    cases.push(filtering);
+    let mut results_filter = base.clone();
+    results_filter.result_filtering = true;
+    cases.push(results_filter);
+    let mut palette = base.clone();
+    palette.palette = Some(crate::app::palette::Palette::default());
+    cases.push(palette);
+    cases
+}
+
+fn split_modal_owners(model: &Model) -> [bool; 10] {
+    [
+        model.help_open,
+        model.password_prompt.is_some(),
+        model.name_prompt.is_some(),
+        model.connection_details,
+        model.inspector.is_some(),
+        model.definition.is_some(),
+        model.completion.menu.is_some(),
+        model.tree.filtering,
+        model.result_filtering,
+        model.palette.is_some(),
+    ]
+}
+
+#[test]
+fn split_actions_never_act_through_modal_surfaces() {
+    for model in split_modal_models() {
+        for action in [Action::ShrinkPane, Action::GrowPane, Action::ZoomPane] {
+            let mut candidate = model.clone();
+            assert!(update(&mut candidate, Message::Action(action.clone())).is_empty());
+            assert_eq!(candidate.splits, model.splits, "{action:?}");
+        }
+    }
+}
+
+#[test]
+fn split_default_chords_keep_modal_owners_and_never_edit_or_run_sql() {
+    for model in split_modal_models() {
+        for key in [',', '.', 'z'] {
+            let mut candidate = model.clone();
+            split_key(&mut candidate, key);
+            assert_eq!(
+                candidate.splits,
+                model.splits,
+                "{key}, owners {:?}",
+                split_modal_owners(&model)
+            );
+            assert_eq!(
+                split_modal_owners(&candidate),
+                split_modal_owners(&model),
+                "{key}"
+            );
+            assert_eq!(candidate.editor.text(), model.editor.text());
+            assert_eq!(candidate.editor.revision(), model.editor.revision());
+            assert_eq!(candidate.phase, model.phase);
+        }
+    }
+}
+
+#[test]
+fn split_configured_direct_keys_keep_modal_owners_and_never_edit_or_run_sql() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    for model in split_modal_models() {
+        for name in ["shrink-pane", "grow-pane", "zoom-pane"] {
+            let keys = BTreeMap::from([(
+                name.to_owned(),
+                crate::config::schema::KeySpec::One("alt+f10".into()),
+            )]);
+            let keymap = crate::ui::Keymap::from_config(&keys).unwrap();
+            let action = keymap
+                .resolve(&KeyEvent::new(KeyCode::F(10), KeyModifiers::ALT))
+                .unwrap();
+            let mut candidate = model.clone();
+            assert!(update(&mut candidate, Message::Action(action)).is_empty());
+            assert_eq!(candidate.splits, model.splits, "{name}");
+            assert_eq!(
+                split_modal_owners(&candidate),
+                split_modal_owners(&model),
+                "{name}"
+            );
+            assert_eq!(candidate.editor.text(), model.editor.text());
+            assert_eq!(candidate.editor.revision(), model.editor.revision());
+            assert_eq!(candidate.phase, model.phase);
+        }
+    }
+}
+
+#[test]
+fn split_deferred_chords_preserve_other_commands_close_and_forward_behavior() {
+    for mut model in split_modal_models().into_iter().skip(4).take(5) {
+        model.editor.set_text("select 1");
+        let owners = split_modal_owners(&model);
+        assert!(update(&mut model, Message::Action(Action::BeginPrefix)).is_empty());
+        assert_eq!(split_modal_owners(&model), owners);
+        assert!(model.prefix_pending);
+        assert!(update(&mut model, Message::Action(Action::Insert('q'))).is_empty());
+        assert!(!model.prefix_pending);
+        assert!(!pane_input_owned(&model));
+        assert!(
+            model.format_notice.is_some(),
+            "the format command was forwarded"
+        );
+    }
+}
+
+#[test]
+fn split_palette_commands_use_underlying_focus_and_active_keys() {
+    use crate::app::palette::{Palette, PaletteCommand};
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Results;
+    let mut keys = BTreeMap::new();
+    keys.insert(
+        "grow-pane".into(),
+        crate::config::schema::KeySpec::One("alt+f10".into()),
+    );
+    let keymap = crate::ui::Keymap::from_config(&keys).unwrap();
+    model.keymap_snapshot = keymap.snapshot();
+    let entry = palette_entries(&model)
+        .into_iter()
+        .find(|entry| entry.command == PaletteCommand::Run(Action::GrowPane))
+        .expect("grow palette entry");
+    assert!(entry.detail.contains("Alt+F10"));
+    let before = split_dividers(&model).1.unwrap();
+    model.palette = Some(Palette::new(vec![entry]));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.palette.is_none());
+    assert_eq!(model.focus, Focus::Results);
+    assert_eq!(split_dividers(&model).1, Some(before + 1));
+}
+
+#[test]
+fn split_paging_tracks_zoom_and_tree_filter_prelude() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.focus = Focus::Objects;
+    model.tree.roots = (0..100)
+        .map(|n| {
+            crate::app::tree::Node::new(crate::app::tree::NodeKind::Message(format!("row {n}")))
+        })
+        .collect();
+    model.tree.filter = "row".into();
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.tree.selected, 35);
+    model.focus = Focus::Editor;
+    model
+        .editor
+        .set_text((0..100).map(|_| "line").collect::<Vec<_>>().join("\n"));
+    update(&mut model, Message::Action(Action::MoveBufferStart));
+    split_key(&mut model, 'z');
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert_eq!(model.editor.position().0, 37);
+}
+
+#[test]
+fn split_unready_plan_paging_never_moves_the_hidden_retained_grid() {
+    let mut model = copy_model(
+        (0..100)
+            .map(|n| vec![Cell::Text(n.to_string()), Cell::Text("x".into())])
+            .collect(),
+    );
+    model.size = (120, 40);
+    model.selected_row = 7;
+    for failed in [false, true] {
+        model.plan = crate::app::PlanView::loading(JobId(9), false);
+        if failed {
+            model.plan.failed(false, "No plan", "Try again");
+        }
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(model.selected_row, 7);
+        assert_eq!(crate::ui::layout::results_page(&model), 1);
+    }
+}
+
+#[test]
+fn split_fresh_diagnostics_and_failed_transactions_remain_visible() {
+    let mut base = connected();
+    base.size = (120, 40);
+    base.editor.set_text("SELECT 1;");
+    let effects = update(&mut base, Message::Action(Action::RunBuffer));
+    let Effect::Execute { job, .. } = effects[0] else {
+        panic!("execute");
+    };
+    let diagnostic = Diagnostic::new(
+        DiagnosticKind::Query,
+        "Synthetic failure must remain visible.",
+        "a synthetic operation",
+    );
+    for focus in [Focus::Editor, Focus::Objects] {
+        let messages = vec![
+            (
+                "execution",
+                Message::ExecutionFinished(failed_execution(job, diagnostic.clone())),
+            ),
+            (
+                "connection",
+                Message::ConnectionFailed(Box::new(diagnostic.clone())),
+            ),
+            (
+                "cancellation",
+                Message::CancellationFailed(Box::new(diagnostic.clone())),
+            ),
+            (
+                "export",
+                Message::RowsExported(Box::new(Err(diagnostic.clone()))),
+            ),
+            (
+                "clipboard",
+                Message::ClipboardFailed(Box::new(diagnostic.clone())),
+            ),
+        ];
+        for (origin, message) in messages {
+            let mut model = base.clone();
+            model.focus = focus;
+            split_key(&mut model, 'z');
+            update(&mut model, message);
+            assert!(
+                split_frame(&model).contains(&diagnostic.headline),
+                "{origin}, {focus:?}"
+            );
+        }
+        let mut model = base.clone();
+        model.focus = focus;
+        split_key(&mut model, 'z');
+        let mut failed = execution(job, ExecutionStatus::Failed, &[]);
+        failed.transaction = crate::query::result::TransactionState::Failed;
+        update(&mut model, Message::ExecutionFinished(failed));
+        let text = split_frame(&model);
+        assert!(
+            text.contains("This transaction has failed."),
+            "{focus:?}: {text}"
+        );
+        assert!(text.contains("ROLLBACK ends it."));
+    }
+}
+
+#[test]
+fn split_error_zoom_refusal_and_results_focus_keep_details_visible() {
+    let mut model = connected();
+    model.size = (120, 40);
+    model.error = Some(Diagnostic::new(
+        DiagnosticKind::Query,
+        "Visible error",
+        "a synthetic operation",
+    ));
+    let preferences = model.splits;
+    split_key(&mut model, 'z');
+    assert!(!model.splits.zoomed);
+    assert_eq!(model.splits, preferences);
+    const NOTICE: &str = "Zoom Results to keep error and recovery details visible.";
+    assert!(split_frame(&model).contains(NOTICE));
+    update(&mut model, Message::Tick { running_for: None });
+    assert!(split_frame(&model).contains(NOTICE));
+    model.focus = Focus::Results;
+    split_key(&mut model, 'z');
+    assert!(model.splits.zoomed);
+    assert!(split_frame(&model).contains("Visible error"));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Objects);
+    assert!(!model.splits.zoomed);
+    assert!(split_frame(&model).contains("Visible error"));
+    model.error = None;
+    model.transaction = crate::query::result::TransactionState::Failed;
+    model.last_execution = Some(*execution(JobId(42), ExecutionStatus::Failed, &[]));
+    model.focus = Focus::Results;
+    split_key(&mut model, 'z');
+    assert!(model.splits.zoomed);
+    assert!(split_frame(&model).contains("This transaction has failed."));
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert!(!model.splits.zoomed);
+    assert!(split_frame(&model).contains("ROLLBACK ends it."));
+}
+
 fn session() -> Box<SessionInfo> {
     Box::new(SessionInfo {
         target: "app@localhost:5432/orders".into(),
@@ -34,6 +2111,7 @@ fn execution(job: JobId, status: ExecutionStatus, rows: &[&str]) -> Box<Executio
         set.push(vec![Cell::Text((*row).to_owned())]);
     }
     Box::new(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job,
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -51,6 +2129,7 @@ fn execution(job: JobId, status: ExecutionStatus, rows: &[&str]) -> Box<Executio
 
 fn failed_execution(job: JobId, error: Diagnostic) -> Box<Execution> {
     Box::new(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job,
         statements: Vec::new(),
         status: ExecutionStatus::Failed,
@@ -68,6 +2147,7 @@ fn copy_model(rows: Vec<Vec<Cell>>) -> Model {
         set.push(row);
     }
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(7),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -120,6 +2200,7 @@ fn cell_update_model() -> Model {
     let mut set = ResultSet::new(vec!["order_id".into(), "note".into()], 100);
     set.push(vec![Cell::Text("7".into()), Cell::Text("old".into())]);
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(77),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -267,6 +2348,7 @@ fn refreshing_never_replays_multiple_or_write_classified_sources() {
 fn refreshing_a_zero_row_result_is_still_an_explicit_read() {
     let mut model = refresh_model("SELECT value FROM orders;");
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(7),
         statements: vec![StatementResult {
             result_set: Some(ResultSet::new(vec!["value".into()], 100)),
@@ -1040,6 +3122,136 @@ fn a_stale_result_cannot_overwrite_a_newer_query() {
 }
 
 #[test]
+fn a_queued_old_connection_message_cannot_restore_facts_after_a_switch() {
+    let mut model = connected();
+    model.connection_generation = 2;
+    let current = session();
+    let current_target = current.target.clone();
+    update(&mut model, Message::Connected(current));
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::ConnectionLost),
+        },
+    );
+    assert!(model.connection.is_usable());
+    assert_eq!(
+        model.connection.info().map(|info| &info.target),
+        Some(&current_target)
+    );
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::Connected(session())),
+        },
+    );
+    assert_eq!(
+        model.connection.info().map(|info| &info.target),
+        Some(&current_target)
+    );
+}
+
+#[test]
+fn an_old_envelope_cannot_deliver_a_stale_execution() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::RunBuffer));
+    let job = model.phase.job().expect("running");
+    model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::ExecutionFinished(execution(
+                job,
+                ExecutionStatus::Succeeded,
+                &["stale"],
+            ))),
+        },
+    );
+
+    assert_eq!(
+        model.phase.job(),
+        Some(job),
+        "a queued result from the replaced connection must not finish the new route"
+    );
+    assert!(model.visible_result().is_none());
+}
+
+#[test]
+fn a_queued_old_profile_failure_cannot_replace_the_current_connection() {
+    let mut model = connected();
+    model.connection_generation = 2;
+    let current = model.connection.clone();
+    let failure = || {
+        Message::ConnectionFailed(Box::new(Diagnostic::new(
+            DiagnosticKind::Config,
+            "the old selected profile does not exist",
+            "resolving the selected connection",
+        )))
+    };
+
+    let effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(failure()),
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(model.connection, current);
+    assert!(model.error.is_none());
+
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 2,
+            message: Box::new(failure()),
+        },
+    );
+    assert!(matches!(model.connection, ConnectionState::Failed(_)));
+    assert!(model.error.is_some());
+}
+
+#[test]
+fn a_queued_old_connect_reload_cannot_start_current_catalogue_work() {
+    let mut model = connected();
+    model.connection_generation = 2;
+    let tree = model.tree.clone();
+    let completion = model.completion.clone();
+
+    let effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::Action(Action::ReloadObjects)),
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(model.tree, tree);
+    assert_eq!(model.completion, completion);
+
+    let effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: 2,
+            message: Box::new(Message::Action(Action::ReloadObjects)),
+        },
+    );
+    assert!(model.tree.loading);
+    assert!(effects.contains(&Effect::LoadSchemas));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::LoadSchemas, Effect::LoadCompletionCatalog { .. }]
+    ));
+}
+
+#[test]
 fn cancelling_requests_but_does_not_claim_cancellation() {
     let mut model = connected();
     model.editor.set_text("SELECT pg_sleep(30);");
@@ -1055,6 +3267,7 @@ fn cancelling_requests_but_does_not_claim_cancellation() {
     update(
         &mut model,
         Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: Vec::new(),
             status: ExecutionStatus::Cancelled,
@@ -1101,6 +3314,7 @@ fn a_lost_connection_during_execution_is_recorded_on_the_connection_too() {
     update(
         &mut model,
         Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: Vec::new(),
             status: ExecutionStatus::ConnectionLost,
@@ -1259,6 +3473,7 @@ fn plan_finished(
     result: Result<crate::query::PlanDocument, Diagnostic>,
 ) -> Box<crate::app::PlanExecution> {
     Box::new(crate::app::PlanExecution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job,
         analyzed,
         elapsed: Duration::from_millis(2),
@@ -1436,6 +3651,7 @@ fn a_failed_execution_shows_its_diagnostic_collapsed() {
     update(
         &mut model,
         Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
             job,
             statements: Vec::new(),
             status: ExecutionStatus::Failed,
@@ -1671,7 +3887,7 @@ fn a_page_key_moves_by_what_is_on_screen_in_whichever_pane_has_focus() {
     model.editor.set_text(text);
     update(&mut model, Message::Action(Action::MoveBufferStart));
 
-    let page = crate::ui::layout::editor_page(model.size);
+    let page = crate::ui::layout::editor_page(&model);
     assert!(page > 1, "a full-size terminal shows more than one line");
     update(
         &mut model,
@@ -1698,10 +3914,7 @@ fn a_page_key_moves_by_what_is_on_screen_in_whichever_pane_has_focus() {
         &mut model,
         Message::Action(Action::MovePage(Direction::Down)),
     );
-    assert_eq!(
-        model.selected_row,
-        crate::ui::layout::results_page(model.size)
-    );
+    assert_eq!(model.selected_row, crate::ui::layout::results_page(&model));
     update(&mut model, Message::Action(Action::MoveBufferEnd));
     assert_eq!(
         model.selected_row, 99,
@@ -2383,7 +4596,7 @@ fn asking_what_an_object_is_loads_its_definition_and_shows_where_it_came_from() 
     assert_eq!(open.lines().len(), 40);
 
     // Scrolling stops with the last line on screen, both ways.
-    let height = crate::ui::layout::definition_viewport(model.size).1;
+    let height = crate::ui::layout::definition_viewport(model.size, &model.presentation).1;
     for _ in 0..200 {
         update(&mut model, Message::Action(Action::Move(Direction::Down)));
     }
@@ -2725,6 +4938,7 @@ fn with_grid(columns: &[&str], rows: &[&[Cell]]) -> Model {
     }
     let signature = set.columns.clone();
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -3302,7 +5516,7 @@ fn a_chord_shows_its_continuations_and_the_next_key_ends_it() {
 
     // An unrecognised second key cancels rather than leaving it hanging.
     update(&mut model, Message::Action(Action::BeginPrefix));
-    update(&mut model, Message::Action(Action::Insert('z')));
+    update(&mut model, Message::Action(Action::Insert('~')));
     assert!(!model.prefix_pending);
 }
 
@@ -4452,6 +6666,11 @@ fn a_late_update_metadata_response_cannot_replace_a_changed_selection() {
 #[test]
 fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select() {
     let mut model = cell_update_model();
+    model.retained_data_loss = crate::query::result::RetentionLossSummary {
+        limited_sets: 1,
+        first: None,
+    };
+    let loss = model.retained_data_loss;
     let snapshot = model.last_execution.clone();
     let source_sql = model.last_sql.clone();
     let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
@@ -4479,6 +6698,7 @@ fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select(
         Effect::Execute { .. } | Effect::ExecuteParameterized { .. }
     )));
     assert_eq!(model.last_execution, snapshot);
+    assert_eq!(model.retained_data_loss, loss);
     assert_eq!(model.last_sql, source_sql);
     assert!(model.visible_result().is_some());
     assert!(model.cell_update_notice.as_deref().is_some_and(|notice| {
@@ -4928,4 +7148,597 @@ fn a_connection_established_without_a_connecting_attempt_does_not_steal_focus() 
         "a fixture or restored session must not move focus"
     );
     assert!(!model.expand_first_schema_on_load);
+}
+
+#[test]
+fn notice_status_pending_survives_ticks_resize_and_paint_without_server_text_copy() {
+    use crate::app::model::{NoticeSessionId, NoticeSource};
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let mut model = connected();
+    let id = NoticeSessionId::new();
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+        },
+    );
+    let counts = NoticeCounts {
+        omitted: NoticeCount::Exact(4),
+        ..NoticeCounts::default()
+    };
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id,
+            checkpoint: NoticeCheckpoint {
+                revision: 1,
+                totals: counts,
+            },
+            latest: None,
+        },
+    );
+    assert_eq!(
+        model.notice_state.pending, counts,
+        "actual message must reach bounded pending state"
+    );
+    update(&mut model, Message::Tick { running_for: None });
+    update(&mut model, Message::Resized(40, 8));
+    let _ = crate::ui::layout::render_to_string(
+        &model,
+        &crate::ui::Keymap::new(),
+        &model.presentation,
+        40,
+        8,
+    );
+    assert_eq!(
+        model.notice_state.pending, counts,
+        "drawing is never acknowledgement"
+    );
+    assert!(
+        model.notices.is_empty(),
+        "server prose is not cloned into local message history"
+    );
+}
+
+fn notice_model_pending() -> Model {
+    use crate::app::model::{NoticeSessionId, NoticeSource};
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let mut model = connected();
+    let id = NoticeSessionId::new();
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+        },
+    );
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id,
+            checkpoint: NoticeCheckpoint {
+                revision: 1,
+                totals: NoticeCounts {
+                    omitted: NoticeCount::Exact(4),
+                    ..NoticeCounts::default()
+                },
+            },
+            latest: None,
+        },
+    );
+    model
+}
+fn open_notice_details(model: &mut Model) {
+    update(model, Message::Action(Action::OpenPalette));
+    let palette = model.palette.as_ref().unwrap();
+    let index = palette
+        .matches()
+        .iter()
+        .position(|entry| entry.command == crate::app::palette::PaletteCommand::NoticeDetails)
+        .unwrap();
+    for _ in 0..index {
+        update(model, Message::Action(Action::Move(Direction::Down)));
+    }
+    assert!(update(model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.notice_details.is_some());
+}
+#[test]
+fn notice_reader_open_escape_and_explicit_ack_only_affect_captured_snapshot() {
+    use crate::app::model::NoticeSource;
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts};
+    let mut model = notice_model_pending();
+    model.size = (40, 8);
+    open_notice_details(&mut model);
+    assert_eq!(
+        model.notice_state.pending.omitted,
+        NoticeCount::Exact(4),
+        "opening is not acknowledgement"
+    );
+    let source = model.notice_state.sources[0]
+        .as_ref()
+        .unwrap()
+        .session_id
+        .clone();
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: source,
+            checkpoint: NoticeCheckpoint {
+                revision: 2,
+                totals: NoticeCounts {
+                    omitted: NoticeCount::Exact(7),
+                    ..NoticeCounts::default()
+                },
+            },
+            latest: None,
+        },
+    );
+    assert_eq!(
+        model
+            .notice_details
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .pending
+            .omitted,
+        NoticeCount::Exact(4),
+        "reader content is fixed"
+    );
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.notice_details.is_none());
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(3));
+    open_notice_details(&mut model);
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(3));
+    open_notice_details(&mut model);
+    update(&mut model, Message::Resized(39, 8));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.notice_details.is_some());
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(3));
+    update(&mut model, Message::Action(Action::Dismiss));
+}
+#[test]
+fn notice_reader_preserves_owners_paste_hidden_editor_and_palette_cancel() {
+    let mut model = notice_model_pending();
+    model.size = (80, 24);
+    model.editor.set_text("SELECT 42;");
+    open_notice_details(&mut model);
+    let before = model.editor.clone();
+    for action in [
+        Action::Insert('x'),
+        Action::Backspace,
+        Action::DeleteForward,
+        Action::RunBuffer,
+        Action::FocusNext,
+        Action::GrowPane,
+    ] {
+        assert!(update(&mut model, Message::Action(action)).is_empty());
+        assert_eq!(model.editor.text(), before.text());
+        assert_eq!(model.editor.cursor(), before.cursor());
+    }
+    update(&mut model, Message::Pasted("hidden-synthetic-paste".into()));
+    assert_eq!(model.editor.text(), before.text());
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let scroll = model.notice_details.as_ref().unwrap().scroll;
+    update(&mut model, Message::Action(Action::OpenPalette));
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert_eq!(model.notice_details.as_ref().unwrap().scroll, scroll);
+    for family in ["copy", "update", "production", "analyze", "parameter"] {
+        let mut guarded = review_viewport_case(family, true);
+        guarded.notice_details = model.notice_details.clone();
+        let pending = guarded.notice_state.pending;
+        assert!(update(&mut guarded, Message::Action(Action::MoveBufferEnd)).is_empty());
+        assert!(guarded.review_scroll > 0, "{family}");
+        assert_eq!(guarded.notice_state.pending, pending);
+        assert!(guarded.notice_details.is_some());
+    }
+}
+#[test]
+fn notice_retirement_authority_rejects_unknown_old_and_duplicate_transfer() {
+    use crate::app::model::{NoticeSessionId, NoticeSource};
+    use crate::query::result::{NoticeCount, NoticeCounts};
+    let mut model = notice_model_pending();
+    let old = model.notice_state.sources[0]
+        .as_ref()
+        .unwrap()
+        .session_id
+        .clone();
+    let counts = NoticeCounts {
+        omitted: NoticeCount::Exact(6),
+        ..NoticeCounts::default()
+    };
+    update(
+        &mut model,
+        Message::NoticeRetired {
+            generation: 1,
+            source: NoticeSource::User,
+            session_id: NoticeSessionId::new(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(4));
+    model.connection_profiles = connection_profiles();
+    update(&mut model, Message::Action(Action::OpenConnectionPicker));
+    update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(model.connection_generation, 2);
+    update(
+        &mut model,
+        Message::NoticeRetired {
+            generation: 1,
+            source: NoticeSource::User,
+            session_id: old.clone(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(6));
+    update(
+        &mut model,
+        Message::NoticeRetired {
+            generation: 1,
+            source: NoticeSource::User,
+            session_id: old.clone(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(6));
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: 1,
+            message: Box::new(Message::NoticeSourceInstalled {
+                source: NoticeSource::User,
+                session_id: old,
+            }),
+        },
+    );
+    assert!(model.notice_state.sources[0].is_none());
+}
+
+#[test]
+fn notice_peer_older_checkpoint_cannot_replace_counts_baseline_or_latest() {
+    use crate::app::model::{NoticeSessionId, NoticeSource, NoticeSummary};
+    use crate::query::result::{NoticeCheckpoint, NoticeCount, NoticeCounts, NoticeScope};
+    let mut model = connected();
+    let id = NoticeSessionId::new();
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+        },
+    );
+    let counts = |n| NoticeCounts {
+        omitted: NoticeCount::Exact(n),
+        ..NoticeCounts::default()
+    };
+    let latest = |n| {
+        Some(NoticeSummary {
+            scope: NoticeScope::Query,
+            retained: Some(n),
+            counts: NoticeCounts::default(),
+        })
+    };
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id.clone(),
+            checkpoint: NoticeCheckpoint {
+                revision: 2,
+                totals: counts(2),
+            },
+            latest: latest(2),
+        },
+    );
+    update(
+        &mut model,
+        Message::NoticeStatus {
+            source: NoticeSource::User,
+            session_id: id,
+            checkpoint: NoticeCheckpoint {
+                revision: 1,
+                totals: counts(1),
+            },
+            latest: latest(1),
+        },
+    );
+    assert_eq!(model.notice_state.pending, counts(2));
+    let state = model.notice_state.sources[0].as_ref().unwrap();
+    assert_eq!(state.checkpoint.revision, 2);
+    assert_eq!(state.latest.as_ref().unwrap().retained, Some(2));
+}
+
+#[test]
+fn notice_peer_explicit_cancel_closes_reader_without_ack_and_uses_one_cancel_path() {
+    let mut model = notice_model_pending();
+    model.phase = QueryPhase::Running {
+        job: JobId(99),
+        statements: 1,
+    };
+    open_notice_details(&mut model);
+    let pending = model.notice_state.pending;
+    let effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Cancel { job: JobId(99) }]
+    ));
+    assert!(matches!(
+        model.phase,
+        QueryPhase::CancellationRequested { job: JobId(99) }
+    ));
+    assert!(model.notice_details.is_none());
+    assert_eq!(model.notice_state.pending, pending);
+    assert!(update(&mut model, Message::Action(Action::Cancel)).is_empty());
+    let mut idle = notice_model_pending();
+    open_notice_details(&mut idle);
+    let pending = idle.notice_state.pending;
+    assert!(update(&mut idle, Message::Action(Action::Cancel)).is_empty());
+    assert!(idle.notice_details.is_none());
+    assert_eq!(idle.notice_state.pending, pending);
+}
+
+#[test]
+fn notice_reader_saved_query_choice_reveals_covered_inspector_and_definition() {
+    for definition in [false, true] {
+        let mut model = copy_model(vec![vec![
+            Cell::Text("1".into()),
+            Cell::Text("synthetic covered value".into()),
+        ]]);
+        model.notice_state = notice_model_pending().notice_state;
+        if definition {
+            model.definition = Some(crate::app::model::Definition {
+                pending: None,
+                heading: "synthetic definition".into(),
+                definition: Some(definition_of("orders")),
+                error: None,
+                scroll: 0,
+            });
+        } else {
+            update(&mut model, Message::Action(Action::ToggleInspector));
+            assert!(model.inspector.is_some());
+        }
+        // Preserve the existing lower owner while the newer client report owns
+        // input; the saved-query answer can arrive after the report was opened.
+        model.notice_details = Some(crate::app::model::NoticeDetails {
+            snapshot: model.notice_state.snapshot(),
+            scroll: 3,
+        });
+        update(&mut model, Message::Action(Action::OpenPalette));
+        update(
+            &mut model,
+            Message::QueriesListed(vec![crate::queries::SavedQuery {
+                name: "synthetic-saved".into(),
+                path: "/unused/synthetic.sql".into(),
+                summary: "SELECT 77".into(),
+            }]),
+        );
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(matches!(effects.as_slice(),[Effect::LoadQuery {name}] if name=="synthetic-saved"));
+        assert!(model.notice_details.is_none());
+        assert!(
+            model.inspector.is_none(),
+            "saved SQL must not change behind an old inspector"
+        );
+        assert!(
+            model.definition.is_none(),
+            "saved SQL must not change behind an old definition"
+        );
+        assert_eq!(model.focus, Focus::Editor);
+        update(
+            &mut model,
+            Message::QueryLoaded(Box::new(Ok("SELECT 77".into()))),
+        );
+        assert_eq!(model.editor.text(), "SELECT 77");
+    }
+}
+
+#[test]
+fn notice_reader_empty_or_cancelled_palette_preserves_snapshot_and_baseline_open_focus() {
+    let mut model = notice_model_pending();
+    open_notice_details(&mut model);
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let offset = model.notice_details.as_ref().unwrap().scroll;
+    let pending = model.notice_details.as_ref().unwrap().snapshot.pending;
+    for empty in [false, true] {
+        update(&mut model, Message::Action(Action::OpenPalette));
+        if empty {
+            for ch in "synthetic-no-command-98371".chars() {
+                update(&mut model, Message::Action(Action::Insert(ch)));
+            }
+            assert!(model.palette.as_ref().unwrap().matches().is_empty());
+            update(&mut model, Message::Action(Action::Activate));
+        } else {
+            update(&mut model, Message::Action(Action::Dismiss));
+        }
+        assert_eq!(model.notice_details.as_ref().unwrap().scroll, offset);
+        assert_eq!(
+            model.notice_details.as_ref().unwrap().snapshot.pending,
+            pending
+        );
+    }
+    let mut baseline = connected();
+    baseline.focus = Focus::Results;
+    update(
+        &mut baseline,
+        Message::QueriesListed(vec![crate::queries::SavedQuery {
+            name: "synthetic-saved".into(),
+            path: "/unused/synthetic.sql".into(),
+            summary: "SELECT 77".into(),
+        }]),
+    );
+    assert!(matches!(
+        update(&mut baseline, Message::Action(Action::Activate)).as_slice(),
+        [Effect::LoadQuery { .. }]
+    ));
+    assert_eq!(
+        baseline.focus,
+        Focus::Results,
+        "uncovered baseline Open does not steal focus early"
+    );
+}
+
+#[test]
+fn notice_uninstalled_retirement_is_current_generation_bounded_and_once() {
+    use crate::app::model::NoticeSessionId;
+    use crate::query::result::{NoticeCount, NoticeCounts};
+    let mut model = Model::new(10);
+    let id = NoticeSessionId::new();
+    let counts = NoticeCounts {
+        omitted: NoticeCount::Exact(1),
+        ..NoticeCounts::default()
+    };
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id.clone(),
+            counts,
+        },
+    );
+    assert!(
+        !model.notice_state.pending.needs_report(),
+        "ordinary unknown sources have no authority"
+    );
+    update(&mut model, Message::NoticeUninstalledRetirementStarted(1));
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 0,
+            session_id: NoticeSessionId::new(),
+            counts,
+        },
+    );
+    assert!(!model.notice_state.pending.needs_report());
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id.clone(),
+            counts,
+        },
+    );
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id.clone(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    update(&mut model, Message::NoticeUninstalledRetirementFinished(1));
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: NoticeSessionId::new(),
+            counts,
+        },
+    );
+    assert_eq!(model.notice_state.pending.omitted, NoticeCount::Exact(1));
+    update(&mut model, Message::NoticeUninstalledRetirementStarted(1));
+    update(
+        &mut model,
+        Message::NoticeUninstalledRetired {
+            generation: 1,
+            session_id: id,
+            counts,
+        },
+    );
+    assert_eq!(
+        model.notice_state.pending.omitted,
+        NoticeCount::Exact(1),
+        "reopened same boundary cannot recount token"
+    );
+    assert!(model.notice_state.sources.iter().all(Option::is_none));
+}
+
+#[test]
+fn retained_data_summary_follows_only_accepted_replacement_executions() {
+    let mut model = connected();
+    let mut limited = execution(JobId(101), ExecutionStatus::Succeeded, &["first"]);
+    let mut later = ResultSet::new(vec!["later".into()], 0);
+    later.push(vec![Cell::Text("not retained".into())]);
+    limited.statements.push(StatementResult {
+        result_set: Some(later),
+        rows_affected: None,
+        elapsed: Duration::ZERO,
+        notices: Vec::new(),
+    });
+    model.phase = QueryPhase::Running {
+        job: JobId(101),
+        statements: 2,
+    };
+    update(&mut model, Message::ExecutionFinished(limited));
+    assert_eq!(model.retained_data_loss.limited_sets, 1);
+    assert_eq!(model.retained_data_loss.first.unwrap().ordinal, 2);
+    let loss = model.retained_data_loss;
+    model.phase = QueryPhase::Running {
+        job: JobId(102),
+        statements: 1,
+    };
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(
+            JobId(101),
+            ExecutionStatus::Succeeded,
+            &["stale"],
+        )),
+    );
+    assert_eq!(model.retained_data_loss, loss);
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(
+            JobId(102),
+            ExecutionStatus::Succeeded,
+            &["complete"],
+        )),
+    );
+    assert_eq!(model.retained_data_loss, Default::default());
+    model.retained_data_loss = loss;
+    begin_connection(&mut model, None);
+    assert_eq!(model.retained_data_loss, Default::default());
+    assert!(model.last_execution.is_none());
+}
+
+#[test]
+fn unavailable_description_intents_refuse_before_effects_with_fixed_guidance() {
+    for action in [
+        Action::CopyValue,
+        Action::ToggleInspector,
+        Action::GenerateCellUpdate,
+        Action::ExportRows,
+    ] {
+        let mut model = connected();
+        model.focus = Focus::Results;
+        let mut prior = execution(
+            JobId(1),
+            ExecutionStatus::Succeeded,
+            &["synthetic forbidden"],
+        );
+        prior.statements[0].result_set = Some(ResultSet::unavailable(3, 100));
+        model.last_execution = Some(*prior);
+        assert!(
+            update(&mut model, Message::Action(action.clone())).is_empty(),
+            "{action:?}"
+        );
+        assert!(
+            model.pending_copy.is_none()
+                && model.update_lookup.is_none()
+                && model.name_prompt.is_none()
+                && model.palette.is_none()
+                && model.inspector.is_none()
+        );
+        assert!(
+            model.result_grid.note.as_deref().is_some_and(
+                |note| note.contains("Result data unavailable - retained-result limit reached")
+            ),
+            "{action:?}"
+        );
+        assert!(model.error.is_none());
+    }
 }

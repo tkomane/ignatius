@@ -37,6 +37,11 @@ Every visible node has:
 
 ## Safety and machine boundary
 
+W04's 2026-10-25 [review viewport contract](../../018-clipboard-copy/contracts/review-viewport.md)
+governs the analysis confirmation's traversal and admission before its one-shot
+effect. The existing four-source-line preview remains a labelled preview.
+Shared implementation/verification is tracked in Feature 018 T037-T040.
+
 - Plain planning does not execute the target statement.
 - Analysis says that it executes the target, may have side effects, and is not
   automatically rolled back. Confirmation is explicit and one-shot.

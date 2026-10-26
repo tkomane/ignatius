@@ -322,6 +322,7 @@ pub async fn fetch(
     let mut command = tokio::process::Command::new(&program);
     command
         .args(&arguments)
+        .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -463,13 +464,15 @@ fn not_found(provider: &Provider, program: &str) -> Box<Diagnostic> {
 }
 
 fn timed_out(provider: &Provider, program: &str) -> Box<Diagnostic> {
+    let limit = if provider.timeout.as_secs() > 0 {
+        format!("{} seconds", provider.timeout.as_secs())
+    } else {
+        format!("{} ms", provider.timeout.as_millis().max(1))
+    };
     Box::new(
         Diagnostic::new(
             DiagnosticKind::Connection,
-            format!(
-                "{program} did not answer within {} seconds",
-                provider.timeout.as_secs()
-            ),
+            format!("{program} did not answer within {limit}"),
             format!("asking {} for a credential", provider.name),
         )
         .likely_cause(

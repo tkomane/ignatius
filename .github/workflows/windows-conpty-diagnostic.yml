@@ -1,0 +1,89 @@
+name: Windows ConPTY diagnostic
+
+# An explicit experiment, with strict capability assertions and bounded evidence.
+# Failure remains failure. This is not product acceptance or a release gate pass.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-conpty-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  diagnostic:
+    name: Native Windows ConPTY capability experiment
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Compile every workspace target
+        run: cargo build --locked --workspace --all-targets --all-features
+      - name: Windows ConPTY capability and ownership controls
+        id: windows-conpty
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          # Installed tools only. Microsoft recommends Launch-VsDevShell for build automation.
+          # https://learn.microsoft.com/visualstudio/ide/reference/command-prompt-powershell
+          $taskVsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $taskInstallations = @(& $taskVsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          if ($LASTEXITCODE -ne 0 -or $taskInstallations.Count -ne 1) { throw 'One installed MSVC toolset is required' }
+          $taskDeveloperShell = Join-Path ($taskInstallations[0].Trim()) 'Common7/Tools/Launch-VsDevShell.ps1'
+          & $taskDeveloperShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          if ($null -eq (Get-Command cl.exe -CommandType Application -ErrorAction SilentlyContinue)) { throw 'Installed MSVC developer environment unavailable' }
+          $taskRoot = Join-Path $env:RUNNER_TEMP "ignatius-conpty-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $taskBuild = Join-Path $taskRoot 'build'
+          $taskEvidence = Join-Path $taskRoot 'runtime'
+          $taskCursorEvidence = Join-Path $taskRoot 'cursor-runtime'
+          $taskCargoHome = if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cargo' } else { [IO.Path]::GetFullPath($env:CARGO_HOME) }
+          $taskCargoTarget = Join-Path $env:GITHUB_WORKSPACE 'target'
+          & "$env:GITHUB_WORKSPACE/tests/support/windows_conpty/Build.ps1" -SourceRoot $env:GITHUB_WORKSPACE -BuildRoot $taskBuild -CargoHome $taskCargoHome -CargoTarget $taskCargoTarget -ExpectedRevision $env:GITHUB_SHA
+          & "$env:GITHUB_WORKSPACE/tests/support/windows_conpty/Run-Controls.ps1" -BuildManifest (Join-Path $taskBuild 'build-manifest.json') -EvidenceRoot $taskCursorEvidence -RunReviewedCursorDiagnostic
+          & "$env:GITHUB_WORKSPACE/tests/support/windows_conpty/Run-Controls.ps1" -BuildManifest (Join-Path $taskBuild 'build-manifest.json') -EvidenceRoot $taskEvidence -RunReviewedCapabilityControls
+      - name: Retain bounded Windows ConPTY evidence
+        if: ${{ always() && steps.windows-conpty.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-conpty-capability-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          # Deliberate metadata/trace allowlist. Never upload the build, cache or temp tree.
+          path: |
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/build-manifest.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/prebuild-inputs.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/cargo-lib.jsonl
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/cargo-lib.log
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/rustc.log
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/cl-host.log
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/cl-protocol.log
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/protocol-green.log
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/validation-green.log
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/summary.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/capture-manifest.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/controller.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/supervisor.stdout.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/supervisor.stderr.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/runtime/*/translated.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/summary.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/capture-manifest.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/controller.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/supervisor.stdout.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/supervisor.stderr.bin
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/cursor-runtime/cursor-routing/translated.bin

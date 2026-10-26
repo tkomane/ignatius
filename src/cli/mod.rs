@@ -179,9 +179,9 @@ pub enum Command {
         max_rows: Option<usize>,
         /// Stream the result into a file instead of standard output.
         ///
-        /// The rows never pass through memory, so the size of the result does
-        /// not matter. An interrupted export leaves a `.partial` file and says
-        /// how many rows reached it.
+        /// The entire result is not retained in memory. Individual values,
+        /// rows and driver frames still use memory. An interrupted export
+        /// leaves a `.partial` file and reports row progress and flush uncertainty.
         #[arg(short = 'o', long, value_name = "PATH")]
         output: Option<PathBuf>,
         /// Replace the output file if it already exists.
@@ -506,6 +506,8 @@ pub enum ConfigAction {
 pub struct Presentation {
     /// Whether colour may be emitted.
     pub color: bool,
+    /// Explicit colour flag, or the absolute plain-mode request; None uses config.
+    pub color_override: Option<crate::config::ColorMode>,
     /// The `--color-depth` override, when the flag was given.
     pub color_depth: Option<crate::config::ColorDepthChoice>,
     /// The tier resolved from flags and the environment alone.
@@ -519,6 +521,18 @@ pub struct Presentation {
 }
 
 impl Presentation {
+    /// Resolves configured colour before depth or a validated theme is selected.
+    fn with_configured_color(
+        &self,
+        configured: crate::config::ColorMode,
+        facts: &doctor::TerminalFacts,
+    ) -> Self {
+        let mut presentation = self.clone();
+        presentation.color =
+            crate::ui::terminal::should_use_color(self.color_override.unwrap_or(configured), facts);
+        presentation
+    }
+
     /// Whether anything beyond ASCII may be drawn.
     #[must_use]
     pub fn unicode(&self) -> bool {
@@ -630,23 +644,28 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
     match result {
         Ok(code) => code,
         Err(diagnostic) => {
-            let _ = write!(err, "{}", diagnostic.render_plain(presentation.verbose));
+            if let Some(line) = diagnostic.theme_refusal_line() {
+                let _ = writeln!(err, "{line}");
+            } else {
+                let _ = write!(err, "{}", diagnostic.render_plain(presentation.verbose));
+            }
             diagnostic.exit_code()
         }
     }
 }
 
-/// Decides colour and glyphs from flags, configuration and the environment.
+/// Resolves flag/environment defaults; loaded configuration applies afterward.
 fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> Presentation {
-    let color_mode = if global.plain {
-        crate::config::ColorMode::Never
+    let color_override = if global.plain {
+        Some(crate::config::ColorMode::Never)
     } else {
-        match global.color {
-            Some(ColorChoice::Always) => crate::config::ColorMode::Always,
-            Some(ColorChoice::Never) => crate::config::ColorMode::Never,
-            Some(ColorChoice::Auto) | None => crate::config::ColorMode::Auto,
-        }
+        global.color.map(|choice| match choice {
+            ColorChoice::Always => crate::config::ColorMode::Always,
+            ColorChoice::Never => crate::config::ColorMode::Never,
+            ColorChoice::Auto => crate::config::ColorMode::Auto,
+        })
     };
+    let color_mode = color_override.unwrap_or(crate::config::ColorMode::Auto);
     // Plain and --ascii are absolute: they are what a user reaches for when the
     // terminal cannot cope, so configuration does not get to override them.
     let forced_ascii = global.plain || global.ascii;
@@ -659,6 +678,7 @@ fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> P
 
     Presentation {
         color: crate::ui::terminal::should_use_color(color_mode, facts),
+        color_override,
         color_depth: global.color_depth,
         glyphs: glyph_override.unwrap_or(if unicode_capable {
             crate::ui::GlyphTier::Unicode
@@ -837,6 +857,7 @@ fn doctor_command(
         .as_ref()
         .map(|l| l.config.clone())
         .unwrap_or_default();
+    let presentation = presentation.with_configured_color(configured.ui.color, facts);
     // Report the depth actually in use: the flag, then the configuration key,
     // then the environment, with colour-off routes defeating all of them.
     let mut facts = facts.clone();
@@ -1094,19 +1115,20 @@ fn query_command(
         }
     }
 
-    // An export streams rows straight to a file and never holds the result.
+    // An export streams to a file without retaining the complete result.
     if let Some(destination) = request.output {
         let writer = output::StreamWriter::new(request.options.clone())?;
         let export = crate::query::export::Export::create(destination, request.force)?;
-        let outcome = runtime()?.block_on(interactive::export_once_with_parameters(
+        let outcome = runtime()?.block_on(interactive::export_once_with_parameters_reported(
             target,
             &loaded.config,
             sql,
             parameters,
             export,
             writer,
-        ))?;
-
+        ));
+        write_notice_counts(err, outcome.notice_report.counts).map_err(io_diagnostic)?;
+        let outcome = outcome.value?;
         return match outcome {
             interactive::ExportOutcome::Completed(finished) => {
                 // The summary is a diagnostic, not data, so it goes to stderr
@@ -1141,41 +1163,127 @@ fn query_command(
         };
     }
 
-    let execution = runtime()?.block_on(interactive::execute_once_with_parameters(
+    let execution = runtime()?.block_on(interactive::execute_once_with_parameters_reported(
         target,
         &loaded.config,
         sql,
         parameters,
         row_cap,
-    ))?;
+    ));
 
-    if let Err(err) = output::write_execution(out, &execution, &request.options) {
-        return match err.kind() {
-            // Piping into `head` closes the stream early. That is the pipeline
-            // working, not a failure, and it exits zero like every other tool.
-            std::io::ErrorKind::BrokenPipe => Ok(ExitCode::Success),
-            // The format refused to represent the result unambiguously.
-            std::io::ErrorKind::InvalidInput => Err(Diagnostic::new(
-                DiagnosticKind::Usage,
-                err.to_string(),
-                "writing results",
-            )
-            .next_action("run a single statement, or choose a format that carries result sets")),
-            _ => Err(io_diagnostic(err)),
-        };
-    }
-
-    if let Some(error) = &execution.error {
-        if request.options.format == Format::Json {
-            // JSON diagnostics are written to stderr because stdout remains a
-            // data stream. The failed execution intentionally wrote no JSON
-            // result document, so a parser cannot mistake it for success.
-            writeln!(err, "{}", error.to_json()).map_err(io_diagnostic)?;
-            return Ok(error.exit_code());
+    let execution = match execution {
+        Ok(execution) => execution,
+        Err(failure) => {
+            return write_query_failure(
+                err,
+                failure.value,
+                &failure.notice_report,
+                request.options.format,
+            );
         }
-        return Err(error.clone());
+    };
+    write_query_execution(out, err, &execution, &request.options)
+}
+
+fn write_query_execution(
+    out: &mut impl Write,
+    err: &mut impl Write,
+    execution: &crate::query::result::Execution,
+    options: &output::OutputOptions,
+) -> Result<ExitCode, Diagnostic> {
+    if let Err(error) = output::write_execution(out, execution, options) {
+        let diagnostic = match error.kind() {
+            std::io::ErrorKind::BrokenPipe => return Ok(ExitCode::Success),
+            std::io::ErrorKind::InvalidInput => {
+                Diagnostic::new(DiagnosticKind::Usage, error.to_string(), "writing results")
+                    .next_action(
+                        "run a single statement, or choose a format that carries result sets",
+                    )
+            }
+            _ => io_diagnostic(error),
+        };
+        return write_query_failure(err, diagnostic, &execution.notice_report, options.format);
+    }
+    write_buffered_truncation(err, execution, options.format).map_err(io_diagnostic)?;
+    if let Some(error) = &execution.error {
+        return write_query_failure(err, error.clone(), &execution.notice_report, options.format);
+    }
+    if options.format == Format::Json && execution.notice_report.counts.needs_report() {
+        writeln!(err,"{}",serde_json::json!({"kind":"notice_retention","source":"client","notice_report":execution.notice_report.to_json()})).map_err(io_diagnostic)?;
+    } else {
+        write_notice_counts(err, execution.notice_report.counts).map_err(io_diagnostic)?;
     }
     Ok(ExitCode::Success)
+}
+
+fn write_query_failure(
+    err: &mut impl Write,
+    diagnostic: Diagnostic,
+    report: &crate::query::result::NoticeReport,
+    format: Format,
+) -> Result<ExitCode, Diagnostic> {
+    if format == Format::Json {
+        // Completed-prefix result bytes remain on stdout; stderr has one diagnostic.
+        let mut value = diagnostic.to_json();
+        if report.counts.needs_report() {
+            value["notice_report"] = report.to_json();
+        }
+        writeln!(err, "{value}").map_err(io_diagnostic)?;
+        Ok(diagnostic.exit_code())
+    } else {
+        write_notice_counts(err, report.counts).map_err(io_diagnostic)?;
+        Err(diagnostic)
+    }
+}
+
+pub(crate) fn write_notice_counts(
+    err: &mut impl Write,
+    counts: crate::query::result::NoticeCounts,
+) -> std::io::Result<()> {
+    for line in counts.lines() {
+        writeln!(err, "{line}")?;
+    }
+    Ok(())
+}
+
+/// Reports client retention only after buffered data writing succeeds. Counts
+/// describe received rows, never an unknown server total or a reason to replay.
+fn write_buffered_truncation(
+    err: &mut impl Write,
+    execution: &crate::query::result::Execution,
+    format: Format,
+) -> std::io::Result<()> {
+    if !matches!(
+        format,
+        Format::Csv | Format::Tsv | Format::Ndjson | Format::Markdown | Format::Insert
+    ) {
+        return Ok(());
+    }
+    for (index, set) in execution
+        .statements
+        .iter()
+        .filter_map(|statement| statement.result_set.as_ref())
+        .enumerate()
+    {
+        if !set.is_available() {
+            writeln!(
+                err,
+                "Result set {} data unavailable: retained no description for {} source columns and {} received rows because the retained-result limit was reached. For a future complete streaming export, choose --output before execution.",
+                index + 1,
+                set.source_column_count(),
+                set.rows_seen
+            )?;
+        } else if set.is_truncated() {
+            writeln!(
+                err,
+                "Result set {} truncated: retained {} of {} received rows. For a future complete streaming export, choose --output before execution.",
+                index + 1,
+                set.rows.len(),
+                set.rows_seen,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Opens the plain, line-oriented client.

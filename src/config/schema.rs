@@ -8,21 +8,83 @@
 //! No secret value may ever appear here. Profiles (Feature 002) will store
 //! references to credentials, never credentials.
 
+pub use crate::ui::theme::{ThemeDefinition, ThemeSelection};
 use serde::{Deserialize, Serialize};
 
 /// Schema version understood by this build.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-/// Non-secret user configuration.
+/// Non-secret configuration with typed manual theme inputs.
+///
+/// Deserialization lowers grammar only. Load, migration and save must resolve
+/// the complete theme before admitting these inputs or persisting them.
+pub type Config = ConfigSchema<ThemeSelection, ThemeDefinition>;
+
+#[derive(Clone, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct DeferredThemeValue(toml::Value);
+
+impl std::fmt::Debug for DeferredThemeValue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DeferredThemeValue(<hidden>)")
+    }
+}
+
+pub(crate) type PendingConfig = ConfigSchema<Option<DeferredThemeValue>, DeferredThemeValue>;
+
+impl PendingConfig {
+    /// Resolves the two deferred leaves only, after a caller's ordinary gates.
+    pub(crate) fn resolve(
+        self,
+    ) -> Result<(Config, crate::ui::theme::ValidatedThemes), crate::ui::theme::ThemeRefusal> {
+        let (selection, definition) = crate::ui::theme::lower_theme_inputs(
+            self.ui.theme.as_ref().map(|value| &value.0),
+            self.theme.as_ref().map(|value| &value.0),
+        )?;
+        let themes = crate::ui::theme::ValidatedThemes::resolve(selection, definition.as_ref())?;
+        let ui = UiSchema {
+            theme: selection,
+            density: self.ui.density,
+            glyphs: self.ui.glyphs,
+            color: self.ui.color,
+            color_depth: self.ui.color_depth,
+            mouse: self.ui.mouse,
+            reduced_motion: self.ui.reduced_motion,
+            completion: self.ui.completion,
+        };
+        Ok((
+            ConfigSchema {
+                schema_version: self.schema_version,
+                ui,
+                query: self.query,
+                connection: self.connection,
+                history: self.history,
+                clipboard: self.clipboard,
+                profiles: self.profiles,
+                keys: self.keys,
+                auth: self.auth,
+                theme: definition,
+            },
+            themes,
+        ))
+    }
+}
+
+/// The single configuration schema, with only the theme leaves parameterised.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
+#[serde(
+    rename = "Config",
+    expecting = "struct Config",
+    deny_unknown_fields,
+    bound(deserialize = "S: Deserialize<'de> + Default, D: Deserialize<'de>")
+)]
+pub struct ConfigSchema<S, D> {
     /// Version of this file's schema. Written by the product, migrated on upgrade.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     /// Presentation settings.
     #[serde(default)]
-    pub ui: UiConfig,
+    pub ui: UiSchema<S>,
     /// Query execution limits.
     #[serde(default)]
     pub query: QueryConfig,
@@ -58,6 +120,9 @@ pub struct Config {
     /// than code.
     #[serde(default)]
     pub auth: AuthConfig,
+    /// Optional custom-theme definition; a pending parser defers only this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<D>,
 }
 
 /// One or several keys bound to the same action.
@@ -81,11 +146,11 @@ impl KeySpec {
     }
 }
 
-impl Default for Config {
+impl<S: Default, D> Default for ConfigSchema<S, D> {
     fn default() -> Self {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
-            ui: UiConfig::default(),
+            ui: UiSchema::default(),
             query: QueryConfig::default(),
             connection: ConnectionConfig::default(),
             history: HistoryConfig::default(),
@@ -93,6 +158,7 @@ impl Default for Config {
             keys: std::collections::BTreeMap::new(),
             profiles: std::collections::BTreeMap::new(),
             auth: AuthConfig::default(),
+            theme: None,
         }
     }
 }
@@ -341,13 +407,25 @@ const fn default_schema_version() -> u32 {
     0
 }
 
-/// Presentation settings.
+/// Presentation settings with the supported manual selection type.
+pub type UiConfig = UiSchema<ThemeSelection>;
+
+/// Presentation schema with only the selection leaf parameterised.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct UiConfig {
-    /// Which built-in theme to use.
+#[serde(
+    rename = "UiConfig",
+    expecting = "struct UiConfig",
+    deny_unknown_fields,
+    rename_all = "kebab-case",
+    bound(deserialize = "S: Deserialize<'de> + Default")
+)]
+pub struct UiSchema<S> {
+    /// The contracted comfortable or compact spacing table.
     #[serde(default)]
-    pub theme: ThemeChoice,
+    pub density: Density,
+    /// Which manual theme to select.
+    #[serde(default)]
+    pub theme: S,
     /// Whether to draw with Unicode box characters or plain ASCII.
     #[serde(default)]
     pub glyphs: GlyphMode,
@@ -368,10 +446,11 @@ pub struct UiConfig {
     pub completion: bool,
 }
 
-impl Default for UiConfig {
+impl<S: Default> Default for UiSchema<S> {
     fn default() -> Self {
         Self {
-            theme: ThemeChoice::Dark,
+            density: Density::Comfortable,
+            theme: S::default(),
             glyphs: GlyphMode::Auto,
             color: ColorMode::Auto,
             color_depth: ColorDepthChoice::Auto,
@@ -384,6 +463,17 @@ impl Default for UiConfig {
 
 const fn default_completion() -> bool {
     true
+}
+
+/// The two supported presentation densities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Density {
+    /// Default spacing with room to breathe.
+    #[default]
+    Comfortable,
+    /// The documented compact spacing table.
+    Compact,
 }
 
 /// Built-in themes.
@@ -545,11 +635,13 @@ pub struct ValidationIssue {
     pub suggestion: String,
 }
 
-impl Config {
+impl<S, D> ConfigSchema<S, D> {
     /// Checks values that the type system cannot express.
     ///
     /// Returns every issue found rather than stopping at the first, so one run of
     /// `config validate` fixes one round of edits.
+    /// Theme resolution is a separate admission gate so each caller preserves
+    /// its existing ordinary validation order.
     #[must_use]
     pub fn validate(&self) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();

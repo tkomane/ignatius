@@ -21,6 +21,47 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Color;
 use std::time::Duration;
 
+#[test]
+fn density_title_padding_preserves_content_whitespace_on_panes_and_overlays() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        let p = colour_off_presentation().with_density(density);
+        for overlay in [false, true] {
+            let area = Rect::new(0, 0, 30, 3);
+            let mut buf = Buffer::empty(area);
+            let block = if overlay {
+                super::overlay_block("  name  ".into(), &p)
+            } else {
+                super::pane_block("  name  ".into(), true, &p)
+            };
+            use ratatui::widgets::Widget;
+            block.render(area, &mut buf);
+            let line = crate::ui::layout::buffer_to_string(&buf)
+                .lines()
+                .next()
+                .unwrap()
+                .to_owned();
+            let n = line.chars().position(|ch| ch == 'n').unwrap();
+            assert_eq!(
+                n,
+                if density == crate::config::Density::Comfortable {
+                    3
+                } else {
+                    2
+                },
+                "{line}"
+            );
+            assert_eq!(
+                line.chars().nth(n + 4),
+                Some(' '),
+                "the content's final space survives: {line}"
+            );
+        }
+    }
+}
+
 // ------------------------------------------------- painted surfaces (T017)
 
 /// A presentation on one palette at a chosen colour depth.
@@ -318,6 +359,7 @@ fn grid_model(column_count: usize, row_count: usize) -> Model {
     let mut model = Model::new(100);
     model.sidebar_visible = false;
     model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
         job: JobId(1),
         statements: vec![StatementResult {
             result_set: Some(set),
@@ -380,7 +422,7 @@ fn the_horizontal_split_is_where_editor_meets_results() {
     let model = Model::new(100);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (editor, results) = main_panes(body, true);
+    let (editor, results) = main_panes(body, true, &model.splits);
     let editor_bottom = editor.y + editor.height - 1;
     assert_eq!(
         region_at(&model, area, editor.x + 5, editor_bottom),
@@ -491,7 +533,7 @@ fn editor_cells_carry_line_and_column() {
     model.editor.set_cursor(0);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (editor, _) = main_panes(body, false);
+    let (editor, _) = main_panes(body, false, &model.splits);
     let inside = inner(editor);
     let text_start = inside.x + 4; // two-digit gutter, a space and the marker
 
@@ -546,7 +588,7 @@ fn result_grid_cells_headers_and_edges_carry_source_indices() {
     let model = grid_model(2, 2);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (_, results) = main_panes(body, false);
+    let (_, results) = main_panes(body, false, &model.splits);
     let inside = inner(results);
     let content_x = inside.x + 3; // two-digit gutter plus its space
     let header_y = inside.y + 3;
@@ -592,7 +634,7 @@ fn an_overflowing_grid_exposes_the_scrollbar() {
     let model = grid_model(2, 40);
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (_, results) = main_panes(body, false);
+    let (_, results) = main_panes(body, false, &model.splits);
     let inside = inner(results);
     let scrollbar_x = inside.x + inside.width - 1;
     assert_eq!(
@@ -628,7 +670,7 @@ fn borders_and_out_of_area_cells_are_misses() {
     assert_eq!(region_at(&model, area, 0, 30), None);
 
     let body = body_area(area);
-    let (editor, _) = main_panes(body, true);
+    let (editor, _) = main_panes(body, true, &model.splits);
     // The editor's top border is not a text cell.
     assert_eq!(region_at(&model, area, editor.x + 1, editor.y), None);
 
@@ -672,7 +714,7 @@ fn an_open_palette_reports_items_and_hides_the_panes_beneath() {
 
     // A pane cell is owned by the overlay, not by the editor beneath it.
     let body = body_area(area);
-    let (editor, _) = main_panes(body, false);
+    let (editor, _) = main_panes(body, false, &model.splits);
     let editor_inner = inner(editor);
     assert_eq!(
         region_at(&model, area, editor_inner.x, editor_inner.y),
@@ -692,11 +734,338 @@ fn an_open_help_overlay_hides_the_panes_beneath() {
     model.help_open = true;
     let area = Rect::new(0, 0, 100, 30);
     let body = body_area(area);
-    let (editor, _) = main_panes(body, false);
+    let (editor, _) = main_panes(body, false, &model.splits);
     let editor_inner = inner(editor);
     assert_eq!(
         region_at(&model, area, editor_inner.x, editor_inner.y),
         None
     );
     assert_eq!(region_at(&model, area, 0, 0), None);
+}
+
+fn editor_eol_probe(
+    text: &str,
+    cursor: usize,
+    name: &str,
+) -> (Model, Buffer, Rect, Vec<(u16, u16)>) {
+    let area = Rect::new(0, 0, 100, 30);
+    let mut model = Model::new(100);
+    model.size = (area.width, area.height);
+    model.focus = Focus::Editor;
+    model.editor.set_text(text);
+    model.editor.set_cursor(cursor);
+    model.presentation = Presentation::new(
+        Theme::new(ThemeChoice::HighContrast, true),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let pane = crate::ui::layout::pane_geometry(&model, area)
+        .editor
+        .unwrap();
+    let inner = super::inner_rect(pane);
+    let mut buf = Buffer::empty(area);
+    crate::ui::render(&model, &Keymap::new(), area, &mut buf);
+    let selection = model.presentation.theme.style(Token::Selection);
+    let carets = (inner.y..inner.bottom())
+        .flat_map(|y| (inner.x..inner.right()).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            selection.bg == Some(buf[(x, y)].bg) && selection.fg == Some(buf[(x, y)].fg)
+        })
+        .collect::<Vec<_>>();
+    if let Some(dir) = std::env::var_os("IGNATIUS_EDITOR_REPRO_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cells = (area.y..area.bottom()).flat_map(|y| (area.x..area.right()).map(move |x| (x,y)))
+            .map(|(x,y)| serde_json::json!({"x":x,"y":y,"symbol":buf[(x,y)].symbol(),"fg":format!("{:?}",buf[(x,y)].fg),"bg":format!("{:?}",buf[(x,y)].bg),"modifiers":buf[(x,y)].modifier.bits()})).collect::<Vec<_>>();
+        std::fs::write(dir.join(format!("{name}.json")), serde_json::to_vec_pretty(&serde_json::json!({"kind":"SyntheticRatatuiBuffer","source":text,"cursor_byte":cursor,"scalar_position":model.editor.position(),"pane":[pane.x,pane.y,pane.width,pane.height],"carets":carets,"cells":cells})).unwrap()).unwrap();
+    }
+    assert_eq!(model.editor.cursor(), cursor, "source cursor remains valid");
+    (model, buf, area, carets)
+}
+
+#[test]
+fn editor_eol_probe_short_ascii_control() {
+    let (model, _, _, carets) = editor_eol_probe("select 1", 8, "short-ascii");
+    assert_eq!(model.editor.position(), (1, 9));
+    assert_eq!(carets.len(), 1);
+}
+
+#[test]
+fn editor_eol_probe_long_ascii_caret_visible() {
+    let text = "a".repeat(160);
+    let (_, _, _, carets) = editor_eol_probe(&text, text.len(), "long-ascii");
+    assert_eq!(
+        carets.len(),
+        1,
+        "valid end cursor must remain visible in actual 100x30 Buffer"
+    );
+}
+
+fn editor_probe_hit_matches_caret(text: &str, cursor: usize, name: &str) {
+    let (model, _, area, carets) = editor_eol_probe(text, cursor, name);
+    let (x, y) = *carets.first().expect("short line caret is visible");
+    let (line, column) = model.editor.position();
+    assert_eq!(
+        region_at(&model, area, x, y),
+        Some(Region::EditorText { line, column }),
+        "painted caret cell must hit the same source scalar"
+    );
+}
+
+#[test]
+fn editor_eol_probe_wide_hit_matches_caret() {
+    editor_probe_hit_matches_caret("界ab", "界".len(), "wide");
+}
+
+#[test]
+fn editor_eol_probe_combining_hit_matches_caret() {
+    editor_probe_hit_matches_caret("e\u{301}X", "e\u{301}".len(), "combining");
+}
+
+#[test]
+fn editor_eol_probe_control_hit_matches_caret() {
+    editor_probe_hit_matches_caret("A\tB", 2, "control");
+}
+
+#[test]
+fn editor_eol_probe_home_and_very_long_ascii_remain_visible() {
+    let text = "a".repeat(70_000);
+    let (_, _, _, end) = editor_eol_probe(&text, text.len(), "very-long-ascii");
+    assert_eq!(end.len(), 1);
+    let (model, buf, area, home) = editor_eol_probe(&text, 0, "long-ascii-home");
+    assert_eq!(home.len(), 1);
+    assert_eq!(
+        region_at(&model, area, home[0].0, home[0].1),
+        Some(Region::EditorText { line: 1, column: 1 })
+    );
+    assert_eq!(buf[home[0]].symbol(), "a");
+}
+
+#[test]
+fn editor_eol_probe_cluster_interior_highlights_whole_unit() {
+    for (name, text, cursor, symbol, width) in [
+        ("combining-interior", "e\u{301}X", 1, "e\u{301}", 1),
+        (
+            "zwj-interior",
+            "👩\u{200d}💻X",
+            "👩".len(),
+            "👩\u{200d}💻",
+            2,
+        ),
+    ] {
+        let (model, buf, area, carets) = editor_eol_probe(text, cursor, name);
+        // Ratatui stores a wide grapheme at its leading cell and resets the
+        // skipped continuation cell. The whole symbol must stay in that cell.
+        assert_eq!(carets.len(), 1);
+        assert_eq!(buf[carets[0]].symbol(), symbol);
+        let (first_x, y) = carets[0];
+        for x in first_x..first_x + width {
+            assert_eq!(
+                region_at(&model, area, x, y),
+                Some(Region::EditorText { line: 1, column: 1 })
+            );
+        }
+    }
+}
+
+#[test]
+fn editor_eol_probe_tiny_capacity_and_degradation_keep_selected_cell() {
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for glyph in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+            for depth in [
+                ColorDepth::TrueColor,
+                ColorDepth::Indexed256,
+                ColorDepth::Basic16,
+                ColorDepth::None,
+            ] {
+                let mut model = Model::new(100);
+                model.focus = Focus::Editor;
+                model.editor.set_text("界X");
+                model.editor.set_cursor(0);
+                model.presentation = Presentation::new(
+                    Theme::new(ThemeChoice::HighContrast, depth != ColorDepth::None)
+                        .with_depth(depth),
+                    Glyphs::new(glyph),
+                    true,
+                )
+                .with_density(density);
+                let area = Rect::new(0, 0, 7, 3);
+                let mut buf = Buffer::empty(area);
+                render_editor(&model, &Keymap::new(), &model.presentation, area, &mut buf);
+                if density == crate::config::Density::Comfortable
+                    && glyph == GlyphTier::Unicode
+                    && depth == ColorDepth::TrueColor
+                {
+                    editor_probe_capture_extra("tiny-one-text-cell", &model, &buf);
+                }
+                let cell = &buf[(5, 1)];
+                assert_eq!(cell.symbol(), " ");
+                let selection = model.presentation.theme.style(Token::Selection);
+                assert!(cell.modifier.contains(selection.add_modifier));
+                if let Some(bg) = selection.bg {
+                    assert_eq!(cell.bg, bg);
+                }
+                if let Some(fg) = selection.fg {
+                    assert_eq!(cell.fg, fg);
+                }
+                assert_eq!(
+                    super::editor_region(&model, area, 5, 1),
+                    Some(Region::EditorText { line: 1, column: 1 })
+                );
+            }
+        }
+    }
+}
+
+fn editor_probe_capture_extra(name: &str, model: &Model, buf: &Buffer) {
+    if let Some(dir) = std::env::var_os("IGNATIUS_EDITOR_REPRO_DIR") {
+        let cells=(buf.area.y..buf.area.bottom()).flat_map(|y| (buf.area.x..buf.area.right()).map(move |x|(x,y)))
+            .map(|(x,y)| serde_json::json!({"x":x,"y":y,"symbol":buf[(x,y)].symbol(),"fg":format!("{:?}",buf[(x,y)].fg),"bg":format!("{:?}",buf[(x,y)].bg),"modifiers":buf[(x,y)].modifier.bits()})).collect::<Vec<_>>();
+        std::fs::write(std::path::PathBuf::from(dir).join(format!("{name}.json")),serde_json::to_vec_pretty(&serde_json::json!({"kind":"SyntheticRatatuiBuffer","source":model.editor.text(),"cursor_byte":model.editor.cursor(),"area":[buf.area.x,buf.area.y,buf.area.width,buf.area.height],"cells":cells})).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn editor_eol_probe_completion_anchor_uses_display_cells_and_no_text_capacity_is_noop() {
+    let mut anchors = Vec::new();
+    for (name, text) in [
+        ("completion-wide", "界界界SEL"),
+        ("completion-ascii", "aaaaaaSEL"),
+    ] {
+        let (mut model, _, area, _) = editor_eol_probe(text, text.len(), name);
+        model.completion.menu = Some(crate::app::completion::CompletionMenu::new(
+            crate::query::completion::complete("SEL", 3, None),
+            true,
+        ));
+        let mut buf = Buffer::empty(area);
+        crate::ui::render(&model, &Keymap::new(), area, &mut buf);
+        let title = (area.y..area.bottom())
+            .find_map(|y| {
+                let text = (area.x..area.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>();
+                text.find("Complete")
+                    .map(|byte| (text[..byte].chars().count(), y))
+            })
+            .expect("completion title");
+        anchors.push(title);
+        editor_probe_capture_extra(&format!("{name}-popup"), &model, &buf);
+        model.sidebar_visible = false;
+        model.splits.zoomed = true;
+        // A deliberately very large line-count gutter consumes all available
+        // text cells only in a direct narrow pane; render_completion uses the
+        // actual shared pane geometry and refuses its zero-capacity case.
+        let small = Rect::new(0, 0, 6, 3);
+        let mut tinybuf = Buffer::empty(small);
+        render_editor(
+            &model,
+            &Keymap::new(),
+            &model.presentation,
+            small,
+            &mut tinybuf,
+        );
+        editor_probe_capture_extra("tiny-no-text-capacity", &model, &tinybuf);
+        assert!(
+            (1..5).all(|x| tinybuf[(x, 1)].bg
+                != model.presentation.theme.style(Token::Selection).bg.unwrap())
+        );
+        let before = tinybuf.clone();
+        super::render_completion(&model, &model.presentation, small, &mut tinybuf);
+        assert_eq!(tinybuf, before, "no text capacity must not draw a popup");
+    }
+    assert_eq!(
+        anchors[0], anchors[1],
+        "equal display-cell carets need equal popup anchors"
+    );
+}
+
+#[test]
+fn editor_eol_probe_cluster_error_uses_any_source_byte_and_caret_wins() {
+    let (mut model, _, area, carets) = editor_eol_probe("e\u{301}X", 1, "cluster-error-setup");
+    let point = carets[0];
+    model.error_location = Some(crate::query::error_location::ErrorLocation {
+        cursor: 1,
+        token: Some(1..3),
+        line: 1,
+        column: 2,
+        statement_number: 1,
+        character: 2,
+    });
+    let mut buf = Buffer::empty(area);
+    crate::ui::render(&model, &Keymap::new(), area, &mut buf);
+    assert_eq!(buf[point].symbol(), "e\u{301}");
+    assert_eq!(
+        Some(buf[point].bg),
+        model.presentation.theme.style(Token::Selection).bg
+    );
+    model.focus = Focus::Results;
+    crate::ui::render(&model, &Keymap::new(), area, &mut buf);
+    assert_eq!(
+        Some(buf[point].fg),
+        model.presentation.theme.style(Token::Danger).fg
+    );
+    editor_probe_capture_extra("cluster-error-unfocused", &model, &buf);
+}
+
+#[test]
+fn editor_eol_probe_unfocused_zero_width_maps_painted_following_unit() {
+    let (mut model, _, area, carets) = editor_eol_probe("\u{301}X", 0, "zero-width-focused");
+    let point = carets[0];
+    assert_eq!(
+        region_at(&model, area, point.0, point.1),
+        Some(Region::EditorText { line: 1, column: 1 })
+    );
+    model.focus = Focus::Results;
+    let mut buf = Buffer::empty(area);
+    crate::ui::render(&model, &Keymap::new(), area, &mut buf);
+    assert_eq!(
+        buf[point].symbol(),
+        "X",
+        "unfocused rendering exposes the following source unit"
+    );
+    editor_probe_capture_extra("zero-width-unfocused", &model, &buf);
+    assert_eq!(
+        region_at(&model, area, point.0, point.1),
+        Some(Region::EditorText { line: 1, column: 2 }),
+        "hit must follow painted X when no caret blank is painted"
+    );
+}
+
+#[test]
+fn editor_eol_probe_oversized_escape_blank_retains_source_mapping() {
+    for text in ["\tX", "\u{009b}X"] {
+        let mut model = Model::new(100);
+        model.focus = Focus::Editor;
+        model.editor.set_text(text);
+        model.editor.set_cursor(0);
+        model.presentation = Presentation::new(
+            Theme::new(ThemeChoice::HighContrast, true),
+            Glyphs::new(GlyphTier::Unicode),
+            true,
+        );
+        let pane = Rect::new(0, 0, 7, 3);
+        let mut buf = Buffer::empty(pane);
+        render_editor(&model, &Keymap::new(), &model.presentation, pane, &mut buf);
+        assert_eq!(buf[(5, 1)].symbol(), " ");
+        assert_eq!(
+            Some(buf[(5, 1)].bg),
+            model.presentation.theme.style(Token::Selection).bg
+        );
+        assert_eq!(
+            super::editor_region(&model, pane, 5, 1),
+            Some(Region::EditorText { line: 1, column: 1 })
+        );
+        editor_probe_capture_extra(
+            if text.starts_with('\t') {
+                "oversized-tab-blank"
+            } else {
+                "oversized-c1-blank"
+            },
+            &model,
+            &buf,
+        );
+    }
 }

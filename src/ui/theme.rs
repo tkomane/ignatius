@@ -12,8 +12,15 @@
 use crate::config::ThemeChoice;
 use ratatui::style::{Color, Modifier, Style};
 
+mod custom;
+pub use custom::{
+    ThemeCycleError, ThemeDefinition, ThemeRefusal, ThemeSelection, ValidatedCustomPalette,
+    ValidatedThemes, lower_theme_inputs,
+};
+
 /// A semantic role that the interface needs to express.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(usize)]
 pub enum Token {
     /// Ordinary background.
     Surface,
@@ -66,6 +73,49 @@ pub enum Token {
 }
 
 impl Token {
+    /// Fixed exhaustive palette size.
+    pub const COUNT: usize = 24;
+    /// Stable slot in Token::ALL order.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+    /// Exact canonical configuration key.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Surface => "surface",
+            Self::SurfaceAlt => "surface-alt",
+            Self::SurfacePane => "surface-pane",
+            Self::SurfaceOverlay => "surface-overlay",
+            Self::Text => "text",
+            Self::Muted => "muted",
+            Self::Border => "border",
+            Self::Focus => "focus",
+            Self::Success => "success",
+            Self::Warning => "warning",
+            Self::Danger => "danger",
+            Self::Info => "info",
+            Self::EnvironmentProduction => "environment-production",
+            Self::EnvironmentNonProduction => "environment-non-production",
+            Self::TransactionActive => "transaction-active",
+            Self::TransactionFailed => "transaction-failed",
+            Self::NullValue => "null-value",
+            Self::Selection => "selection",
+            Self::Header => "header",
+            Self::SyntaxKeyword => "syntax-keyword",
+            Self::SyntaxLiteral => "syntax-literal",
+            Self::SyntaxNumber => "syntax-number",
+            Self::SyntaxComment => "syntax-comment",
+            Self::SyntaxIdentifier => "syntax-identifier",
+        }
+    }
+    /// Resolves only exact canonical names, with no aliases or trimming.
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|token| token.key() == key)
+    }
+
     /// Every token. Used to prove each theme defines all of them.
     pub const ALL: &'static [Self] = &[
         Self::Surface,
@@ -106,6 +156,25 @@ impl From<Rgb> for Color {
 }
 
 impl Rgb {
+    /// Parses only # plus six ASCII hex digits, without aliases or trimming.
+    #[must_use]
+    pub fn from_hex(value: &str) -> Option<Self> {
+        let bytes = value.as_bytes();
+        if bytes.len() != 7 || bytes[0] != b'#' || !bytes[1..].iter().all(u8::is_ascii_hexdigit) {
+            return None;
+        }
+        Some(Self(
+            u8::from_str_radix(&value[1..3], 16).ok()?,
+            u8::from_str_radix(&value[3..5], 16).ok()?,
+            u8::from_str_radix(&value[5..7], 16).ok()?,
+        ))
+    }
+    /// Canonical serialization of a typed RGB value.
+    #[must_use]
+    pub fn hex(self) -> String {
+        format!("#{:02X}{:02X}{:02X}", self.0, self.1, self.2)
+    }
+
     /// WCAG relative luminance.
     #[must_use]
     pub fn luminance(self) -> f64 {
@@ -132,12 +201,17 @@ impl Rgb {
 /// A resolved theme: a palette plus whether colour may be emitted at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
-    /// Which built-in palette this is.
-    pub choice: ThemeChoice,
+    active: ActivePalette,
     /// When false, tokens resolve to modifiers only and no colour is emitted.
     pub color: bool,
     /// How many colours the terminal can actually show.
     pub depth: ColorDepth,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ActivePalette {
+    Builtin(ThemeChoice),
+    Custom(ValidatedCustomPalette),
 }
 
 /// How many colours the terminal can actually show.
@@ -204,7 +278,7 @@ impl Theme {
     #[must_use]
     pub const fn new(choice: ThemeChoice, color: bool) -> Self {
         Self {
-            choice,
+            active: ActivePalette::Builtin(choice),
             color,
             depth: ColorDepth::TrueColor,
         }
@@ -258,10 +332,20 @@ impl Theme {
     /// The palette colour for a token, ignoring whether colour is enabled.
     #[must_use]
     pub const fn rgb(&self, token: Token) -> Rgb {
-        match self.choice {
-            ThemeChoice::Dark => dark(token),
-            ThemeChoice::Light => light(token),
-            ThemeChoice::HighContrast => high_contrast(token),
+        match &self.active {
+            ActivePalette::Builtin(ThemeChoice::Dark) => dark(token),
+            ActivePalette::Builtin(ThemeChoice::Light) => light(token),
+            ActivePalette::Builtin(ThemeChoice::HighContrast) => high_contrast(token),
+            ActivePalette::Custom(palette) => palette.colors[token.index()],
+        }
+    }
+
+    /// Identity derived inseparably from the active palette data.
+    #[must_use]
+    pub const fn selection(&self) -> ThemeSelection {
+        match &self.active {
+            ActivePalette::Builtin(choice) => ThemeSelection::from_builtin(*choice),
+            ActivePalette::Custom(_) => ThemeSelection::Custom,
         }
     }
 
@@ -342,13 +426,13 @@ const fn dark(token: Token) -> Rgb {
         Token::EnvironmentProduction => Rgb(0xff, 0x9e, 0x9e),
         Token::EnvironmentNonProduction => Rgb(0x9a, 0xa4, 0xb2),
         Token::TransactionActive => Rgb(0xe6, 0xb4, 0x50),
-        Token::NullValue => Rgb(0x8b, 0x93, 0xa1),
+        Token::NullValue => Rgb(0x94, 0x9c, 0xaa),
         Token::Selection => Rgb(0x9a, 0xb8, 0xe8),
         Token::Header => Rgb(0xc8, 0xd3, 0xe3),
         Token::SyntaxKeyword => Rgb(0xc9, 0x9c, 0xf0),
         Token::SyntaxLiteral => Rgb(0x9e, 0xd6, 0x7e),
         Token::SyntaxNumber => Rgb(0xf0, 0xc0, 0x74),
-        Token::SyntaxComment => Rgb(0x8b, 0x95, 0xa6),
+        Token::SyntaxComment => Rgb(0x92, 0x9c, 0xad),
         Token::SyntaxIdentifier => Rgb(0x7d, 0xcf, 0xff),
     }
 }
@@ -372,13 +456,13 @@ const fn light(token: Token) -> Rgb {
         Token::EnvironmentProduction => Rgb(0x8f, 0x0f, 0x1a),
         Token::EnvironmentNonProduction => Rgb(0x55, 0x5e, 0x6b),
         Token::TransactionActive => Rgb(0x7a, 0x4d, 0x00),
-        Token::NullValue => Rgb(0x60, 0x6a, 0x78),
+        Token::NullValue => Rgb(0x5a, 0x64, 0x72),
         Token::Selection => Rgb(0x33, 0x5b, 0xa8),
         Token::Header => Rgb(0x2b, 0x32, 0x3d),
         Token::SyntaxKeyword => Rgb(0x6b, 0x21, 0xa8),
         Token::SyntaxLiteral => Rgb(0x0e, 0x63, 0x3e),
         Token::SyntaxNumber => Rgb(0x7a, 0x4d, 0x00),
-        Token::SyntaxComment => Rgb(0x5d, 0x66, 0x73),
+        Token::SyntaxComment => Rgb(0x5b, 0x64, 0x71),
         Token::SyntaxIdentifier => Rgb(0x0a, 0x55, 0x74),
     }
 }

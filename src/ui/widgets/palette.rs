@@ -3,12 +3,26 @@ use crate::app::model::Model;
 use crate::query::value::sanitize_for_display;
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
+use crate::ui::layout::{OverlayAnchor, overlay_box};
 use crate::ui::theme::{Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
+
+pub(crate) fn palette_box(
+    palette: &crate::app::palette::Palette,
+    presentation: &Presentation,
+    area: Rect,
+) -> Rect {
+    let notes = palette
+        .context_note
+        .as_deref()
+        .map_or(0, |note| note.split(". ").count());
+    let minimum = u16::try_from(notes).unwrap_or(u16::MAX).saturating_add(4);
+    overlay_box(area, presentation, (76, 18), minimum, OverlayAnchor::Top)
+}
 
 pub(crate) fn render_palette(
     palette: &crate::app::palette::Palette,
@@ -17,14 +31,8 @@ pub(crate) fn render_palette(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let width = area.width.saturating_sub(8).min(76);
-    let height = area.height.saturating_sub(6).min(18);
-    let palette_area = Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + 2,
-        width,
-        height,
-    };
+    let palette_area = palette_box(palette, presentation, area);
+    let height = palette_area.height;
     ratatui::widgets::Clear.render(palette_area, buf);
 
     let matches = palette.matches();
@@ -72,21 +80,30 @@ pub(crate) fn render_palette(
     let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
     for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
         let selected = index == palette.selected;
+        let selection = if selected {
+            theme.style(Token::Selection)
+        } else {
+            Style::default()
+        };
         let mut spans = vec![
-            Span::styled(format!(" {:<8}", entry.group), theme.style(Token::Muted)),
+            Span::styled(
+                format!(" {:<8}", entry.group),
+                theme.style(Token::Muted).patch(selection),
+            ),
             Span::styled(
                 sanitize_for_display(&entry.label),
                 if selected {
                     theme.style(Token::Selection)
                 } else {
                     theme.style(Token::Text)
-                },
+                }
+                .patch(selection),
             ),
         ];
         if !entry.detail.is_empty() {
             spans.push(Span::styled(
                 format!("  {}", sanitize_for_display(&entry.detail)),
-                theme.style(Token::Muted),
+                theme.style(Token::Muted).patch(selection),
             ));
         }
         let mut line = Line::from(spans);
@@ -146,8 +163,9 @@ pub(crate) fn render_connection_details(
     ratatui::widgets::Clear.render(area, buf);
     Block::new().style(theme.stripe()).render(area, buf);
 
-    let width = area.width.saturating_sub(6).min(96);
-    let height = area.height.saturating_sub(4).min(30);
+    let box_area = overlay_box(area, presentation, (96, 30), 8, OverlayAnchor::Center);
+    let width = box_area.width;
+    let height = box_area.height;
     if width < 28 || height < 8 {
         Paragraph::new(Line::from(Span::styled(
             "Connection details need a larger terminal. Esc closes.",
@@ -161,12 +179,6 @@ pub(crate) fn render_connection_details(
         return;
     }
 
-    let box_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
     ratatui::widgets::Clear.render(box_area, buf);
     // The overlay fill comes from the depth-aware surface route, so 256-colour
     // terminals get an indexed colour and 16-colour or colour-off terminals
@@ -367,3 +379,6 @@ fn push_detail(lines: &mut Vec<Line<'static>>, label: &str, value: String, style
         Span::styled(sanitize_for_display(&value), style),
     ]));
 }
+
+#[cfg(test)]
+mod tests;

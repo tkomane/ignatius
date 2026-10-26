@@ -850,6 +850,8 @@ impl FormatNotice {
 /// ordinary next frame. The renderer holds no copy.
 #[derive(Debug, Clone)]
 pub struct Presentation {
+    /// The configured spacing choice, independent of terminal layout tier.
+    pub density: crate::config::Density,
     /// Palette and whether colour may be emitted.
     pub theme: crate::ui::theme::Theme,
     /// Which icons and box characters may be drawn.
@@ -870,10 +872,27 @@ impl Presentation {
         reduced_motion: bool,
     ) -> Self {
         Self {
+            density: crate::config::Density::Comfortable,
             color_depth: theme.depth,
             theme,
             glyphs,
             reduced_motion,
+        }
+    }
+
+    /// Selects a contracted spacing table without changing existing defaults.
+    #[must_use]
+    pub const fn with_density(mut self, density: crate::config::Density) -> Self {
+        self.density = density;
+        self
+    }
+
+    /// All density-dependent spacing, from the single data table.
+    #[must_use]
+    pub const fn spacing(&self) -> Spacing {
+        match self.density {
+            crate::config::Density::Comfortable => SPACING_TABLE[0],
+            crate::config::Density::Compact => SPACING_TABLE[1],
         }
     }
 
@@ -888,6 +907,7 @@ impl Default for Presentation {
     /// detection at startup.
     fn default() -> Self {
         Self {
+            density: crate::config::Density::Comfortable,
             theme: crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, false),
             glyphs: crate::ui::glyphs::Glyphs::new(crate::ui::glyphs::GlyphTier::Unicode),
             reduced_motion: false,
@@ -896,11 +916,359 @@ impl Default for Presentation {
     }
 }
 
+/// The complete density-dependent spacing contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spacing {
+    pub title_padding: u16,
+    pub grid_cell_padding: u16,
+    pub toolbar_blank_rows: u16,
+    pub footer_hint_cap: usize,
+    pub overlay_margin: u16,
+}
+
+pub(crate) const SPACING_TABLE: [Spacing; 2] = [
+    Spacing {
+        title_padding: 1,
+        grid_cell_padding: 1,
+        toolbar_blank_rows: 1,
+        footer_hint_cap: 6,
+        overlay_margin: 2,
+    },
+    Spacing {
+        title_padding: 0,
+        grid_cell_padding: 1,
+        toolbar_blank_rows: 0,
+        footer_hint_cap: 4,
+        overlay_margin: 1,
+    },
+];
+
+/// Session-local unzoomed preferences. Missing values retain the initial
+/// responsive heuristics; rendering clamps them without destroying them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SplitState {
+    /// Preferred outer sidebar width in cells.
+    pub sidebar_cells: Option<u16>,
+    /// Preferred outer editor height in rows.
+    pub editor_rows: Option<u16>,
+    /// Show the focused pane over the body, preserving both preferences.
+    pub zoomed: bool,
+}
+
+/// Value-free layout feedback, with ordered wording for narrow footers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutNotice {
+    /// The terminal already uses one pane.
+    SinglePane,
+    /// Keep a diagnostic or transaction recovery surface visible.
+    SafetyDetails,
+}
+
+impl LayoutNotice {
+    /// Full wording followed by the two contracted short forms.
+    #[must_use]
+    pub const fn wordings(self) -> [&'static str; 3] {
+        match self {
+            Self::SinglePane => [
+                "Layout is already single-pane at this terminal size.",
+                "Already single-pane.",
+                "Single-pane",
+            ],
+            Self::SafetyDetails => [
+                "Zoom Results to keep error and recovery details visible.",
+                "Zoom Results for details.",
+                "Zoom Results",
+            ],
+        }
+    }
+}
+
+/// Runtime-minted physical-session identity. Queued clones prevent pointer reuse.
+#[derive(Clone)]
+pub struct NoticeSessionId(std::sync::Arc<()>);
+impl NoticeSessionId {
+    /// Mints one opaque local identity, without a global counter or server value.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(()))
+    }
+}
+impl Default for NoticeSessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl PartialEq for NoticeSessionId {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for NoticeSessionId {}
+impl std::fmt::Debug for NoticeSessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NoticeSessionId(..)")
+    }
+}
+
+/// Which physical runtime route produced client accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSource {
+    /// User SQL connection, including shared metadata fallback.
+    User,
+    /// Dedicated metadata connection.
+    Metadata,
+}
+impl NoticeSource {
+    /// Fixed slot; never a per-report history.
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::User => 0,
+            Self::Metadata => 1,
+        }
+    }
+    /// Safe built-in description.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::User => "user connection",
+            Self::Metadata => "metadata connection",
+        }
+    }
+}
+
+/// Latest client summary, with no retained server prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeSummary {
+    /// Client observation scope.
+    pub scope: crate::query::result::NoticeScope,
+    /// Admitted entries, unavailable when accounting failed.
+    pub retained: Option<u16>,
+    /// Client counts for that report.
+    pub counts: crate::query::result::NoticeCounts,
+}
+impl From<&crate::query::result::NoticeReport> for NoticeSummary {
+    fn from(report: &crate::query::result::NoticeReport) -> Self {
+        Self {
+            scope: report.scope,
+            retained: report.retained,
+            counts: report.counts,
+        }
+    }
+}
+
+/// Fixed accounting record for one installed physical session.
+#[derive(Debug, Clone)]
+pub struct NoticeSourceState {
+    /// Captured connection generation.
+    pub generation: u64,
+    /// Runtime identity, never a pointer/address display.
+    pub session_id: NoticeSessionId,
+    /// Last committed totals delivered to this model.
+    pub checkpoint: crate::query::result::NoticeCheckpoint,
+    /// Unacknowledged contribution of this physical source.
+    pub pending: crate::query::result::NoticeCounts,
+    /// Latest bounded fixed summary.
+    pub latest: Option<NoticeSummary>,
+}
+
+/// A fixed reader snapshot. Opening does not acknowledge it.
+#[derive(Debug, Clone)]
+pub struct NoticeSnapshot {
+    /// Pending aggregate at opening.
+    pub pending: crate::query::result::NoticeCounts,
+    /// Pending retired-source aggregate at opening.
+    pub previous: crate::query::result::NoticeCounts,
+    /// At most the two physical-source records, without server text.
+    pub sources: [Option<NoticeSourceState>; 2],
+    /// Local pending-state revision at opening.
+    pub revision: u64,
+}
+
+/// Read-only notice details, separate from sending-review state.
+#[derive(Debug, Clone)]
+pub struct NoticeDetails {
+    /// Captured report, unchanged by later arrivals.
+    pub snapshot: NoticeSnapshot,
+    /// First wrapped display row.
+    pub scroll: usize,
+}
+
+/// Fixed-size latest/pending accounting; no server text or report queue.
+#[derive(Debug, Clone, Default)]
+pub struct NoticeState {
+    /// At most two installed physical sources.
+    pub sources: [Option<NoticeSourceState>; 2],
+    /// All loss awaiting an explicit acknowledgement.
+    pub pending: crate::query::result::NoticeCounts,
+    /// Unacknowledged counts from retired connections.
+    pub previous: crate::query::result::NoticeCounts,
+    /// Changes to pending state, independent of draw/ticks.
+    pub revision: u64,
+    /// Explicit authority for a synchronous physical retirement handoff.
+    pub retiring_generation: Option<u64>,
+    /// Each source may hand off once at that boundary.
+    pub retirement_open: [bool; 2],
+    /// At most one latest failed-connect delivery identity per route.
+    pub last_attempt: [Option<NoticeSessionId>; 2],
+    /// Explicit current-generation authority for one bounded shutdown drain.
+    pub uninstalled_retirement: Option<u64>,
+    /// Generation whose fixed uninstalled-attempt tokens are retained.
+    pub uninstalled_token_generation: Option<u64>,
+    /// At most pending2 plus channel2 identities, never a report history.
+    pub uninstalled_tokens: [Option<NoticeSessionId>; 4],
+}
+impl NoticeState {
+    /// Begins a bounded retirement authority; ordinary old status stays invalid.
+    pub fn begin_retirement(&mut self, generation: u64) {
+        self.retiring_generation = Some(generation);
+        self.retirement_open = [true, true];
+    }
+    /// Ends the explicit handoff authority.
+    pub fn finish_retirement(&mut self, generation: u64) {
+        if self.retiring_generation == Some(generation) {
+            self.retiring_generation = None;
+            self.retirement_open = [false, false];
+        }
+    }
+    /// Installs only an explicitly observed physical source, preserving old debt.
+    pub fn install(&mut self, source: NoticeSource, generation: u64, session_id: NoticeSessionId) {
+        let index = source.index();
+        if self.sources[index]
+            .as_ref()
+            .is_some_and(|old| old.generation == generation && old.session_id == session_id)
+        {
+            return;
+        }
+        if let Some(old) = self.sources[index].as_ref() {
+            let (old_gen, old_id, totals) = (
+                old.generation,
+                old.session_id.clone(),
+                old.checkpoint.totals,
+            );
+            self.retire(source, old_gen, &old_id, totals);
+        }
+        self.sources[index] = Some(NoticeSourceState {
+            generation,
+            session_id,
+            checkpoint: crate::query::result::NoticeCheckpoint::default(),
+            pending: crate::query::result::NoticeCounts::default(),
+            latest: None,
+        });
+    }
+    /// Coalesces one committed checkpoint without double counting it.
+    pub fn observe(
+        &mut self,
+        source: NoticeSource,
+        generation: u64,
+        session_id: &NoticeSessionId,
+        checkpoint: crate::query::result::NoticeCheckpoint,
+        latest: Option<NoticeSummary>,
+    ) {
+        let Some(state) = self.sources[source.index()]
+            .as_mut()
+            .filter(|state| state.generation == generation && state.session_id == *session_id)
+        else {
+            return;
+        };
+        if checkpoint.revision < state.checkpoint.revision {
+            return;
+        }
+        if checkpoint.revision == state.checkpoint.revision && checkpoint.revision != u64::MAX {
+            if checkpoint.totals != state.checkpoint.totals {
+                return;
+            }
+            if latest.is_some() {
+                state.latest = latest;
+            }
+            return;
+        }
+        let delta = checkpoint.totals.since(state.checkpoint.totals);
+        state.checkpoint = checkpoint;
+        state.pending = state.pending.plus(delta);
+        if checkpoint.revision == u64::MAX && state.checkpoint.revision == u64::MAX {
+            state.latest = None;
+        } else if latest.is_some() {
+            state.latest = latest;
+        }
+        if delta.needs_report() {
+            self.pending = self.pending.plus(delta);
+            self.revision = self.revision.saturating_add(1);
+        }
+    }
+    /// Adds a nonmutating actual-retirement projection exactly once, then retires identity.
+    pub fn retire(
+        &mut self,
+        source: NoticeSource,
+        generation: u64,
+        session_id: &NoticeSessionId,
+        counts: crate::query::result::NoticeCounts,
+    ) {
+        let index = source.index();
+        if !self.sources[index]
+            .as_ref()
+            .is_some_and(|state| state.generation == generation && state.session_id == *session_id)
+        {
+            return;
+        }
+        let state = self.sources[index]
+            .take()
+            .expect("matched physical identity");
+        let delta = counts.since(state.checkpoint.totals);
+        self.pending = self.pending.plus(delta);
+        self.previous = self.previous.plus(state.pending.plus(delta));
+        self.retirement_open[index] = false;
+        if delta.needs_report() {
+            self.revision = self.revision.saturating_add(1);
+        }
+    }
+    /// Captures fixed counters/checkpoints without acknowledgement.
+    #[must_use]
+    pub fn snapshot(&self) -> NoticeSnapshot {
+        NoticeSnapshot {
+            pending: self.pending,
+            previous: self.previous,
+            sources: self.sources.clone(),
+            revision: self.revision,
+        }
+    }
+    /// Acknowledges only the displayed snapshot; new loss remains pending.
+    pub fn acknowledge(&mut self, snapshot: &NoticeSnapshot) {
+        if self.revision == snapshot.revision && self.revision != u64::MAX {
+            self.pending = crate::query::result::NoticeCounts::default();
+            self.previous = crate::query::result::NoticeCounts::default();
+            for source in self.sources.iter_mut().flatten() {
+                source.pending = crate::query::result::NoticeCounts::default();
+            }
+        } else {
+            self.pending = self.pending.since(snapshot.pending);
+            let mut previous_ack = snapshot.previous;
+            for (index, old) in snapshot.sources.iter().enumerate() {
+                if let Some(old) = old {
+                    match self.sources[index].as_mut().filter(|source| {
+                        source.generation == old.generation && source.session_id == old.session_id
+                    }) {
+                        Some(source) => source.pending = source.pending.since(old.pending),
+                        None => previous_ack = previous_ack.plus(old.pending),
+                    }
+                }
+            }
+            self.previous = self.previous.since(previous_ack);
+        }
+    }
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
+    /// Identity of the connection whose server-derived facts are in this
+    /// model. It starts at one to match the initial runtime connection route.
+    pub(crate) connection_generation: u64,
     /// Which pane has focus.
     pub focus: Focus,
+    /// Layout shape for this application session, never persisted.
+    pub splits: SplitState,
+    /// Feedback retained through ticks until the next user action.
+    pub layout_notice: Option<LayoutNotice>,
     /// The active key labels used when discovery surfaces describe actions.
     ///
     /// This is a configuration snapshot supplied by the interactive runtime,
@@ -908,6 +1276,8 @@ pub struct Model {
     pub keymap_snapshot: KeymapSnapshot,
     /// How the interface is presented: theme, glyph tier and reduced motion.
     pub presentation: Presentation,
+    /// Validated immutable palettes available during this application session.
+    pub(crate) theme_catalog: crate::ui::theme::ValidatedThemes,
     /// The SQL buffer.
     pub editor: Editor,
     /// Schema-aware completion state and its catalogue snapshot.
@@ -936,6 +1306,8 @@ pub struct Model {
     pub phase: QueryPhase,
     /// The most recent completed execution.
     pub last_execution: Option<Execution>,
+    /// Fixed loss summary tied to the retained source, never recomputed per frame.
+    pub retained_data_loss: crate::query::result::RetentionLossSummary,
     /// The SQL template that produced the retained execution.
     ///
     /// It is kept separately because `Execution` intentionally contains only
@@ -943,10 +1315,16 @@ pub struct Model {
     pub last_sql: Option<String>,
     /// Server messages from the most recent execution.
     pub notices: Vec<Notice>,
+    /// Fixed server-notice retention accounting, separate from local SAVED/WROTE messages.
+    pub notice_state: NoticeState,
+    /// Read-only client report captured on explicit opening.
+    pub notice_details: Option<NoticeDetails>,
     /// The error being shown, if any.
     pub error: Option<Diagnostic>,
     /// Whether the help overlay is open.
     pub help_open: bool,
+    /// First wrapped help row, local to the current help visit.
+    pub help_scroll: usize,
     /// Whether the technical section of the error is expanded.
     pub error_expanded: bool,
     /// Validated location in the current editor buffer, when one exists.
@@ -969,6 +1347,9 @@ pub struct Model {
     pub next_update_request: u64,
     /// Last known terminal size.
     pub size: (u16, u16),
+    /// First wrapped row of the owning one-shot sending review. Content is
+    /// derived transiently; SQL and prompted answers are never cached here.
+    pub review_scroll: usize,
     /// How long the last execution took, kept for the status bar.
     pub last_elapsed: Option<Duration>,
     /// Row cap applied to results.
@@ -1091,6 +1472,7 @@ impl Model {
     #[must_use]
     pub fn new(row_cap: usize) -> Self {
         Self {
+            connection_generation: 1,
             row_cap,
             size: (crate::ui::MIN_COLUMNS, crate::ui::MIN_ROWS),
             sidebar_visible: true,
@@ -1140,13 +1522,16 @@ impl Model {
     /// filtered view.
     ///
     /// **The filter runs over retained rows only.** Rows beyond the cap were
-    /// never received, so they cannot be searched, and every count that mentions
+    /// never retained, so they cannot be searched, and every count that mentions
     /// the filter says so.
     #[must_use]
     pub fn filtered_rows(&self) -> Vec<usize> {
         let Some(set) = self.visible_result() else {
             return Vec::new();
         };
+        if !set.is_available() {
+            return Vec::new();
+        }
         if self.result_filter.trim().is_empty() {
             return (0..set.rows.len()).collect();
         }
@@ -1189,12 +1574,19 @@ impl Model {
         let Some(set) = self.visible_result() else {
             return String::new();
         };
-        if self.result_filter.trim().is_empty() {
+        if !set.is_available() || self.result_filter.trim().is_empty() {
             return set.window_label();
         }
         let matching = self.filtered_rows().len();
         let retained = set.retained();
-        if set.is_truncated() {
+        if set.retention_reason()
+            == Some(crate::query::result::RetentionReason::RetainedResultLimit)
+        {
+            format!(
+                "matching {matching} of {retained} retained rows, of {} returned (retained-result limit reached)",
+                set.rows_seen
+            )
+        } else if set.is_truncated() {
             format!(
                 "matching {matching} of {retained} retained rows, of {} returned (limit {} reached)",
                 set.rows_seen, set.cap
@@ -1216,67 +1608,4 @@ impl Model {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn focus_cycles_through_the_panes_that_are_on_screen() {
-        assert_eq!(Focus::Editor.next(true), Focus::Results);
-        assert_eq!(Focus::Results.next(true), Focus::Objects);
-        assert_eq!(Focus::Objects.next(true), Focus::Editor);
-
-        // With the tree hidden, Tab never lands on it.
-        assert_eq!(Focus::Results.next(false), Focus::Editor);
-
-        for focus in [Focus::Editor, Focus::Results, Focus::Objects] {
-            assert!(!focus.label().is_empty());
-        }
-    }
-
-    #[test]
-    fn cancellation_requested_is_a_state_of_its_own() {
-        let requested = QueryPhase::CancellationRequested { job: JobId(1) };
-        assert_eq!(requested.label(), "Cancellation requested");
-        assert_ne!(requested.label(), QueryPhase::Idle.label());
-        assert!(requested.is_busy(), "the statement may still be running");
-        assert_eq!(requested.job(), Some(JobId(1)));
-    }
-
-    #[test]
-    fn a_lost_connection_still_names_its_target() {
-        let info = Box::new(SessionInfo {
-            target: "app@localhost:5432/orders".into(),
-            database: "orders".into(),
-            user: "app".into(),
-            server_version: "18.6".into(),
-            backend_pid: "1".into(),
-            search_path: "public".into(),
-            read_only: false,
-            tls: crate::postgres::TlsState::Disabled,
-            environment: Environment::Local,
-        });
-        let lost = ConnectionState::Lost { info };
-        assert!(lost.label().contains("connection lost"));
-        assert!(
-            !lost.is_usable(),
-            "statements must not be sent on a lost connection"
-        );
-        assert!(lost.info().is_some());
-    }
-
-    #[test]
-    fn job_identities_are_unique_and_increasing() {
-        let mut model = Model::new(100);
-        let first = model.allocate_job();
-        let second = model.allocate_job();
-        assert_ne!(first, second);
-        assert!(second > first);
-    }
-
-    #[test]
-    fn an_unclassified_connection_is_not_production() {
-        let model = Model::new(100);
-        assert_eq!(model.environment(), Environment::Unclassified);
-        assert!(!model.environment().is_production());
-    }
-}
+mod tests;

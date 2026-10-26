@@ -1,13 +1,106 @@
 # Roadmap
 
-**Replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-10-25; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
 The planned experience through Feature 024 is now implemented locally. The
 next phase integrates that work and proves product, platform and release claims.
 
-The latest completed local slice is **024 Explicit retained-result refresh**;
-its recorded plain/TLS verifier pass, semantic Unix-socket skip and outstanding
-terminal checks remain distinct in `docs/status.md`.
+The latest implemented experience slice is **025 GUI-grade experience, US4**:
+paste, painted surfaces, the workable grid and first-frame startup are recorded
+in `docs/status.md`. Feature 025 US5-US10 and final acceptance remain open in
+its task list. The current integration branch also contains W02 connection
+identity hardening, W05 local server-matrix evidence and W11 dry trust tooling.
+Those local results do not establish hosted acceptance or release readiness.
+Feature025 T055's observed expanded-field selection defect is now corrected
+at published `ffb86a1` in draft PR34: actual Buffer evidence, independent review,
+the full local gate and all three hosted platform regressions passed. CI has
+13 successful jobs and one scheduled drift skip; PG14/18/socket also passed.
+Fresh main-targeted CodeQL and parent integration remain pending. Manual US5
+custom themes/runtime switching are in implementation on the isolated
+`codex/manual-themes-2026-10-25` branch: strict configuration/startup, runtime
+cycling and styled parity are integrated and the full local verifier passes
+1,497 harness cases. Published `d92c416` in draft PR35; hosted platform/MSRV,
+PG14/18/socket and policy gates passed (13 jobs, one scheduled-fixture skip).
+Fresh CodeQL/parent integration and native hand use remain pending. Visual review
+also exposed and repaired T056's selected palette group/detail ink composition.
+Final integration review found the ignored configured-colour startup/doctor
+route; T057 now corrects it with a full repeat and actual owned-PTY route evidence.
+Automatic background detection, native hand use and release remain separate
+open work.
+The next observed-friction slice is W09 / Feature025 T058: the long-line editor
+can clip its caret at the right edge. FR-2529 and the dated presentation
+contract now specify a shared horizontal view for drawing, completion and hit
+mapping. Its implementation and independent-review correction passed 78 widget
+and 114 layout cases, the full 1,515-case local gate and the same-width owned
+PTY repeat on `codex/editor-caret-2026-10-25`, based on PR35. Published `14d18ad`
+in draft PR36 after the normal pre-push repeat and clean-source/history scans.
+Hosted acceptance passed 13 executable jobs with one intentional scheduled
+fixture skip; all 18 new cases ran on Linux/macOS/Windows. Native appearance/
+hand use remain separate. A follow-up W10 diagnostic found a material local
+test-profile long-line allocation/latency increase. FR-2530/T059 now specifies
+bounded visible/caret metadata while preserving the accepted cells; isolated
+implementation on `codex/bounded-editor-view-2026-10-25` passed local independent
+review, 83 widget/114 layout cases, the full 1,520-case gate, exact 51,081-cell
+parity and an owned-PTY control. Final 1 MiB diagnostic medians improve to
+138.342 ms/17.063 MiB RSS. Published clean `d2edce1` in draft PR37 after normal
+pre-push/source-history scanning. Hosted acceptance passed all 13 executable
+jobs with one intentional scheduled-fixture skip; all five T059 and 18 T058
+cases execute on Linux/macOS/Windows. PG14/18/socket, policy and MSRV are also
+accepted for this product source. The small diagnostic is not release-build
+p95 or a process-memory ceiling. The final documentation checkpoint preserves
+accepted product-source bytes and points to PR37 for current-head checks.
+
+Read-only readiness reviews at `d92c416` also bound the next assignments:
+
+- US6 mouse needs explicit input-time/interruption, viewport-only scrolling
+  and drag/keyboard-parity policies before its combined integrator assignment.
+  Preserve `mouse = false` until the complete verb table and restoration gates
+  pass; existing hit regions alone do not establish dispatch readiness.
+- US8 quiet chrome needs the complete state/token/suppression table, filled
+  custom-theme contrast admission, one-row safety priorities and completed-only
+  200 ms threshold pinned before implementation. Keep truthful transport,
+  transaction and recovery wording through narrow layouts.
+- US5 automatic background detection needs a supported single-owner reply
+  transport, reserved-envelope/late-input policy and staged terminal lifecycle
+  before T032. Locked Crossterm has no public OSC reply event; a finite drain
+  cannot guarantee late replies never become keys. Manual themes remain the
+  accepted implementation; no detector or fallback claim is inferred.
+
+These are dependency clarifications, not completed feature checkboxes or a
+replacement for the authoritative feature tasks. Resolve them as bounded
+contracts before assigning the next implementation.
+On 25 October, local M1 work also patched the current dependency advisories,
+refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
+window. Feature 025 keyboard panes T039/T041 and density T040 are implemented
+locally, with T038 test implementation complete. Feature 018 T037-T040 now
+repair the reproduced narrow-review disclosure failure across five sending
+surfaces and passed the complete local verifier (1,270 harness cases). W07-062
+also proves actual error/panic guard restoration in owned macOS PTYs. W10-007
+measured oversized-value/notice retention and exposed silent CSV truncation;
+W10-009 now discloses buffered truncation and W10-010 repairs complete-row/
+partial-flush reporting. Both passed the combined local gate with Feature 015
+T042's scrollable, input-owning help (1,315 harness cases). Native/platform and
+different-family acceptance remain distinct from those implementation tasks.
+W10-008 retains distinct notice, aggregate-result and incoming-allocation
+contracts; observed RSS peaks are not memory ceilings. W10-011's 12 real-writer
+pacing samples preserve all output bytes with distinct small/large-value RSS.
+W10-012 notice admission/accounting is implemented locally in `d65024b`, with
+1,370 combined harness cases and reviewed synthetic buffers. Published `fda16f8`
+also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; native
+hand-use remains separate. W10-013's execution-wide retained-data contract is
+accepted at published `54056c2`: local 1,431 outer cases/112 styled buffers,
+all five PostgreSQL majors plain/TLS, actual socket, pinned/MSRV/platform and
+CodeQL checks. W07's published `65cf237` repeats three native Windows ConPTY
+control passes and completes separate cursor calibration. The retained sensor
+tracks native setters/main VT but not alternate VT; the original cursor
+capability still fails. Faithful alternate cursor observation is required before
+the option/path matrix. The strict experiment is now explicitly dispatched via
+`windows-conpty-diagnostic.yml`; routine CI retains all platform product suites.
+Full Windows restoration and hand use remain open. CLI cancellation and complete
+resource acceptance remain separate. Keep these
+partial slices distinct from completion of Feature 025 or release readiness.
+**024 Explicit retained-result refresh** remains part of the integrated feature
+chain; the later experience work preserves its source-bound, deliberate action.
 
 | Read this for | Authority |
 | --- | --- |
@@ -69,9 +162,10 @@ flowchart LR
 
 ## Start here
 
-1. **W01:** recheck the current worktree and inherited Feature 024 completion
-   evidence, then prepare a reproducible integration baseline. Historical main
-   CI is not evidence for newer uncommitted features.
+1. **W01/W02/W04/W10:** preserve the current integration baseline, close any
+   remaining asynchronous connection-envelope gaps, probe generated-write
+   privacy and repair local-state confinement/recovery defects. Recheck
+   `docs/status.md` and actual source before reusing recorded evidence.
 2. **W02-W07 and W10:** resolve correctness, privacy, native-platform and
    resource/recovery gaps. Assign shared runtime files to one integrator;
    use isolated auth and terminal scopes where parallel work is authorized.
@@ -81,6 +175,20 @@ flowchart LR
 4. **W11 and W13 preparation can proceed alongside those steps.** Prepare
    concrete trust, support, naming and governance decisions before owner review.
    Proceed to W12/W14 only when their dependencies and authority exist.
+5. **Feature 025 US5-US10:** continue the already specified, observed-friction
+   work after immediate correctness/privacy defects are contained. Follow the
+   story dependencies and exact contracts; no additional feature is needed to
+   keep development moving. Final terminal/participant evidence stays open
+   until the named platform and journey have actually been exercised.
+   The pane-control keyboard/shared-geometry core precedes mouse split dragging;
+   the task plan now records this previously omitted dependency. Mouse capture
+   stays off until complete pointer behavior and keyboard parity are verified.
+   T039/T041's keyboard split/zoom core passed local integration on 25 October
+   2026. Density T040 and T038 test implementation also passed the complete
+   local gate. Dragging still belongs to T035. Full US7, native visual and
+   hosted acceptance remain open. Feature 015 T042's observed help clipping and
+   hidden-input routes are repaired and locally verified. Continue the remaining
+   theme/pointer/daily-use contracts after the distinct W10 resource bounds.
 
 Use full feature directory slugs in assignments. The historical `007` collision
 and old broad-theme numbers are documented in the inventory; neither justifies

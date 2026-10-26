@@ -109,6 +109,38 @@ in a new dated section here, and update the routing table only when a bucket,
 promotion or model retirement changes the value calculation. A promotion
 ending does not by itself change the routed model.
 
+## Scoped review preparation - 2026-10-25
+
+The owner explicitly approved transmitting today's scoped Ignatius changes to
+the existing OpenCode Go GLM-5.3 service for read-only independent review, using
+included subscription allowance only. This does not authorize paid fallback,
+another provider/model, sharing or publication.
+
+The current [official Go documentation](https://opencode.ai/v2/docs/console/go/),
+checked 25 October, says enabled **Extra Usage** can fall back to paid Console
+credit after the included limit. The older table above is historical, not proof
+of current billing controls. Installed OpenCode 1.19.4 exposes the existing Go
+identity and GLM-5.3 model route but not that billing setting. Console requires
+sign-in in the available browser. Asked to confirm Extra Usage was off before
+inference, the owner explicitly answered `Skip external review`. No inference
+or source transmission occurred. This is the owner's exception to the
+different-family requirement for today's work; native independent review and
+local verification still apply. Do not retry this external route without a
+new owner instruction.
+
+Task-private configuration readback confirmed model and small model both
+`opencode-go/glm-5.3`, only the Go provider enabled, sharing and updates disabled,
+all tools denied, no external plugins/MCP, and a one-step read-only reviewer.
+Metadata-only validation is not inference or review acceptance. Prepared frozen
+source bundles, hashes and sanitized configuration are under
+`/private/tmp/ignatius-scoped-review-prep-ttyz8dgw/`. They exclude account state,
+environment credentials and unrelated files. Version-tagged
+[CLI source](https://github.com/anomalyco/opencode/blob/v1.19.4/packages/opencode/src/cli/cmd/run.ts)
+confirms noninteractive stdin is sent as prompt text; a future authorized run
+could use that path without command-line source payloads or file-reading tools.
+No actual model execution, response, metered use or completed external review
+is claimed. The prepared bundles were left local when the owner cancelled.
+
 ## Current ownership
 
 Dated 2026-09-10. Recorded from this session; update at handoff.

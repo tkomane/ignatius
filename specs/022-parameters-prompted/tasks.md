@@ -102,6 +102,39 @@ description: "Implementation tasks for prompted named parameters"
 
 ## Dependencies and execution order
 
+### W04 correction - 2026-10-25
+
+- [x] W04-031 Reproduce generated-write server-diagnostic value disclosure
+  through isolated production-adapter subprocesses with positive SQLSTATE and
+  successful-write/logging controls.
+- [x] W04-032 Apply value-free parameterized execution/export diagnostics and
+  session-scoped notice privacy without changing ordinary error detail or
+  intentional result output.
+- [x] W04-033 Prove constraint/type/stream failure, transformed values,
+  successful-prefix/no-replay behavior, and delayed notices; update security,
+  compatibility, release notes and status after focused/full verification.
+- [x] W03-034 Reproduce off-at-start and later setting-change binding failures,
+  then add the FR-2215 fresh setting guard and per-session user-SQL gate without
+  changing stream message boundaries or pre-connection CLI validation.
+- [x] W03-035 Prove completed-prefix/no-suffix behavior, whole-message stream
+  parsing and rollback, unavailable/failed-transaction probe outcomes,
+  restoration to `on`, and concurrent session calls; run focused/live/full
+  checks and retain compatibility/source evidence separately.
+
+W03 evidence on 2026-10-25: the initial public regression set failed four
+cases, and the private startup/gate pair failed both cases before the fix.
+Afterwards, nine public parameter-semantics contracts and seven session tests
+passed over both plain and verified TLS PostgreSQL 18.4, alongside the five
+runtime-privacy contracts. Cancellation used a live server-activity barrier;
+gate tests polled a held lock rather than relying on sleeps. The integrated
+locked verifier with the five security dependency patches passed 1,175 harness
+cases across 22 summaries; the socket case returned early and remains a
+semantic skip. The log is
+`/private/tmp/ignatius-verify-2026-10-25-wave2-security.log`. Native peer review
+found no remaining scoped blocker. Different-family review, real terminal,
+native Windows and exact packaged-candidate evidence remain open. FATAL during
+the setting probe was source-reviewed, not independently injected live.
+
 ### Phase dependencies
 
 - Phase 1 has no dependency.

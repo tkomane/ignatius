@@ -44,6 +44,15 @@ What this program stores, where, for how long, and what it never stores.
   not a command-line argument. Binding creates an escaped text literal only at
   the simple-query boundary. NUL is refused before send.
 
+  Server error prose/object fields for parameterized execution and export are
+  omitted with explicit privacy wording, retaining classification, validated
+  SQLSTATE, statement ordinal, numeric position and built-in advice. This also
+  protects transformed or truncated values that exact-value redaction cannot
+  recognise. Before the first parameterized send, existing and future notices
+  become value-free until disconnect, because their asynchronous arrival can
+  outlive the request. Ordinary query errors remain detailed; deliberately
+  returned row values remain query/export output.
+
 - **Generated cell-update values.** A replacement and the selected row's key
   values are held in secret `ParameterBindings` for one reviewed, parameterized
   `UPDATE`. The template, identifiers, row and privilege facts are safe model
@@ -121,6 +130,17 @@ multiplexer may observe or retain the value. NULL, stale, oversized, disabled,
 and failed writes send no value; use an explicit export when a file is the
 intended boundary.
 
+All five sending-review surfaces share one transient wrapped view: clipboard,
+generated UPDATE, production run, EXPLAIN ANALYZE and named parameters. The body
+can be scrolled with the active navigation keys; acceptance requires its current
+final page and enough room for review, input and complete command guidance.
+Input stays fixed and parameter answers remain masked. Too-small geometry
+refuses sending; actual resizing resets review and a newly observed input-time
+resize cannot accept before a new frame. Existing identity, typed-name and
+posture checks still run before the one-shot effect. Analyze/copy-target
+redaction remains in force; the exact generated UPDATE is intentional review
+output. This makes content reachable, not proof that someone read it.
+
 ## Interactive cell updates
 
 Cell updates are TUI-only and are not an implicit edit mode. The analyzer
@@ -136,6 +156,9 @@ review Enter creates one `ExecuteParameterized` effect. Esc creates none. The
 generated template is what can enter statement history; bound values remain in
 secret memory until the adapter binds them at the existing simple-query
 boundary. The prior result remains a snapshot and is never rerun automatically.
+If its older metadata response arrives while another input/review owns the
+screen, the client discards only that lookup, preserves the current input and
+explains how to generate the cell update again. It does not queue or retry SQL.
 
 ## Interactive retained-result refresh
 
@@ -161,8 +184,30 @@ a cell update does not trigger it.
 | Configuration | `~/.config/ignatius/config.toml` or `%APPDATA%\ignatius\config.toml` | `0600` on Unix; profile ACL on Windows | Until deleted |
 | Migration backups | Beside the configuration, timestamped | Same | Until deleted |
 | Logs | `~/.local/share/ignatius/logs/ignatius.log` | `0600` on Unix | Rotated at 5 MB, one previous file kept |
-| Saved queries | `~/.config/ignatius/queries/*.sql` | The directory's own | Until deleted. Written only when the user names one |
+| Saved queries | `~/.config/ignatius/queries/*.sql` | `0600` for newly saved/replaced files on Unix; profile ACL on Windows | Until deleted. Written only when the user names one |
 | Statement history | `~/.local/share/ignatius/history.jsonl` | `0600` on Unix, set at creation and kept when the file is trimmed | Last 1000 entries by default; `ignatius history clear` removes it |
+
+Configuration writes, saved-query replacements and history trimming reserve
+new sibling temporary files exclusively, with Unix mode `0600` from creation.
+Their contents are flushed and synced before rename; an existing temporary is
+never reopened, followed or removed. A failed replacement preserves the prior
+destination and removes only this attempt's temporary. Stale files from an
+interrupted earlier attempt are left for the owner to inspect. This does not
+claim directory-entry durability across power loss or multi-process locking.
+
+Migration backups reserve their timestamped name with exclusive creation,
+including Unix `0600` before the first byte. Up to 128 existing-entry collisions
+are skipped without following links. The backup contains the exact parsed
+configuration bytes and is flushed and synced before replacement; an incomplete
+backup is removed only by its own attempt, and a completed one remains available
+if replacement fails. Migration is a parsed-snapshot operation: a concurrent
+owner edit can still be overwritten. This does not provide compare-and-swap or
+multi-process migration coordination.
+
+Saved-query load/save refuses symbolic links and non-regular leaf entries;
+listings omit them. A regular file replaced through a hard link is replaced as
+a directory entry, leaving its other names unchanged. The configured library
+root is trusted; same-user path replacement races are outside this boundary.
 
 `ignatius config paths` prints all of these. Deleting the configuration directory
 returns the program to a first-run state and loses nothing else.

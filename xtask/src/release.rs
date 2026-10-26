@@ -3691,6 +3691,588 @@ fn days_in_month(year: u16, month: u8) -> u8 {
     }
 }
 
+/// Generates or verifies the CycloneDX software bill of materials.
+///
+/// The SBOM is derived deterministically from `Cargo.lock`: no network, no
+/// clock, no randomness, so regenerating it must reproduce the exact bytes.
+/// This is the inventory half of the owner-chosen W11 trust providers
+/// (CycloneDX SBOM, Sigstore keyless signing, GitHub OIDC/SLSA provenance);
+/// signing and provenance adapters follow separately.
+pub fn sbom(args: &[&str]) -> Result<(), String> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| "release sbom needs generate or verify".to_owned())?;
+    match *command {
+        "generate" => sbom_generate(rest),
+        "verify" => sbom_verify(rest),
+        other => Err(format!(
+            "release sbom needs generate or verify, not {other}"
+        )),
+    }
+}
+
+fn sbom_options(args: &[&str], out_flag: &str) -> Result<(PathBuf, PathBuf), String> {
+    let mut lockfile: Option<&str> = None;
+    let mut out: Option<&str> = None;
+    for arg in args {
+        let Some((flag, value)) = arg.split_once('=') else {
+            return Err(format!("release sbom options use --flag=value, not {arg}"));
+        };
+        match flag {
+            "--lockfile" => lockfile = Some(value),
+            flag if flag == out_flag => out = Some(value),
+            _ => {
+                return Err(format!(
+                    "unknown release sbom option {flag}; expected --lockfile and {out_flag}"
+                ));
+            }
+        }
+    }
+    let lockfile = lockfile.ok_or_else(|| "release sbom needs --lockfile=PATH".to_owned())?;
+    let out = out
+        .ok_or_else(|| format!("release sbom needs {out_flag}=PATH"))
+        .map(PathBuf::from)?;
+    Ok((resolve_path(Path::new(lockfile)), out))
+}
+
+/// One `[[package]]` entry of the lockfile subset this command understands.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct LockedCrate {
+    name: String,
+    version: String,
+}
+
+/// Parses the narrow `Cargo.lock` subset the SBOM covers.
+///
+/// Only `[[package]]` sections with `name` and `version` string entries (plus
+/// the top-level `version` marker and skippable `dependencies` arrays) are
+/// understood. Anything else is an error rather than a silent omission: an
+/// inventory that quietly drops crates is worse than one that refuses.
+fn parse_lockfile(text: &str, path: &Path) -> Result<Vec<LockedCrate>, String> {
+    let fail = |detail: &str| -> String {
+        format!("{} is not a supported Cargo.lock: {detail}", path.display())
+    };
+    let mut crates: Vec<LockedCrate> = Vec::new();
+    let mut current: Option<(Option<String>, Option<String>)> = None;
+    let mut in_dependencies = false;
+    let mut packages_seen = 0usize;
+
+    for (number, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        let location = number + 1;
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if in_dependencies {
+            if line.starts_with(']') {
+                in_dependencies = false;
+            }
+            continue;
+        }
+        if line.starts_with('[') {
+            if line == "[[package]]" {
+                if let Some((name, version)) = current.take() {
+                    crates.push(LockedCrate {
+                        name: name
+                            .ok_or_else(|| fail(&format!("package {packages_seen} has no name")))?,
+                        version: version.ok_or_else(|| {
+                            fail(&format!("package {packages_seen} has no version"))
+                        })?,
+                    });
+                }
+                packages_seen += 1;
+                current = Some((None, None));
+                continue;
+            }
+            return Err(fail(&format!("line {location} has an unknown section")));
+        }
+        let Some((name, version)) = current.as_mut() else {
+            if line.starts_with("version") {
+                continue;
+            }
+            return Err(fail(&format!("line {location} is outside a package")));
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(fail(&format!("line {location} is not a key/value pair")));
+        };
+        match key.trim() {
+            "name" => {
+                *name = Some(quoted_string(value.trim(), &fail, location)?);
+            }
+            "version" => {
+                *version = Some(quoted_string(value.trim(), &fail, location)?);
+            }
+            "source" | "checksum" => {
+                quoted_string(value.trim(), &fail, location)?;
+            }
+            "dependencies" => {
+                if !value.trim().starts_with('[') {
+                    return Err(fail(&format!(
+                        "line {location} has a bad dependencies list"
+                    )));
+                }
+                if !value.trim().ends_with(']') {
+                    in_dependencies = true;
+                }
+            }
+            other => {
+                return Err(fail(&format!(
+                    "line {location} has an unsupported key {other}"
+                )));
+            }
+        }
+    }
+    if in_dependencies {
+        return Err(fail("the dependencies list never closes"));
+    }
+    if let Some((name, version)) = current.take() {
+        crates.push(LockedCrate {
+            name: name.ok_or_else(|| fail("the last package has no name"))?,
+            version: version.ok_or_else(|| fail("the last package has no version"))?,
+        });
+    }
+    if crates.is_empty() {
+        return Err(fail("it names no packages"));
+    }
+    let mut sorted = crates;
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != packages_seen {
+        return Err(fail("it names a duplicate package"));
+    }
+    Ok(sorted)
+}
+
+fn quoted_string(
+    value: &str,
+    fail: &dyn Fn(&str) -> String,
+    location: usize,
+) -> Result<String, String> {
+    let inner = value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .ok_or_else(|| fail(&format!("line {location} is not a quoted string")))?;
+    if inner.contains('"') || inner.contains('\n') {
+        return Err(fail(&format!("line {location} has a bad quoted string")));
+    }
+    Ok(inner.to_owned())
+}
+
+/// Reads the root product name and version for the SBOM metadata component.
+fn read_product_identity(root: &Path) -> Result<(String, String), String> {
+    let path = root.join("Cargo.toml");
+    let text = fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "could not read product manifest {}: {error}",
+            path.display()
+        )
+    })?;
+    let mut in_package = false;
+    let mut name: Option<String> = None;
+    let mut version: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=')
+            && name.is_none()
+            && key.trim() == "name"
+        {
+            name = Some(value.trim().trim_matches('"').trim_matches('\'').to_owned());
+        }
+        if let Some((key, value)) = line.split_once('=')
+            && version.is_none()
+            && key.trim() == "version"
+        {
+            let candidate = value.trim().trim_matches('"').trim_matches('\'');
+            if looks_like_semver(candidate) {
+                version = Some(candidate.to_owned());
+            }
+        }
+    }
+    match (name, version) {
+        (Some(name), Some(version)) if !name.is_empty() => Ok((name, version)),
+        _ => Err(format!(
+            "product manifest {} has no usable package name and version",
+            path.display()
+        )),
+    }
+}
+
+/// Renders the deterministic CycloneDX 1.5 document for these crates.
+///
+/// Key order is fixed by construction and there is no timestamp, serial
+/// number or randomness, so the same lockfile always yields the same bytes.
+fn canonical_sbom_bytes(product: &str, product_version: &str, crates: &[LockedCrate]) -> Vec<u8> {
+    use serde_json::{Map, Value};
+    let components: Vec<Value> = crates
+        .iter()
+        .map(|item| {
+            let mut component = Map::new();
+            component.insert(
+                "bom-ref".to_owned(),
+                Value::String(format!("pkg:cargo/{}@{}", item.name, item.version)),
+            );
+            component.insert("name".to_owned(), Value::String(item.name.clone()));
+            component.insert(
+                "purl".to_owned(),
+                Value::String(format!("pkg:cargo/{}@{}", item.name, item.version)),
+            );
+            component.insert("type".to_owned(), Value::String("library".to_owned()));
+            component.insert("version".to_owned(), Value::String(item.version.clone()));
+            Value::Object(component)
+        })
+        .collect();
+    let mut metadata_component = Map::new();
+    metadata_component.insert("name".to_owned(), Value::String(product.to_owned()));
+    metadata_component.insert("type".to_owned(), Value::String("application".to_owned()));
+    metadata_component.insert(
+        "version".to_owned(),
+        Value::String(product_version.to_owned()),
+    );
+    let mut metadata = Map::new();
+    metadata.insert("component".to_owned(), Value::Object(metadata_component));
+    let mut document = Map::new();
+    document.insert(
+        "bomFormat".to_owned(),
+        Value::String("CycloneDX".to_owned()),
+    );
+    document.insert("components".to_owned(), Value::Array(components));
+    document.insert("metadata".to_owned(), Value::Object(metadata));
+    document.insert("specVersion".to_owned(), Value::String("1.5".to_owned()));
+    document.insert("version".to_owned(), Value::Number(1.into()));
+    let mut bytes = serde_json::to_string_pretty(&Value::Object(document))
+        .expect("SBOM document is JSON-serializable")
+        .into_bytes();
+    bytes.push(b'\n');
+    bytes
+}
+
+fn sbom_generate(args: &[&str]) -> Result<(), String> {
+    let (lockfile, out) = sbom_options(args, "--out")?;
+    let root = super::repo_root();
+    let (product, product_version) = read_product_identity(&root)?;
+    let text = fs::read_to_string(&lockfile)
+        .map_err(|error| format!("could not read {}: {error}", lockfile.display()))?;
+    if path_is_symlink(&lockfile)? {
+        return Err(format!(
+            "lockfile must not be a symlink: {}",
+            lockfile.display()
+        ));
+    }
+    let out = resolve_path(&out);
+    let Some(parent) = out.parent() else {
+        return Err("output path must have a parent directory".to_owned());
+    };
+    if !parent.is_dir() {
+        return Err(format!(
+            "output parent directory does not exist: {}",
+            parent.display()
+        ));
+    }
+    if path_is_symlink(parent)? {
+        return Err(format!(
+            "output parent must not use a symlink: {}",
+            parent.display()
+        ));
+    }
+    let crates = parse_lockfile(&text, &lockfile)?;
+    let bytes = canonical_sbom_bytes(&product, &product_version, &crates);
+    write_new_file(&out, &bytes)?;
+    println!(
+        "SBOM: recorded {} crates from {} in {}",
+        crates.len(),
+        lockfile.display(),
+        out.display()
+    );
+    Ok(())
+}
+
+fn sbom_verify(args: &[&str]) -> Result<(), String> {
+    let (lockfile, sbom) = sbom_options(args, "--sbom")?;
+    let root = super::repo_root();
+    let (product, product_version) = read_product_identity(&root)?;
+    let text = fs::read_to_string(&lockfile)
+        .map_err(|error| format!("could not read {}: {error}", lockfile.display()))?;
+    let stored =
+        fs::read(&sbom).map_err(|error| format!("could not read {}: {error}", sbom.display()))?;
+    let crates = parse_lockfile(&text, &lockfile)?;
+    let expected = canonical_sbom_bytes(&product, &product_version, &crates);
+    if stored == expected {
+        println!(
+            "SBOM: {} matches {} ({} crates)",
+            sbom.display(),
+            lockfile.display(),
+            crates.len()
+        );
+        return Ok(());
+    }
+    let first = stored
+        .iter()
+        .zip(expected.iter())
+        .position(|(left, right)| left != right)
+        .unwrap_or(stored.len().min(expected.len()));
+    Err(format!(
+        "{} does not match {}: first difference at byte {first} (stored {} bytes, expected {} bytes)",
+        sbom.display(),
+        lockfile.display(),
+        stored.len(),
+        expected.len()
+    ))
+}
+
+/// Checks that signature and provenance sidecars bind their artefacts.
+///
+/// For each artefact in `release-manifest.json` this expects siblings
+/// `<name>.sigstore.json` (Sigstore bundle) and `<name>.intoto.jsonl` (SLSA
+/// provenance) in the bundle directory and requires both to name the
+/// artefact's SHA-256 digest. A bound sidecar proves the signature and the
+/// provenance statement are *about* these exact bytes; it is not
+/// cryptographic verification, which needs the Sigstore client and the SLSA
+/// verifier named in the release record against the release identity.
+/// Missing, mismatched or malformed sidecars are explicit blockers, never a
+/// passing claim.
+pub fn trust(args: &[&str]) -> Result<(), String> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| "release trust needs verify".to_owned())?;
+    if *command != "verify" {
+        return Err(format!("release trust needs verify, not {command}"));
+    }
+    let mut manifest_dir: Option<&str> = None;
+    let mut bundle_dir: Option<&str> = None;
+    for arg in rest {
+        let Some((flag, value)) = arg.split_once('=') else {
+            return Err(format!("release trust options use --flag=value, not {arg}"));
+        };
+        match flag {
+            "--manifest-dir" => manifest_dir = Some(value),
+            "--bundle-dir" => bundle_dir = Some(value),
+            _ => {
+                return Err(format!(
+                    "unknown release trust option {flag}; expected --manifest-dir and --bundle-dir"
+                ));
+            }
+        }
+    }
+    let manifest_dir =
+        resolve_path(Path::new(manifest_dir.ok_or_else(|| {
+            "release trust needs --manifest-dir=DIR".to_owned()
+        })?));
+    let bundle_dir = resolve_path(Path::new(
+        bundle_dir.ok_or_else(|| "release trust needs --bundle-dir=DIR".to_owned())?,
+    ));
+    for (kind, dir) in [("manifest", &manifest_dir), ("bundle", &bundle_dir)] {
+        if path_is_symlink(dir)? {
+            return Err(format!(
+                "{kind} directory must not be a symlink: {}",
+                dir.display()
+            ));
+        }
+        if !dir.is_dir() {
+            return Err(format!(
+                "{kind} directory does not exist: {}",
+                dir.display()
+            ));
+        }
+    }
+    let manifest_path = manifest_dir.join("release-manifest.json");
+    let manifest_bytes = fs::read(&manifest_path)
+        .map_err(|error| format!("could not read {}: {error}", manifest_path.display()))?;
+    let manifest = parse_canonical_manifest(&manifest_bytes)?;
+    if manifest.artefacts.is_empty() {
+        return Err("release-manifest.json names no artefacts".to_owned());
+    }
+    let mut bound = 0usize;
+    for artefact in &manifest.artefacts {
+        let bundle_path = checked_trust_sidecar(&bundle_dir, &artefact.name, "sigstore.json")?;
+        let bundle_bytes = fs::read(&bundle_path)
+            .map_err(|error| format!("could not read {}: {error}", bundle_path.display()))?;
+        check_sigstore_binding(&bundle_bytes, &artefact.checksum, &bundle_path)?;
+        let provenance_path = checked_trust_sidecar(&bundle_dir, &artefact.name, "intoto.jsonl")?;
+        let provenance_bytes = fs::read(&provenance_path)
+            .map_err(|error| format!("could not read {}: {error}", provenance_path.display()))?;
+        let predicate =
+            check_provenance_binding(&provenance_bytes, &artefact.checksum, &provenance_path)?;
+        println!(
+            "bound {} (sigstore bundle and {} provenance)",
+            artefact.name, predicate
+        );
+        bound += 1;
+    }
+    println!(
+        "Trust: {bound} of {} artefact(s) bound; cryptographic verification still needs the Sigstore client and SLSA verifier from the release record",
+        manifest.artefacts.len()
+    );
+    Ok(())
+}
+
+fn checked_trust_sidecar(
+    directory: &Path,
+    artefact: &str,
+    extension: &str,
+) -> Result<PathBuf, String> {
+    let name = format!("{artefact}.{extension}");
+    let path = directory.join(&name);
+    if path.is_symlink() {
+        return Err(format!(
+            "trust sidecar must not be a symlink: {}",
+            path.display()
+        ));
+    }
+    if !path.is_file() {
+        return Err(format!(
+            "{artefact} has no {extension} sidecar: binding missing"
+        ));
+    }
+    Ok(path)
+}
+
+/// Requires the bundle's message digest to be the artefact's SHA-256.
+fn check_sigstore_binding(bytes: &[u8], checksum: &str, path: &Path) -> Result<(), String> {
+    let document: serde_json::Value = serde_json::from_str(
+        std::str::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8 JSON", path.display()))?,
+    )
+    .map_err(|error| format!("{} is not a Sigstore bundle: {error}", path.display()))?;
+    let digest = document
+        .pointer("/messageSignature/messageDigest/digest")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "{} has no messageSignature.messageDigest.digest",
+                path.display()
+            )
+        })?;
+    let algorithm = document
+        .pointer("/messageSignature/messageDigest/algorithm")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "{} has no messageSignature.messageDigest.algorithm",
+                path.display()
+            )
+        })?;
+    if algorithm != "SHA2_256" {
+        return Err(format!(
+            "{} uses digest algorithm {algorithm}, not SHA2_256",
+            path.display()
+        ));
+    }
+    let decoded = base64_decode(digest)
+        .ok_or_else(|| format!("{} has a malformed bundle digest", path.display()))?;
+    let actual = hex_bytes(&decoded);
+    if actual != checksum.to_lowercase() {
+        return Err(format!(
+            "{} binds a different digest than the manifest checksum",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Requires the first in-toto statement to carry the artefact's digest.
+fn check_provenance_binding(bytes: &[u8], checksum: &str, path: &Path) -> Result<String, String> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| format!("{} is not UTF-8 JSON lines", path.display()))?;
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .ok_or_else(|| format!("{} names no statement", path.display()))?;
+    let statement: serde_json::Value = serde_json::from_str(first)
+        .map_err(|error| format!("{} is not an in-toto statement: {error}", path.display()))?;
+    if statement
+        .pointer("/_type")
+        .and_then(serde_json::Value::as_str)
+        != Some("https://in-toto.io/Statement/v1")
+    {
+        return Err(format!("{} is not an in-toto v1 statement", path.display()));
+    }
+    let subjects = statement
+        .pointer("/subject")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{} has no statement subject", path.display()))?;
+    let bound = subjects.iter().any(|subject| {
+        subject
+            .pointer("/digest/sha256")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|digest| digest.eq_ignore_ascii_case(checksum))
+    });
+    if !bound {
+        return Err(format!(
+            "{} names no subject with the manifest checksum",
+            path.display()
+        ));
+    }
+    Ok(statement
+        .pointer("/predicateType")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("untyped")
+        .to_owned())
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        text.push_str(&format!("{byte:02x}"));
+    }
+    text
+}
+
+/// Decodes standard base64 without outside crates.
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    if text.is_empty() || !text.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (chunks, _) = text.as_bytes().as_chunks::<4>();
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        let last = chunk_index + 1 == chunks.len();
+        let mut group = 0u32;
+        let mut padding = 0usize;
+        for (index, byte) in chunk.iter().enumerate() {
+            let sextet = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => {
+                    padding += 1;
+                    0
+                }
+                _ => return None,
+            };
+            if padding > 0 && *byte != b'=' {
+                return None;
+            }
+            if *byte == b'=' && index < 2 {
+                return None;
+            }
+            group = (group << 6) | u32::from(sextet);
+        }
+        if padding > 2 {
+            return None;
+        }
+        if padding > 0 && !last {
+            return None;
+        }
+        out.push((group >> 16) as u8);
+        if padding < 2 {
+            out.push((group >> 8) as u8);
+        }
+        if padding < 1 {
+            out.push(group as u8);
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::json_u64;
@@ -3712,5 +4294,255 @@ mod tests {
         assert_eq!(json_u64(&number("23.1")), None);
         assert_eq!(json_u64(&number("-1.0")), None);
         assert_eq!(json_u64(&number("18446744073709551616")), None);
+    }
+
+    fn lock_fixture() -> &'static str {
+        "version = 4\n\
+         \n\
+         [[package]]\n\
+         name = \"zebra\"\n\
+         version = \"2.0.0\"\n\
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+         checksum = \"abc\"\n\
+         \n\
+         [[package]]\n\
+         name = \"apple\"\n\
+         version = \"1.0.0\"\n\
+         dependencies = [\n\
+          \"zebra\",\n\
+         ]\n"
+    }
+
+    #[test]
+    fn sbom_parses_packages_sorted_with_purls() {
+        use super::{canonical_sbom_bytes, parse_lockfile};
+        use std::path::Path;
+        let crates = parse_lockfile(lock_fixture(), Path::new("Cargo.lock")).expect("parse");
+        assert_eq!(crates.len(), 2);
+        assert_eq!(crates[0].name, "apple");
+        assert_eq!(crates[1].name, "zebra");
+
+        let bytes = canonical_sbom_bytes("ignatius", "0.1.0", &crates);
+        let first = canonical_sbom_bytes("ignatius", "0.1.0", &crates);
+        assert_eq!(bytes, first, "the same lockfile must yield the same bytes");
+        let text = String::from_utf8(bytes).expect("utf-8");
+        assert!(text.contains("\"bomFormat\": \"CycloneDX\""), "{text}");
+        assert!(text.contains("\"specVersion\": \"1.5\""), "{text}");
+        assert!(text.contains("pkg:cargo/apple@1.0.0"), "{text}");
+        assert!(text.contains("pkg:cargo/zebra@2.0.0"), "{text}");
+        assert!(
+            text.find("pkg:cargo/apple").unwrap() < text.find("pkg:cargo/zebra").unwrap(),
+            "components stay sorted: {text}"
+        );
+        assert!(!text.contains("serialNumber"), "no randomness: {text}");
+    }
+
+    #[test]
+    fn sbom_rejects_a_lockfile_it_cannot_fully_cover() {
+        use super::parse_lockfile;
+        use std::path::Path;
+        let path = Path::new("Cargo.lock");
+        assert!(parse_lockfile("[[package]]\nname = \"only\"\n", path).is_err());
+        assert!(
+            parse_lockfile(
+                "[[package]]\nname = \"a\"\nversion = \"1\"\nmagic = \"x\"\n",
+                path
+            )
+            .is_err()
+        );
+        assert!(parse_lockfile(
+            "[[package]]\nname = \"a\"\nversion = \"1\"\n[[package]]\nname = \"a\"\nversion = \"1\"\n",
+            path
+        )
+        .is_err());
+        assert!(
+            parse_lockfile(
+                "[[package]]\nname = \"a\"\nversion = \"1\"\ndependencies = [\n",
+                path
+            )
+            .is_err()
+        );
+        assert!(parse_lockfile("", path).is_err());
+    }
+
+    fn sbom_scratch_dir(case: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ignatius-sbom-{}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst),
+            case
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn sbom_generate_then_verify_round_trips_and_detects_tampering() {
+        use super::{sbom_generate, sbom_verify};
+        let dir = sbom_scratch_dir("round-trip");
+        let lock = dir.join("Cargo.lock");
+        let out = dir.join("sbom.json");
+        std::fs::write(&lock, lock_fixture()).expect("fixture");
+        let lock = lock.to_str().expect("utf-8").to_owned();
+        let out = out.to_str().expect("utf-8").to_owned();
+
+        sbom_generate(&[&format!("--lockfile={lock}"), &format!("--out={out}")]).expect("generate");
+        sbom_verify(&[&format!("--lockfile={lock}"), &format!("--sbom={out}")]).expect("verify");
+
+        let mut bytes = std::fs::read(&out).expect("read");
+        let last = bytes.len() - 2;
+        bytes[last] = if bytes[last] == b'0' { b'1' } else { b'0' };
+        std::fs::write(&out, &bytes).expect("tamper");
+        assert!(
+            sbom_verify(&[&format!("--lockfile={lock}"), &format!("--sbom={out}")]).is_err(),
+            "a changed byte must fail verification"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn base64_decode_matches_the_rfc_vectors_and_rejects_junk() {
+        use super::base64_decode;
+        assert_eq!(base64_decode("TQ=="), Some(b"M".to_vec()));
+        assert_eq!(base64_decode("TWE="), Some(b"Ma".to_vec()));
+        assert_eq!(base64_decode("TWFu"), Some(b"Man".to_vec()));
+        assert_eq!(base64_decode(""), None);
+        assert_eq!(base64_decode("TQ="), None);
+        assert_eq!(base64_decode("T==="), None);
+        assert_eq!(base64_decode("!!!!"), None);
+        assert_eq!(base64_decode("TQ==TQ==".repeat(2).as_str()), None);
+    }
+
+    fn base64_encode(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut text = String::new();
+        for chunk in bytes.chunks(3) {
+            let mut group = 0u32;
+            for byte in chunk {
+                group = (group << 8) | u32::from(*byte);
+            }
+            group <<= 8 * (3 - chunk.len());
+            for index in 0..4 {
+                if index <= chunk.len() {
+                    text.push(ALPHABET[((group >> (18 - index * 6)) & 63) as usize] as char);
+                } else {
+                    text.push('=');
+                }
+            }
+        }
+        text
+    }
+
+    fn trust_fixture_dir(case: &str, digest_hex: &str, digest_b64: &str) -> std::path::PathBuf {
+        use super::{ManifestArtefact, canonical_manifest_bytes, sort_manifest_artefacts};
+        let dir = sbom_scratch_dir(case);
+        let manifest_dir = dir.join("manifest");
+        let bundle_dir = dir.join("bundles");
+        std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
+        std::fs::create_dir_all(&bundle_dir).expect("bundle dir");
+        let mut artefacts = vec![ManifestArtefact {
+            name: "ignatius-0.1.0-aarch64-apple-darwin.tar.gz".to_owned(),
+            target: "aarch64-apple-darwin".to_owned(),
+            format: "tar.gz".to_owned(),
+            size_bytes: 8,
+            checksum: digest_hex.to_owned(),
+        }];
+        sort_manifest_artefacts(&mut artefacts);
+        let manifest = canonical_manifest_bytes("0.1.0", &"ab".repeat(20), "test", &artefacts);
+        std::fs::write(manifest_dir.join("release-manifest.json"), &manifest).expect("manifest");
+        let bundle = format!(
+            "{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{digest_b64}\"}},\"signature\":\"AAA=\"}}}}"
+        );
+        std::fs::write(
+            bundle_dir.join("ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            &bundle,
+        )
+        .expect("bundle");
+        let provenance = format!(
+            "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"a.tar.gz\",\"digest\":{{\"sha256\":\"{digest_hex}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
+        );
+        std::fs::write(
+            bundle_dir.join("ignatius-0.1.0-aarch64-apple-darwin.tar.gz.intoto.jsonl"),
+            &provenance,
+        )
+        .expect("provenance");
+        dir
+    }
+
+    fn fixture_digest() -> (String, String) {
+        use sha2::Digest as _;
+        let bytes = sha2::Sha256::digest(b"fixture artefact bytes");
+        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        (hex.clone(), base64_encode(&bytes))
+    }
+
+    #[test]
+    fn trust_verify_binds_matching_sidecars() {
+        use super::trust;
+        let (hex, b64) = fixture_digest();
+        let dir = trust_fixture_dir("bound", &hex, &b64);
+        let manifest = dir.join("manifest").to_str().expect("utf-8").to_owned();
+        let bundles = dir.join("bundles").to_str().expect("utf-8").to_owned();
+        trust(&[
+            "verify",
+            &format!("--manifest-dir={manifest}"),
+            &format!("--bundle-dir={bundles}"),
+        ])
+        .expect("bound sidecars verify");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn trust_verify_names_missing_mismatched_and_malformed_sidecars() {
+        use super::trust;
+        let (hex, b64) = fixture_digest();
+        let wrong = "00".repeat(32);
+
+        let dir = trust_fixture_dir("cases", &hex, &b64);
+        let manifest = dir.join("manifest").to_str().expect("utf-8").to_owned();
+        let bundles = dir.join("bundles").to_str().expect("utf-8").to_owned();
+        let run = || {
+            trust(&[
+                "verify",
+                &format!("--manifest-dir={manifest}"),
+                &format!("--bundle-dir={bundles}"),
+            ])
+        };
+
+        std::fs::remove_file(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+        )
+        .expect("remove");
+        assert!(run().is_err(), "a missing bundle must block");
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            format!("{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{}\"}}}}}}", base64_encode(&[0u8; 32])),
+        )
+        .expect("rewrite");
+        let error = run().expect_err("a foreign digest must block");
+        assert!(error.contains("different digest"), "{error}");
+
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            format!("{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA512\",\"digest\":\"{b64}\"}}}}}}"),
+        )
+        .expect("rewrite");
+        assert!(run().is_err(), "an unexpected algorithm must block");
+
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.sigstore.json"),
+            format!("{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{b64}\"}}}}}}"),
+        )
+        .expect("restore");
+        std::fs::write(
+            dir.join("bundles/ignatius-0.1.0-aarch64-apple-darwin.tar.gz.intoto.jsonl"),
+            format!("{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"digest\":{{\"sha256\":\"{wrong}\"}}}}]}}\n"),
+        )
+        .expect("rewrite");
+        assert!(run().is_err(), "a foreign provenance subject must block");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

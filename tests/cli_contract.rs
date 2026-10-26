@@ -354,6 +354,47 @@ fn a_broken_configuration_file_exits_with_the_config_code() {
 }
 
 #[test]
+fn density_configuration_is_strict_and_refused_before_terminal_acquisition() {
+    let state = tempfile::tempdir().expect("isolated density configuration");
+    let dir = state.path();
+    for value in ["comfortable", "compact"] {
+        std::fs::write(
+            dir.join("config.toml"),
+            format!("schema_version = 1\n[ui]\ndensity = \"{value}\"\n"),
+        )
+        .unwrap();
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", dir)
+            .args(["config", "validate"])
+            .output()
+            .unwrap();
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+    }
+    std::fs::write(
+        dir.join("config.toml"),
+        "schema_version = 1\n[ui]\ndensity = \"dense\"\n",
+    )
+    .unwrap();
+    for args in [vec!["config", "validate"], vec!["connect"]] {
+        let output = binary()
+            .env("IGNATIUS_CONFIG_DIR", dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(code(&output), 3, "{}", stderr(&output));
+        let text = format!("{}{}", stdout(&output), stderr(&output));
+        assert!(
+            text.contains("comfortable") && text.contains("compact"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("\u{1b}[?1049h"),
+            "configuration refusal entered alternate screen"
+        );
+    }
+}
+
+#[test]
 fn config_init_writes_a_file_this_build_accepts_and_refuses_to_overwrite() {
     let dir = std::env::temp_dir().join(format!("ignatius-init-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -895,6 +936,308 @@ mod with_server {
                 }
             }
         };
+    }
+
+    mod buffered_retention {
+        use super::*;
+
+        const SQL: &str = "SELECT 'w10-retention-row'::text AS value FROM generate_series(1, 2)";
+        const FORMATS: &[&str] = &["csv", "tsv", "ndjson", "markdown", "insert"];
+        const INSERT_ROW: &str =
+            "INSERT INTO \"retained_snapshot\" (\"value\") VALUES (E'w10-retention-row');\n";
+
+        fn status(ordinal: usize, retained: usize, received: u64) -> String {
+            format!(
+                "Result set {ordinal} truncated: retained {retained} of {received} received rows. For a future complete streaming export, choose --output before execution.\n"
+            )
+        }
+
+        fn command(uri: &str, state: &tempfile::TempDir) -> Command {
+            let fields = ignatius::connection::parse_connection_string(uri)
+                .expect("synthetic fixture connection is valid");
+            let mut command = Command::new(env!("CARGO_BIN_EXE_ignatius"));
+            command.env("IGNATIUS_CONFIG_DIR", state.path().join("config"));
+            command.env("IGNATIUS_DATA_DIR", state.path().join("data"));
+            command.env_remove("IGNATIUS_LOG");
+            command.env_remove("IGNATIUS_TEST_PG_URI");
+            for name in [
+                "PGHOST",
+                "PGPORT",
+                "PGDATABASE",
+                "PGUSER",
+                "PGPASSWORD",
+                "PGAPPNAME",
+                "PGSSLMODE",
+                "PGCONNECT_TIMEOUT",
+                "PGSERVICE",
+                "PGSERVICEFILE",
+                "PGSYSCONFDIR",
+                "PGPASSFILE",
+                "PGSSLROOTCERT",
+                "PGSSLCERT",
+                "PGSSLKEY",
+                "PGREQUIRESSL",
+                "PGCHANNELBINDING",
+                "PGGSSENCMODE",
+            ] {
+                command.env_remove(name);
+            }
+            command.env("PGPASSFILE", state.path().join("absent.pgpass"));
+            for (field, variable) in [
+                ("host", "PGHOST"),
+                ("port", "PGPORT"),
+                ("dbname", "PGDATABASE"),
+                ("user", "PGUSER"),
+                ("password", "PGPASSWORD"),
+                ("sslmode", "PGSSLMODE"),
+                ("sslrootcert", "PGSSLROOTCERT"),
+                ("sslcert", "PGSSLCERT"),
+                ("sslkey", "PGSSLKEY"),
+                ("connect_timeout", "PGCONNECT_TIMEOUT"),
+                ("channel_binding", "PGCHANNELBINDING"),
+                ("gssencmode", "PGGSSENCMODE"),
+            ] {
+                if let Some(value) = fields.get(field) {
+                    command.env(variable, value);
+                }
+            }
+            command.args(["query", "--read-only"]);
+            command
+        }
+
+        fn options(command: &mut Command, format: &str, cap: usize) {
+            command.args(["--format", format, "--max-rows", &cap.to_string()]);
+            if format == "insert" {
+                command.args(["--insert-table", "retained_snapshot"]);
+            }
+        }
+
+        fn expected(format: &str, rows: usize) -> String {
+            match format {
+                "csv" | "tsv" => format!("value\n{}", "w10-retention-row\n".repeat(rows)),
+                "ndjson" => "{\"value\":\"w10-retention-row\"}\n".repeat(rows),
+                "markdown" => format!(
+                    "| value |\n| --- |\n{}",
+                    "| w10-retention-row |\n".repeat(rows)
+                ),
+                "insert" => vec![INSERT_ROW; rows].join("\n"),
+                _ => unreachable!(),
+            }
+        }
+
+        fn reports_truncation(format: &str) {
+            let uri = uri_or_skip!();
+            let state = tempfile::tempdir().expect("private child state");
+            let mut child = command(&uri, &state);
+            options(&mut child, format, 1);
+            let output = child.args(["-c", SQL]).output().expect("run isolated CLI");
+            assert_eq!(code(&output), 0, "{}", stderr(&output));
+            assert_eq!(
+                stdout(&output),
+                expected(format, 1),
+                "compatible result bytes"
+            );
+            assert_eq!(stderr(&output), status(1, 1, 2));
+            assert!(!stderr(&output).contains("w10-retention-row"));
+        }
+
+        #[test]
+        fn csv_reports_retained_and_received_rows() {
+            reports_truncation("csv");
+        }
+        #[test]
+        fn tsv_reports_retained_and_received_rows() {
+            reports_truncation("tsv");
+        }
+        #[test]
+        fn ndjson_reports_retained_and_received_rows() {
+            reports_truncation("ndjson");
+        }
+        #[test]
+        fn markdown_reports_retained_and_received_rows() {
+            reports_truncation("markdown");
+        }
+        #[test]
+        fn insert_reports_retained_and_received_rows() {
+            reports_truncation("insert");
+        }
+
+        #[test]
+        fn nontruncated_results_have_no_new_status() {
+            let uri = uri_or_skip!();
+            for format in FORMATS {
+                let state = tempfile::tempdir().expect("private child state");
+                let mut child = command(&uri, &state);
+                options(&mut child, format, 2);
+                let output = child.args(["-c", SQL]).output().expect("run isolated CLI");
+                assert_eq!(code(&output), 0, "{}", stderr(&output));
+                assert_eq!(stdout(&output), expected(format, 2));
+                assert!(stderr(&output).is_empty());
+            }
+        }
+
+        #[test]
+        fn zero_cap_reports_received_rows_without_inventing_data() {
+            let uri = uri_or_skip!();
+            for format in FORMATS {
+                let state = tempfile::tempdir().expect("private child state");
+                let mut child = command(&uri, &state);
+                options(&mut child, format, 0);
+                let output = child.args(["-c", SQL]).output().expect("run isolated CLI");
+                assert_eq!(code(&output), 0, "{}", stderr(&output));
+                assert_eq!(stdout(&output), expected(format, 0));
+                assert_eq!(stderr(&output), status(1, 0, 2));
+            }
+        }
+
+        #[test]
+        fn no_header_does_not_silence_the_separate_status() {
+            let uri = uri_or_skip!();
+            let state = tempfile::tempdir().expect("private child state");
+            let mut child = command(&uri, &state);
+            options(&mut child, "csv", 1);
+            let output = child
+                .args(["-c", SQL, "--no-header"])
+                .output()
+                .expect("run isolated CLI");
+            assert_eq!(code(&output), 0, "{}", stderr(&output));
+            assert_eq!(stdout(&output), "w10-retention-row\n");
+            assert_eq!(stderr(&output), status(1, 1, 2));
+        }
+
+        #[test]
+        fn successful_prefix_status_survives_a_later_error_in_every_format() {
+            let uri = uri_or_skip!();
+            for format in FORMATS {
+                let state = tempfile::tempdir().expect("private child state");
+                let mut child = command(&uri, &state);
+                options(&mut child, format, 1);
+                child.arg("--verbose");
+                let output = child
+                    .args(["-c", &format!("{SQL}; SELECT 1 / 0")])
+                    .output()
+                    .expect("run isolated CLI");
+                assert_eq!(code(&output), 7);
+                assert_eq!(stdout(&output), expected(format, 1));
+                let error = stderr(&output);
+                assert!(error.starts_with(&status(1, 1, 2)), "{error}");
+                assert!(
+                    error.contains("division by zero") && error.contains("22012"),
+                    "{error}"
+                );
+                assert!(!error.contains("w10-retention-row"));
+            }
+        }
+
+        #[test]
+        fn result_ordinals_ignore_command_only_statements_before_a_later_error() {
+            let uri = uri_or_skip!();
+            let state = tempfile::tempdir().expect("private child state");
+            let mut child = command(&uri, &state);
+            options(&mut child, "csv", 1);
+            child.arg("--verbose");
+            let output = child.args(["-c", "SET application_name = 'w10-status'; SELECT generate_series(1, 2) AS n; SET application_name = 'w10-status'; SELECT generate_series(3, 5) AS n; SELECT 1 / 0"]).output().expect("run isolated CLI");
+            assert_eq!(code(&output), 7);
+            assert_eq!(stdout(&output), "n\n1\n\nn\n3\n");
+            let error = stderr(&output);
+            assert!(
+                error.starts_with(&format!("{}{}", status(1, 1, 2), status(2, 1, 3))),
+                "{error}"
+            );
+            assert!(
+                error.contains("division by zero") && error.contains("22012"),
+                "{error}"
+            );
+            assert!(!error.contains("Result set 3 truncated"));
+        }
+
+        #[test]
+        fn file_streaming_remains_complete_with_a_zero_buffer_cap() {
+            let uri = uri_or_skip!();
+            for format in ["csv", "tsv", "ndjson", "insert"] {
+                let state = tempfile::tempdir().expect("private child state");
+                let destination = state.path().join(format!("complete.{format}"));
+                let mut child = command(&uri, &state);
+                options(&mut child, format, 0);
+                let output = child
+                    .args(["-c", SQL, "--output"])
+                    .arg(&destination)
+                    .output()
+                    .expect("stream isolated file");
+                assert_eq!(code(&output), 0, "{}", stderr(&output));
+                assert!(stdout(&output).is_empty());
+                let file_data = expected(format, 2);
+                assert_eq!(
+                    std::fs::read_to_string(&destination).expect("completed file"),
+                    file_data
+                );
+                assert_eq!(
+                    stderr(&output),
+                    format!("Exported 2 row(s) to {}\n", destination.display())
+                );
+                assert!(
+                    !destination
+                        .with_extension(format!("{format}.partial"))
+                        .exists()
+                );
+            }
+        }
+
+        #[test]
+        fn unsupported_markdown_streaming_keeps_its_existing_refusal() {
+            let uri = uri_or_skip!();
+            let state = tempfile::tempdir().expect("private child state");
+            let destination = state.path().join("unsupported.md");
+            let mut child = command(&uri, &state);
+            options(&mut child, "markdown", 0);
+            let output = child
+                .args(["-c", SQL, "--output"])
+                .arg(&destination)
+                .output()
+                .expect("run isolated CLI");
+            assert_eq!(code(&output), 2);
+            assert!(stdout(&output).is_empty());
+            assert!(stderr(&output).contains("markdown cannot be written as a stream"));
+            assert!(!stderr(&output).contains("truncated:"));
+            assert!(!destination.exists());
+        }
+
+        #[test]
+        fn json_and_table_keep_only_their_existing_inband_counts() {
+            let uri = uri_or_skip!();
+            for format in ["json", "table"] {
+                let state = tempfile::tempdir().expect("private child state");
+                let mut child = command(&uri, &state);
+                options(&mut child, format, 1);
+                let output = child.args(["-c", SQL]).output().expect("run isolated CLI");
+                assert_eq!(code(&output), 0, "{}", stderr(&output));
+                assert!(stderr(&output).is_empty());
+                if format == "json" {
+                    let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                    assert_eq!(data[0]["rows_seen"], 2);
+                    assert_eq!(data[0]["truncated"], true);
+                    assert_eq!(data[0]["rows"].as_array().unwrap().len(), 1);
+                } else {
+                    assert!(stdout(&output).contains("showing 1 of 2 rows"));
+                }
+            }
+        }
+
+        #[test]
+        fn refused_multi_result_ndjson_has_no_success_status() {
+            let uri = uri_or_skip!();
+            let state = tempfile::tempdir().expect("private child state");
+            let mut child = command(&uri, &state);
+            options(&mut child, "ndjson", 1);
+            let output = child
+                .args(["-c", &format!("{SQL}; {SQL}")])
+                .output()
+                .expect("run isolated CLI");
+            assert_eq!(code(&output), 2);
+            assert!(stdout(&output).is_empty());
+            assert!(stderr(&output).contains("ndjson cannot represent"));
+            assert!(!stderr(&output).contains("truncated:"));
+        }
     }
 
     #[test]
@@ -1482,19 +1825,20 @@ mod with_server {
         use std::process::Stdio;
 
         let uri = uri_or_skip!();
-        let dir = std::env::temp_dir().join(format!("ignatius-partial-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        let destination = dir.join("big.csv");
-        let _ = std::fs::remove_file(&destination);
+        let dir = tempfile::tempdir().expect("isolated partial export");
+        let destination = dir.path().join("stream.csv");
+        let partial = std::path::PathBuf::from(format!("{}.partial", destination.display()));
 
-        // A result large enough that it is certainly still streaming when the
-        // interrupt arrives.
-        let child = binary()
+        // Emit a bounded prefix that exceeds both protocol and file buffers,
+        // then hold the tail on the server. Large row counts plus a fixed delay
+        // race fast servers and can interrupt an already completed export.
+        let mut child = binary()
             .args([
                 "query",
                 &uri,
                 "-c",
-                "SELECT generate_series(1, 4000000) AS n, repeat('x', 200) AS pad",
+                "SELECT n, repeat('x', 200) AS pad FROM generate_series(1, 1000) AS n \
+                 UNION ALL SELECT 1001, repeat('x', 200) FROM pg_sleep(30)",
                 "--format",
                 "csv",
                 "-o",
@@ -1505,12 +1849,29 @@ mod with_server {
             .spawn()
             .expect("spawn");
 
-        std::thread::sleep(std::time::Duration::from_millis(2500));
-        let status = Command::new("kill")
-            .args(["-INT", &child.id().to_string()])
-            .status()
-            .expect("send SIGINT");
-        assert!(status.success());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if std::fs::metadata(&partial).is_ok_and(|metadata| metadata.len() > 8192) {
+                break;
+            }
+            if child.try_wait().expect("poll export child").is_some() {
+                let output = child.wait_with_output().expect("read early exit");
+                panic!(
+                    "export ended before its written-row barrier: {}",
+                    stderr(&output)
+                );
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().expect("stop only the owned export child");
+                let output = child.wait_with_output().expect("read bounded failure");
+                panic!(
+                    "export did not write its bounded prefix: {}",
+                    stderr(&output)
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        unsafe_free_interrupt(child.id());
 
         let output = child.wait_with_output().expect("wait");
         assert_eq!(
@@ -1527,17 +1888,19 @@ mod with_server {
             "it names the partial file: {message}"
         );
 
-        let partial = std::path::PathBuf::from(format!("{}.partial", destination.display()));
         assert!(partial.exists(), "the rows already written are kept");
         assert!(
             !destination.exists(),
             "an incomplete export never occupies the destination, where it would look finished"
         );
+        let written = std::fs::read_to_string(&partial).expect("retained partial data");
+        let mut lines = written.lines();
+        assert_eq!(lines.next(), Some("n,pad"));
+        let rows = lines.count();
         assert!(
-            std::fs::metadata(&partial).expect("metadata").len() > 0,
-            "something was actually written before the interrupt"
+            (1..=1000).contains(&rows),
+            "the emitted prefix is retained: {rows}"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

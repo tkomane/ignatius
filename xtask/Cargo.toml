@@ -1,6 +1,7 @@
 [package]
 name = "xtask"
 version = "0.0.0"
+license = "Apache-2.0"
 edition = "2024"
 publish = false
 description = "Development and release tasks for Ignatius"

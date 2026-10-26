@@ -110,8 +110,9 @@ assert the exit code for both success and failure.
 
 - A value containing terminal escape sequences is displayed without those
   sequences reaching the terminal.
-- A result larger than the row cap is bounded in memory while still reporting the
-  true row count.
+- A result larger than the row cap retains at most that many rows while
+  reporting received counts. REL-002 separately bounds named retained data;
+  earlier driver allocation and process RSS are different boundaries.
 - A buffer of only comments or stray semicolons sends nothing to the server.
 - An unterminated quote does not hang, panic, or split into two statements.
 - A `sslmode` the build does not implement fails with an explanation rather than
@@ -163,6 +164,13 @@ assert the exit code for both success and failure.
   MUST show how to run, cancel, get help and quit.
 - **UX-006**: A SQL NULL MUST be distinguishable from an empty string and from
   the text `NULL`.
+- **UX-007**: Interactive sending prompts MUST keep their required review
+  content reachable and refuse acceptance when the current viewport cannot
+  authorize it under the shared 2026-10-25
+  [review viewport contract](../018-clipboard-copy/contracts/review-viewport.md).
+  This covers clipboard, generated UPDATE, production-run, EXPLAIN ANALYZE
+  and named-parameter surfaces. Feature 018 T037-T040 track the shared repair;
+  existing typed-name, identity and one-shot effect guards still apply.
 
 ### Security
 
@@ -183,11 +191,49 @@ assert the exit code for both success and failure.
 - **REL-001**: The terminal MUST be restored on normal exit, error, panic and
   SIGTERM: alternate screen, cursor visibility, raw mode, bracketed paste and
   mouse capture.
+  On Unix, SIGTERM reception MUST be registered synchronously before terminal
+  acquisition, not deferred to an asynchronously scheduled watcher. A
+  registration failure MUST return an ordinary safe diagnostic before any
+  terminal mode is taken. A signal received during startup remains queued for
+  the existing quit path when the event loop starts; it does not replay SQL or
+  introduce transaction recovery. Windows signal handling is unchanged.
+  Panic restoration MUST use the options actually acquired, before the panic
+  details are printed, rather than assuming default mouse/paste/screen options.
+  Report attempted restoration truthfully if an output/raw-mode restore fails;
+  a panic message MUST NOT assert that no database write occurred or that
+  arbitrary panic details contain no secrets. This changes no query retry,
+  rollback or panic-payload handling contract.
 - **REL-002**: Result rows held in memory MUST be bounded by an explicit cap,
-  with truncation visible and the true count preserved.
+  with truncation visible and the true count preserved. Buffered Session
+  ingestion MUST additionally apply one 32-MiB logical occupied-result-data
+  allowance across the Execution, with atomic whole-description/row admission,
+  explicit typed unavailability and unchanged PostgreSQL outcomes under the
+  [retained-result contract](contracts/retained-result-data.md). This named
+  allowance excludes earlier driver allocation and is not a process-RAM ceiling.
+  W10-013 tracks implementation and acceptance; specification is not completion.
 - **REL-003**: A result belonging to a superseded job MUST be discarded.
 - **REL-004**: Configuration writes MUST be atomic and MUST take a backup before
   a migration.
+  A migration backup MUST contain the exact source bytes that were parsed,
+  use exclusive creation with Unix mode `0600` before its first write, and be
+  flushed and synced before replacing the configuration. Existing backup
+  entries, including dangling links, MUST remain untouched. Failure before
+  backup completion MUST leave the original configuration unchanged and clean
+  up only the newly reserved partial backup; failure after completion MUST
+  retain that backup for recovery. Timestamped candidate reservation is bounded
+  to 128 attempts and retries only an existing-entry collision.
+
+- **REL-005**: Application-owned server-notice retention after driver
+  connection MUST use a cumulative observation-window allowance of 256 entries
+  and 1 MiB of retained UTF-8 fields, with the existing 64 KiB message rule.
+  Payload drains MUST NOT replenish an active allowance or reset sticky
+  parameter privacy. Client omissions, shortening and abandoned transferred
+  payload MUST be reported with exact/lower-bound/unknown precision through
+  query, export, plan and connection outcomes. CLI data bytes and database
+  execution/transaction/cancellation facts MUST remain unchanged. The complete
+  delivery, acknowledgement, API and residual-boundary contract is
+  [notice-retention.md](contracts/notice-retention.md). This is not a driver
+  startup/frame, aggregate-result or whole-process memory ceiling.
 
 ### Performance
 
