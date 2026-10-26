@@ -6,7 +6,283 @@ fn density_template_carries_its_comfortable_default() {
     let config: Config = toml::from_str(TEMPLATE).unwrap();
     assert_eq!(config, Config::default());
 }
-use crate::config::schema::{ColorDepthChoice, ThemeChoice};
+use crate::config::schema::{ColorDepthChoice, ThemeSelection};
+
+fn manual_theme_source(source: &str) -> (tempfile::TempDir, Paths) {
+    let (dir, paths) = temp_paths();
+    fs::create_dir_all(&paths.config_dir).unwrap();
+    fs::write(&paths.config_file, source).unwrap();
+    (dir, paths)
+}
+
+#[test]
+fn manual_theme_wrong_shape_uses_the_typed_safe_line() {
+    let (_dir, paths) = manual_theme_source("[ui]\ntheme = false\n");
+    let error = load(&paths).unwrap_err();
+    assert_eq!(
+        error.theme_refusal_line(),
+        Some(
+            "configuration error: ui.theme must be a string. Use \"dark\", \"light\", \"high-contrast\" or \"custom\"."
+        )
+    );
+    assert_eq!(error.exit_code(), crate::ExitCode::Config);
+}
+
+#[test]
+fn manual_theme_load_preserves_ordinary_range_precedence_and_aggregation() {
+    let (_dir, paths) = manual_theme_source(
+        "schema_version = 1\n[ui]\ntheme = false\n[query]\nmax-buffered-rows = 0\n[connection]\nconnect-timeout-seconds = 0\n",
+    );
+    let error = load(&paths).unwrap_err();
+    assert_eq!(error.headline, "2 setting(s) are out of range");
+    assert!(error.theme_refusal_line().is_none());
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|field| field.label == "query.max-buffered-rows")
+    );
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|field| field.label == "connection.connect-timeout-seconds")
+    );
+}
+
+#[test]
+fn manual_theme_migration_validates_before_noop_dryrun_or_backup() {
+    for version in [0, CURRENT_SCHEMA_VERSION] {
+        for dry_run in [false, true] {
+            let text = format!(
+                "schema_version = {version}\n[theme]\nsurface = \"#000000\"\ntext = \"#000000\"\n"
+            );
+            let (_dir, paths) = manual_theme_source(&text);
+            let error = migrate(&paths, dry_run).unwrap_err();
+            assert_eq!(
+                error.theme_refusal_line(),
+                Some(
+                    "configuration error: [theme] text on surface is 1.0:1; this pair must reach 4.5:1."
+                )
+            );
+            assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), text);
+            assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+        }
+    }
+}
+
+#[test]
+fn manual_theme_newer_migration_version_wins_before_wrong_theme_shape() {
+    let source = format!(
+        "schema_version = {}\n[ui]\ntheme = false\n",
+        CURRENT_SCHEMA_VERSION + 1
+    );
+    let (_dir, paths) = manual_theme_source(&source);
+    let error = migrate(&paths, false).unwrap_err();
+    assert!(error.headline.contains("newer than this build understands"));
+    assert!(error.theme_refusal_line().is_none());
+    assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), source);
+    assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+}
+
+fn invalid_typed_theme() -> Config {
+    let mut config = Config::default();
+    config.theme = Some(
+        crate::ui::theme::ThemeDefinition::new(crate::config::ThemeChoice::Dark)
+            .with_override(
+                crate::ui::theme::Token::Surface,
+                crate::ui::theme::Rgb(0, 0, 0),
+            )
+            .with_override(
+                crate::ui::theme::Token::Text,
+                crate::ui::theme::Rgb(0, 0, 0),
+            ),
+    );
+    config
+}
+
+#[test]
+fn manual_theme_save_validates_inactive_typed_definition_before_any_mutation() {
+    let original = "schema_version = 1\n";
+    let (_dir, paths) = manual_theme_source(original);
+    let error = save(&paths, &invalid_typed_theme()).unwrap_err();
+    assert!(error.theme_refusal_line().unwrap().contains("1.0:1"));
+    assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), original);
+    assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted_at(&dir.path().join("uncreated"));
+    assert!(save(&paths, &invalid_typed_theme()).is_err());
+    assert!(!paths.config_dir.exists());
+}
+
+#[test]
+fn manual_theme_valid_custom_catalog_roundtrips_only_actual_definition() {
+    use crate::ui::theme::{ColorDepth, Rgb, Token};
+    let (_dir, paths) = manual_theme_source(
+        "[ui]\ntheme = \"custom\"\n[theme]\nextends = \"dark\"\ntext = \"#FFFFFF\"\n",
+    );
+    let loaded = load(&paths).unwrap();
+    assert_eq!(loaded.config.ui.theme, ThemeSelection::Custom);
+    for color in [true, false] {
+        let theme = loaded.themes.selected_theme(color, ColorDepth::Indexed256);
+        assert_eq!(theme.selection(), ThemeSelection::Custom);
+        assert_eq!(theme.rgb(Token::Text), Rgb(255, 255, 255));
+        assert_eq!(theme.color, color);
+        assert_eq!(theme.depth, ColorDepth::Indexed256);
+    }
+    save(&paths, &loaded.config).unwrap();
+    let reloaded = load(&paths).unwrap();
+    assert_eq!(loaded, reloaded);
+    let source = fs::read_to_string(&paths.config_file).unwrap();
+    let value: toml::Value = toml::from_str(&source).unwrap();
+    assert_eq!(value["theme"].as_table().unwrap().len(), 2);
+    assert_eq!(value["theme"]["text"].as_str(), Some("#FFFFFF"));
+}
+
+#[test]
+fn manual_theme_legacy_ranges_remain_route_specific() {
+    let (dir, paths) = temp_paths();
+    let mut config = Config::default();
+    config.query.max_buffered_rows = 0;
+    save(&paths, &config).unwrap();
+    assert!(load(&paths).unwrap_err().headline.contains("out of range"));
+    fs::write(
+        &paths.config_file,
+        "schema_version = 0\n[query]\nmax-buffered-rows = 0\n",
+    )
+    .unwrap();
+    assert!(!migrate(&paths, false).unwrap().no_op);
+    assert!(migrate(&paths, true).unwrap().no_op);
+    assert!(dir.path().exists());
+}
+
+#[test]
+fn manual_theme_template_definition_is_fully_commented_and_valid_when_enabled() {
+    let ordinary: Config = toml::from_str(TEMPLATE).unwrap();
+    assert_eq!(ordinary, Config::default());
+    assert!(ordinary.theme.is_none());
+    assert!(!ordinary.ui.mouse);
+    let start = TEMPLATE
+        .find("# [theme]")
+        .expect("optional definition example");
+    let block = TEMPLATE[start..].split("\n\n").next().unwrap();
+    let uncommented = block
+        .lines()
+        .map(|line| {
+            line.strip_prefix("# ")
+                .expect("every definition line is commented")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (_dir, paths) = manual_theme_source(&format!(
+        "schema_version = 1\n{uncommented}\n[ui]\ntheme = \"custom\"\n"
+    ));
+    let loaded = load(&paths).unwrap();
+    assert_eq!(loaded.config.ui.theme, ThemeSelection::Custom);
+    assert!(loaded.config.theme.is_some());
+}
+
+#[test]
+fn manual_theme_reflection_is_safe_and_transferred_without_a_parser_wrapper() {
+    let secret = "SYNTHETIC_THEME_PASSWORD_SENTINEL";
+    let selection = format!(
+        "postgres://u:{secret}@h/d\n\t\"\\\u{202E}{}",
+        "€".repeat(60)
+    );
+    let input = std::collections::BTreeMap::from([(
+        "ui",
+        std::collections::BTreeMap::from([("theme", selection.clone())]),
+    )]);
+    let source = toml::to_string(&input).unwrap();
+    let raw = toml::Value::String(selection);
+    let expected = crate::ui::theme::lower_theme_inputs(Some(&raw), None).unwrap_err();
+    let (_dir, paths) = manual_theme_source(&source);
+    for error in [
+        load(&paths).unwrap_err(),
+        migrate(&paths, true).unwrap_err(),
+        migrate(&paths, false).unwrap_err(),
+    ] {
+        let line = error.theme_refusal_line().unwrap();
+        assert_eq!(line, expected.line());
+        assert!(line.is_ascii());
+        assert!(!line.contains('\n') && !line.contains('\r') && !line.contains('\u{1b}'));
+        assert!(line.contains("postgres://u:") && line.contains("@h/d"));
+        assert!(line.contains("\\n") && line.contains("\\u{202E}"));
+        assert!(line.contains("... [truncated]"));
+        assert!(!line.contains(secret));
+        assert!(!error.to_json().to_string().contains(secret));
+    }
+    assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), source);
+    assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+}
+
+#[test]
+fn manual_theme_first_failure_order_is_shared_by_load_and_migration() {
+    for (source, expected) in [
+        (
+            "[ui]\ntheme = \"auto\"\n[theme]\nextends = 7\n",
+            "configuration error: ui.theme = \"auto\" is not available in this build. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
+        ),
+        (
+            "[ui]\ntheme = \"custom\"\n",
+            "configuration error: ui.theme = \"custom\" requires a [theme] table.",
+        ),
+        (
+            "theme = []\n[ui]\ntheme = \"custom\"\n",
+            "configuration error: theme must be a table.",
+        ),
+        (
+            "[theme]\nextends = 7\naaa = 7\n",
+            "configuration error: [theme] extends must be a string. Use \"dark\", \"light\" or \"high-contrast\".",
+        ),
+        (
+            "[theme]\nzzz = \"red\"\naaa = 7\ntext = \"red\"\n",
+            "configuration error: [theme] has no token named \"aaa\". Token names are listed in docs/design/theme-tokens.md.",
+        ),
+        (
+            "[theme]\ntext = \"red\"\nsurface = \"red\"\n",
+            "configuration error: [theme] surface = \"red\" is not a colour. Use \"#RRGGBB\" hex, for example \"#F38BA8\".",
+        ),
+    ] {
+        for version in [0, 1] {
+            let text = format!("schema_version = {version}\n{source}");
+            let (_dir, paths) = manual_theme_source(&text);
+            for error in [
+                load(&paths).unwrap_err(),
+                migrate(&paths, true).unwrap_err(),
+                migrate(&paths, false).unwrap_err(),
+            ] {
+                assert_eq!(error.theme_refusal_line(), Some(expected));
+                assert_eq!(error.exit_code(), crate::ExitCode::Config);
+            }
+            assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), text);
+            assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+        }
+    }
+}
+
+#[test]
+fn manual_theme_public_typed_deserialization_does_not_admit_invalid_state() {
+    let source = "[ui]\ntheme = \"custom\"\n[theme]\nsurface = \"#000000\"\ntext = \"#000000\"\n";
+    let typed: Config = toml::from_str(source).unwrap();
+    assert!(
+        typed.validate().is_empty(),
+        "ordinary range validation is separate"
+    );
+    assert_eq!(typed.ui.theme, ThemeSelection::Custom);
+    let expected = crate::ui::theme::ValidatedThemes::resolve(typed.ui.theme, typed.theme.as_ref())
+        .unwrap_err();
+    let (_dir, paths) = manual_theme_source(source);
+    for error in [
+        load(&paths).unwrap_err(),
+        save(&paths, &typed).unwrap_err(),
+        migrate(&paths, false).unwrap_err(),
+    ] {
+        assert_eq!(error.theme_refusal_line(), Some(expected.line()));
+    }
+    assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), source);
+    assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+}
 
 #[test]
 fn config_save_preserves_a_stale_temporary_from_an_interrupted_write() {
@@ -114,11 +390,11 @@ fn out_of_range_values_are_reported_with_every_issue() {
 fn save_is_atomic_and_leaves_no_temporary_file() {
     let (_dir, paths) = temp_paths();
     let mut config = Config::default();
-    config.ui.theme = ThemeChoice::Light;
+    config.ui.theme = ThemeSelection::Light;
     save(&paths, &config).expect("save");
 
     let reloaded = load(&paths).expect("load");
-    assert_eq!(reloaded.config.ui.theme, ThemeChoice::Light);
+    assert_eq!(reloaded.config.ui.theme, ThemeSelection::Light);
     assert_eq!(reloaded.source, ConfigSource::File);
 
     let leftovers: Vec<_> = fs::read_dir(&paths.config_dir)
@@ -190,7 +466,7 @@ fn migration_is_idempotent_and_backs_up_before_changing_anything() {
     assert_eq!(loaded.config.schema_version, CURRENT_SCHEMA_VERSION);
     assert_eq!(
         loaded.config.ui.theme,
-        ThemeChoice::Light,
+        ThemeSelection::Light,
         "settings preserved"
     );
     assert!(loaded.pending_migration.is_none());
@@ -279,7 +555,7 @@ fn migration_backup_uses_the_parsed_bytes_and_is_private_before_its_first_write(
         fs::read_to_string(report.backup.unwrap()).unwrap(),
         original
     );
-    assert_eq!(load(&paths).unwrap().config.ui.theme, ThemeChoice::Light);
+    assert_eq!(load(&paths).unwrap().config.ui.theme, ThemeSelection::Light);
 }
 
 #[test]

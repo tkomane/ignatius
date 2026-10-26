@@ -15,8 +15,9 @@ Up/Down, PageUp/PageDown, Home/End and Ctrl+Home/Ctrl+End scroll within it.
 Its fixed rail names the active keys, close route, position and searchable
 command palette. Esc, Enter or the help key closes only help. Text, paste and
 editing/navigation keys cannot change covered SQL; other explicit commands
-close help before using their usual handler. A palette or chord prefix can
-cover help and return to the same position; pane chords retain their modal
+close help before using their usual handler. Direct theme switches preserve
+the current input/overlay owner instead of acting through it. A palette or chord
+prefix can cover help and return to the same position; pane chords retain their modal
 no-op rule. Help opened from an inspector covers that inspector until dismissed.
 Opening help or resizing starts at the top. Space bindings are written as
 `Space`, including `Ctrl+Space`.
@@ -68,6 +69,16 @@ cancellation through the existing query recovery path when one is running.
 Palette cancel/empty choice returns to the same snapshot/offset. Reading and
 paste never edit covered SQL; protected prompts/reviews keep higher ownership.
 No new mandatory binding or configuration name is introduced.
+
+The palette's **Session / Switch theme** entry is always available, including
+without a direct key and while a query is running or cancellation is pending.
+It cycles dark, light, high-contrast, custom when a validated `[theme]` exists,
+then dark. The choice lasts for the session; it does not write configuration,
+reconnect or repeat SQL. Configure the optional `switch-theme` action under
+`[keys]`; the single palette row lists the active aliases. Direct keys preserve
+prompts, reviews, filters, help, inspectors, palettes and pending chord prefixes.
+Choosing the palette entry follows the existing parent-close policy; cancelling
+or choosing no match returns to the same help/notice position.
 
 ## Chords
 
@@ -316,7 +327,7 @@ modifiers followed by one key: a single character, `f1` to `f24`, or one of
 
 The bindable action names are the authority in `src/ui/keymap.rs`:
 `run-buffer`, `run-statement`, `refresh-result`, `cancel`, `quit`, `toggle-help`,
-`focus-next`, `format-buffer`,
+`focus-next`, `format-buffer`, `switch-theme`,
 `toggle-error-detail`, `dismiss`, `toggle-sidebar`, `open-palette`,
 `open-result-grid`, `narrow-column`, `widen-column`,
 `shrink-pane`, `grow-pane`, `zoom-pane`,

@@ -80,21 +80,30 @@ pub(crate) fn render_palette(
     let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
     for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
         let selected = index == palette.selected;
+        let selection = if selected {
+            theme.style(Token::Selection)
+        } else {
+            Style::default()
+        };
         let mut spans = vec![
-            Span::styled(format!(" {:<8}", entry.group), theme.style(Token::Muted)),
+            Span::styled(
+                format!(" {:<8}", entry.group),
+                theme.style(Token::Muted).patch(selection),
+            ),
             Span::styled(
                 sanitize_for_display(&entry.label),
                 if selected {
                     theme.style(Token::Selection)
                 } else {
                     theme.style(Token::Text)
-                },
+                }
+                .patch(selection),
             ),
         ];
         if !entry.detail.is_empty() {
             spans.push(Span::styled(
                 format!("  {}", sanitize_for_display(&entry.detail)),
-                theme.style(Token::Muted),
+                theme.style(Token::Muted).patch(selection),
             ));
         }
         let mut line = Line::from(spans);
@@ -370,3 +379,6 @@ fn push_detail(lines: &mut Vec<Line<'static>>, label: &str, value: String, style
         Span::styled(sanitize_for_display(&value), style),
     ]));
 }
+
+#[cfg(test)]
+mod tests;

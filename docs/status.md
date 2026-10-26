@@ -1,14 +1,348 @@
 # Status
 
-**Updated: 2026-10-25.** This file is the resumption point. Read it, then check
+**Updated: 2026-10-26.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Autonomous roadmap continuation - 2026-10-25 (in progress)
+## Repository integration - 26 October 2026 (in progress)
 
-### Current local progress and active assignments
+The day-long implementation goal is complete. Owner-authorized sequential
+integration has merged PR32 (`af2ad3f`), PR34 (`81d5f9e`), PR35 (`84e033f`),
+PR36 (`5efb685`) and PR37 (`50fee40`) into main. Each descendant was refreshed
+against the newly merged main and passed 17 checks, with only the deliberate
+schedule-only fixture check skipped. The latest application source is the
+bounded editor implementation `d2edce1`; merge commits preserve the full source
+history. There has been no release or deployment.
 
-Branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
+PR33 now carries the separate Windows capability experiment plus the preserved
+W07 evidence and this integrated editor stack. Its native helpers/assertions
+are unchanged. The explicitly dispatched `windows-conpty-diagnostic.yml` keeps
+the known capability failure strict and retains bounded evidence; routine CI
+continues all three mandatory platform product suites. W07-064/T055a/T051 and
+Windows 11/Windows Terminal hand use remain open. The normal clean pre-push gate
+and fresh main-targeted CI are required before this integration is accepted.
+
+Dependency PR26, PR31 and replacement Cargo PR38 still need sequential refresh,
+checks and integration. Historical local main and older prototype branches are
+preserved in the verified local `.git/archives/20261026-before.bundle` and its
+ref inventory before cleanup. Those historical prototypes are recovery material,
+not new product or release acceptance. Final branch/worktree cleanup follows
+integration; check actual Git state rather than historical branch names below.
+
+Next product work remains the roadmap's scoped native terminal/provider and
+hand-use acceptance, followed by release evidence/trust, installation and p95
+gates. The US6/US8/T032 readiness notes remain planning inputs. The owner skipped
+external OpenCode review; no different-family review or release approval is
+implied by the merge task.
+
+## Autonomous roadmap continuation - 25 October 2026 (historical checkpoints)
+
+The dated snapshots below retain their source-bound observations. Their branch,
+PR and approval states describe the time of each checkpoint; current integration
+state is recorded above.
+
+### Latest reviewable checkpoint
+
+Latest product-source commit is **`d2edce1`**, published in
+[draft PR37](https://github.com/tkomane/ignatius/pull/37). Its CI run
+`40236560722` passed 13 executable jobs with one intentional scheduled-fixture
+skip. All five T059 and 18 T058 cases executed on Linux/macOS/Windows. The
+normal local/pre-push gate passed 1,520 harness cases, including 1,212 library
+cases; real PG14/18 plain/TLS and Linux socket hosted evidence also passed.
+The documentation checkpoint retains that exact product source; current-head
+workflow state is visible in PR37's checks.
+
+Review order is PR32 -> PR34 -> PR35 -> PR36 -> PR37. PR33 is the separate
+Windows ConPTY diagnostic with its preserved sensor limitation, not an accepted
+restoration fix. PR32 remains open at `d6d65e7`, against unchanged main `445ed82`.
+Its already-requested specific main-merge permission is still pending; phone
+workflow-scope approval did not authorize that protected action. After actual
+owner permission, refresh exact-head checks and integrate sequentially, with
+fresh main-targeted CodeQL on retargeted descendants. Native Warp/Windows11
+hand use, cloud-provider evidence, release p95/trust and release remain open.
+
+The team also prepared source-bound US6 mouse, US8 quiet-chrome and T032 input/
+lifecycle readiness notes, indexed in the roadmap. No mouse default or automatic
+background-detection support was enabled. One authorized Codex reset was used;
+external OpenCode review was explicitly skipped. The canonical W07 checkout
+and its unpublished `9278db4` record are preserved. The active managed worktree
+is retained for review; only owned acceptance records enter this checkpoint.
+
+### Dated local progress and assignments
+
+Historical W07 publication checkpoint:
+
+Current branch: `codex/windows-conpty-observation-2026-10-25`, published
+`65cf237` in draft PR33, stacked on unchanged D6 in PR32. The separate cursor
+calibration and reviewed CI wiring are published after the normal full pre-push
+gate passed. CI `40221850172` completed with 12 successful jobs, one scheduled
+skip and the unchanged Windows capability failure. The separate diagnostic
+completed: native setters and main VT are observable, alternate VT is not
+tracked by this sensor. Full Windows acceptance stays open. Parent PR32's
+exact protected-main merge approval is pending.
+
+Historical UI stack checkpoints:
+
+Accepted manual-theme branch: `codex/manual-themes-2026-10-25`, reusing the managed worktree
+from accepted `ffb86a1`. Published clean **`d92c416`** in
+[draft PR35](https://github.com/tkomane/ignatius/pull/35), stacked on PR34.
+The unchanged full pre-push hook repeated all 1,497 cases successfully; pinned
+Gitleaks passed the exact 444-file clean source and 291 non-merge commits among
+320 reachable local revisions. CI `40231713035` completed with **13 successful
+jobs and one intentional scheduled-fixture skip**. Actual merge `253ac7cc`
+matches head tree `00158901056a97195719d3e08026eeeff7234254`.
+Continuation now uses `codex/editor-caret-2026-10-25` from that same accepted
+head. Four owned post-publication records were carried forward intact. Root
+added FR-2529, T058 and a dated presentation/plan contract for the observed
+long-line editor caret clipping. An isolated worker is retaining the actual
+Buffer red before implementation; a separate native worker owns independent
+review. The actual 100x30 Buffer baseline has four meaningful failures and one
+passing short-line control: long ASCII draws zero caret cells; wide, combining
+and escaped-control cell hits name the wrong source scalar. Red log:
+`/private/tmp/ignatius-editor-eol-red-1di2ma1e/red.log`. Root's actual clean-d92
+100x30 PTY also clips the typed end sentinel, while Home restores the prefix;
+normal quit, alternate-screen exit and unchanged config passed, with no profile
+selected or SQL submitted. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-before-c0901prg/receipt.json`.
+Two preceding harness expectations incorrectly required unchanged words in a
+differential repaint; both are retained with normal child cleanup, not labelled
+product failures. T058 is now locally accepted: the derived horizontal view,
+shared completion/hit mapping and independently caught unfocused-zero-width
+repair passed 78 widget and 114 layout tests, Clippy/formatting and the complete
+1,515-harness / 1,207-library local verifier. PostgreSQL 18.6 plain/TLS ran;
+macOS socket is still skipped. Root verified both freezes, original tests and
+installed source and inspected seven synthetic images. The identical 100x30
+PTY repeat now shows the end sentinel, still restores the prefix with Home,
+quits zero and preserves config, without selecting a profile or submitting SQL.
+After receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-oarmp52a/receipt.json`.
+Full log: `/private/tmp/ignatius-t058-full-verify-20261025.log`
+(`03c40158ff7af92030466bd04d9ad3591c7b9b0bbbd0cfd502ee054ca0e8b462`).
+Published clean **`14d18ad`** in [draft PR36](https://github.com/tkomane/ignatius/pull/36),
+stacked on PR35. The unchanged normal pre-push hook repeated all 1,515 cases;
+pinned network-disabled Gitleaks passed all 446 clean-source files and 292
+non-merge revisions among 321 reachable local revisions. CI `40234580931` is
+completed on actual merge `42be23db`, whose tree matches head
+`384e26053d4653a51652b965c9bcad19103b0bd0`. All 13 executable jobs succeeded,
+with one intentional scheduled-fixture skip. Root verified eight platform and
+21 policy artifacts plus complete PG14/18/socket logs. All 18 T058 cases ran on
+Linux/macOS/Windows with Rust 1.97.1; harness/library totals are 1,515/1,207,
+1,515/1,207 and 1,459/1,188. Doctor retains three explicit skips per platform.
+Six permitted duplicate warnings and three conditional Python archive-test
+guards remain qualified; this is not native or release acceptance.
+The clean published local binary also passes the same 100x30 end/Home journey
+with normal quit, alternate-screen exit and unchanged config. A retained early
+repeat typed before the picker had observably closed; the final harness now
+waits for the underlying-owner repaint before typing. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-ni4f6ssl/receipt.json`.
+Only post-publication acceptance notes are now local edits. Native appearance,
+hand use, fresh main-targeted CodeQL, parent integration and release stay open.
+A bounded W10 diagnostic found a material T058 transient-allocation increase.
+With three fresh test-profile samples per revision/size, the 1 MiB line median
+render rose from 264.462 to 902.313 ms and process maximum RSS from 17.453 to
+146.500 MiB; at 16 KiB medians were 6.481/19.611 ms and 11.953/13.062 MiB.
+Root verified all 951 frozen baseline artifacts. One initial sandboxed observer
+failure is retained/excluded; 12 valid children all preserved source/state.
+This is not a process ceiling or release-build 100-action p95 result. Receipt:
+`/private/tmp/ignatius-editor-perf-2kfyw0q6/REPORT.md`.
+Root adopted FR-2530/T059 and the bounded-projection contract before delegating
+an isolated correction. Active branch is now
+`codex/bounded-editor-view-2026-10-25` from accepted PR36; only owned records and
+contracts are local edits. Worker source remains isolated until review. PR36's
+draft body discloses this follow-up. T059 is now locally accepted: final
+sanitizer-gated ASCII projection passed 83 widget/114 layout tests, lints and
+the full 1,520-harness / 1,212-library verifier. Root verified final 58 artifacts,
+original test preservation and every JSON field/cell in 21 frames/51,081 cells;
+independent review accepted the bounded projection and narrow ASCII delta.
+Final identical-harness samples give 16 KiB median 6.198 ms/12.156 MiB RSS and
+1 MiB 138.342 ms/17.063 MiB, preserving source/state and one visible caret.
+The 100x30 owned PTY end/Home/normal-quit/config control also passes. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-jzgapy6r/receipt.json`.
+These are local test-profile observations, not release p95, process ceilings
+or native hand use. Published clean **`d2edce1`** in
+[draft PR37](https://github.com/tkomane/ignatius/pull/37), stacked on PR36.
+The normal pre-push verifier repeated all 1,520/1,212 cases; pinned offline
+Gitleaks passed 446 exact-source files and 293 non-merge commits among 322
+reachable local revisions. Local/head/upstream match. The clean published
+binary also passes the 100x30 PTY control, receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-3z02aab9/receipt.json`.
+CI `40236560722` uses merge `882873ec`, whose tree equals head
+`c9276f6b71c45dc439f247e37ef9b9431cd6d414`. PG14/18 plain/TLS, real Linux socket,
+all 13 executable jobs passed, with one intentional scheduled-fixture skip.
+Root verified eight platform/20 policy artifacts and complete database logs.
+Linux/macOS totals are 1,520/1,212 library and Windows 1,464/1,193; all five
+T059 plus 18 T058 cases execute on each. Doctor retains three explicit skips.
+These acceptance records form a documentation-only checkpoint. Canonical
+W07 checkout remains clean at its original `9278db4`; no owner work was replaced.
+Read-only US6/US8/T032 readiness
+reviews are reflected in the roadmap; their unresolved policy dependencies
+remain open and mouse capture stays disabled.
+Root adopted the dated manual theme contract/plan and
+T028a test subset. Root integrated the five-file pure theme freeze after checking
+all 39 artifact hashes and reviewing the grammar, safe refusals and resolver.
+That lane passed 42 theme and 11 Results tests; four measured Null/comment
+contrast failures precede the four admitted RGB repairs. Root's seven reducer
+tests pass, including custom cycling, owners, busy queries, mismatch/query
+diagnostic preservation and profile/resize/async retention. Four original
+runtime/palette cases were observed red first. Independent runtime review found
+two missing exhaustive discovery arms; both are corrected. The 31 keymap tests
+pass after extending reachability coverage to open the actual palette.
+
+The strict-schema prerequisite preserved original TOML errors/spans; its final
+phase2 source is now integrated after root reviewed the actual admission code
+and verified all 127 artifacts. Root independently confirmed the normalized
+bodies of all 41 original configuration/diagnostic tests and the store helper.
+Four real-CLI cases were observed red first and now pass on the combined source:
+150 isolated child runs cover exact refusals across startup/query/show/validate/
+migrate, valid roundtrip, doctor JSON and bounded redacted reflection.
+
+The initial five-theme T033 matrix passed 2,520 actual frames. Root checked 101
+artifacts and inspected all seven sheets, then individual HighContrast palette
+inspection exposed selected group/detail ink retaining Muted on white fill.
+T056's failing-first correction and stronger assertions are integrated from a
+new 125-artifact freeze. Root inspected corrected HighContrast, inverted Custom
+and colour-off palette images and the comparison sheet. Its own comparison of
+12,096,000 cells confirms only 2,340 foregrounds change in 60 painted palette
+frames; all labels, backgrounds, modifiers, geometry, Basic16/off and non-palette
+frames are preserved. The rejected first candidate's extra Basic16 label change
+and all earlier evidence remain retained. Native appearance is still unverified.
+
+The final combined local verifier passed **1,497 outer harness cases, 1,189
+library cases and 25 summaries**, all six executed gates and actual PostgreSQL
+18.6 plain/TLS. Both existing synthetic servers were freshly queried as 18.6.
+The macOS socket case remains skipped. T028a/T029/T030/T031/T033/T056/T057 record
+manual local implementation, including the configured-colour route.
+T028/T028b/T032 and whole-US5 completion stay open.
+Published source is locally/hosted verified; current post-publication acceptance
+notes are owned local documentation edits for the next meaningful checkpoint.
+Fresh main-targeted CodeQL, parent integration, native appearance/hand use and
+release remain open. PR32's already-requested protected-main approval is still
+pending; phone workflow-scope approval did not authorize that merge.
+Full log: `/private/tmp/ignatius-manual-themes-t057-verify-20261025.log`
+(SHA-256 `965e7cd3662408e9da11c3d59a3647c1bdda22aac32bd20b5dccd418496da914`).
+
+Final independent integration review found an existing route omission after the
+earlier 1,492-case pass: full-screen startup and doctor ignored `[ui] color`.
+That pre-T057 pass did not prove the route. Root pinned exact precedence before
+delegating a narrow private CLI correction: explicit flag, configured choice,
+then auto facts, with plain/NO_COLOR/dumb absolute. Root reviewed and integrated
+the five-file correction after verifying all 208 frozen artifacts; 64 distinct
+focused cases and 27 actual doctor subprocess controls passed. The final full
+repeat above includes this correction. Source/history scans, publication and
+hosted platform/MSRV acceptance have now passed as recorded above.
+Root also confirmed T057 in the actual pre-fix local binary using three owned
+macOS PTYs and a synthetic profile picker: configured Custom/never emitted 119
+painted SGR sequences, explicit always emitted 119, and NO_COLOR plus always
+emitted zero. All three quit normally with alternate-screen enter/exit captured;
+no profile was chosen or SQL sent. This proves the route defect and controls,
+not native emulator/font appearance. Before evidence:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-3i9adtvz/`.
+The corrected binary changes configured never to zero painted SGRs. Explicit
+always and NO_COLOR control captures are byte-identical to before; all three
+sessions quit normally. After receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-qtg0xxks/receipt.json`.
+
+Independent hosted platform audit confirms the same 74 selected manual-theme/
+T056/T057 cases executed on Linux/macOS/Windows with Rust 1.97.1. Full harness/
+library totals were 1,497/1,189, 1,497/1,189 and 1,441/1,170. Startup/refusal smoke
+passed; doctor retains three explicit skips per platform. Rust 1.90 compilation,
+advisories/licences, workflow and release-scope gates passed. Six permitted
+duplicate-version warnings and three conditional Python archive-test guards
+remain qualified in the policy audit. PG14/18 plain/verified-TLS and one actual
+Linux socket passed; 473 selected invocations include pure/local tests and are
+not 473 live queries. Runtime-major guards and readiness support the live claims.
+
+The clean published local binary also completed a real palette keyboard cycle
+through dark/light/high-contrast/custom in an owned 180x40 macOS PTY, retaining
+typed SQL and exact config bytes, with normal quit and no connection selection
+or SQL execution. Earlier probe harness failures are retained: one stalled
+setup was terminated by exact owned PID; another assumed visible text at a
+clipped width; a later one used a wrong expected Light RGB. None is claimed as
+a product regression or passing journey. Final receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-cycle-pty-h7f9buo8/receipt.json`.
+
+Hosted platform receipt: `/private/tmp/ignatius-pr35-platform-audit-2u768bko/receipt.json`
+(28 artifacts, manifest `14b6a8b72446181242dd24d1fa256a35bc9b96d9e991ef06a41f0c7a53cd08d9`).
+Policy: `/private/tmp/ignatius-pr35-policy-audit-ziQQqR/RECEIPT.md`
+(37 artifacts, manifest `d0b7857d77b8c9fd7a437143cc86effdf62396a035121a4534f8151dbbce6131`).
+DB audit: `/private/tmp/ignatius-pr35-d92c416-db-audit-20261025.json`.
+Publication: `/private/tmp/ignatius-manual-d92c416-publication-20261025.json`.
+
+Next roadmap readiness: `/private/tmp/ignatius-t032-readiness-w4djagqv/ASSESSMENT.md`
+identifies late OSC reply/input ownership, staged guard, deadline/parser and
+doctor-provenance decisions before T032. It is a read-only, source-backed
+proposal, not an adopted input design or permission to enable auto. Continue
+the day-long goal without weakening the current explicit auto refusal.
+
+Theme freeze: `/private/tmp/ignatius-us5-theme-ffb86a1-z53t1vo8/pure-theme-freeze-01/`
+(manifest SHA-256 `edf823b9f4c69bb56ef2669e0501e3b230873a005a5197d12145a0fbfce11263`).
+Root runtime log: `/private/tmp/ignatius-us5-runtime-root-custom-green-20261025.log`.
+The runtime size-query regression was also observed red then green; theme keys
+now bypass the geometry prerequisite, preserving covered offsets. All six
+existing runtime geometry/review controls pass. Independent review found no
+remaining scoped blocker for that delta.
+CLI red: `/private/tmp/ignatius-us5-cli-root-red-20261025.log`.
+
+Previous branch `codex/selected-field-contrast-2026-10-25` is published in PR34,
+isolated from reviewed D6 in PR32. Feature025 T055 corrects an expanded Results
+selection defect before manual custom themes: child Header/NullValue colours
+override Selection ink, producing white-on-white HighContrast text. Root
+verified all 16 immutable reproduction artifacts. The worker owns only
+`src/ui/widgets/results.rs` and its sidecar; contracts/spec/plan/tasks pin the
+correction and 72 presentation combinations before implementation. No palette,
+configuration, runtime action or geometry change is included. The exact two-file
+correction is integrated and independently reviewed. Root verified all 76 frozen
+artifacts; all eight original Results tests remain byte-identical. Focused
+Results 11/theme 20 passed, with the maintained actual-Buffer red preserved.
+Root inspected all 12 before/after synthetic rasters; only selected painted
+foregrounds change. These captures do not prove native terminal appearance.
+The complete local verifier passed **1,434 outer harness cases, 1,130 library
+cases and 24 summaries**, formatting, warnings-denied lints/API docs and actual
+PostgreSQL 18.6 plain/TLS. The first run's six TLS failures came from missing
+ignored synthetic fixture files in this new worktree; all affected cases passed
+after fixture wiring and a full repeat. The macOS socket case remains skipped.
+Published clean `ffb86a1` in [draft PR34](https://github.com/tkomane/ignatius/pull/34)
+after the installed full pre-push verifier again passed all 1,434 cases, with the
+same socket skip. Pinned Gitleaks passed the exact 438-file source and 290
+reachable revisions. PR merge ref `d38304f9` has the identical source tree
+`77c2add104a13c5bd20bca99eb687d0de9f0578a`. CI `40223833554` completed with
+13 successful jobs and one deliberate schedule-only drift skip. The three new
+Buffer cases ran and passed on Linux/macOS/Windows; library totals were
+1,130/1,130/1,111 under actual Rust 1.97.1. Startup/refusal smoke, Rust 1.90,
+PG14/18 plain/verified-TLS and the real Linux socket passed. Database jobs ran
+236 selected invocations per major plus one socket; these include pure/local
+cases and are not 473 live queries. Fresh main-targeted CodeQL remains pending.
+Local receipt:
+`/private/tmp/ignatius-t055-root-integration-20261025.json`.
+Publication: `/private/tmp/ignatius-t055-ffb86a1-publication-20261025.json`.
+Hosted platform audit:
+`/private/tmp/ignatius-pr34-platform-audit-kmb7tndf/RECEIPT.md` (SHA-256
+`8e2cd6155079190e78da21487a0c77089055410f976a462259215c62ac944095`);
+DB/socket audit: `/private/tmp/ignatius-pr34-ffb86a1-db-audit-20261025.json`.
+Repro: `/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`.
+
+Next: integrate configuration refusal/startup gates, complete styled parity and
+CLI checks, then run the full gate and publish the reviewed manual slice while
+keeping auto/T032 open.
+Read-only strict-parser/identity design brief:
+`/private/tmp/ignatius-us5-strict-identity-design-ffb86a1-20261025.md`, SHA-256
+`363f853c8c6245f2982b59eb89d482ea04b89a7dfc123be70c2917cbda9e33cc`.
+The design has been adopted in the dated contract with only theme leaves
+deferred and Custom identity inseparable from its validated cache. Exact
+reflection escaping, caller-specific precedence and the actual capsule contrast
+set are pinned. Preserve migrate/save's existing lack of ordinary range
+validation; add only theme checks there.
+Post-publication acceptance records are local owned documentation edits for the
+next meaningful source checkpoint; published application source remains `ffb86a1`.
+
+Windows work continues separately in [draft PR33](https://github.com/tkomane/ignatius/pull/33):
+at `65cf237`, calibration follows native setters/main VT but cannot track
+alternate-VT visibility; the unchanged original cursor capability still fails.
+That harness is not part of this sibling branch. Parent PR32's protected-main
+merge still needs the already-requested specific owner approval. Nothing has
+merged or released. Earlier source-bound checkpoints follow.
+
+Parent branch: `codex/autonomous-roadmap-2026-10-25`. Notice source is saved in
 `d65024b`. W10-012's integrated notice
 implementation passed the complete local verifier: **1,370 outer harness cases,
 1,072 library, 23 summaries**, formatting, warnings-denied lints/API docs and
@@ -113,6 +447,18 @@ W10-013 is checked for this scoped implementation/acceptance. Native Windows
 hand-use and other resource routes remain open. Source publication has not
 merged main or released. The next record commit changes documentation only.
 
+Documentation-only checkpoints `999aba8` and `d6d65e7` are published after the
+unchanged full pre-push gate passed again. Rust/Cargo/build-script/test/workflow
+file bytes are identical to accepted `54056c2`; build revision identity changes
+normally. Fresh PR CI `40211200487` and CodeQL `40211200491` completed at
+`d6d65e7`: 17 successful checks, one deliberate schedule-only skip and no new
+CodeQL alerts. Reviews/comments/unresolved threads are empty; PR32 is ready.
+An attempted protected-main merge was rejected by automatic approval review
+because the publication grant did not explicitly authorise that merge. The
+owner's exact-head merge question is pending; do not retry without that approval.
+No main mutation occurred. Root inspected all 30 annotated checks at `54056c2`:
+30 runner queue/image notices and zero warning/error annotations.
+
 W07-064 is now specified as the next isolated assignment under foundation
 REL-001 and `contracts/windows-conpty-observation.md`. Use a test-only native
 SDK observer plus the selected safe Rust guard/hook process; establish native
@@ -120,6 +466,151 @@ capability and negative ownership/state controls before the full option/path
 matrix. Root owns CI and acceptance. Unsupported paste/buffer observations
 cannot close T055a; Windows 11/Windows Terminal hand use stays T051. No Windows
 ConPTY runtime evidence has run yet.
+
+The PostgreSQL lane now implements the first W07-064 capability/control freeze
+in `/private/tmp/ignatius-w07-064-d6d65e7-il6f_ql4/source`, exact detached D6,
+with a fresh SSD cache/target and all previous frozen inputs preserved. Owned
+paths are new test-support C++/safe Rust/PowerShell only; root owns CI, product
+source, canonical docs and Windows execution after immutable review. The root
+clarification pins 250 ms after positive HANG_READY, 20 s setup and 25 s outer
+supervision, exact Job membership and protected local pipes. Current canonical
+contract includes it; frozen input copy/hash is recorded in the private handoff.
+No 24-case expansion or Windows runtime is authorised before capability review.
+
+First W07 freeze01 is retained under the lane's
+`capability-control-freeze-01/`: 36 snapshot hashes independently verified. Local
+19 pure C++/30 synthetic PowerShell/4 parser checks and helper compilation ran;
+zero Windows cases. Root and peer blocked native execution on two harness
+findings: cleanup waits after the 25-second deadline and suppressed zero-byte
+ReadFile errors. Freeze02 repairs both with a shared absolute cleanup budget,
+heap-owned pending I/O lifetime, strict error classification and pre/post build
+input proof. Root verified all 32 new artifact hashes and nine integrated files;
+the only integration deviation removes one trailing space. Independent review
+accepted the limited source scope and rehashed all 36 prior artifacts and 1,207
+compiled inputs unchanged. Review:
+`/private/tmp/ignatius-w07-064-independent-review-02-20261025.md`, SHA-256
+`40aaead5667e256bc306a340ec4c086663af67b980b33f7cba94bdb024d2e4eb`.
+
+Root admits only the first four controls/capability cases to the authorised
+hosted CI workflow after the local publication gate. Actual wrong-ownership,
+native error-path cleanup and the full 24-path matrix remain open. All 15
+workflow contracts, 26 pure C++ and 48 synthetic PowerShell checks passed in the
+integration tree; standalone Rust formatting and pinned Actionlint passed.
+The Windows-only CI/evidence wiring previously failed first; its script AST
+also passed. The complete local verifier passed 1,432 outer harness cases,
+1,127 library cases and 24 summaries, formatting, warnings-denied lints/API
+docs and PostgreSQL 18.6 plain/TLS. The macOS socket case remains a semantic
+skip. Log: `/private/tmp/ignatius-w07-064-integrated-verify-20261025.log`.
+Published clean `69f4de6` and opened [draft PR33](https://github.com/tkomane/ignatius/pull/33)
+against unchanged parent D6 for a scoped 14-file review. The unchanged pre-push
+gate passed all 1,432 cases again, with the same macOS socket skip. Pinned
+Gitleaks passed the exact 447-file clean snapshot and 286 reachable revisions.
+CI `40215610812` finished: 12 jobs succeeded, one schedule-only job skipped and
+Windows failed in the new controller before any native child. Actual pinned
+Rust 1.97.1 and MSVC toolset 14.51/SDK 10.0.26100 helper builds succeeded. Root verified
+the 94,212-byte artifact digest and all 447 source/nine helper hashes against
+the committed source. Its summary records empty cases, unchanged inputs and
+`Index was outside the bounds of the array.` The exact empty-directory failure
+reproduced under local PowerShell StrictMode. The three-script inventory repair
+passed 52 checks (all prior 48 plus four actual file/directory cases), four AST
+checks and independent review. Root verified the 14 frozen artifacts and
+integrated source bytes. Budget/ownership/native code and first-four scope are
+unchanged; the primary admits the repeat after the normal pre-push gate.
+The failed run remains preserved and no native result is
+claimed. First evidence: `/private/tmp/ignatius-pr33-windows-first-40215610812-1/`.
+Repair `7d167a9` is now published after the installed full pre-push gate again
+passed all 1,432 cases with the same macOS socket skip. Clean 447-file source
+and 287 reachable revisions passed pinned Gitleaks. CI `40216991785` finished:
+12 jobs passed, scheduled drift skipped and Windows failed the capability
+cursor assertion after four actual children. No-guard, known-unrestored and
+acknowledged hung-child controls passed. Guard input masks were 423/152/423,
+with genuine raw/mouse transition/restoration; buffer sentinel was 1/0/1.
+Cursor queries succeeded but stayed visible 1/1/1, so capability remains failed.
+All four exact Jobs were empty, processes waited and output/control-I/O cleanup
+confirmed; the acknowledged hang interval was 257.6195 ms. Root verified all
+27 archive files, 17 capture entries and 447 source/nine helper hashes.
+Evidence: `/private/tmp/ignatius-pr33-windows-second-40216991785-1/`.
+The team is diagnosing sensor/active-buffer semantics without product changes,
+assertion weakening or matrix expansion. PR33 stays draft; parent PR32's
+specific protected-main merge approval remains unanswered.
+The root adopted a single separate cursor calibration in the existing contract:
+one persistent authenticated actor compares native setters and VT main/alternate
+cursor operations, with controlled marker readback and complete native facts.
+The implementation lane now owns only test-support changes in a fresh private
+`7d167a9` snapshot. The independent lane reviews the calibration design. Root
+owns canonical source/CI and native admission after frozen review;
+the exact published calibration is now admitted under the bounded scope below. Frozen contract input:
+`/private/tmp/ignatius-w07-cursor-calibration-contract-20261025.md`, SHA-256
+`0cc81e4bdcd68692a155911463cd7aba279e7d03afac300c41b0811c5df5f286`.
+Candidate freeze01 contains 60 root-verified artifacts and reported 53 portable
+C++/82 PowerShell/three actual-emitter synthetic checks, preserving prior26/52.
+Review01 blocked native admission on a short-sentinel-read gap: requested/
+actual read lengths must prove complete content before alternate absence.
+Repair02 captures individual restoration verification API results and all
+requested/actual sentinel counts. Root verified all 75 repaired artifact hashes,
+read the repaired fields and integrated all nine files byte-for-byte. Independent
+review accepted both repairs; 74 C++ and 103 PowerShell checks passed again in
+the canonical tree. Worker evidence separately records six synthetic emitter
+cases, two exact wire-emitter roundtrips, four AST parses and Rust formatting.
+The original immutable candidate remains preserved. The primary admits only
+the separate calibration and unchanged first four on this reviewed source.
+Published `65cf237` passed the normal full pre-push gate: 1,432 outer harness
+cases, 1,127 library cases, 24 summaries and all six executed gates. The macOS
+socket case remains a semantic skip. Pinned Gitleaks passed the exact 447-file
+source and 288 reachable revisions. PR merge ref `dfe46f52` has identical tree
+`4ce8f1f7cf0b8e704294578d76fb1531b963dc21`. CI `40221850172` finished with 12
+successful jobs, one deliberate schedule-only skip and a Windows failure.
+The separate nine-stage diagnostic completed with one authenticated retained
+actor: native setters and main VT produced hidden/shown transitions, while
+alternate VT remained visible 1/1 despite complete writes, unique phase marker
+readback and 36/36 sentinel reads. Baseline 423/7, cursor size 25 and visibility 1
+were independently restored before the distinct final query. Diagnostic duration
+was 54.2058 ms native/157 ms controller. The unchanged original four again produced
+three control passes and failed cursor capability; all five exact Jobs emptied
+and actual process/drain/control-I/O cleanup completed. Root verified the
+105,445-byte ZIP SHA-256 `c78a505aa9c1994b8300080963e6e8268e3e1173e866a809f2527f1bb0fbac20`,
+all 33 files, 22 capture entries, 447 Git source blobs and nine helpers. This
+measures a sensor/routing limitation, not actual alternate cursor state or a
+product defect. No matrix expansion or weaker assertion is admitted. Evidence:
+`/private/tmp/ignatius-pr33-windows-calibration-40221850172-1/`; root receipt
+`/private/tmp/ignatius-pr33-65cf237-calibration-windows-review-20261025.json`.
+Independent native audit found no integrity or adopted-scope inconsistency:
+`/private/tmp/ignatius-w07-calibration-65cf237-native-review-j2f4lx0v/REVIEW.md`,
+SHA-256 `64a56107cda058b343d6434393054bca603a91c94e99d9688b6f8bdbad5496a1`.
+Compiler/link binary hashes remain build/controller-recorded identities because
+their bytes are intentionally excluded from the narrow archive.
+Root's separate diagnostic-before-capability CI wiring passed its meaningful
+red/green workflow contract, formatting, pinned Actionlint, PS AST and independent
+review. The 21-pattern evidence allowlist is published with the source.
+Freeze01: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-01/`.
+Accepted repair:
+`/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`,
+manifest `c44d1f1f3f8ea4e9c7455051cf32ccd447dd8a07ba80581f71c52a6ea7c810bc`;
+peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-20261025.md`,
+SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.
+Fresh CodeQL is pending retargeting to main because its existing base-main
+filter is preserved.
+The independent roadmap preparation now assesses Feature025 US5's manual
+custom-theme/startup/runtime-switch journey; auto/T032 and whole-US5 acceptance
+remain open. Its unadopted contract proposal is
+`/private/tmp/ignatius-us5-manual-contract-proposal-afimm9za/PROPOSED-PINS.md`
+(SHA-256 `0fbc914b56ad2e38beac198dc728868cdd0a143f04b45698c8dd068a9406d9e8`).
+Root verified both planning artifact hashes. The actual-library probe confirmed
+a P2 expanded-field selection defect: HighContrast header white on white and
+NULL grey on white, instead of Selection's Surface ink. Root verified all 16
+frozen repro artifacts; the meaningful real-Buffer red remains preserved in
+`/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`. T055 specifies
+the narrow composition correction before custom themes, with no palette change.
+Active isolated worktree:
+`/Users/tshiamo/.codex/worktrees/selected-field-contrast/ignatius-psql-client`,
+branch `codex/selected-field-contrast-2026-10-25` from D6, independent of PR33.
+The worker owns only Results renderer/sidecar; root owns contracts, integration,
+rendered review and publication. The fix is not integrated or accepted yet.
+The independent integration review accepted the installed-tool bootstrap and
+15-pattern evidence allowlist; receipt:
+`/private/tmp/ignatius-w07-064-independent-integration-review-20261025.md`.
+The next wrong-owned-Job and one deliberate Guard error-return controls are
+proposed privately, not implemented or admitted before first-four results.
 
 The team separately assessed incoming allocation and next-slice feasibility.
 No frame/startup/RSS bound is adopted: the locked driver has no single public
@@ -2079,10 +2570,12 @@ These are real and none of them is hidden anywhere else:
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
    been driven by hand.
-7. **Terminal restoration is proven automatically on Unix**, by a test that runs
-   the client under a real pty and reads the bytes. The Windows equivalent needs
-   ConPTY and has not been written. Warp's own renderer and a live terminal
-   resize have not been exercised by hand; the pty runs use a forced size.
+7. **Terminal restoration is proven automatically on Unix**, by tests that run
+   owned real PTYs. Published `7d167a9` now has three actual Windows ConPTY control
+   passes and partial Guard raw/mouse/buffer evidence. Its hidden-cursor
+   capability check fails; calibration and full T055a acceptance remain open.
+   Warp's own renderer and a live terminal resize have not been exercised by
+   hand; the PTY runs use a forced size.
 8. **The secret scan was previously scanning nothing.** It walks the commit
    range of a push, which the default shallow checkout could not resolve, so it
    reported no leaks after scanning zero bytes. Fixed on 2026-08-15 by fetching
@@ -2142,9 +2635,10 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-1. **W07:** pin and implement the owned Windows ConPTY capability/guard
-   observation slice. Use actual native modes/cursor/buffer evidence; preserve
-   T055a's remaining mode gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
+1. **W07:** calibrate the Windows cursor sensor under the owned native contract,
+   preserving `7d167a9`'s three control passes and failed capability. Admit the
+   Guard option/path matrix only after faithful observations; preserve T055a's
+   remaining gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
 2. **W10-008:** retain the separate notice and retained-data contracts; finish
    the incoming-allocation design without claiming driver/startup/RSS ceilings.
    Preserve cancellation, sticky privacy and unknown write outcomes.

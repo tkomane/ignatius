@@ -193,6 +193,41 @@ No constitution violations. Two structural costs are accepted knowingly:
 | Widget-module extraction before any visual change | 6,553-line single file makes parallel implementation impossible and hit regions unverifiable | Patching in place would serialize every story through one file and let hit-testing drift from drawing |
 | Presentation moves into `Model` | Runtime theme switching and depth-aware rendering must be reducible, testable state | Mutating a shared reference in the event loop would put presentation outside the reducer's evidence boundary |
 
+### Manual theme slice - 2026-10-25
+
+Deliver FR-2513/2515/2516 under the dated theme-config contract before the
+separate automatic-background protocol. T028a is the manual test subset;
+T028/T028b/T032 and whole-US5 acceptance remain open until their full scope runs.
+Do not change mouse capture, dependencies, query behavior or release controls.
+
+One strict generic schema declaration may parameterise only selection/definition
+leaves for a private pending parse. Prove original-source TOML syntax, duplicate
+and ordinary error/span behavior before admitting it. Existing load range gates
+remain; migrate/save gain theme checks only. Raw pending values have no printable
+Debug route. A typed theme-only diagnostic tag preserves other human/JSON/doctor
+envelopes. Serialize the actual typed definition, not its resolved cache.
+
+Theme resolution owns canonical token names/hex grammar, the complete RGB
+matrix, safe refusals and the immutable fixed-size custom cache. Active theme
+identity is derived from a private built-in/custom palette variant; built-in
+Theme::new stays infallible and cannot represent missing custom data. Root owns
+the model/catalog pair, startup before TerminalGuard, SwitchTheme action,
+owner-first handling, explicit palette discovery and actual CLI/parity evidence.
+No runtime action reads files or reparses raw maps. A cache mismatch reports an
+internal diagnostic without changing theme or emitting effects.
+
+Work is bounded in two isolated lanes from accepted ffb86a1. The configuration
+lane first proves parser preservation only in a private candidate. The pure-theme
+lane owns theme code/tests, including the four measured Null/comment adjustments
+after actual-library reds, and publishes a frozen API/source handoff. Then the
+configuration lane consumes that exact handoff for schema/store/diagnostic work.
+Root owns canonical integration and shared app/CLI files throughout. The sole
+out-of-module theme migration is the Results sidecar's debug identity accessor;
+its assertions and all T055 behavior stay unchanged. Cross-review the frozen
+combined source, run strict refusal subprocesses and styled parity, then the
+full verifier and normal publication gates. The existing independent-review
+exception and protected-main/release approval boundaries remain unchanged.
+
 ## Implementation Phases
 
 1. **Foundational (serialized, integrator only)**: extract
@@ -248,3 +283,43 @@ types/notices, remapped hint bounds and minimum-size prompt visibility. Full
 verification and rendered inspection follow focused checks. Keep T038 open
 until its complete density test set is proven, and keep drag acceptance open
 until T035.
+
+### Selected-field correction - 2026-10-25
+
+Before manual custom themes, T055 repairs the actual expanded Results renderer's
+child-span foreground precedence. A source-bound actual Buffer probe found a
+selected HighContrast header white on white and NULL grey on white, while the
+Selection style specifies Surface ink. The worker owns only the existing
+Results renderer and its sidecar tests; root owns contract/records/integration.
+Keep the original red and prove the real renderer's selected/unselected cells,
+semantic modifiers and depth/glyph/density boundaries before full and rendered
+review. No RGB palette, custom parsing, runtime action, geometry or mouse change
+is included. W07's independently measured alternate-buffer cursor sensor gap
+remains open and is not resolved by this UI correction.
+
+### Long-line editor view correction - 2026-10-25
+
+W09's owned 100x30 PTY journey exposed a long SQL line being clipped while its
+caret was beyond the right edge. Source inspection confirms the renderer has
+only a derived vertical window; completion clamps a scalar column to the pane
+edge and hit mapping treats screen cells as scalar columns. T058 first retains
+an actual-Buffer failing reproduction, then shares one pure display-cell view
+between those three consumers. Root owns FR-2529, the presentation contract,
+records and integration; the worker owns only editor rendering/shared hit
+mapping and their sidecar tests in an isolated source copy. No editor/model
+state, dependency, terminal input, mouse default, SQL or effect change is
+included. Existing source text, source scalar columns, styles and vertical
+window remain authoritative. Independent review, rendered-cell inspection and
+the same-width owned-PTY repeat precede scoped acceptance; native hand use
+remains separate.
+
+### Bounded editor-view metadata - 2026-10-25
+
+W10's identical-harness diagnostic after T058 acceptance measures a material
+test-profile allocation/latency increase at 16 KiB/1 MiB. T059 projects only
+visible/caret units using the same pure mapper and one display sanitiser, with
+linear source scanning and no persistent cache. Root owns FR-2530, contract,
+review, integration and records; the isolated worker owns only editor view,
+its three consumers and sidecar tests. Preserve the already accepted exact
+styled cells and all source/edit semantics. Diagnostic observations are not
+process ceilings or the release-build 100-action p95 protocol.

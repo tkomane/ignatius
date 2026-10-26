@@ -2357,7 +2357,7 @@ fn release_workflow_aggregates_three_reverified_target_bundles() {
         "aggregate:\n    name: Aggregate candidate evidence\n    needs: [source, archive, runtime]",
         "timeout-minutes: 20",
         "ref: ${{ needs.source.outputs.revision }}",
-        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "actions/download-artifact@",
         "pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}",
         "pattern: release-runtime-*-${{ github.run_id }}-${{ github.run_attempt }}",
         "merge-multiple: false",
@@ -2648,12 +2648,15 @@ fn release_workflow_is_read_only_and_non_publishing() {
 #[test]
 fn release_workflow_uses_the_required_actions_and_pinned_build_inputs() {
     let workflow = include_str!("../.github/workflows/release.yml");
+    // workflow_contract owns full-SHA validation and cross-workflow pin
+    // consistency. Require action identities here without duplicating their
+    // dependency-managed revisions.
     for expected in [
-        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        "dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772",
-        "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6",
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "actions/checkout@",
+        "dtolnay/rust-toolchain@",
+        "Swatinem/rust-cache@",
+        "actions/upload-artifact@",
+        "actions/download-artifact@",
         "toolchain: \"1.97.1\"",
         "fetch-depth: 0",
         "persist-credentials: false",

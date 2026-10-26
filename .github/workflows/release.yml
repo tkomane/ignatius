@@ -72,12 +72,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install the pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.97.1"
           components: rustfmt, clippy
       - name: Cache Rust build inputs
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # A tag can bypass the ordinary branch workflow. Run the same immutable
       # dependency policy before any candidate bytes are retained.
       - name: Run the source supply-chain policy
@@ -206,13 +206,13 @@ jobs:
           persist-credentials: false
 
       - name: Install the pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.97.1"
           targets: ${{ matrix.target }}
 
       - name: Cache Rust build inputs
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build the target binary
         env:
@@ -370,7 +370,7 @@ jobs:
           echo "Upload scope: $upload"
 
       - name: Store run-scoped candidate evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-candidate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -403,7 +403,7 @@ jobs:
           persist-credentials: false
 
       - name: Download target candidate evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/ignatius-runtime-inputs
           pattern: release-candidate-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -447,7 +447,7 @@ jobs:
             --output "$runtime_root/runtime-evidence.json"
 
       - name: Store run-scoped runtime evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-runtime-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -466,19 +466,19 @@ jobs:
           ref: ${{ needs.source.outputs.revision }}
           persist-credentials: false
       - name: Install the pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.97.1"
       - name: Cache Rust build inputs
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Download target candidate evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/ignatius-release-inputs
           pattern: release-candidate-*-${{ github.run_id }}-${{ github.run_attempt }}
           merge-multiple: false
       - name: Download target runtime evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/ignatius-runtime-inputs
           pattern: release-runtime-*-${{ github.run_id }}-${{ github.run_attempt }}
@@ -715,7 +715,7 @@ jobs:
           echo "Upload scope: $upload"
 
       - name: Store run-scoped aggregate evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-candidate-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -778,13 +778,13 @@ jobs:
           persist-credentials: false
 
       - name: Install the pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.97.1"
           targets: ${{ matrix.target }}
 
       - name: Cache Rust build inputs
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build a fixed-identity reproducibility candidate
         shell: bash
@@ -844,7 +844,7 @@ jobs:
           test -s "$artefacts/$archive_name"
 
       - name: Store reproducibility candidate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-repro-${{ matrix.target }}-${{ matrix.repeat }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -866,7 +866,7 @@ jobs:
           persist-credentials: false
 
       - name: Download reproducibility candidates
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/ignatius-repro-inputs
           pattern: release-repro-*-${{ github.run_id }}-${{ github.run_attempt }}
@@ -928,7 +928,7 @@ jobs:
           } > "$evidence_root/reproducibility-evidence.json"
 
       - name: Store reproducibility comparison
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-reproducibility-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error

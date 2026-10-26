@@ -42,7 +42,7 @@ fn every_theme_defines_every_token() {
                     rgb,
                     theme.background(),
                     "{:?}/{token:?} is invisible against its own background",
-                    theme.choice
+                    theme.selection()
                 );
             }
         }
@@ -57,7 +57,7 @@ fn primary_text_is_readable_on_its_surface() {
             assert!(
                 ratio >= READABLE,
                 "{:?}: text contrast {ratio:.2} is below {READABLE}",
-                theme.choice
+                theme.selection()
             );
         }
     }
@@ -82,7 +82,7 @@ fn semantic_states_stay_legible_on_their_surface() {
                 assert!(
                     ratio >= LARGE_OR_SECONDARY,
                     "{:?}/{token:?} contrast {ratio:.2} is below {LARGE_OR_SECONDARY}",
-                    theme.choice
+                    theme.selection()
                 );
             }
         }
@@ -98,7 +98,7 @@ fn text_stays_readable_on_a_striped_row() {
         assert!(
             theme.rgb(Token::Text).contrast(stripe) >= READABLE,
             "{:?}: text on a striped row is {:.2}",
-            theme.choice,
+            theme.selection(),
             theme.rgb(Token::Text).contrast(stripe)
         );
         for token in [
@@ -110,7 +110,7 @@ fn text_stays_readable_on_a_striped_row() {
             assert!(
                 theme.rgb(token).contrast(stripe) >= LARGE_OR_SECONDARY,
                 "{:?}/{token:?} on a striped row is {:.2}",
-                theme.choice,
+                theme.selection(),
                 theme.rgb(token).contrast(stripe)
             );
         }
@@ -124,7 +124,7 @@ fn a_capsule_is_legible_and_falls_back_to_reversed_text() {
         assert!(
             style.bg.is_some(),
             "{:?}: a capsule needs a fill",
-            theme.choice
+            theme.selection()
         );
         assert!(style.fg.is_some());
         // The pair is token against surface, which the palette tests already
@@ -135,7 +135,7 @@ fn a_capsule_is_legible_and_falls_back_to_reversed_text() {
         assert!(
             ratio >= LARGE_OR_SECONDARY,
             "{:?}: capsule contrast {ratio:.2}",
-            theme.choice
+            theme.selection()
         );
     }
     let plain = Theme::new(ThemeChoice::Dark, false);
@@ -310,7 +310,7 @@ fn basic_16_uses_the_contract_family_and_the_luminance_rule() {
                 basic_16(*token, &theme),
                 expected,
                 "{:?}/{token:?}",
-                theme.choice
+                theme.selection()
             );
         }
     }
@@ -454,4 +454,106 @@ fn depth_none_emits_no_colour_and_keeps_the_modifier_rules() {
     assert!(theme.stripe().bg.is_none());
     assert!(theme.capsule(Token::Danger).bg.is_none());
     assert!(theme.surface(Token::SurfacePane).bg.is_none());
+}
+
+fn manual_text_pair(choice: ThemeChoice, token: Token) {
+    let theme = Theme::new(choice, true);
+    for background in SURFACE_TOKENS {
+        let ratio = theme.rgb(token).contrast(theme.rgb(background));
+        assert!(
+            ratio >= 4.5,
+            "{choice:?}/{token:?} on {background:?}: {ratio:.8}:1, requires 4.5:1"
+        );
+    }
+}
+
+#[test]
+fn manual_dark_null_text_clears_four_surfaces() {
+    manual_text_pair(ThemeChoice::Dark, Token::NullValue);
+}
+
+#[test]
+fn manual_dark_comment_text_clears_four_surfaces() {
+    manual_text_pair(ThemeChoice::Dark, Token::SyntaxComment);
+}
+
+#[test]
+fn manual_light_null_text_clears_four_surfaces() {
+    manual_text_pair(ThemeChoice::Light, Token::NullValue);
+}
+
+#[test]
+fn manual_light_comment_text_clears_four_surfaces() {
+    manual_text_pair(ThemeChoice::Light, Token::SyntaxComment);
+}
+
+#[test]
+fn manual_complete_builtin_matrix_clears_the_contract() {
+    let text = [
+        Token::Text,
+        Token::Muted,
+        Token::Header,
+        Token::NullValue,
+        Token::SyntaxKeyword,
+        Token::SyntaxLiteral,
+        Token::SyntaxNumber,
+        Token::SyntaxComment,
+        Token::SyntaxIdentifier,
+    ];
+    let semantic = [
+        Token::Focus,
+        Token::Success,
+        Token::Warning,
+        Token::Danger,
+        Token::Info,
+        Token::EnvironmentProduction,
+        Token::EnvironmentNonProduction,
+        Token::TransactionActive,
+        Token::TransactionFailed,
+    ];
+    let mut failures = Vec::new();
+    for theme in themes() {
+        for token in Token::ALL {
+            if SURFACE_TOKENS.contains(token) {
+                continue;
+            }
+            let threshold = if theme.selection() == ThemeSelection::HighContrast {
+                7.0
+            } else if text.contains(token) {
+                4.5
+            } else if semantic.contains(token) {
+                3.0
+            } else {
+                continue;
+            };
+            for background in SURFACE_TOKENS {
+                let ratio = theme.rgb(*token).contrast(theme.rgb(background));
+                if ratio < threshold {
+                    failures.push(format!(
+                        "{:?}/{token:?}/{background:?} {ratio:.8} < {threshold:.1}",
+                        theme.selection()
+                    ));
+                }
+            }
+        }
+        assert_ne!(theme.rgb(Token::Border), theme.rgb(Token::Surface));
+        for fill in [Token::Selection, Token::EnvironmentProduction] {
+            let threshold = if theme.selection() == ThemeSelection::HighContrast {
+                7.0
+            } else {
+                4.5
+            };
+            let ratio = theme.rgb(Token::Surface).contrast(theme.rgb(fill));
+            if ratio < threshold {
+                failures.push(format!(
+                    "{:?}/Surface/{fill:?} {ratio:.8} < {threshold:.1}",
+                    theme.selection()
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "resolved matrix failures: {failures:#?}"
+    );
 }

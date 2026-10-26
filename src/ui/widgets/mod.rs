@@ -293,14 +293,28 @@ fn editor_region(model: &Model, editor: Rect, column: u16, row: u16) -> Option<R
     if column < text_start {
         return Some(Region::EditorGutter { line });
     }
-    let requested = usize::from(column.saturating_sub(text_start)).saturating_add(1);
+    let capacity = usize::from(inner.width).saturating_sub(gutter + 2);
+    if capacity == 0 {
+        return None;
+    }
+    let viewport = editor::view::viewport(&model.editor, capacity);
+    let cell = usize::from(column.saturating_sub(text_start));
     let line_text = model
         .editor
         .text()
         .split('\n')
         .nth(line.saturating_sub(1))
         .unwrap_or("");
-    let column = requested.min(line_text.chars().count().saturating_add(1));
+    let column = if model.focus == crate::app::model::Focus::Editor
+        && line == cursor_line
+        && viewport.blank_caret
+        && cell == viewport.caret_cell
+    {
+        viewport.caret_column
+    } else {
+        editor::view::LineView::project(line_text, viewport.offset.saturating_add(cell), 1, None)
+            .column_at(viewport.offset.saturating_add(cell))
+    };
     Some(Region::EditorText { line, column })
 }
 

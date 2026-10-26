@@ -11,6 +11,64 @@ in `docs/status.md`. Feature 025 US5-US10 and final acceptance remain open in
 its task list. The current integration branch also contains W02 connection
 identity hardening, W05 local server-matrix evidence and W11 dry trust tooling.
 Those local results do not establish hosted acceptance or release readiness.
+Feature025 T055's observed expanded-field selection defect is now corrected
+at published `ffb86a1` in draft PR34: actual Buffer evidence, independent review,
+the full local gate and all three hosted platform regressions passed. CI has
+13 successful jobs and one scheduled drift skip; PG14/18/socket also passed.
+Fresh main-targeted CodeQL and parent integration remain pending. Manual US5
+custom themes/runtime switching are in implementation on the isolated
+`codex/manual-themes-2026-10-25` branch: strict configuration/startup, runtime
+cycling and styled parity are integrated and the full local verifier passes
+1,497 harness cases. Published `d92c416` in draft PR35; hosted platform/MSRV,
+PG14/18/socket and policy gates passed (13 jobs, one scheduled-fixture skip).
+Fresh CodeQL/parent integration and native hand use remain pending. Visual review
+also exposed and repaired T056's selected palette group/detail ink composition.
+Final integration review found the ignored configured-colour startup/doctor
+route; T057 now corrects it with a full repeat and actual owned-PTY route evidence.
+Automatic background detection, native hand use and release remain separate
+open work.
+The next observed-friction slice is W09 / Feature025 T058: the long-line editor
+can clip its caret at the right edge. FR-2529 and the dated presentation
+contract now specify a shared horizontal view for drawing, completion and hit
+mapping. Its implementation and independent-review correction passed 78 widget
+and 114 layout cases, the full 1,515-case local gate and the same-width owned
+PTY repeat on `codex/editor-caret-2026-10-25`, based on PR35. Published `14d18ad`
+in draft PR36 after the normal pre-push repeat and clean-source/history scans.
+Hosted acceptance passed 13 executable jobs with one intentional scheduled
+fixture skip; all 18 new cases ran on Linux/macOS/Windows. Native appearance/
+hand use remain separate. A follow-up W10 diagnostic found a material local
+test-profile long-line allocation/latency increase. FR-2530/T059 now specifies
+bounded visible/caret metadata while preserving the accepted cells; isolated
+implementation on `codex/bounded-editor-view-2026-10-25` passed local independent
+review, 83 widget/114 layout cases, the full 1,520-case gate, exact 51,081-cell
+parity and an owned-PTY control. Final 1 MiB diagnostic medians improve to
+138.342 ms/17.063 MiB RSS. Published clean `d2edce1` in draft PR37 after normal
+pre-push/source-history scanning. Hosted acceptance passed all 13 executable
+jobs with one intentional scheduled-fixture skip; all five T059 and 18 T058
+cases execute on Linux/macOS/Windows. PG14/18/socket, policy and MSRV are also
+accepted for this product source. The small diagnostic is not release-build
+p95 or a process-memory ceiling. The final documentation checkpoint preserves
+accepted product-source bytes and points to PR37 for current-head checks.
+
+Read-only readiness reviews at `d92c416` also bound the next assignments:
+
+- US6 mouse needs explicit input-time/interruption, viewport-only scrolling
+  and drag/keyboard-parity policies before its combined integrator assignment.
+  Preserve `mouse = false` until the complete verb table and restoration gates
+  pass; existing hit regions alone do not establish dispatch readiness.
+- US8 quiet chrome needs the complete state/token/suppression table, filled
+  custom-theme contrast admission, one-row safety priorities and completed-only
+  200 ms threshold pinned before implementation. Keep truthful transport,
+  transaction and recovery wording through narrow layouts.
+- US5 automatic background detection needs a supported single-owner reply
+  transport, reserved-envelope/late-input policy and staged terminal lifecycle
+  before T032. Locked Crossterm has no public OSC reply event; a finite drain
+  cannot guarantee late replies never become keys. Manual themes remain the
+  accepted implementation; no detector or fallback claim is inferred.
+
+These are dependency clarifications, not completed feature checkboxes or a
+replacement for the authoritative feature tasks. Resolve them as bounded
+contracts before assigning the next implementation.
 On 25 October, local M1 work also patched the current dependency advisories,
 refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
 window. Feature 025 keyboard panes T039/T041 and density T040 are implemented
@@ -32,7 +90,13 @@ also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; nativ
 hand-use remains separate. W10-013's execution-wide retained-data contract is
 accepted at published `54056c2`: local 1,431 outer cases/112 styled buffers,
 all five PostgreSQL majors plain/TLS, actual socket, pinned/MSRV/platform and
-CodeQL checks. W07's Windows ConPTY observation is the next bounded slice. CLI cancellation and complete
+CodeQL checks. W07's published `65cf237` repeats three native Windows ConPTY
+control passes and completes separate cursor calibration. The retained sensor
+tracks native setters/main VT but not alternate VT; the original cursor
+capability still fails. Faithful alternate cursor observation is required before
+the option/path matrix. The strict experiment is now explicitly dispatched via
+`windows-conpty-diagnostic.yml`; routine CI retains all platform product suites.
+Full Windows restoration and hand use remain open. CLI cancellation and complete
 resource acceptance remain separate. Keep these
 partial slices distinct from completion of Feature 025 or release readiness.
 **024 Explicit retained-result refresh** remains part of the integrated feature

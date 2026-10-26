@@ -1,5 +1,552 @@
 # Verification
 
+## ConPTY integration boundary - 26 October 2026
+
+The diagnostic now has a separate explicit-dispatch workflow,
+`.github/workflows/windows-conpty-diagnostic.yml`. It retains the unchanged
+native helper/control assertions and bounded evidence, including failed cases.
+There is no `continue-on-error`, accepted constant observation or replacement
+sensor. Routine CI keeps mandatory Windows product tests; the experimental
+capability failure remains a W07-064/T055a/T051 gap. Existing source-bound native
+results below remain historical evidence, not a new runtime result for this
+workflow relocation. Local workflow contracts and Actionlint pass for the new
+boundary; hosted acceptance is recorded after CI completes.
+
+## W07-064 first Windows capability harness - 2026-10-25
+
+The integrated test-only C++/safe Rust/PowerShell harness is based on `d6d65e7`.
+Root verified all 32 freeze02 artifacts and all nine integrated helper files;
+one trailing space was removed during integration. Native independent review
+accepted the first-four-case source scope after two reproduced harness bugs
+were repaired: post-deadline cleanup waits and suppressed zero-byte failed
+reads. The repaired controller shares one 25-second stopwatch, reserves cleanup
+time and fails unconfirmed cleanup. Pending native I/O retains every referenced
+buffer/handle until completion or supervisor process exit. Input hashes are
+recorded before build and checked afterward.
+
+Actual integration checks passed: 26 pure C++ checks, 48 synthetic PowerShell
+receipt/deadline/identity checks, all 15 workflow contracts, standalone Rust
+formatting and digest-pinned network-disabled Actionlint. Earlier PowerShell
+AST checks covered all four scripts and the extracted CI step. Those checks
+exercise local arithmetic, validation and wiring; hosted compilation and
+runtime results are recorded separately below. The complete local verifier passed 1,432
+outer harness cases, 1,127 library cases and 24 summaries, formatting,
+warnings-denied lints/API docs and PostgreSQL 18.6 plain/TLS. The macOS socket
+case remains a semantic skip. Log:
+`/private/tmp/ignatius-w07-064-integrated-verify-20261025.log`. Documentation
+was reconciled during/after this integration run; the installed pre-push gate
+will repeat checks against the clean committed source.
+
+Frozen source: `/private/tmp/ignatius-w07-064-d6d65e7-il6f_ql4/capability-control-freeze-02/`,
+manifest `fcd7cfeaa3fa8bacb8c2773555071b94c740663fc254253e5029bf2cc517490a`.
+Independent review: `/private/tmp/ignatius-w07-064-independent-review-02-20261025.md`,
+SHA-256 `40aaead5667e256bc306a340ec4c086663af67b980b33f7cba94bdb024d2e4eb`.
+Root integration receipt: `/private/tmp/ignatius-w07-064-root-integration-review-20261025.json`.
+Both original failures, earlier freeze and compiled inputs remain preserved.
+
+The primary admits only no-guard, known-unrestored, acknowledged hung-child and
+actual guard capability to the authorised Windows CI after the publication
+gate. Captures use the explicit synthetic metadata/trace upload allowlist,
+excluding binaries, caches and config/data. No ConPTY child has run yet.
+Wrong-ownership/native-error controls, the normal/error/uncaught-panic matrix,
+paste/full T055a, Windows 11/Windows Terminal hand use and release remain open.
+Four-case success alone cannot close W07-064.
+
+Clean source `69f4de6` is published in draft PR33, stacked on unchanged D6.
+The installed pre-push verifier repeated all 1,432 outer cases/24 summaries
+successfully, with the same semantic socket skip. Digest-pinned Gitleaks passed
+447 clean source files and 286 reachable revisions. CI run `40215610812` is
+complete with 12 successes, one deliberate schedule-only skip and one Windows
+controller failure before any case. Actual native helper compilation passed
+Rust1.97.1 x86_64-pc-windows-msvc and MSVC toolset14.51/SDK10.0.26100,
+Windows build26100 (runner image `win25-vs2026`/`20261021.278.1`).
+Root verified the 94,212-byte archive digest and all 447 source/nine helper
+hashes against `69f4de6`; summary cases are empty and post-input hashes match.
+The initial empty capture inventory produced an array-index error. The literal
+published expression reproduced that failure under local PowerShell StrictMode.
+A three-script shared accumulator repair passed 52 checks, including all prior
+48 and four real tiny owned-file/directory inventories, plus four script AST
+checks. Independent review accepted it; root verified all 14 frozen artifacts
+and exact integrated bytes. The 32 MiB admission, deadlines, first-four and
+native ownership/code remain unchanged. The primary admits the same four-case
+repeat after the normal pre-push gate. Repair source:
+`/private/tmp/ignatius-w07-inventory-69f4de6-tblan28y/final-freeze/`; review
+`/private/tmp/ignatius-w07-inventory-independent-review-20261025.md`, SHA-256
+`736b89b6db7bb2023b17dc3f0dfd2172ed35657623243397a4f2a970720433cc`.
+First failed Windows evidence:
+`/private/tmp/ignatius-pr33-windows-first-40215610812-1/`. No ConPTY child ran.
+The repaired clean head `7d167a9` is published after the unchanged full pre-push
+gate passed all 1,432 cases/24 summaries with the same macOS socket skip.
+Pinned source/history scans passed 447 files and 287 revisions. The hosted
+repeat CI `40216991785` completed with 12 successful jobs, one deliberate
+schedule-only skip and the failed Windows capability check. Four fresh native
+children actually ran. No-guard, known-unrestored and acknowledged hung-child
+controls passed; capability failed because acquired cursor visibility stayed1.
+Actual Guard input masks were423/152/423 and native main/alternate/main sentinel
+reads1/0/1. Cursor query success with constant1/1/1 does not prove cursor hiding
+or identify a product defect. The observation method is under investigation.
+
+All four exact Jobs were empty, guard/worker processes positively waited,
+translated output complete/bounded and reader/HPCON/control-I/O cleanup
+confirmed. Native durations were41.3788/34.0117/297.3594/48.9785ms, controller
+95/81/340/92ms; the acknowledged hung interval was257.6195ms before owned
+termination and actual exit124. Root verified the 101,380-byte archive SHA-256
+`c55cfc2975541e6f2bf133bc85e32fd6f93eeb31b60637f029e8b25b96b8f1e4`,
+all27 files,17 capture-manifest entries and447 source/nine helper hashes against
+`7d167a9`. Actual checkout `da1283e4` has the identical head tree
+`a2a46e4933966baedd0ad49ee5c979be17f1f7de`; revision identity differs normally.
+Evidence: `/private/tmp/ignatius-pr33-windows-second-40216991785-1/`, root review
+`/private/tmp/ignatius-pr33-7d167a9-second-windows-review-20261025.json`.
+No assertion was weakened, product source changed or later matrix admitted.
+Independent native audit:
+`/private/tmp/ignatius-w07-windows-second-independent-review-9e8kfug0/REVIEW.md`,
+SHA-256 `8170f35388d47964ef6b3e52cf3d0b0786dac8f977026b827e21f71892a96680`.
+Root verified its two hashed review artifacts. The separate locked-Crossterm/
+Microsoft routing assessment is
+`/private/tmp/ignatius-w07-cursor-sensor-assessment-q4rnegi5/ASSESSMENT.md`.
+It supports a sensor hypothesis but cannot identify the shipped26100 source.
+The adopted one-actor calibration is integrated from repaired immutable02,
+manifest `c44d1f1f3f8ea4e9c7455051cf32ccd447dd8a07ba80581f71c52a6ea7c810bc`.
+Root verified all 75 artifact hashes and nine exact integrated source files.
+Review01 caught successful-short sentinel reads masquerading as alternate
+absence and incomplete restoration-query records. The repair independently
+requires full nonce-derived sentinel counts and retains every verification
+query/error/fact/clock. Both have C++/PowerShell failing-first evidence.
+Native independent review accepted the repair; root's integrated repeat passed
+74 portable C++ and 103 PowerShell cases. Six exact-emitter synthetic cases,
+two exact wire roundtrips, four AST parses and Rust formatting are separately
+qualified worker evidence. These checks are not Windows compilation/runtime.
+Root's diagnostic-before-capability CI contract failed first, then passed;
+formatting, pinned Actionlint, extracted PowerShell AST and independent review
+also passed. Uploads add only six fixed diagnostic paths to the prior15 patterns.
+The original four assertions and all ownership/deadline/environment protections
+remain. The primary admits only calibration followed by the unchanged first
+four on the reviewed source after the normal full pre-push gate. Published
+`65cf237` passed that gate with 1,432 outer harness cases, 1,127 library cases
+and 24 summaries; the macOS socket case remains skipped. The clean 447-file
+source and 288 reachable revisions passed pinned Gitleaks. Actual PR merge ref
+`dfe46f52` and head have identical tree `4ce8f1f7cf0b8e704294578d76fb1531b963dc21`.
+CI `40221850172` completed: 12 jobs passed, one scheduled drift check skipped,
+and Windows failed the unchanged Guard cursor capability after the diagnostic
+completed. The one retained actor observed native-setter and main-VT hidden/
+shown transitions, but alternate-VT visibility stayed 1/1. All stage writes,
+marker readbacks and 36/36 sentinel reads completed, with masks 423/7 and cursor
+size 25. Independent baseline verification succeeded before the final query.
+Diagnostic duration was 54.2058 ms native/157 ms controller; actual alternate cursor
+state remains unproved. The original no-guard/known-unrestored/hung-child controls
+again passed and original capability failed. All five exact Jobs emptied and
+owned process/drain/control-I/O cleanup was confirmed. No later matrix or
+assertion change is admitted. Root verified 33 files, 22 capture entries and all
+447 Git source/nine helper identities; archive 105,445 bytes SHA-256
+`c78a505aa9c1994b8300080963e6e8268e3e1173e866a809f2527f1bb0fbac20`.
+Evidence: `/private/tmp/ignatius-pr33-windows-calibration-40221850172-1/`;
+root `/private/tmp/ignatius-pr33-65cf237-calibration-windows-review-20261025.json`.
+This supports the sensor-routing limitation, not a diagnosed product defect or
+proof that the installed 26100 binaries match current Microsoft source.
+Independent native audit accepted the same limits and found no integrity or
+adopted-scope inconsistency:
+`/private/tmp/ignatius-w07-calibration-65cf237-native-review-j2f4lx0v/REVIEW.md`,
+SHA-256 `64a56107cda058b343d6434393054bca603a91c94e99d9688b6f8bdbad5496a1`.
+Executable/link hashes are recorded by the build/controller; their bytes are
+excluded from the upload and cannot be independently rehashed from this archive.
+Publication receipt:
+`/private/tmp/ignatius-w07-65cf237-publication-20261025.json`.
+Source: `/private/tmp/ignatius-w07-cursor-calibration-7d167a9-qgzdtg_o/cursor-calibration-freeze-02/`;
+peer `/private/tmp/ignatius-w07-cursor-calibration-independent-review-02-20261025.md`,
+SHA-256 `139acb266ab0fa04bf0aa3e9166c06adee202a83e0662134c405badbfa3beda0`.
+New-head CodeQL remains pending until a main-targeted PR triggers the
+unchanged filter. Overall capability and W07-064/T055a/T051 remain incomplete.
+
+The separate read-only audit verified complete PG14/18/socket logs: each TCP
+job ran 236 selected invocations, plus one actual socket query (473 combined).
+Those include 24 actual retained-result and 40 notice invocations across both
+TCP routes/majors. Selected counts also include pure/local controls; successful
+libtest capture does not alone exclude every miscellaneous early return. Actual
+major assertions are 14/18; patch labels remain reviewed image provenance.
+Evidence: `/private/tmp/ignatius-pr33-db-hosted-audit-51oq6q99/RECEIPT.md`.
+
+## Long-line editor correction - 2026-10-25
+
+Feature025 FR-2529 / T058 is integrated from clean `d92c416` with five owned
+source paths. The root presentation/plan/task amendments precede implementation.
+Actual 100x30 Buffer tests first recorded four failures and one short-ASCII
+control: missing long-line caret and incorrect wide/combining/control hits.
+The first candidate then passed 76 widget and 114 layout cases. Independent
+review found an unfocused zero-width hit override that disagreed with painting;
+a separate failing actual-Buffer case precedes the one-predicate focus repair.
+Final focused counts are **78 widget and 114 layout cases**, with formatting
+and warnings-denied Clippy passing. All original 26,505 widget-test bytes remain
+an exact prefix; the short ASCII control preserves all 3,000 cells exactly.
+
+Root verified every artifact in both immutable freezes (49 and 38 respectively),
+the 446 compiled input hashes against the published base or owned candidate
+files, and the five installed files against the final freeze. Root inspected
+seven synthetic raster files, including before/after long-line, Home, control,
+combining, error, completion and tiny-capacity views. Raw cells remain primary;
+Menlo/indexed/default/DIM approximations and missing CJK/emoji font glyphs do not
+establish native appearance. The short completion regression proves display-cell
+agreement; it is not an exhaustive scrolled-popup matrix, where right-clamping
+can hide anchor differences. No memory/latency ceiling or grapheme-based editing
+claim is added. Source positions and undo remain scalar/byte based.
+
+The full integrated local verifier passed **1,515 outer harness cases, 1,207
+library cases and 25 summaries**, with zero failures/ignored cases and all six
+executed gates. Existing synthetic plain/TLS servers were freshly queried as
+PostgreSQL **18.6**; the macOS Unix-socket case is still an explicit semantic
+skip. Local tools are macOS 27.0.1 arm64 and Homebrew Rust/Cargo 1.99.1; hosted
+Rust 1.97.1/MSRV acceptance remains separate. Log:
+`/private/tmp/ignatius-t058-full-verify-20261025.log`, SHA-256
+`03c40158ff7af92030466bd04d9ad3591c7b9b0bbbd0cfd502ee054ca0e8b462`.
+
+Root's identical owned 100x30 PTY script and synthetic config show the typed
+end sentinel absent before and present after, with Home revealing the prefix
+in both. Both quit zero, enter/leave the alternate screen and preserve config
+bytes. No profile was selected or SQL submitted. Before binary is clean d92;
+after binary is d92-modified with the exact installed freeze02 source, not a
+clean publication identity. Script SHA-256:
+`8b12cc6426c98e299ded8f9c42fad8ad154de9e5d81a1c17b5dfa0414f06a678`.
+Receipts: `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-before-c0901prg/receipt.json`
+and `/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-oarmp52a/receipt.json`.
+Two prior harness redraw expectations and one non-integrated verifier attempt
+are retained and excluded from acceptance. The latter was stopped by exact
+task-owned process ancestry before the source-bound full repeat above.
+
+Freeze02: `/private/tmp/ignatius-editor-eol-red-1di2ma1e/freeze-02/`, manifest
+`1acce2109b6ac2cc8cdd0efa90f08284f07532e544ef589b8d51f50a4f93de71`.
+Native independent review:
+`/private/tmp/ignatius-t058-freeze02-independent-review-224cbtyy/REVIEW.md`.
+The owner's external-review skip remains in force; no different-family provider
+review is claimed. Hosted acceptance, native terminal/font/hand use, fresh
+main-targeted CodeQL, parent integration and release remain separate gates.
+
+Published clean `14d18ad97f1aafd4a4d953ea5e35f3b2f644b1a0` in draft PR36.
+The normal unmodified pre-push hook repeated all 1,515/1,207 cases and six gates,
+with the socket skip retained; log SHA-256
+`2715c9214280f72d6d9ac567a1f7fd7caefeee926f2ba31c2d6e909e89d9149a`.
+Pinned offline Gitleaks passed the exact 446-file clean Git archive, whose every
+blob was independently checked against Git; source digest is
+`3ac4e9d43c6aa65bc612d8e0a6868443bb97231eff72be28b4a9e380fa17bd71`.
+Its all-ref history scan reports 292 non-merge commits among 321 reachable
+local revisions; do not confuse those with head-only ancestry counts. Receipt:
+`/private/tmp/ignatius-t058-14d18ad-scan-source-20261025.json`.
+
+The clean local publication binary (SHA-256
+`a58af2e58b011334333ea2b932f59244d8121b407e82d41b2472d493561b7976`)
+passes a separate 100x30 PTY repeat. One retained early-owner harness race left
+typing in the picker; the corrected harness waits for actual owner-change
+repaint. It then shows the end sentinel and Home prefix, quits zero, restores
+the alternate screen and preserves config without profile selection or SQL
+submission. This supplements rather than relabels the identical-script
+before/modified-source pair above. Clean receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-ni4f6ssl/receipt.json`.
+
+Hosted run `40234580931` uses actual merge `42be23db`, with the same tree
+`384e26053d4653a51652b965c9bcad19103b0bd0` as the head. Root inspected complete
+PG14/18 and socket logs: 236 selected invocations per major plus one actual
+socket contract, 473 total including pure/local cases. Readiness and the
+plain/verified-TLS runtime-major/transport guard are positive. These are not
+473 live queries, and runtime patch versions were not printed.
+
+The run completed successfully with **13 successful jobs and one intentional
+schedule-only fixture skip**. Root verified all eight platform artifacts and
+21 policy artifacts. Every platform actually executed all 18 T058 cases with
+Rust 1.97.1. Full harness/library totals are Linux 1,515/1,207, macOS
+1,515/1,207 and Windows 1,459/1,188; compile, docs and startup/refusal smoke also
+passed. Doctor retains three explicit skips each. MSRV Rust 1.90 compilation
+passed; six allowed duplicate-version warnings remain. The release scope
+reports 93 cases but three conditional Python archive-helper branches are not
+independently runtime-proved; synthetic upload scope is not a real release.
+Platform manifest:
+`d0774396161695bfba219f4923217a8f22fc4810f08ddaa4b1d04d8cb5841c3b`
+at `/private/tmp/ignatius-pr36-platform-audit-int5fsm7/`.
+Policy manifest:
+`a9473fa7aa8294d1ad6d6c7a8ca983311ca52bd2d48c0a860fbce56380129b3d`
+at `/private/tmp/ignatius-pr36-policy-audit-hx59gy/`.
+CodeQL's main-base filter is unchanged; no fresh feature-base analysis is
+claimed. Native hand use, parent integration and release still require their
+own acceptance.
+
+### W10 long-line renderer diagnostic - 2026-10-25
+
+A single identical test-only harness, exact d92/14d source archives and 12 fresh
+children compare three samples per revision/size. At 16 KiB the parent/candidate
+median renderer times are 6.481/19.611 ms and process maximum RSS 11.953/13.062
+MiB. At 1 MiB they are 264.462/902.313 ms and 17.453/146.500 MiB. All children
+preserve source, scalar cursor, revision, modified and undo state; only the new
+view paints a visible caret. This is a material local test-profile regression,
+not release-build p95 acceptance or a whole-process ceiling.
+
+Root verified all 951 baseline artifacts. Compiler RSS is excluded; one
+sandbox-denied resource observer sample is retained/excluded, then normal
+reviewed escalation admits the valid observations. Exact host/tool/profile,
+raw timing/RSS and uncontrolled-background-load limits are in
+`/private/tmp/ignatius-editor-perf-2kfyw0q6/REPORT.md`, manifest
+`aaa9011c90d1a7f63127411da7d573c3a762fe41369d7dcf132f740aa31b512f`.
+FR-2530/T059's bounded projection is now locally accepted. Final 83 widget and
+114 layout cases, formatting and warnings-denied Clippy pass. Root verified
+all 80/58 artifacts in the two correction freezes, accepted independent source
+reviews, and independently compared every JSON field and all 51,081 cells in
+21 retained frames to the accepted T058 captures. Original widget tests are
+byte-identical and original view tests remain an exact prefix. Cell comparison:
+`/private/tmp/ignatius-t059-root-cell-comparison-20261025.json`.
+
+The final small ASCII path runs only after equality with the full existing
+sanitiser, then `is_ascii`; controls and Unicode retain their canonical paths.
+Caret discovery keeps scalar facts, and projection filters before retaining
+units. The metadata bound does not cover total source/sanitiser allocations or
+make an RSS-ceiling claim. Final freeze:
+`/private/tmp/ignatius-editor-projection-cjmu5kiy/freeze-02/`, manifest
+`6622e7cde8d4b6f07028b68b148344bd7df5567e1a948955c6ca0a81d193c578`.
+Independent microdelta review:
+`/private/tmp/ignatius-t059-freeze02-independent-review-t5zkt4zn/REVIEW.md`.
+
+With the exact same `4f3914b5785cf315a840964d52a7b3c3c04bca62bdfa47c6eed512ac0f37a322`
+harness, six fresh final processes preserve state and one visible caret.
+At 16 KiB, median renderer time/RSS is 6.198 ms/12.156 MiB; at 1 MiB,
+138.342 ms/17.063 MiB. Three-sample ranges are retained. The intermediate
+bounded-only 618.566 ms/16.031 MiB observations and non-identical formatted
+harness trials remain distinct; formatted trials are excluded. One earlier
+private-overlay failure log was overwritten; its tool tail and later complete
+failure are retained, not recreated or accepted. No diagnostic harness ships.
+These are unoptimized test-profile observations with uncontrolled host load,
+not release p95/100-action, process ceiling or native-terminal acceptance.
+
+The full integrated local verifier passes **1,520 harness cases, 1,212 library
+cases and 25 summaries**, zero failed/ignored, all six executed gates. Existing
+PostgreSQL 18.6 plain/TLS ran; macOS socket remains skipped. Log:
+`/private/tmp/ignatius-t059-full-verify-20261025.log`, SHA-256
+`9545a73faec3ab23d1560e4f7a65ed1d41c8038d7a1ee2997e0ad95d89f61107`.
+The actual 100x30 owned macOS PTY end/Home/quit/config control passes at the
+modified parent build with exact integrated final source. Receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-jzgapy6r/receipt.json`.
+Published clean `d2edce1bde1e92ca193a94f84c954e8bb594e6d3` in draft PR37.
+Normal pre-push repeats all 1,520/1,212 cases, with six passing gates and the
+same socket skip; log SHA-256
+`9090ca7cd89cccc02b19ce893172d321b567345176362f9a877d22a3fbd8128f`.
+Pinned network-disabled Gitleaks passes the exact 446-file Git archive and
+293 non-merge revisions among 322 local reachable revisions; every archive
+blob is checked against Git. Source digest:
+`4272b687c41e3514d79b7e1bad315f6beb46fe80d7a9371f3550c67edc779113`.
+Receipt: `/private/tmp/ignatius-t059-d2edce1-scan-source-20261025.json`.
+
+The clean publication binary (SHA-256
+`ba37ca675819d3d15fe5f11d9ecdb35eb07b0f34e27629e116d88c5d0b5fb5dd`)
+also passes the 100x30 owned-PTY control, with normal exit/config preservation
+and no connection selection or SQL submission:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-editor-caret-pty-after-3z02aab9/receipt.json`.
+
+Hosted run `40236560722` uses actual merge `882873ec` with the same tree as
+head, `c9276f6b71c45dc439f247e37ef9b9431cd6d414`. Root accepts complete PG14/18
+plain/verified-TLS and socket logs: 236 selected invocations per major plus one
+socket, including pure/local controls. Positive readiness and runtime-major/
+transport guards establish those live paths, not 473 queries or printed patch
+versions. Seven policy jobs also passed; root verified their 20-artifact
+manifest `ce9a3466760aa43eb54f72d93fc0ef427df0bdc853215486712ed72812064d90`
+at `/private/tmp/ignatius-pr37-policy-audit-Ha8yQb/`. Six permitted duplicate
+warnings, conditional Python archive-test runtimes and feature-base CodeQL
+limits remain qualified. The run completed successfully with **13 successful
+jobs and one intentional scheduled-fixture skip**. Root verified all eight
+platform artifacts: Linux/macOS harness/library totals are 1,520/1,212 and
+Windows 1,464/1,193. Every platform executes all five T059 and 18 T058 cases
+under Rust 1.97.1; compile/docs/startup-refusal smoke passes. Doctor retains
+three explicit skips each. Actual smoke binaries identify the clean merge,
+while exact-head diagnostics bind the published head; equal trees establish
+the product source, not identical build identities.
+Platform manifest:
+`9a350e422a0f5ff1df4d8ea6ade34d8c0028b10430cd90e2d59d625f22cedebd`
+at `/private/tmp/ignatius-pr37-platform-audit-nwy_o3ki/`.
+The final documentation checkpoint preserves all production/test source bytes
+from accepted `d2edce1`; its current-head workflow remains in PR37's checks.
+Whole resource, native and release-performance acceptance remain open.
+
+## Manual theme integration - 2026-10-25
+
+The manual FR-2513/2515/2516 slice integrates the immutable pure-theme and strict
+configuration lanes with the root-owned startup cache, action, discovery and
+runtime handling. Automatic background detection/T032 remains open. Root read
+the parser/resolver/admission code and verified all 39 pure-theme and 127
+configuration artifacts. Original Theme/Results assertions are preserved after
+the diagnostic identity accessor migration; configuration preservation records
+cover 41 original cases and original TOML errors/spans. Runtime review caught
+two exhaustive discovery omissions, corrected before combined compilation.
+
+Focused evidence includes the configuration lane's 152 passing cases and 150
+actual isolated CLI child invocations. Root's four real-CLI tests pass again on
+the integrated source. Seven reducer cases prove custom/builtin cycling,
+busy-query and owner preservation, query-diagnostic mismatch handling and
+profile/resize/async retention. The size-independent runtime regression failed
+before correction and then passed; all six existing geometry/review controls
+pass. Keymap 31 and discovery 14 focused cases pass. These overlapping scopes
+are reported separately rather than added to a full-suite total.
+
+The initial T033 freeze passed two tests across 2,520 actual 120x40 buffers.
+Root verified 101 artifacts, inspected seven comparison sheets and four
+individual images, then found a selected palette group/detail ink defect that
+the initial assertions missed. The original captures remain pre-correction
+evidence. T056 records actual failing palette/full-frame tests, followed by a
+small span-style composition correction and stronger assertions. A first
+candidate's extra Basic16 label change was rejected; final label ink is exactly
+preserved. Root verified all 125 correction artifacts and inspected corrected
+HighContrast/inverted-custom/colour-off palette images.
+
+Root independently compared all 12,096,000 cells before/after: 2,340 foreground
+cells in 60 painted palette frames change, confined to selected group/detail.
+All symbols, geometry, backgrounds, modifiers and selected labels are unchanged;
+all 2,100 Basic16/off and 2,160 non-palette frames are exactly preserved. These
+overlapping counts must not be added. RGB/indexed/Reset/DIM/font approximations
+are explicit in the synthetic rasters; raw actual cells are primary. No native
+terminal appearance or participant-use claim follows from these captures.
+
+Pure freeze: `/private/tmp/ignatius-us5-theme-ffb86a1-z53t1vo8/pure-theme-freeze-01/`
+(manifest `edf823b9f4c69bb56ef2669e0501e3b230873a005a5197d12145a0fbfce11263`).
+Config: `/private/tmp/ignatius-us5-config-ffb86a1-gcucqbu1/config-phase2-freeze-01/`
+(`4d3b42e1232664a6c29c7f16b95462c468f0d4937664fec8e76a86376d10f873`).
+T056: `/private/tmp/ignatius-t056-palette-eigzhww5/t056-correction-freeze-01/`
+(`a710845a90ea43209a53e5d6d01506a8e77d5669f2ec1747f2f0698edeec8636`).
+Root cell comparison: `/private/tmp/ignatius-us5-root-t056-comparison-20261025.json`.
+The first combined local verifier passed **1,492 outer harness cases, 1,184
+library cases and 25 summaries**, with zero failures/ignored cases and all six
+executed gates green. PostgreSQL plain and verified-TLS ran; both existing
+synthetic containers were freshly queried as 18.6. The unconfigured macOS Unix
+socket is a semantic skip, not a pass. Actual local tools are macOS 27.0.1
+arm64 and Rust/Cargo 1.99.1. Log:
+`/private/tmp/ignatius-manual-themes-integrated-verify-20261025.log`, SHA-256
+`045db75e41363664e9fcf637cf5a0deb52b90a999fb651bd65fdef7bd6774997`.
+Root also independently confirmed the exact normalized bodies of all 41 original
+configuration/diagnostic tests and the store helper. Publication,
+hosted/pinned/MSRV and fresh CodeQL acceptance remain pending. Final integration
+review found the existing ignored `[ui] color` startup/doctor route after this
+pass. That pre-T057 pass does not establish configured-colour acceptance.
+Root's independent actual-binary PTY probe confirms the omission: Custom plus
+configured never paints 119 extended-colour SGRs, explicit always 119, and
+NO_COLOR plus always zero. Each owned macOS PTY uses a synthetic profile picker,
+chooses no connection and exits normally with alternate-screen entry/exit
+captured. No native emulator/font or full-mode restoration claim is inferred.
+Before receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-3i9adtvz/receipt.json`;
+binary SHA-256 `93242cfce604c9336df67eeb42dd05ff982ae31d3f295205611328629559bbb9`.
+
+T057 is now integrated after independent root review and verification of all
+208 frozen artifacts. It retains explicit colour flag presence until the loaded
+configuration is available and applies the existing resolver before depth/cache
+selection. Runtime and doctor share this policy; raw facts and report schemas
+remain unchanged. The lane passed 64 distinct focused cases and 27 actual doctor
+JSON subprocess controls, with watched runtime/doctor failures retained.
+Freeze: `/private/tmp/ignatius-t057-colour-route-vsz02y83/final-freeze-01/`, manifest
+`69c866f92f1e2ebc1c4dd0bb95c40a7b93152563ac9947051e4891d44969af5d`.
+
+The final combined repeat passed **1,497 outer cases, 1,189 library cases and
+25 summaries**, all six executed gates, zero failures/ignored cases and the same
+socket skip. Log: `/private/tmp/ignatius-manual-themes-t057-verify-20261025.log`,
+SHA-256 `965e7cd3662408e9da11c3d59a3647c1bdda22aac32bd20b5dccd418496da914`.
+The rebuilt actual binary's three owned PTY controls all exit normally with
+alternate-screen entry/exit captured. Configured never now emits zero painted
+SGRs; explicit always and NO_COLOR raw captures remain byte-identical to their
+pre-fix controls. After receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-pty-qtg0xxks/receipt.json`,
+binary SHA-256 `3d0c50917ae5640bfda906be225314360c1ad015c18130319062c252eed01883`.
+These are local macOS 27 arm64/Rust 1.99.1 results, with no native font or
+emulator claim. Published clean `d92c416` in draft PR35 after the full unchanged
+pre-push verifier repeated all 1,497 cases. Pinned Gitleaks passed 444 exact-source
+files and 291 non-merge commits among 320 reachable local revisions.
+
+CI `40231713035` completed with 13 successful jobs and one deliberate scheduled
+fixture-drift skip. Actual merge `253ac7cc` and head share tree
+`00158901056a97195719d3e08026eeeff7234254`. Independent platform audit confirms
+the same 74 selected manual-theme/T056/T057 cases executed on each primary
+platform under Rust 1.97.1; full harness/library totals are Linux 1,497/1,189,
+macOS 1,497/1,189 and Windows 1,441/1,170. Startup/refusal and docs passed, with
+doctor's three explicit skips per platform. Platform fixture guards are not live
+database claims. Separate PG14/18 jobs each passed 236 selected invocations,
+including positive runtime-major/readiness and plain/verify-full routes; one
+actual Linux socket query passed. The 473 total includes pure/local cases.
+
+MSRV 1.90 compilation and policy jobs passed. Six configured duplicate-version
+warnings remain; three reported archive-helper passes have conditional Python
+guards without separately printed positive invocation evidence. Neither is
+converted into a zero-warning/no-semantic-skip claim. Full log receipts:
+`/private/tmp/ignatius-pr35-platform-audit-2u768bko/receipt.json` (28 artifacts),
+`/private/tmp/ignatius-pr35-policy-audit-ziQQqR/RECEIPT.md` (37 artifacts), and
+`/private/tmp/ignatius-pr35-d92c416-db-audit-20261025.json`.
+
+The actual clean published local binary also passed a 180x40 owned-PTY keyboard
+journey through all four palettes, retaining typed SQL/config bytes and exiting
+normally without connection selection or SQL execution. Earlier probe harness
+setup/clipping/wrong-RGB expectations are retained as failed harness attempts.
+Final receipt:
+`/var/folders/vq/3120439x7q715kvbyn0jbxrc0000gn/T/ignatius-theme-cycle-pty-h7f9buo8/receipt.json`.
+Fresh main-targeted CodeQL, parent integration, native desktop appearance/hand
+use and release remain open. Post-publication acceptance notes remain local
+owned documentation edits until the next meaningful source checkpoint.
+
+## Expanded Results selection correction - 2026-10-25
+
+Feature025 T055 starts from reviewed D6 on its own sibling branch. The actual
+expanded Results renderer at equivalent D6/7d/65 production bytes produced a
+selected HighContrast header foreground/background `#ffffff/#ffffff` and NULL
+`#d0d0d0/#ffffff`; Selection specifies Surface ink `#000000` on that fill.
+Positive row/content/background and unselected controls precede the meaningful
+actual-Buffer failure. Root checked all 16 immutable reproduction artifacts;
+manifest SHA-256 `a5c5e55a6cdfaadb040adda91d803fe545bd0b901f487d3220a178b24845f920`.
+Evidence: `/private/tmp/ignatius-us5-selection-probe-3k_rf75u/freeze-01/`.
+
+The scoped contract requires final Selection precedence on header/arrow/value
+spans, preserving semantic modifiers, ordinary unselected colours and existing
+basic16/colour-off reversed selection. Three built-ins, four depths, three glyph
+tiers and both densities form 72 actual-renderer combinations. The two-file
+correction is integrated byte-for-byte from immutable freeze01 (76 artifacts
+verified), manifest SHA-256
+`2d2f4b9608e87cdbc9161046f375d9f90361dca8b2a858a449a450f661c1da4d`.
+All eight original Results tests are byte-identical; 11 Results and 20 theme
+tests passed. Three maintained tests cover actual ink/modifiers, unselected and
+colour-off controls, and NULL/empty/literal-NULL distinctions. The maintained
+failing-first Header assertion is separate from the initial probe's qualified
+setup correction. Independent review found no blocker:
+`/private/tmp/ignatius-t055-peer-review-yojn9ktl/REVIEW.md`, SHA-256
+`2ee03e1b664aeea1feb183d0af235eaad97a7c28b00e8e6a77416bb7d86f50f4`.
+
+Root inspected the contact sheet's 12 before/after synthetic rasters and verified
+their source/JSON capture identities. Only selected painted foregrounds change;
+symbols, positions, backgrounds and modifiers match. Basic16/None/explicit
+colour-off scenes are byte-identical. Font, indexed/reset colour and DIM
+approximations remain explicit; this is not native terminal appearance evidence.
+
+The first full gate preserved six TLS failures: this new worktree lacked the
+ignored disposable CA/client certificate/key files used by the existing TLS
+container. Root inspected the read-only mount and copied only those three
+synthetic files, keeping the key 0600 and directory 0700. No container, test or
+product-policy change occurred. The full repeat passed **1,434 outer harness
+cases, 1,130 library and 24 summaries**, all six executed gates and actual
+PostgreSQL 18.6 plain/TLS. All six affected cases now pass. The macOS socket case
+remains a semantic skip. Actual local tools: macOS 27.0.1 arm64, Rust/Cargo 1.99.1;
+hosted pinned/MSRV/platform acceptance is pending. Repeat log SHA-256
+`dab6ff370743602b9dbdb18298c96d877f2b43e74d2a8cd6dfe8b13675f42fa3`.
+Logs: `/private/tmp/ignatius-t055-integrated-verify-20261025.log` and
+`/private/tmp/ignatius-t055-integrated-verify-repeat-20261025.log`; root receipt
+`/private/tmp/ignatius-t055-root-integration-20261025.json`.
+This is neither a palette correction nor broader US5/Windows acceptance.
+
+Published clean `ffb86a1` in [draft PR34](https://github.com/tkomane/ignatius/pull/34)
+after the unchanged pre-push verifier again passed all 1,434 cases/24 summaries,
+with the same socket skip. Exact source 438 and reachable history 290 passed
+pinned Gitleaks. PR merge ref `d38304f9` matches head tree
+`77c2add104a13c5bd20bca99eb687d0de9f0578a`. CI `40223833554` completed with
+13 successful jobs and one deliberate schedule-only fixture-drift skip.
+Independent platform audit confirms every new T055 case ran on Linux, macOS
+and Windows with Rust 1.97.1; full library passes were 1,130/1,130/1,111.
+Startup/refusal smoke succeeded, with doctor's terminal/size/connection skips
+preserved as limits. Hosted runners do not establish native terminal appearance.
+PG14/18 plain/verify-full and one real Linux socket passed. The 473 selected
+invocations include pure/local cases; positive fixtures and runtime-major guards
+support the live claims, not a claim that all selected cases queried a server.
+Complete job logs/source-linked receipts:
+`/private/tmp/ignatius-pr34-platform-audit-kmb7tndf/RECEIPT.md` (SHA-256
+`8e2cd6155079190e78da21487a0c77089055410f976a462259215c62ac944095`) and
+`/private/tmp/ignatius-pr34-ffb86a1-db-audit-20261025.json`.
+Fresh CodeQL follows parent integration/retargeting under the unchanged
+main-target filter; it is not yet accepted. Publication receipt:
+`/private/tmp/ignatius-t055-ffb86a1-publication-20261025.json`.
+
 ## W10-012 integrated local verification - 2026-10-25
 
 The frozen isolated handoff passed 750 focused library cases and 32 actual

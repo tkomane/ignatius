@@ -837,6 +837,55 @@ fn help_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 }
 
+fn switch_theme_action(model: &mut Model) -> Vec<Effect> {
+    if model.password_prompt.is_some()
+        || model.parameter_prompt.is_some()
+        || model.name_prompt.is_some()
+        || model.connection_details
+        || model.prefix_pending
+        || model.pending_run.is_some()
+        || model.pending_plan.is_some()
+        || model.pending_copy.is_some()
+        || model.update_prompt.is_some()
+        || model.pending_update.is_some()
+        || model.palette.is_some()
+        || model.help_open
+        || pane_input_owned(model)
+    {
+        return Vec::new();
+    }
+    match model.theme_catalog.cycle(&model.presentation.theme) {
+        Ok(theme) => model.presentation.theme = theme,
+        Err(reason) => {
+            let diagnostic = crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Internal,
+                "the theme could not be switched",
+                "switching the session theme",
+            )
+            .likely_cause(reason.to_string())
+            .next_action("continue in the current theme, or save your SQL before restarting");
+            if let Some(existing) = model.error.as_mut() {
+                let note = crate::diagnostics::TechnicalField {
+                    label: "Theme switching".into(),
+                    value: diagnostic.headline,
+                };
+                if let Some(field) = existing
+                    .technical
+                    .iter_mut()
+                    .find(|field| field.label == note.label)
+                {
+                    *field = note;
+                } else {
+                    existing.technical.push(note);
+                }
+            } else {
+                model.error = Some(diagnostic);
+            }
+        }
+    }
+    Vec::new()
+}
+
 fn pane_input_owned(model: &Model) -> bool {
     model.notice_details.is_some()
         || model.inspector.is_some()
@@ -847,6 +896,9 @@ fn pane_input_owned(model: &Model) -> bool {
 }
 
 fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if matches!(action, Action::SwitchTheme) {
+        return switch_theme_action(model);
+    }
     model.layout_notice = None;
     // Reshaping a pane must not dismiss an input owner and act underneath it.
     if (model.help_open || pane_input_owned(model))
@@ -935,6 +987,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.should_quit = true;
             vec![Effect::Quit]
         }
+        Action::SwitchTheme => switch_theme_action(model),
         Action::ToggleHelp => {
             model.help_open = !model.help_open;
             if model.help_open {
@@ -3770,7 +3823,44 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
 
     // A command appears once even when several active keys invoke it. The
     // detail keeps every active direct key, with configured replacements first.
+    let mut theme_keys = Vec::new();
+    for binding in snapshot
+        .bindings
+        .iter()
+        .filter(|binding| binding.action == Action::SwitchTheme)
+    {
+        if !theme_keys.contains(&binding.key) {
+            theme_keys.push(binding.key.clone());
+        }
+    }
+    for chord in snapshot
+        .chords
+        .iter()
+        .filter(|chord| chord.action == Action::SwitchTheme)
+    {
+        let key = format!(
+            "{} {}",
+            snapshot.prefix.as_deref().unwrap_or("Ctrl+K"),
+            chord.key
+        );
+        if !theme_keys.contains(&key) {
+            theme_keys.push(key);
+        }
+    }
+    entries.push(PaletteEntry {
+        label: "Switch theme".into(),
+        detail: if theme_keys.is_empty() {
+            "Cycle theme for this session".into()
+        } else {
+            theme_keys.join(" / ")
+        },
+        group: "Session",
+        command: PaletteCommand::Run(Action::SwitchTheme),
+    });
     for action in crate::app::discovery::palette_actions(model) {
+        if action == Action::SwitchTheme {
+            continue;
+        }
         let bindings: Vec<&crate::app::discovery::KeyBindingSnapshot> = snapshot
             .bindings
             .iter()
