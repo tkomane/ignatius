@@ -4,36 +4,51 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Repository integration - 26 October 2026 (in progress)
+## Consolidated baseline - 26 October 2026
 
-The day-long implementation goal is complete. Owner-authorized sequential
-integration has merged PR32 (`af2ad3f`), PR34 (`81d5f9e`), PR35 (`84e033f`),
-PR36 (`5efb685`) and PR37 (`50fee40`) into main. Each descendant was refreshed
-against the newly merged main and passed 17 checks, with only the deliberate
-schedule-only fixture check skipped. The latest application source is the
-bounded editor implementation `d2edce1`; merge commits preserve the full source
-history. There has been no release or deployment.
+Resume from `main`. The day-long implementation goal is complete. The owner
+requested sequential PR integration and local/remote branch cleanup. PR32
+(`af2ad3f`), PR34 (`81d5f9e`), PR35 (`84e033f`), PR36 (`5efb685`), PR37
+(`50fee40`), PR33 (`d2c31a2`), PR26 (`ca481e7`) and PR31 (`a52b65f`) were merged
+in that order. Every descendant was refreshed against its newly merged parent;
+each accepted PR had 17 successful checks and the deliberate schedule-only
+fixture skip. Merge commits preserve the complete feature history.
 
-PR33 now carries the separate Windows capability experiment plus the preserved
-W07 evidence and this integrated editor stack. Its native helpers/assertions
-are unchanged. The explicitly dispatched `windows-conpty-diagnostic.yml` keeps
-the known capability failure strict and retains bounded evidence; routine CI
-continues all three mandatory platform product suites. W07-064/T055a/T051 and
-Windows 11/Windows Terminal hand use remain open. The normal clean pre-push gate
-and fresh main-targeted CI are required before this integration is accepted.
+The final consolidation change in [PR38](https://github.com/tkomane/ignatius/pull/38)
+adds the seven grouped Cargo dependency updates and reconciles these resumption
+records. Its exact-head checks and GitHub merge state are the final dependency
+acceptance evidence. Historical PR30 was replaced by PR38. There has been no
+release, tag, deployment or production change.
 
-Dependency PR26, PR31 and replacement Cargo PR38 still need sequential refresh,
-checks and integration. Historical local main and older prototype branches are
-preserved in the verified local `.git/archives/20261026-before.bundle` and its
-ref inventory before cleanup. Those historical prototypes are recovery material,
-not new product or release acceptance. Final branch/worktree cleanup follows
-integration; check actual Git state rather than historical branch names below.
+The integrated experience includes T055 selected-field readability, manual
+custom themes and T056/T057 colour-route fixes, T058 editor caret/hit mapping
+and T059 bounded editor metadata. Prior clean pre-push verifiers passed 1,521
+outer cases, including 1,212 library cases, formatting, lints, API docs and real
+PostgreSQL plain/TLS. Local macOS socket verification remains a semantic skip;
+hosted Linux executes the real socket contract. The final lockfile is subject
+to the same complete pre-push gate and fresh main-targeted CI/CodeQL in PR38.
 
-Next product work remains the roadmap's scoped native terminal/provider and
-hand-use acceptance, followed by release evidence/trust, installation and p95
-gates. The US6/US8/T032 readiness notes remain planning inputs. The owner skipped
-external OpenCode review; no different-family review or release approval is
-implied by the merge task.
+W07's unchanged native helpers/assertions are retained in the explicitly
+dispatched `windows-conpty-diagnostic.yml`. The known alternate-cursor sensor
+failure stays a failure; ordinary CI retains all three platform product suites.
+W07-064/T055a/T051 and Windows 11/Windows Terminal hand use remain open.
+
+Historical local main and older unpublished prototype branches were preserved
+before deletion in the verified owner-clone `.git/archives/20261026-before.bundle`
+(32 refs, complete history), with a ref inventory and restoration instructions.
+These include alternate release-evidence/inventory/verifier implementations;
+review them against current W11 and privacy contracts before any future reuse.
+They are recovery material, not newly adopted product or release acceptance.
+The app blocks removal of this chat's primary worktree; retain it clean and
+detached at the same final main commit. Inspect actual Git state for branch and
+worktree counts when resuming; the dated names below are historical evidence.
+
+Next work is bounded native terminal/provider and hand-use acceptance, with
+US6/US8/T032 contract clarifications before those implementations. Preserve
+`mouse = false` and manual themes until their respective gates pass. Release
+trust/evidence, installation/recovery and release-build p95 remain open. External
+OpenCode review was explicitly skipped; different-family review and release
+approval are not implied by repository consolidation.
 
 ## Autonomous roadmap continuation - 25 October 2026 (historical checkpoints)
 

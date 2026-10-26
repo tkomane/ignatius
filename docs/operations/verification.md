@@ -1,5 +1,39 @@
 # Verification
 
+## Sequential repository consolidation - 26 October 2026
+
+Feature PRs 34-37 were refreshed and merged in dependency order after PR32.
+Each fresh head passed 17 checks, with only scheduled fixture drift skipped.
+PR33 then preserved both the native diagnostic and UI evidence through four
+resolved documentation conflicts. Its clean pre-push verifier passed 1,521
+outer harness cases (1,212 library), formatting, lints/API docs and actual
+PostgreSQL plain/TLS. The local macOS socket path remained a semantic skip.
+Exact `a2cbf78` passed CI/CodeQL runs `40246567778` and `40246567779`, including
+hosted Linux socket, before merge `d2c31a2`.
+
+Initial local attempts were not accepted: a shared cached xtask pointed at the
+other checkout, and a later documentation edit during verification made the
+binary's recorded clean state stale. Rebuilding xtask for the canonical root
+and running the complete gate from a committed, untouched checkout corrected
+both verification conditions. The successful clean pre-push log is
+`/private/tmp/ignatius-hygiene-pr33-prepush.log`.
+
+PR26 reproduced a stale release assertion containing a duplicate old action
+SHA. Its repaired focused test and full pre-push gate passed. The release
+contract retains action identities/build inputs; the shared workflow contract
+still requires full 40-character revisions, review labels and one consistent
+pin per action across all workflows. PR26 and PR31 include the added diagnostic
+workflow when updating pins and passed fresh main-targeted CI before merging.
+
+The final Cargo lockfile and these consolidated records are reviewed in
+[PR38](https://github.com/tkomane/ignatius/pull/38); consult its exact-head checks
+for the final dependency verdict. Its normal pre-push log is
+`/private/tmp/ignatius-hygiene-pr38-prepush.log`. Earlier clean logs and CI are
+source-bound evidence, not a substitute for that final lockfile validation.
+The ConPTY helper files remain byte-identical to `65cf237`. Relocating their
+strict execution to explicit dispatch supplies no new native runtime result
+and does not close the recorded alternate-cursor sensor gap or release gates.
+
 ## ConPTY integration boundary - 26 October 2026
 
 The diagnostic now has a separate explicit-dispatch workflow,

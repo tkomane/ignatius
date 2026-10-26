@@ -1,54 +1,40 @@
 # Roadmap
 
-**Reconciled 2026-10-25; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-10-26; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
-The planned experience through Feature 024 is now implemented locally. The
-next phase integrates that work and proves product, platform and release claims.
+The implemented source through Feature 024 is consolidated with the latest
+Feature 025 corrections. Resume from `main` and the [current status](../status.md);
+its dated PR/check records distinguish integrated code from remaining product,
+platform and release acceptance.
 
-The latest implemented experience slice is **025 GUI-grade experience, US4**:
-paste, painted surfaces, the workable grid and first-frame startup are recorded
-in `docs/status.md`. Feature 025 US5-US10 and final acceptance remain open in
-its task list. The current integration branch also contains W02 connection
-identity hardening, W05 local server-matrix evidence and W11 dry trust tooling.
-Those local results do not establish hosted acceptance or release readiness.
-Feature025 T055's observed expanded-field selection defect is now corrected
-at published `ffb86a1` in draft PR34: actual Buffer evidence, independent review,
-the full local gate and all three hosted platform regressions passed. CI has
-13 successful jobs and one scheduled drift skip; PG14/18/socket also passed.
-Fresh main-targeted CodeQL and parent integration remain pending. Manual US5
-custom themes/runtime switching are in implementation on the isolated
-`codex/manual-themes-2026-10-25` branch: strict configuration/startup, runtime
-cycling and styled parity are integrated and the full local verifier passes
-1,497 harness cases. Published `d92c416` in draft PR35; hosted platform/MSRV,
-PG14/18/socket and policy gates passed (13 jobs, one scheduled-fixture skip).
-Fresh CodeQL/parent integration and native hand use remain pending. Visual review
-also exposed and repaired T056's selected palette group/detail ink composition.
-Final integration review found the ignored configured-colour startup/doctor
-route; T057 now corrects it with a full repeat and actual owned-PTY route evidence.
-Automatic background detection, native hand use and release remain separate
-open work.
-The next observed-friction slice is W09 / Feature025 T058: the long-line editor
-can clip its caret at the right edge. FR-2529 and the dated presentation
-contract now specify a shared horizontal view for drawing, completion and hit
-mapping. Its implementation and independent-review correction passed 78 widget
-and 114 layout cases, the full 1,515-case local gate and the same-width owned
-PTY repeat on `codex/editor-caret-2026-10-25`, based on PR35. Published `14d18ad`
-in draft PR36 after the normal pre-push repeat and clean-source/history scans.
-Hosted acceptance passed 13 executable jobs with one intentional scheduled
-fixture skip; all 18 new cases ran on Linux/macOS/Windows. Native appearance/
-hand use remain separate. A follow-up W10 diagnostic found a material local
-test-profile long-line allocation/latency increase. FR-2530/T059 now specifies
-bounded visible/caret metadata while preserving the accepted cells; isolated
-implementation on `codex/bounded-editor-view-2026-10-25` passed local independent
-review, 83 widget/114 layout cases, the full 1,520-case gate, exact 51,081-cell
-parity and an owned-PTY control. Final 1 MiB diagnostic medians improve to
-138.342 ms/17.063 MiB RSS. Published clean `d2edce1` in draft PR37 after normal
-pre-push/source-history scanning. Hosted acceptance passed all 13 executable
-jobs with one intentional scheduled-fixture skip; all five T059 and 18 T058
-cases execute on Linux/macOS/Windows. PG14/18/socket, policy and MSRV are also
-accepted for this product source. The small diagnostic is not release-build
-p95 or a process-memory ceiling. The final documentation checkpoint preserves
-accepted product-source bytes and points to PR37 for current-head checks.
+Feature 025 US1-US4 and the manual-theme portion of US5 are implemented. T055
+corrects expanded-field selection readability; T056/T057 repair palette ink and
+the configured-colour startup/doctor route. T058 shares the long-line horizontal
+view across painting, completion and hit mapping. T059 bounds visible/caret
+metadata while preserving the accepted cells. The feature stack passed fresh
+main-targeted platform, MSRV, PostgreSQL 14/18 plain/TLS, real Linux socket and
+CodeQL checks during sequential integration. The final dependency head is
+tracked in PR38. Neither source integration nor these checks closes full
+Feature 025 or native hand-use acceptance.
+
+The local T059 diagnostic's 1 MiB medians were 138.342 ms/17.063 MiB RSS, with
+exact 51,081-cell parity. These are scoped test-profile measurements, not
+release-build p95 or a process-memory ceiling. Detailed source-bound results
+remain in [verification](../operations/verification.md).
+
+W07 retains the failed alternate-cursor sensor capability in its strict,
+explicitly dispatched diagnostic workflow. Normal Windows product CI is
+mandatory; its success does not close W07-064/T055a/T051. A faithful observation
+seam and admitted native matrix remain prerequisites for terminal restoration
+acceptance. Windows 11/Windows Terminal, Warp hand use and provider evidence
+remain separate work.
+
+Automatic background detection and US6-US10 remain open in the authoritative
+feature tasks. Select the next bounded assignment after the readiness contracts
+below, preserving manual themes and `mouse = false`. W11 may examine historical
+owner-clone release/inventory prototypes retained in the pre-cleanup recovery
+bundle, but their existence does not adopt an older trust or privacy contract.
+No release or deployment follows from consolidation.
 
 Read-only readiness reviews at `d92c416` also bound the next assignments:
 
