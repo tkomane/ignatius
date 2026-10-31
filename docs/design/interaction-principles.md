@@ -91,6 +91,23 @@ writes and flushes a terminal sequence but never reads or clears the clipboard.
 Success therefore says that terminal acceptance is unconfirmed, and the
 terminal, SSH path, or multiplexer exposure remains visible to the user.
 
+**Paste is bounded and explicit.** Bracketed paste lands at the caret as one
+undoable edit, normalizes CRLF and CR line breaks to standard LF, and
+enforces a hard 1 MiB UTF-8 limit (refusing oversized payloads with the limit
+named). Pasting never automatically executes SQL or confirms prompts, even if
+the pasted text contains newlines or semicolons. Pasting while a non-text
+surface owns input is visibly acknowledged as an ignored paste rather than
+dropped silently. Pasting into a masked password prompt accepts the text
+securely without echoing characters to the terminal or writing them to history.
+
+**The pointer enhances without replacing.** Mouse capture is on by default
+(`ui.mouse = false` to disable). Every mouse verb dispatches to the same reducer
+action as its keyboard equivalent, ensuring no interactive capability is
+mouse-only. In terminals with capture enabled, holding Shift while clicking or
+dragging preserves terminal-native text selection. Right-click, middle-click,
+and hover remain unbound with no context menus, preventing gestures from
+conflicting with platform window management or terminal conventions.
+
 **Formatting is a local, reversible edit.** `Ctrl+Shift+F`, `Ctrl+K q`, the
 palette, and plain `\\format` expose the same deterministic operation. It
 changes whitespace and layout only outside protected SQL regions, never runs a
@@ -125,7 +142,7 @@ matching still apply. Scrolling sends nothing and does not prove reading.
 
 ## What is deliberately avoided
 
-- ASCII art on launch, gradients made of glyphs, spinners without text.
+- ASCII art on launch, except the bounded US10 identity reveal: connecting frames only, 1.4 s cap, any-key skip, reduced-motion static, never in plain mode
 - A border around everything. Borders separate panes and nothing else.
 - Unexplained abbreviations. `read-write` rather than `rw`.
 - A permanent wall of shortcuts. Six hints in the footer; the rest in help.

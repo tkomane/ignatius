@@ -301,6 +301,39 @@ Terminals that speak the Kitty keyboard protocol, including Warp, can send press
 and release events. Only presses are acted on. Without that, every statement
 would run twice.
 
+## Mouse verbs
+
+Every mouse gesture resolves through the pure hit-region dispatch function and
+translates to the same action the keyboard emits. Anything not listed in this
+table changes nothing.
+
+| Region | Event | Modifier | Action | Keyboard route |
+| --- | --- | --- | --- | --- |
+| Any pane interior | left Down | - | focus that pane | `Tab` focus cycle |
+| Sidebar row | left Down | - | focus tree and select that row | arrows after focus |
+| Sidebar row | left double | - | toggle expand or open, exactly as Enter on that row | `Enter` |
+| Editor text cell | left Down | - | focus editor and move the caret to that position | arrows |
+| Results cell | left Down | - | focus results and select that cell | arrows |
+| Results cell | left double | - | open the inspector on that cell | the existing inspector toggle |
+| Results header cell | left Down | - | sort cycle for that column: ascending, descending, server order | the existing grid sort controls |
+| Results column edge (the header rule cell) | left Drag | - | resize that column within the grid contract's bounds | `Ctrl+K [` / `Ctrl+K ]` |
+| Vertical split bar | left Drag | - | move the sidebar split within documented minimums | `Ctrl+K ,` / `Ctrl+K .` |
+| Horizontal split bar | left Drag | - | move the editor/results split within documented minimums | `Ctrl+K ,` / `Ctrl+K .` |
+| Overlay item | left Down | - | select that item | arrows |
+| Overlay item | left double | - | accept that item, exactly as Enter | `Enter` |
+| Pane under pointer | ScrollDown / ScrollUp | - | scroll that pane three rows per notch; keyboard focus does not move | `PageDown` / `PageUp`, arrows |
+| Results under pointer | ScrollDown / ScrollUp | Shift | scroll visible columns | the existing column scroll keys |
+| Header, footer, borders outside the regions above | any | any | nothing | not applicable |
+| Anywhere | right or middle button | any | nothing (no context menus in this feature) | not applicable |
+| Anywhere | Moved (no button) | any | nothing | not applicable |
+
+Mouse capture is enabled by default (`ui.mouse = true`). Setting
+`ui.mouse = false` in `config.toml` disables mouse capture entirely; every
+capability remains reachable by keyboard. In terminals with mouse capture
+enabled, holding `Shift` while clicking or dragging bypasses application capture
+and restores terminal-native text selection. In-app copying of cell values
+remains the explicit, opt-in OSC 52 route (`[clipboard] osc52 = true`).
+
 ## Configurable bindings
 
 A `[keys]` table in `config.toml` replaces the built-in binding for an action:

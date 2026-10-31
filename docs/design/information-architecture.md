@@ -22,6 +22,26 @@
 Row 1 is the header: who you are connected to and how. Rows 2 to n are the two
 panes. The last row is the footer: what the client is doing, and what to press.
 
+## First frame and connecting shell
+
+The connecting experience begins from frame 1:
+
+- **Painted shell from frame 1**: The client renders the complete surface ladder,
+  target summary, elapsed connection timer, and an immediate cancellation route
+  (`Ctrl+C` or `Esc`).
+- **Named connecting steps**: Progress advances through explicit, truthful
+  connection phases (`resolving profile`, `acquiring credential`,
+  `TLS handshake`, `server handshake`, `loading catalogue`). Steps that are not
+  applicable to the current connection are skipped immediately without false
+  progress or synthetic delays.
+- **First connected frame**: As soon as the connection succeeds, the interface
+  transitions smoothly into the workspace: focus lands in the editor pane, the
+  first level of the database catalogue expands in the object tree, and the
+  `Ctrl+R` execution hint appears in the footer.
+- **Unconfigured startup**: When launched without an explicit target or profile,
+  the client presents guided instructions advising the user to pass a connection
+  target or define a profile in `config.toml`.
+
 ## What each region owns
 
 **Object tree.** Schemas, their object groups with counts, the objects
@@ -52,8 +72,12 @@ accept, dismiss, or move. The menu is local after the snapshot load and never
 changes the editor before Enter.
 
 **Results pane.** Column headers, rows, and in the title the execution status and
-summary. Truncation is stated in the summary, never implied by an absence. When
-an error is present it replaces this pane, because an error is the result.
+summary. Below the headers, the viewport range line reports position with exact
+precision: `rows M-N of Total retained` (qualifying when results are truncated or
+filtered), and explicitly stating `0 rows returned` when a query yields an empty
+set (never misleadingly reporting `rows 0-0`). Truncation is stated in the
+summary, never implied by an absence. When an error is present it replaces this
+pane, because an error is the result.
 
 The same pane has a second shape, reached with `Ctrl+K x`: one row down the
 screen, one column per line, with the names aligned. It exists because a grid
@@ -113,7 +137,37 @@ becomes heavier, and the border takes the focus colour. The first two survive
 with colour off, which is why the border weight changes rather than only its
 colour.
 
+## Pane splits and zoom
+
+The workspace layout can be adjusted interactively during a session:
+
+- **Keyboard and pointer routes**: Session-local adjustments use `Ctrl+K ,`
+  (`shrink-pane`), `Ctrl+K .` (`grow-pane`), `Ctrl+K z` (`zoom-pane`), or direct
+  mouse dragging of the vertical and horizontal split divider bars.
+- **Sidebar bounds**: The object tree split adjusts in 2-cell increments, clamped
+  between 20 and 60 columns (leaving at least 30 columns for the main workspace).
+- **Editor and results bounds**: The horizontal split between the editor and
+  results panes adjusts in 1-row increments, enforcing a minimum height of 3 rows
+  for both panes.
+- **Zoom**: `Ctrl+K z` zooms the focused pane to fill the entire body area;
+  repeating the command or pressing a split key restores the exact pre-zoom
+  layout.
+- **Compact terminal feedback**: When terminal dimensions are constrained below
+  80x24 (single-pane compact mode), attempting to adjust splits or zoom displays
+  the informative notice: `"Layout is already single-pane at this terminal size."`.
+
 ## Overlays
+
+Command palette overlays occupy 80% of terminal height with the text input field
+pinned at the top.
+
+Overlays that display inspectable resources (definitions, saved queries,
+connection profiles, and dependencies) use a preview-bearing split layout:
+40% left-hand list for item selection and 60% right-hand preview panel. Previews
+are assembled entirely from retained session data with zero network calls or
+query executions. For other purposes, overlays span the full dialog width. On
+terminals narrower than 80 columns, the preview panel is omitted cleanly to keep
+the selection list usable.
 
 Help is centred, lists every binding with its description, and says `Esc to
 close` in its own title. The connection details surface is a second, read-only

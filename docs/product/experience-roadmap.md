@@ -152,6 +152,21 @@ the locked verifier pass, including plain and TLS PostgreSQL 18.4 evidence; the
 semantic Unix-socket gate and terminal, screen-reader and cross-platform hand
 checks remain separate evidence gates.
 
+As of 2026-10-31, Feature 025 (GUI-grade experience) delivers the complete visual
+and interactive polish package. It implements a 3-level painted surface elevation
+ladder (`Surface`, `SurfacePane`, `SurfaceOverlay`) across 4 colour depths
+(`TrueColor`, `Indexed256`, `Basic16`, `None`) with `--color-depth` and
+`ui.color-depth` overrides; bracketed paste with a 1 MiB cap and masked
+password-prompt integration; a workable results grid with a truthful range line
+(`rows M-N of Total retained`), 3-state local column sort, and bounded column
+widths; a first-frame connecting shell with named steps (`resolving profile`,
+`acquiring credential`, `TLS handshake`, `server handshake`, `loading catalogue`),
+target/elapsed telemetry and a bounded boot reveal wordmark; manual custom themes
+with runtime palette switching; a first-class mouse verb table with `ui.mouse = true`
+default and 1:1 keyboard parity; adjustable splits, zoom and density (`comfortable`
+and `compact`); quiet chrome domain capsules with 200 ms elapsed gating; and an
+80% height command palette with 60% right-hand previews from retained in-memory data.
+
 ## What a graphical client is actually giving people
 
 Not beauty. Four things, and they are worth naming separately because they cost
@@ -299,6 +314,14 @@ bounded 500-node, 1 MiB view keeps a large or malformed response recoverable.
   refresh from the source behind a completed result. It is intentionally narrow:
   one read-classified statement, a usable connection, named-parameter
   re-prompting, an explicit outcome, and no passive replay.
+- **A GUI-grade experience.** Feature 025 brings graphical workbench ergonomics
+  to the terminal: painted surface elevation across 4 colour depths, bracketed
+  paste with a 1 MiB cap, a workable results grid with range line, local sort
+  and column widths, a first-frame connecting shell with named steps and boot
+  reveal wordmark, manual custom themes, a first-class mouse verb table with
+  `ui.mouse = true` default and 1:1 keyboard parity, adjustable splits, zoom and
+  density, quiet chrome domain capsules with 200 ms elapsed gating, and 80%/60%
+  palette previews from retained data.
 
 ## What is deliberately not on the list
 
