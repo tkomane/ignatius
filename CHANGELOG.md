@@ -8,6 +8,36 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: 3-level surface elevation ladder (Surface, SurfacePane, SurfaceOverlay)
+  and 4-tier colour depth (TrueColor, Indexed256, Basic16, None) with
+  `--color-depth` CLI flag and `ui.color-depth` configuration overrides. Basic16
+  and None fall back cleanly to unpainted surfaces.
+- New: Results grid range line displays visible slice and retained total
+  (`rows M-N of Total retained`), 3-state local column sorting (natural,
+  ascending, descending), and draggable column dividers with widths bounded
+  between 4 and 64 character cells.
+- New: first-frame connecting shell renders immediately from frame 1 with named
+  progress steps (`resolving profile`, `acquiring credential`, `TLS handshake`,
+  `server handshake`, `loading catalogue`), elapsed connection timing, sanitized
+  target display, unconfigured welcome guidance, and a bounded boot reveal
+  wordmark.
+- New: first-class mouse support enabled by default (`ui.mouse = true`) with 1:1
+  keyboard parity across all interactive panes, including click to focus and
+  select, double-click actions, draggable split bars and column dividers, wheel
+  scrolling without moving focus, and Shift-drag pass-through for terminal text
+  selection.
+- Improved: quiet chrome header renders compact status capsules across four core
+  domains (connection, transaction/mode, catalogue/schema, and execution status)
+  with 200 ms elapsed gating to suppress visual flicker on fast queries.
+- Improved: command palette opens at 80% terminal height with a 60% right-hand
+  contextual preview pane for definitions, saved queries, connection profiles,
+  and catalogue dependencies using retained in-memory metadata without network
+  calls or secret exposure.
+- Improved: bracketed paste safely accepts arbitrary SQL up to 1 MiB with LF
+  normalization, prevents accidental execution of multiline statements with
+  trailing newlines, safely delivers secret input into masked password prompts
+  without terminal echo, and visibly reports unhandled paste events on
+  non-editable surfaces.
 - Improved: long SQL lines retain only visible/caret display metadata, reducing
   transient memory and render work while preserving the same SQL, gutter,
   selection and completion geometry.

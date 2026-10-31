@@ -1,8 +1,67 @@
 # Status
 
-**Updated: 2026-10-26.** This file is the resumption point. Read it, then check
+**Updated: 2026-10-31.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Feature 025 completion and documentation parity - 31 October 2026
+
+Resume from `main`. Feature `025-gui-grade-experience` Waves 1, 2 and 3 have
+completed implementation, independent adversarial review, and full verification:
+
+- **Wave 1 ([PR41](https://github.com/tkomane/ignatius/pull/41), merged at `9f68cb3`)**:
+  delivered US8 quiet chrome capsules and `200 ms` elapsed gating (`T042-T043`),
+  US9 80% height / 60% preview command palettes from retained session data
+  (`T044-T045`), and US10 ASCII identity mark and bounded boot reveal
+  (`T052-T054`), plus the `#[cfg(test)]` prompt guard in `src/cli/prompt.rs`
+  preventing interactive `/dev/tty` blocking during unit tests.
+- **Wave 2 ([PR42](https://github.com/tkomane/ignatius/pull/42), merged at `743683e`)**:
+  delivered US6 mouse verb-table dispatch and default capture (`T034-T037`),
+  including monotonic double-click timing (`DOUBLE_CLICK_WINDOW = 400 ms`),
+  split and column-edge dragging with keyboard-identical clamps, `ui.mouse = true`
+  by default with `Shift` terminal-selection guidance in `F1` help, PTY capture
+  sequence restoration in `tests/terminal_restore.rs`, and full keyboard-only
+  reachability proof with `ui.mouse = false`.
+- **Wave 3 (`T046-T051`)**: amended the six narrative design documents
+  (`docs/design/theme-tokens.md`, `docs/design/terminal-compatibility.md`,
+  `docs/design/icons-and-motion.md`, `docs/design/interaction-principles.md`,
+  `docs/design/information-architecture.md`, `docs/design/keymap.md`), updated
+  `docs/support/compatibility.md`, `docs/product/experience-roadmap.md`,
+  `docs/product/journeys.md`, `docs/security/data-handling.md` and
+  `CHANGELOG.md`, and added `gui_grade_experience_documentation_matches_the_build_and_quickstart`
+  in `tests/documentation_matches_the_build.rs`.
+
+### Separated verification evidence (31 October 2026)
+
+- **What focused unit and contract tests proved (`T049`)**:
+  - `cargo fmt --all -- --check`: pass.
+  - `cargo test --locked --lib ui::widgets`: 106 passed.
+  - `cargo test --locked --lib ui::theme`: 44 passed.
+  - `cargo test --locked --lib ui::layout`: 114 passed.
+  - `cargo test --locked --lib paste`: 27 passed.
+  - `cargo test --locked --lib app::update::tests::mouse`: 15 passed.
+  - `cargo test --locked --lib every_interactive_capability_is_reachable_by_keyboard_with_mouse_off`: 1 passed.
+  - `cargo test --locked --lib app::update::tests::manual_theme`: 8 passed (21 across `manual_theme` lib filter).
+  - `cargo test --locked --lib app::grid`: 18 passed.
+  - `cargo test --locked --lib app::update::tests::connecting_steps`: 1 passed (11 across `connecting` lib filter).
+  - `cargo test --locked --lib config`: 83 passed.
+  - `cargo test --locked --test documentation_matches_the_build`: 16 passed.
+  - Normal-hyphen prose scan (`T051`): 0 em dashes or en dashes across all modified files.
+- **What the full local suite proved (`T050`, `cargo --locked xtask verify`)**:
+  - `formatting`: pass.
+  - `lints`: pass (`cargo clippy --locked --all-targets -- -D warnings`).
+  - `API documentation`: pass.
+  - `workspace tests`: pass (1,261 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 16, `postgres_integration` 72, `release_contract` 14, `runtime_privacy_contract` 5, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
+  - `documentation tests`: pass.
+  - `cargo xtask db down` and `cargo xtask db status`: verified container and network teardown (`Stopped. Its data is gone`) and post-teardown status (`Not running. Start it with cargo xtask db up.`).
+- **What live PostgreSQL, PTY and hosted CI evidence proved**:
+  - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain (`127.0.0.1:55432`) and TLS (`localhost:55433`): all database-backed integration tests passed.
+  - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 restoration tests passed, including balanced mouse capture enable/disable (`ESC[?1000h` / `ESC[?1000l`) and alternate-screen-last ordering.
+  - Hosted GitHub Actions on PR41 (`9f68cb3`) and PR42 (`743683e`): all 16 executed jobs passed (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
+- **What remains unverified or open (reported separately, never merged with passes)**:
+  - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI is not set`); covered by the hosted Linux `PostgreSQL 18 Unix socket` CI job.
+  - Phase 7 automatic OSC 11 background luminance probe (`T028`, `T028b`, `T032`): remains open behind the Crossterm single-owner input/drain lifecycle constraint; `ui.theme = "auto"` remains explicitly refused at configuration validation.
+  - Native terminal emulator visual appearance, screen-reader hand use, Windows 11 / ConPTY interactive hand use (`W07`), live cloud-provider authentication journeys, release-build p95 latency/memory ceilings (`W10`), and release signing/publication (`W11`) remain open.
 
 ## Consolidated baseline - 26 October 2026
 

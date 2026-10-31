@@ -17,11 +17,11 @@ cargo fmt --all -- --check
 cargo test --locked --lib ui::widgets
 cargo test --locked --lib ui::theme
 cargo test --locked --lib ui::layout
-cargo test --locked --lib app::editor::tests::paste
+cargo test --locked --lib paste
 cargo test --locked --lib app::update::tests::mouse
-cargo test --locked --lib app::update::tests::theme_switch
+cargo test --locked --lib app::update::tests::manual_theme
 cargo test --locked --lib app::grid
-cargo test --locked --lib connection::service::tests::connecting_steps
+cargo test --locked --lib app::update::tests::connecting_steps
 cargo test --locked --lib config
 cargo test --locked --test documentation_matches_the_build
 cargo --locked xtask verify

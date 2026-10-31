@@ -558,9 +558,11 @@ Split/zoom preferences are never persisted. `[ui] density = "comfortable"`
 footer hint caps (six/four) and preferred overlay clearance from one table.
 Notices and the existing one-cell grid padding remain present. Unknown density
 values are refused with configuration exit 3 before taking terminal modes;
-there is no density CLI flag or runtime toggle. Mouse dragging remains open
-Feature 025 work. Rendered-buffer checks and actual native terminal use remain
-separate acceptance classes. Density itself does not change acceptance policy.
+there is no density CLI flag or runtime toggle. Mouse split-bar and column-edge
+dragging are implemented with the same bounds as the keyboard routes (20..=60
+sidebar columns, minimum 3 pane rows, 4..=64 result column cells).
+Rendered-buffer checks and actual native terminal use remain separate
+acceptance classes. Density itself does not change acceptance policy.
 
 Clipboard, generated UPDATE, production-run, EXPLAIN ANALYZE and named-parameter
 reviews now share scrollable content and a fixed input/command rail. Both
@@ -603,7 +605,7 @@ styled-buffer parity and local large-line diagnostics are recorded in
 [verification](../operations/verification.md#w10-long-line-renderer-diagnostic---2026-10-25).
 Observed process RSS and renderer times are not memory ceilings or release p95.
 
-## Manual themes
+## Manual themes and presentation
 
 The manual-theme slice supports `dark`, `light`, `high-contrast` and `custom`
 in `[ui] theme`. A single optional `[theme]` table inherits a built-in palette
@@ -613,13 +615,24 @@ configuration exit 3 before terminal acquisition or configuration writes.
 Existing ordinary configuration validation and migration behavior are retained.
 See [theme tokens](../design/theme-tokens.md) for grammar and contrast scope.
 
+The presentation layer paints surfaces across a three-level elevation ladder:
+`Surface` (base canvas), `SurfacePane` (pane interior) and `SurfaceOverlay`
+(dialogs, prompts, palette and completion popups). Four colour depths are
+supported: `TrueColor` (24-bit direct RGB), `Indexed256` (quantized 256-colour
+cube and grayscale), `Basic16` (standard ANSI 16-colour table) and `None`
+(monochrome / modifier-only). Depth can be selected via `--color-depth` or
+`[ui] color-depth`. At `Basic16` and `None`, background surfaces remain
+unpainted so cells inherit the terminal's own background, with semantic meaning
+carried through borders, text modifiers and words.
+
 The Session / Switch theme palette entry cycles the validated catalog without
 writing files or changing connection/query state. Direct bindings preserve input
 owners; palette cancellation retains covered reading positions. The choice
 survives resize and profile changes for the session. Rendered-buffer evidence
 includes five palettes and colour-off/depth/glyph/density combinations; native
 font, DIM, emulator appearance and hand use remain separate. Automatic background
-detection (`auto`, T032) remains unimplemented and is explicitly refused.
+detection via OSC 11 (`ui.theme = "auto"`, T032) remains open and is refused at
+configuration validation.
 The integrated manual source passed full local verification on 25 October 2026:
 1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
 The local macOS socket case is skipped. Published `d92c416` in draft PR35 passed
@@ -644,6 +657,14 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 Minimum size for the full layout is 80x24. Below that a single-pane layout is
 used; below 40x8 a message states the current size, the minimum, and the
 line-oriented alternative.
+
+Mouse capture defaults to on (`ui.mouse = true`) in the interactive client,
+enabling click-to-focus, row selection, header sorting, double-click actions,
+split-bar dragging and wheel scrolling. Setting `ui.mouse = false` disables capture
+so the terminal owns every pointer gesture. Holding `Shift` while dragging
+preserves the terminal's native text selection even when mouse capture is active.
+Bracketed paste is enabled during full-screen sessions and cleanly restored on exit,
+with pasted payloads capped at 1 MiB.
 
 On macOS, owned-PTY children prove error-return and caught-panic cleanup through
 the actual terminal guard/hook for all mouse/paste/alternate-screen options.

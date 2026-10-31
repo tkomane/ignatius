@@ -3,14 +3,19 @@
 ## First run, local database, target under two minutes
 
 1. The user runs `ignatius` with a connection target.
-2. The interface draws immediately, before the connection completes, showing
-   `Connecting` rather than a blank screen or a spinner with no explanation.
-3. The header fills in: environment classification, read/write posture, target,
-   and the transport state the server reported.
+2. The interface draws immediately from frame 1 as a complete full-screen shell,
+   rendering the bounded boot reveal wordmark, sanitized target, elapsed
+   connecting time, and named connecting steps (`resolving profile`, `acquiring credential`,
+   `TLS handshake`, `server handshake`, `loading catalogue`) rather than a blank screen
+   or an unexplained spinner.
+3. The first connected frame lands in the editor with the first schema expanded
+   in the object tree, while quiet chrome capsules display environment
+   classification, read/write posture, target, transport state, and status.
 4. The editor already contains a safe starter query and a comment naming the run
    key. There is nothing to type to see something happen.
-5. Ctrl+R runs it. The results pane shows columns, values, row count and elapsed time,
-   and the status reads `Completed`.
+5. Ctrl+R runs it. The results pane shows columns, values, row count, the
+   results range line (`rows M-N of Total retained`), and elapsed time, and
+   the status reads `Completed`.
 6. Ctrl+Q. The terminal is exactly as it was.
 
 Nothing in that path asks for an account, offers a tutorial, requires a profile,
@@ -235,6 +240,59 @@ esac
 
 Data on stdout, diagnostics on stderr, and an exit code that says which kind of
 failure it was.
+
+## Pasting SQL into the editor
+
+Bracketed paste allows pasting arbitrary SQL or text into the editor safely:
+
+1. The user pastes text from the system clipboard into the editor while bracketed
+   paste mode is active.
+2. The payload is bounded at 1 MiB (1,048,576 bytes) and line endings are normalized
+   from CRLF or CR to LF.
+3. The pasted text is inserted directly at the caret as a single undoable edit.
+   The buffer does not run automatically, and multiline statements with trailing
+   newlines will never trigger unwanted execution.
+4. Pasting onto non-text surfaces (such as the object tree or results table) is
+   visibly ignored with a transient notice rather than dropped silently.
+5. When a masked password prompt is active, pasted credentials are treated as
+   secret input and accepted without terminal echo or log exposure.
+
+## Using the mouse and resizing panes
+
+The mouse provides full pointer parity across interactive elements alongside
+the complete keyboard workflow:
+
+1. Clicking any pane focuses it; clicking inside the editor positions the caret;
+   clicking results rows or cells selects them.
+2. Clicking a table header cycles local sort across natural, ascending, and descending
+   ordering.
+3. Double-clicking a schema or relation in the object tree toggles expansion or
+   inserts the qualified identifier into the SQL editor; double-clicking a result
+   cell opens the detail inspector.
+4. Dragging split bars adjusts sidebar width (bounded between 20 and 60 columns)
+   or pane rows (minimum 3 rows). Dragging column divider edges in results resizes
+   column widths between 4 and 64 character cells.
+5. Scrolling the mouse wheel navigates long buffers, trees, or tables without
+   forcing focus to move.
+6. Holding Shift while selecting or dragging bypasses mouse reporting and preserves
+   the terminal emulator's native text selection and clipboard copying. Keyboard
+   shortcuts (`Ctrl+K ,`, `Ctrl+K .`, and `Ctrl+K z`) provide 1:1 parity for pane
+   resizing and maximize/restore zoom.
+
+## Switching themes and previewing palette items
+
+The command palette supports theme selection and contextual metadata previews:
+
+1. The user presses `Ctrl+P` (or clicks the palette trigger) to open the modal
+   palette, sized to 80% terminal height.
+2. Typing `theme` lists available themes (including Ignatius Dark, Ignatius Light,
+   Nord, Catppuccin Mocha, Solarized Dark, Solarized Light, and high-contrast
+   variants). Selecting a theme applies it immediately for the current session.
+3. When browsing definitions, saved queries, connection profiles, or catalogue
+   dependencies, the palette displays a right-hand preview pane occupying 60% of
+   palette width.
+4. Previews render retained in-memory metadata, profile configuration summaries,
+   or statement text instantly without initiating network calls or exposing secrets.
 
 ## Journeys that remain open
 

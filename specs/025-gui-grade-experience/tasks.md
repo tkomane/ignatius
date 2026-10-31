@@ -554,7 +554,7 @@ when it is not.
   RSS versus 902.313 ms/146.500 MiB before. Small-sample process observations
   are not a release p95 or memory ceiling. Hosted acceptance remains separate.
 
-- [ ] T046 Amend the narrative design documents in the same change as the
+- [x] T046 Amend the narrative design documents in the same change as the
   final behaviour: `docs/design/theme-tokens.md` (painted surfaces,
   elevation, colour depth, the superseded Feature 007 override note),
   `docs/design/terminal-compatibility.md` (mouse default and rationale,
@@ -569,20 +569,20 @@ when it is not.
   results range line, splits, overlay geometry) and the
   `docs/design/keymap.md` mouse verb table (its per-action key rows will
   already have landed with T022, T031 and T041).
-- [ ] T047 [P] Update `docs/support/compatibility.md`,
+- [x] T047 [P] Update `docs/support/compatibility.md`,
   `docs/product/experience-roadmap.md`, `docs/product/journeys.md`,
   `docs/security/data-handling.md` (paste bound and preview sanitising)
   and `CHANGELOG.md`.
-- [ ] T048 Update the parity assertions in
+- [x] T048 Update the parity assertions in
   `tests/documentation_matches_the_build.rs` for every amended document,
   key and action in the same change as T046.
-- [ ] T049 Run the focused checks from `quickstart.md` and record focused
+- [x] T049 Run the focused checks from `quickstart.md` and record focused
   results and any skipped environment evidence.
-- [ ] T050 Run `cargo --locked xtask verify` with the disposable database,
+- [x] T050 Run `cargo --locked xtask verify` with the disposable database,
   then `cargo xtask db down` and `cargo xtask db status`; record full-suite
   results separately from semantic skips and manual terminal gaps in
   `docs/status.md`.
-- [ ] T051 Mark completed tasks only after evidence is recorded, and run
+- [x] T051 Mark completed tasks only after evidence is recorded, and run
   the normal-hyphen prose scan across all changed documentation.
 
 ## Dependencies and execution order

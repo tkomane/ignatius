@@ -177,6 +177,28 @@ actual or unknown outcome, and does not retry after failure or connection loss.
 Changing focus, filtering, sorting, layout controls, reconnecting or completing
 a cell update does not trigger it.
 
+## Bracketed paste and palette previews
+
+Feature 025 introduces terminal bracketed paste handling (SEC-2501) and command
+palette contextual previews (SEC-2502).
+
+Bracketed paste payloads are bounded at 1 MiB (1,048,576 bytes) before any buffer
+mutation occurs; oversized payloads are rejected without partial insertion. Line
+endings are normalized from CRLF or CR to LF. Pasted text is never executed
+automatically as SQL, never bypasses transaction safeguards, and is never used to
+implicitly confirm destructive prompts. When a masked password prompt is active,
+bracketed paste delivers the payload as secret input into the password collector
+without terminal echo, history persistence, or diagnostic logging. Pasting onto
+non-editable surfaces (such as results tables or object trees) is safely ignored.
+
+Command palette previews render inside a right-hand pane occupying 60% of the
+80% height palette. Previews display only retained in-memory metadata, saved
+query text, catalogue dependencies, or safe connection profile summaries (such as
+name, location, database, role, and provider hints). Palette previews never
+initiate background network I/O, execute external credential providers, query
+PostgreSQL, or display unmasked passwords or token secrets. All preview text passes
+through the terminal display sanitiser to strip escape sequences before rendering.
+
 ## Written to disk
 
 | What | Where | Permissions | Lifetime |

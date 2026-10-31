@@ -39,14 +39,25 @@ are what someone reaches for when the terminal cannot cope.
 
 ## What is drawn
 
-**Header.** The product mark, the environment classification, read/write posture,
-the target, the transport state and the last elapsed time. Production is a filled
-capsule; everything else is plain text. The bracketed word stays in every mode,
-so `[PROD]` is legible with no colour and no icons at all.
+**Header.** The product mark, target, and the header capsule set across four
+discrete badge domains:
 
-**Transport.** Three states, three icons, because they mean three different
-things: encrypted and verified, encrypted without an identity check, and not
-encrypted. Nothing draws the second as if it were the first.
+- **Environment**: `PROD` (danger/red capsule); non-production local environments
+  remain unbadged by default.
+- **Transaction**: `TX ACT` (warning/yellow capsule) when a transaction is open,
+  and `TX FAIL` (danger/red capsule) when a transaction has failed and requires
+  rollback; idle state is unbadged.
+- **Transport**: `TLS verify-full` (info/sky capsule) when encrypted and identity
+  is verified, `TLS unverified` (warning/yellow capsule) when encrypted without
+  host identity verification, and `TLS NONE` (danger/red capsule) when unencrypted.
+- **Posture**: `READ-ONLY` (teal/posture accent capsule) when the session is
+  restricted to read-only queries; normal read-write posture is plain text.
+
+The query elapsed-time badge is gated and displayed only when query execution
+takes at least `200 ms`, preventing visual flicker on fast queries. With colour
+off, all capsules degrade to reversed text with unchanged words and brackets
+(`[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]`, `[TLS verify-full]`), ensuring
+complete readability on monochrome screens.
 
 **Results.** Row numbers in a gutter, alternating row backgrounds, a rule under
 the headers, a column rule between columns, and a scroll indicator when there are
@@ -80,19 +91,31 @@ Two rules keep them honest:
 
 ## Motion
 
-There are exactly two moving things, and both exist to answer "is this still
+There are exactly three moving things, and all exist to answer "is this still
 working":
 
 - A braille spinner beside the word `Running` or `Cancellation requested`.
 - A meter that sweeps while a statement runs.
+- The bounded US10 boot reveal wordmark on connecting frames.
 
 **The meter shows time passing, not progress.** PostgreSQL reports no progress
 for a running statement, so nothing in the interface may imply a percentage. It
 is a heartbeat, and it is drawn as one.
 
+**The boot reveal wordmark** provides immediate feedback while a connection is
+being established. It operates under strict bounds: a `1.4 s` cap (twelve ticks
+at 60 Hz), a left-to-right sweep with easing and a decode leading edge, an any-key
+skip that still delivers the typed key to its handler, immediate truncation on
+any connection outcome (success or failure), runs at most once per process,
+renders a static final frame from tick 0 under reduced motion, falls back to a
+compact monogram under 64 columns, is omitted entirely on too-small layouts
+below 40x8, and is never emitted in plain mode or non-interactive machine output.
+
 Motion stops entirely with `ui.reduced-motion = true`, and the same words and the
 same elapsed time remain. A test renders a running query at two different frame
-counters under reduced motion and asserts the output is byte-identical.
+counters under reduced motion and asserts the output is byte-identical. Under
+reduced motion, the boot reveal displays directly at its static final frame with
+zero animation frames.
 
 ## How motion stays testable
 

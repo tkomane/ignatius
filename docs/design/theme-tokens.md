@@ -91,6 +91,26 @@ bounded ASCII line and never printed as terminal control sequences. Use
 theme** entry cycles the validated palettes without saving the session choice;
 an optional `[keys] switch-theme = "alt+f12"` binding uses the same action.
 
+## Painted surfaces and elevation
+
+The interface organizes visual hierarchy into three painted elevation levels:
+
+- **Surface**: The base elevation used for the outer screen frame, header, and
+  footer.
+- **SurfacePane**: The pane interior elevation, raised one level above the base
+  surface for the object tree, editor, and results grid.
+- **SurfaceOverlay**: The overlay elevation, raised one level above panes for
+  floating overlays, popups, prompts, and modal dialogs.
+
+Overlays employ Clear-then-block painting: every overlay paints a `Clear` widget
+over its bounding rectangle before rendering its block surface and contents. This
+prevents underlying text, borders, or cursor artifacts from covered panes from
+bleeding through into the overlay.
+
+At `Basic16` and `None` colour depths, surface background fills are left
+unpainted. The terminal emulator's native background shows through, and visual
+elevation is conveyed cleanly through borders, glyphs, and explicit wording.
+
 ## Fills
 
 These styles use a token as a background rather than a foreground:
@@ -127,6 +147,24 @@ because every state is also a word.
 
 ## Colour depth
 
-Tokens are RGB and emitted as truecolor sequences, which Warp and Windows
-Terminal both support. On a 16-colour terminal the emulator approximates them,
-which affects appearance only, never meaning. Overriding this is Feature 007.
+The interface supports a 4-tier colour depth model:
+
+- **TrueColor**: 24-bit direct RGB colour emitted through virtual terminal
+  sequences. Used when `COLORTERM` reports `truecolor` or `24bit`, or when
+  explicitly configured.
+- **Indexed256**: The 256-colour palette, selected when `TERM` contains
+  `256color` or configured explicitly. RGB colours pass through a deterministic
+  quantizer using the standard 6x6x6 colour cube (indices 16-231) and the 24-step
+  greyscale ramp (indices 232-255). The quantizer never emits indices 0-15,
+  preserving user-configured ANSI palette colours.
+- **Basic16**: The 16 basic ANSI colours, chosen as the portable fallback or by
+  configuration. Token colours map through a fixed 16-colour lookup table.
+- **None**: No colour sequences emitted; tokens resolve to font styling modifiers
+  (bold, dim, reversed) and text words. Selected when `NO_COLOR`, `TERM=dumb`,
+  `--plain`, or `ui.color = "never"` is active.
+
+Contrast thresholds (4.5:1 for readable text, 3:1 for semantic and graphical
+elements, and 7:1 for the high-contrast theme) are mathematically verified in
+the test suite against WCAG relative luminance at `TrueColor`. At reduced depths
+(`Indexed256` and `Basic16`), quantized approximations maintain readability,
+while `None` conveys all meaning through text labels and styling modifiers.

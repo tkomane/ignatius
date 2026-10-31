@@ -8,17 +8,22 @@ bugs come from. Reference: <https://learn.microsoft.com/en-us/windows/console/co
 
 ## What is turned on, and turned off again
 
-| Mode | Default | Sequence |
-| --- | --- | --- |
-| Alternate screen | On | `ESC[?1049h` / `ESC[?1049l` |
-| Bracketed paste | On | `ESC[?2004h` / `ESC[?2004l` |
-| Cursor visibility | Hidden | `ESC[?25l` / `ESC[?25h` |
-| Mouse capture | **Off** | `ESC[?1000h` / `ESC[?1000l` |
-| Raw mode | On | Crossterm |
+| Mode | Default | Note | Sequence |
+| --- | --- | --- | --- |
+| Alternate screen | On | Active during session | `ESC[?1049h` / `ESC[?1049l` |
+| Bracketed paste | On | Active during session | `ESC[?2004h` / `ESC[?2004l` |
+| Cursor visibility | Hidden | Restored on exit | `ESC[?25l` / `ESC[?25h` |
+| Mouse capture | **On** | By default; disable with ui.mouse = false | `ESC[?1000h` / `ESC[?1000l` |
+| Raw mode | On | Active during session | Crossterm |
 
-Mouse capture is off by default because capturing the mouse takes away the
-terminal's own text selection, which people rely on to copy a value. Turning it
-on is a configuration choice and removes no keyboard capability.
+Mouse capture defaults to on because pointer interactions and mouse verbs are a
+first-class path in the full-screen client. Turning mouse capture on takes away
+the terminal's own default text selection, but holding Shift while clicking or
+dragging restores terminal-native text selection in supported terminals. In-app
+copying of retained text cells remains the explicit, opt-in OSC 52 route
+(`[clipboard] osc52 = true`). Mouse capture can be disabled entirely by setting
+`ui.mouse = false` in `config.toml`, and disabling it removes no interactive
+capability: every action remains reachable by keyboard.
 
 **Mouse capture is the one mode that is not an escape sequence everywhere.** On
 Windows, Crossterm enables and disables it through the console API rather than by
@@ -67,6 +72,34 @@ admitted uncertainty:
 Every one of these can be overridden: `--ascii`, `--plain`, `--color`, and the
 `ui` section of the configuration. `doctor` reports what was detected so a user
 can see why the interface chose what it chose.
+
+### Colour depth detection precedence
+
+Terminal colour depth is determined through a strict five-tier precedence:
+
+1. **None**: Forced when `NO_COLOR` is present, `TERM=dumb`, `--plain` is
+   passed, or `ui.color = "never"` is configured. All colour emission is
+   disabled, resolving tokens to styling modifiers and text.
+2. **Explicit overrides**: The `--color-depth` command-line flag takes precedence
+   over configuration, followed by `ui.color-depth` in `config.toml` (`truecolor`,
+   `256`, or `16`). An explicit setting of `auto` defers to environment
+   detection below.
+3. **TrueColor**: Detected when the `COLORTERM` environment variable equals
+   `truecolor` or `24bit`. Emits direct 24-bit RGB escape sequences.
+4. **Indexed256**: Detected when `TERM` contains `256color`. Uses the deterministic
+   6x6x6 color cube and greyscale ramp, never emitting indices 0-15.
+5. **Basic16**: The universal fallback when none of the above match. Maps tokens
+   through the fixed 16-colour ANSI table.
+
+### OSC 11 background luminance probing
+
+Automatic terminal background luminance detection via OSC 11 (`ESC]11;?ESC\`) is
+architecturally designed (D-2505) but remains an open implementation item
+(`T032`). Because unconfirmed terminal queries can cause escape-sequence
+echoing or hang on unsupported emulators, automatic probing is not active, and
+configuring `ui.theme = "auto"` is explicitly refused during configuration
+validation with a message naming the supported choices (`dark`, `light`,
+`high-contrast`, `custom`).
 
 ## Sizes
 

@@ -29,6 +29,11 @@ const EXPERIENCE_ROADMAP: &str = include_str!("../docs/product/experience-roadma
 const PRODUCT_ROADMAP: &str = include_str!("../docs/product/roadmap.md");
 const QUICKSTART: &str = include_str!("../specs/023-cell-update/quickstart.md");
 const REFRESH_QUICKSTART: &str = include_str!("../specs/024-retained-result-refresh/quickstart.md");
+const GUI_QUICKSTART: &str = include_str!("../specs/025-gui-grade-experience/quickstart.md");
+const THEME_TOKENS: &str = include_str!("../docs/design/theme-tokens.md");
+const TERMINAL_COMPATIBILITY: &str = include_str!("../docs/design/terminal-compatibility.md");
+const ICONS_AND_MOTION: &str = include_str!("../docs/design/icons-and-motion.md");
+const INFORMATION_ARCHITECTURE: &str = include_str!("../docs/design/information-architecture.md");
 
 #[test]
 fn every_chord_the_build_offers_is_in_the_keymap_document() {
@@ -391,6 +396,113 @@ fn retained_result_refresh_documentation_matches_the_build_and_quickstart() {
         assert!(
             REFRESH_QUICKSTART.contains(expected),
             "Feature 024 quickstart is missing {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
+    assert!(
+        !THEME_TOKENS.contains("Overriding this is Feature 007"),
+        "docs/design/theme-tokens.md still carries the superseded Feature 007 note"
+    );
+    assert!(
+        !COMPATIBILITY.contains("Mouse dragging remains open Feature 025 work"),
+        "docs/support/compatibility.md still says mouse dragging is open"
+    );
+
+    for (document, expected) in [
+        (THEME_TOKENS, "## Painted surfaces and elevation"),
+        (THEME_TOKENS, "SurfacePane"),
+        (THEME_TOKENS, "SurfaceOverlay"),
+        (THEME_TOKENS, "Indexed256"),
+        (THEME_TOKENS, "Basic16"),
+        (
+            TERMINAL_COMPATIBILITY,
+            "| Mouse capture | **On** | By default; disable with ui.mouse = false |",
+        ),
+        (TERMINAL_COMPATIBILITY, "COLORTERM"),
+        (TERMINAL_COMPATIBILITY, "OSC 11"),
+        (TERMINAL_COMPATIBILITY, "ui.theme = \"auto\""),
+        (ICONS_AND_MOTION, "There are exactly three moving things"),
+        (ICONS_AND_MOTION, "boot reveal wordmark"),
+        (ICONS_AND_MOTION, "200 ms"),
+        (ICONS_AND_MOTION, "TLS verify-full"),
+        (ICONS_AND_MOTION, "READ-ONLY"),
+        (INTERACTION, "Paste is bounded and explicit"),
+        (INTERACTION, "The pointer enhances without replacing"),
+        (
+            INTERACTION,
+            "ASCII art on launch, except the bounded US10 identity reveal: connecting frames only, 1.4 s cap, any-key skip, reduced-motion static, never in plain mode",
+        ),
+        (
+            INFORMATION_ARCHITECTURE,
+            "## First frame and connecting shell",
+        ),
+        (INFORMATION_ARCHITECTURE, "rows M-N of Total retained"),
+        (INFORMATION_ARCHITECTURE, "0 rows returned"),
+        (INFORMATION_ARCHITECTURE, "## Pane splits and zoom"),
+        (
+            INFORMATION_ARCHITECTURE,
+            "Layout is already single-pane at this terminal size.",
+        ),
+        (
+            INFORMATION_ARCHITECTURE,
+            "Command palette overlays occupy 80%",
+        ),
+        (INFORMATION_ARCHITECTURE, "60% right-hand preview"),
+        (KEYMAP, "## Mouse verbs"),
+        (KEYMAP, "| Any pane interior | left Down |"),
+        (KEYMAP, "| Sidebar row | left double |"),
+        (KEYMAP, "| Results header cell | left Down |"),
+        (
+            KEYMAP,
+            "| Results column edge (the header rule cell) | left Drag |",
+        ),
+        (KEYMAP, "| Vertical split bar | left Drag |"),
+        (KEYMAP, "| Horizontal split bar | left Drag |"),
+        (KEYMAP, "| Overlay item | left double |"),
+        (KEYMAP, "| Pane under pointer | ScrollDown / ScrollUp |"),
+        (
+            KEYMAP,
+            "| Results under pointer | ScrollDown / ScrollUp | Shift |",
+        ),
+        (COMPATIBILITY, "SurfacePane"),
+        (COMPATIBILITY, "SurfaceOverlay"),
+        (COMPATIBILITY, "ui.mouse = true"),
+        (DATA_HANDLING, "## Bracketed paste and palette previews"),
+        (DATA_HANDLING, "1,048,576"),
+        (JOURNEYS, "## Pasting SQL into the editor"),
+        (JOURNEYS, "## Using the mouse and resizing panes"),
+        (JOURNEYS, "## Switching themes and previewing palette items"),
+        (EXPERIENCE_ROADMAP, "025"),
+        (CHANGELOG, "SurfacePane"),
+        (CHANGELOG, "ui.mouse = true"),
+    ] {
+        assert!(
+            document.contains(expected),
+            "GUI-grade experience documentation contract is missing {expected:?}"
+        );
+    }
+
+    for expected in [
+        "cargo fmt --all -- --check",
+        "cargo test --locked --lib ui::widgets",
+        "cargo test --locked --lib ui::theme",
+        "cargo test --locked --lib ui::layout",
+        "cargo test --locked --lib paste",
+        "cargo test --locked --lib app::update::tests::mouse",
+        "cargo test --locked --lib app::update::tests::manual_theme",
+        "cargo test --locked --lib app::grid",
+        "cargo test --locked --lib app::update::tests::connecting_steps",
+        "cargo test --locked --lib config",
+        "cargo test --locked --test documentation_matches_the_build",
+        "cargo --locked xtask verify",
+        "A skipped gate is not a\npass.",
+    ] {
+        assert!(
+            GUI_QUICKSTART.contains(expected),
+            "Feature 025 quickstart is missing {expected:?}"
         );
     }
 }
