@@ -448,11 +448,11 @@ dragging and the remaining acceptance gates precede the full story checkpoint.
 domain map, gating at 200 ms, loud production, silent local default and
 reversed-text degradation.
 
-- [ ] T042 [US8] Add failing tests for the badge domain map, elapsed
+- [x] T042 [US8] Add failing tests for the badge domain map, elapsed
   gating, the left-identity and right-context split, the unchanged
   six-hint footer cap, and colour-off reversed text, in
   `src/ui/widgets/header.rs` and `src/ui/widgets/footer.rs`.
-- [ ] T043 [US8] Extend the capsule helpers in `src/ui/theme.rs` and
+- [x] T043 [US8] Extend the capsule helpers in `src/ui/theme.rs` and
   implement the header and footer arrangement in
   `src/ui/widgets/header.rs` and `src/ui/widgets/footer.rs`.
 
@@ -465,12 +465,12 @@ reversed-text degradation.
 **Independent Test**: Open each purpose; assert geometry, preview sources,
 full-width fallback, narrow omission and zero fetching.
 
-- [ ] T044 [US9] Add failing tests for the 80 percent height, input at the
+- [x] T044 [US9] Add failing tests for the 80 percent height, input at the
   top, the 60 percent preview for definition, saved-query, profile and
   dependency purposes, full width elsewhere, narrow omission and
   no-execution previews, in `src/app/palette.rs` and
   `src/ui/widgets/palette.rs`.
-- [ ] T045 [US9] Implement preview sources in `src/app/palette.rs` and the
+- [x] T045 [US9] Implement preview sources in `src/app/palette.rs` and the
   geometry in `src/ui/widgets/palette.rs`, sanitising previewed text
   through the existing display rules.
 
@@ -489,7 +489,7 @@ never carrying banner bytes.
 
 ### Tests for User Story 10
 
-- [ ] T052 [US10] Add failing tests first: reducer tests in
+- [x] T052 [US10] Add failing tests first: reducer tests in
   `src/app/update/tests.rs` for sweep progression (the easing values at
   ticks 0, 6 and 12), skip-on-key with the key still delivered to its
   normal handler, truncate on any connection outcome, once per process,
@@ -500,13 +500,13 @@ never carrying banner bytes.
 
 ### Implementation for User Story 10
 
-- [ ] T053 [US10] Implement the banner art and the pure sweep functions in
+- [x] T053 [US10] Implement the banner art and the pure sweep functions in
   `src/ui/widgets/banner.rs` (new file, not single-writer) and render it
   from the connecting shell; the integrator routes the small reducer arm
   and the once-per-process fact through `src/app/model.rs` and
   `src/app/update.rs`; add the gradient anchors in `src/ui/theme.rs`
   under the existing contrast tests. No new dependency.
-- [ ] T054 [US10] Add the ASCII-tier art to `README.md` under the CI
+- [x] T054 [US10] Add the ASCII-tier art to `README.md` under the CI
   badge, replacing the current tagline paragraph, which moves below the
   block; monochrome only, no screenshots or GIFs. `README.md` has no
   parity test and is not `docs/design/`.

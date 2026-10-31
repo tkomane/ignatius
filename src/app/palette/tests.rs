@@ -206,3 +206,231 @@ fn command_palette_names_search_and_prerequisite_guidance() {
     );
     assert!(palette.purpose.empty_message().contains("applicable"));
 }
+
+#[test]
+fn supports_preview_is_true_only_for_the_four_preview_bearing_purposes() {
+    let run_entry = PaletteEntry {
+        label: "Command".into(),
+        detail: "Run action".into(),
+        group: "Session",
+        command: PaletteCommand::Run(Action::SwitchTheme),
+    };
+    let insert_entry = PaletteEntry {
+        label: "public.users".into(),
+        detail: "table public.users".into(),
+        group: "Objects",
+        command: PaletteCommand::Insert("public.users".into()),
+    };
+
+    // GoTo with object/Insert entries supports preview
+    let goto_objects = Palette::new(vec![insert_entry.clone()]);
+    assert!(goto_objects.supports_preview());
+
+    // GoTo with only Run command entries does NOT support preview (renders full width)
+    let goto_commands = Palette::new(vec![run_entry.clone()]);
+    assert!(!goto_commands.supports_preview());
+
+    // Empty GoTo does not support preview
+    let goto_empty = Palette::new(Vec::new());
+    assert!(!goto_empty.supports_preview());
+
+    // Saved queries, connections, dependencies support preview
+    let saved = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "all_users".into(),
+        detail: "SELECT * FROM users;".into(),
+        group: "Saved",
+        command: PaletteCommand::Open("all_users".into()),
+    }]);
+    assert!(saved.supports_preview());
+
+    let connections = Palette::over_connections(vec![PaletteEntry {
+        label: "production-replica".into(),
+        detail: "postgres.internal:5432 / app_db".into(),
+        group: "Production",
+        command: PaletteCommand::ConnectProfile(Some("production-replica".into())),
+    }]);
+    assert!(connections.supports_preview());
+
+    let dependencies = Palette::over_dependencies(vec![PaletteEntry {
+        label: "public.orders".into(),
+        detail: "view public.order_summary".into(),
+        group: "Used by",
+        command: PaletteCommand::Insert("public.orders".into()),
+    }]);
+    assert!(dependencies.supports_preview());
+
+    // Full width elsewhere
+    let commands = Palette::over_commands(vec![run_entry.clone()], "Context note");
+    assert!(!commands.supports_preview());
+
+    let history = Palette::over_history(vec![PaletteEntry {
+        label: "SELECT 1".into(),
+        detail: "just now".into(),
+        group: "History",
+        command: PaletteCommand::Insert("SELECT 1".into()),
+    }]);
+    assert!(!history.supports_preview());
+
+    let controls = Palette::over_result_controls(vec![PaletteEntry {
+        label: "Sort".into(),
+        detail: "order".into(),
+        group: "Grid",
+        command: PaletteCommand::Grid(crate::app::grid::GridCommand::SortSelected),
+    }]);
+    assert!(!controls.supports_preview());
+
+    let columns = Palette::over_result_columns(vec![PaletteEntry {
+        label: "col1".into(),
+        detail: "shown".into(),
+        group: "Columns",
+        command: PaletteCommand::ResultColumn(0),
+    }]);
+    assert!(!columns.supports_preview());
+
+    let export = Palette::over_export_formats(
+        vec![PaletteEntry {
+            label: "CSV".into(),
+            detail: "comma separated".into(),
+            group: "Formats",
+            command: PaletteCommand::ChooseExportFormat(ExportFormat::Csv),
+        }],
+        "Export format guidance",
+    );
+    assert!(!export.supports_preview());
+}
+
+#[test]
+fn selected_preview_derives_pure_retained_text_for_all_four_preview_bearing_purposes() {
+    // 1. Definition (GoTo with object entry)
+    let def_palette = Palette::new(vec![PaletteEntry {
+        label: "users".into(),
+        detail: "table public.users".into(),
+        group: "Objects",
+        command: PaletteCommand::Insert("public.users".into()),
+    }]);
+    let preview = def_palette.selected_preview().expect("definition preview");
+    let joined = preview.join("\n");
+    assert!(joined.contains("Kind: Objects"));
+    assert!(joined.contains("Identifier: public.users"));
+    assert!(joined.contains("Summary: table public.users"));
+
+    // 2. Saved queries
+    let saved_palette = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "monthly_revenue".into(),
+        detail: "SELECT sum(amount) FROM payments;".into(),
+        group: "Saved",
+        command: PaletteCommand::Open("monthly_revenue".into()),
+    }]);
+    let preview = saved_palette
+        .selected_preview()
+        .expect("saved query preview");
+    let joined = preview.join("\n");
+    assert!(joined.contains("Query: monthly_revenue"));
+    assert!(joined.contains("Origin: Saved"));
+    assert!(joined.contains("SQL: SELECT sum(amount) FROM payments;"));
+
+    // 3. Profile (credential safety: safe summary only, never expose secret or credential)
+    let conn_palette = Palette::over_connections(vec![PaletteEntry {
+        label: "prod_db".into(),
+        detail: "db.production.internal:5432 / prod (tls verify-full)".into(),
+        group: "Production",
+        command: PaletteCommand::ConnectProfile(Some("prod_db".into())),
+    }]);
+    let preview = conn_palette
+        .selected_preview()
+        .expect("connection profile preview");
+    let joined = preview.join("\n");
+    assert!(joined.contains("Profile: prod_db"));
+    assert!(joined.contains("Posture: Production"));
+    assert!(joined.contains("Target: db.production.internal:5432 / prod (tls verify-full)"));
+    assert!(!joined.contains("password"));
+
+    // 4. Dependency
+    let dep_palette = Palette::over_dependencies(vec![PaletteEntry {
+        label: "public.orders_view".into(),
+        detail: "view on table public.orders".into(),
+        group: "Depends on",
+        command: PaletteCommand::Insert("public.orders_view".into()),
+    }]);
+    let preview = dep_palette.selected_preview().expect("dependency preview");
+    let joined = preview.join("\n");
+    assert!(joined.contains("Direction: Depends on"));
+    assert!(joined.contains("Object: public.orders_view"));
+    assert!(joined.contains("Details: view on table public.orders"));
+}
+
+#[test]
+fn selected_preview_returns_fallback_message_when_matches_is_empty() {
+    let mut palette = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "query_1".into(),
+        detail: "SELECT 1".into(),
+        group: "Saved",
+        command: PaletteCommand::Open("query_1".into()),
+    }]);
+    palette.query = "nonexistent_needle".into();
+    assert!(palette.matches().is_empty());
+    let preview = palette
+        .selected_preview()
+        .expect("fallback preview when matches empty");
+    assert_eq!(preview, vec!["No matching entry selected."]);
+}
+
+#[test]
+fn selected_preview_returns_none_for_non_preview_purposes() {
+    let palette = Palette::over_commands(
+        vec![PaletteEntry {
+            label: "Switch theme".into(),
+            detail: "Cycle theme".into(),
+            group: "Session",
+            command: PaletteCommand::Run(Action::SwitchTheme),
+        }],
+        "Note",
+    );
+    assert!(palette.selected_preview().is_none());
+}
+
+#[test]
+fn moving_selection_updates_selected_preview_synchronously_with_zero_side_effects() {
+    let mut palette = Palette::over_saved_queries(vec![
+        PaletteEntry {
+            label: "query_alpha".into(),
+            detail: "SELECT 'alpha';".into(),
+            group: "Saved",
+            command: PaletteCommand::Open("query_alpha".into()),
+        },
+        PaletteEntry {
+            label: "query_beta".into(),
+            detail: "SELECT 'beta';".into(),
+            group: "Saved",
+            command: PaletteCommand::Open("query_beta".into()),
+        },
+    ]);
+    assert_eq!(palette.selected, 0);
+    assert!(
+        palette
+            .selected_preview()
+            .unwrap()
+            .join("\n")
+            .contains("query_alpha")
+    );
+
+    palette.move_selection(1);
+    assert_eq!(palette.selected, 1);
+    assert!(
+        palette
+            .selected_preview()
+            .unwrap()
+            .join("\n")
+            .contains("query_beta")
+    );
+
+    palette.move_selection(-1);
+    assert_eq!(palette.selected, 0);
+    assert!(
+        palette
+            .selected_preview()
+            .unwrap()
+            .join("\n")
+            .contains("query_alpha")
+    );
+}

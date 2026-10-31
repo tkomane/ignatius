@@ -255,3 +255,208 @@ fn the_elapsed_clock_survives_reduced_depth_and_ascii() {
         assert!(text.contains("1.5s"), "{tier:?}/{depth:?}: {text}");
     }
 }
+
+fn connected_model(env: crate::connection::Environment) -> Model {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+        target: "app@localhost:5432/orders".into(),
+        database: "orders".into(),
+        user: "app".into(),
+        server_version: "16.1".into(),
+        backend_pid: "12345".into(),
+        tls: crate::postgres::TlsState::Active {
+            mode: crate::connection::SslMode::VerifyFull,
+            version: "TLSv1.3".into(),
+            cipher: "TLS_AES_256_GCM_SHA384".into(),
+        },
+        read_only: false,
+        search_path: "public".into(),
+        environment: env,
+    }));
+    model
+}
+
+#[test]
+fn us8_header_suppresses_tx_idle_and_tls_steady_state() {
+    let mut model = connected_model(crate::connection::Environment::Local);
+    model.transaction = crate::query::result::TransactionState::Autocommit;
+    let text = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        !text.contains("tx: idle"),
+        "tx: idle must be suppressed: {text}"
+    );
+    assert!(
+        !text.contains("Autocommit"),
+        "routine autocommit must be suppressed: {text}"
+    );
+    assert!(
+        !text.contains("TLSv1.3"),
+        "steady-state TLS must be suppressed: {text}"
+    );
+    assert!(
+        !text.contains("verify-full"),
+        "steady-state TLS must be suppressed: {text}"
+    );
+    assert!(
+        !text.contains("tls:"),
+        "tls: must not appear in steady state header: {text}"
+    );
+}
+
+#[test]
+fn us8_header_displays_non_idle_transactions_as_capsules() {
+    let mut model = connected_model(crate::connection::Environment::Local);
+    model.transaction = crate::query::result::TransactionState::Open;
+    let text = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        text.contains("[TX ACTIVE]"),
+        "in-transaction must show [TX ACTIVE]: {text}"
+    );
+
+    model.transaction = crate::query::result::TransactionState::Failed;
+    let text_failed = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        text_failed.contains("[TX FAILED]"),
+        "failed transaction must show [TX FAILED]: {text_failed}"
+    );
+}
+
+#[test]
+fn us8_header_suppresses_completed_elapsed_under_200ms_and_shows_at_or_above() {
+    let mut model = connected_model(crate::connection::Environment::Local);
+    // Under 200 ms: suppressed
+    model.last_elapsed = Some(Duration::from_millis(150));
+    let text = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        !text.contains("150"),
+        "elapsed < 200ms must be omitted: {text}"
+    );
+
+    // At 200 ms: displayed
+    model.last_elapsed = Some(Duration::from_millis(200));
+    let text_200 = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        text_200.contains("200ms"),
+        "elapsed >= 200ms must be rendered: {text_200}"
+    );
+
+    // Running duration: always displayed regardless of duration
+    model.running_for = Some(Duration::from_millis(50));
+    let text_running = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        text_running.contains("0.0s") || text_running.contains("0.1s"),
+        "live running_for must be rendered: {text_running}"
+    );
+}
+
+#[test]
+fn us8_header_capsule_styles_truecolor_indexed256_and_fallback() {
+    let mut model = connected_model(crate::connection::Environment::Production);
+    model.transaction = crate::query::result::TransactionState::Open;
+    if let ConnectionState::Connected(ref mut info) = model.connection {
+        info.read_only = true;
+    }
+
+    // TrueColor with color on: filled capsules
+    let area = Rect::new(0, 0, 120, 1);
+    let mut buf = Buffer::empty(area);
+    render_header(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        area,
+        &mut buf,
+    );
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("[PROD]"), "{text}");
+    assert!(text.contains("[READ ONLY]"), "{text}");
+    assert!(text.contains("[TX ACTIVE]"), "{text}");
+
+    // Basic16: fallback without painted background fill
+    let mut buf_16 = Buffer::empty(area);
+    render_header(
+        &model,
+        &presentation(GlyphTier::Ascii, ColorDepth::Basic16),
+        area,
+        &mut buf_16,
+    );
+    let text_16 = buffer_to_string(&buf_16);
+    assert!(text_16.contains("[PROD]"), "{text_16}");
+    assert!(text_16.contains("[READ ONLY]"), "{text_16}");
+    assert!(text_16.contains("[TX ACTIVE]"), "{text_16}");
+
+    // Routine LOCAL keeps quiet muted style without filled background
+    let model_local = connected_model(crate::connection::Environment::Local);
+    let mut buf_local = Buffer::empty(area);
+    render_header(
+        &model_local,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        area,
+        &mut buf_local,
+    );
+    let text_local = buffer_to_string(&buf_local);
+    assert!(text_local.contains("[LOCAL]"), "{text_local}");
+}
+
+#[test]
+fn us8_header_left_identity_and_right_context_alignment() {
+    let mut model = connected_model(crate::connection::Environment::Local);
+    model.transaction = crate::query::result::TransactionState::Open;
+
+    // Wide: right group is aligned towards right edge
+    let area_wide = Rect::new(0, 0, 100, 1);
+    let mut buf_wide = Buffer::empty(area_wide);
+    render_header(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        area_wide,
+        &mut buf_wide,
+    );
+    let text_wide = buffer_to_string(&buf_wide);
+    assert!(text_wide.contains("Ignatius"), "{text_wide}");
+    assert!(text_wide.contains("[TX ACTIVE]"), "{text_wide}");
+
+    let tx_idx = text_wide.find("[TX ACTIVE]").unwrap();
+    assert!(
+        tx_idx > 60,
+        "right group should be right-aligned in wide terminal, found at {tx_idx}: {text_wide}"
+    );
+
+    // Narrow: left identity takes priority
+    let area_narrow = Rect::new(0, 0, 40, 1);
+    let mut buf_narrow = Buffer::empty(area_narrow);
+    render_header(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        area_narrow,
+        &mut buf_narrow,
+    );
+    let text_narrow = buffer_to_string(&buf_narrow);
+    assert!(
+        text_narrow.contains("Ignatius"),
+        "product name must be preserved at 40 cols: {text_narrow}"
+    );
+}

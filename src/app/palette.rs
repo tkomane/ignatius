@@ -11,6 +11,7 @@
 use crate::app::grid::GridCommand;
 use crate::app::message::Action;
 use crate::app::model::ExportFormat;
+use crate::query::value::sanitize_for_display;
 
 /// What choosing an entry does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -327,6 +328,101 @@ impl Palette {
         let current = isize::try_from(self.selected).unwrap_or(0);
         let next = (current + delta).clamp(0, isize::try_from(count - 1).unwrap_or(0));
         self.selected = usize::try_from(next).unwrap_or(0);
+    }
+
+    /// Whether this palette's purpose and entries support a right-hand preview pane.
+    #[must_use]
+    pub fn supports_preview(&self) -> bool {
+        match self.purpose {
+            Purpose::SavedQueries | Purpose::Connections | Purpose::Dependencies => true,
+            Purpose::GoTo => self
+                .entries
+                .iter()
+                .any(|entry| !matches!(entry.command, PaletteCommand::Run(_))),
+            _ => false,
+        }
+    }
+
+    /// Derives safe multi-line preview text for the selected entry, or a fallback
+    /// message when matches are empty.
+    #[must_use]
+    pub fn selected_preview(&self) -> Option<Vec<String>> {
+        if !self.supports_preview() {
+            return None;
+        }
+        let matches = self.matches();
+        if matches.is_empty() {
+            return Some(vec!["No matching entry selected.".to_owned()]);
+        }
+        let entry = self.selected_entry()?;
+        Some(entry.preview_lines(self.purpose))
+    }
+}
+
+impl PaletteEntry {
+    /// Formats safe, multi-line preview text for this entry under the given palette purpose.
+    #[must_use]
+    pub fn preview_lines(&self, purpose: Purpose) -> Vec<String> {
+        match purpose {
+            Purpose::GoTo => {
+                let mut lines = Vec::new();
+                lines.push(format!("Kind: {}", sanitize_for_display(self.group)));
+                let identifier = match &self.command {
+                    PaletteCommand::Insert(text) if !text.is_empty() => text.as_str(),
+                    _ => self.label.as_str(),
+                };
+                lines.push(format!("Identifier: {}", sanitize_for_display(identifier)));
+                if !self.label.is_empty() && self.label != identifier {
+                    lines.push(format!("Name: {}", sanitize_for_display(&self.label)));
+                }
+                if !self.detail.is_empty() {
+                    if self.detail.contains('\n') {
+                        lines.push("Summary:".to_owned());
+                        for line in self.detail.lines() {
+                            lines.push(format!("  {}", sanitize_for_display(line)));
+                        }
+                    } else {
+                        lines.push(format!("Summary: {}", sanitize_for_display(&self.detail)));
+                    }
+                }
+                lines
+            }
+            Purpose::SavedQueries => {
+                let mut lines = Vec::new();
+                lines.push(format!("Query: {}", sanitize_for_display(&self.label)));
+                lines.push(format!("Origin: {}", sanitize_for_display(self.group)));
+                if !self.detail.is_empty() {
+                    if self.detail.contains('\n') {
+                        lines.push("SQL:".to_owned());
+                        for line in self.detail.lines() {
+                            lines.push(format!("  {}", sanitize_for_display(line)));
+                        }
+                    } else {
+                        lines.push(format!("SQL: {}", sanitize_for_display(&self.detail)));
+                    }
+                }
+                lines
+            }
+            Purpose::Connections => {
+                let mut lines = Vec::new();
+                lines.push(format!("Profile: {}", sanitize_for_display(&self.label)));
+                lines.push(format!("Posture: {}", sanitize_for_display(self.group)));
+                if !self.detail.is_empty() {
+                    lines.push(format!("Target: {}", sanitize_for_display(&self.detail)));
+                }
+                lines
+            }
+            Purpose::Dependencies => {
+                let mut lines = Vec::new();
+                lines.push(format!("Direction: {}", sanitize_for_display(self.group)));
+                lines.push(format!("Object: {}", sanitize_for_display(&self.label)));
+                if !self.detail.is_empty() {
+                    lines.push(format!("Details: {}", sanitize_for_display(&self.detail)));
+                }
+                lines
+            }
+            _ => Vec::new(),
+        }
     }
 }
 

@@ -228,6 +228,24 @@ fresh processes and measured renderer time/RSS. Report observed values and
 small-sample limits; no fabricated absolute ceiling, 100-action p95 result or
 native terminal claim follows. Root owns independent review/full verification.
 
+## Quiet chrome (US8 / T042-T043) - 2026-10-26
+
+- **Header layout (one row)**:
+  - Left side carries identity and posture: product name (`ignatius` or `ignatius:` when a connection target follows), sanitised connection target (`user@host:port/db`), and the safety posture badge capsule (`[PRODUCTION]`, `[STAGING]`, `[LOCAL]`, `[UNCLASSIFIED]`, `[READ ONLY]`) beside any active provider badge.
+  - Right side carries active session context: active transaction capsule (`[TX ACTIVE]` or `[TX FAILED]`), running spinner + live elapsed time while a query is executing, or the completed statement elapsed time when `last_elapsed >= 200 ms`, plus `[MUTED]` when motion is off.
+  - When the header row cannot fit both groups cleanly, the left-hand identity and safety posture take priority and the right-hand context group truncates or yields space first so `ignatius`, the target, and the safety words remain readable at 80x24 and 40x8.
+- **Routine suppression**:
+  - `tx: idle` is routine and MUST NOT appear in the header.
+  - `tls: verified`, `tls: verification skipped`, and `tls: plaintext` are routine in the steady-state header and MUST NOT appear there (non-verified TLS remains visible in the connection picker and write-confirmation overlays, and `Session Summary` continues to report full transport facts on demand).
+  - Completed statement elapsed time (`last_elapsed`) is rendered in the header ONLY when `last_elapsed >= 200 ms` (`Duration::from_millis(200)`). Live `running_for` elapsed time while a query is executing remains visible at all durations so the connecting and running wait indicators stay truthful.
+- **Filled badge capsules**:
+  - At `ColorDepth::TrueColor` and `ColorDepth::Indexed256` with colour enabled, non-routine posture and transaction capsules (`[PRODUCTION]`, `[STAGING]`, `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) render as filled capsules (semantic token colour as background, `Surface` as foreground text, `BOLD`) whenever the token's foreground/background pair clears the active theme's contrast threshold (`4.5:1` on `Dark`/`Light`, `7.0:1` on `HighContrast`). If a custom theme's token against `Surface` does not clear that threshold, fall back to the existing foreground-on-`Surface` `BOLD` badge style so custom-theme contrast admission is never violated.
+  - Routine environment badges (`[LOCAL]`, `[UNCLASSIFIED]`) remain quiet muted badges on `Surface` so they do not compete with `[PRODUCTION]`, `[READ ONLY]`, or `[TX FAILED]` while still preserving their words in layout and safety tests.
+  - At `ColorDepth::Basic16` and `ColorDepth::None` (or with colour off), badges use the existing foreground/modifier rules with no painted background fill, and keep their brackets (`[PRODUCTION]`, `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) so words and brackets carry the meaning without colour.
+- **Footer layout (one row)**:
+  - Left side carries the current status / notice / diagnostic message; when idle, shows `Ready` in muted style.
+  - Right side carries context-filtered key hints from the single keymap authority, capped at **6** hints in `Density::Comfortable` and **4** hints in `Density::Compact` (`Presentation::footer_hint_cap()`), dropping lower-priority hints from the right when narrow so no key/label pair is ever half-rendered.
+
 ## Doctor reporting
 
 `ignatius doctor` reports, in this order, beside the existing detections:

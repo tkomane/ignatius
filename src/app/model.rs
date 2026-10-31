@@ -1289,6 +1289,10 @@ pub struct Model {
     /// Kept separately from [`ConnectionState::Connecting`] so a failure can
     /// still name the stage it happened in after the state becomes `Failed`.
     pub connecting_step: Option<ConnectingStep>,
+    /// Boot reveal state for the identity mark over the initial connecting wait.
+    pub banner: crate::ui::widgets::banner::BannerState,
+    /// Whether the boot reveal has already started once in this process.
+    pub banner_played: bool,
     /// Whether the next catalogue load should open the tree's first level.
     ///
     /// Set on a successful connection, consumed once by the first load, so a

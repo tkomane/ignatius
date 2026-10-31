@@ -10,7 +10,9 @@
 
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
-use std::io::{IsTerminal, Write};
+#[cfg(not(test))]
+use std::io::IsTerminal;
+use std::io::Write;
 
 /// Whether there is a terminal to ask on.
 ///
@@ -20,7 +22,14 @@ use std::io::{IsTerminal, Write};
 /// that fails.
 #[must_use]
 pub fn can_ask() -> bool {
-    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+    #[cfg(test)]
+    {
+        false
+    }
+    #[cfg(not(test))]
+    {
+        std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+    }
 }
 
 /// Restores the terminal's own line handling whatever happens next.

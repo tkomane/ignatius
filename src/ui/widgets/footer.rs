@@ -10,6 +10,16 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
+trait FooterHintCap {
+    fn footer_hint_cap(&self) -> usize;
+}
+
+impl FooterHintCap for Presentation {
+    fn footer_hint_cap(&self) -> usize {
+        self.spacing().footer_hint_cap
+    }
+}
+
 /// Returns false only when layout feedback needs the body's border rail.
 pub(crate) fn render_footer(
     model: &Model,
@@ -201,7 +211,10 @@ pub(crate) fn render_footer(
         }
     }
 
-    for action in crate::app::discovery::hint_actions_for(model, presentation) {
+    for action in crate::app::discovery::hint_actions_for(model, presentation)
+        .into_iter()
+        .take(presentation.footer_hint_cap())
+    {
         let Some((key, label)) = keymap.contextual_hint(&action) else {
             continue;
         };

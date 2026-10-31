@@ -7742,3 +7742,97 @@ fn unavailable_description_intents_refuse_before_effects_with_fixed_guidance() {
         assert!(model.error.is_none());
     }
 }
+
+#[test]
+fn banner_reveal_advances_across_twelve_ticks_skips_on_input_or_outcome_and_plays_at_most_once() {
+    use crate::ui::widgets::banner::{BANNER_TOTAL_TICKS, BannerState};
+
+    let mut model = Model::new(100);
+    assert_eq!(model.banner, BannerState::Final);
+    assert!(!model.banner_played);
+
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::ResolvingProfile,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    assert!(model.banner_played);
+    assert_eq!(model.banner, BannerState::Revealing { tick: 0 });
+
+    for expected_tick in 1..BANNER_TOTAL_TICKS {
+        update(
+            &mut model,
+            Message::Tick {
+                running_for: Some(Duration::from_millis(u64::from(expected_tick) * 90)),
+            },
+        );
+        assert_eq!(
+            model.banner,
+            BannerState::Revealing {
+                tick: expected_tick
+            }
+        );
+    }
+
+    update(
+        &mut model,
+        Message::Tick {
+            running_for: Some(Duration::from_millis(1080)),
+        },
+    );
+    assert_eq!(model.banner, BannerState::Final);
+
+    // Subsequent connecting steps in the same process do not replay the animation.
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::ServerHandshake,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    assert_eq!(model.banner, BannerState::Final);
+
+    // Any key action skips the reveal to Final and still reaches its normal handler.
+    let mut skip_by_key = Model::new(100);
+    update(
+        &mut skip_by_key,
+        Message::ConnectingStep {
+            step: ConnectingStep::ResolvingProfile,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    assert_eq!(skip_by_key.banner, BannerState::Revealing { tick: 0 });
+    update(&mut skip_by_key, Message::Action(Action::ToggleHelp));
+    assert_eq!(skip_by_key.banner, BannerState::Final);
+    assert!(
+        skip_by_key.help_open,
+        "the key event still reaches its normal handler"
+    );
+
+    // Any connection outcome (Connected or ConnectionFailed) skips immediately to Final.
+    let mut skip_by_connect = Model::new(100);
+    update(
+        &mut skip_by_connect,
+        Message::ConnectingStep {
+            step: ConnectingStep::ServerHandshake,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    assert_eq!(skip_by_connect.banner, BannerState::Revealing { tick: 0 });
+    update(&mut skip_by_connect, Message::Connected(session()));
+    assert_eq!(skip_by_connect.banner, BannerState::Final);
+
+    // Reduced motion starts directly at Final with zero animation frames.
+    let mut reduced = Model::new(100);
+    reduced.reduced_motion = true;
+    update(
+        &mut reduced,
+        Message::ConnectingStep {
+            step: ConnectingStep::ResolvingProfile,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    assert_eq!(reduced.banner, BannerState::Final);
+}

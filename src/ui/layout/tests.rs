@@ -838,9 +838,11 @@ fn the_full_layout_shows_connection_environment_tls_and_hints() {
         text.contains("[LOCAL]"),
         "environment must be a visible word"
     );
-    assert!(text.contains("[read-write]"), "posture must be visible");
     assert!(text.contains("app@localhost:5432/orders"));
-    assert!(text.contains("TLS off"), "protection state must be stated");
+    assert!(
+        !text.contains("TLS off"),
+        "steady-state routine TLS is suppressed in the US8 quiet header"
+    );
     assert!(text.contains("Editor"));
     assert!(text.contains("Results"));
     assert!(text.contains("Ready"));
@@ -2625,15 +2627,24 @@ fn the_connection_picker_names_the_default_profile_and_secret_boundary() {
     for expected in [
         "Connection picker",
         "Use default connection settings",
+        "ordinary resolution",
         "orders-prod",
         "Profiles",
-        "read-only",
         "passwords",
         "provider tokens",
         "Enter to connect",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
+
+    if let Some(palette) = model.palette.as_mut() {
+        palette.move_selection(1);
+    }
+    let second_selected = render_to_string(&model, &Keymap::new(), &rich(), 140, 34);
+    assert!(
+        second_selected.contains("read-only"),
+        "selected profile preview must include its detail:\n{second_selected}"
+    );
 
     let plain = render_to_string(
         &model,

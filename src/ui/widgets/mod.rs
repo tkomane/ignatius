@@ -1,3 +1,4 @@
+pub mod banner;
 pub mod editor;
 pub mod footer;
 pub mod header;
@@ -6,6 +7,7 @@ pub mod overlays;
 pub mod palette;
 pub mod results;
 
+pub(crate) use banner::render_banner;
 pub(crate) use editor::{render_completion, render_editor};
 pub(crate) use footer::render_footer;
 pub(crate) use header::{render_compact_header, render_header};
@@ -408,35 +410,8 @@ fn palette_item_at(
     column: u16,
     row: u16,
 ) -> Option<Region> {
-    let palette_area = palette::palette_box(palette, &model.presentation, area);
-    let height = palette_area.height;
-    let inner = inner_rect(palette_area);
-    if !in_rect(inner, column, row) {
-        return None;
-    }
-    let matches = palette.matches();
-    let note_lines = palette
-        .context_note
-        .as_deref()
-        .map_or(0, |note| note.split(". ").count());
-    let visible = (height as usize).saturating_sub(3 + note_lines).max(1);
-    let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
-    let first_item = inner
-        .y
-        .saturating_add(1)
-        .saturating_add(u16::try_from(note_lines).unwrap_or(u16::MAX));
-    if row < first_item {
-        return None;
-    }
-    let position = usize::from(row.saturating_sub(first_item));
-    if position >= visible {
-        return None;
-    }
-    let index = offset.saturating_add(position);
-    if index >= matches.len() {
-        return None;
-    }
-    Some(Region::OverlayItem { index })
+    palette::hit_row(palette, &model.presentation, area, column, row)
+        .map(|index| Region::OverlayItem { index })
 }
 
 /// The source column whose cell contains a screen column, if any.

@@ -1,12 +1,22 @@
 use crate::app::model::{ConnectingStep, ConnectionState, Model};
-use crate::query::value::sanitize_for_display;
+use crate::connection::Environment;
+use crate::query::result::TransactionState;
+use crate::query::value::{display_width, sanitize_for_display};
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
+use std::time::Duration;
+
+/// Constructs a filled capsule style for non-routine badges when contrast permits,
+/// or falls back to the theme's capsule style.
+pub(crate) fn capsule_style(presentation: &Presentation, token: Token) -> Style {
+    presentation.theme.capsule(token)
+}
 
 pub(crate) fn render_header(
     model: &Model,
@@ -14,52 +24,24 @@ pub(crate) fn render_header(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let theme = &presentation.theme;
-    let environment = model.environment();
-    let mut spans = vec![Span::styled(
-        format!(
-            " {}{} ",
-            presentation.icon(Icon::Brand),
-            crate::branding::PRODUCT_NAME
-        ),
-        theme.style(Token::Header),
-    )];
-
-    // The classification is a bracketed word in every mode, so it is legible
-    // with no colour and no icons. Production additionally gets a filled
-    // capsule, because it is the one marker that must never be skimmed past.
-    let label = format!(
-        " {}[{}] ",
-        presentation.icon(if environment.is_production() {
-            Icon::Production
-        } else {
-            Icon::Environment
-        }),
-        environment.label()
-    );
-    spans.push(if environment.is_production() {
-        Span::styled(label, theme.capsule(Token::EnvironmentProduction))
-    } else {
-        Span::styled(label, theme.style(Token::EnvironmentNonProduction))
-    });
-
-    if let Some(info) = model.connection.info() {
-        let (icon, token) = if info.read_only {
-            (Icon::ReadOnly, Token::Info)
-        } else {
-            (Icon::ReadWrite, Token::Muted)
-        };
-        spans.push(Span::styled(
-            format!("{}[{}]", presentation.icon(icon), info.posture()),
-            theme.style(token),
-        ));
+    if area.width == 0 || area.height == 0 {
+        return;
     }
 
-    spans.push(Span::styled(
-        presentation.glyphs.separator(),
-        theme.style(Token::Border),
+    let theme = &presentation.theme;
+    let environment = model.environment();
+    let mut left_spans: Vec<Span<'static>> = Vec::new();
+
+    // 1. Product name
+    let brand = presentation.icon(Icon::Brand);
+    let name = crate::branding::PRODUCT_NAME;
+    left_spans.push(Span::styled(
+        format!(" {brand}{name}: "),
+        theme.style(Token::Header),
     ));
-    spans.push(Span::styled(
+
+    // 2. Connection state / target
+    left_spans.push(Span::styled(
         format!(
             "{}{}",
             presentation.icon(Icon::Database),
@@ -68,32 +50,19 @@ pub(crate) fn render_header(
         theme.style(Token::Text),
     ));
 
-    // The connecting clock and the failed stage are extra facts about the
-    // connection segment, so they sit beside it rather than replacing it.
-    spans.extend(connection_state_spans(model, presentation));
-
-    if let Some(info) = model.connection.info() {
-        spans.push(Span::styled(
-            presentation.glyphs.separator(),
-            theme.style(Token::Border),
-        ));
-        let (icon, token) = tls_appearance(&info.tls);
-        spans.push(Span::styled(
-            format!("{}{}", presentation.icon(icon), info.tls.label()),
-            theme.style(token),
+    // Failed connection step if any
+    if let Some(step) = failed_step(model) {
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
+            format!("failed during {}", step.label()),
+            theme.style(Token::Danger),
         ));
     }
 
-    // Which credential route opened this session. Said in words rather than
-    // shown as a colour, because "who am I connected as, and how" is the
-    // question a token makes harder to answer: there was no password to type,
-    // so nothing about the act of connecting recorded the answer.
+    // 3. Active provider badge if any
     if let Some(provider) = &model.credential_provider {
-        spans.push(Span::styled(
-            presentation.glyphs.separator(),
-            theme.style(Token::Border),
-        ));
-        spans.push(Span::styled(
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
             format!(
                 "{}[auth: {}]",
                 presentation.icon(Icon::Info),
@@ -103,15 +72,45 @@ pub(crate) fn render_header(
         ));
     }
 
-    // A session that keeps no record says so. This is the opposite of a mode
-    // that hides: the safe state is the one being announced, and someone who
-    // paused recording an hour ago should not have to remember that they did.
-    if !model.records_history() {
-        spans.push(Span::styled(
-            presentation.glyphs.separator(),
-            theme.style(Token::Border),
+    // 4. Safety posture capsules
+    // Environment capsule
+    let env_token = if environment.is_production() {
+        Token::EnvironmentProduction
+    } else if matches!(environment, Environment::Staging) {
+        Token::Warning
+    } else if matches!(environment, Environment::Local | Environment::Unclassified) {
+        Token::Muted
+    } else {
+        Token::EnvironmentNonProduction
+    };
+
+    let env_style = if environment.is_production() || matches!(environment, Environment::Staging) {
+        capsule_style(presentation, env_token)
+    } else {
+        theme.style(env_token)
+    };
+
+    left_spans.push(Span::raw("  "));
+    left_spans.push(Span::styled(
+        format!("[{}]", environment.label()),
+        env_style,
+    ));
+
+    // Read-only capsule
+    if let Some(info) = model.connection.info()
+        && info.read_only
+    {
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
+            "[READ ONLY]",
+            capsule_style(presentation, Token::Info),
         ));
-        spans.push(Span::styled(
+    }
+
+    // History and metadata link notices
+    if !model.records_history() {
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
             format!("{}[history off]", presentation.icon(Icon::Info)),
             theme.style(Token::Info),
         ));
@@ -119,14 +118,8 @@ pub(crate) fn render_header(
         model.metadata_link,
         crate::app::model::MetadataLink::Unavailable(_)
     ) {
-        // Only said when it is not what was intended. The tree opening its own
-        // connection is the normal case and needs no announcement; falling back
-        // to sharing one explains why the tree can be slow behind a long query.
-        spans.push(Span::styled(
-            presentation.glyphs.separator(),
-            theme.style(Token::Border),
-        ));
-        spans.push(Span::styled(
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
             format!(
                 "{}[objects: {}]",
                 presentation.icon(Icon::Info),
@@ -135,34 +128,88 @@ pub(crate) fn render_header(
             theme.style(Token::Info),
         ));
     } else if model.history_note.is_some() {
-        // A statement the history refused. Saying so where the user already
-        // looks is the difference between a rule and a mystery.
-        spans.push(Span::styled(
-            presentation.glyphs.separator(),
-            theme.style(Token::Border),
-        ));
-        spans.push(Span::styled(
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
             format!("{}[not in history]", presentation.icon(Icon::Info)),
             theme.style(Token::Info),
         ));
     }
 
-    if let Some(elapsed) = model.last_elapsed {
-        spans.push(Span::styled(
-            presentation.glyphs.separator(),
-            theme.style(Token::Border),
-        ));
-        spans.push(Span::styled(
-            format!(
-                "{}{} ms",
-                presentation.icon(Icon::Clock),
-                elapsed.as_millis()
-            ),
-            theme.style(Token::Muted),
-        ));
+    // Right group: active session context
+    let mut right_spans: Vec<Span<'static>> = Vec::new();
+
+    // Non-idle transaction capsule
+    match model.transaction {
+        TransactionState::Open => {
+            right_spans.push(Span::styled(
+                "[TX ACTIVE]",
+                capsule_style(presentation, Token::TransactionActive),
+            ));
+        }
+        TransactionState::Failed => {
+            right_spans.push(Span::styled(
+                "[TX FAILED]",
+                capsule_style(presentation, Token::TransactionFailed),
+            ));
+        }
+        _ => {}
     }
 
-    Paragraph::new(Line::from(spans)).render(area, buf);
+    // Running / completed elapsed indicator
+    if let Some(d) = model.running_for {
+        let text = if !presentation.reduced_motion {
+            format!(
+                "{} {:.1}s",
+                presentation.glyphs.spinner(model.frame),
+                d.as_secs_f64()
+            )
+        } else {
+            format!("{:.1}s", d.as_secs_f64())
+        };
+        if !right_spans.is_empty() {
+            right_spans.push(Span::raw("  "));
+        }
+        right_spans.push(Span::styled(text, theme.style(Token::Info)));
+    } else if let Some(d) = model.last_elapsed
+        && d >= Duration::from_millis(200)
+    {
+        let text = if d >= Duration::from_secs(1) {
+            format!("{:.1}s", d.as_secs_f64())
+        } else {
+            format!("{}ms", d.as_millis())
+        };
+        if !right_spans.is_empty() {
+            right_spans.push(Span::raw("  "));
+        }
+        right_spans.push(Span::styled(text, theme.style(Token::Muted)));
+    }
+
+    // Motion badge
+    if presentation.reduced_motion {
+        if !right_spans.is_empty() {
+            right_spans.push(Span::raw("  "));
+        }
+        right_spans.push(Span::styled("[MUTED]", theme.style(Token::Muted)));
+    }
+
+    let left_width: usize = left_spans.iter().map(|s| display_width(&s.content)).sum();
+    let right_width: usize = right_spans.iter().map(|s| display_width(&s.content)).sum();
+    let total_width = usize::from(area.width);
+
+    if !right_spans.is_empty() && left_width + 2 + right_width <= total_width {
+        let left_area = Rect::new(area.x, area.y, area.width - (right_width as u16), 1);
+        let right_x = area.x + area.width - (right_width as u16);
+        let right_area = Rect::new(right_x, area.y, right_width as u16, 1);
+        Paragraph::new(Line::from(left_spans)).render(left_area, buf);
+        Paragraph::new(Line::from(right_spans)).render(right_area, buf);
+    } else if !right_spans.is_empty() && left_width + 2 < total_width {
+        let mut combined = left_spans;
+        combined.push(Span::raw("  "));
+        combined.extend(right_spans);
+        Paragraph::new(Line::from(combined)).render(area, buf);
+    } else {
+        Paragraph::new(Line::from(left_spans)).render(area, buf);
+    }
 }
 
 /// The connection facts a header adds beside the connection label.
@@ -225,6 +272,7 @@ fn connecting_elapsed(model: &Model) -> Option<std::time::Duration> {
 ///
 /// Encryption with a verified identity, encryption without one, and no
 /// encryption at all are three different facts and are drawn three ways.
+#[allow(dead_code)]
 const fn tls_appearance(state: &crate::postgres::TlsState) -> (Icon, Token) {
     use crate::connection::SslMode;
     use crate::postgres::TlsState;
@@ -273,7 +321,10 @@ pub(crate) fn render_compact_header(
     let label = format!(" [{}] ", environment.label());
     let mut spans = vec![
         if environment.is_production() {
-            Span::styled(label, theme.capsule(Token::EnvironmentProduction))
+            Span::styled(
+                label,
+                capsule_style(presentation, Token::EnvironmentProduction),
+            )
         } else {
             Span::styled(label, theme.style(Token::EnvironmentNonProduction))
         },
