@@ -33,12 +33,16 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             update(model, *message)
         }
-        Message::Action(action) => apply_action(model, action),
+        Message::Action(action) => {
+            model.banner.finish();
+            apply_action(model, action)
+        }
         Message::InputAtSize {
             action,
             columns,
             rows,
         } => {
+            model.banner.finish();
             let changed = model.size != (columns, rows);
             let accepting_review = matches!(action, Action::Activate | Action::RunBuffer)
                 && crate::ui::review::active_kind(model).is_some();
@@ -73,6 +77,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         }
         Message::Connected(info) => {
             let was_connecting = matches!(model.connection, ConnectionState::Connecting { .. });
+            model.banner.finish();
             model.connection = ConnectionState::Connected(info);
             model.error = None;
             model.connecting_step = None;
@@ -88,11 +93,18 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::ConnectingStep { step, target } => {
+            if !model.banner_played {
+                model.banner_played = true;
+                model.banner = crate::ui::widgets::banner::BannerState::new(
+                    model.reduced_motion || model.presentation.reduced_motion,
+                );
+            }
             model.connection = ConnectionState::Connecting { step, target };
             model.connecting_step = Some(step);
             Vec::new()
         }
         Message::ConnectionFailed(diagnostic) => {
+            model.banner.finish();
             model.phase = QueryPhase::Idle;
             model.update_lookup = None;
             model.update_prompt = None;
@@ -628,6 +640,13 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         Message::Tick { running_for } => {
             model.frame = model.frame.wrapping_add(1);
             model.running_for = running_for;
+            if matches!(model.connection, ConnectionState::Connecting { .. }) {
+                if model.reduced_motion || model.presentation.reduced_motion {
+                    model.banner.finish();
+                } else {
+                    model.banner.advance();
+                }
+            }
             Vec::new()
         }
     };

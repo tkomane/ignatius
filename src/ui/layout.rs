@@ -21,7 +21,7 @@ use crate::query::value::display_width;
 use crate::ui::keymap::Keymap;
 use crate::ui::theme::Token;
 use crate::ui::widgets::{
-    render_chords, render_compact_header, render_completion, render_confirmation,
+    render_banner, render_chords, render_compact_header, render_completion, render_confirmation,
     render_connection_details, render_copy_confirmation, render_definition, render_editor,
     render_error, render_footer, render_header, render_help, render_inspector, render_name_prompt,
     render_objects, render_palette, render_parameter_prompt, render_password_prompt,
@@ -397,6 +397,48 @@ fn render_panes(
             render_error(model, error, presentation, results, buf);
         } else {
             render_results(model, keymap, presentation, results, buf);
+        }
+    }
+    if let crate::app::model::ConnectionState::Connecting { step, target } = &model.connection
+        && geometry.body.width > 4
+        && geometry.body.height > 2
+    {
+        let banner_state = if presentation.reduced_motion || model.reduced_motion {
+            crate::ui::widgets::banner::BannerState::Final
+        } else {
+            model.banner
+        };
+        let step_label = if target.is_empty() {
+            format!("Connecting - {}", step.label())
+        } else {
+            format!(
+                "Connecting to {} - {}",
+                crate::query::value::sanitize_for_display(target),
+                step.label()
+            )
+        };
+        if geometry.body.width > 4 && geometry.body.height > 2 {
+            let banner_y = geometry
+                .results
+                .map_or(geometry.body.y.saturating_add(1), |results| {
+                    results.y.saturating_add(1)
+                });
+            let banner_bottom = geometry.body.bottom().saturating_sub(1);
+            if banner_bottom > banner_y {
+                let inner_banner = Rect::new(
+                    geometry.body.x.saturating_add(1),
+                    banner_y,
+                    geometry.body.width.saturating_sub(2),
+                    banner_bottom.saturating_sub(banner_y),
+                );
+                render_banner(
+                    banner_state,
+                    Some(&step_label),
+                    presentation,
+                    inner_banner,
+                    buf,
+                );
+            }
         }
     }
     let notice_fits_footer = render_footer(model, keymap, presentation, geometry.footer, buf);

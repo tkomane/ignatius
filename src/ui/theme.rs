@@ -492,12 +492,24 @@ impl Theme {
     /// A filled capsule: the token as a background, the surface as the text.
     ///
     /// Used for the markers that must be impossible to miss, such as the
-    /// environment classification. Contrast is the same pair as the token's own
-    /// foreground contrast, which the palette tests already enforce.
+    /// environment classification. When the token's contrast against `Surface`
+    /// is below the active theme's text threshold (for example on a custom
+    /// theme whose status token was admitted at 3.0:1), falls back to the
+    /// foreground-on-surface bold badge style.
     #[must_use]
     pub fn capsule(&self, token: Token) -> Style {
+        if !self.color || self.depth == ColorDepth::None {
+            return Style::default().add_modifier(Modifier::REVERSED);
+        }
         if !self.depth.paints_surfaces() {
             return Style::default().add_modifier(Modifier::REVERSED);
+        }
+        let threshold = match self.selection() {
+            ThemeSelection::HighContrast => 7.0,
+            _ => 4.5,
+        };
+        if self.rgb(token).contrast(self.rgb(Token::Surface)) < threshold {
+            return self.style(token).add_modifier(Modifier::BOLD);
         }
         match self.color(token) {
             Some(fill) => Style::default()
@@ -527,6 +539,70 @@ impl Theme {
             style = style.bg(background);
         }
         style
+    }
+
+    /// Gradient endpoints for the identity mark banner.
+    #[must_use]
+    pub const fn banner_anchors(&self) -> (Rgb, Rgb) {
+        match &self.active {
+            ActivePalette::Builtin(ThemeChoice::Dark) => {
+                (Rgb(0xCB, 0xA6, 0xF7), Rgb(0x89, 0xDC, 0xEB))
+            }
+            ActivePalette::Builtin(ThemeChoice::Light) => {
+                (Rgb(0x6B, 0x21, 0xA8), Rgb(0x0A, 0x55, 0x74))
+            }
+            ActivePalette::Builtin(ThemeChoice::HighContrast) => {
+                (Rgb(0xB5, 0xD0, 0xFF), Rgb(0x7D, 0xF0, 0xFF))
+            }
+            ActivePalette::Custom(_) => (self.rgb(Token::SyntaxKeyword), self.rgb(Token::Info)),
+        }
+    }
+
+    /// Interpolates linearly between the banner gradient anchors for a given column.
+    #[must_use]
+    pub fn banner_column_rgb(&self, col: usize, width: usize) -> Rgb {
+        let (a, b) = self.banner_anchors();
+        if width <= 1 {
+            return a;
+        }
+        let span = (width - 1) as i32;
+        let c = (col as i32).min(span);
+        let lerp = |ca: u8, cb: u8| -> u8 {
+            let val = (i32::from(ca) * (span - c) + i32::from(cb) * c + span / 2) / span;
+            val.clamp(0, 255) as u8
+        };
+        Rgb(lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
+    }
+
+    /// Resolves the depth-aware style for a banner column.
+    #[must_use]
+    pub fn banner_column_style(&self, col: usize, width: usize) -> Style {
+        if !self.color || matches!(self.depth, ColorDepth::None) {
+            return Style::default();
+        }
+        match self.depth {
+            ColorDepth::TrueColor => Style::default().fg(self.banner_column_rgb(col, width).into()),
+            ColorDepth::Indexed256 => Style::default().fg(Color::Indexed(quantize_256(
+                self.banner_column_rgb(col, width),
+            ))),
+            ColorDepth::Basic16 => {
+                let index = if col < width / 2 {
+                    basic_16(Token::Focus, self)
+                } else {
+                    basic_16(Token::Info, self)
+                };
+                Style::default().fg(Color::Indexed(index))
+            }
+            ColorDepth::None => Style::default(),
+        }
+    }
+
+    /// Precomputes the per-column style ramp of length `width` used by every row.
+    #[must_use]
+    pub fn banner_ramp(&self, width: usize) -> Vec<Style> {
+        (0..width)
+            .map(|col| self.banner_column_style(col, width))
+            .collect()
     }
 }
 

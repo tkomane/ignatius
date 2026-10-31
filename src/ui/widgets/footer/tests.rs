@@ -384,3 +384,78 @@ fn retained_data_footer_badge_is_complete_or_deferred_and_never_clears_facts() {
     assert!(!draw(&model, 120).contains("Limited sets"));
     assert_eq!(model.retained_data_loss, before);
 }
+
+#[test]
+fn us8_footer_hint_cap_and_ready_status() {
+    use crate::app::model::Focus;
+    use crate::config::Density;
+
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    let keymap = Keymap::new();
+
+    // When idle, footer must render "Ready" on the left
+    let p_comf = presentation(ThemeChoice::Dark, true, GlyphTier::Unicode)
+        .with_density(Density::Comfortable);
+    let area = Rect::new(0, 0, 160, 1);
+    let mut buf = Buffer::empty(area);
+    render_footer(&model, &keymap, &p_comf, area, &mut buf);
+    let text = crate::ui::layout::buffer_to_string(&buf);
+    assert!(
+        text.trim_start().starts_with("Ready") || text.contains("Ready"),
+        "idle status must show Ready: {text}"
+    );
+
+    // Comfortable density caps hints at 6
+    let comf_actions = crate::app::discovery::hint_actions_for(&model, &p_comf);
+    assert!(
+        comf_actions.len() <= 6,
+        "Comfortable hint cap is 6: {}",
+        comf_actions.len()
+    );
+
+    // Compact density caps hints at 4
+    let p_comp =
+        presentation(ThemeChoice::Dark, true, GlyphTier::Unicode).with_density(Density::Compact);
+    let comp_actions = crate::app::discovery::hint_actions_for(&model, &p_comp);
+    assert!(
+        comp_actions.len() <= 4,
+        "Compact hint cap is 4: {}",
+        comp_actions.len()
+    );
+}
+
+#[test]
+fn us8_footer_narrow_truncation_drops_whole_hints() {
+    use crate::app::model::Focus;
+    use crate::config::Density;
+
+    let mut model = Model::new(100);
+    model.focus = Focus::Editor;
+    let keymap = Keymap::new();
+    let p =
+        presentation(ThemeChoice::Dark, false, GlyphTier::Ascii).with_density(Density::Comfortable);
+    let actions = crate::app::discovery::hint_actions_for(&model, &p);
+
+    let draw = |width: u16| {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buffer = Buffer::empty(area);
+        render_footer(&model, &keymap, &p, area, &mut buffer);
+        crate::ui::layout::buffer_to_string(&buffer)
+    };
+
+    // For various narrow widths, verify no key/label pair is half-rendered
+    for width in 15..120 {
+        let line = draw(width);
+        for action in &actions {
+            if let Some((key, label)) = keymap.contextual_hint(action)
+                && (line.contains(&key) || line.contains(label))
+            {
+                assert!(
+                    line.contains(&format!("{key} {label}")),
+                    "partial hint pair at width {width}: key='{key}', label='{label}' in line: {line}"
+                );
+            }
+        }
+    }
+}

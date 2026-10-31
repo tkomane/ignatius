@@ -557,3 +557,115 @@ fn manual_complete_builtin_matrix_clears_the_contract() {
         "resolved matrix failures: {failures:#?}"
     );
 }
+
+#[test]
+fn banner_anchors_and_ramp_columns_clear_contrast_thresholds() {
+    for theme in themes() {
+        let (anchor_a, anchor_b) = theme.banner_anchors();
+        let threshold = if theme.selection() == ThemeSelection::HighContrast {
+            HIGH_CONTRAST_MINIMUM
+        } else {
+            READABLE
+        };
+
+        // Both anchor endpoints must meet the threshold against all surfaces.
+        for surface in surfaces(&theme) {
+            let ratio_a = anchor_a.contrast(surface);
+            assert!(
+                ratio_a >= threshold,
+                "{:?}: banner anchor_a {:?} contrast {:.2} below {threshold} against {surface:?}",
+                theme.selection(),
+                anchor_a,
+                ratio_a
+            );
+            let ratio_b = anchor_b.contrast(surface);
+            assert!(
+                ratio_b >= threshold,
+                "{:?}: banner anchor_b {:?} contrast {:.2} below {threshold} against {surface:?}",
+                theme.selection(),
+                anchor_b,
+                ratio_b
+            );
+        }
+
+        // Every interpolated column across a 59-column ramp must clear the threshold.
+        const WIDTH: usize = 59;
+        for col in 0..WIDTH {
+            let col_rgb = theme.banner_column_rgb(col, WIDTH);
+            for surface in surfaces(&theme) {
+                let ratio = col_rgb.contrast(surface);
+                assert!(
+                    ratio >= threshold,
+                    "{:?}: banner col {col}/{WIDTH} {:?} contrast {:.2} below {threshold} against {surface:?}",
+                    theme.selection(),
+                    col_rgb,
+                    ratio
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn banner_ramp_honours_color_depths_and_disabled_color() {
+    const WIDTH: usize = 59;
+    let base_theme = Theme::new(ThemeChoice::Dark, true);
+
+    // TrueColor emits Color::Rgb matching banner_column_rgb.
+    let truecolor_theme = base_theme.clone().with_depth(ColorDepth::TrueColor);
+    let ramp_tc = truecolor_theme.banner_ramp(WIDTH);
+    assert_eq!(ramp_tc.len(), WIDTH);
+    for (col, style) in ramp_tc.iter().enumerate() {
+        let expected_rgb = truecolor_theme.banner_column_rgb(col, WIDTH);
+        assert_eq!(style.fg, Some(expected_rgb.into()));
+    }
+
+    // Indexed256 emits Color::Indexed in 16..=255.
+    let indexed_theme = base_theme.clone().with_depth(ColorDepth::Indexed256);
+    let ramp_idx = indexed_theme.banner_ramp(WIDTH);
+    assert_eq!(ramp_idx.len(), WIDTH);
+    for (col, style) in ramp_idx.iter().enumerate() {
+        let expected_rgb = indexed_theme.banner_column_rgb(col, WIDTH);
+        let expected_idx = quantize_256(expected_rgb);
+        assert_eq!(style.fg, Some(Color::Indexed(expected_idx)));
+        assert!(expected_idx >= 16);
+    }
+
+    // Basic16 emits two flat bands in 0..=15.
+    let basic_theme = base_theme.clone().with_depth(ColorDepth::Basic16);
+    let ramp_16 = basic_theme.banner_ramp(WIDTH);
+    assert_eq!(ramp_16.len(), WIDTH);
+    let left_expected = ramp_16[0].fg;
+    let right_expected = ramp_16[WIDTH - 1].fg;
+    assert_ne!(left_expected, right_expected);
+    for (col, style) in ramp_16.iter().enumerate() {
+        if col < WIDTH / 2 {
+            assert_eq!(style.fg, left_expected);
+        } else {
+            assert_eq!(style.fg, right_expected);
+        }
+        if let Some(Color::Indexed(idx)) = style.fg {
+            assert!(idx <= 15);
+        } else {
+            panic!("Expected Color::Indexed for Basic16, got {:?}", style.fg);
+        }
+    }
+
+    // ColorDepth::None emits plain text (no fg).
+    let none_theme = base_theme.clone().with_depth(ColorDepth::None);
+    let ramp_none = none_theme.banner_ramp(WIDTH);
+    assert_eq!(ramp_none.len(), WIDTH);
+    for style in &ramp_none {
+        assert_eq!(style.fg, None);
+        assert_eq!(style.bg, None);
+    }
+
+    // color = false emits plain text (no fg).
+    let no_color_theme = Theme::new(ThemeChoice::Dark, false);
+    let ramp_no_color = no_color_theme.banner_ramp(WIDTH);
+    assert_eq!(ramp_no_color.len(), WIDTH);
+    for style in &ramp_no_color {
+        assert_eq!(style.fg, None);
+        assert_eq!(style.bg, None);
+    }
+}
