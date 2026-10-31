@@ -1257,6 +1257,59 @@ impl NoticeState {
     }
 }
 
+/// The maximum interval between two left `Down` events on the same region for a
+/// double-click (`contracts/mouse.md`).
+pub const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
+/// An active pointer drag over a split bar or a result-column rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragTarget {
+    /// Dragging the vertical split between the sidebar and the main panes.
+    VerticalSplit {
+        /// Screen column where the drag started.
+        start_column: u16,
+        /// Sidebar width in cells when the drag started.
+        start_width: u16,
+    },
+    /// Dragging the horizontal split between the editor and the results pane.
+    HorizontalSplit {
+        /// Screen row where the drag started.
+        start_row: u16,
+        /// Editor height in rows when the drag started.
+        start_height: u16,
+    },
+    /// Dragging the right edge of a result-grid column.
+    ColumnEdge {
+        /// Zero-based source-column index.
+        column: usize,
+        /// Screen column where the drag started.
+        start_column: u16,
+        /// Column width in cells when the drag started.
+        start_width: usize,
+    },
+}
+
+/// The most recent left `Down` on a double-clickable region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LastClick {
+    /// The hit region that received the first click.
+    pub region: crate::ui::widgets::Region,
+    /// Monotonic mouse-clock value when the click arrived.
+    pub at: Duration,
+}
+
+/// Pure pointer interaction state owned by [`Model`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MouseState {
+    /// Active split or column-edge drag, if any.
+    pub drag: Option<DragTarget>,
+    /// Last left `Down` eligible to form a double-click within [`DOUBLE_CLICK_WINDOW`].
+    pub last_click: Option<LastClick>,
+    /// Monotonic elapsed time used to evaluate [`DOUBLE_CLICK_WINDOW`] without
+    /// reading a system clock inside the reducer.
+    pub clock: Duration,
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
@@ -1267,6 +1320,8 @@ pub struct Model {
     pub focus: Focus,
     /// Layout shape for this application session, never persisted.
     pub splits: SplitState,
+    /// Pure pointer interaction state (active drag target and last-click tracker).
+    pub mouse: MouseState,
     /// Feedback retained through ticks until the next user action.
     pub layout_notice: Option<LayoutNotice>,
     /// The active key labels used when discovery surfaces describe actions.
@@ -1490,6 +1545,11 @@ impl Model {
     #[must_use]
     pub const fn is_animating(&self) -> bool {
         self.phase.is_busy() || matches!(self.connection, ConnectionState::Connecting { .. })
+    }
+
+    /// Advances the pure monotonic mouse clock by `elapsed`.
+    pub fn advance_mouse_clock(&mut self, elapsed: Duration) {
+        self.mouse.clock = self.mouse.clock.saturating_add(elapsed);
     }
 
     /// Hands out the next job identity.

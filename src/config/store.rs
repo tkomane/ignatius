@@ -309,8 +309,8 @@ glyphs = "auto"
 color = "auto"
 # auto, truecolor, 256, 16. 16-colour and below do not paint surfaces.
 color-depth = "auto"
-# Mouse reporting is off so the terminal's own text selection keeps working.
-mouse = false
+# Mouse reporting is on by default. Hold Shift for terminal selection, or set false.
+mouse = true
 # Replaces animated feedback with static text.
 reduced-motion = false
 # Opens a local schema-completion menu while typing. Ctrl+Space always opens it.

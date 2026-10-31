@@ -24,8 +24,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// Which optional terminal modes to turn on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalOptions {
-    /// Mouse reporting. Off by default: capturing the mouse takes away the
-    /// terminal's own text selection, which users rely on for copying.
+    /// On by default; setting false leaves mouse capture off so the terminal owns every pointer gesture.
     pub mouse: bool,
     /// Use the alternate screen so the user's scrollback survives.
     pub alternate_screen: bool,
@@ -36,7 +35,7 @@ pub struct TerminalOptions {
 impl Default for TerminalOptions {
     fn default() -> Self {
         Self {
-            mouse: false,
+            mouse: true,
             alternate_screen: true,
             bracketed_paste: true,
         }

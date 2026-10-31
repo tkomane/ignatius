@@ -49,17 +49,34 @@ mean two things.
 | Anywhere | right or middle button | any | nothing (no context menus in this feature) | not applicable |
 | Anywhere | Moved (no button) | any | nothing | not applicable |
 
-## Drag mechanics
+## Drag, wheel and double-click mechanics
 
-- A drag is: left Down on a drag region, one or more Drag events, ended by
-  Up or by any non-mouse event that interrupts it.
-- The Up event's button is not trusted (some terminals substitute Left);
-  a drag ends on any Up.
-- A drag that leaves the region or the window applies the last in-bounds
-  position. A terminal resize during a drag cancels the drag and re-clamps
-  every split.
-- Double-click window: two left Down events on the same region target
-  within 400 ms. A third click starts a new count.
+- A drag is: left Down on a drag region (`VerticalSplit`,
+  `HorizontalSplit` or `ColumnEdge { column }`), one or more `Drag(Left)`
+  events, ended by `Up` or by any non-mouse user event (`Action`,
+  `InputAtSize`, `Pasted` or `Resized`) or modal overlay that interrupts
+  it.
+- The `Up` event's button is not trusted (some terminals substitute Left);
+  a drag ends on any `Up`.
+- A drag that leaves the region or the window applies the clamped
+  in-bounds position (`20..=60.min(body.width.saturating_sub(30))` for
+  `VerticalSplit`, `3..=body.height.saturating_sub(3)` for
+  `HorizontalSplit`, and `MIN_COLUMN_WIDTH..=MAX_COLUMN_WIDTH` for
+  `ColumnEdge`). A terminal resize during a drag cancels the drag and
+  re-clamps every split.
+- Double-click window: two left Down events on the same double-clickable
+  region target (`SidebarRow { index }`, `ResultsCell { row, column }` or
+  `OverlayItem { index }`) within 400 ms (`DOUBLE_CLICK_WINDOW`). Elapsed
+  time enters the pure reducer through `Model`'s monotonic mouse clock
+  (advanced by the interactive input loop and `Message::Tick`) without
+  reading the system clock inside `update`. A third click starts a new
+  count, and any non-mouse user input or click on a different region clears
+  the tracker.
+- Wheel scrolling (`ScrollDown` / `ScrollUp` with no modifiers) over any
+  pane interior steps that pane three rows per notch through the existing
+  pane movement rules while preserving `model.focus`. `Shift` plus
+  `ScrollDown` / `ScrollUp` over the results pane steps one visible column
+  through `move_result_column` while preserving `model.focus`.
 
 ## Dispatch rule
 

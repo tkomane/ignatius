@@ -346,20 +346,20 @@ no-ops elsewhere; rerun the interaction set with the mouse off.
 
 ### Tests for User Story 6
 
-- [ ] T034 [US6] Add failing tests in `src/app/update/tests.rs` for every
+- [x] T034 [US6] Add failing tests in `src/app/update/tests.rs` for every
   row of the `contracts/mouse.md` verb table (state equality with the
   keyboard route), unbound events as no-ops, Ctrl-click ignored, drag end
   on any Up, resize-cancels-drag, and the 400 ms double-click window.
 
 ### Implementation for User Story 6
 
-- [ ] T035 [US6] The integrator implements mouse dispatch in
+- [x] T035 [US6] The integrator implements mouse dispatch in
   `src/app/update.rs`: `region_at`, the verb table as data, wheel steps
   and drag clamps per the contracts.
-- [ ] T036 [US6] Flip the capture default in `src/config/schema.rs` and
+- [x] T036 [US6] Flip the capture default in `src/config/schema.rs` and
   `src/ui/terminal.rs`, amending the two tests that pin the old default,
   and add the help wording for Shift-selection and the opt-out.
-- [ ] T037 [US6] Add a mouse-off test run proving every capability in the
+- [x] T037 [US6] Add a mouse-off test run proving every capability in the
   interaction test set is reachable with `ui.mouse = false`.
 
 **Checkpoint**: The pointer works everywhere it should and nowhere it

@@ -295,17 +295,11 @@ fn quitting_restores_every_mode_it_took() {
         ("\x1b[?1049h", "\x1b[?1049l", "alternate screen"),
         ("\x1b[?2004h", "\x1b[?2004l", "bracketed paste"),
         ("\x1b[?25l", "\x1b[?25h", "cursor visibility"),
+        ("\x1b[?1000h", "\x1b[?1000l", "mouse capture"),
     ] {
         assert!(session.contains(on), "{what} was never enabled");
         assert!(session.contains(off), "{what} was left enabled");
     }
-
-    // Mouse capture is off by default, so the terminal's own selection keeps
-    // working. Enabling it here would be a regression a user would feel.
-    assert!(
-        !session.contains("\x1b[?1000h"),
-        "mouse capture was taken without being asked for"
-    );
 }
 
 #[test]

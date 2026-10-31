@@ -435,8 +435,8 @@ pub struct UiSchema<S> {
     /// Which colour depth to use before detection, or `auto`.
     #[serde(default)]
     pub color_depth: ColorDepthChoice,
-    /// Mouse reporting. Off by default so terminal text selection keeps working.
-    #[serde(default)]
+    /// Mouse reporting is on by default (`true`). Setting `false` leaves mouse capture off.
+    #[serde(default = "default_mouse")]
     pub mouse: bool,
     /// Replaces animated feedback with static text.
     #[serde(default)]
@@ -454,7 +454,7 @@ impl<S: Default> Default for UiSchema<S> {
             glyphs: GlyphMode::Auto,
             color: ColorMode::Auto,
             color_depth: ColorDepthChoice::Auto,
-            mouse: false,
+            mouse: default_mouse(),
             reduced_motion: false,
             completion: default_completion(),
         }
@@ -462,6 +462,10 @@ impl<S: Default> Default for UiSchema<S> {
 }
 
 const fn default_completion() -> bool {
+    true
+}
+
+const fn default_mouse() -> bool {
     true
 }
 

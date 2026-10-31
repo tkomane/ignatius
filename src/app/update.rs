@@ -35,6 +35,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
         }
         Message::Action(action) => {
             model.banner.finish();
+            model.mouse.drag = None;
+            model.mouse.last_click = None;
             apply_action(model, action)
         }
         Message::InputAtSize {
@@ -43,6 +45,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             rows,
         } => {
             model.banner.finish();
+            model.mouse.drag = None;
+            model.mouse.last_click = None;
             let changed = model.size != (columns, rows);
             let accepting_review = matches!(action, Action::Activate | Action::RunBuffer)
                 && crate::ui::review::active_kind(model).is_some();
@@ -58,6 +62,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
         }
         Message::Resized(columns, rows) => {
+            let was_dragging = model.mouse.drag.take().is_some();
+            model.mouse.last_click = None;
             if model.size != (columns, rows) {
                 model.size = (columns, rows);
                 model.review_scroll = 0;
@@ -66,12 +72,23 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     details.scroll = 0;
                 }
             }
+            if was_dragging {
+                clamp_splits(model);
+            }
             Vec::new()
         }
-        // Mouse stays inert until the pointer phase; a paste routes to the
-        // surface that owns input, or says it was ignored.
-        Message::Mouse { .. } => Vec::new(),
+        Message::Mouse {
+            kind,
+            column,
+            row,
+            modifiers,
+        } => {
+            model.banner.finish();
+            handle_mouse(model, kind, column, row, modifiers)
+        }
         Message::Pasted(text) => {
+            model.mouse.drag = None;
+            model.mouse.last_click = None;
             model.layout_notice = None;
             paste_action(model, text)
         }
@@ -638,6 +655,13 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::Tick { running_for } => {
+            let tick_delta = match (model.running_for, running_for) {
+                (Some(previous), Some(current)) if current > previous => {
+                    current.saturating_sub(previous)
+                }
+                _ => std::time::Duration::from_millis(90),
+            };
+            model.advance_mouse_clock(tick_delta);
             model.frame = model.frame.wrapping_add(1);
             model.running_for = running_for;
             if matches!(model.connection, ConnectionState::Connecting { .. }) {
@@ -650,6 +674,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
     };
+    if crate::ui::widgets::overlay_blocks_panes(model) {
+        model.mouse.drag = None;
+    }
     if effects.iter().any(|effect| matches!(effect, Effect::Quit)) {
         model
             .notice_state
@@ -1621,6 +1648,340 @@ fn adjust_panes(model: &mut Model, action: &Action) {
             editor.height.saturating_sub(1)
         };
         model.splits.editor_rows = Some(desired.clamp(3, geometry.body.height.saturating_sub(3)));
+    }
+}
+
+/// Re-clamps any explicit split positions to the current terminal geometry.
+fn clamp_splits(model: &mut Model) {
+    use crate::ui::layout::{LayoutMode, body_area, layout_mode};
+    use ratatui::layout::Rect;
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+    if layout_mode(area) != LayoutMode::Full {
+        return;
+    }
+    let body = body_area(area);
+    if let Some(cells) = model.splits.sidebar_cells {
+        let max_sidebar = 60.min(body.width.saturating_sub(30)).max(20);
+        model.splits.sidebar_cells = Some(cells.clamp(20, max_sidebar));
+    }
+    if let Some(rows) = model.splits.editor_rows {
+        let max_editor = body.height.saturating_sub(3).max(3);
+        model.splits.editor_rows = Some(rows.clamp(3, max_editor));
+    }
+}
+
+/// Dispatches a mouse gesture through the pure hit-region table (`contracts/mouse.md`).
+fn handle_mouse(
+    model: &mut Model,
+    kind: crate::app::message::MouseKind,
+    column: u16,
+    row: u16,
+    modifiers: crate::app::message::MouseModifiers,
+) -> Vec<Effect> {
+    use crate::app::message::{MouseButton, MouseKind};
+    use crate::app::model::{DOUBLE_CLICK_WINDOW, DragTarget, LastClick};
+    use crate::ui::layout::{LayoutMode, layout_mode, pane_geometry};
+    use crate::ui::widgets::{Region, overlay_blocks_panes, pane_at, region_at};
+    use ratatui::layout::Rect;
+
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+
+    // A drag ends on Up of any button, regardless of modifiers or position.
+    if matches!(kind, MouseKind::Up(_)) {
+        model.mouse.drag = None;
+        return Vec::new();
+    }
+
+    // Hover and horizontal wheel events have no verb in this feature.
+    if matches!(
+        kind,
+        MouseKind::Moved | MouseKind::ScrollLeft | MouseKind::ScrollRight
+    ) {
+        return Vec::new();
+    }
+
+    // Ctrl+click and Alt-modified mouse events are deliberately unbound.
+    if modifiers.control || modifiers.alt {
+        if matches!(kind, MouseKind::Down(_)) {
+            model.mouse.drag = None;
+            model.mouse.last_click = None;
+        }
+        return Vec::new();
+    }
+
+    // Shift-modified events are ignored except Shift + wheel over Results.
+    if modifiers.shift {
+        if matches!(kind, MouseKind::ScrollDown | MouseKind::ScrollUp) {
+            if pane_at(model, area, column, row) == Some(Focus::Results) && !model.plan.is_visible()
+            {
+                model.layout_notice = None;
+                let columns = model.visible_result().map_or_else(Vec::new, |set| {
+                    model.result_grid.visible_columns(set.columns.len())
+                });
+                let delta = if matches!(kind, MouseKind::ScrollDown) {
+                    1
+                } else {
+                    -1
+                };
+                move_result_column(model, &columns, delta);
+            }
+            return Vec::new();
+        }
+        if matches!(kind, MouseKind::Down(_)) {
+            model.mouse.drag = None;
+            model.mouse.last_click = None;
+        }
+        return Vec::new();
+    }
+
+    // Unmodified wheel scrolls the pane under the pointer three rows per notch
+    // without moving keyboard focus.
+    if matches!(kind, MouseKind::ScrollDown | MouseKind::ScrollUp) {
+        if let Some(target_pane) = pane_at(model, area, column, row) {
+            model.layout_notice = None;
+            let direction = if matches!(kind, MouseKind::ScrollDown) {
+                Direction::Down
+            } else {
+                Direction::Up
+            };
+            let saved_focus = model.focus;
+            model.focus = target_pane;
+            for _ in 0..3 {
+                move_selection(model, direction);
+            }
+            model.focus = saved_focus;
+        }
+        return Vec::new();
+    }
+
+    if let MouseKind::Drag(button) = kind {
+        if button != MouseButton::Left {
+            return Vec::new();
+        }
+        let Some(drag) = model.mouse.drag else {
+            return Vec::new();
+        };
+        if overlay_blocks_panes(model) {
+            model.mouse.drag = None;
+            return Vec::new();
+        }
+        match drag {
+            DragTarget::VerticalSplit {
+                start_column,
+                start_width,
+            } => {
+                if layout_mode(area) != LayoutMode::Full {
+                    model.mouse.drag = None;
+                    return Vec::new();
+                }
+                model.layout_notice = None;
+                model.splits.zoomed = false;
+                let geometry = pane_geometry(model, area);
+                let delta = i32::from(column) - i32::from(start_column);
+                let desired = u16::try_from(i32::from(start_width).saturating_add(delta).max(0))
+                    .unwrap_or(u16::MAX);
+                model.splits.sidebar_cells =
+                    Some(desired.clamp(20, 60.min(geometry.body.width.saturating_sub(30))));
+            }
+            DragTarget::HorizontalSplit {
+                start_row,
+                start_height,
+            } => {
+                if layout_mode(area) != LayoutMode::Full {
+                    model.mouse.drag = None;
+                    return Vec::new();
+                }
+                model.layout_notice = None;
+                model.splits.zoomed = false;
+                let geometry = pane_geometry(model, area);
+                let delta = i32::from(row) - i32::from(start_row);
+                let desired = u16::try_from(i32::from(start_height).saturating_add(delta).max(0))
+                    .unwrap_or(u16::MAX);
+                model.splits.editor_rows =
+                    Some(desired.clamp(3, geometry.body.height.saturating_sub(3)));
+            }
+            DragTarget::ColumnEdge {
+                column: col_idx,
+                start_column,
+                start_width,
+            } => {
+                if model.plan.is_visible() {
+                    model.mouse.drag = None;
+                    return Vec::new();
+                }
+                model.layout_notice = None;
+                let delta =
+                    isize::try_from(i32::from(column) - i32::from(start_column)).unwrap_or(0);
+                let width = start_width.saturating_add_signed(delta).clamp(
+                    crate::app::grid::MIN_COLUMN_WIDTH,
+                    crate::app::grid::MAX_COLUMN_WIDTH,
+                );
+                model.result_grid.widths.insert(col_idx, width);
+                model.result_grid.note = None;
+            }
+        }
+        return Vec::new();
+    }
+
+    let MouseKind::Down(button) = kind else {
+        return Vec::new();
+    };
+    model.mouse.drag = None;
+    if button != MouseButton::Left {
+        model.mouse.last_click = None;
+        return Vec::new();
+    }
+
+    let region = region_at(model, area, column, row);
+    let is_double_clickable = |candidate: Region| {
+        matches!(
+            candidate,
+            Region::SidebarRow { .. } | Region::ResultsCell { .. } | Region::OverlayItem { .. }
+        )
+    };
+    let is_double = region.is_some_and(|current| {
+        is_double_clickable(current)
+            && model.mouse.last_click.is_some_and(|previous| {
+                previous.region == current
+                    && model.mouse.clock.saturating_sub(previous.at) <= DOUBLE_CLICK_WINDOW
+            })
+    });
+    if is_double {
+        model.mouse.last_click = None;
+    } else if let Some(current) = region.filter(|candidate| is_double_clickable(*candidate)) {
+        model.mouse.last_click = Some(LastClick {
+            region: current,
+            at: model.mouse.clock,
+        });
+    } else {
+        model.mouse.last_click = None;
+    }
+
+    match region {
+        Some(Region::SidebarRow { index }) => {
+            model.prefix_pending = false;
+            model.layout_notice = None;
+            model.completion.menu = None;
+            model.result_filtering = false;
+            model.focus = Focus::Objects;
+            let max = model.tree.rows().len().saturating_sub(1);
+            model.tree.selected = index.min(max);
+            if is_double {
+                model.tree.filtering = false;
+                return apply_action(model, Action::Activate);
+            }
+            Vec::new()
+        }
+        Some(Region::EditorText {
+            line,
+            column: text_col,
+        }) => {
+            model.prefix_pending = false;
+            model.layout_notice = None;
+            model.completion.menu = None;
+            model.tree.filtering = false;
+            model.result_filtering = false;
+            model.focus = Focus::Editor;
+            model.editor.set_position(line, text_col);
+            Vec::new()
+        }
+        Some(Region::ResultsCell {
+            row: cell_row,
+            column: cell_col,
+        }) => {
+            model.prefix_pending = false;
+            model.layout_notice = None;
+            model.completion.menu = None;
+            model.tree.filtering = false;
+            model.focus = Focus::Results;
+            let max_row = model.displayed_rows().len().saturating_sub(1);
+            model.selected_row = cell_row.min(max_row);
+            if let Some(set) = model.visible_result() {
+                let columns = model.result_grid.visible_columns(set.columns.len());
+                if let Some(pos) = columns.iter().position(|&c| c == cell_col) {
+                    model.selected_column = cell_col;
+                    model.result_grid.horizontal_start = pos;
+                }
+            }
+            if is_double {
+                model.result_filtering = false;
+                return apply_action(model, Action::ToggleInspector);
+            }
+            Vec::new()
+        }
+        Some(Region::ResultsHeaderCell { column: header_col }) => {
+            model.prefix_pending = false;
+            model.layout_notice = None;
+            let selected_source_row = model.selected_source_row();
+            model.result_grid.toggle_sort(header_col);
+            restore_selected_source_row(model, selected_source_row);
+            Vec::new()
+        }
+        Some(Region::ColumnEdge { column: edge_col }) => {
+            model.prefix_pending = false;
+            let automatic = model
+                .visible_result()
+                .map_or(crate::app::grid::MIN_COLUMN_WIDTH, |set| {
+                    crate::app::grid::automatic_column_width(set, edge_col)
+                });
+            let start_width = model.result_grid.width_for(edge_col, automatic);
+            model.mouse.drag = Some(DragTarget::ColumnEdge {
+                column: edge_col,
+                start_column: column,
+                start_width,
+            });
+            Vec::new()
+        }
+        Some(Region::VerticalSplit) => {
+            model.prefix_pending = false;
+            let geometry = pane_geometry(model, area);
+            if let Some(sidebar) = geometry.objects {
+                model.mouse.drag = Some(DragTarget::VerticalSplit {
+                    start_column: column,
+                    start_width: sidebar.width,
+                });
+            }
+            Vec::new()
+        }
+        Some(Region::HorizontalSplit) => {
+            model.prefix_pending = false;
+            let geometry = pane_geometry(model, area);
+            if let Some(editor) = geometry.editor {
+                model.mouse.drag = Some(DragTarget::HorizontalSplit {
+                    start_row: row,
+                    start_height: editor.height,
+                });
+            }
+            Vec::new()
+        }
+        Some(Region::OverlayItem { index }) => {
+            model.prefix_pending = false;
+            model.layout_notice = None;
+            if let Some(palette) = model.palette.as_mut() {
+                let max = palette.matches().len().saturating_sub(1);
+                palette.selected = index.min(max);
+            }
+            if is_double {
+                return apply_action(model, Action::Activate);
+            }
+            Vec::new()
+        }
+        Some(Region::Header | Region::Footer) => Vec::new(),
+        Some(Region::EditorGutter { .. } | Region::ResultsScrollbar) | None => {
+            if let Some(pane) = pane_at(model, area, column, row) {
+                model.prefix_pending = false;
+                model.layout_notice = None;
+                model.completion.menu = None;
+                if pane != Focus::Objects {
+                    model.tree.filtering = false;
+                }
+                if pane != Focus::Results {
+                    model.result_filtering = false;
+                }
+                model.focus = pane;
+            }
+            Vec::new()
+        }
     }
 }
 

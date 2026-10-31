@@ -16,20 +16,38 @@ fn defaults_take_the_alternate_screen_and_leave_the_mouse_alone() {
     let options = TerminalOptions::default();
     assert!(options.alternate_screen);
     assert!(options.bracketed_paste);
-    assert!(!options.mouse, "mouse capture must be opt-in");
+    assert!(options.mouse, "mouse capture is on by default");
 
     let (entered, left) = sequences(options);
     assert!(entered.contains("\x1b[?1049h"), "alternate screen entered");
     assert!(entered.contains("\x1b[?2004h"), "bracketed paste enabled");
     assert!(entered.contains("\x1b[?25l"), "cursor hidden");
-    assert!(
-        !entered.contains("\x1b[?1000h"),
-        "mouse not captured by default"
-    );
+    #[cfg(unix)]
+    {
+        assert!(entered.contains("\x1b[?1000h"), "mouse captured by default");
+        assert!(left.contains("\x1b[?1000l"), "mouse capture disabled");
+    }
 
     assert!(left.contains("\x1b[?25h"), "cursor shown again");
     assert!(left.contains("\x1b[?2004l"), "bracketed paste disabled");
     assert!(left.contains("\x1b[?1049l"), "alternate screen left");
+}
+
+#[test]
+fn mouse_off_leaves_mouse_capture_alone() {
+    let options = TerminalOptions {
+        mouse: false,
+        ..TerminalOptions::default()
+    };
+    let (entered, left) = sequences(options);
+    assert!(
+        !entered.contains("\x1b[?1000h"),
+        "mouse capture should not be enabled when mouse is false"
+    );
+    assert!(
+        !left.contains("\x1b[?1000l"),
+        "mouse capture should not be disabled when mouse is false"
+    );
 }
 
 #[test]

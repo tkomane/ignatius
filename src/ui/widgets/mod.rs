@@ -20,9 +20,7 @@ pub(crate) use overlays::{
 pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
 
-#[cfg(test)]
-use crate::app::model::Focus;
-use crate::app::model::Model;
+use crate::app::model::{Focus, Model};
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
 use crate::ui::theme::Token;
@@ -196,7 +194,11 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
     if let Some(palette) = &model.palette {
         return palette_item_at(model, palette, area, column, row);
     }
-    if model.definition.is_some() || model.inspector.is_some() || model.help_open {
+    if model.notice_details.is_some()
+        || model.definition.is_some()
+        || model.inspector.is_some()
+        || model.help_open
+    {
         return None;
     }
     if model.completion.menu.is_some() {
@@ -233,6 +235,67 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
     }
     if let Some(results) = geometry.results.filter(|rect| in_rect(*rect, column, row)) {
         return results_region(model, results, column, row);
+    }
+    None
+}
+
+/// Whether an open modal or overlay hides the underlying workspace panes.
+#[must_use]
+pub const fn overlay_blocks_panes(model: &Model) -> bool {
+    model.password_prompt.is_some()
+        || model.name_prompt.is_some()
+        || model.parameter_prompt.is_some()
+        || model.update_prompt.is_some()
+        || model.pending_update.is_some()
+        || model.pending_copy.is_some()
+        || model.pending_plan.is_some()
+        || model.pending_run.is_some()
+        || model.prefix_pending
+        || model.connection_details
+        || model.palette.is_some()
+        || model.notice_details.is_some()
+        || model.definition.is_some()
+        || model.inspector.is_some()
+        || model.help_open
+        || model.completion.menu.is_some()
+}
+
+/// Resolves which pane interior owns a screen cell when no overlay covers the
+/// workspace and the cell is not on a border, header, footer or split bar.
+#[must_use]
+pub fn pane_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Focus> {
+    if !in_rect(area, column, row) || overlay_blocks_panes(model) {
+        return None;
+    }
+    if layout_mode(area) == LayoutMode::TooSmall {
+        return None;
+    }
+    let geometry = pane_geometry(model, area);
+    if in_rect(geometry.header, column, row)
+        || in_rect(geometry.footer, column, row)
+        || geometry
+            .vertical_split
+            .is_some_and(|rect| in_rect(rect, column, row))
+        || geometry
+            .horizontal_split
+            .is_some_and(|rect| in_rect(rect, column, row))
+    {
+        return None;
+    }
+    if let Some(tree) = geometry.objects
+        && in_rect(inner_rect(tree), column, row)
+    {
+        return Some(Focus::Objects);
+    }
+    if let Some(editor) = geometry.editor
+        && in_rect(inner_rect(editor), column, row)
+    {
+        return Some(Focus::Editor);
+    }
+    if let Some(results) = geometry.results
+        && in_rect(inner_rect(results), column, row)
+    {
+        return Some(Focus::Results);
     }
     None
 }
