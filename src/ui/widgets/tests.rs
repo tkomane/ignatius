@@ -743,6 +743,26 @@ fn an_open_help_overlay_hides_the_panes_beneath() {
     assert_eq!(region_at(&model, area, 0, 0), None);
 }
 
+#[test]
+fn an_open_notice_details_overlay_hides_the_panes_beneath() {
+    let mut model = Model::new(100);
+    model.sidebar_visible = false;
+    model.editor.set_text("SELECT 1;");
+    model.notice_details = Some(crate::app::model::NoticeDetails {
+        snapshot: model.notice_state.snapshot(),
+        scroll: 0,
+    });
+    let area = Rect::new(0, 0, 100, 30);
+    let body = body_area(area);
+    let (editor, _) = main_panes(body, false, &model.splits);
+    let editor_inner = inner(editor);
+    assert_eq!(
+        region_at(&model, area, editor_inner.x, editor_inner.y),
+        None
+    );
+    assert_eq!(region_at(&model, area, 0, 0), None);
+}
+
 fn editor_eol_probe(
     text: &str,
     cursor: usize,

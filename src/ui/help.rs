@@ -93,7 +93,10 @@ pub(crate) fn build(model: &Model, presentation: &Presentation, area: Rect) -> V
     let theme = &presentation.theme;
     let usable = area.width >= super::USABLE_COLUMNS && area.height >= super::USABLE_ROWS;
     let mut rows = Vec::new();
-    for text in wrap_to_width("Every action is reachable from the keyboard.", width) {
+    for text in wrap_to_width(
+        "Every action is reachable from the keyboard. Hold Shift to select text with the terminal, or set ui.mouse = false in config.toml.",
+        width,
+    ) {
         rows.push(Line::styled(text, theme.style(Token::Muted)));
     }
     let entries: Vec<(String, String)> = snapshot

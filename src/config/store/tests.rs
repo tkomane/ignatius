@@ -161,7 +161,7 @@ fn manual_theme_template_definition_is_fully_commented_and_valid_when_enabled() 
     let ordinary: Config = toml::from_str(TEMPLATE).unwrap();
     assert_eq!(ordinary, Config::default());
     assert!(ordinary.theme.is_none());
-    assert!(!ordinary.ui.mouse);
+    assert!(ordinary.ui.mouse);
     let start = TEMPLATE
         .find("# [theme]")
         .expect("optional definition example");

@@ -149,3 +149,23 @@ fn long_valid_control_remaps_keep_the_help_body_at_the_minimum() {
         assert!(view.rail.len() <= usize::from(view.rail_area.height));
     }
 }
+
+#[test]
+fn help_intro_mentions_shift_and_mouse_config() {
+    let model = Model::new(100);
+    let view = build(&model, &model.presentation, Rect::new(0, 0, 100, 30));
+    let text = view
+        .rows
+        .iter()
+        .map(|row| row.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("Shift"),
+        "help must mention Shift for terminal selection: {text}"
+    );
+    assert!(
+        text.contains("ui.mouse = false"),
+        "help must mention setting ui.mouse = false: {text}"
+    );
+}

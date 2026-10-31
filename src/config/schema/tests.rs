@@ -22,8 +22,8 @@ fn defaults_are_valid_and_current() {
     let config = Config::default();
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
     assert!(config.validate().is_empty(), "{:?}", config.validate());
-    // Safe by default: mouse capture off keeps terminal selection working.
-    assert!(!config.ui.mouse);
+    // Mouse reporting is on by default.
+    assert!(config.ui.mouse);
     assert!(
         !config.clipboard.osc52,
         "terminal clipboard transport is opt-in"

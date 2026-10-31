@@ -7836,3 +7836,1206 @@ fn banner_reveal_advances_across_twelve_ticks_skips_on_input_or_outcome_and_play
     );
     assert_eq!(reduced.banner, BannerState::Final);
 }
+
+// -----------------------------------------------------------------------------
+// Mouse verb table contract tests (specs/025-gui-grade-experience/contracts/mouse.md)
+// -----------------------------------------------------------------------------
+
+use crate::app::grid::GridCommand;
+use crate::app::message::{MouseButton, MouseKind, MouseModifiers};
+use crate::app::model::{DOUBLE_CLICK_WINDOW, DragTarget};
+use crate::ui::widgets::{Region, pane_at, region_at};
+
+fn mouse_modifiers(shift: bool, control: bool, alt: bool) -> MouseModifiers {
+    MouseModifiers {
+        shift,
+        control,
+        alt,
+    }
+}
+
+fn mouse_down(column: u16, row: u16) -> Message {
+    Message::Mouse {
+        kind: MouseKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: MouseModifiers::default(),
+    }
+}
+
+fn mouse_up(button: MouseButton, column: u16, row: u16) -> Message {
+    Message::Mouse {
+        kind: MouseKind::Up(button),
+        column,
+        row,
+        modifiers: MouseModifiers::default(),
+    }
+}
+
+fn mouse_drag(column: u16, row: u16) -> Message {
+    Message::Mouse {
+        kind: MouseKind::Drag(MouseButton::Left),
+        column,
+        row,
+        modifiers: MouseModifiers::default(),
+    }
+}
+
+fn mouse_wheel(kind: MouseKind, column: u16, row: u16, shift: bool) -> Message {
+    Message::Mouse {
+        kind,
+        column,
+        row,
+        modifiers: mouse_modifiers(shift, false, false),
+    }
+}
+
+fn find_region(model: &Model, predicate: impl Fn(Region) -> bool) -> (u16, u16) {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    for row in 0..model.size.1 {
+        for col in 0..model.size.0 {
+            if let Some(r) = region_at(model, area, col, row)
+                && predicate(r)
+            {
+                return (col, row);
+            }
+        }
+    }
+    panic!(
+        "region matching predicate not found in area {}x{}",
+        model.size.0, model.size.1
+    );
+}
+
+fn find_empty_pane_interior(model: &Model, target: Focus) -> (u16, u16) {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    for row in 0..model.size.1 {
+        for col in 0..model.size.0 {
+            if pane_at(model, area, col, row) == Some(target)
+                && region_at(model, area, col, row).is_none()
+            {
+                return (col, row);
+            }
+        }
+    }
+    panic!(
+        "empty pane interior for {target:?} not found in area {}x{}",
+        model.size.0, model.size.1
+    );
+}
+
+fn find_pane(model: &Model, target: Focus) -> (u16, u16) {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    for row in 0..model.size.1 {
+        for col in 0..model.size.0 {
+            if pane_at(model, area, col, row) == Some(target) {
+                return (col, row);
+            }
+        }
+    }
+    panic!(
+        "pane {target:?} not found in area {}x{}",
+        model.size.0, model.size.1
+    );
+}
+
+fn assert_mouse_keyboard_equivalence(mouse: &Model, keyboard: &Model) {
+    assert_eq!(mouse.focus, keyboard.focus, "focus must match");
+    assert_eq!(
+        mouse.tree.selected, keyboard.tree.selected,
+        "tree selected must match"
+    );
+    assert_eq!(
+        mouse.tree.rows(),
+        keyboard.tree.rows(),
+        "tree rows must match"
+    );
+    assert_eq!(
+        mouse.editor.text(),
+        keyboard.editor.text(),
+        "editor text must match"
+    );
+    assert_eq!(
+        mouse.editor.position(),
+        keyboard.editor.position(),
+        "editor position must match"
+    );
+    assert_eq!(
+        mouse.selected_row, keyboard.selected_row,
+        "selected row must match"
+    );
+    assert_eq!(
+        mouse.selected_column, keyboard.selected_column,
+        "selected column must match"
+    );
+    assert_eq!(
+        mouse.result_grid.sort, keyboard.result_grid.sort,
+        "grid sort must match"
+    );
+    assert_eq!(
+        mouse.result_grid.widths, keyboard.result_grid.widths,
+        "grid column widths must match"
+    );
+    assert_eq!(
+        mouse.result_grid.horizontal_start, keyboard.result_grid.horizontal_start,
+        "grid horizontal start must match"
+    );
+    assert_eq!(mouse.splits, keyboard.splits, "pane splits must match");
+    assert_eq!(
+        mouse.inspector.is_some(),
+        keyboard.inspector.is_some(),
+        "inspector visibility must match"
+    );
+    assert_eq!(
+        mouse.palette.is_some(),
+        keyboard.palette.is_some(),
+        "palette visibility must match"
+    );
+    if let (Some(m_p), Some(k_p)) = (&mouse.palette, &keyboard.palette) {
+        assert_eq!(
+            m_p.selected, k_p.selected,
+            "palette selected item must match"
+        );
+    }
+    assert_eq!(
+        mouse.layout_notice, keyboard.layout_notice,
+        "layout notice must match"
+    );
+}
+
+#[test]
+fn mouse_verb_table_pane_interior_focus() {
+    let mut base = with_grid(
+        &["id", "name"],
+        &[&[Cell::Text("1".into()), Cell::Text("Alice".into())]],
+    );
+    update(
+        &mut base,
+        Message::SchemasLoaded(Box::new(Ok(vec![
+            schema_summary("public", 1),
+            schema_summary("reporting", 0),
+        ]))),
+    );
+    base.size = (120, 40);
+
+    // 1. Click interior of Objects while focused on Editor -> focuses Objects.
+    let mut mouse_model = base.clone();
+    mouse_model.focus = Focus::Editor;
+    let (col, row) = find_empty_pane_interior(&mouse_model, Focus::Objects);
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    keyboard_model.focus = Focus::Editor;
+    while keyboard_model.focus != Focus::Objects {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+
+    // 2. Click interior of Results while focused on Objects -> focuses Results.
+    let mut mouse_model = base.clone();
+    mouse_model.focus = Focus::Objects;
+    let (col, row) = find_empty_pane_interior(&mouse_model, Focus::Results);
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    keyboard_model.focus = Focus::Objects;
+    while keyboard_model.focus != Focus::Results {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+
+    // 3. Click interior of Editor while focused on Results -> focuses Editor.
+    let mut mouse_model = base.clone();
+    mouse_model.focus = Focus::Results;
+    let (col, row) = find_empty_pane_interior(&mouse_model, Focus::Editor);
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    keyboard_model.focus = Focus::Results;
+    while keyboard_model.focus != Focus::Editor {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+}
+
+#[test]
+fn mouse_verb_table_sidebar_row_single_click() {
+    let mut base = with_tree();
+    base.size = (120, 40);
+    base.focus = Focus::Editor;
+
+    let (col, row) = find_region(&base, |r| r == Region::SidebarRow { index: 1 });
+
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    while keyboard_model.focus != Focus::Objects {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    assert_eq!(keyboard_model.focus, Focus::Objects);
+    assert_eq!(keyboard_model.tree.selected, 0);
+    update(
+        &mut keyboard_model,
+        Message::Action(Action::Move(Direction::Down)),
+    );
+    assert_eq!(keyboard_model.tree.selected, 1);
+
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+}
+
+#[test]
+fn mouse_verb_table_sidebar_row_double_click_schema_and_table() {
+    // A: Schema node expansion
+    let mut base_tree = with_tree();
+    base_tree.size = (120, 40);
+    base_tree.focus = Focus::Editor;
+    assert!(!base_tree.tree.rows()[0].expanded);
+
+    let (col, row) = find_region(&base_tree, |r| r == Region::SidebarRow { index: 0 });
+
+    let mut mouse_model = base_tree.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+    mouse_model.advance_mouse_clock(Duration::from_millis(150));
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base_tree.clone();
+    while keyboard_model.focus != Focus::Objects {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    assert_eq!(keyboard_model.focus, Focus::Objects);
+    assert_eq!(keyboard_model.tree.selected, 0);
+    update(&mut keyboard_model, Message::Action(Action::Activate));
+
+    assert!(mouse_model.tree.rows()[0].expanded);
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+
+    // B: Table node activation (inserts query into editor)
+    let mut base_table = with_selected_table();
+    base_table.size = (120, 40);
+    let table_row = base_table.tree.selected;
+
+    let (col, row) = find_region(&base_table, |r| {
+        r == Region::SidebarRow { index: table_row }
+    });
+
+    let mut mouse_model = base_table.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+    mouse_model.advance_mouse_clock(Duration::from_millis(150));
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base_table.clone();
+    update(&mut keyboard_model, Message::Action(Action::Activate));
+
+    assert_eq!(mouse_model.focus, Focus::Editor);
+    assert_eq!(mouse_model.editor.text(), "\"public\".\"orders\"");
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+}
+
+#[test]
+fn mouse_verb_table_editor_text_click() {
+    let mut base = connected();
+    base.size = (120, 40);
+    base.editor
+        .set_text("SELECT customer_id, first_name\nFROM customers\nWHERE active = true");
+    base.editor.set_cursor(0);
+    base.focus = Focus::Objects;
+
+    let (col, row) = find_region(&base, |r| r == Region::EditorText { line: 2, column: 5 });
+
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    while keyboard_model.focus != Focus::Editor {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    update(
+        &mut keyboard_model,
+        Message::Action(Action::Move(Direction::Down)),
+    );
+    for _ in 0..4 {
+        update(
+            &mut keyboard_model,
+            Message::Action(Action::Move(Direction::Right)),
+        );
+    }
+
+    assert_eq!(mouse_model.focus, Focus::Editor);
+    assert_eq!(mouse_model.editor.position(), (2, 5));
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+}
+
+#[test]
+fn mouse_verb_table_results_cell_single_and_double_click() {
+    let mut base = with_grid(
+        &["id", "name", "email"],
+        &[
+            &[
+                Cell::Text("1".into()),
+                Cell::Text("Alice".into()),
+                Cell::Text("alice@example.com".into()),
+            ],
+            &[
+                Cell::Text("2".into()),
+                Cell::Text("Bob".into()),
+                Cell::Text("bob@example.com".into()),
+            ],
+        ],
+    );
+    base.size = (120, 40);
+    base.focus = Focus::Editor;
+
+    let (col, row) = find_region(&base, |r| r == Region::ResultsCell { row: 1, column: 1 });
+
+    // Single click: focuses Results and selects (row: 1, column: 1).
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    while keyboard_model.focus != Focus::Results {
+        update(&mut keyboard_model, Message::Action(Action::FocusNext));
+    }
+    update(
+        &mut keyboard_model,
+        Message::Action(Action::Move(Direction::Down)),
+    );
+    update(
+        &mut keyboard_model,
+        Message::Action(Action::Move(Direction::Right)),
+    );
+
+    assert_eq!(mouse_model.focus, Focus::Results);
+    assert_eq!(mouse_model.selected_row, 1);
+    assert_eq!(mouse_model.selected_column, 1);
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+
+    // Double click: opens the value inspector on the cell.
+    let mut mouse_double = base.clone();
+    update(&mut mouse_double, mouse_down(col, row));
+    mouse_double.advance_mouse_clock(Duration::from_millis(150));
+    update(&mut mouse_double, mouse_down(col, row));
+
+    let mut keyboard_double = keyboard_model.clone();
+    update(
+        &mut keyboard_double,
+        Message::Action(Action::ToggleInspector),
+    );
+
+    assert!(mouse_double.inspector.is_some());
+    assert_mouse_keyboard_equivalence(&mouse_double, &keyboard_double);
+}
+
+#[test]
+fn mouse_verb_table_results_header_cell_sort_cycle() {
+    let mut base = with_grid(
+        &["id", "name"],
+        &[
+            &[Cell::Text("2".into()), Cell::Text("Bob".into())],
+            &[Cell::Text("1".into()), Cell::Text("Alice".into())],
+        ],
+    );
+    base.size = (120, 40);
+    base.focus = Focus::Results;
+    base.selected_column = 0;
+
+    let (col, row) = find_region(&base, |r| r == Region::ResultsHeaderCell { column: 0 });
+
+    let mut mouse_model = base.clone();
+    let mut keyboard_model = base.clone();
+
+    // 1. First click: Ascending sort
+    update(&mut mouse_model, mouse_down(col, row));
+    apply_grid_command(&mut keyboard_model, GridCommand::SortSelected);
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+    assert!(matches!(
+        mouse_model.result_grid.sort,
+        Some(crate::app::grid::SortSpec {
+            column: 0,
+            direction: crate::app::grid::SortDirection::Ascending
+        })
+    ));
+
+    // 2. Second click: Descending sort
+    mouse_model.advance_mouse_clock(Duration::from_millis(500));
+    update(&mut mouse_model, mouse_down(col, row));
+    apply_grid_command(&mut keyboard_model, GridCommand::SortSelected);
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+    assert!(matches!(
+        mouse_model.result_grid.sort,
+        Some(crate::app::grid::SortSpec {
+            column: 0,
+            direction: crate::app::grid::SortDirection::Descending
+        })
+    ));
+
+    // 3. Third click: None (server order restored)
+    mouse_model.advance_mouse_clock(Duration::from_millis(500));
+    update(&mut mouse_model, mouse_down(col, row));
+    apply_grid_command(&mut keyboard_model, GridCommand::SortSelected);
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+    assert!(mouse_model.result_grid.sort.is_none());
+}
+
+#[test]
+fn mouse_verb_table_column_edge_drag_resize() {
+    let mut base = with_grid(
+        &["identifier", "description"],
+        &[&[Cell::Text("1".into()), Cell::Text("item".into())]],
+    );
+    base.size = (120, 40);
+    base.focus = Focus::Results;
+
+    let (col, row) = find_region(&base, |r| r == Region::ColumnEdge { column: 0 });
+
+    // A: Normal drag resize by +2 columns
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+    assert!(matches!(
+        mouse_model.mouse.drag,
+        Some(DragTarget::ColumnEdge { column: 0, .. })
+    ));
+    update(&mut mouse_model, mouse_drag(col + 2, row));
+    update(&mut mouse_model, mouse_up(MouseButton::Left, col + 2, row));
+    assert!(mouse_model.mouse.drag.is_none());
+
+    let mut keyboard_model = base.clone();
+    keyboard_model.selected_column = 0;
+    update(&mut keyboard_model, Message::Action(Action::WidenColumn));
+
+    assert_eq!(
+        mouse_model.result_grid.widths,
+        keyboard_model.result_grid.widths
+    );
+
+    // B: Clamping to MIN_COLUMN_WIDTH on negative drag
+    let mut mouse_clamp_min = base.clone();
+    update(&mut mouse_clamp_min, mouse_down(col, row));
+    update(&mut mouse_clamp_min, mouse_drag(0, row));
+    let auto_0 =
+        crate::app::grid::automatic_column_width(mouse_clamp_min.visible_result().unwrap(), 0);
+    assert_eq!(
+        mouse_clamp_min.result_grid.width_for(0, auto_0),
+        crate::app::grid::MIN_COLUMN_WIDTH
+    );
+
+    // C: Clamping to MAX_COLUMN_WIDTH on huge positive drag
+    let mut mouse_clamp_max = base.clone();
+    update(&mut mouse_clamp_max, mouse_down(col, row));
+    update(&mut mouse_clamp_max, mouse_drag(col + 200, row));
+    assert_eq!(
+        mouse_clamp_max.result_grid.width_for(0, auto_0),
+        crate::app::grid::MAX_COLUMN_WIDTH
+    );
+}
+
+#[test]
+fn mouse_verb_table_vertical_split_drag_resize() {
+    let mut base = with_tree();
+    base.size = (120, 40);
+
+    let (col, row) = find_region(&base, |r| r == Region::VerticalSplit);
+
+    // A: Normal drag +2 columns
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+    assert!(matches!(
+        mouse_model.mouse.drag,
+        Some(DragTarget::VerticalSplit { .. })
+    ));
+    update(&mut mouse_model, mouse_drag(col + 2, row));
+    update(&mut mouse_model, mouse_up(MouseButton::Left, col + 2, row));
+    assert!(mouse_model.mouse.drag.is_none());
+
+    let mut keyboard_model = base.clone();
+    keyboard_model.focus = Focus::Objects;
+    update(&mut keyboard_model, Message::Action(Action::GrowPane));
+
+    assert_eq!(
+        mouse_model.splits.sidebar_cells,
+        keyboard_model.splits.sidebar_cells
+    );
+
+    // B: Clamp to minimum (20 cells)
+    let mut mouse_min = base.clone();
+    update(&mut mouse_min, mouse_down(col, row));
+    update(&mut mouse_min, mouse_drag(5, row));
+    assert_eq!(mouse_min.splits.sidebar_cells, Some(20));
+
+    // C: Clamp to maximum (60 cells when 120 width available: 60.min(120 - 30) = 60)
+    let mut mouse_max = base.clone();
+    update(&mut mouse_max, mouse_down(col, row));
+    update(&mut mouse_max, mouse_drag(115, row));
+    assert_eq!(mouse_max.splits.sidebar_cells, Some(60));
+}
+
+#[test]
+fn mouse_verb_table_horizontal_split_drag_resize() {
+    let mut base = with_grid(&["id"], &[&[Cell::Text("1".into())]]);
+    base.size = (120, 40);
+
+    let (col, row) = find_region(&base, |r| r == Region::HorizontalSplit);
+
+    // A: Normal drag +1 row
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+    assert!(matches!(
+        mouse_model.mouse.drag,
+        Some(DragTarget::HorizontalSplit { .. })
+    ));
+    update(&mut mouse_model, mouse_drag(col, row + 1));
+    update(&mut mouse_model, mouse_up(MouseButton::Left, col, row + 1));
+    assert!(mouse_model.mouse.drag.is_none());
+
+    let mut keyboard_model = base.clone();
+    keyboard_model.focus = Focus::Editor;
+    update(&mut keyboard_model, Message::Action(Action::GrowPane));
+
+    assert_eq!(
+        mouse_model.splits.editor_rows,
+        keyboard_model.splits.editor_rows
+    );
+
+    // B: Clamp to minimum (3 rows)
+    let mut mouse_min = base.clone();
+    update(&mut mouse_min, mouse_down(col, row));
+    update(&mut mouse_min, mouse_drag(col, 1));
+    assert_eq!(mouse_min.splits.editor_rows, Some(3));
+
+    // C: Clamp to maximum (body height 38 - 3 = 35)
+    let mut mouse_max = base.clone();
+    update(&mut mouse_max, mouse_down(col, row));
+    update(&mut mouse_max, mouse_drag(col, 39));
+    assert_eq!(mouse_max.splits.editor_rows, Some(35));
+}
+
+#[test]
+fn mouse_verb_table_overlay_item_single_and_double_click() {
+    let mut base = connected();
+    base.size = (120, 40);
+    update(&mut base, Message::Action(Action::OpenPalette));
+    assert!(base.palette.is_some());
+    assert_eq!(base.palette.as_ref().unwrap().selected, 0);
+
+    let (col, row) = find_region(&base, |r| r == Region::OverlayItem { index: 1 });
+
+    // Single click: selects overlay item 1
+    let mut mouse_model = base.clone();
+    update(&mut mouse_model, mouse_down(col, row));
+
+    let mut keyboard_model = base.clone();
+    update(
+        &mut keyboard_model,
+        Message::Action(Action::Move(Direction::Down)),
+    );
+
+    assert_eq!(mouse_model.palette.as_ref().unwrap().selected, 1);
+    assert_mouse_keyboard_equivalence(&mouse_model, &keyboard_model);
+
+    // Double click: accepts overlay item 1 (runs Action::Activate)
+    let mut mouse_double = base.clone();
+    update(&mut mouse_double, mouse_down(col, row));
+    mouse_double.advance_mouse_clock(Duration::from_millis(150));
+    update(&mut mouse_double, mouse_down(col, row));
+
+    let mut keyboard_double = keyboard_model.clone();
+    update(&mut keyboard_double, Message::Action(Action::Activate));
+
+    assert_mouse_keyboard_equivalence(&mouse_double, &keyboard_double);
+}
+
+#[test]
+fn mouse_verb_table_wheel_scrolling_preserves_focus() {
+    let row_cells: Vec<Vec<Cell>> = (0..20).map(|i| vec![Cell::Text(i.to_string())]).collect();
+    let row_refs: Vec<&[Cell]> = row_cells.iter().map(|r| r.as_slice()).collect();
+    let mut base = with_grid(&["val"], &row_refs);
+    update(
+        &mut base,
+        Message::SchemasLoaded(Box::new(Ok(vec![
+            schema_summary("s0", 1),
+            schema_summary("s1", 1),
+            schema_summary("s2", 1),
+            schema_summary("s3", 1),
+            schema_summary("s4", 1),
+        ]))),
+    );
+    base.editor
+        .set_text("line1\nline2\nline3\nline4\nline5\nline6");
+    base.editor.set_cursor(0);
+    base.size = (120, 40);
+
+    // 1. Wheel ScrollDown on Results pane while Editor is focused
+    let mut model = base.clone();
+    model.focus = Focus::Editor;
+    let (res_col, res_row) = find_pane(&model, Focus::Results);
+
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollDown, res_col, res_row, false),
+    );
+    assert_eq!(
+        model.focus,
+        Focus::Editor,
+        "mouse wheel preserves editor focus"
+    );
+    assert_eq!(
+        model.selected_row, 3,
+        "scroll down advances selection by 3 rows"
+    );
+
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollUp, res_col, res_row, false),
+    );
+    assert_eq!(
+        model.focus,
+        Focus::Editor,
+        "mouse wheel preserves editor focus"
+    );
+    assert_eq!(model.selected_row, 0, "scroll up steps back by 3 rows");
+
+    // 2. Wheel ScrollDown on Objects pane while Results is focused
+    model.focus = Focus::Results;
+    let (obj_col, obj_row) = find_pane(&model, Focus::Objects);
+
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollDown, obj_col, obj_row, false),
+    );
+    assert_eq!(
+        model.focus,
+        Focus::Results,
+        "mouse wheel preserves results focus"
+    );
+    assert_eq!(
+        model.tree.selected, 3,
+        "scroll down on objects steps by 3 rows"
+    );
+
+    // 3. Wheel ScrollDown on Editor pane while Objects is focused
+    model.focus = Focus::Objects;
+    let (ed_col, ed_row) = find_pane(&model, Focus::Editor);
+
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollDown, ed_col, ed_row, false),
+    );
+    assert_eq!(
+        model.focus,
+        Focus::Objects,
+        "mouse wheel preserves objects focus"
+    );
+    assert_eq!(
+        model.editor.position().0,
+        4,
+        "scroll down on editor moves 3 lines down from line 1 to line 4"
+    );
+}
+
+#[test]
+fn mouse_verb_table_shift_wheel_on_results_scrolls_columns() {
+    let col_names = vec!["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7"];
+    let row_cells: Vec<Cell> = (0..8).map(|i| Cell::Text(i.to_string())).collect();
+    let mut base = with_grid(&col_names, &[&row_cells]);
+    base.size = (120, 40);
+    base.focus = Focus::Editor;
+    base.selected_column = 0;
+    base.result_grid.horizontal_start = 0;
+
+    let (res_col, res_row) = find_pane(&base, Focus::Results);
+
+    let mut model = base.clone();
+    // Shift + ScrollDown on Results steps one visible column forward
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollDown, res_col, res_row, true),
+    );
+    assert_eq!(
+        model.focus,
+        Focus::Editor,
+        "focus is preserved during shift wheel"
+    );
+    assert_eq!(model.selected_column, 1);
+    assert_eq!(model.result_grid.horizontal_start, 1);
+
+    // Shift + ScrollUp on Results steps one visible column backward
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollUp, res_col, res_row, true),
+    );
+    assert_eq!(
+        model.focus,
+        Focus::Editor,
+        "focus is preserved during shift wheel"
+    );
+    assert_eq!(model.selected_column, 0);
+    assert_eq!(model.result_grid.horizontal_start, 0);
+
+    // Shift + wheel over Editor is an ignored no-op
+    let (ed_col, ed_row) = find_pane(&model, Focus::Editor);
+    let before = model.clone();
+    update(
+        &mut model,
+        mouse_wheel(MouseKind::ScrollDown, ed_col, ed_row, true),
+    );
+    assert_eq!(model.editor.position(), before.editor.position());
+    assert_eq!(model.focus, before.focus);
+}
+
+#[test]
+fn mouse_verb_table_unbound_events_and_modifiers_are_no_ops() {
+    let mut base = with_grid(
+        &["id", "name"],
+        &[&[Cell::Text("1".into()), Cell::Text("Alice".into())]],
+    );
+    base.size = (120, 40);
+    base.focus = Focus::Editor;
+
+    let (res_col, res_row) = find_region(&base, |r| matches!(r, Region::ResultsCell { .. }));
+
+    // 1. Click on Header (row 0)
+    let mut model = base.clone();
+    update(&mut model, mouse_down(10, 0));
+    assert_mouse_keyboard_equivalence(&model, &base);
+
+    // 2. Click on Footer (row 39)
+    let mut model = base.clone();
+    update(&mut model, mouse_down(10, 39));
+    assert_mouse_keyboard_equivalence(&model, &base);
+
+    // 3. Right click anywhere
+    let mut model = base.clone();
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Down(MouseButton::Right),
+            column: res_col,
+            row: res_row,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+
+    // 4. Middle click anywhere
+    let mut model = base.clone();
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Down(MouseButton::Middle),
+            column: res_col,
+            row: res_row,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+
+    // 5. Moved (pointer move without button)
+    let mut model = base.clone();
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Moved,
+            column: res_col,
+            row: res_row,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+
+    // 6. Horizontal wheel (ScrollLeft / ScrollRight)
+    let mut model = base.clone();
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::ScrollLeft,
+            column: res_col,
+            row: res_row,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::ScrollRight,
+            column: res_col,
+            row: res_row,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+
+    // 7. Ctrl+click is deliberately ignored everywhere
+    let mut model = base.clone();
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Down(MouseButton::Left),
+            column: res_col,
+            row: res_row,
+            modifiers: mouse_modifiers(false, true, false),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+    assert!(model.mouse.last_click.is_none());
+    assert!(model.mouse.drag.is_none());
+
+    // 8. Alt-click is deliberately ignored everywhere
+    let mut model = base.clone();
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Down(MouseButton::Left),
+            column: res_col,
+            row: res_row,
+            modifiers: mouse_modifiers(false, false, true),
+        },
+    );
+    assert_mouse_keyboard_equivalence(&model, &base);
+    assert!(model.mouse.last_click.is_none());
+    assert!(model.mouse.drag.is_none());
+}
+
+#[test]
+fn mouse_drag_termination_and_resize_cancellation() {
+    let mut base = with_tree();
+    base.size = (120, 40);
+
+    let (col, row) = find_region(&base, |r| r == Region::VerticalSplit);
+
+    // 1. Drag terminates on Up(Left)
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col, row));
+    assert!(model.mouse.drag.is_some());
+    update(&mut model, mouse_up(MouseButton::Left, col + 2, row));
+    assert!(model.mouse.drag.is_none());
+
+    // 2. Drag terminates on Up(Right) (untrusted button)
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col, row));
+    assert!(model.mouse.drag.is_some());
+    update(&mut model, mouse_up(MouseButton::Right, col + 2, row));
+    assert!(model.mouse.drag.is_none());
+
+    // 3. Terminal resize cancels active drag and reclamps splits
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col, row));
+    assert!(model.mouse.drag.is_some());
+    update(&mut model, Message::Resized(100, 30));
+    assert!(model.mouse.drag.is_none());
+    assert_eq!(model.size, (100, 30));
+
+    // 4. Modal overlay cancels drag on next drag event
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col, row));
+    assert!(model.mouse.drag.is_some());
+    update(&mut model, Message::Action(Action::OpenPalette));
+    assert!(model.palette.is_some());
+    update(&mut model, mouse_drag(col + 3, row));
+    assert!(model.mouse.drag.is_none());
+}
+
+#[test]
+fn mouse_double_click_timing_window() {
+    let mut base = with_tree();
+    base.size = (120, 40);
+
+    let (col0, row0) = find_region(&base, |r| r == Region::SidebarRow { index: 0 });
+    let (col1, row1) = find_region(&base, |r| r == Region::SidebarRow { index: 1 });
+
+    // 1. Two clicks at interval <= 400 ms trigger double-click
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col0, row0));
+    assert!(model.mouse.last_click.is_some());
+    assert!(!model.tree.rows()[0].expanded);
+
+    model.advance_mouse_clock(DOUBLE_CLICK_WINDOW); // exactly 400 ms
+    update(&mut model, mouse_down(col0, row0));
+    assert!(model.tree.rows()[0].expanded, "double click expanded node");
+    assert!(
+        model.mouse.last_click.is_none(),
+        "tracker cleared after double click"
+    );
+
+    // 2. Two clicks with interval > 400 ms are two single clicks
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col0, row0));
+    assert_eq!(model.mouse.last_click.unwrap().at, Duration::ZERO);
+
+    model.advance_mouse_clock(DOUBLE_CLICK_WINDOW + Duration::from_millis(1)); // 401 ms
+    update(&mut model, mouse_down(col0, row0));
+    assert!(!model.tree.rows()[0].expanded, "double click did not fire");
+    assert_eq!(
+        model.mouse.last_click.unwrap().at,
+        Duration::from_millis(401),
+        "second click became a new first click"
+    );
+
+    // 3. A third click within 400 ms of the second click triggers double-click
+    model.advance_mouse_clock(Duration::from_millis(200)); // at 601 ms (delta 200 ms)
+    update(&mut model, mouse_down(col0, row0));
+    assert!(
+        model.tree.rows()[0].expanded,
+        "third click completed double click"
+    );
+    assert!(model.mouse.last_click.is_none());
+
+    // 4. Click on a different region resets the tracker
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col0, row0));
+    assert_eq!(
+        model.mouse.last_click.unwrap().region,
+        Region::SidebarRow { index: 0 }
+    );
+    model.advance_mouse_clock(Duration::from_millis(50));
+    update(&mut model, mouse_down(col1, row1));
+    assert!(!model.tree.rows()[0].expanded);
+    assert_eq!(
+        model.mouse.last_click.unwrap().region,
+        Region::SidebarRow { index: 1 }
+    );
+
+    // 5. Non-mouse user event (e.g. Pasted) clears the tracker
+    let mut model = base.clone();
+    update(&mut model, mouse_down(col0, row0));
+    assert!(model.mouse.last_click.is_some());
+    update(&mut model, Message::Pasted("text".into()));
+    assert!(model.mouse.last_click.is_none());
+}
+
+#[test]
+fn every_interactive_capability_is_reachable_by_keyboard_with_mouse_off() {
+    // Verify configuration contract: ui.mouse = false is a valid opt-out.
+    let mut config = crate::config::Config::default();
+    config.ui.mouse = false;
+    assert!(config.validate().is_empty(), "ui.mouse = false is valid");
+    assert!(!config.ui.mouse, "mouse capture is disabled");
+
+    // With mouse disabled, zero Message::Mouse events are sent by runtime.
+    // Every interactive capability from the mouse verb table is exercised
+    // purely through Message::Action keyboard routes.
+    let mut model = with_grid(
+        &["id", "name", "email"],
+        &[
+            &[
+                Cell::Text("1".into()),
+                Cell::Text("Alice".into()),
+                Cell::Text("a@example.com".into()),
+            ],
+            &[
+                Cell::Text("2".into()),
+                Cell::Text("Bob".into()),
+                Cell::Text("b@example.com".into()),
+            ],
+            &[
+                Cell::Text("3".into()),
+                Cell::Text("Charlie".into()),
+                Cell::Text("c@example.com".into()),
+            ],
+            &[
+                Cell::Text("4".into()),
+                Cell::Text("Dana".into()),
+                Cell::Text("d@example.com".into()),
+            ],
+        ],
+    );
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![
+            schema_summary("public", 1),
+            schema_summary("reporting", 0),
+        ]))),
+    );
+    model.size = (120, 40);
+
+    // 1. Focus cycling across all panes
+    assert_eq!(model.focus, Focus::Results);
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Objects);
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Editor);
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Results);
+
+    // 2. Sidebar tree navigation, expansion, and table activation
+    model.focus = Focus::Objects;
+    assert_eq!(model.tree.selected, 0);
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(model.tree.selected, 1);
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(model.tree.selected, 0);
+    assert!(!model.tree.rows()[0].expanded);
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.tree.rows()[0].expanded, "schema expanded via Enter");
+
+    // Load table metadata and activate table to insert SQL
+    let mut table_model = with_selected_table();
+    table_model.size = (120, 40);
+    assert_eq!(table_model.focus, Focus::Objects);
+    update(&mut table_model, Message::Action(Action::Activate));
+    assert_eq!(table_model.focus, Focus::Editor);
+    assert_eq!(table_model.editor.text(), "\"public\".\"orders\"");
+
+    // 3. Editor text editing and caret movement
+    update(&mut table_model, Message::Action(Action::Insert(';')));
+    assert!(table_model.editor.text().ends_with(';'));
+    update(
+        &mut table_model,
+        Message::Action(Action::Move(Direction::Left)),
+    );
+    update(
+        &mut table_model,
+        Message::Action(Action::Move(Direction::Right)),
+    );
+
+    // 4. Results grid navigation
+    model.focus = Focus::Results;
+    model.selected_row = 0;
+    model.selected_column = 0;
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(model.selected_row, 1);
+    update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert_eq!(model.selected_column, 1);
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(model.selected_row, 0);
+    update(&mut model, Message::Action(Action::Move(Direction::Left)));
+    assert_eq!(model.selected_column, 0);
+
+    // 5. Results cell inspection
+    assert!(model.inspector.is_none());
+    update(&mut model, Message::Action(Action::ToggleInspector));
+    assert!(
+        model.inspector.is_some(),
+        "inspector opened via keyboard toggle"
+    );
+    update(&mut model, Message::Action(Action::ToggleInspector));
+    assert!(
+        model.inspector.is_none(),
+        "inspector closed via keyboard toggle"
+    );
+
+    // 6. Results column sorting
+    assert!(model.result_grid.sort.is_none());
+    apply_grid_command(&mut model, GridCommand::SortSelected);
+    assert!(
+        matches!(
+            model.result_grid.sort,
+            Some(crate::app::grid::SortSpec {
+                column: 0,
+                direction: crate::app::grid::SortDirection::Ascending
+            })
+        ),
+        "sort ascending via grid command"
+    );
+    apply_grid_command(&mut model, GridCommand::SortSelected);
+    assert!(
+        matches!(
+            model.result_grid.sort,
+            Some(crate::app::grid::SortSpec {
+                column: 0,
+                direction: crate::app::grid::SortDirection::Descending
+            })
+        ),
+        "sort descending via grid command"
+    );
+    apply_grid_command(&mut model, GridCommand::SortSelected);
+    assert!(
+        model.result_grid.sort.is_none(),
+        "sort cleared via grid command"
+    );
+
+    // 7. Results column resizing
+    let auto_0 = crate::app::grid::automatic_column_width(model.visible_result().unwrap(), 0);
+    let initial_width = model.result_grid.width_for(0, auto_0);
+    update(&mut model, Message::Action(Action::WidenColumn));
+    let widened = model.result_grid.width_for(0, auto_0);
+    assert_eq!(widened, initial_width + 2, "column widened by step 2");
+    update(&mut model, Message::Action(Action::NarrowColumn));
+    let narrowed = model.result_grid.width_for(0, auto_0);
+    assert_eq!(narrowed, initial_width, "column narrowed back by step 2");
+
+    // 8. Split resizing
+    // Sidebar split via GrowPane/ShrinkPane when Objects is focused
+    model.focus = Focus::Objects;
+    let initial_sidebar_width = crate::ui::layout::pane_geometry(
+        &model,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    )
+    .objects
+    .unwrap()
+    .width;
+    update(&mut model, Message::Action(Action::GrowPane));
+    assert_eq!(
+        model.splits.sidebar_cells,
+        Some(initial_sidebar_width + 2),
+        "sidebar split grown by keyboard"
+    );
+    update(&mut model, Message::Action(Action::ShrinkPane));
+    assert_eq!(
+        model.splits.sidebar_cells,
+        Some(initial_sidebar_width),
+        "sidebar split shrunk by keyboard"
+    );
+
+    // Editor split via GrowPane/ShrinkPane when Editor is focused
+    model.focus = Focus::Editor;
+    let initial_editor_height = crate::ui::layout::pane_geometry(
+        &model,
+        ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1),
+    )
+    .editor
+    .unwrap()
+    .height;
+    update(&mut model, Message::Action(Action::GrowPane));
+    assert_eq!(
+        model.splits.editor_rows,
+        Some(initial_editor_height + 1),
+        "editor split grown by keyboard"
+    );
+    update(&mut model, Message::Action(Action::ShrinkPane));
+    assert_eq!(
+        model.splits.editor_rows,
+        Some(initial_editor_height),
+        "editor split shrunk by keyboard"
+    );
+
+    // 9. Command palette overlay navigation and activation
+    assert!(model.palette.is_none());
+    update(&mut model, Message::Action(Action::OpenPalette));
+    assert!(model.palette.is_some(), "palette opened via keyboard");
+    assert_eq!(model.palette.as_ref().unwrap().selected, 0);
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(
+        model.palette.as_ref().unwrap().selected,
+        1,
+        "palette item selected via arrows"
+    );
+    update(&mut model, Message::Action(Action::Activate));
+    if model.notice_details.is_some() || model.connection_details || model.help_open {
+        update(&mut model, Message::Action(Action::Dismiss));
+    }
+
+    // 10. Vertical paging in Results
+    model.focus = Focus::Results;
+    model.selected_row = 0;
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    assert!(model.selected_row > 0, "page down moved selection");
+    update(&mut model, Message::Action(Action::MovePage(Direction::Up)));
+    assert_eq!(model.selected_row, 0, "page up restored selection");
+
+    // 11. Column window stepping
+    assert_eq!(model.result_grid.horizontal_start, 0);
+    update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert_eq!(
+        model.result_grid.horizontal_start, 1,
+        "right arrow stepped column window"
+    );
+    update(&mut model, Message::Action(Action::Move(Direction::Left)));
+    assert_eq!(
+        model.result_grid.horizontal_start, 0,
+        "left arrow stepped column window back"
+    );
+}

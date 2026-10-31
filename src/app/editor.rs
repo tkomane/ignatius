@@ -107,6 +107,21 @@ impl Editor {
         self.cursor = self.clamp_to_boundary(byte_offset);
     }
 
+    /// Places the caret at one-based `(line, column)` character coordinates
+    /// without adding undo history.
+    pub fn set_position(&mut self, line: usize, column: usize) {
+        let start = if line <= 1 {
+            0
+        } else {
+            self.text
+                .match_indices('\n')
+                .nth(line - 2)
+                .map_or(self.text.len(), |(index, _)| index + 1)
+        };
+        let offset = self.offset_in_line(start, column.saturating_sub(1));
+        self.set_cursor(offset);
+    }
+
     /// Records that the buffer now matches something on disk.
     pub const fn mark_saved(&mut self) {
         self.modified = false;

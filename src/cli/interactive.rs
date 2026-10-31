@@ -749,6 +749,7 @@ async fn event_loop(
 
     let result=async {
     draw(&mut terminal, &mut model, &keymap)?;
+    let mut last_mouse_at = std::time::Instant::now();
 
     loop {
         for (index,pending) in pending_installs.iter_mut().enumerate() {
@@ -774,6 +775,11 @@ async fn event_loop(
             },
             message=rx.recv()=>match message {Some(message)=>message,None=>break},
         };
+        if matches!(message, Message::Mouse { .. }) {
+            let now = std::time::Instant::now();
+            model.advance_mouse_clock(now.saturating_duration_since(last_mouse_at));
+            last_mouse_at = now;
+        }
         poll_notice_sources(&mut model,&session,&metadata).await;
         let effects = reduce_terminal_input(&terminal, &mut model, message)?;
         for effect in effects {
@@ -1210,6 +1216,11 @@ fn reduce_input_with_size(
             let size = read_size()?;
             synchronize_model_size(model, size.width, size.height);
             Ok(Vec::new())
+        }
+        Message::Mouse { .. } => {
+            let size = read_size()?;
+            synchronize_model_size(model, size.width, size.height);
+            Ok(update(model, message))
         }
         message => Ok(update(model, message)),
     }
