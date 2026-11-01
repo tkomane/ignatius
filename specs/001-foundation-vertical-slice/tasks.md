@@ -135,13 +135,15 @@ when the behaviour exists and a test or recorded evidence proves it.
   Separate retained-row behavior, pre-retention driver allocation, notice-count
   growth and complete streaming output; record peak RSS, byte/row counts,
   medians/ranges and failures without inventing a whole-process ceiling.
-- [ ] W10-008 Use W10-007 evidence to specify distinct operational bounds for
+- [x] W10-008 Use W10-007 evidence to specify distinct operational bounds for
   notice retention, aggregate retained-result bytes and incoming frame/value
   allocation, including truthful refusal, unknown-outcome and recovery wording.
   Identify a real slow-export-sink measurement seam; a slow server is not a slow
   sink. Add each implementation task only after its relevant complete contract
   agrees. A bounded notice slice alone cannot close the complete W10 memory
-  requirement.
+  requirement. Specified across `contracts/notice-retention.md` (`W10-012`),
+  `contracts/retained-result-data.md` (`W10-013`), and
+  `contracts/operational-resource-bounds.md` (`W10-008`).
 - [x] W10-009 Repair the measured silent buffered-query truncation route:
   CSV/TSV/NDJSON/Markdown/INSERT must report retained versus received counts on
   stderr without changing data bytes, success exit codes or automatically

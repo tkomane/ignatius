@@ -9039,3 +9039,329 @@ fn every_interactive_capability_is_reachable_by_keyboard_with_mouse_off() {
         "left arrow stepped column window back"
     );
 }
+
+#[test]
+fn w02_rapid_multi_switch_generation_race_ignores_stale_catalog_and_failure() {
+    let mut model = connected();
+    let g0 = model.connection_generation;
+
+    // First switch initiated
+    begin_connection(&mut model, Some("profile-a".into()));
+    let g1 = model.connection_generation;
+    assert!(g1 > g0, "generation advanced on switch to profile-a");
+
+    // Profile-a fails to connect
+    update(
+        &mut model,
+        Message::ForConnection {
+            generation: g1,
+            message: Box::new(Message::ConnectionFailed(Box::new(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "failed to connect to profile-a",
+                "profile-a",
+            )))),
+        },
+    );
+    assert!(model.error.is_some());
+
+    // Second switch initiated
+    begin_connection(&mut model, Some("profile-b".into()));
+    let g2 = model.connection_generation;
+    assert!(g2 > g1, "generation advanced on switch to profile-b");
+
+    // Stale catalog response arrives from generation 0
+    let stale_catalog = update(
+        &mut model,
+        Message::ForConnection {
+            generation: g0,
+            message: Box::new(Message::SchemasLoaded(Box::new(Ok(vec![schema_summary(
+                "stale_schema",
+                1,
+            )])))),
+        },
+    );
+    assert!(
+        stale_catalog.is_empty(),
+        "stale catalog produces no effects"
+    );
+    assert!(
+        !model
+            .tree
+            .rows()
+            .iter()
+            .any(|r| r.label.contains("stale_schema")),
+        "stale catalog is ignored and not loaded into tree"
+    );
+
+    // Stale connection failure arrives from generation 1
+    let stale_failure = update(
+        &mut model,
+        Message::ForConnection {
+            generation: g1,
+            message: Box::new(Message::ConnectionFailed(Box::new(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "stale connection failure from profile-a",
+                "profile-a",
+            )))),
+        },
+    );
+    assert!(
+        stale_failure.is_empty(),
+        "stale failure produces no effects"
+    );
+
+    // Current connection succeeds for generation 2
+    let current_effects = update(
+        &mut model,
+        Message::ForConnection {
+            generation: g2,
+            message: Box::new(Message::Connected(session())),
+        },
+    );
+    assert!(current_effects.is_empty());
+    assert_eq!(model.connection_generation, g2);
+    assert!(
+        matches!(model.connection, ConnectionState::Connected(_)),
+        "generation 2 is connected"
+    );
+    assert!(
+        model.error.is_none(),
+        "error was cleared by successful connection"
+    );
+    assert!(
+        !model
+            .tree
+            .rows()
+            .iter()
+            .any(|r| r.label.contains("stale_schema")),
+        "tree remains uncontaminated by stale catalog"
+    );
+
+    // Stale failure arriving after connection is also rejected
+    let stale_late_failure = update(
+        &mut model,
+        Message::ForConnection {
+            generation: g1,
+            message: Box::new(Message::ConnectionFailed(Box::new(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "stale late failure from profile-a",
+                "profile-a",
+            )))),
+        },
+    );
+    assert!(
+        stale_late_failure.is_empty(),
+        "stale late failure produces no effects"
+    );
+    assert!(
+        model.error.is_none(),
+        "stale failure does not clobber connection state"
+    );
+}
+
+#[test]
+fn w02_cancellation_interrupted_by_disconnect_recovers_to_idle_for_next_run() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected execute effect, got {effects:?}");
+    };
+    let running_job = *job;
+    assert!(matches!(model.phase, QueryPhase::Running { job, .. } if job == running_job));
+    assert!(model.running_for.is_some());
+
+    let cancel_effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(
+        matches!(cancel_effects.as_slice(), [Effect::Cancel { job }] if *job == running_job),
+        "cancel emitted cancel effect for running job"
+    );
+    assert!(matches!(
+        model.phase,
+        QueryPhase::CancellationRequested { job } if job == running_job
+    ));
+
+    // Disconnect interrupts the pending cancellation
+    let disconnect_effects = update(&mut model, Message::ConnectionLost);
+    assert!(disconnect_effects.is_empty());
+    assert_eq!(model.phase, QueryPhase::Idle, "phase recovered to idle");
+    assert!(model.running_for.is_none(), "running_for cleared");
+    assert!(matches!(model.connection, ConnectionState::Lost { .. }));
+
+    // Late execution finish arrives after disconnect
+    let late_execution = execution(running_job, ExecutionStatus::Cancelled, &[]);
+    let late_effects = update(&mut model, Message::ExecutionFinished(late_execution));
+    assert!(late_effects.is_empty(), "late execution finish ignored");
+    assert!(
+        model.last_execution.is_none(),
+        "last execution was not updated"
+    );
+    assert_eq!(model.phase, QueryPhase::Idle);
+
+    // Reconnect and verify ready for the next run
+    update(&mut model, Message::Connected(session()));
+    assert!(matches!(model.connection, ConnectionState::Connected(_)));
+    assert_eq!(model.phase, QueryPhase::Idle);
+
+    model.editor.set_text("SELECT 2;");
+    let next_effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job: next_job, .. }] = next_effects.as_slice() else {
+        panic!("expected next run execution effect, got {next_effects:?}");
+    };
+    assert_ne!(*next_job, running_job, "allocated a fresh job id");
+    assert!(matches!(model.phase, QueryPhase::Running { job, .. } if job == *next_job));
+}
+
+#[test]
+fn w02_pending_destructive_review_cleared_on_disconnect_cannot_execute() {
+    let mut model = connected();
+    let mut info = session();
+    info.environment = Environment::Production;
+    update(&mut model, Message::Connected(info));
+
+    model.editor.set_text("DROP TABLE customers;");
+    let initial_effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(
+        initial_effects.is_empty(),
+        "destructive query is gated behind review"
+    );
+    assert!(
+        model.pending_run.is_some(),
+        "pending run confirmation exists"
+    );
+
+    // Connection is lost while review is pending
+    let disconnect_effects = update(&mut model, Message::ConnectionLost);
+    assert!(disconnect_effects.is_empty());
+    assert!(
+        model.pending_run.is_none(),
+        "pending run was cleared by disconnect"
+    );
+    assert_eq!(model.phase, QueryPhase::Idle);
+
+    // Attempting to confirm / activate review cannot execute anything
+    let activate_effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(
+        activate_effects.is_empty(),
+        "cannot activate cleared review"
+    );
+    assert!(
+        !activate_effects
+            .iter()
+            .any(|e| matches!(e, Effect::Execute { .. })),
+        "no execute effect dispatched"
+    );
+    assert_eq!(model.phase, QueryPhase::Idle);
+
+    // Reconnecting does not resurrect the pending review
+    update(&mut model, Message::Connected(session()));
+    assert!(
+        model.pending_run.is_none(),
+        "pending run remains none after reconnect"
+    );
+    let after_reconnect = update(&mut model, Message::Action(Action::Activate));
+    assert!(after_reconnect.is_empty());
+    assert!(
+        !after_reconnect
+            .iter()
+            .any(|e| matches!(e, Effect::Execute { .. })),
+        "no execute effect dispatched after reconnect"
+    );
+}
+
+#[test]
+fn w02_result_grid_selection_clamps_on_smaller_result_and_compact_resize() {
+    let rows: Vec<Vec<Cell>> = (0..10)
+        .map(|i| {
+            vec![
+                Cell::Text(format!("row_{i}_c0")),
+                Cell::Text(format!("row_{i}_c1")),
+                Cell::Text(format!("row_{i}_c2")),
+            ]
+        })
+        .collect();
+    let row_slices: Vec<&[Cell]> = rows.iter().map(|r| r.as_slice()).collect();
+    let mut model = with_grid(&["col0", "col1", "col2"], &row_slices);
+    model.focus = Focus::Results;
+    model.selected_row = 8;
+    model.selected_column = 2;
+
+    model.phase = QueryPhase::Running {
+        job: JobId(2),
+        statements: 1,
+    };
+    let small_exec = execution(JobId(2), ExecutionStatus::Succeeded, &["single_val"]);
+    update(&mut model, Message::ExecutionFinished(small_exec));
+
+    assert_eq!(
+        model.selected_row, 0,
+        "selection clamped/reset to 0 on new result"
+    );
+    assert_eq!(model.selected_column, 0, "selected column reset to 0");
+
+    // Resize to compact terminal size
+    update(&mut model, Message::Resized(50, 12));
+    assert_eq!(model.size, (50, 12));
+
+    // Render frame to verify no panics in compact layout
+    let rendered = crate::ui::layout::render_to_string(
+        &model,
+        &crate::ui::Keymap::new(),
+        &model.presentation,
+        50,
+        12,
+    );
+    assert!(
+        !rendered.is_empty(),
+        "frame rendered successfully in compact mode"
+    );
+}
+
+#[test]
+fn w02_refresh_while_cell_update_lookup_in_flight_invalidates_stale_lookup() {
+    let mut model = cell_update_model();
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("expected LoadUpdateTarget effect, got {effects:?}");
+    };
+    let lookup_request = *request;
+    assert!(model.update_lookup.is_some());
+
+    // User triggers a refresh while lookup is still in flight
+    let refresh_effects = update(&mut model, Message::Action(Action::RefreshResult));
+    assert!(
+        model.update_lookup.is_none(),
+        "refresh clears in-flight update lookup"
+    );
+    assert!(model.running_refresh, "model is running refresh");
+    assert!(
+        matches!(refresh_effects.as_slice(), [Effect::Execute { .. }]),
+        "refresh dispatches execution: {refresh_effects:?}"
+    );
+
+    // Stale lookup response arrives
+    let stale_effects = update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: lookup_request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    assert!(stale_effects.is_empty(), "stale lookup produces no effects");
+    assert!(
+        model.update_prompt.is_none(),
+        "stale lookup does not open prompt"
+    );
+
+    // Finish the refresh query cleanly
+    let refresh_job = match model.phase {
+        QueryPhase::Running { job, .. } => job,
+        ref other => panic!("expected running query phase, got {other:?}"),
+    };
+    let exec = execution(refresh_job, ExecutionStatus::Succeeded, &["7"]);
+    update(&mut model, Message::ExecutionFinished(exec));
+    assert_eq!(model.phase, QueryPhase::Idle);
+    assert!(!model.running_refresh);
+    assert!(model.update_prompt.is_none());
+}
