@@ -1,13 +1,16 @@
 # Status
 
-**Updated: 2026-10-31.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-02.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Feature 025 completion and documentation parity - 31 October 2026
+## Feature 025 completion and W02/W03/W04/W06/W10/W11/W13 waves - 2 November 2026
 
-Resume from `main`. Feature `025-gui-grade-experience` Waves 1, 2 and 3 have
-completed implementation, independent adversarial review, and full verification:
+Resume from `main`. All six waves of Feature `025-gui-grade-experience` and the
+cross-cutting `W02`, `W03`, `W04`, `W06`, `W10-008`, `W11` and `W13` packages
+have completed implementation, independent adversarial review, full local
+verification (`cargo --locked xtask verify`), and hosted GitHub Actions CI +
+CodeQL merge into `main`:
 
 - **Wave 1 ([PR41](https://github.com/tkomane/ignatius/pull/41), merged at `9f68cb3`)**:
   delivered US8 quiet chrome capsules and `200 ms` elapsed gating (`T042-T043`),
@@ -22,7 +25,8 @@ completed implementation, independent adversarial review, and full verification:
   by default with `Shift` terminal-selection guidance in `F1` help, PTY capture
   sequence restoration in `tests/terminal_restore.rs`, and full keyboard-only
   reachability proof with `ui.mouse = false`.
-- **Wave 3 (`T046-T051`)**: amended the six narrative design documents
+- **Wave 3 ([PR43](https://github.com/tkomane/ignatius/pull/43), merged at `7f8a95e`)**:
+  amended the six narrative design documents
   (`docs/design/theme-tokens.md`, `docs/design/terminal-compatibility.md`,
   `docs/design/icons-and-motion.md`, `docs/design/interaction-principles.md`,
   `docs/design/information-architecture.md`, `docs/design/keymap.md`), updated
@@ -30,38 +34,65 @@ completed implementation, independent adversarial review, and full verification:
   `docs/product/journeys.md`, `docs/security/data-handling.md` and
   `CHANGELOG.md`, and added `gui_grade_experience_documentation_matches_the_build_and_quickstart`
   in `tests/documentation_matches_the_build.rs`.
+- **Wave 5 ([PR44](https://github.com/tkomane/ignatius/pull/44), merged at `f52d8b7`)**:
+  specified `W10-008` distinct operational resource bounds in
+  `specs/001-foundation-vertical-slice/contracts/operational-resource-bounds.md`;
+  fixed `Message::ConnectionLost` in `src/app/update.rs` to clear `model.running_for`
+  unconditionally; added 5 `W02` cross-feature interleaving reducer tests in
+  `src/app/update/tests.rs`; extracted `src/query/parameters/tests.rs` sidecar
+  and added 3 `W03` live PostgreSQL adversarial SQL tests in
+  `tests/postgres_integration.rs`; and added 3 `W04` runtime privacy subprocess
+  contract tests in `tests/runtime_privacy_contract.rs`.
+- **Wave 4 ([PR46](https://github.com/tkomane/ignatius/pull/46), merged at `dd7027c`)**:
+  completed Feature `025-gui-grade-experience` Phase 7 (`T028`, `T028b`, `T032`)
+  for `ui.theme = "auto"`, including the OSC 11 reply parser (BEL and ST
+  terminators, 1-to-4-hex-digit channel scaling, noise resilience), WCAG
+  relative luminance selection (`Light` at `>= 0.5`, `Dark` otherwise), staged
+  terminal lifecycle (`TerminalGuard::acquire_raw` -> 100 ms OSC 11 probe +
+  drain -> `enter_full_screen`), `Osc11LateReplyFilter` on the input thread, and
+  `ignatius doctor` theme reporting. Every task in
+  `specs/025-gui-grade-experience/tasks.md` is now checked `[x]`.
+- **Wave 6 ([PR45](https://github.com/tkomane/ignatius/pull/45), merged at `8087ff6`)**:
+  extracted `src/connection/cloud/tests.rs` sidecar and added 5 `W06`
+  cross-platform cloud-provider subprocess tests (21 total in
+  `connection::cloud::tests`); added 2 `W11` end-to-end CLI contract tests in
+  `tests/release_contract.rs` for `xtask release sbom` and `trust verify`; and
+  documented `W11`/`W13` release trust verification and vulnerability triage
+  runbooks in `docs/operations/release.md` and
+  `docs/architecture/decisions/0008-packaging-and-release.md`.
 
-### Separated verification evidence (31 October 2026)
+### Separated verification evidence (2 November 2026)
 
-- **What focused unit and contract tests proved (`T049`)**:
+- **What focused unit and contract tests proved (`T049`, `T028`, `T028b`, `T032`, `W02`, `W03`, `W04`, `W06`, `W11`)**:
   - `cargo fmt --all -- --check`: pass.
   - `cargo test --locked --lib ui::widgets`: 106 passed.
-  - `cargo test --locked --lib ui::theme`: 44 passed.
+  - `cargo test --locked --lib ui::theme`: 87 passed (including 10 OSC 11 parser & luminance tests).
+  - `cargo test --locked --lib ui::terminal`: 26 passed (including 10 staged-guard, probe/drain, and `Osc11LateReplyFilter` tests).
+  - `cargo test --locked --lib diagnostics::doctor`: 14 passed (including 4 `theme` auto check tests).
   - `cargo test --locked --lib ui::layout`: 114 passed.
   - `cargo test --locked --lib paste`: 27 passed.
   - `cargo test --locked --lib app::update::tests::mouse`: 15 passed.
-  - `cargo test --locked --lib every_interactive_capability_is_reachable_by_keyboard_with_mouse_off`: 1 passed.
-  - `cargo test --locked --lib app::update::tests::manual_theme`: 8 passed (21 across `manual_theme` lib filter).
-  - `cargo test --locked --lib app::grid`: 18 passed.
-  - `cargo test --locked --lib app::update::tests::connecting_steps`: 1 passed (11 across `connecting` lib filter).
-  - `cargo test --locked --lib config`: 83 passed.
+  - `cargo test --locked --lib app::update::tests::w02_`: 5 passed.
+  - `cargo test --locked --lib query::parameters::tests`: 7 passed.
+  - `cargo test --locked --lib connection::cloud::tests`: 21 passed.
+  - `cargo test --locked --test runtime_privacy_contract`: 8 passed.
+  - `cargo test --locked --test release_contract`: 16 passed.
+  - `cargo test --locked --test theme_contract`: 4 passed.
   - `cargo test --locked --test documentation_matches_the_build`: 16 passed.
   - Normal-hyphen prose scan (`T051`): 0 em dashes or en dashes across all modified files.
 - **What the full local suite proved (`T050`, `cargo --locked xtask verify`)**:
   - `formatting`: pass.
   - `lints`: pass (`cargo clippy --locked --all-targets -- -D warnings`).
   - `API documentation`: pass.
-  - `workspace tests`: pass (1,261 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 16, `postgres_integration` 72, `release_contract` 14, `runtime_privacy_contract` 5, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
+  - `workspace tests`: pass (1,294 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 16, `postgres_integration` 75, `release_contract` 16, `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
   - `documentation tests`: pass.
-  - `cargo xtask db down` and `cargo xtask db status`: verified container and network teardown (`Stopped. Its data is gone`) and post-teardown status (`Not running. Start it with cargo xtask db up.`).
 - **What live PostgreSQL, PTY and hosted CI evidence proved**:
-  - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain (`127.0.0.1:55432`) and TLS (`localhost:55433`): all database-backed integration tests passed.
+  - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain (`127.0.0.1:55432`) and TLS (`localhost:55433`): all 75 database-backed integration tests passed (including `W03` adversarial parameter-boundary, concurrent-modification, and `standard_conforming_strings=off` refusal tests).
   - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 restoration tests passed, including balanced mouse capture enable/disable (`ESC[?1000h` / `ESC[?1000l`) and alternate-screen-last ordering.
-  - Hosted GitHub Actions on PR41 (`9f68cb3`) and PR42 (`743683e`): all 16 executed jobs passed (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
+  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), and PR45 (`8087ff6`): all 17 executed checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
 - **What remains unverified or open (reported separately, never merged with passes)**:
   - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI is not set`); covered by the hosted Linux `PostgreSQL 18 Unix socket` CI job.
-  - Phase 7 automatic OSC 11 background luminance probe (`T028`, `T028b`, `T032`): implemented in Wave 4 (`ui.theme = "auto"`, 100 ms raw-mode OSC 11 probe + drain before alternate-screen entry, `Osc11LateReplyFilter`, and `doctor` theme check); native terminal emulator OSC 11 hand verification remains open alongside `W08`.
-  - Native terminal emulator visual appearance, screen-reader hand use, Windows 11 / ConPTY interactive hand use (`W07`), live cloud-provider authentication journeys, release-build p95 latency/memory ceilings (`W10`), and release signing/publication (`W11`) remain open.
+  - Native terminal emulator visual appearance and OSC 11 hand verification (`W08`), screen-reader hand use (`007 T032`), Windows 11 / ConPTY interactive hand use (`001 T051`, `001 T055a`, `W07-064`), Linux full-screen hand use (`001 T052`), live cloud-provider account authentication journeys (`W06`), release-build p95 latency/memory ceilings (`W10`), and owner-gated release candidate assembly/signing/publication (`008 T033`, `008 T035`, `W12`, `W14`) remain open.
 
 ## Consolidated baseline - 26 October 2026
 
