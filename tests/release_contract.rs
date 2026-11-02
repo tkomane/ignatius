@@ -2876,3 +2876,467 @@ fn deterministic_archive_creation_repeats_identical_bytes_for_each_format() {
         }
     }
 }
+
+fn base64_encode_contract(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(triple >> 18) & 0x3f] as char);
+        out.push(TABLE[(triple >> 12) & 0x3f] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(triple >> 6) & 0x3f] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[triple & 0x3f] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn sha256_digest_contract(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+
+    let mut h = [
+        0x6a09e667u32,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
+    ];
+
+    let mut msg = data.to_vec();
+    let bit_len = (data.len() as u64) * 8;
+    msg.push(0x80);
+    while !(msg.len() + 8).is_multiple_of(64) {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in msg.as_chunks::<64>().0 {
+        let mut w = [0u32; 64];
+        for (i, b) in chunk.as_chunks::<4>().0.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*b);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+
+        let mut a = h[0];
+        let mut b = h[1];
+        let mut c = h[2];
+        let mut d = h[3];
+        let mut e = h[4];
+        let mut f = h[5];
+        let mut g = h[6];
+        let mut h_val = h[7];
+
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = h_val
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            h_val = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(h_val);
+    }
+
+    let mut out = [0u8; 32];
+    for (i, val) in h.iter().enumerate() {
+        out[i * 4..(i + 1) * 4].copy_from_slice(&val.to_be_bytes());
+    }
+    out
+}
+
+fn fixture_digest_for_contract(bytes: &[u8]) -> (String, String) {
+    let digest = sha256_digest_contract(bytes);
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let b64 = base64_encode_contract(&digest);
+    (hex, b64)
+}
+
+#[test]
+fn w11_sbom_generate_and_verify_cli_roundtrips_and_detects_tampered_lockfile_hash() {
+    let temp = tempdir().expect("temporary directory");
+    let lockfile_source = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock");
+    let lockfile_copy = temp.path().join("Cargo.lock");
+    fs::copy(&lockfile_source, &lockfile_copy).expect("copy Cargo.lock");
+
+    let sbom_path = temp.path().join("ignatius.cdx.json");
+
+    let generate = run_xtask(vec![
+        "release".to_owned(),
+        "sbom".to_owned(),
+        "generate".to_owned(),
+        format!("--lockfile={}", lockfile_copy.display()),
+        format!("--out={}", sbom_path.display()),
+    ]);
+    let generate_text = output_text(&generate);
+    assert!(
+        generate.status.success(),
+        "release sbom generate failed: {generate_text}"
+    );
+    assert!(
+        generate_text.contains("SBOM: recorded"),
+        "expected SBOM generation summary: {generate_text}"
+    );
+    assert!(sbom_path.exists(), "generated SBOM file must exist");
+
+    let verify = run_xtask(vec![
+        "release".to_owned(),
+        "sbom".to_owned(),
+        "verify".to_owned(),
+        format!("--lockfile={}", lockfile_copy.display()),
+        format!("--sbom={}", sbom_path.display()),
+    ]);
+    let verify_text = output_text(&verify);
+    assert!(
+        verify.status.success(),
+        "release sbom verify failed on clean roundtrip: {verify_text}"
+    );
+    assert!(
+        verify_text.contains("matches"),
+        "expected match confirmation: {verify_text}"
+    );
+
+    let original_sbom_bytes = fs::read(&sbom_path).expect("read original sbom");
+    let mut tampered_sbom = original_sbom_bytes.clone();
+    tampered_sbom[12] ^= 0x01;
+    fs::write(&sbom_path, &tampered_sbom).expect("write tampered sbom");
+
+    let verify_tampered_sbom = run_xtask(vec![
+        "release".to_owned(),
+        "sbom".to_owned(),
+        "verify".to_owned(),
+        format!("--lockfile={}", lockfile_copy.display()),
+        format!("--sbom={}", sbom_path.display()),
+    ]);
+    let tampered_sbom_text = output_text(&verify_tampered_sbom);
+    assert!(
+        !verify_tampered_sbom.status.success(),
+        "release sbom verify must fail on tampered SBOM"
+    );
+    assert!(
+        tampered_sbom_text.contains("does not match")
+            && tampered_sbom_text.contains("first difference at byte"),
+        "expected difference diagnostic on tampered SBOM: {tampered_sbom_text}"
+    );
+
+    fs::write(&sbom_path, &original_sbom_bytes).expect("restore original sbom");
+
+    let original_lock_text = fs::read_to_string(&lockfile_copy).expect("read original lock");
+    let needle = "name = \"ignatius\"";
+    assert!(
+        original_lock_text.contains(needle),
+        "Cargo.lock must contain product name"
+    );
+    let tampered_lock_text = original_lock_text.replacen(needle, "name = \"ignatiux\"", 1);
+    fs::write(&lockfile_copy, &tampered_lock_text).expect("write tampered lock");
+
+    let verify_tampered_lock = run_xtask(vec![
+        "release".to_owned(),
+        "sbom".to_owned(),
+        "verify".to_owned(),
+        format!("--lockfile={}", lockfile_copy.display()),
+        format!("--sbom={}", sbom_path.display()),
+    ]);
+    let tampered_lock_text = output_text(&verify_tampered_lock);
+    assert!(
+        !verify_tampered_lock.status.success(),
+        "release sbom verify must fail on tampered lockfile"
+    );
+    assert!(
+        tampered_lock_text.contains("does not match")
+            && tampered_lock_text.contains("first difference at byte"),
+        "expected difference diagnostic on tampered lockfile: {tampered_lock_text}"
+    );
+}
+
+#[test]
+fn w11_trust_verify_cli_validates_complete_bundle_and_refuses_tampered_sidecars() {
+    let temp = tempdir().expect("temporary directory");
+    let bundle_dir = temp.path().join("bundle");
+    fs::create_dir_all(&bundle_dir).expect("create bundle dir");
+
+    let payload = b"synthetic release archive payload for trust verification\n";
+    let (hex, b64) = fixture_digest_for_contract(payload);
+
+    let archive_name = "ignatius-0.1.0-preview.1-aarch64-apple-darwin.tar.gz";
+    let archive_path = bundle_dir.join(archive_name);
+    fs::write(&archive_path, payload).expect("write archive");
+
+    let sums_path = bundle_dir.join("SHA256SUMS");
+    fs::write(&sums_path, format!("{hex}  {archive_name}\n")).expect("write SHA256SUMS");
+
+    let sig_path = bundle_dir.join(format!("{archive_name}.sig"));
+    fs::write(&sig_path, b"synthetic raw signature bytes\n").expect("write sig");
+
+    let pem_path = bundle_dir.join(format!("{archive_name}.pem"));
+    fs::write(
+        &pem_path,
+        b"-----BEGIN CERTIFICATE-----\nMIIC...synthetic\n-----END CERTIFICATE-----\n",
+    )
+    .expect("write pem");
+
+    let cdx_path = bundle_dir.join("ignatius-0.1.0.cdx.json");
+    fs::write(
+        &cdx_path,
+        b"{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"version\":1,\"components\":[]}\n",
+    )
+    .expect("write cdx");
+
+    let sigstore_path = bundle_dir.join(format!("{archive_name}.sigstore.json"));
+    let sigstore_content = format!(
+        "{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{b64}\"}},\"signature\":\"AAA=\"}}}}"
+    );
+    fs::write(&sigstore_path, &sigstore_content).expect("write sigstore");
+
+    let intoto_path = bundle_dir.join(format!("{archive_name}.intoto.jsonl"));
+    let intoto_content = format!(
+        "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"{archive_name}\",\"digest\":{{\"sha256\":\"{hex}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
+    );
+    fs::write(&intoto_path, &intoto_content).expect("write intoto");
+
+    let manifest_path = bundle_dir.join("release-manifest.json");
+    let manifest_json = json!({
+        "schema_version": 1,
+        "product_version": "0.1.0-preview.1",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "build_identity": "ci-rehearsal-2026-08-16",
+        "artefacts": [{
+            "name": archive_name,
+            "target": "aarch64-apple-darwin",
+            "format": "tar.gz",
+            "size_bytes": payload.len(),
+            "checksum_algorithm": "sha256",
+            "checksum": hex
+        }]
+    });
+    fs::write(
+        &manifest_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&manifest_json).expect("manifest json")
+        ),
+    )
+    .expect("write manifest");
+
+    let mut catalogue = fixture("valid-candidate.json");
+    catalogue["records"][0]["artefacts"][0]["size_bytes"] = json!(payload.len());
+    catalogue["records"][0]["artefacts"][0]["checksum"] = json!(hex);
+    let catalogue_path = temp.path().join("catalog.json");
+    fs::write(
+        &catalogue_path,
+        serde_json::to_string_pretty(&catalogue).expect("catalog json"),
+    )
+    .expect("write catalog");
+
+    let valid_trust = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    let valid_trust_text = output_text(&valid_trust);
+    assert!(
+        valid_trust.status.success(),
+        "release trust verify failed on valid bundle: {valid_trust_text}"
+    );
+    assert!(
+        valid_trust_text.contains("bound ignatius-0.1.0-preview.1-aarch64-apple-darwin.tar.gz"),
+        "expected bound artefact in output: {valid_trust_text}"
+    );
+
+    let valid_manifest = run_xtask(vec![
+        "release".to_owned(),
+        "manifest".to_owned(),
+        "verify".to_owned(),
+        "--record".to_owned(),
+        catalogue_path.display().to_string(),
+        "--artefact-dir".to_owned(),
+        bundle_dir.display().to_string(),
+        "--manifest".to_owned(),
+        manifest_path.display().to_string(),
+        "--checksums".to_owned(),
+        sums_path.display().to_string(),
+    ]);
+    let valid_manifest_text = output_text(&valid_manifest);
+    assert!(
+        valid_manifest.status.success(),
+        "release manifest verify failed on valid bundle: {valid_manifest_text}"
+    );
+
+    // (a) Archive SHA-256 digest does not match SHA256SUMS
+    let tampered_payload = b"tampered archive payload bytes with mismatched sha256 checksum\n";
+    fs::write(&archive_path, tampered_payload).expect("write tampered archive");
+
+    let verify_tampered_archive = run_xtask(vec![
+        "release".to_owned(),
+        "manifest".to_owned(),
+        "verify".to_owned(),
+        "--record".to_owned(),
+        catalogue_path.display().to_string(),
+        "--artefact-dir".to_owned(),
+        bundle_dir.display().to_string(),
+        "--manifest".to_owned(),
+        manifest_path.display().to_string(),
+        "--checksums".to_owned(),
+        sums_path.display().to_string(),
+    ]);
+    let tampered_archive_text = output_text(&verify_tampered_archive);
+    assert!(
+        !verify_tampered_archive.status.success(),
+        "manifest verify must fail when archive SHA-256 digest does not match SHA256SUMS"
+    );
+    assert!(
+        tampered_archive_text.contains("checksum does not match the exact archive bytes")
+            || tampered_archive_text.contains("size is"),
+        "expected mismatch diagnostic: {tampered_archive_text}"
+    );
+
+    fs::write(&archive_path, payload).expect("restore archive");
+
+    // (b) A .sig/.pem (or sigstore.json) sidecar is missing or empty
+    fs::remove_file(&sigstore_path).expect("remove sigstore sidecar");
+    let missing_sidecar = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    let missing_sidecar_text = output_text(&missing_sidecar);
+    assert!(
+        !missing_sidecar.status.success(),
+        "trust verify must fail when sigstore sidecar is missing"
+    );
+    assert!(
+        missing_sidecar_text.contains("binding missing"),
+        "expected missing sidecar diagnostic: {missing_sidecar_text}"
+    );
+
+    fs::write(&sigstore_path, b"").expect("write empty sigstore sidecar");
+    let empty_sidecar = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    let empty_sidecar_text = output_text(&empty_sidecar);
+    assert!(
+        !empty_sidecar.status.success(),
+        "trust verify must fail when sigstore sidecar is empty"
+    );
+    assert!(
+        empty_sidecar_text.contains("is not a Sigstore bundle"),
+        "expected empty/malformed sidecar diagnostic: {empty_sidecar_text}"
+    );
+
+    fs::write(&sig_path, b"").expect("empty sig");
+    assert_eq!(
+        fs::metadata(&sig_path).expect("sig metadata").len(),
+        0,
+        "sig sidecar is empty"
+    );
+    fs::write(&pem_path, b"").expect("empty pem");
+    assert_eq!(
+        fs::metadata(&pem_path).expect("pem metadata").len(),
+        0,
+        "pem sidecar is empty"
+    );
+
+    fs::write(&sigstore_path, &sigstore_content).expect("restore sigstore");
+    fs::write(&sig_path, b"synthetic raw signature bytes\n").expect("restore sig");
+    fs::write(
+        &pem_path,
+        b"-----BEGIN CERTIFICATE-----\nMIIC...synthetic\n-----END CERTIFICATE-----\n",
+    )
+    .expect("restore pem");
+
+    // (c) .intoto.jsonl SLSA provenance subject digest does not match archive digest
+    let wrong_digest = "00".repeat(32);
+    let tampered_intoto = format!(
+        "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"{archive_name}\",\"digest\":{{\"sha256\":\"{wrong_digest}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
+    );
+    fs::write(&intoto_path, &tampered_intoto).expect("write tampered intoto");
+
+    let tampered_provenance = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    let tampered_provenance_text = output_text(&tampered_provenance);
+    assert!(
+        !tampered_provenance.status.success(),
+        "trust verify must fail when in-toto provenance subject digest does not match"
+    );
+    assert!(
+        tampered_provenance_text.contains("names no subject with the manifest checksum"),
+        "expected foreign subject diagnostic: {tampered_provenance_text}"
+    );
+
+    fs::write(&intoto_path, &intoto_content).expect("restore intoto");
+    let recovered_trust = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    assert!(
+        recovered_trust.status.success(),
+        "trust verify should pass after restoring sidecars"
+    );
+}
