@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn theme_refusal_tag_is_typed_and_keeps_the_existing_json_envelope() {
-    let value = toml::Value::String("auto".into());
+    let value = toml::Value::String("nonexistent".into());
     let refusal = crate::ui::theme::lower_theme_inputs(Some(&value), None).unwrap_err();
     let line = refusal.line().to_owned();
     let diagnostic = Diagnostic::from_theme_refusal(refusal);

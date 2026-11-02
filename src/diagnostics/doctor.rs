@@ -127,6 +127,8 @@ pub struct TerminalFacts {
     pub color_depth: crate::ui::theme::ColorDepth,
     /// Where `color_depth` came from.
     pub color_depth_source: crate::ui::theme::DepthSource,
+    /// Detected terminal background RGB when OSC 11 was queried for ui.theme = "auto".
+    pub background_rgb: Option<crate::ui::theme::Rgb>,
 }
 
 /// The complete doctor report.
@@ -284,9 +286,34 @@ pub fn environment_report(
     checks.push(terminal_check(terminal));
     checks.push(colour_check(terminal));
     checks.push(colour_depth_check(terminal));
+    if config
+        .as_ref()
+        .is_ok_and(|loaded| loaded.config.ui.theme == crate::config::ThemeSelection::Auto)
+    {
+        checks.push(theme_auto_check(terminal));
+    }
     checks.push(size_check(terminal));
 
     Report { checks }
+}
+
+fn theme_auto_check(terminal: &TerminalFacts) -> Check {
+    match terminal.background_rgb {
+        Some(rgb) => {
+            let selected = match crate::ui::theme::theme_for_background(rgb) {
+                crate::config::ThemeChoice::Light => "light",
+                _ => "dark",
+            };
+            Check::ok(
+                "theme",
+                format!(
+                    "answered rgb({}, {}, {}); using {selected}",
+                    rgb.0, rgb.1, rgb.2
+                ),
+            )
+        }
+        None => Check::ok("theme", "no answer within 100 ms; using dark"),
+    }
 }
 
 fn directory_check(name: &str, dir: &Path) -> Check {

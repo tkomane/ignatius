@@ -220,8 +220,12 @@ fn manual_theme_reflection_is_safe_and_transferred_without_a_parser_wrapper() {
 fn manual_theme_first_failure_order_is_shared_by_load_and_migration() {
     for (source, expected) in [
         (
+            "[ui]\ntheme = \"other\"\n[theme]\nextends = 7\n",
+            "configuration error: ui.theme = \"other\" is not a theme. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
+        ),
+        (
             "[ui]\ntheme = \"auto\"\n[theme]\nextends = 7\n",
-            "configuration error: ui.theme = \"auto\" is not available in this build. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
+            "configuration error: [theme] extends must be a string. Use \"dark\", \"light\" or \"high-contrast\".",
         ),
         (
             "[ui]\ntheme = \"custom\"\n",
@@ -282,6 +286,15 @@ fn manual_theme_public_typed_deserialization_does_not_admit_invalid_state() {
     }
     assert_eq!(fs::read_to_string(&paths.config_file).unwrap(), source);
     assert_eq!(fs::read_dir(&paths.config_dir).unwrap().count(), 1);
+}
+
+#[test]
+fn manual_theme_auto_loads_and_roundtrips() {
+    let source = "schema_version = 1\n[ui]\ntheme = \"auto\"\n";
+    let (_dir, paths) = manual_theme_source(source);
+    let loaded = load(&paths).expect("load auto theme");
+    assert_eq!(loaded.config.ui.theme, ThemeSelection::Auto);
+    assert!(loaded.themes.is_auto());
 }
 
 #[test]

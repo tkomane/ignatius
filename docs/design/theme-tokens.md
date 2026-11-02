@@ -66,8 +66,11 @@ extends = "dark"
 syntax-keyword = "#C99CF0"
 ```
 
-`ui.theme` accepts `dark`, `light`, `high-contrast` and `custom`. Automatic
-background detection remains pending; `auto` is refused explicitly. An absent
+`ui.theme` accepts `dark`, `light`, `high-contrast`, `custom` and `auto`. When
+`ui.theme = "auto"`, startup probes the terminal background luminance over OSC 11
+within a 100 ms deadline before entering the alternate screen, selecting `light`
+when WCAG relative luminance is at least 0.5 and falling back to `dark` without
+hanging when unanswered. An absent
 definition adds no custom palette to the session cycle. An empty `[theme]`
 inherits dark and still has Custom identity. `extends` defaults to dark and
 accepts only the three built-ins. Partial definitions inherit every omitted

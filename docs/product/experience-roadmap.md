@@ -162,7 +162,7 @@ password-prompt integration; a workable results grid with a truthful range line
 widths; a first-frame connecting shell with named steps (`resolving profile`,
 `acquiring credential`, `TLS handshake`, `server handshake`, `loading catalogue`),
 target/elapsed telemetry and a bounded boot reveal wordmark; manual custom themes
-with runtime palette switching; a first-class mouse verb table with `ui.mouse = true`
+and `ui.theme = "auto"` OSC 11 background luminance detection with runtime palette switching; a first-class mouse verb table with `ui.mouse = true`
 default and 1:1 keyboard parity; adjustable splits, zoom and density (`comfortable`
 and `compact`); quiet chrome domain capsules with 200 ms elapsed gating; and an
 80% height command palette with 60% right-hand previews from retained in-memory data.

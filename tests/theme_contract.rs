@@ -39,10 +39,6 @@ fn manual_theme_refusals_are_exact_before_terminal_connection_or_migration_write
             "ui.theme = \"custom\" requires a [theme] table.",
         ),
         (
-            "[ui]\ntheme = \"auto\"\n",
-            "ui.theme = \"auto\" is not available in this build. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
-        ),
-        (
             "[ui]\ntheme = \"Dark\"\n",
             "ui.theme = \"Dark\" is not a theme. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
         ),
@@ -118,7 +114,7 @@ fn manual_theme_refusals_are_exact_before_terminal_connection_or_migration_write
 
 #[test]
 fn manual_theme_valid_custom_roundtrips_without_serializing_the_cache() {
-    for selection in ["dark", "light", "high-contrast", "custom"] {
+    for selection in ["dark", "light", "high-contrast", "custom", "auto"] {
         let dir = tempfile::tempdir().unwrap();
         let source = format!(
             "schema_version = 1\n[ui]\ntheme = \"{selection}\"\n[theme]\nextends = \"light\"\n"

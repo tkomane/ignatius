@@ -3,14 +3,23 @@
 Pinned grammar, wording and protocol facts. An implementer who needs a
 value that is not here stops and reports.
 
-## Manual delivery clarification - 2026-10-25
+## Delivery clarification - 2026-10-25 (Updated 2026-11-02)
 
-The next complete journey is FR-2513/2515/2516: custom configuration, explicit
-startup selection and a session-local runtime cycle. Automatic background
-detection/FR-2514/T032 remains open. Until that separate task is implemented,
-`auto` is explicitly refused as specified below. Mouse capture remains false
-until the independent pointer story is complete; this slice does not change it.
-The later OSC protocol section remains the requirement for that future task.
+The theme delivery covers custom configuration, explicit startup selection,
+session-local runtime cycling, and automatic background detection (T028, T028b,
+T032, FR-2513, FR-2514, FR-2515, FR-2516).
+
+`ui.theme = "auto"` is implemented with:
+- Single-owner reply transport on the main thread before `spawn_input_thread`
+  starts and before the alternate screen is entered.
+- Staged terminal lifecycle (`TerminalGuard::acquire_raw` -> 100 ms OSC 11
+  probe + drain -> `enter_full_screen`).
+- Late-reply suppression filter (`Osc11LateReplyFilter`) in the input thread
+  so any reply arriving after the 100 ms deadline over a high-latency link is
+  discarded and never becomes typed editor keys.
+
+Mouse capture remains false until the independent pointer story is complete;
+this slice does not change it.
 
 ## Configuration surface
 
@@ -130,7 +139,6 @@ Additional exact lines (quoted placeholders are already safe):
 
 - `configuration error: ui.theme = "custom" requires a [theme] table.`
 - `configuration error: ui.theme = "{selection}" is not a theme. Use "dark", "light", "high-contrast" or "custom".`
-- `configuration error: ui.theme = "auto" is not available in this build. Use "dark", "light", "high-contrast" or "custom".`
 - `configuration error: ui.theme must be a string. Use "dark", "light", "high-contrast" or "custom".`
 - `configuration error: theme must be a table.`
 - `configuration error: [theme] extends must be a string. Use "dark", "light" or "high-contrast".`
@@ -209,6 +217,10 @@ flag, configuration key, terminal query or scripted-output schema change.
 
 - Runs once at startup, before the alternate screen is entered and before
   the input thread starts.
+- Staged terminal lifecycle: `TerminalGuard::acquire_raw` -> 100 ms OSC 11
+  probe + drain -> `enter_full_screen`.
+- Single-owner reply transport on the main thread before `spawn_input_thread`
+  starts and before the alternate screen is entered.
 - Request bytes: `ESC ] 1 1 ; ? BEL` (`\x1b]11;?\x07`).
 - Wait at most 100 ms for a reply of the shape
   `ESC ] 1 1 ; r g b : RRRR / GGGG / BBBB` terminated by BEL (`\x07`) or
@@ -220,8 +232,9 @@ flag, configuration key, terminal query or scripted-output schema change.
   for `doctor` as `no answer within 100 ms; using dark`. This is a
   fallback and is never described as detection.
 - Bytes read after the deadline are discarded; a late reply must never
-  surface as typed input. The read happens before raw-mode input handling
-  begins, and anything unconsumed is drained before the event loop starts.
+  surface as typed input. The input thread uses `Osc11LateReplyFilter` to
+  suppress any late reply arriving over high-latency links so it never
+  becomes typed editor keys.
 - `auto` composes with `[theme]` only through `extends`; `auto` never
   selects `custom`.
 

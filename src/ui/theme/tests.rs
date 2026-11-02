@@ -669,3 +669,138 @@ fn banner_ramp_honours_color_depths_and_disabled_color() {
         assert_eq!(style.bg, None);
     }
 }
+
+#[test]
+fn osc11_query_sequence_is_exact_bel_terminated_bytes() {
+    assert_eq!(OSC11_QUERY, b"\x1b]11;?\x07");
+}
+
+#[test]
+fn osc11_reply_parser_handles_both_terminators_and_digit_widths() {
+    // Both terminators: BEL (\x07) and ST (\x1b\\)
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:ffff/ffff/ffff\x07"),
+        Some(Rgb(255, 255, 255))
+    );
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:0000/0000/0000\x1b\\"),
+        Some(Rgb(0, 0, 0))
+    );
+
+    // 1-digit scaling: 0..15 scaled to 0..255 (via (v * 255 + 7) / 15 == v * 17)
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:0/8/f\x07"),
+        Some(Rgb(0, 136, 255))
+    );
+
+    // 2-digit scaling: directly 8-bit hex
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:12/34/ab\x1b\\"),
+        Some(Rgb(0x12, 0x34, 0xab))
+    );
+
+    // 3-digit scaling: 0..4095 scaled to 0..255
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:000/800/fff\x07"),
+        Some(Rgb(0, 128, 255))
+    );
+
+    // 4-digit scaling: 0..65535 scaled to 0..255
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:1234/eeee/ffff\x1b\\"),
+        Some(Rgb(18, 238, 255))
+    );
+
+    // Mixed component widths
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:f/12/800/ffff\x07"), None);
+    assert_eq!(
+        parse_osc11_reply(b"\x1b]11;rgb:f/12/800\x07"),
+        Some(Rgb(255, 0x12, 128))
+    );
+
+    // Preceding and trailing noise in buffer
+    assert_eq!(
+        parse_osc11_reply(b"prefix-bytes\x1b]11;rgb:aabb/ccdd/eeff\x07trailing-noise"),
+        Some(Rgb(0xaa, 0xcc, 0xee))
+    );
+    assert_eq!(
+        parse_osc11_reply(b"\x00\x1b[0m\x1b]11;rgb:ffff/0000/8888\x1b\\extra"),
+        Some(Rgb(255, 0, 136))
+    );
+}
+
+#[test]
+fn osc11_reply_parser_rejects_malformed_replies() {
+    // Missing terminator
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:ffff/ffff/ffff"), None);
+
+    // Missing prefix
+    assert_eq!(parse_osc11_reply(b"rgb:ffff/ffff/ffff\x07"), None);
+
+    // Wrong prefix
+    assert_eq!(parse_osc11_reply(b"\x1b]10;rgb:ffff/ffff/ffff\x07"), None);
+
+    // Empty components
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:/ffff/ffff\x07"), None);
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:ffff//ffff\x07"), None);
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:ffff/ffff/\x07"), None);
+
+    // Too few or too many components
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:ffff/ffff\x07"), None);
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:ff/ff/ff/ff\x07"), None);
+
+    // >4 hex digits in a component
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:fffff/ffff/ffff\x07"), None);
+
+    // Non-hex digits
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:gggg/ffff/ffff\x07"), None);
+    assert_eq!(parse_osc11_reply(b"\x1b]11;rgb:ff ff/ffff/ffff\x07"), None);
+
+    // Empty buffer
+    assert_eq!(parse_osc11_reply(b""), None);
+}
+
+#[test]
+fn theme_for_background_divides_at_relative_luminance_half() {
+    // Luminance >= 0.5 selects Light, < 0.5 selects Dark
+    assert_eq!(theme_for_background(Rgb(255, 255, 255)), ThemeChoice::Light);
+    assert_eq!(theme_for_background(Rgb(0, 0, 0)), ThemeChoice::Dark);
+
+    // Green is high luminance (>0.7)
+    assert_eq!(theme_for_background(Rgb(0, 255, 0)), ThemeChoice::Light);
+    // Red is low luminance (~0.21)
+    assert_eq!(theme_for_background(Rgb(255, 0, 0)), ThemeChoice::Dark);
+    // Blue is very low luminance (~0.07)
+    assert_eq!(theme_for_background(Rgb(0, 0, 255)), ThemeChoice::Dark);
+
+    // Grey threshold check around 0.5 luminance
+    // Rgb(187, 187, 187) luminance is ~0.4965 (< 0.5 -> Dark)
+    assert_eq!(theme_for_background(Rgb(187, 187, 187)), ThemeChoice::Dark);
+    // Rgb(188, 188, 188) luminance is ~0.5029 (>= 0.5 -> Light)
+    assert_eq!(theme_for_background(Rgb(188, 188, 188)), ThemeChoice::Light);
+}
+
+#[test]
+fn resolve_auto_theme_handles_replies_malformed_and_none() {
+    // Valid light background reply
+    let light_reply = b"\x1b]11;rgb:ffff/ffff/ffff\x07";
+    assert_eq!(
+        resolve_auto_theme(Some(light_reply)),
+        (ThemeChoice::Light, Some(Rgb(255, 255, 255)))
+    );
+
+    // Valid dark background reply
+    let dark_reply = b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\";
+    let (choice, rgb) = resolve_auto_theme(Some(dark_reply));
+    assert_eq!(choice, ThemeChoice::Dark);
+    assert_eq!(rgb, Some(Rgb(0x1e, 0x1e, 0x2e)));
+
+    // Malformed reply falls back to Dark with None rgb
+    assert_eq!(
+        resolve_auto_theme(Some(b"garbage-reply")),
+        (ThemeChoice::Dark, None)
+    );
+
+    // None reply (timeout / unanswered) falls back to Dark with None rgb
+    assert_eq!(resolve_auto_theme(None), (ThemeChoice::Dark, None));
+}

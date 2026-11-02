@@ -264,7 +264,7 @@ runtime; drive `auto` with an answering and a silent terminal.
 
 ### Tests for User Story 5
 
-- [ ] T028 [US5] Add failing tests for `extends` inheritance, each refusal
+- [x] T028 [US5] Add failing tests for `extends` inheritance, each refusal
   wording line of `contracts/theme-config.md`, colour-off neutrality of
   custom themes, and the OSC 11 reply parser (both terminators, component
   scaling, malformed replies) in `src/config/schema.rs` and
@@ -274,7 +274,7 @@ runtime; drive `auto` with an answering and a silent terminal.
   resolved contrast matrix and colour-off neutrality. Watch current-library
   NullValue/comment threshold failures before the four admitted RGB repairs.
   This manual subset does not close T028's OSC parser obligation.
-- [ ] T028b [US5] Complete T028's OSC reply-parser cases with T032; leave this
+- [x] T028b [US5] Complete T028's OSC reply-parser cases with T032; leave this
   unchecked during the manual startup/runtime-switch delivery.
 
 ### Implementation for User Story 5
@@ -296,7 +296,7 @@ runtime; drive `auto` with an answering and a silent terminal.
   action row and parity assertions in the same change.
   Include the explicit no-key Session row, snapshot-alias deduplication, direct
   owner/prefix no-op and busy-session zero-effect preservation rules.
-- [ ] T032 [US5] The integrator implements the one-shot OSC 11 exchange in
+- [x] T032 [US5] The integrator implements the one-shot OSC 11 exchange in
   `src/cli/interactive.rs` before the alternate screen with the 100 ms
   deadline and drain rule, the luminance decision in `src/ui/theme.rs`,
   and the answered and unanswered `doctor` wording in

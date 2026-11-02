@@ -91,6 +91,7 @@ const HELD: u8 = 1;
 const MOUSE: u8 = 1 << 1;
 const ALTERNATE_SCREEN: u8 = 1 << 2;
 const BRACKETED_PASTE: u8 = 1 << 3;
+const FULL_SCREEN: u8 = 1 << 4;
 
 /// Retains the acquired options atomically, so the panic hook restores those
 /// modes without taking a lock while the process is unwinding. Zero is idle.
@@ -98,6 +99,7 @@ static TERMINAL_STATE: AtomicU8 = AtomicU8::new(0);
 
 fn hold_terminal(options: TerminalOptions) {
     let state = HELD
+        | FULL_SCREEN
         | if options.mouse { MOUSE } else { 0 }
         | if options.alternate_screen {
             ALTERNATE_SCREEN
@@ -112,13 +114,16 @@ fn hold_terminal(options: TerminalOptions) {
     TERMINAL_STATE.store(state, Ordering::SeqCst);
 }
 
-fn take_terminal_options() -> Option<TerminalOptions> {
+fn take_terminal_state() -> Option<(bool, TerminalOptions)> {
     let state = TERMINAL_STATE.swap(0, Ordering::SeqCst);
-    (state & HELD != 0).then_some(TerminalOptions {
-        mouse: state & MOUSE != 0,
-        alternate_screen: state & ALTERNATE_SCREEN != 0,
-        bracketed_paste: state & BRACKETED_PASTE != 0,
-    })
+    (state & HELD != 0).then_some((
+        state & FULL_SCREEN != 0,
+        TerminalOptions {
+            mouse: state & MOUSE != 0,
+            alternate_screen: state & ALTERNATE_SCREEN != 0,
+            bracketed_paste: state & BRACKETED_PASTE != 0,
+        },
+    ))
 }
 
 /// Owns the terminal for the lifetime of the interactive session.
@@ -128,10 +133,37 @@ fn take_terminal_options() -> Option<TerminalOptions> {
 #[derive(Debug)]
 pub struct TerminalGuard {
     options: TerminalOptions,
+    entered_full_screen: bool,
     restored: bool,
 }
 
 impl TerminalGuard {
+    /// Takes the terminal in raw mode only, without alternate screen or cursor changes.
+    pub fn acquire_raw() -> io::Result<Self> {
+        terminal::enable_raw_mode()?;
+        TERMINAL_STATE.store(HELD, Ordering::SeqCst);
+        Ok(Self {
+            options: TerminalOptions::default(),
+            entered_full_screen: false,
+            restored: false,
+        })
+    }
+
+    /// Transitions a raw-mode terminal into full-screen mode with the given options.
+    pub fn enter_full_screen(&mut self, options: TerminalOptions) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        if let Err(err) = enter(&mut stdout, options) {
+            let _ = restore_modes(&mut stdout, options, terminal::disable_raw_mode);
+            self.restored = true;
+            TERMINAL_STATE.store(0, Ordering::SeqCst);
+            return Err(err);
+        }
+        self.options = options;
+        self.entered_full_screen = true;
+        hold_terminal(options);
+        Ok(())
+    }
+
     /// Takes the terminal: raw mode, alternate screen, and the chosen options.
     pub fn acquire(options: TerminalOptions) -> io::Result<Self> {
         terminal::enable_raw_mode()?;
@@ -144,6 +176,7 @@ impl TerminalGuard {
         hold_terminal(options);
         Ok(Self {
             options,
+            entered_full_screen: true,
             restored: false,
         })
     }
@@ -155,8 +188,12 @@ impl TerminalGuard {
         }
         self.restored = true;
         TERMINAL_STATE.store(0, Ordering::SeqCst);
-        let mut stdout = io::stdout();
-        restore_modes(&mut stdout, self.options, terminal::disable_raw_mode)
+        if self.entered_full_screen {
+            let mut stdout = io::stdout();
+            restore_modes(&mut stdout, self.options, terminal::disable_raw_mode)
+        } else {
+            terminal::disable_raw_mode()
+        }
     }
 }
 
@@ -188,9 +225,13 @@ impl Drop for TerminalGuard {
 pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let restored = take_terminal_options().map(|options| {
-            let mut stdout = io::stdout();
-            restore_modes(&mut stdout, options, terminal::disable_raw_mode).is_ok()
+        let restored = take_terminal_state().map(|(entered_full_screen, options)| {
+            if entered_full_screen {
+                let mut stdout = io::stdout();
+                restore_modes(&mut stdout, options, terminal::disable_raw_mode).is_ok()
+            } else {
+                terminal::disable_raw_mode().is_ok()
+            }
         });
         let mut stderr = io::stderr();
         let _ = write_panic_notice(&mut stderr, restored);
@@ -239,6 +280,7 @@ pub fn capabilities() -> TerminalFacts {
         unicode: detect_unicode(),
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     };
     // The environment alone decides here; the runtime overwrites these two
     // fields with the effective flag and configuration resolution before
@@ -316,6 +358,271 @@ pub fn should_use_color(config: crate::config::ColorMode, facts: &TerminalFacts)
         ColorMode::Always => true,
         ColorMode::Never => false,
         ColorMode::Auto => facts.is_terminal,
+    }
+}
+
+/// The maximum duration to wait for an OSC 11 terminal background reply.
+pub const OSC11_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Queries the terminal for its background colour using OSC 11 with an injected writer and reader.
+///
+/// Sends `\x1b]11;?\x07`, then reads steps up to `deadline`, parsing the accumulated bytes with
+/// [`crate::ui::theme::parse_osc11_reply`]. Buffers at most 256 bytes.
+/// Calls `drain` upon completing or reaching the deadline.
+pub fn query_osc11_background_with<W, R, D>(
+    writer: &mut W,
+    deadline: std::time::Instant,
+    mut read_step: R,
+    mut drain: D,
+) -> Option<crate::ui::theme::Rgb>
+where
+    W: Write,
+    R: FnMut(std::time::Duration) -> io::Result<Option<Vec<u8>>>,
+    D: FnMut(),
+{
+    if writer.write_all(crate::ui::theme::OSC11_QUERY).is_err() || writer.flush().is_err() {
+        drain();
+        return None;
+    }
+
+    let mut buffer = Vec::with_capacity(64);
+    let mut detected = None;
+
+    while std::time::Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match read_step(remaining) {
+            Ok(Some(bytes)) => {
+                if buffer.len() + bytes.len() <= 256 {
+                    buffer.extend_from_slice(&bytes);
+                } else {
+                    let available = 256usize.saturating_sub(buffer.len());
+                    buffer.extend_from_slice(&bytes[..available]);
+                }
+                if let Some(rgb) = crate::ui::theme::parse_osc11_reply(&buffer) {
+                    detected = Some(rgb);
+                    break;
+                }
+            }
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+
+    drain();
+    detected
+}
+
+/// Converts a key event to byte(s) for OSC 11 reply parsing.
+pub fn key_event_to_bytes(key: &crossterm::event::KeyEvent, out: &mut Vec<u8>) {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        out.push(b'\x1b');
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char(c) if c.is_ascii_alphabetic() => {
+                let code = c.to_ascii_lowercase() as u8 - b'a' + 1;
+                out.push(code);
+            }
+            KeyCode::Char(' ') => out.push(0),
+            _ => {}
+        }
+    } else {
+        match key.code {
+            KeyCode::Esc => out.push(b'\x1b'),
+            KeyCode::Char(c) => {
+                let mut buf = [0u8; 4];
+                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            }
+            KeyCode::Enter => out.push(b'\n'),
+            KeyCode::Tab => out.push(b'\t'),
+            KeyCode::Backspace => out.push(0x7f),
+            _ => {}
+        }
+    }
+}
+
+/// Queries the active terminal for its background RGB colour using an OSC 11 probe.
+///
+/// Waits up to [`OSC11_TIMEOUT`] (100 ms). Must be called while in raw mode on the main thread
+/// before `spawn_input_thread` starts.
+pub fn probe_osc11_background() -> Option<crate::ui::theme::Rgb> {
+    let mut stdout = io::stdout();
+    let deadline = std::time::Instant::now() + OSC11_TIMEOUT;
+
+    let read_step = |timeout: std::time::Duration| -> io::Result<Option<Vec<u8>>> {
+        if crossterm::event::poll(timeout)? {
+            match crossterm::event::read()? {
+                crossterm::event::Event::Key(key) => {
+                    let mut bytes = Vec::new();
+                    key_event_to_bytes(&key, &mut bytes);
+                    Ok(Some(bytes))
+                }
+                _ => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    };
+
+    let drain = || {
+        while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
+            if crossterm::event::read().is_err() {
+                break;
+            }
+        }
+    };
+
+    query_osc11_background_with(&mut stdout, deadline, read_step, drain)
+}
+
+/// Pure state machine filtering out late OSC 11 background replies from user input.
+#[derive(Debug, Clone)]
+pub struct Osc11LateReplyFilter {
+    enabled: bool,
+    buffered_keys: Vec<crossterm::event::KeyEvent>,
+    buffered_bytes: Vec<u8>,
+}
+
+/// Match classification for potential OSC 11 sequences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Osc11PrefixMatch {
+    /// Incomplete sequence matching prefix so far.
+    Incomplete,
+    /// Complete and valid OSC 11 reply sequence.
+    Complete,
+    /// Sequence does not match OSC 11 reply.
+    Mismatch,
+}
+
+/// Validates whether `bytes` is a prefix of or a complete OSC 11 reply.
+#[must_use]
+pub fn check_osc11_prefix(bytes: &[u8]) -> Osc11PrefixMatch {
+    if bytes.is_empty() {
+        return Osc11PrefixMatch::Mismatch;
+    }
+    const PREFIX: &[u8] = b"\x1b]11;rgb:";
+    if bytes.len() <= PREFIX.len() {
+        if PREFIX.starts_with(bytes) {
+            return Osc11PrefixMatch::Incomplete;
+        }
+        return Osc11PrefixMatch::Mismatch;
+    }
+    if !bytes.starts_with(PREFIX) {
+        return Osc11PrefixMatch::Mismatch;
+    }
+    let rest = &bytes[PREFIX.len()..];
+    let mut parts = Vec::new();
+    let mut current_part_start = 0;
+    let mut i = 0;
+    while i < rest.len() {
+        let b = rest[i];
+        if b == b'/' {
+            let part = &rest[current_part_start..i];
+            if !(1..=4).contains(&part.len()) || !part.iter().all(u8::is_ascii_hexdigit) {
+                return Osc11PrefixMatch::Mismatch;
+            }
+            parts.push(part);
+            if parts.len() > 2 {
+                return Osc11PrefixMatch::Mismatch;
+            }
+            current_part_start = i + 1;
+            i += 1;
+            continue;
+        }
+        if b == b'\x07' {
+            if parts.len() != 2 {
+                return Osc11PrefixMatch::Mismatch;
+            }
+            let part = &rest[current_part_start..i];
+            if !(1..=4).contains(&part.len()) || !part.iter().all(u8::is_ascii_hexdigit) {
+                return Osc11PrefixMatch::Mismatch;
+            }
+            if i + 1 == rest.len() {
+                return Osc11PrefixMatch::Complete;
+            }
+            return Osc11PrefixMatch::Mismatch;
+        }
+        if b == b'\x1b' {
+            if parts.len() != 2 {
+                return Osc11PrefixMatch::Mismatch;
+            }
+            let part = &rest[current_part_start..i];
+            if !(1..=4).contains(&part.len()) || !part.iter().all(u8::is_ascii_hexdigit) {
+                return Osc11PrefixMatch::Mismatch;
+            }
+            if i + 1 == rest.len() {
+                return Osc11PrefixMatch::Incomplete;
+            }
+            if rest[i + 1] == b'\\' && i + 2 == rest.len() {
+                return Osc11PrefixMatch::Complete;
+            }
+            return Osc11PrefixMatch::Mismatch;
+        }
+        if !b.is_ascii_hexdigit() {
+            return Osc11PrefixMatch::Mismatch;
+        }
+        if i - current_part_start >= 4 {
+            return Osc11PrefixMatch::Mismatch;
+        }
+        i += 1;
+    }
+    Osc11PrefixMatch::Incomplete
+}
+
+impl Osc11LateReplyFilter {
+    /// Creates a new filter. When `enabled` is false, all keys pass through immediately.
+    #[must_use]
+    pub const fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            buffered_keys: Vec::new(),
+            buffered_bytes: Vec::new(),
+        }
+    }
+
+    /// Returns whether the filter is actively buffering potential escape keys.
+    #[must_use]
+    pub fn is_buffering(&self) -> bool {
+        !self.buffered_keys.is_empty()
+    }
+
+    /// Processes an incoming key event.
+    ///
+    /// Returns keys to be emitted to the application, or an empty vector while buffering.
+    pub fn process_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Vec<crossterm::event::KeyEvent> {
+        if !self.enabled {
+            return vec![key];
+        }
+
+        self.buffered_keys.push(key);
+        key_event_to_bytes(&key, &mut self.buffered_bytes);
+
+        match check_osc11_prefix(&self.buffered_bytes) {
+            Osc11PrefixMatch::Incomplete => Vec::new(),
+            Osc11PrefixMatch::Complete => {
+                self.buffered_keys.clear();
+                self.buffered_bytes.clear();
+                self.enabled = false;
+                Vec::new()
+            }
+            Osc11PrefixMatch::Mismatch => {
+                self.buffered_bytes.clear();
+                std::mem::take(&mut self.buffered_keys)
+            }
+        }
+    }
+
+    /// Flushes any buffered keys immediately.
+    pub fn flush(&mut self) -> Vec<crossterm::event::KeyEvent> {
+        self.buffered_bytes.clear();
+        std::mem::take(&mut self.buffered_keys)
     }
 }
 

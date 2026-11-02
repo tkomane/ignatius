@@ -93,13 +93,16 @@ Terminal colour depth is determined through a strict five-tier precedence:
 
 ### OSC 11 background luminance probing
 
-Automatic terminal background luminance detection via OSC 11 (`ESC]11;?ESC\`) is
-architecturally designed (D-2505) but remains an open implementation item
-(`T032`). Because unconfirmed terminal queries can cause escape-sequence
-echoing or hang on unsupported emulators, automatic probing is not active, and
-configuring `ui.theme = "auto"` is explicitly refused during configuration
-validation with a message naming the supported choices (`dark`, `light`,
-`high-contrast`, `custom`).
+When `ui.theme = "auto"` is configured, startup queries the terminal's background
+colour via OSC 11 (`ESC]11;?BEL`) in raw mode before entering the alternate
+screen, waiting at most 100 ms (`D-2505`, `T032`). Replies terminated with BEL
+(`0x07`) or ST (`ESC\`) are parsed across 1-to-4-digit hex components; when the
+WCAG relative luminance of the reported background is at least 0.5, the `light`
+palette is chosen, and otherwise `dark` is chosen. Unanswered queries time out
+cleanly after 100 ms and fall back to `dark`, while a late-reply filter swallows
+delayed OSC 11 responses so they never appear as typed SQL. `ignatius doctor`
+reports either `answered rgb(R, G, B); using <light|dark>` or `no answer within
+100 ms; using dark`.
 
 ## Sizes
 

@@ -60,7 +60,7 @@ completed implementation, independent adversarial review, and full verification:
   - Hosted GitHub Actions on PR41 (`9f68cb3`) and PR42 (`743683e`): all 16 executed jobs passed (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
 - **What remains unverified or open (reported separately, never merged with passes)**:
   - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI is not set`); covered by the hosted Linux `PostgreSQL 18 Unix socket` CI job.
-  - Phase 7 automatic OSC 11 background luminance probe (`T028`, `T028b`, `T032`): remains open behind the Crossterm single-owner input/drain lifecycle constraint; `ui.theme = "auto"` remains explicitly refused at configuration validation.
+  - Phase 7 automatic OSC 11 background luminance probe (`T028`, `T028b`, `T032`): implemented in Wave 4 (`ui.theme = "auto"`, 100 ms raw-mode OSC 11 probe + drain before alternate-screen entry, `Osc11LateReplyFilter`, and `doctor` theme check); native terminal emulator OSC 11 hand verification remains open alongside `W08`.
   - Native terminal emulator visual appearance, screen-reader hand use, Windows 11 / ConPTY interactive hand use (`W07`), live cloud-provider authentication journeys, release-build p95 latency/memory ceilings (`W10`), and release signing/publication (`W11`) remain open.
 
 ## Consolidated baseline - 26 October 2026

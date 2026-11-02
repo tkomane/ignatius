@@ -114,7 +114,13 @@ fn refusal_order_is_selection_then_shape_base_unknown_and_token_order() {
         lower("theme=1\n[ui]\ntheme=\"auto\"")
             .unwrap_err()
             .line()
-            .contains("not available in this build")
+            .contains("theme must be a table")
+    );
+    assert!(
+        lower("theme=1\n[ui]\ntheme=\"other\"")
+            .unwrap_err()
+            .line()
+            .contains("is not a theme")
     );
     assert!(
         lower("[theme]\nextends=1\naaa=1")
@@ -466,24 +472,17 @@ fn reflected_controls_and_unicode_are_complete_ascii_escapes_at_budget_edges() {
 }
 
 #[test]
-fn selection_refusals_have_the_exact_manual_unknown_and_auto_lines() {
-    for (selection, expected) in [
-        (
-            "other",
-            "configuration error: ui.theme = \"other\" is not a theme. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
-        ),
-        (
-            "auto",
-            "configuration error: ui.theme = \"auto\" is not available in this build. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
-        ),
-    ] {
-        assert_eq!(
-            lower_theme_inputs(Some(&toml::Value::String(selection.into())), None)
-                .unwrap_err()
-                .line(),
-            expected
-        );
-    }
+fn selection_refusals_have_the_exact_manual_unknown_line_and_auto_is_accepted() {
+    assert_eq!(
+        lower_theme_inputs(Some(&toml::Value::String("other".into())), None)
+            .unwrap_err()
+            .line(),
+        "configuration error: ui.theme = \"other\" is not a theme. Use \"dark\", \"light\", \"high-contrast\" or \"custom\"."
+    );
+    assert_eq!(
+        lower_theme_inputs(Some(&toml::Value::String("auto".into())), None).unwrap(),
+        (ThemeSelection::Auto, None)
+    );
 }
 
 #[test]
@@ -516,4 +515,59 @@ fn every_reflection_route_uses_the_existing_redactor_before_safe_formatting() {
             assert!(!error.line().chars().any(char::is_control));
         }
     }
+}
+
+#[test]
+fn auto_selection_resolves_and_adapts_to_background() {
+    let mut catalog = ValidatedThemes::resolve(ThemeSelection::Auto, None).unwrap();
+    assert!(catalog.is_auto());
+    // Initial selection before background detection is Dark
+    let initial = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(initial.selection(), ThemeSelection::Dark);
+
+    // Light background detection updates selection to Light
+    let choice = catalog.apply_auto_background(Some(Rgb(255, 255, 255)));
+    assert_eq!(choice, ThemeChoice::Light);
+    let updated = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(updated.selection(), ThemeSelection::Light);
+
+    // Dark background detection updates selection to Dark
+    let choice = catalog.apply_auto_background(Some(Rgb(0, 0, 0)));
+    assert_eq!(choice, ThemeChoice::Dark);
+    let updated = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(updated.selection(), ThemeSelection::Dark);
+
+    // None background detection (timeout or fallback) selects Dark
+    let choice = catalog.apply_auto_background(None);
+    assert_eq!(choice, ThemeChoice::Dark);
+    let updated = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(updated.selection(), ThemeSelection::Dark);
+}
+
+#[test]
+fn non_auto_catalog_ignores_apply_auto_background() {
+    let mut catalog = ValidatedThemes::resolve(ThemeSelection::Light, None).unwrap();
+    assert!(!catalog.is_auto());
+    let initial = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(initial.selection(), ThemeSelection::Light);
+
+    // Applying background on a non-auto catalog is a no-op
+    let choice = catalog.apply_auto_background(Some(Rgb(0, 0, 0)));
+    assert_eq!(choice, ThemeChoice::Light);
+    let untouched = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(untouched.selection(), ThemeSelection::Light);
+}
+
+#[test]
+fn auto_selection_with_custom_definition_validates_custom_and_defaults_to_dark() {
+    let definition = ThemeDefinition::new(ThemeChoice::Light);
+    let catalog = ValidatedThemes::resolve(ThemeSelection::Auto, Some(&definition)).unwrap();
+    assert!(catalog.is_auto());
+    let initial = catalog.selected_theme(true, ColorDepth::TrueColor);
+    // Selection is Dark, but custom definition is validated and preserved
+    assert_eq!(initial.selection(), ThemeSelection::Dark);
+
+    // Bad custom definition is refused even under auto selection
+    let bad = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Text, Rgb(0, 0, 0));
+    assert!(ValidatedThemes::resolve(ThemeSelection::Auto, Some(&bad)).is_err());
 }

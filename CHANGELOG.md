@@ -47,8 +47,10 @@ source can generate user-facing notes.
 - New: manual custom themes inherit a built-in palette and validate every
   resolved colour before use, including inactive definitions. The command
   palette's Switch theme entry changes appearance for the current session,
-  preserving active SQL, query progress and input owners. Automatic background
-  detection remains pending.
+  preserving active SQL, query progress and input owners. `ui.theme = "auto"`
+  queries terminal background luminance over OSC 11 with a 100 ms timeout and
+  late-reply suppression, choosing `light` or `dark` and reporting the outcome
+  in `doctor`.
 - Fixed: dark/light NULL and SQL comment colours meet the resolved 4.5:1 text
   threshold on overlay surfaces as well as the frame, pane and striped rows.
 - Fixed: selected command-palette groups and details use the selection ink

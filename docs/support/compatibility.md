@@ -631,8 +631,11 @@ owners; palette cancellation retains covered reading positions. The choice
 survives resize and profile changes for the session. Rendered-buffer evidence
 includes five palettes and colour-off/depth/glyph/density combinations; native
 font, DIM, emulator appearance and hand use remain separate. Automatic background
-detection via OSC 11 (`ui.theme = "auto"`, T032) remains open and is refused at
-configuration validation.
+detection via OSC 11 (`ui.theme = "auto"`, `T028`, `T028b`, `T032`) probes the
+terminal in raw mode with a 100 ms deadline before alternate-screen entry,
+chooses `light` when relative luminance is at least 0.5 and `dark` otherwise
+(including on timeout), filters late replies on the input thread, and reports
+the outcome in `ignatius doctor`.
 The integrated manual source passed full local verification on 25 October 2026:
 1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
 The local macOS socket case is skipped. Published `d92c416` in draft PR35 passed

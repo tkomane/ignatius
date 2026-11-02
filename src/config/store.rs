@@ -299,8 +299,7 @@ schema_version = 1
 [ui]
 # comfortable, compact. Changes only the interactive presentation.
 density = "comfortable"
-# dark, light, high-contrast, custom. custom needs the optional [theme] below.
-# auto is not available in this build.
+# dark, light, high-contrast, custom, auto. custom needs the optional [theme] below.
 theme = "dark"
 # auto, unicode, ascii, nerd-font. nerd-font is never chosen automatically:
 # whether your font carries the icons cannot be detected from in here.
