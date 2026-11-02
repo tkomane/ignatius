@@ -1,5 +1,110 @@
 # Verification
 
+## Feature 025 completion, sidecar test extraction, and W10/W08/W09 contract verification - 2 November 2026
+
+Nine sequential pull requests ([PR41](https://github.com/tkomane/ignatius/pull/41)
+through [PR49](https://github.com/tkomane/ignatius/pull/49)) completed Feature
+`025-gui-grade-experience`, extracted all remaining inline test modules into
+sidecar `tests.rs` files, and delivered the `W02`, `W03`, `W04`, `W06`, `W08`/`W09`
+automated reference-journey acceptance, `W10` operational resource-bounds and
+local-state recovery, `W11`, and `W13` packages on `main`:
+
+- **PR41 (`9f68cb3`)**: Feature 025 US8 quiet chrome (`T042-T043`), US9 command
+  palettes with 60% retained-data preview (`T044-T045`), US10 identity mark and
+  bounded boot reveal (`T052-T054`), and the `#[cfg(test)]` prompt guard in
+  `src/cli/prompt.rs`.
+- **PR42 (`743683e`)**: Feature 025 US6 mouse verb-table dispatch and default
+  capture (`T034-T037`), monotonic `400 ms` double-click window, split/column
+  dragging with keyboard-identical clamps, PTY mouse capture restoration in
+  `tests/terminal_restore.rs`, and `ui.mouse = false` keyboard parity proof.
+- **PR43 (`7f8a95e`)**: Feature 025 Phase 12 design and compatibility
+  documentation parity (`T046-T051`) and
+  `gui_grade_experience_documentation_matches_the_build_and_quickstart` in
+  `tests/documentation_matches_the_build.rs`.
+- **PR44 (`f52d8b7`)**: `W10-008` operational resource-bounds contract
+  (`specs/001-foundation-vertical-slice/contracts/operational-resource-bounds.md`),
+  `Message::ConnectionLost` `running_for` fix in `src/app/update.rs`, 5 `W02`
+  cross-feature interleaving tests, `W03` parameter sidecar extraction and 3
+  live PostgreSQL adversarial SQL tests in `tests/postgres_integration.rs`, and
+  3 `W04` runtime privacy subprocess contract tests in
+  `tests/runtime_privacy_contract.rs`.
+- **PR46 (`dd7027c`)**: Feature 025 Phase 7 (`T028`, `T028b`, `T032`) OSC 11
+  automatic background luminance detection (`ui.theme = "auto"`), WCAG relative
+  luminance threshold (`Light` at `>= 0.5`, `Dark` otherwise), staged
+  `TerminalGuard::acquire_raw` -> 100 ms OSC 11 probe + drain ->
+  `enter_full_screen`, `Osc11LateReplyFilter`, and `ignatius doctor` theme
+  check.
+- **PR45 (`8087ff6`)**: `W06` `src/connection/cloud/tests.rs` sidecar extraction
+  and 5 cross-platform subprocess tests (21 total), plus `W11`/`W13` release
+  trust (`xtask release sbom` and `trust verify` in `tests/release_contract.rs`)
+  and governance runbooks in `docs/operations/release.md` and ADR-0008.
+- **PR47 (`a5e7abb`)**: `docs/status.md` and `[x] W10-008` task reconciliation.
+- **PR48 (`8be5f6b`)**: Extraction of all 26 remaining inline `#[cfg(test)] mod tests`
+  blocks across `src/` into sidecar `<module>/tests.rs` files (`rg -n 'mod tests \{' src/`
+  returns 0 matches).
+- **PR49 (`92a5230`)**: `W10` performance, resource-bounds, and local-state
+  recovery contract suite (`tests/resource_bounds_contract.rs`) and `W08`/`W09`
+  reference journeys `J1-J8` plus viewport matrix (`100x30`, `80x24`, `60x20`,
+  `30x6` and live resize) automated acceptance suite in
+  `src/ui/acceptance/tests.rs`.
+
+### Separated verification evidence (2 November 2026)
+
+- **Focused unit and contract evidence**:
+  - `rg -n 'mod tests \{' src/`: 0 matches across `src/`.
+  - `cargo test --locked --test resource_bounds_contract`: 4 passed (`0.46s`).
+    - Scenario 1 (`w10_local_input_palette_and_completion_p95_within_100ms_and_state_invariant`):
+      20 warm-up + 100 measured local actions over 60 catalog objects, 30
+      relations, 3 saved queries and 20 history entries into a `120x40` buffer;
+      measured `p50 = 1.09 ms`, `p95 = 2.40 ms` (`<= 100 ms` target).
+    - Scenario 2 (`w10_local_grid_interaction_at_retained_row_cap_p95_within_100ms_and_preserves_row_identity`):
+      20 warm-up + 100 measured grid actions over a 1,000-row wide-Unicode
+      `ResultSet` into a `120x40` buffer; measured `p50 = 3.85 ms`,
+      `p95 = 4.10 ms` (`<= 100 ms` target) with source-row identity preserved.
+    - Scenario 3 (`w10_all_seven_subsystem_input_and_retention_ceilings_enforce_exact_boundaries`):
+      verified exact pass and `+1` refusal boundaries across formatter (`1 MiB`),
+      plan (`1 MiB` / `500` nodes), clipboard (`1 MiB`), named parameters (`64`
+      distinct names), single-cell update (`16 KiB`), notice/value truncation
+      (`64 KiB` / `1 MiB`), and result-set retention byte budget (`32 MiB`).
+    - Scenario 4 (`w10_local_state_recovery_preserves_existing_files_and_refuses_unsafe_paths`):
+      verified config schema refusal, atomic write `0600` permissions and
+      sibling safety, export collision/unwritable-parent refusal, history
+      trimming/clear, and saved-query path-traversal/corrupt-file recovery in
+      isolated `tempfile::TempDir` fixtures.
+  - `cargo test --locked --lib ui::acceptance`: 4 passed (2,520-frame theme
+    matrix, `NO_COLOR` precedence, `J1-J8` reference journeys, and
+    `100x30`/`80x24`/`60x20`/`30x6` + live-resize viewport matrix).
+- **Full local verification suite (`cargo --locked xtask verify`)**:
+  - `formatting` (`rustfmt --edition 2024 --check`): pass.
+  - `lints` (`cargo clippy --locked --all-targets -- -D warnings`): pass.
+  - `API documentation` (`cargo doc --locked --no-deps`): pass.
+  - `workspace tests`: pass (`1,296` library unit tests + `archive_helper_contract` 3,
+    `cli_contract` 67, `documentation_matches_the_build` 16,
+    `postgres_integration` 75, `release_contract` 16, `resource_bounds_contract` 4,
+    `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4,
+    `workflow_contract` 15, `xtask` 11).
+  - `documentation tests`: pass.
+- **Live PostgreSQL, PTY and hosted CI evidence**:
+  - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain
+    (`127.0.0.1:55432`) and TLS (`localhost:55433`): all 75 integration tests
+    passed.
+  - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 terminal
+    restoration tests passed.
+  - Hosted GitHub Actions on PR41 through PR49: all 17 executed checks passed on
+    every PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18
+    Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret
+    scan, workflow contract, release evidence scope, and CodeQL for
+    actions/python/rust).
+- **Remaining unverified / open items**:
+  - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI`
+    is not set; covered on Linux CI).
+  - Native terminal emulator visual appearance and OSC 11 hand verification
+    (`W08`), screen-reader hand use (`007 T032`), Windows 11 / ConPTY
+    interactive hand use (`001 T051`, `001 T055a`, `W07-064`), Linux full-screen
+    hand use (`001 T052`), live cloud-provider account authentication journeys
+    (`W06`), and owner-gated release candidate assembly/signing/publication
+    (`008 T033`, `008 T035`, `W12`, `W14`) remain open.
+
 ## Sequential repository consolidation - 26 October 2026
 
 Feature PRs 34-37 were refreshed and merged in dependency order after PR32.
