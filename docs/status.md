@@ -4,13 +4,13 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Feature 025 completion and W02/W03/W04/W06/W10/W11/W13 waves - 2 November 2026
+## Feature 025 completion and W02/W03/W04/W06/W08/W09/W10/W11/W13 waves - 2 November 2026
 
-Resume from `main`. All six waves of Feature `025-gui-grade-experience` and the
-cross-cutting `W02`, `W03`, `W04`, `W06`, `W10-008`, `W11` and `W13` packages
-have completed implementation, independent adversarial review, full local
-verification (`cargo --locked xtask verify`), and hosted GitHub Actions CI +
-CodeQL merge into `main`:
+Resume from `main`. All waves of Feature `025-gui-grade-experience` and the
+cross-cutting `W02`, `W03`, `W04`, `W06`, `W08`/`W09` automated acceptance,
+`W10`, `W11` and `W13` packages have completed implementation, independent
+adversarial review, full local verification (`cargo --locked xtask verify`),
+and hosted GitHub Actions CI + CodeQL merge into `main`:
 
 - **Wave 1 ([PR41](https://github.com/tkomane/ignatius/pull/41), merged at `9f68cb3`)**:
   delivered US8 quiet chrome capsules and `200 ms` elapsed gating (`T042-T043`),
@@ -60,11 +60,33 @@ CodeQL merge into `main`:
   documented `W11`/`W13` release trust verification and vulnerability triage
   runbooks in `docs/operations/release.md` and
   `docs/architecture/decisions/0008-packaging-and-release.md`.
+- **Wave 7 ([PR47](https://github.com/tkomane/ignatius/pull/47), merged at `a5e7abb`)**:
+  reconciled `docs/status.md` and marked `[x] W10-008` in
+  `specs/001-foundation-vertical-slice/tasks.md`.
+- **Wave 8 ([PR48](https://github.com/tkomane/ignatius/pull/48), merged at `8be5f6b`)**:
+  extracted all 26 remaining inline `#[cfg(test)] mod tests` blocks across
+  `src/query/`, `src/app/`, `src/ui/`, `src/cli/`, `src/config/`,
+  `src/connection/`, `src/postgres/`, `src/diagnostics/` and root modules into
+  sidecar `tests.rs` files (`rg -n 'mod tests \{' src/` returns 0 matches).
+- **Wave 9 (`tests/resource_bounds_contract.rs` and `src/ui/acceptance/tests.rs`)**:
+  delivered the `W10` performance, resource-bounds, and local-state recovery
+  integration contract suite (`tests/resource_bounds_contract.rs`, 4 scenarios:
+  100-action warm-up + measured local input/palette/completion p95 = `2.40 ms`
+  <= `100 ms`; 100-action 1,000-row wide-Unicode grid interaction p95 = `4.10 ms`
+  <= `100 ms` preserving source-row identity; exact pass/refusal boundary checks
+  across all 7 subsystem ceilings; and local-state recovery across config schema,
+  atomic write permissions, export collision/parent refusal, history trimming,
+  and saved-query path traversal/corruption) plus the `W08`/`W09` automated
+  reference journeys (`J1` through `J8`) and `100x30` / `80x24` / `60x20` / `30x6`
+  + live-resize viewport acceptance suite in `src/ui/acceptance/tests.rs`.
 
 ### Separated verification evidence (2 November 2026)
 
-- **What focused unit and contract tests proved (`T049`, `T028`, `T028b`, `T032`, `W02`, `W03`, `W04`, `W06`, `W11`)**:
+- **What focused unit and contract tests proved (`T049`, `T028`, `T028b`, `T032`, `W02`, `W03`, `W04`, `W06`, `W08`, `W09`, `W10`, `W11`)**:
   - `cargo fmt --all -- --check`: pass.
+  - `rg -n 'mod tests \{' src/`: 0 matches (100% sidecar `tests.rs` compliance).
+  - `cargo test --locked --lib ui::acceptance`: 4 passed (including 2,520-frame theme matrix, `J1-J8` reference journeys, and `100x30`/`80x24`/`60x20`/`30x6` + live-resize viewport matrix).
+  - `cargo test --locked --test resource_bounds_contract`: 4 passed (local input/palette/completion p50 = `1.09 ms`, p95 = `2.40 ms`; 1,000-row grid interaction p50 = `3.85 ms`, p95 = `4.10 ms`; all 7 subsystem ceilings; local-state recovery).
   - `cargo test --locked --lib ui::widgets`: 106 passed.
   - `cargo test --locked --lib ui::theme`: 87 passed (including 10 OSC 11 parser & luminance tests).
   - `cargo test --locked --lib ui::terminal`: 26 passed (including 10 staged-guard, probe/drain, and `Osc11LateReplyFilter` tests).
@@ -84,15 +106,15 @@ CodeQL merge into `main`:
   - `formatting`: pass.
   - `lints`: pass (`cargo clippy --locked --all-targets -- -D warnings`).
   - `API documentation`: pass.
-  - `workspace tests`: pass (1,294 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 16, `postgres_integration` 75, `release_contract` 16, `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
+  - `workspace tests`: pass (1,296 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 16, `postgres_integration` 75, `release_contract` 16, `resource_bounds_contract` 4, `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
   - `documentation tests`: pass.
 - **What live PostgreSQL, PTY and hosted CI evidence proved**:
   - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain (`127.0.0.1:55432`) and TLS (`localhost:55433`): all 75 database-backed integration tests passed (including `W03` adversarial parameter-boundary, concurrent-modification, and `standard_conforming_strings=off` refusal tests).
   - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 restoration tests passed, including balanced mouse capture enable/disable (`ESC[?1000h` / `ESC[?1000l`) and alternate-screen-last ordering.
-  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), and PR45 (`8087ff6`): all 17 executed checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
+  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), PR45 (`8087ff6`), PR47 (`a5e7abb`), and PR48 (`8be5f6b`): all 17 executed checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
 - **What remains unverified or open (reported separately, never merged with passes)**:
   - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI is not set`); covered by the hosted Linux `PostgreSQL 18 Unix socket` CI job.
-  - Native terminal emulator visual appearance and OSC 11 hand verification (`W08`), screen-reader hand use (`007 T032`), Windows 11 / ConPTY interactive hand use (`001 T051`, `001 T055a`, `W07-064`), Linux full-screen hand use (`001 T052`), live cloud-provider account authentication journeys (`W06`), release-build p95 latency/memory ceilings (`W10`), and owner-gated release candidate assembly/signing/publication (`008 T033`, `008 T035`, `W12`, `W14`) remain open.
+  - Native terminal emulator visual appearance and OSC 11 hand verification (`W08`), screen-reader hand use (`007 T032`), Windows 11 / ConPTY interactive hand use (`001 T051`, `001 T055a`, `W07-064`), Linux full-screen hand use (`001 T052`), live cloud-provider account authentication journeys (`W06`), and owner-gated release candidate assembly/signing/publication (`008 T033`, `008 T035`, `W12`, `W14`) remain open.
 
 ## Consolidated baseline - 26 October 2026
 
