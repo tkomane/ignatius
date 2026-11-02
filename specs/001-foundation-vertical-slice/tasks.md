@@ -237,7 +237,10 @@ thresholds. Maximum observed RSS was 44,744,704 bytes, including a complete
 artifact digests and removal of only the three owned export payloads.
 Evidence: `/private/tmp/ignatius-w10-007-AFKZrb/evidence/`; detailed results and
 limits are in verification. These observed peaks establish no strict process,
-frame, notice or aggregate-result ceiling. W10-008 remains open.
+frame, notice or aggregate-result ceiling. W10-008 (`contracts/operational-resource-bounds.md`)
+was subsequently specified and merged in PR44 (`f52d8b7`), separating notice
+retention, aggregate retained-result bytes, incoming wire-frame allocation and
+the slow-export-sink measurement seam.
 
 W10-009 integration progress: the three-file patch was reviewed/applied, after
 nine expected baseline failures and 87 private focused passes. Root then passed
