@@ -96,6 +96,85 @@ under W11, and the live release authorization gate below stays blocking:
   handling, retention location, the independent verification command, and
   the live release and distribution authorization itself.
 
+## Trust verification and governance specification (W11 and W13)
+
+Under W11 and W13, the trust contract establishes deterministic SBOM generation,
+binding verification of Sigstore and SLSA sidecars, and independent verification
+procedures.
+
+### Operator trust commands
+
+- **Deterministic CycloneDX SBOM**:
+  ```bash
+  cargo xtask release sbom generate --lockfile=Cargo.lock --out=release-evidence/ignatius.cdx.json
+  cargo xtask release sbom verify --lockfile=Cargo.lock --sbom=release-evidence/ignatius.cdx.json
+  ```
+  The generation process derives the component list directly from `Cargo.lock`
+  without network or timestamp nondeterminism. Verification enforces byte-exact
+  reproducibility.
+
+- **Trust bundle sidecar binding verification**:
+  ```bash
+  cargo xtask release trust verify --manifest-dir=<dir> --bundle-dir=<dir>
+  # For unified release bundles:
+  cargo xtask release trust verify --manifest-dir=dist --bundle-dir=dist
+  ```
+  Wrapper tooling accepts `--dir <bundle-dir>` mapping to identical manifest and
+  bundle directories. The task confirms that `<archive>.sigstore.json` and
+  `<archive>.intoto.jsonl` explicitly bind the SHA-256 archive checksums recorded
+  in `release-manifest.json` and `SHA256SUMS`. Missing, malformed, or mismatched
+  sidecars fail closed before any release candidate is approved.
+
+### Independent consumer verification
+
+Consumers verify downloaded release archives without repository dependencies
+using standard ecosystem verifiers:
+
+- **Sigstore keyless verification (cosign)**:
+  ```bash
+  cosign verify-blob \
+    --certificate <archive>.pem \
+    --signature <archive>.sig \
+    --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
+    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+    <archive>
+  ```
+  Or using the unified bundle sidecar:
+  ```bash
+  cosign verify-blob \
+    --bundle <archive>.sigstore.json \
+    --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
+    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+    <archive>
+  ```
+
+- **SLSA provenance verification (slsa-verifier)**:
+  ```bash
+  slsa-verifier verify-artifact <archive> \
+    --provenance-path <archive>.intoto.jsonl \
+    --source-uri github.com/tkomane/ignatius \
+    --source-tag <version-tag>
+  ```
+
+### Dependency vulnerability triage and emergency patch-release runbook
+
+Supply-chain governance enforces continuous auditing and fail-closed response:
+
+- **Automated scanning**:
+  ```bash
+  cargo audit
+  cargo deny check advisories bans licenses sources
+  ```
+- **Triage classification**:
+  Advisories are triaged by reachability: shipped runtime paths (`src/`) vs
+  test/xtask-only paths (`tests/`, `xtask/`). Reachable vulnerabilities in shipped
+  code block candidate release readiness immediately.
+- **Emergency patch release**:
+  Patches are applied via minimal dependency updates in `Cargo.toml`/`Cargo.lock`,
+  validated with `cargo xtask verify`, recorded in `CHANGELOG.md`, and released
+  by pushing a signed patch tag (e.g. `v0.1.1`) to trigger the automated GitHub
+  Actions release pipeline (`.github/workflows/release.yml`).
+
 ## Consequences
 
 - The repository may document the provider-neutral inventory, signature and

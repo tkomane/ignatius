@@ -736,6 +736,159 @@ authorization naming the exact product version, source revision, target set,
 artefact destinations and approved evidence retention boundary. This rehearsal
 performed none of those publication operations.
 
+## Trust verification and governance runbook (W11 and W13)
+
+This runbook specifies operator and consumer verification procedures for release
+trust artefacts (CycloneDX SBOM, Sigstore keyless signatures, SLSA provenance)
+and the dependency vulnerability triage process.
+
+### CycloneDX SBOM generation and verification
+
+The software bill of materials is derived deterministically from `Cargo.lock`
+using the pinned CycloneDX 1.5 schema without network access:
+
+```bash
+# Generate the deterministic CycloneDX SBOM from Cargo.lock
+cargo xtask release sbom generate \
+  --lockfile=Cargo.lock \
+  --out=release-evidence/ignatius.cdx.json
+
+# Verify the stored SBOM reproduces the exact locked crate inventory
+cargo xtask release sbom verify \
+  --lockfile=Cargo.lock \
+  --sbom=release-evidence/ignatius.cdx.json
+```
+
+If any dependency is added, removed, or changed in version without regenerating
+the SBOM, `sbom verify` exits non-zero and reports the exact byte offset where
+the inventory diverges from the stored file.
+
+### Trust bundle sidecar verification
+
+Before publishing or distributing release archives, operators verify that the
+Sigstore signature bundle and SLSA in-toto provenance statement bind the exact
+SHA-256 archive checksums declared in `release-manifest.json`:
+
+```bash
+# Verify that sidecars bind the manifest checksums across manifest and bundle directories
+cargo xtask release trust verify \
+  --manifest-dir=<manifest-dir> \
+  --bundle-dir=<bundle-dir>
+
+# For a unified release distribution directory (e.g., dist/ or release-bundle/):
+cargo xtask release trust verify \
+  --manifest-dir=dist \
+  --bundle-dir=dist
+```
+
+In operator wrapper tooling, `--dir <bundle-dir>` maps directly to passing the
+bundle directory to both `--manifest-dir` and `--bundle-dir`.
+
+The trust verifier fails closed with a non-zero exit code if:
+- an archive SHA-256 digest does not match `SHA256SUMS` or `release-manifest.json`;
+- `<archive>.sigstore.json` (or `.sig`/`.pem`) is missing or empty;
+- the Sigstore bundle digest algorithm is not `SHA2_256` or binds a foreign digest; or
+- `<archive>.intoto.jsonl` does not contain an in-toto v1 statement whose
+  subject SHA-256 digest matches the archive checksum.
+
+### Independent cryptographic verification
+
+Consumer verification of Sigstore signatures and SLSA provenance statements
+does not depend on repository tooling. Users verify downloaded archives using
+official standalone verifiers.
+
+#### Sigstore keyless signature verification (cosign)
+
+Verify the archive signature against the repository workflow identity:
+
+```bash
+# Verification using individual signature and certificate sidecars:
+cosign verify-blob \
+  --certificate <archive>.pem \
+  --signature <archive>.sig \
+  --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  <archive>
+
+# Verification using the Sigstore bundle sidecar:
+cosign verify-blob \
+  --bundle <archive>.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  <archive>
+```
+
+#### SLSA provenance verification (slsa-verifier)
+
+Verify the build provenance statement against the release tag and repository:
+
+```bash
+slsa-verifier verify-artifact <archive> \
+  --provenance-path <archive>.intoto.jsonl \
+  --source-uri github.com/tkomane/ignatius \
+  --source-tag <version-tag>
+```
+
+### Dependency vulnerability triage and emergency patch releases
+
+All dependencies are continuously checked against RustSec and supply-chain
+policies.
+
+#### Vulnerability scanning
+
+Run advisory and policy checks locally or in CI:
+
+```bash
+# Advisory database audit
+cargo audit
+
+# Comprehensive advisory, license, ban, and source policy validation
+cargo deny check advisories bans licenses sources
+```
+
+#### Triage protocol
+
+When an advisory is reported:
+
+1. **Classify dependency scope**:
+   - Shipped runtime code (`src/` and core production dependencies).
+   - Test or build tooling only (`tests/`, `xtask/`, or `dev-dependencies`).
+2. **Evaluate reachability**:
+   - Determine whether the vulnerable function, type, or code path is reachable
+     from user input, network input, or configuration in `ignatius`.
+   - If unreachable or isolated to dev-dependencies, document the rationale in
+     the security tracker and schedule an update in the next routine cycle.
+   - If reachable in shipped code, treat the advisory as an emergency blocker.
+3. **Remediation**:
+   - Bump the dependency version in `Cargo.toml` to a patched release.
+   - Run `cargo update -p <crate_name>` to update `Cargo.lock`.
+   - Run `cargo xtask verify` to ensure tests, formatting, and lints pass.
+   - Re-generate and verify the SBOM:
+     `cargo xtask release sbom generate --lockfile=Cargo.lock --out=release-evidence/ignatius.cdx.json`
+     `cargo xtask release sbom verify --lockfile=Cargo.lock --sbom=release-evidence/ignatius.cdx.json`
+
+#### Emergency patch release procedure
+
+1. Record the CVE or RUSTSEC ID and patch summary in `CHANGELOG.md` under a new
+   patch version section (for example `## [0.1.1] - YYYY-MM-DD`).
+2. Increment the patch version in `Cargo.toml` (for example `version = "0.1.1"`).
+3. Validate locally:
+   ```bash
+   cargo xtask verify
+   ```
+4. Commit the changes and tag the release commit:
+   ```bash
+   git tag -a v0.1.1 -m "Release v0.1.1: patch advisory <ID>"
+   git push origin v0.1.1
+   ```
+5. GitHub Actions (`.github/workflows/release.yml`) executes the release pipeline:
+   - builds deterministic release archives on macOS, Windows, and Linux;
+   - generates CycloneDX SBOM;
+   - signs archives keylessly with Sigstore OIDC;
+   - generates SLSA build provenance;
+   - verifies bundle integrity via `cargo xtask release trust verify`; and
+   - publishes the candidate release only after all trust gates pass.
+
 ## Steps
 
 1. Update `CHANGELOG.md` under a new version heading. The changelog is the single

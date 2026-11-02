@@ -342,12 +342,43 @@ pub async fn fetch(
         // trustworthy: they are text from elsewhere heading for a terminal, and
         // they may quote a credential back at us.
         let reason = redaction::redact_text(&String::from_utf8_lossy(&output.stderr));
-        return Err(refused(provider, &program, reason.trim()));
+        return Err(refused(provider, &program, output.status, reason.trim()));
     }
 
     let printed = String::from_utf8_lossy(&output.stdout);
     let token = match &provider.extract {
-        Extract::Raw => printed.trim().to_owned(),
+        Extract::Raw => {
+            let trimmed = printed.trim();
+            if trimmed.contains('\n') || trimmed.contains('\r') {
+                return Err(Box::new(
+                    Diagnostic::new(
+                        DiagnosticKind::Authentication,
+                        format!("{} produced an invalid multiline credential", provider.name),
+                        "reading the credential from the provider",
+                    )
+                    .likely_cause(
+                        "the program succeeded but printed multiline output instead of a single-line token; it may have printed a diagnostic, usage text, or error page",
+                    )
+                    .next_action(provider.remedy.clone())
+                    .technical("Program", program),
+                ));
+            }
+            if trimmed.starts_with('<') && trimmed.ends_with('>') {
+                return Err(Box::new(
+                    Diagnostic::new(
+                        DiagnosticKind::Authentication,
+                        format!("{} produced an HTML response instead of a credential", provider.name),
+                        "reading the credential from the provider",
+                    )
+                    .likely_cause(
+                        "the program succeeded but printed an HTML page instead of a token; an intermediary gateway or proxy may have returned an error page",
+                    )
+                    .next_action(provider.remedy.clone())
+                    .technical("Program", program),
+                ));
+            }
+            trimmed.to_owned()
+        }
         Extract::JsonField(field) => extract_field(&printed, field, provider, &program)?,
     };
 
@@ -359,6 +390,21 @@ pub async fn fetch(
                 "reading the credential from the provider",
             )
             .likely_cause("the program succeeded and printed nothing where the token should be")
+            .next_action(provider.remedy.clone())
+            .technical("Program", program),
+        ));
+    }
+
+    if token.contains('\n') || token.contains('\r') {
+        return Err(Box::new(
+            Diagnostic::new(
+                DiagnosticKind::Authentication,
+                format!("{} produced an invalid multiline credential", provider.name),
+                "reading the credential from the provider",
+            )
+            .likely_cause(
+                "the program succeeded but printed multiline output instead of a single-line token",
+            )
             .next_action(provider.remedy.clone())
             .technical("Program", program),
         ));
@@ -498,14 +544,21 @@ fn could_not_run(provider: &Provider, program: &str, reason: &str) -> Box<Diagno
     )
 }
 
-fn refused(provider: &Provider, program: &str, reason: &str) -> Box<Diagnostic> {
+fn refused(
+    provider: &Provider,
+    program: &str,
+    status: std::process::ExitStatus,
+    reason: &str,
+) -> Box<Diagnostic> {
     let mut diagnostic = Diagnostic::new(
         DiagnosticKind::Authentication,
         format!("{program} could not provide a credential"),
         format!("asking {} for a credential", provider.name),
     )
     .next_action(provider.remedy.clone())
-    .technical("Provider", provider.name.clone());
+    .technical("Provider", provider.name.clone())
+    .technical("Program", program.to_owned())
+    .technical("Exit status", status.to_string());
     if !reason.is_empty() {
         diagnostic = diagnostic.likely_cause(format!("the tool said: {reason}"));
     }
@@ -513,370 +566,4 @@ fn refused(provider: &Provider, program: &str, reason: &str) -> Box<Diagnostic> 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::connection::target::{Host, SslMode};
-
-    fn target(sslmode: SslMode) -> ConnectionTarget {
-        ConnectionTarget {
-            host: Host::Tcp("db.example.com".into()),
-            port: 5432,
-            database: "orders".into(),
-            user: "someone@example.com".into(),
-            password: None,
-            sslmode,
-            root_cert: None,
-            client_cert: None,
-            client_key: None,
-            application_name: "ignatius".into(),
-            connect_timeout: Duration::from_secs(5),
-            environment: crate::connection::Environment::Local,
-            read_only: false,
-            notes: Vec::new(),
-            auth: Some("entra".into()),
-        }
-    }
-
-    #[test]
-    fn the_built_in_providers_are_the_three_clouds_and_each_has_a_command() {
-        let names: Vec<String> = built_in().into_iter().map(|p| p.name).collect();
-        assert_eq!(names, vec!["entra", "aws", "gcp"]);
-        for provider in built_in() {
-            assert!(
-                !provider.command.is_empty(),
-                "{} has no command",
-                provider.name
-            );
-            assert!(
-                !provider.remedy.is_empty(),
-                "{} has no remedy to suggest",
-                provider.name
-            );
-        }
-    }
-
-    #[test]
-    fn provider_presentation_names_the_cloud_and_never_copies_arguments() {
-        let entra = built_in()
-            .into_iter()
-            .find(|provider| provider.name == "entra")
-            .expect("built-in Entra provider");
-        let view = entra.presentation();
-        assert_eq!(view.display_name, "Microsoft Entra ID");
-        assert_eq!(view.command_name, "az");
-        assert!(view.invocation.contains("OSS RDBMS"));
-        assert!(view.lifetime.contains("5-60 minutes"));
-        assert!(view.transport.contains("TLS required"));
-        assert!(view.extraction.contains("accessToken"));
-        assert!(view.remedy.contains("az login"));
-        assert!(
-            !view.invocation.contains("{host}"),
-            "display metadata must not expose substituted arguments"
-        );
-    }
-
-    #[test]
-    fn custom_provider_presentation_hides_arbitrary_arguments() {
-        let provider = Provider {
-            name: "corp".into(),
-            command: vec!["corp-token".into(), "--secret-value".into()],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: "run corp login".into(),
-        };
-        let view = provider.presentation();
-        assert!(view.display_name.contains("corp"));
-        assert_eq!(view.command_name, "corp-token");
-        assert!(view.invocation.contains("arguments hidden"));
-        assert!(!view.invocation.contains("secret-value"));
-        assert_eq!(view.remedy, "run corp login");
-    }
-
-    #[test]
-    fn every_built_in_cloud_has_a_named_route_and_lifetime() {
-        for (name, display, command, lifetime) in [
-            (
-                "entra",
-                "Microsoft Entra ID",
-                "az account get-access-token",
-                "5-60 minutes",
-            ),
-            (
-                "aws",
-                "AWS IAM database authentication",
-                "aws rds generate-db-auth-token",
-                "15 minutes",
-            ),
-            (
-                "gcp",
-                "Google Cloud SQL IAM",
-                "gcloud sql generate-login-token",
-                "about 1 hour",
-            ),
-        ] {
-            let provider = built_in()
-                .into_iter()
-                .find(|provider| provider.name == name)
-                .expect("built-in provider");
-            let view = provider.presentation();
-            assert_eq!(view.display_name, display);
-            assert!(view.invocation.contains(command), "{name}: {view:?}");
-            assert!(view.lifetime.contains(lifetime), "{name}: {view:?}");
-            assert!(view.transport.contains("TLS required"), "{name}: {view:?}");
-        }
-    }
-
-    #[test]
-    fn configuration_replaces_a_built_in_rather_than_being_ignored() {
-        let mut configured = BTreeMap::new();
-        configured.insert(
-            "entra".to_owned(),
-            Provider {
-                name: "entra".into(),
-                command: vec!["mine".into()],
-                extract: Extract::Raw,
-                timeout: DEFAULT_TIMEOUT,
-                remedy: "mine".into(),
-            },
-        );
-        let all = registry(&configured);
-        assert_eq!(all["entra"].command, vec!["mine".to_owned()]);
-        assert!(all.contains_key("aws"), "the others are still there");
-    }
-
-    #[test]
-    fn an_unknown_provider_is_refused_with_the_names_that_exist() {
-        let error = find(&registry(&BTreeMap::new()), "azure").expect_err("unknown");
-        let text = format!("{error:?}");
-        assert!(text.contains("entra"), "it lists what exists: {text}");
-        assert_eq!(error.kind, DiagnosticKind::Config);
-    }
-
-    #[test]
-    fn a_transport_that_might_be_unencrypted_is_refused_before_anything_runs() {
-        for mode in [SslMode::Disable, SslMode::Prefer] {
-            let error =
-                require_encryption(&target(mode), "entra").expect_err("must refuse {mode:?}");
-            assert_eq!(error.kind, DiagnosticKind::Config);
-        }
-        for mode in [SslMode::Require, SslMode::VerifyCa, SslMode::VerifyFull] {
-            assert!(
-                require_encryption(&target(mode), "entra").is_ok(),
-                "{mode:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_targets_own_facts_are_substituted_as_whole_arguments() {
-        let aws = built_in().into_iter().find(|p| p.name == "aws").unwrap();
-        let (program, arguments) =
-            command_for(&aws, &target(SslMode::VerifyFull)).expect("a command");
-        assert_eq!(program, "aws");
-        assert!(arguments.contains(&"db.example.com".to_owned()));
-        assert!(arguments.contains(&"5432".to_owned()));
-        assert!(arguments.contains(&"someone@example.com".to_owned()));
-        assert!(
-            !arguments.iter().any(|a| a.contains('{')),
-            "nothing is left unsubstituted: {arguments:?}"
-        );
-    }
-
-    #[test]
-    fn a_hostile_database_name_is_one_argument_and_not_a_command() {
-        let provider = Provider {
-            name: "test".into(),
-            command: vec!["tool".into(), "--db".into(), "{database}".into()],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: String::new(),
-        };
-        let mut hostile = target(SslMode::VerifyFull);
-        hostile.database = "x; rm -rf /".into();
-        let (_, arguments) = command_for(&provider, &hostile).expect("a command");
-        assert_eq!(
-            arguments,
-            vec!["--db".to_owned(), "x; rm -rf /".to_owned()],
-            "no shell means no splitting, so it stays one argument"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_program_that_does_not_exist_is_a_missing_prerequisite_not_a_refusal() {
-        let provider = Provider {
-            name: "test".into(),
-            command: vec!["ignatius-no-such-program-exists".into()],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: "install it".into(),
-        };
-        let error = fetch(&provider, &target(SslMode::VerifyFull))
-            .await
-            .expect_err("no such program");
-        assert_eq!(
-            error.kind,
-            DiagnosticKind::Config,
-            "a missing tool is configuration, not a rejected credential"
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_raw_token_is_read_from_standard_output() {
-        let provider = Provider {
-            name: "test".into(),
-            command: vec!["/bin/echo".into(), "  a-token  ".into()],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: String::new(),
-        };
-        let secret = fetch(&provider, &target(SslMode::Require))
-            .await
-            .expect("a token");
-        assert_eq!(secrecy::ExposeSecret::expose_secret(&secret), "a-token");
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_json_token_is_read_from_its_field() {
-        let provider = Provider {
-            name: "test".into(),
-            command: vec![
-                "/bin/echo".into(),
-                r#"{"accessToken":"from-json","expiresOn":"later"}"#.into(),
-            ],
-            extract: Extract::JsonField("accessToken".into()),
-            timeout: DEFAULT_TIMEOUT,
-            remedy: String::new(),
-        };
-        let secret = fetch(&provider, &target(SslMode::Require))
-            .await
-            .expect("a token");
-        assert_eq!(secrecy::ExposeSecret::expose_secret(&secret), "from-json");
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_failing_program_is_an_authentication_failure_carrying_its_own_reason() {
-        let provider = Provider {
-            name: "test".into(),
-            command: vec![
-                "/bin/sh".into(),
-                "-c".into(),
-                "echo 'please run: log in' >&2; exit 1".into(),
-            ],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: "sign in".into(),
-        };
-        let error = fetch(&provider, &target(SslMode::Require))
-            .await
-            .expect_err("it failed");
-        assert_eq!(error.kind, DiagnosticKind::Authentication);
-        let text = format!("{error:?}");
-        assert!(
-            text.contains("log in"),
-            "the tool's reason survives: {text}"
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_provider_that_echoes_a_credential_shape_never_leaks_it_into_the_diagnostic() {
-        const SENTINEL: &str = "w04-sentinel-4f2a";
-        let provider = Provider {
-            name: "test".into(),
-            command: vec![
-                "/bin/sh".into(),
-                "-c".into(),
-                format!(
-                    "echo 'password={SENTINEL}' >&2; \
-                     echo 'Authorization: Bearer {SENTINEL}' >&2; exit 1"
-                ),
-            ],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: "sign in".into(),
-        };
-        let error = fetch(&provider, &target(SslMode::Require))
-            .await
-            .expect_err("it failed");
-        assert_eq!(error.kind, DiagnosticKind::Authentication);
-
-        let mut displayable = vec![error.headline.clone(), error.attempted.clone()];
-        if let Some(cause) = &error.likely_cause {
-            displayable.push(cause.clone());
-        }
-        if let Some(action) = &error.next_action {
-            displayable.push(action.clone());
-        }
-        for field in &error.technical {
-            displayable.push(field.label.clone());
-            displayable.push(field.value.clone());
-        }
-        for text in displayable {
-            assert!(
-                !text.contains(SENTINEL),
-                "provider stderr leaked the sentinel into {text:?}"
-            );
-        }
-        let cause = error.likely_cause.as_deref().unwrap_or_default();
-        assert!(
-            cause.contains("[redacted]"),
-            "the provider's reason should survive redaction rather than be dropped: {cause:?}"
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_provider_that_never_answers_times_out_without_reading_its_output() {
-        let provider = Provider {
-            name: "test".into(),
-            command: vec!["/bin/sleep".into(), "3".into()],
-            extract: Extract::Raw,
-            timeout: Duration::from_secs(1),
-            remedy: "sign in".into(),
-        };
-        let error = fetch(&provider, &target(SslMode::Require))
-            .await
-            .expect_err("it hung");
-        assert_eq!(
-            error.kind,
-            DiagnosticKind::Connection,
-            "a timeout is a connection failure, not a rejected credential"
-        );
-        assert!(
-            error.headline.contains("did not answer within 1 seconds"),
-            "the provider's own timeout drives the path: {}",
-            error.headline
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn nothing_is_run_at_all_when_the_transport_would_allow_plain_text() {
-        // The claim is not that the token is discarded. It is that the program
-        // never ran, so there was never a token to discard.
-        let witness = std::env::temp_dir().join(format!(
-            "ignatius-provider-witness-{}-{}",
-            std::process::id(),
-            "plain"
-        ));
-        let _ = std::fs::remove_file(&witness);
-        let provider = Provider {
-            name: "test".into(),
-            command: vec!["/usr/bin/touch".into(), witness.display().to_string()],
-            extract: Extract::Raw,
-            timeout: DEFAULT_TIMEOUT,
-            remedy: String::new(),
-        };
-        let error = fetch(&provider, &target(SslMode::Prefer))
-            .await
-            .expect_err("it must refuse");
-        assert_eq!(error.kind, DiagnosticKind::Config);
-        assert!(
-            !witness.exists(),
-            "the provider's command ran despite the transport being refused"
-        );
-    }
-}
+mod tests;
