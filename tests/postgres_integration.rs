@@ -69,6 +69,20 @@ fn fixture(uri: &str) -> Fixture {
     Fixture { runtime, session }
 }
 
+/// Helper returning a connected plain PostgreSQL test fixture, or None if unset.
+fn connect_plain() -> Option<Fixture> {
+    match std::env::var("IGNATIUS_TEST_PG_URI") {
+        Ok(uri) if !uri.is_empty() => Some(fixture(&uri)),
+        _ => {
+            eprintln!(
+                "skipping: IGNATIUS_TEST_PG_URI is not set. Start the container with \
+                 `docker compose -f docker/compose.yaml up -d` and export the URI."
+            );
+            None
+        }
+    }
+}
+
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Runtime::new().expect("runtime")
 }
@@ -2442,4 +2456,194 @@ fn the_transaction_state_is_read_from_the_server_at_each_step() {
 
     let recovered = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(4)));
     assert_eq!(recovered.transaction, TransactionState::Autocommit);
+}
+
+#[test]
+fn w03_adversarial_sql_injection_payloads_in_named_parameters_remain_literal_text() {
+    let Some(fx) = connect_plain() else {
+        return;
+    };
+
+    let initial = fx.block_on(
+        fx.session
+            .execute("SELECT count(*) FROM orders", 10, JobId(1001)),
+    );
+    assert_eq!(
+        initial.status,
+        ExecutionStatus::Succeeded,
+        "failed querying initial orders count: {:?}",
+        initial.error
+    );
+    let initial_count = initial.statements[0]
+        .result_set
+        .as_ref()
+        .expect("initial count result set")
+        .rows[0][0]
+        .clone();
+
+    let payloads = [
+        "' OR '1'='1'; DROP TABLE orders; --",
+        "\\'; DROP TABLE orders; --",
+        "$$; SELECT pg_sleep(5); -- $$",
+    ];
+
+    for (idx, payload) in payloads.iter().enumerate() {
+        let bindings = ParameterBindings::from_secrets(
+            vec!["payload".into()],
+            vec![SecretString::from((*payload).to_owned())],
+        )
+        .expect("parameter bindings");
+
+        let execution = fx.block_on(fx.session.execute_with_parameters(
+            "SELECT :payload AS echoed",
+            &bindings,
+            100,
+            JobId(1002 + idx as u64),
+        ));
+
+        assert_eq!(
+            execution.status,
+            ExecutionStatus::Succeeded,
+            "adversarial payload execution failed: {:?}",
+            execution.error
+        );
+        let set = execution.statements[0]
+            .result_set
+            .as_ref()
+            .expect("echoed result set");
+        assert_eq!(set.rows.len(), 1);
+        assert_eq!(
+            set.rows[0][0],
+            Cell::Text((*payload).into()),
+            "payload must be echoed as exact literal text without SQL injection interpretation"
+        );
+    }
+
+    let after = fx.block_on(
+        fx.session
+            .execute("SELECT count(*) FROM orders", 10, JobId(1009)),
+    );
+    assert_eq!(
+        after.status,
+        ExecutionStatus::Succeeded,
+        "failed querying post-test orders count: {:?}",
+        after.error
+    );
+    let after_count = after.statements[0]
+        .result_set
+        .as_ref()
+        .expect("after count result set")
+        .rows[0][0]
+        .clone();
+    assert_eq!(
+        initial_count, after_count,
+        "orders count must remain unchanged after adversarial parameter executions"
+    );
+}
+
+#[test]
+fn w03_generated_update_with_quoted_unicode_primary_key_updates_only_target_row() {
+    let Some(fx) = connect_plain() else {
+        return;
+    };
+
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE w03_unicode_pk (\"k\"\"ey\" text PRIMARY KEY, note text); \
+         INSERT INTO w03_unicode_pk VALUES ('row\"1\n✓', 'note_one'), ('row\"2', 'note_two'); \
+         SET search_path TO pg_temp",
+        100,
+        JobId(1010),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = "SELECT \"k\"\"ey\", note FROM w03_unicode_pk ORDER BY \"k\"\"ey\"";
+    let (_relation, plan) =
+        plan_live_cell_update(&fx, source_sql, "w03_unicode_pk", 1, 0, "updated_note_one");
+
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(1011),
+    ));
+    assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
+    assert_eq!(
+        applied.statements[0].rows_affected,
+        Some(1),
+        "exactly one row must be affected"
+    );
+
+    let verify = fx.block_on(fx.session.execute(
+        "SELECT \"k\"\"ey\", note FROM w03_unicode_pk ORDER BY \"k\"\"ey\"",
+        10,
+        JobId(1012),
+    ));
+    assert_eq!(verify.status, ExecutionStatus::Succeeded, "{verify:?}");
+    let rows = verify.statements[0]
+        .result_set
+        .as_ref()
+        .expect("queried rows")
+        .rows
+        .clone();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0],
+        vec![
+            Cell::Text("row\"1\n✓".into()),
+            Cell::Text("updated_note_one".into()),
+        ],
+        "target row must be updated with the new replacement value"
+    );
+    assert_eq!(
+        rows[1],
+        vec![Cell::Text("row\"2".into()), Cell::Text("note_two".into()),],
+        "untargeted row must remain completely untouched"
+    );
+}
+
+#[test]
+fn w03_concurrent_column_drop_between_review_and_send_reports_clean_server_error() {
+    let Some(fx) = connect_plain() else {
+        return;
+    };
+
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE w03_ddl_race (id integer PRIMARY KEY, note text); \
+         INSERT INTO w03_ddl_race VALUES (1, 'initial'); \
+         SET search_path TO pg_temp",
+        100,
+        JobId(1020),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = "SELECT id, note FROM w03_ddl_race";
+    let (_relation, plan) =
+        plan_live_cell_update(&fx, source_sql, "w03_ddl_race", 1, 0, "replacement");
+
+    let alter = fx.block_on(fx.session.execute(
+        "ALTER TABLE w03_ddl_race DROP COLUMN note",
+        10,
+        JobId(1021),
+    ));
+    assert_eq!(alter.status, ExecutionStatus::Succeeded, "{alter:?}");
+
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &plan.sql_template,
+        &plan.parameters,
+        10,
+        JobId(1022),
+    ));
+
+    assert_eq!(
+        applied.status,
+        ExecutionStatus::Failed,
+        "sending update plan against dropped column must fail: {applied:?}"
+    );
+    let error = applied.error.as_ref().expect("server error diagnostic");
+    assert_eq!(
+        sqlstate(error),
+        "42703",
+        "expected undefined_column SQLSTATE 42703: {error:?}"
+    );
 }

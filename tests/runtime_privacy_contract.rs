@@ -539,3 +539,151 @@ fn parameterized_notice_privacy_covers_the_backlog_and_late_messages_after_strea
         std::fs::read_to_string(paths.log_dir.join("ignatius.log")).expect("production debug log");
     assert_no_values(&log, "notice scenario debug log");
 }
+
+#[test]
+fn w04_exotic_authorization_header_and_json_shapes_are_redacted() {
+    let sentinels = [
+        (
+            "Authorization: Bearer secret_tok_alpha_999",
+            "secret_tok_alpha_999",
+        ),
+        (
+            "authorization: bearer secret_tok_beta_888",
+            "secret_tok_beta_888",
+        ),
+        (
+            "Proxy-Authorization: Basic dXNlcjpzZWNyZXQ=",
+            "dXNlcjpzZWNyZXQ=",
+        ),
+        (
+            "postgres://admin:top_secret_pw@db.internal:5432/prod",
+            "top_secret_pw",
+        ),
+    ];
+
+    for (input, sentinel) in sentinels {
+        let redacted = ignatius::diagnostics::redaction::redact_text(input);
+        assert!(
+            !redacted.contains(sentinel),
+            "sentinel {sentinel} leaked in redacted output: {redacted}"
+        );
+    }
+
+    // JSON-wrapped structure testing multiple secret shapes in one document
+    let json_corpus = serde_json::json!({
+        "auth_title": "Authorization: Bearer secret_tok_alpha_999",
+        "auth_lower": "authorization: bearer secret_tok_beta_888",
+        "proxy_auth": "Proxy-Authorization: Basic dXNlcjpzZWNyZXQ=",
+        "database_uri": "postgres://admin:top_secret_pw@db.internal:5432/prod",
+    })
+    .to_string();
+
+    let redacted_json = ignatius::diagnostics::redaction::redact_text(&json_corpus);
+    for sentinel in [
+        "secret_tok_alpha_999",
+        "secret_tok_beta_888",
+        "dXNlcjpzZWNyZXQ=",
+        "top_secret_pw",
+    ] {
+        assert!(
+            !redacted_json.contains(sentinel),
+            "sentinel {sentinel} leaked in redacted JSON corpus: {redacted_json}"
+        );
+    }
+}
+
+#[test]
+fn w04_secret_string_and_parameter_bindings_never_leak_in_debug_or_panic_payloads() {
+    let sentinel = "w04_ultra_secret_param_value";
+    let secret = SecretString::from(sentinel.to_owned());
+    let debug_secret = format!("{secret:?}");
+    assert!(
+        !debug_secret.contains(sentinel),
+        "SecretString leaked secret sentinel in Debug representation: {debug_secret}"
+    );
+
+    let bindings = ParameterBindings::from_secrets(
+        vec!["sensitive_param".into()],
+        vec![SecretString::from(sentinel.to_owned())],
+    )
+    .expect("parameter bindings");
+
+    let debug_bindings = format!("{bindings:?}");
+    assert!(
+        !debug_bindings.contains(sentinel),
+        "ParameterBindings leaked secret sentinel in Debug representation: {debug_bindings}"
+    );
+
+    let effect = Effect::ExecuteParameterized {
+        job: JobId(999),
+        sql: "SELECT :sensitive_param AS revealed".to_owned(),
+        parameters: bindings,
+    };
+
+    let debug_effect = format!("{effect:?}");
+    assert!(
+        !debug_effect.contains(sentinel),
+        "Effect::ExecuteParameterized leaked secret sentinel in Debug representation: {debug_effect}"
+    );
+
+    // Verify panic payload formatting when wrapping secret values
+    let panic_result = std::panic::catch_unwind(|| {
+        let panic_secret = SecretString::from("w04_ultra_secret_param_value".to_owned());
+        panic!("controlled panic with secret: {panic_secret:?}");
+    });
+    assert!(panic_result.is_err());
+    let panic_err = panic_result.unwrap_err();
+    let panic_msg = panic_err
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic_err.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        !panic_msg.contains(sentinel),
+        "panic payload leaked secret sentinel: {panic_msg}"
+    );
+}
+
+#[test]
+fn w04_history_secret_filter_rejects_case_and_identifier_variations() {
+    let temp_dir = tempfile::tempdir().expect("isolated temporary history directory");
+    let history_file = temp_dir.path().join("history.jsonl");
+    let history = History::at(&history_file, 100);
+
+    let test_statements = [
+        "ALTER USER app WITH PASSWORD 'secret_pass_123'",
+        "CREATE USER reporter WITH PassWord 'secret_pass_456'",
+        "SELECT * FROM credentials WHERE api_key = 'live_key_789'",
+        "UPDATE auth_cache SET secret_token = 'tok_abc'",
+        "SELECT token FROM sessions WHERE header = 'Bearer xyz'",
+        "SELECT 'Bearer xyz' AS token",
+    ];
+
+    for sql in test_statements {
+        let entry = Entry::now(
+            "postgres://localhost:5432/app",
+            "app",
+            "test",
+            sql,
+            Outcome::Succeeded,
+            Duration::from_millis(5),
+        );
+
+        let record_outcome = history.record(&entry).expect("record history entry");
+        assert_eq!(
+            record_outcome,
+            Recorded::LooksLikeACredential,
+            "statement containing credential variation must be rejected: {sql}"
+        );
+    }
+
+    let entries = history.entries().expect("read history entries");
+    assert!(
+        entries.is_empty(),
+        "history file must not persist any credential-bearing statements: {entries:?}"
+    );
+    assert!(
+        !history_file.exists(),
+        "history file must not be created on disk when every entry is rejected"
+    );
+}

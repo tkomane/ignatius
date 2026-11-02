@@ -165,9 +165,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 );
                 model.transaction = crate::query::result::TransactionState::Unknown;
                 model.focus = Focus::Results;
-                model.running_for = None;
             }
             model.phase = QueryPhase::Idle;
+            model.running_for = None;
             model.transaction = crate::query::result::TransactionState::Unknown;
             model.completion.menu = None;
             // The runtime sends this message before the late execution result
