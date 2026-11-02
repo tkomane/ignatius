@@ -4,13 +4,12 @@
 
 **Created**: 2026-09-17
 
-**Status**: US1-US4 are implemented with dated evidence in `docs/status.md`.
-US7's keyboard split/zoom/shared-geometry core passed its integrated local
-verifier on 2026-10-25. Density and its remaining T038 tests also passed the
-integrated local verifier that day. Dragging and complete US7 acceptance,
-plus US5/US6/US8-US10, remain open. The feature originated in
-one owner observation on 2026-09-17; automated checks add no participant sample
-or native hand-use claim.
+**Status**: US1-US10 and all tasks (`T001-T059`, including `T028`, `T028b` and
+`T032` for `ui.theme = "auto"` OSC 11 background luminance detection) are
+implemented and merged on `main` with dated evidence in `docs/status.md` and
+`docs/operations/verification.md`. The feature originated in one owner
+observation on 2026-09-17; automated checks add no participant sample or native
+terminal hand-use claim (`W08`).
 
 **Input**: User description: "Close the gap between the GUI-like promise and
 the observed experience. On 2026-09-17 the owner abandoned Ignatius for the
