@@ -30,6 +30,8 @@ const PRODUCT_ROADMAP: &str = include_str!("../docs/product/roadmap.md");
 const QUICKSTART: &str = include_str!("../specs/023-cell-update/quickstart.md");
 const REFRESH_QUICKSTART: &str = include_str!("../specs/024-retained-result-refresh/quickstart.md");
 const GUI_QUICKSTART: &str = include_str!("../specs/025-gui-grade-experience/quickstart.md");
+const GUI_SPEC: &str = include_str!("../specs/025-gui-grade-experience/spec.md");
+const README: &str = include_str!("../README.md");
 const THEME_TOKENS: &str = include_str!("../docs/design/theme-tokens.md");
 const TERMINAL_COMPATIBILITY: &str = include_str!("../docs/design/terminal-compatibility.md");
 const ICONS_AND_MOTION: &str = include_str!("../docs/design/icons-and-motion.md");
@@ -409,6 +411,18 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
     assert!(
         !COMPATIBILITY.contains("Mouse dragging remains open Feature 025 work"),
         "docs/support/compatibility.md still says mouse dragging is open"
+    );
+    assert!(
+        !README.contains("Themes, mouse, panes and the rest are specified and not yet"),
+        "README.md still says Feature 025 themes, mouse, and panes are not yet merged"
+    );
+    assert!(
+        !GUI_SPEC.contains("plus US5/US6/US8-US10, remain open"),
+        "specs/025-gui-grade-experience/spec.md still says US5/US6/US8-US10 remain open"
+    );
+    assert!(
+        GUI_SPEC.contains("US1-US10 and all tasks (`T001-T059`"),
+        "specs/025-gui-grade-experience/spec.md does not record US1-US10 completion"
     );
 
     for (document, expected) in [

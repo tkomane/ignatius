@@ -270,18 +270,26 @@ tells you at the point of use rather than failing quietly.
 
 ## Where this is going
 
-The next milestone is
-[the GUI-grade experience](specs/025-gui-grade-experience/spec.md): painted
-surfaces and real elevation, user-owned and runtime-switchable themes with
-colour-depth awareness, first-class mouse support with full keyboard parity,
-movable panes with a density setting, quiet threshold-gated chrome, palette
-previews, and an identity mark that materialises over the connecting wait.
+[The GUI-grade experience](specs/025-gui-grade-experience/spec.md) (`US1-US10`)
+is implemented in source on `main`: pasted SQL reaches the editor as one
+undoable edit, the frame paints its own surfaces across four colour depths,
+themes (`dark`, `light`, `high-contrast`, `custom` and `auto` OSC 11 background
+luminance detection) switch at runtime, mouse capture (`ui.mouse = true`)
+supports pane focus, sorting, split/column dragging and scrolling with full
+keyboard parity, panes resize and zoom with `comfortable` and `compact`
+density, chrome capsules stay quiet until a `200 ms` threshold is crossed,
+command palettes show a 60% right-hand preview from retained session data, and
+the connecting wait displays a bounded `1.4 s` identity reveal with named
+stages.
 
-In progress. Pasted SQL already reaches the editor, the frame paints its own
-surfaces across four colour depths, the grid states its visible range and
-resizes from the keyboard, and the connecting wait names each step it can
-honestly observe. Themes, mouse, panes and the rest are specified and not yet
-merged; the specification says exactly which claims exist today.
+What remains before a public release is human and platform acceptance rather
+than missing workbench features: native terminal and OSC 11 hand verification
+across macOS, Windows 11, Linux and WSL (`W08`), VoiceOver and NVDA screen-reader
+hand use (`007 T032`), Windows ConPTY restoration (`001 T055a` / `W07-064`),
+live cloud-provider authentication against vendor databases (`W06`), and
+owner-authorized release candidate assembly, signing and publication (`W12` /
+`W14`). `docs/status.md` and `docs/support/compatibility.md` record each gate
+separately.
 
 > Success is not stars. It is whether a senior engineer reaches for Ignatius
 > instead of `psql` when the database is production-adjacent, and does not
