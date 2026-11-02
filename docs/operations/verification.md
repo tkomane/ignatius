@@ -2,8 +2,8 @@
 
 ## Feature 025 completion, sidecar test extraction, and W10/W08/W09 contract verification - 2 November 2026
 
-Nine sequential pull requests ([PR41](https://github.com/tkomane/ignatius/pull/41)
-through [PR50](https://github.com/tkomane/ignatius/pull/50)) completed Feature
+Eleven sequential pull requests ([PR41](https://github.com/tkomane/ignatius/pull/41)
+through [PR51](https://github.com/tkomane/ignatius/pull/51)) completed Feature
 `025-gui-grade-experience`, extracted all remaining inline test modules into
 sidecar `tests.rs` files, and delivered the `W02`, `W03`, `W04`, `W06`, `W08`/`W09`
 automated reference-journey acceptance, `W10` operational resource-bounds and
@@ -50,6 +50,9 @@ local-state recovery, `W11`, and `W13` packages on `main`:
 - **PR50 (`3fdd291`)**: Dated 2 November 2026 verification log and
   reconciliation of `specs/005-sql-editing/checklists/requirements.md`
   (`CHK001-CHK020`).
+- **PR51 (`3e7c7b3`)**: Reconciliation of `README.md` (`## Where this is going`),
+  `specs/025-gui-grade-experience/spec.md` (`Status` header), and regression
+  assertions in `tests/documentation_matches_the_build.rs`.
 
 ### Separated verification evidence (2 November 2026)
 
@@ -93,7 +96,7 @@ local-state recovery, `W11`, and `W13` packages on `main`:
     passed.
   - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 terminal
     restoration tests passed.
-  - Hosted GitHub Actions on PR41 through PR50: all 17 executed checks passed on
+  - Hosted GitHub Actions on PR41 through PR51: all 17 executed checks passed on
     every PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18
     Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret
     scan, workflow contract, release evidence scope, and CodeQL for

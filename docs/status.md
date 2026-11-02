@@ -84,7 +84,7 @@ and hosted GitHub Actions CI + CodeQL merge into `main`:
   (`PR41` through `PR49`) in `docs/operations/verification.md` and reconciled
   the reviewer-owned requirements quality checklist (`CHK001-CHK020`) in
   `specs/005-sql-editing/checklists/requirements.md`.
-- **Wave 11 (`README.md`, `specs/025-gui-grade-experience/spec.md`, and `tests/documentation_matches_the_build.rs`)**:
+- **Wave 11 ([PR51](https://github.com/tkomane/ignatius/pull/51), merged at `3e7c7b3`)**:
   reconciled `README.md` (`## Where this is going`) and the `Status` header of
   `specs/025-gui-grade-experience/spec.md` with the completed `US1-US10` /
   `T001-T059` source implementation on `main` (while keeping native terminal
@@ -92,6 +92,10 @@ and hosted GitHub Actions CI + CodeQL merge into `main`:
   vendor authentication, and owner-authorized release gates explicitly open),
   and added regression assertions in
   `tests/documentation_matches_the_build.rs`.
+- **Wave 12 (`docs/product/roadmap.md`, `docs/status.md`, and `docs/operations/verification.md`)**:
+  reconciled `docs/product/roadmap.md` with the merged `PR41-PR51` delivery
+  waves while preserving all open native hand-use, ConPTY, live cloud vendor,
+  and owner-gated release milestones (`M1-M4`, `008 T033/T035`).
 
 ### Separated verification evidence (2 November 2026)
 
@@ -124,7 +128,7 @@ and hosted GitHub Actions CI + CodeQL merge into `main`:
 - **What live PostgreSQL, PTY and hosted CI evidence proved**:
   - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain (`127.0.0.1:55432`) and TLS (`localhost:55433`): all 75 database-backed integration tests passed (including `W03` adversarial parameter-boundary, concurrent-modification, and `standard_conforming_strings=off` refusal tests).
   - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 restoration tests passed, including balanced mouse capture enable/disable (`ESC[?1000h` / `ESC[?1000l`) and alternate-screen-last ordering.
-  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), PR45 (`8087ff6`), PR47 (`a5e7abb`), PR48 (`8be5f6b`), PR49 (`92a5230`), and PR50 (`3fdd291`): all 17 executed checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
+  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), PR45 (`8087ff6`), PR47 (`a5e7abb`), PR48 (`8be5f6b`), PR49 (`92a5230`), PR50 (`3fdd291`), and PR51 (`3e7c7b3`): all 17 executed checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
 - **What remains unverified or open (reported separately, never merged with passes)**:
   - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI is not set`); covered by the hosted Linux `PostgreSQL 18 Unix socket` CI job.
   - Native terminal emulator visual appearance and OSC 11 hand verification (`W08`), screen-reader hand use (`007 T032`), Windows 11 / ConPTY interactive hand use (`001 T051`, `001 T055a`, `W07-064`), Linux full-screen hand use (`001 T052`), live cloud-provider account authentication journeys (`W06`), and owner-gated release candidate assembly/signing/publication (`008 T033`, `008 T035`, `W12`, `W14`) remain open.
