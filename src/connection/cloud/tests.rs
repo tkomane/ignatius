@@ -24,7 +24,14 @@ fn target(sslmode: SslMode) -> ConnectionTarget {
 /// Builds a command that echoes raw text to stdout across Unix and Windows.
 fn echo_raw_command(token: &str) -> Vec<String> {
     if cfg!(windows) {
-        vec!["cmd.exe".into(), "/C".into(), format!("echo {token}")]
+        let escaped = token.replace('\'', "''");
+        vec![
+            "powershell.exe".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            format!("[Console]::WriteLine('{escaped}')"),
+        ]
     } else {
         vec!["/bin/echo".into(), token.into()]
     }
@@ -33,7 +40,14 @@ fn echo_raw_command(token: &str) -> Vec<String> {
 /// Builds a command that echoes JSON or formatted text to stdout across Unix and Windows.
 fn echo_json_command(json: &str) -> Vec<String> {
     if cfg!(windows) {
-        vec!["cmd.exe".into(), "/C".into(), format!("echo {json}")]
+        let escaped = json.replace('\'', "''");
+        vec![
+            "powershell.exe".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            format!("[Console]::WriteLine('{escaped}')"),
+        ]
     } else {
         vec!["/bin/echo".into(), json.into()]
     }
