@@ -424,6 +424,14 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
         GUI_SPEC.contains("US1-US10 and all tasks (`T001-T059`"),
         "specs/025-gui-grade-experience/spec.md does not record US1-US10 completion"
     );
+    assert!(
+        !PRODUCT_ROADMAP.contains("Automatic background detection and US6-US10 remain open"),
+        "docs/product/roadmap.md still says US6-US10 remain open in feature tasks"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Feature 025 `US1-US10` are implemented and merged on `main`"),
+        "docs/product/roadmap.md does not record Feature 025 US1-US10 merge status"
+    );
 
     for (document, expected) in [
         (THEME_TOKENS, "## Painted surfaces and elevation"),

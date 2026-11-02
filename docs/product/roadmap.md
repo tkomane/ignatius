@@ -1,60 +1,47 @@
 # Roadmap
 
-**Reconciled 2026-10-26; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-11-02; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
-The implemented source through Feature 024 is consolidated with the latest
-Feature 025 corrections. Resume from `main` and the [current status](../status.md);
+The implemented source through Feature 025 (`US1-US10`, `T001-T059`) is
+consolidated on `main`. Resume from `main` and the [current status](../status.md);
 its dated PR/check records distinguish integrated code from remaining product,
 platform and release acceptance.
 
-Feature 025 US1-US4 and the manual-theme portion of US5 are implemented. T055
-corrects expanded-field selection readability; T056/T057 repair palette ink and
-the configured-colour startup/doctor route. T058 shares the long-line horizontal
-view across painting, completion and hit mapping. T059 bounds visible/caret
-metadata while preserving the accepted cells. The feature stack passed fresh
-main-targeted platform, MSRV, PostgreSQL 14/18 plain/TLS, real Linux socket and
-CodeQL checks during sequential integration. The final dependency head is
-tracked in PR38. Neither source integration nor these checks closes full
-Feature 025 or native hand-use acceptance.
+Feature 025 `US1-US10` are implemented and merged on `main` (`PR41`, `PR42`,
+`PR43`, `PR46`, `PR51`): pasted SQL (`US1`), painted surfaces across four colour
+depths (`US2`), dense grid headers and range indicators (`US3`), honest
+connecting stages (`US4`), manual and `ui.theme = "auto"` OSC 11 luminance
+themes (`US5`), mouse verb-table dispatch and default capture with keyboard
+parity (`US6`), resizable and zoomable panes with `comfortable`/`compact`
+density (`US7`), quiet `200 ms` threshold-gated chrome capsules (`US8`), 80%
+height / 60% preview command palettes (`US9`), and the bounded `1.4 s` boot
+reveal (`US10`). Cross-cutting packages `W02`, `W03`, `W04`, `W06` subprocess
+tests, `W08`/`W09` automated reference-journey (`J1-J8`) and viewport-matrix
+(`100x30`, `80x24`, `60x20`, `30x6`) suites, `W10` operational resource bounds
+(`W10-008` and `tests/resource_bounds_contract.rs`), `W11`/`W13` release trust
+verification (`xtask release sbom` and `trust verify`), and 100% sidecar
+`tests.rs` extraction (`PR44`, `PR45`, `PR47`, `PR48`, `PR49`, `PR50`) also
+passed all 17 hosted CI and CodeQL checks on `main`. Neither source integration
+nor automated checks closes native terminal hand-use acceptance or release
+readiness.
 
 The local T059 diagnostic's 1 MiB medians were 138.342 ms/17.063 MiB RSS, with
-exact 51,081-cell parity. These are scoped test-profile measurements, not
-release-build p95 or a process-memory ceiling. Detailed source-bound results
-remain in [verification](../operations/verification.md).
+exact 51,081-cell parity, and `tests/resource_bounds_contract.rs` measured
+`p50 = 1.09 ms`, `p95 = 2.40 ms` across 100 local input/palette/completion
+actions and `p50 = 3.85 ms`, `p95 = 4.10 ms` across 100 1,000-row wide-Unicode
+grid interactions. Detailed source-bound results remain in
+[verification](../operations/verification.md).
 
 W07 retains the failed alternate-cursor sensor capability in its strict,
 explicitly dispatched diagnostic workflow. Normal Windows product CI is
 mandatory; its success does not close W07-064/T055a/T051. A faithful observation
 seam and admitted native matrix remain prerequisites for terminal restoration
-acceptance. Windows 11/Windows Terminal, Warp hand use and provider evidence
-remain separate work.
+acceptance. Windows 11/Windows Terminal, Warp hand use and live cloud-provider
+account evidence remain separate work.
 
-Automatic background detection and US6-US10 remain open in the authoritative
-feature tasks. Select the next bounded assignment after the readiness contracts
-below, preserving manual themes and `mouse = false`. W11 may examine historical
-owner-clone release/inventory prototypes retained in the pre-cleanup recovery
-bundle, but their existence does not adopt an older trust or privacy contract.
-No release or deployment follows from consolidation.
-
-Read-only readiness reviews at `d92c416` also bound the next assignments:
-
-- US6 mouse needs explicit input-time/interruption, viewport-only scrolling
-  and drag/keyboard-parity policies before its combined integrator assignment.
-  Preserve `mouse = false` until the complete verb table and restoration gates
-  pass; existing hit regions alone do not establish dispatch readiness.
-- US8 quiet chrome needs the complete state/token/suppression table, filled
-  custom-theme contrast admission, one-row safety priorities and completed-only
-  200 ms threshold pinned before implementation. Keep truthful transport,
-  transaction and recovery wording through narrow layouts.
-- US5 automatic background detection needs a supported single-owner reply
-  transport, reserved-envelope/late-input policy and staged terminal lifecycle
-  before T032. Locked Crossterm has no public OSC reply event; a finite drain
-  cannot guarantee late replies never become keys. Manual themes remain the
-  accepted implementation; no detector or fallback claim is inferred.
-
-These are dependency clarifications, not completed feature checkboxes or a
-replacement for the authoritative feature tasks. Resolve them as bounded
-contracts before assigning the next implementation.
+W11 may examine historical owner-clone release/inventory prototypes retained in
+the pre-cleanup recovery bundle, but their existence does not adopt an older
+trust or privacy contract. No release or deployment follows from consolidation.
 On 25 October, local M1 work also patched the current dependency advisories,
 refreshed five-major PostgreSQL/TLS evidence and closed a Unix startup-signal
 window. Feature 025 keyboard panes T039/T041 and density T040 are implemented
@@ -161,20 +148,10 @@ flowchart LR
 4. **W11 and W13 preparation can proceed alongside those steps.** Prepare
    concrete trust, support, naming and governance decisions before owner review.
    Proceed to W12/W14 only when their dependencies and authority exist.
-5. **Feature 025 US5-US10:** continue the already specified, observed-friction
-   work after immediate correctness/privacy defects are contained. Follow the
-   story dependencies and exact contracts; no additional feature is needed to
-   keep development moving. Final terminal/participant evidence stays open
-   until the named platform and journey have actually been exercised.
-   The pane-control keyboard/shared-geometry core precedes mouse split dragging;
-   the task plan now records this previously omitted dependency. Mouse capture
-   stays off until complete pointer behavior and keyboard parity are verified.
-   T039/T041's keyboard split/zoom core passed local integration on 25 October
-   2026. Density T040 and T038 test implementation also passed the complete
-   local gate. Dragging still belongs to T035. Full US7, native visual and
-   hosted acceptance remain open. Feature 015 T042's observed help clipping and
-   hidden-input routes are repaired and locally verified. Continue the remaining
-   theme/pointer/daily-use contracts after the distinct W10 resource bounds.
+5. **Feature 025 US1-US10:** source implementation (`T001-T059`) and automated
+   verification are merged on `main`. Final native terminal, OSC 11,
+   screen-reader and participant evidence (`W08`/`W09`) stays open until the
+   named platform and journey have actually been exercised by hand.
 
 Use full feature directory slugs in assignments. The historical `007` collision
 and old broad-theme numbers are documented in the inventory; neither justifies
