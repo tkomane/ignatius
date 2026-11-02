@@ -212,6 +212,7 @@ fn no_color_and_dumb_terminals_win_over_configuration() {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     };
 
     assert!(should_use_color(ColorMode::Auto, &base));
@@ -260,6 +261,7 @@ fn detection_facts() -> TerminalFacts {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     }
 }
 
@@ -643,4 +645,198 @@ fn owned_pty_error_restores_every_acquired_mode() {
 #[test]
 fn owned_pty_panic_restores_acquired_modes_before_previous_hook() {
     assert_owned_pty_restored("panic");
+}
+
+#[test]
+fn query_osc11_background_immediate_bel_reply() {
+    let mut writer = Vec::new();
+    let reply = b"\x1b]11;rgb:ffff/ffff/ffff\x07".to_vec();
+    let mut read_calls = 0;
+    let mut drained = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+
+    let res = query_osc11_background_with(
+        &mut writer,
+        deadline,
+        |_rem| {
+            read_calls += 1;
+            if read_calls == 1 {
+                Ok(Some(reply.clone()))
+            } else {
+                Ok(None)
+            }
+        },
+        || drained = true,
+    );
+
+    assert_eq!(writer, crate::ui::theme::OSC11_QUERY);
+    assert_eq!(res, Some(crate::ui::theme::Rgb(255, 255, 255)));
+    assert!(drained, "drain must be called upon completion");
+}
+
+#[test]
+fn query_osc11_background_st_reply_with_preceding_noise() {
+    let mut writer = Vec::new();
+    let reply = b"noise\x1b]11;rgb:0000/0000/0000\x1b\\".to_vec();
+    let mut read_calls = 0;
+    let mut drained = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+
+    let res = query_osc11_background_with(
+        &mut writer,
+        deadline,
+        |_rem| {
+            read_calls += 1;
+            if read_calls == 1 {
+                Ok(Some(reply.clone()))
+            } else {
+                Ok(None)
+            }
+        },
+        || drained = true,
+    );
+
+    assert_eq!(writer, crate::ui::theme::OSC11_QUERY);
+    assert_eq!(res, Some(crate::ui::theme::Rgb(0, 0, 0)));
+    assert!(drained);
+}
+
+#[test]
+fn query_osc11_background_chunked_reply() {
+    let mut writer = Vec::new();
+    let chunks = [
+        b"\x1b]11;".to_vec(),
+        b"rgb:8080/".to_vec(),
+        b"4040/".to_vec(),
+        b"2020\x07".to_vec(),
+    ];
+    let mut step = 0;
+    let mut drained = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+
+    let res = query_osc11_background_with(
+        &mut writer,
+        deadline,
+        |_rem| {
+            if step < chunks.len() {
+                let chunk = chunks[step].clone();
+                step += 1;
+                Ok(Some(chunk))
+            } else {
+                Ok(None)
+            }
+        },
+        || drained = true,
+    );
+
+    assert_eq!(res, Some(crate::ui::theme::Rgb(128, 64, 32)));
+    assert!(drained);
+}
+
+#[test]
+fn query_osc11_background_unanswered_timeout() {
+    let mut writer = Vec::new();
+    let mut drained = false;
+    let deadline = std::time::Instant::now();
+
+    let res =
+        query_osc11_background_with(&mut writer, deadline, |_rem| Ok(None), || drained = true);
+
+    assert_eq!(res, None);
+    assert!(drained);
+}
+
+#[test]
+fn osc11_late_reply_filter_swallows_bel_terminated_reply() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut filter = Osc11LateReplyFilter::new(true);
+
+    assert_eq!(
+        filter.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        vec![]
+    );
+    assert!(filter.is_buffering());
+
+    for ch in [
+        ']', '1', '1', ';', 'r', 'g', 'b', ':', 'f', 'f', 'f', 'f', '/', 'f', 'f', 'f', 'f', '/',
+        'f', 'f', 'f', 'f',
+    ] {
+        assert_eq!(
+            filter.process_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+            vec![]
+        );
+        assert!(filter.is_buffering());
+    }
+
+    let emitted = filter.process_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    assert!(emitted.is_empty(), "entire late reply must be swallowed");
+    assert!(!filter.is_buffering());
+}
+
+#[test]
+fn osc11_late_reply_filter_swallows_st_terminated_reply() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut filter = Osc11LateReplyFilter::new(true);
+
+    assert_eq!(
+        filter.process_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT)),
+        vec![]
+    );
+
+    for ch in [
+        '1', '1', ';', 'r', 'g', 'b', ':', '0', '0', '0', '0', '/', '0', '0', '0', '0', '/', '0',
+        '0', '0', '0',
+    ] {
+        assert_eq!(
+            filter.process_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)),
+            vec![]
+        );
+    }
+
+    let emitted = filter.process_key(KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::ALT));
+    assert!(emitted.is_empty());
+    assert!(!filter.is_buffering());
+}
+
+#[test]
+fn osc11_late_reply_filter_flushes_on_non_matching_key() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut filter = Osc11LateReplyFilter::new(true);
+
+    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(filter.process_key(esc), vec![]);
+    assert!(filter.is_buffering());
+
+    let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+    let flushed = filter.process_key(q);
+    assert_eq!(flushed, vec![esc, q]);
+    assert!(!filter.is_buffering());
+}
+
+#[test]
+fn osc11_late_reply_filter_flushes_on_poll_timeout() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut filter = Osc11LateReplyFilter::new(true);
+
+    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(filter.process_key(esc), vec![]);
+    assert!(filter.is_buffering());
+
+    let flushed = filter.flush();
+    assert_eq!(flushed, vec![esc]);
+    assert!(!filter.is_buffering());
+}
+
+#[test]
+fn osc11_late_reply_filter_passes_normal_keys_immediately() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut filter = Osc11LateReplyFilter::new(true);
+
+    let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(filter.process_key(j), vec![j]);
+    assert!(!filter.is_buffering());
+
+    let mut disabled = Osc11LateReplyFilter::new(false);
+    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(disabled.process_key(esc), vec![esc]);
 }

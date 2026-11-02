@@ -18,6 +18,8 @@ pub enum ThemeSelection {
     HighContrast,
     /// The validated custom definition.
     Custom,
+    /// Automatic palette selection resolved from terminal background luminance.
+    Auto,
 }
 
 impl ThemeSelection {
@@ -33,7 +35,7 @@ impl ThemeSelection {
 
     const fn builtin(self) -> Option<ThemeChoice> {
         match self {
-            Self::Dark => Some(ThemeChoice::Dark),
+            Self::Dark | Self::Auto => Some(ThemeChoice::Dark),
             Self::Light => Some(ThemeChoice::Light),
             Self::HighContrast => Some(ThemeChoice::HighContrast),
             Self::Custom => None,
@@ -183,9 +185,7 @@ fn lower_selection(value: Option<&toml::Value>) -> Result<ThemeSelection, ThemeR
         "light" => Ok(ThemeSelection::Light),
         "high-contrast" => Ok(ThemeSelection::HighContrast),
         "custom" => Ok(ThemeSelection::Custom),
-        "auto" => Err(ThemeRefusal::new(
-            "ui.theme = \"auto\" is not available in this build. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
-        )),
+        "auto" => Ok(ThemeSelection::Auto),
         other => Err(ThemeRefusal::new(format!(
             "ui.theme = \"{}\" is not a theme. Use \"dark\", \"light\", \"high-contrast\" or \"custom\".",
             reflected(other)
@@ -275,6 +275,7 @@ pub struct ValidatedCustomPalette {
 pub struct ValidatedThemes {
     selected: ActivePalette,
     custom: Option<ValidatedCustomPalette>,
+    auto: bool,
 }
 
 impl Default for ValidatedThemes {
@@ -282,6 +283,7 @@ impl Default for ValidatedThemes {
         Self {
             selected: ActivePalette::Builtin(ThemeChoice::Dark),
             custom: None,
+            auto: false,
         }
     }
 }
@@ -321,12 +323,40 @@ impl ValidatedThemes {
                 })
             })
             .transpose()?;
+        let auto = selection == ThemeSelection::Auto;
         let selected = if let Some(base) = selection.builtin() {
             ActivePalette::Builtin(base)
         } else {
             ActivePalette::Custom(custom.clone().ok_or_else(ThemeRefusal::missing)?)
         };
-        Ok(Self { selected, custom })
+        Ok(Self {
+            selected,
+            custom,
+            auto,
+        })
+    }
+
+    /// Whether the theme was configured as auto and awaits or applied background detection.
+    #[must_use]
+    pub const fn is_auto(&self) -> bool {
+        self.auto
+    }
+
+    /// Updates the active palette based on the detected terminal background colour.
+    ///
+    /// When `auto` was configured, a background with relative luminance >= 0.5 selects
+    /// light; otherwise dark. When `auto` was not configured, this is a no-op that
+    /// returns the existing selection.
+    pub fn apply_auto_background(&mut self, background: Option<Rgb>) -> ThemeChoice {
+        if !self.auto {
+            return match &self.selected {
+                ActivePalette::Builtin(choice) => *choice,
+                ActivePalette::Custom(custom) => custom.base,
+            };
+        }
+        let choice = background.map_or(ThemeChoice::Dark, super::theme_for_background);
+        self.selected = ActivePalette::Builtin(choice);
+        choice
     }
 
     /// The initial validated palette, preserving the caller's emission gates.

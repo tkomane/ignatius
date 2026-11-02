@@ -87,6 +87,7 @@ fn facts(no_color: bool) -> crate::diagnostics::doctor::TerminalFacts {
         unicode: true,
         color_depth: ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     }
 }
 

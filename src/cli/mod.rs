@@ -869,6 +869,14 @@ fn doctor_command(
     );
     facts.color_depth = depth;
     facts.color_depth_source = source;
+    if configured.ui.theme == crate::config::ThemeSelection::Auto
+        && facts.is_terminal
+        && std::io::stdin().is_terminal()
+        && let Ok(mut guard) = crate::ui::TerminalGuard::acquire_raw()
+    {
+        facts.background_rgb = crate::ui::terminal::probe_osc11_background();
+        let _ = guard.restore();
+    }
     let mut report = doctor::environment_report(paths, &loaded, &facts);
 
     let env = EnvSnapshot::from_process();

@@ -13,6 +13,7 @@ fn facts() -> TerminalFacts {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     }
 }
 
@@ -228,4 +229,102 @@ fn the_reported_depth_comes_from_the_facts_not_the_environment() {
     let dir = tempfile::tempdir().expect("temp dir");
     let report = environment_report(&Paths::rooted_at(dir.path()), &ok_config(), &terminal);
     assert_eq!(colour_depth_check(&report).detail, "256, source TERM");
+}
+
+#[test]
+fn auto_theme_reports_light_choice_when_background_luminance_is_light() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut config = Config::default();
+    config.ui.theme = crate::config::ThemeSelection::Auto;
+    let loaded = Ok(Loaded {
+        config,
+        themes: crate::ui::theme::ValidatedThemes::default(),
+        source: ConfigSource::Defaults,
+        pending_migration: None,
+    });
+    let terminal = TerminalFacts {
+        background_rgb: Some(crate::ui::theme::Rgb(250, 248, 245)),
+        ..facts()
+    };
+    let report = environment_report(&Paths::rooted_at(dir.path()), &loaded, &terminal);
+    let check = report
+        .checks
+        .iter()
+        .find(|c| c.name == "theme")
+        .expect("theme check must be present for auto theme");
+    assert_eq!(check.status, CheckStatus::Ok);
+    assert_eq!(check.detail, "answered rgb(250, 248, 245); using light");
+}
+
+#[test]
+fn auto_theme_reports_dark_choice_when_background_luminance_is_dark() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut config = Config::default();
+    config.ui.theme = crate::config::ThemeSelection::Auto;
+    let loaded = Ok(Loaded {
+        config,
+        themes: crate::ui::theme::ValidatedThemes::default(),
+        source: ConfigSource::Defaults,
+        pending_migration: None,
+    });
+    let terminal = TerminalFacts {
+        background_rgb: Some(crate::ui::theme::Rgb(17, 19, 24)),
+        ..facts()
+    };
+    let report = environment_report(&Paths::rooted_at(dir.path()), &loaded, &terminal);
+    let check = report
+        .checks
+        .iter()
+        .find(|c| c.name == "theme")
+        .expect("theme check must be present for auto theme");
+    assert_eq!(check.status, CheckStatus::Ok);
+    assert_eq!(check.detail, "answered rgb(17, 19, 24); using dark");
+}
+
+#[test]
+fn auto_theme_reports_fallback_dark_when_unanswered() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut config = Config::default();
+    config.ui.theme = crate::config::ThemeSelection::Auto;
+    let loaded = Ok(Loaded {
+        config,
+        themes: crate::ui::theme::ValidatedThemes::default(),
+        source: ConfigSource::Defaults,
+        pending_migration: None,
+    });
+    let terminal = TerminalFacts {
+        background_rgb: None,
+        ..facts()
+    };
+    let report = environment_report(&Paths::rooted_at(dir.path()), &loaded, &terminal);
+    let check = report
+        .checks
+        .iter()
+        .find(|c| c.name == "theme")
+        .expect("theme check must be present for auto theme");
+    assert_eq!(check.status, CheckStatus::Ok);
+    assert_eq!(check.detail, "no answer within 100 ms; using dark");
+}
+
+#[test]
+fn non_auto_theme_emits_no_theme_check() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut config = Config::default();
+    config.ui.theme = crate::config::ThemeSelection::Dark;
+    let loaded = Ok(Loaded {
+        config,
+        themes: crate::ui::theme::ValidatedThemes::default(),
+        source: ConfigSource::Defaults,
+        pending_migration: None,
+    });
+    let terminal = TerminalFacts {
+        background_rgb: Some(crate::ui::theme::Rgb(250, 248, 245)),
+        ..facts()
+    };
+    let report = environment_report(&Paths::rooted_at(dir.path()), &loaded, &terminal);
+    let check = report.checks.iter().find(|c| c.name == "theme");
+    assert!(
+        check.is_none(),
+        "theme check must not be emitted when not auto"
+    );
 }

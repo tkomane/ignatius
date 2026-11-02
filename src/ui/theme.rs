@@ -18,6 +18,86 @@ pub use custom::{
     ValidatedThemes, lower_theme_inputs,
 };
 
+/// The OSC 11 query sequence requesting the terminal background colour: `ESC ] 1 1 ; ? BEL`.
+pub const OSC11_QUERY: &[u8] = b"\x1b]11;?\x07";
+
+/// Parses an OSC 11 reply reporting the terminal background colour.
+///
+/// Accepts replies of the shape `ESC ] 1 1 ; r g b : RRRR / GGGG / BBBB` terminated
+/// by BEL (`\x07`) or ST (`\x1b\\`). Components are 1 to 4 hex digits each, scaled
+/// to 8 bits by their own width. Noise preceding the sequence is ignored.
+#[must_use]
+pub fn parse_osc11_reply(bytes: &[u8]) -> Option<Rgb> {
+    const PREFIX: &[u8] = b"\x1b]11;rgb:";
+    let start = bytes.windows(PREFIX.len()).position(|w| w == PREFIX)?;
+    let rest = &bytes[start + PREFIX.len()..];
+
+    let mut end = None;
+    let mut i = 0;
+    while i < rest.len() {
+        if rest[i] == b'\x07' {
+            end = Some(i);
+            break;
+        }
+        if rest[i] == b'\x1b' && i + 1 < rest.len() && rest[i + 1] == b'\\' {
+            end = Some(i);
+            break;
+        }
+        i += 1;
+    }
+    let end = end?;
+    let payload = &rest[..end];
+
+    let parts: Vec<&[u8]> = payload.split(|&b| b == b'/').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let r = parse_osc11_channel(parts[0])?;
+    let g = parse_osc11_channel(parts[1])?;
+    let b = parse_osc11_channel(parts[2])?;
+    Some(Rgb(r, g, b))
+}
+
+fn parse_osc11_channel(channel: &[u8]) -> Option<u8> {
+    let len = channel.len();
+    if !(1..=4).contains(&len) || !channel.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    let s = std::str::from_utf8(channel).ok()?;
+    let val = u32::from_str_radix(s, 16).ok()?;
+    let max_val = (1u32 << (len * 4)) - 1;
+    let scaled = (val * 255 + max_val / 2) / max_val;
+    Some(scaled as u8)
+}
+
+/// Chooses `Light` or `Dark` built-in theme based on background luminance.
+///
+/// WCAG relative luminance at or above 0.5 selects `Light`; below selects `Dark`.
+#[must_use]
+pub fn theme_for_background(background: Rgb) -> ThemeChoice {
+    if background.luminance() >= 0.5 {
+        ThemeChoice::Light
+    } else {
+        ThemeChoice::Dark
+    }
+}
+
+/// Resolves an automatic theme choice from a raw OSC 11 response.
+///
+/// Returns `(ThemeChoice::Light, Some(rgb))` or `(ThemeChoice::Dark, Some(rgb))` if
+/// a valid reply is parsed; otherwise returns `(ThemeChoice::Dark, None)`.
+#[must_use]
+pub fn resolve_auto_theme(reply: Option<&[u8]>) -> (ThemeChoice, Option<Rgb>) {
+    let Some(reply) = reply else {
+        return (ThemeChoice::Dark, None);
+    };
+    if let Some(rgb) = parse_osc11_reply(reply) {
+        (theme_for_background(rgb), Some(rgb))
+    } else {
+        (ThemeChoice::Dark, None)
+    }
+}
+
 /// A semantic role that the interface needs to express.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(usize)]

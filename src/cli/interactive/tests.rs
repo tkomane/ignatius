@@ -11,6 +11,7 @@ fn configured_colour_facts(is_terminal: bool) -> crate::diagnostics::doctor::Ter
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     }
 }
 

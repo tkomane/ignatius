@@ -16,6 +16,7 @@ fn configured_colour_doctor_uses_loaded_mode_and_keeps_raw_capability_facts() {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     };
     let initial = resolve_presentation(&GlobalArgs::default(), &facts);
     let mut out = Vec::new();
@@ -56,6 +57,7 @@ fn configured_colour_doctor_dumb_is_absolute_without_faking_no_color() {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     };
     let initial = resolve_presentation(
         &GlobalArgs {
@@ -424,6 +426,7 @@ fn plain_implies_no_colour_and_no_unicode() {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     };
     let presentation = resolve_presentation(
         &GlobalArgs {
@@ -449,6 +452,7 @@ fn the_nerd_font_tier_is_only_ever_chosen_explicitly() {
         unicode: true,
         color_depth: crate::ui::theme::ColorDepth::TrueColor,
         color_depth_source: crate::ui::theme::DepthSource::Default,
+        background_rgb: None,
     };
 
     // Nothing about a capable terminal implies a patched font.
@@ -786,6 +790,7 @@ fn color_depth_resolution_prefers_the_flag_then_configuration_then_detection() {
         unicode: true,
         color_depth: ColorDepth::TrueColor,
         color_depth_source: DepthSource::Default,
+        background_rgb: None,
     };
 
     assert_eq!(

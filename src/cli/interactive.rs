@@ -463,7 +463,7 @@ pub fn run(
     presentation: &Presentation,
     no_history: bool,
 ) -> Result<ExitCode, Diagnostic> {
-    let loaded = crate::config::load(paths)?;
+    let mut loaded = crate::config::load(paths)?;
     // When named profiles exist and no route was typed, let the first frame ask
     // which database the person means. Explicit targets and flags retain the
     // existing pre-terminal resolution and authentication path.
@@ -528,23 +528,38 @@ pub fn run(
         mouse: loaded.config.ui.mouse,
         ..crate::ui::TerminalOptions::default()
     };
+    let is_auto = loaded.config.ui.theme == crate::config::ThemeSelection::Auto;
+    let acquire_error = |err: std::io::Error| {
+        Diagnostic::new(
+            DiagnosticKind::Internal,
+            "could not take control of the terminal",
+            "opening the interactive client",
+        )
+        .likely_cause(err.to_string())
+        .next_action("check that the terminal supports full-screen applications, or use --plain")
+    };
     let acquire = || {
-        crate::ui::TerminalGuard::acquire(options).map_err(|err| {
-            Diagnostic::new(
-                DiagnosticKind::Internal,
-                "could not take control of the terminal",
-                "opening the interactive client",
-            )
-            .likely_cause(err.to_string())
-            .next_action(
-                "check that the terminal supports full-screen applications, or use --plain",
-            )
-        })
+        if is_auto {
+            let mut guard = crate::ui::TerminalGuard::acquire_raw().map_err(acquire_error)?;
+            let detected = crate::ui::terminal::probe_osc11_background();
+            guard.enter_full_screen(options).map_err(acquire_error)?;
+            Ok((guard, detected))
+        } else {
+            let guard = crate::ui::TerminalGuard::acquire(options).map_err(acquire_error)?;
+            Ok((guard, None))
+        }
     };
     #[cfg(unix)]
-    let (mut guard, termination) = prepare_terminal(&runtime, acquire)?;
+    let ((mut guard, detected), termination) = prepare_terminal(&runtime, acquire)?;
     #[cfg(not(unix))]
-    let mut guard = acquire()?;
+    let (mut guard, detected) = acquire()?;
+
+    let filter_late_osc11 = if is_auto {
+        loaded.themes.apply_auto_background(detected);
+        detected.is_none()
+    } else {
+        false
+    };
 
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
     let library = crate::queries::Library::new(&paths.queries_dir);
@@ -558,6 +573,7 @@ pub fn run(
         history,
         library,
         &mut exit_notice_counts,
+        filter_late_osc11,
         #[cfg(unix)]
         termination,
     ));
@@ -609,6 +625,7 @@ async fn event_loop(
     mut history: crate::history::History,
     library: crate::queries::Library,
     exit_notice_counts: &mut NoticeCounts,
+    filter_late_osc11: bool,
     #[cfg(unix)] termination: tokio::signal::unix::Signal,
 ) -> Result<ExitCode, Diagnostic> {
     let crate::config::Loaded { config, themes, .. } = loaded;
@@ -691,7 +708,12 @@ async fn event_loop(
     let mut notice_tick = tokio::time::interval(Duration::from_millis(250));
     notice_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    spawn_input_thread(tx.clone(), Arc::clone(&input_stop), &keymap);
+    spawn_input_thread(
+        tx.clone(),
+        Arc::clone(&input_stop),
+        &keymap,
+        filter_late_osc11,
+    );
     spawn_signal_watcher(
         tx.clone(),
         #[cfg(unix)]
@@ -1262,20 +1284,31 @@ fn spawn_input_thread(
     tx: mpsc::UnboundedSender<Message>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     keymap: &Keymap,
+    filter_late_osc11: bool,
 ) {
     let keymap = keymap.clone();
     std::thread::spawn(move || {
+        let mut filter = crate::ui::terminal::Osc11LateReplyFilter::new(filter_late_osc11);
         while !stop.load(std::sync::atomic::Ordering::SeqCst) {
             match event::poll(INPUT_POLL) {
                 Ok(true) => match event::read() {
                     Ok(Event::Key(key)) => {
-                        if let Some(action) = keymap.resolve(&key)
-                            && tx.send(Message::Action(action)).is_err()
-                        {
-                            return;
+                        for k in filter.process_key(key) {
+                            if let Some(action) = keymap.resolve(&k)
+                                && tx.send(Message::Action(action)).is_err()
+                            {
+                                return;
+                            }
                         }
                     }
                     Ok(Event::Resize(columns, rows)) => {
+                        for k in filter.flush() {
+                            if let Some(action) = keymap.resolve(&k)
+                                && tx.send(Message::Action(action)).is_err()
+                            {
+                                return;
+                            }
+                        }
                         if tx.send(Message::Resized(columns, rows)).is_err() {
                             return;
                         }
@@ -1285,6 +1318,13 @@ fn spawn_input_thread(
                     // Capture is not enabled by this translation, so these
                     // events stay absent until the mouse phase asks for them.
                     Ok(Event::Mouse(mouse)) => {
+                        for k in filter.flush() {
+                            if let Some(action) = keymap.resolve(&k)
+                                && tx.send(Message::Action(action)).is_err()
+                            {
+                                return;
+                            }
+                        }
                         let message = Message::Mouse {
                             kind: mouse_kind(mouse.kind),
                             column: mouse.column,
@@ -1296,6 +1336,13 @@ fn spawn_input_thread(
                         }
                     }
                     Ok(Event::Paste(text)) => {
+                        for k in filter.flush() {
+                            if let Some(action) = keymap.resolve(&k)
+                                && tx.send(Message::Action(action)).is_err()
+                            {
+                                return;
+                            }
+                        }
                         if tx.send(Message::Pasted(text)).is_err() {
                             return;
                         }
@@ -1303,7 +1350,17 @@ fn spawn_input_thread(
                     Ok(_) => {}
                     Err(_) => return,
                 },
-                Ok(false) => {}
+                Ok(false) => {
+                    if filter.is_buffering() {
+                        for k in filter.flush() {
+                            if let Some(action) = keymap.resolve(&k)
+                                && tx.send(Message::Action(action)).is_err()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                }
                 Err(_) => return,
             }
         }
