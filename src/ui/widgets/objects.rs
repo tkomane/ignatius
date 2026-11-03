@@ -216,15 +216,74 @@ pub(crate) fn render_objects(
         .saturating_sub(visible.saturating_sub(1))
         .min(rows.len().saturating_sub(1));
 
-    for (index, row) in rows.iter().enumerate().skip(offset).take(visible) {
-        let selected = focused && index == model.tree.selected;
-        let mut spans = Vec::new();
+    let mut selected_y = None;
 
-        // Indent guides, the way a file tree draws them.
+    for (screen_row, (index, row)) in rows
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+        .enumerate()
+    {
+        let selected = focused && index == model.tree.selected;
+        if selected {
+            selected_y = Some(body.y + u16::try_from(screen_row).unwrap_or(0));
+        }
+        let mut spans = Vec::new();
+        let node = model.tree.node(&row.path);
+
+        if selected {
+            let selection_style = theme.style(Token::Selection);
+            for _ in 0..row.depth {
+                spans.push(Span::styled(
+                    presentation.glyphs.indent_guide(),
+                    selection_style,
+                ));
+            }
+
+            if row.expandable {
+                spans.push(Span::styled(
+                    format!("{} ", presentation.glyphs.chevron(row.expanded)),
+                    selection_style,
+                ));
+            } else {
+                spans.push(Span::styled("  ", selection_style));
+            }
+
+            let icon = presentation.icon(row_icon(&row.row_kind));
+            if !icon.is_empty() {
+                spans.push(Span::styled(icon, selection_style));
+            }
+
+            spans.push(Span::styled(
+                sanitize_for_display(&row.label),
+                selection_style,
+            ));
+
+            if row.loading && !presentation.reduced_motion {
+                spans.push(Span::styled(
+                    format!(" {}", presentation.glyphs.spinner(model.frame)),
+                    selection_style,
+                ));
+            } else if row.loading {
+                spans.push(Span::styled(" loading", selection_style));
+            } else if let Some(detail) = &row.detail {
+                spans.push(Span::styled(
+                    format!("  {}", sanitize_for_display(detail)),
+                    selection_style,
+                ));
+            }
+
+            let line = Line::from(spans).style(selection_style);
+            lines.push(line);
+            continue;
+        }
+
+        // Indent guides for unselected rows
         for _ in 0..row.depth {
             spans.push(Span::styled(
                 presentation.glyphs.indent_guide(),
-                theme.style(Token::Border),
+                theme.style(Token::Muted),
             ));
         }
 
@@ -234,22 +293,122 @@ pub(crate) fn render_objects(
                 theme.style(Token::Muted),
             ));
         } else {
-            spans.push(Span::raw("  "));
+            spans.push(Span::styled("  ", theme.style(Token::Muted)));
         }
 
-        let icon = presentation.icon(row_icon(&row.row_kind));
-        if !icon.is_empty() {
-            spans.push(Span::styled(icon, theme.style(row_token(&row.row_kind))));
-        }
-
-        spans.push(Span::styled(
-            sanitize_for_display(&row.label),
-            if selected {
-                theme.style(Token::Selection)
-            } else {
-                theme.style(row_token(&row.row_kind))
+        match &row.row_kind {
+            crate::app::tree::RowKind::Schema { usable } => {
+                let (icon_token, label_token) = if *usable {
+                    (Token::Focus, Token::Header)
+                } else {
+                    (Token::Muted, Token::Muted)
+                };
+                let icon = presentation.icon(Icon::Schema);
+                if !icon.is_empty() {
+                    spans.push(Span::styled(icon, theme.style(icon_token)));
+                }
+                spans.push(Span::styled(
+                    sanitize_for_display(&row.label),
+                    theme.style(label_token),
+                ));
+            }
+            crate::app::tree::RowKind::Group(kind) => {
+                let icon = presentation.icon(group_icon(*kind));
+                if !icon.is_empty() {
+                    spans.push(Span::styled(icon, theme.style(Token::Info)));
+                }
+                if let Some(crate::app::tree::Node {
+                    kind:
+                        crate::app::tree::NodeKind::Group {
+                            count,
+                            kind: group_kind,
+                            ..
+                        },
+                    ..
+                }) = node
+                {
+                    spans.push(Span::styled(group_kind.plural(), theme.style(Token::Text)));
+                    spans.push(Span::styled(
+                        format!(" ({count})"),
+                        theme.style(Token::Muted),
+                    ));
+                } else {
+                    spans.push(Span::styled(
+                        sanitize_for_display(&row.label),
+                        theme.style(Token::Text),
+                    ));
+                }
+            }
+            crate::app::tree::RowKind::Object { kind, readable } => match kind {
+                crate::postgres::ObjectKind::Index => {
+                    let icon = presentation.icon(Icon::Index);
+                    if !icon.is_empty() {
+                        spans.push(Span::styled(icon, theme.style(Token::Info)));
+                    }
+                    spans.push(Span::styled(
+                        sanitize_for_display(&row.label),
+                        theme.style(Token::Muted),
+                    ));
+                }
+                crate::postgres::ObjectKind::Extension => {
+                    let icon = presentation.icon(Icon::Extension);
+                    if !icon.is_empty() {
+                        spans.push(Span::styled(icon, theme.style(Token::Success)));
+                    }
+                    spans.push(Span::styled(
+                        sanitize_for_display(&row.label),
+                        theme.style(Token::Text),
+                    ));
+                }
+                _ => {
+                    let icon = presentation.icon(group_icon(*kind));
+                    if !icon.is_empty() {
+                        spans.push(Span::styled(
+                            icon,
+                            theme.style(object_semantic_token(*kind)),
+                        ));
+                    }
+                    let label_token = if *readable {
+                        Token::Text
+                    } else {
+                        Token::Warning
+                    };
+                    spans.push(Span::styled(
+                        sanitize_for_display(&row.label),
+                        theme.style(label_token),
+                    ));
+                }
             },
-        ));
+            crate::app::tree::RowKind::Column { primary_key, .. } => {
+                let icon = presentation.icon(if *primary_key {
+                    Icon::KeyColumn
+                } else {
+                    Icon::Column
+                });
+                let (icon_token, label_token) = if *primary_key {
+                    (Token::Warning, Token::Text)
+                } else {
+                    (Token::Muted, Token::Muted)
+                };
+                if !icon.is_empty() {
+                    spans.push(Span::styled(icon, theme.style(icon_token)));
+                }
+                spans.push(Span::styled(
+                    sanitize_for_display(&row.label),
+                    theme.style(label_token),
+                ));
+            }
+            crate::app::tree::RowKind::Message => {
+                let icon = presentation.icon(Icon::Info);
+                if !icon.is_empty() {
+                    spans.push(Span::styled(icon, theme.style(Token::Muted)));
+                }
+                spans.push(Span::styled(
+                    sanitize_for_display(&row.label),
+                    theme.style(Token::Muted),
+                ));
+            }
+        }
 
         if row.loading && !presentation.reduced_motion {
             spans.push(Span::styled(
@@ -265,35 +424,27 @@ pub(crate) fn render_objects(
             ));
         }
 
-        let mut line = Line::from(spans);
-        if selected {
-            line = line.style(theme.style(Token::Selection));
-        }
+        let line = Line::from(spans);
         lines.push(line);
     }
 
     Paragraph::new(lines).render(body, buf);
+
+    if let Some(sy) = selected_y {
+        let selection_style = theme.style(Token::Selection);
+        for x in body.x..body.x.saturating_add(body.width) {
+            buf[(x, sy)].set_style(selection_style);
+        }
+    }
 }
 
 /// The icon for a tree row. Icons are supplementary: the label already carries
 /// the kind for groups, and the detail carries it for objects.
 const fn row_icon(kind: &crate::app::tree::RowKind) -> Icon {
     use crate::app::tree::RowKind;
-    use crate::postgres::ObjectKind;
     match kind {
         RowKind::Schema { .. } => Icon::Schema,
-        RowKind::Group(object) | RowKind::Object { kind: object, .. } => match object {
-            ObjectKind::Table | ObjectKind::PartitionedTable | ObjectKind::ForeignTable => {
-                Icon::Table
-            }
-            ObjectKind::View => Icon::View,
-            ObjectKind::MaterializedView => Icon::MaterializedView,
-            ObjectKind::Sequence => Icon::Sequence,
-            ObjectKind::Function => Icon::Function,
-            ObjectKind::Index => Icon::Index,
-            ObjectKind::Extension => Icon::Extension,
-            ObjectKind::Column => Icon::Column,
-        },
+        RowKind::Group(object) | RowKind::Object { kind: object, .. } => group_icon(*object),
         RowKind::Column {
             primary_key: true, ..
         } => Icon::KeyColumn,
@@ -302,17 +453,30 @@ const fn row_icon(kind: &crate::app::tree::RowKind) -> Icon {
     }
 }
 
-const fn row_token(kind: &crate::app::tree::RowKind) -> Token {
-    use crate::app::tree::RowKind;
+const fn group_icon(kind: crate::postgres::ObjectKind) -> Icon {
+    use crate::postgres::ObjectKind;
     match kind {
-        RowKind::Schema { usable: false } => Token::Muted,
-        RowKind::Schema { .. } => Token::Header,
-        RowKind::Group(_) => Token::Muted,
-        RowKind::Object {
-            readable: false, ..
-        } => Token::Warning,
-        RowKind::Object { .. } | RowKind::Column { .. } => Token::Text,
-        RowKind::Message => Token::Muted,
+        ObjectKind::Table | ObjectKind::PartitionedTable | ObjectKind::ForeignTable => Icon::Table,
+        ObjectKind::View => Icon::View,
+        ObjectKind::MaterializedView => Icon::MaterializedView,
+        ObjectKind::Sequence => Icon::Sequence,
+        ObjectKind::Function => Icon::Function,
+        ObjectKind::Index => Icon::Index,
+        ObjectKind::Extension => Icon::Extension,
+        ObjectKind::Column => Icon::Column,
+    }
+}
+
+const fn object_semantic_token(kind: crate::postgres::ObjectKind) -> Token {
+    use crate::postgres::ObjectKind;
+    match kind {
+        ObjectKind::Table | ObjectKind::PartitionedTable | ObjectKind::ForeignTable => Token::Info,
+        ObjectKind::View | ObjectKind::MaterializedView => Token::SyntaxKeyword,
+        ObjectKind::Sequence => Token::SyntaxLiteral,
+        ObjectKind::Function => Token::SyntaxNumber,
+        ObjectKind::Index => Token::Info,
+        ObjectKind::Extension => Token::Success,
+        ObjectKind::Column => Token::Muted,
     }
 }
 

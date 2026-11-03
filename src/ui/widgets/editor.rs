@@ -306,6 +306,7 @@ pub(crate) fn render_editor(
     };
 
     let mut line_start = 0usize;
+    let mut active_cursor_y = None;
 
     for (index, source) in lines.iter().enumerate() {
         let number = index + 1;
@@ -315,6 +316,12 @@ pub(crate) fn render_editor(
         line_start += source.len() + 1;
         if number <= offset || number > offset + height {
             continue;
+        }
+
+        let on_cursor_line = number == cursor_line;
+        let y = inner.y + u16::try_from(number - offset - 1).unwrap_or(0);
+        if focused && on_cursor_line {
+            active_cursor_y = Some(y);
         }
 
         let in_statement = current
@@ -333,19 +340,20 @@ pub(crate) fn render_editor(
         } else {
             Token::Focus
         };
+        let line_number_style = if on_cursor_line {
+            if focused {
+                theme.on_stripe(Token::Focus)
+            } else {
+                theme.style(Token::Header)
+            }
+        } else {
+            theme.style(Token::Muted)
+        };
         let mut spans = vec![
-            Span::styled(
-                format!("{number:>gutter$} "),
-                theme.style(if number == cursor_line {
-                    Token::Text
-                } else {
-                    Token::Muted
-                }),
-            ),
+            Span::styled(format!("{number:>gutter$} "), line_number_style),
             Span::styled(line_marker, theme.style(line_marker_token)),
         ];
 
-        let y = inner.y + u16::try_from(number - offset - 1).unwrap_or(0);
         Line::from(std::mem::take(&mut spans)).render(Rect::new(inner.x, y, inner.width, 1), buf);
         if capacity == 0 {
             continue;
@@ -392,6 +400,20 @@ pub(crate) fn render_editor(
                 1,
                 theme.style(Token::Selection),
             );
+        }
+    }
+
+    if let Some(cy) = active_cursor_y
+        && let Some(stripe_bg) = theme.stripe().bg
+    {
+        let surface_pane_bg = theme
+            .surface(Token::SurfacePane)
+            .bg
+            .unwrap_or(ratatui::style::Color::Reset);
+        for x in inner.x..inner.x.saturating_add(inner.width) {
+            if buf[(x, cy)].bg == surface_pane_bg {
+                buf[(x, cy)].set_bg(stripe_bg);
+            }
         }
     }
 }

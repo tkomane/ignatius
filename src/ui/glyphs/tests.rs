@@ -190,3 +190,9 @@ fn the_focused_border_differs_from_the_unfocused_one() {
         );
     }
 }
+
+#[test]
+fn unicode_database_icon_uses_fisheye_fallback() {
+    let glyphs = Glyphs::new(GlyphTier::Unicode);
+    assert_eq!(glyphs.icon(Icon::Database), "\u{25c9}");
+}

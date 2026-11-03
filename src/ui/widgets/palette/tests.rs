@@ -396,3 +396,100 @@ fn hit_row_respects_preview_split_and_rejects_preview_clicks() {
         "clicking filter line must not hit row"
     );
 }
+
+#[test]
+fn selected_palette_match_row_pads_full_width_with_selection_background() {
+    let p = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let selection_bg = p.theme.color(Token::Selection).expect("selection color");
+
+    // 1. Non-preview mode (width 70 < MIN_COLUMNS)
+    let narrow_area = Rect::new(0, 0, 70, 20);
+    let mut narrow_buf = Buffer::empty(narrow_area);
+    let pal = palette();
+    render_palette(&pal, &p, narrow_area, &mut narrow_buf);
+    let box_area = super::palette_box(&pal, &p, narrow_area);
+    let row_y = box_area.y + 2; // first match row
+    let inner_start_x = box_area.x + 1;
+    let inner_end_x = box_area.x + box_area.width - 1;
+    for x in inner_start_x..inner_end_x {
+        assert_eq!(
+            narrow_buf[(x, row_y)].bg,
+            selection_bg,
+            "non-preview selected row cell at x={x} must carry selection background"
+        );
+    }
+
+    // 2. Preview mode (width 100 >= MIN_COLUMNS)
+    let wide_area = Rect::new(0, 0, 100, 24);
+    let mut wide_buf = Buffer::empty(wide_area);
+    let saved_pal = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "active_users".into(),
+        detail: "SELECT * FROM users;".into(),
+        group: "Saved",
+        command: PaletteCommand::Open("active_users".into()),
+    }]);
+    render_palette(&saved_pal, &p, wide_area, &mut wide_buf);
+    let wide_box = super::palette_box(&saved_pal, &p, wide_area);
+    let inner_width = wide_box.width - 2;
+    let preview_width = inner_width * 60 / 100;
+    let list_width = inner_width - preview_width;
+    let wide_row_y = wide_box.y + 2;
+    for x in (wide_box.x + 1)..(wide_box.x + 1 + list_width) {
+        assert_eq!(
+            wide_buf[(x, wide_row_y)].bg,
+            selection_bg,
+            "preview mode selected row cell at x={x} must carry selection background across list_width"
+        );
+    }
+}
+
+#[test]
+fn saved_query_preview_pane_highlights_sql_syntax_and_styles_headers() {
+    let p = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let wide_area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(wide_area);
+    let saved_pal = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "users_query".into(),
+        detail: "SELECT id FROM users\nWHERE active = true;".into(),
+        group: "Saved",
+        command: PaletteCommand::Open("users_query".into()),
+    }]);
+    render_palette(&saved_pal, &p, wide_area, &mut buf);
+
+    let query_hdr_pos = cell(&buf, "Query:");
+    assert!(
+        buf[query_hdr_pos].modifier.contains(Modifier::BOLD),
+        "Query: key must have Header style (bold)"
+    );
+
+    let sql_hdr_pos = cell(&buf, "SQL:");
+    assert!(
+        buf[sql_hdr_pos].modifier.contains(Modifier::BOLD),
+        "SQL: header must have Header style (bold)"
+    );
+
+    let keyword_color = p.theme.color(Token::SyntaxKeyword).expect("keyword color");
+    let select_pos = cell(&buf, "SELECT");
+    assert_eq!(
+        buf[select_pos].fg, keyword_color,
+        "SELECT must have SyntaxKeyword foreground"
+    );
+    let from_pos = cell(&buf, "FROM");
+    assert_eq!(
+        buf[from_pos].fg, keyword_color,
+        "FROM must have SyntaxKeyword foreground"
+    );
+    let where_pos = cell(&buf, "WHERE");
+    assert_eq!(
+        buf[where_pos].fg, keyword_color,
+        "WHERE must have SyntaxKeyword foreground"
+    );
+}

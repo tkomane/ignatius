@@ -121,7 +121,7 @@ impl Glyphs {
             GlyphTier::Ascii => "",
             GlyphTier::Unicode => match icon {
                 Icon::Brand => "\u{25c8}",        // ◈
-                Icon::Database => "\u{2637}",     // ☷
+                Icon::Database => "\u{25c9}",     // ◉
                 Icon::Role => "\u{25cb}",         // ○
                 Icon::LockVerified => "\u{2713}", // ✓
                 Icon::LockPlain => "\u{25cf}",    // ●

@@ -459,3 +459,17 @@ fn us8_footer_narrow_truncation_drops_whole_hints() {
         }
     }
 }
+
+#[test]
+fn footer_renders_surface_alt_statusbar() {
+    let model = Model::new(100);
+    let keymap = Keymap::new();
+    let p = presentation(ThemeChoice::Dark, true, GlyphTier::Unicode);
+    let area = Rect::new(0, 0, 80, 1);
+    let mut buf = Buffer::empty(area);
+    render_footer(&model, &keymap, &p, area, &mut buf);
+
+    let surface_alt_bg = p.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    // Verify trailing cell carries SurfaceAlt background
+    assert_eq!(buf[(79, 0)].bg, surface_alt_bg);
+}

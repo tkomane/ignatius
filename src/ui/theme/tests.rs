@@ -804,3 +804,29 @@ fn resolve_auto_theme_handles_replies_malformed_and_none() {
     // None reply (timeout / unanswered) falls back to Dark with None rgb
     assert_eq!(resolve_auto_theme(None), (ThemeChoice::Dark, None));
 }
+
+#[test]
+fn surface_tiers_and_theme_pill_helper() {
+    let dark = Theme::new(ThemeChoice::Dark, true);
+    assert_eq!(dark.rgb(Token::Surface), Rgb(0x11, 0x13, 0x1d));
+    assert_eq!(dark.rgb(Token::SurfaceAlt), Rgb(0x22, 0x26, 0x3a));
+    assert_eq!(dark.rgb(Token::SurfacePane), Rgb(0x1b, 0x1e, 0x2e));
+    assert_eq!(dark.rgb(Token::SurfaceOverlay), Rgb(0x29, 0x2e, 0x42));
+    assert_eq!(dark.rgb(Token::Border), Rgb(0x41, 0x48, 0x68));
+
+    let light = Theme::new(ThemeChoice::Light, true);
+    assert_eq!(light.rgb(Token::Surface), Rgb(0xe6, 0xe9, 0xef));
+    assert_eq!(light.rgb(Token::SurfaceAlt), Rgb(0xe2, 0xe6, 0xf0));
+    assert_eq!(light.rgb(Token::SurfacePane), Rgb(0xf4, 0xf6, 0xf9));
+    assert_eq!(light.rgb(Token::SurfaceOverlay), Rgb(0xdc, 0xe0, 0xe8));
+
+    let pill = dark.pill(Token::Focus);
+    assert_eq!(pill.bg, Some(dark.foreground(Token::SurfaceAlt)));
+    assert_eq!(pill.fg, Some(dark.foreground(Token::Focus)));
+    assert!(pill.add_modifier.contains(Modifier::BOLD));
+
+    let no_color = Theme::new(ThemeChoice::Dark, false);
+    let pill_no_color = no_color.pill(Token::Focus);
+    assert!(pill_no_color.bg.is_none());
+    assert!(pill_no_color.fg.is_none());
+}

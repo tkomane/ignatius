@@ -37,18 +37,45 @@ pub(crate) fn render_header(
     let name = crate::branding::PRODUCT_NAME;
     left_spans.push(Span::styled(
         format!(" {brand}{name}: "),
-        theme.style(Token::Header),
+        theme.pill(Token::Focus),
     ));
 
     // 2. Connection state / target
-    left_spans.push(Span::styled(
-        format!(
-            "{}{}",
-            presentation.icon(Icon::Database),
-            model.connection.label()
-        ),
-        theme.style(Token::Text),
-    ));
+    match &model.connection {
+        ConnectionState::Connected(info) => {
+            left_spans.push(Span::styled(
+                presentation.icon(Icon::Database),
+                theme.on_stripe(Token::Focus),
+            ));
+            let clean_target = sanitize_for_display(&info.target);
+            if let Some(at_idx) = clean_target.find('@')
+                && let Some(slash_idx) = clean_target.rfind('/')
+                && at_idx < slash_idx
+            {
+                let user = &clean_target[..at_idx];
+                let host_port = &clean_target[at_idx..=slash_idx];
+                let db = &clean_target[slash_idx + 1..];
+                left_spans.push(Span::styled(user.to_owned(), theme.on_stripe(Token::Info)));
+                left_spans.push(Span::styled(
+                    host_port.to_owned(),
+                    theme.on_stripe(Token::Muted),
+                ));
+                left_spans.push(Span::styled(db.to_owned(), theme.on_stripe(Token::Header)));
+            } else {
+                left_spans.push(Span::styled(clean_target, theme.on_stripe(Token::Text)));
+            }
+        }
+        _ => {
+            left_spans.push(Span::styled(
+                format!(
+                    "{}{}",
+                    presentation.icon(Icon::Database),
+                    model.connection.label()
+                ),
+                theme.style(Token::Text),
+            ));
+        }
+    }
 
     // Failed connection step if any
     if let Some(step) = failed_step(model) {
@@ -200,15 +227,23 @@ pub(crate) fn render_header(
         let left_area = Rect::new(area.x, area.y, area.width - (right_width as u16), 1);
         let right_x = area.x + area.width - (right_width as u16);
         let right_area = Rect::new(right_x, area.y, right_width as u16, 1);
-        Paragraph::new(Line::from(left_spans)).render(left_area, buf);
-        Paragraph::new(Line::from(right_spans)).render(right_area, buf);
+        Paragraph::new(Line::from(left_spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(left_area, buf);
+        Paragraph::new(Line::from(right_spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(right_area, buf);
     } else if !right_spans.is_empty() && left_width + 2 < total_width {
         let mut combined = left_spans;
         combined.push(Span::raw("  "));
         combined.extend(right_spans);
-        Paragraph::new(Line::from(combined)).render(area, buf);
+        Paragraph::new(Line::from(combined))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(area, buf);
     } else {
-        Paragraph::new(Line::from(left_spans)).render(area, buf);
+        Paragraph::new(Line::from(left_spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(area, buf);
     }
 }
 
@@ -339,7 +374,9 @@ pub(crate) fn render_compact_header(
         ),
         theme.style(Token::Focus),
     ));
-    Paragraph::new(Line::from(spans)).render(area, buf);
+    Paragraph::new(Line::from(spans))
+        .style(theme.surface(Token::SurfaceAlt))
+        .render(area, buf);
 }
 
 #[cfg(test)]

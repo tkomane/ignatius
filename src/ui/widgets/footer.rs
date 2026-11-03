@@ -129,7 +129,9 @@ pub(crate) fn render_footer(
                 theme.style(Token::Info),
             ));
         }
-        Paragraph::new(Line::from(spans)).render(area, buf);
+        Paragraph::new(Line::from(spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(area, buf);
         return wording.is_some();
     }
 
@@ -158,7 +160,9 @@ pub(crate) fn render_footer(
         if !message.is_empty() {
             spans.push(Span::styled(format!(" {message}"), theme.style(token)));
         }
-        Paragraph::new(Line::from(spans)).render(area, buf);
+        Paragraph::new(Line::from(spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(area, buf);
         return true;
     }
 
@@ -187,7 +191,9 @@ pub(crate) fn render_footer(
         if !message.is_empty() {
             spans.push(Span::styled(format!(" {message}"), theme.style(token)));
         }
-        Paragraph::new(Line::from(spans)).render(area, buf);
+        Paragraph::new(Line::from(spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(area, buf);
         return true;
     }
 
@@ -230,7 +236,9 @@ pub(crate) fn render_footer(
         used += segment_width;
     }
 
-    Paragraph::new(Line::from(spans)).render(area, buf);
+    Paragraph::new(Line::from(spans))
+        .style(theme.surface(Token::SurfaceAlt))
+        .render(area, buf);
     true
 }
 
