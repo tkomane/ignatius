@@ -1,6 +1,6 @@
 use super::{action_key_label, input_cursor, overlay_block, pane_block, syntax_token};
 use crate::app::model::{Focus, Model};
-use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
+use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{OverlayAnchor, overlay_box, prompt_box};
@@ -34,7 +34,7 @@ pub(crate) fn render_name_prompt(
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Name: ", theme.style(Token::Text)),
+            Span::styled("Name: ", theme.style(Token::Header)),
             Span::styled(
                 sanitize_for_display(&prompt.typed),
                 theme.style(Token::Focus),
@@ -278,13 +278,16 @@ pub(crate) fn render_update_value_prompt(
         sanitize_for_display(prompt.replacement())
     };
     let lines = vec![
-        Line::from(Span::styled(
-            format!(
-                "Target: {relation}.{}",
-                sanitize_for_display(&prompt.source.target_column)
+        Line::from(vec![
+            Span::styled("Target: ", theme.style(Token::Header)),
+            Span::styled(
+                format!(
+                    "{relation}.{}",
+                    sanitize_for_display(&prompt.source.target_column)
+                ),
+                theme.style(Token::Focus),
             ),
-            theme.style(Token::Focus),
-        )),
+        ]),
         Line::from(Span::styled(
             format!(
                 "Selected result row {}, column {}",
@@ -295,7 +298,7 @@ pub(crate) fn render_update_value_prompt(
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Replacement: ", theme.style(Token::Text)),
+            Span::styled("Replacement: ", theme.style(Token::Header)),
             Span::styled(replacement, theme.style(Token::Focus)),
             Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
         ]),
@@ -512,33 +515,42 @@ fn render_plan_summary(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let mut lines = vec![Line::from(Span::styled(
-        truncate_to_width(
-            summary,
-            area.width as usize,
-            !presentation.glyphs.is_ascii(),
-        ),
-        presentation.theme.style(Token::Info),
-    ))];
+    let truncated = truncate_to_width(
+        summary,
+        area.width as usize,
+        !presentation.glyphs.is_ascii(),
+    );
+    let mut first_line_spans = Vec::new();
+    let mut parts = truncated.split("; ");
+    if let Some(first) = parts.next() {
+        first_line_spans.push(Span::styled(
+            first.to_owned(),
+            presentation.theme.style(Token::Header),
+        ));
+        for segment in parts {
+            first_line_spans.push(Span::styled("; ", presentation.theme.style(Token::Border)));
+            first_line_spans.push(Span::styled(
+                segment.to_owned(),
+                presentation.theme.style(Token::Info),
+            ));
+        }
+    }
+    let mut lines = vec![Line::from(first_line_spans)];
     let attention = document.has_attention().then(|| {
         document.root.at_path(&document.attention_path).map_or_else(
             || "unavailable".to_owned(),
             |node| safe_plan_text(&node.node_type),
         )
     });
-    lines.push(Line::from(Span::styled(
-        attention.map_or_else(
-            || "Attention: unavailable".to_owned(),
-            |node| {
-                format!(
-                    "Attention: {} ({})",
-                    node,
-                    document.attention_basis().label()
-                )
-            },
-        ),
-        presentation.theme.style(Token::Warning),
-    )));
+    let attention_detail = attention.map_or_else(
+        || "unavailable".to_owned(),
+        |node| format!("{} ({})", node, document.attention_basis().label()),
+    );
+    let warning_style = presentation.theme.style(Token::Warning);
+    lines.push(Line::from(vec![
+        Span::styled("Attention: ", warning_style.add_modifier(Modifier::BOLD)),
+        Span::styled(attention_detail, warning_style),
+    ]));
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .render(area, buf);
@@ -582,16 +594,30 @@ fn render_plan_tree(
             !presentation.glyphs.is_ascii(),
         );
         text = truncate_to_width(&text, area.width as usize, !presentation.glyphs.is_ascii());
-        let line = Line::from(Span::styled(
-            text,
-            if selected {
-                presentation.theme.style(Token::Selection)
-            } else if document.is_attention_path(path) {
-                presentation.theme.style(Token::Warning)
-            } else {
-                presentation.theme.style(Token::Text)
-            },
-        ));
+        let line = if selected {
+            let padded = pad_to_width(&text, area.width as usize);
+            Line::from(Span::styled(
+                padded,
+                presentation.theme.style(Token::Selection),
+            ))
+        } else if document.is_attention_path(path) {
+            Line::from(Span::styled(text, presentation.theme.style(Token::Warning)))
+        } else if let Some((left, right)) = text.split_once(" | ") {
+            Line::from(vec![
+                Span::styled(left.to_owned(), presentation.theme.style(Token::Header)),
+                Span::styled(" | ", presentation.theme.style(Token::Border)),
+                Span::styled(
+                    right.to_owned(),
+                    presentation.theme.style(if node.estimate_mismatch() {
+                        Token::Warning
+                    } else {
+                        Token::Muted
+                    }),
+                ),
+            ])
+        } else {
+            Line::from(Span::styled(text, presentation.theme.style(Token::Header)))
+        };
         lines.push(line);
     }
     Paragraph::new(lines).render(area, buf);
@@ -610,18 +636,21 @@ fn render_plan_detail(
     let Some(node) = view.selected_node() else {
         return;
     };
-    let mut lines = vec![Line::from(Span::styled(
-        format!(
-            "Selected: {}  ({}/{})",
-            safe_plan_text(&node.node_type),
-            view.visible_paths()
-                .iter()
-                .position(|path| path == &view.selected_path)
-                .map_or(1, |index| index + 1),
-            view.visible_paths().len()
+    let mut lines = vec![Line::from(vec![
+        Span::styled("Selected: ", presentation.theme.style(Token::Info)),
+        Span::styled(
+            format!(
+                "{}  ({}/{})",
+                safe_plan_text(&node.node_type),
+                view.visible_paths()
+                    .iter()
+                    .position(|path| path == &view.selected_path)
+                    .map_or(1, |index| index + 1),
+                view.visible_paths().len()
+            ),
+            presentation.theme.style(Token::Header),
         ),
-        presentation.theme.style(Token::Header),
-    ))];
+    ])];
     lines.push(Line::from(Span::styled(
         plan_metrics(node, document.analyzed),
         presentation.theme.style(Token::Text),
@@ -633,14 +662,16 @@ fn render_plan_detail(
         )));
     }
     for fact in node.facts.iter().take(2) {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{}: {}",
-                safe_plan_text(&fact.label),
-                safe_plan_text(&fact.value)
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}: ", safe_plan_text(&fact.label)),
+                presentation.theme.style(Token::Info),
             ),
-            presentation.theme.style(Token::Muted),
-        )));
+            Span::styled(
+                safe_plan_text(&fact.value),
+                presentation.theme.style(Token::Muted),
+            ),
+        ]));
     }
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
@@ -933,3 +964,6 @@ pub(crate) fn render_help(
     .style(presentation.theme.style(Token::Focus))
     .render(view.rail_area, buf);
 }
+
+#[cfg(test)]
+mod tests;

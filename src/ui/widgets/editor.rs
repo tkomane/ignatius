@@ -134,12 +134,33 @@ pub(crate) fn render_completion(
             content_width,
             unicode,
         );
-        let style = if index == menu.selected {
-            presentation.theme.style(Token::Selection)
+        if index == menu.selected {
+            let padded = pad_to_width(&text, content_width);
+            lines.push(Line::from(Span::styled(
+                padded,
+                presentation.theme.style(Token::Selection),
+            )));
         } else {
-            presentation.theme.style(Token::Text)
-        };
-        lines.push(Line::from(Span::styled(text, style)));
+            let prefix_raw = format!("{marker} {name}");
+            let kind_token = candidate_kind_token(candidate.kind);
+            if text.len() > prefix_raw.len() && text.is_char_boundary(prefix_raw.len()) {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        text[..prefix_raw.len()].to_owned(),
+                        presentation.theme.style(kind_token),
+                    ),
+                    Span::styled(
+                        text[prefix_raw.len()..].to_owned(),
+                        presentation.theme.style(Token::Muted),
+                    ),
+                ]));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    text,
+                    presentation.theme.style(kind_token),
+                )));
+            }
+        }
     }
     if menu.result.candidates.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -169,6 +190,30 @@ pub(crate) fn render_completion(
         .block(overlay_block(" Complete ".to_owned(), presentation))
         .wrap(Wrap { trim: true })
         .render(popup, buf);
+
+    if menu.selected < menu.result.candidates.len() {
+        let sel_y = popup
+            .y
+            .saturating_add(2)
+            .saturating_add(u16::try_from(menu.selected).unwrap_or(0));
+        if sel_y < popup.bottom().saturating_sub(1) {
+            let sel_style = presentation.theme.style(Token::Selection);
+            for cx in (popup.x + 1)..popup.x.saturating_add(popup.width.saturating_sub(1)) {
+                buf[(cx, sel_y)].set_style(sel_style);
+            }
+        }
+    }
+}
+
+fn candidate_kind_token(kind: crate::query::completion::CandidateKind) -> Token {
+    use crate::query::completion::{CandidateKind, CatalogObjectKind};
+    match kind {
+        CandidateKind::Keyword => Token::SyntaxKeyword,
+        CandidateKind::Cte => Token::Focus,
+        CandidateKind::Column => Token::Text,
+        CandidateKind::Object(CatalogObjectKind::Function) => Token::SyntaxNumber,
+        CandidateKind::Object(_) => Token::Info,
+    }
 }
 pub(crate) fn render_editor(
     model: &Model,
@@ -217,10 +262,18 @@ pub(crate) fn render_editor(
                     "Connect before running SQL. Results appear after a query.",
                     theme.style(Token::Muted),
                 )));
-                lines.push(Line::from(Span::styled(
-                    format!("{palette_key} Command palette shows available actions."),
-                    theme.style(Token::Info),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{palette_key} "),
+                        theme
+                            .style(Token::Focus)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Command palette shows available actions.",
+                        theme.style(Token::Info),
+                    ),
+                ]));
             }
             crate::app::discovery::ConnectionPosture::Connecting => {
                 lines.push(Line::from(Span::styled(
@@ -231,10 +284,18 @@ pub(crate) fn render_editor(
                     "The editor is ready. Wait for the connection before running SQL.",
                     theme.style(Token::Muted),
                 )));
-                lines.push(Line::from(Span::styled(
-                    format!("{help_key} Help explains the keyboard while it connects."),
-                    theme.style(Token::Info),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{help_key} "),
+                        theme
+                            .style(Token::Focus)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Help explains the keyboard while it connects.",
+                        theme.style(Token::Info),
+                    ),
+                ]));
             }
             crate::app::discovery::ConnectionPosture::Connected => {
                 let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
@@ -246,14 +307,30 @@ pub(crate) fn render_editor(
                     "Type SQL in this editor.",
                     theme.style(Token::Text),
                 )));
-                lines.push(Line::from(Span::styled(
-                    format!("{run_key} Run the buffer once SQL is ready."),
-                    theme.style(Token::Info),
-                )));
-                lines.push(Line::from(Span::styled(
-                    format!("{palette_key} Command palette answers what else is possible."),
-                    theme.style(Token::Muted),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{run_key} "),
+                        theme
+                            .style(Token::Focus)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Run the buffer once SQL is ready.",
+                        theme.style(Token::Info),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{palette_key} "),
+                        theme
+                            .style(Token::Focus)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Command palette answers what else is possible.",
+                        theme.style(Token::Muted),
+                    ),
+                ]));
             }
             crate::app::discovery::ConnectionPosture::Lost
             | crate::app::discovery::ConnectionPosture::Failed => {
@@ -265,10 +342,18 @@ pub(crate) fn render_editor(
                     "Reconnect before running SQL. Results remain from the last known query.",
                     theme.style(Token::Muted),
                 )));
-                lines.push(Line::from(Span::styled(
-                    format!("{palette_key} Command palette shows safe actions."),
-                    theme.style(Token::Info),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{palette_key} "),
+                        theme
+                            .style(Token::Focus)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Command palette shows safe actions.",
+                        theme.style(Token::Info),
+                    ),
+                ]));
             }
         }
         Paragraph::new(lines)
@@ -417,3 +502,6 @@ pub(crate) fn render_editor(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

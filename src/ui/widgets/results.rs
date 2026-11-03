@@ -1216,30 +1216,41 @@ pub(crate) fn render_error(
             sanitize_for_display(&error.headline),
             theme.style(Token::Danger),
         )),
-        Line::from(Span::styled(
-            format!("While: {}", sanitize_for_display(&error.attempted)),
-            theme.style(Token::Muted),
-        )),
+        Line::from(vec![
+            Span::styled("While: ", theme.style(Token::Header)),
+            Span::styled(
+                sanitize_for_display(&error.attempted),
+                theme.style(Token::Muted),
+            ),
+        ]),
     ];
     if let Some(object) = &error.object {
         let facts = object_context_text(object);
-        lines.push(Line::from(Span::styled(
-            format!("Object context: {facts}"),
-            theme.style(Token::Text),
-        )));
-        lines.push(Line::from(Span::styled(
-            catalogue_note(model, object),
-            theme.style(Token::Muted),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("Object context: ", theme.style(Token::Header)),
+            Span::styled(facts, theme.style(Token::Text)),
+        ]));
+        let note = catalogue_note(model, object);
+        if let Some(rest) = note.strip_prefix("Catalogue: ") {
+            lines.push(Line::from(vec![
+                Span::styled("Catalogue: ", theme.style(Token::Info)),
+                Span::styled(rest.to_owned(), theme.style(Token::Muted)),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(note, theme.style(Token::Muted))));
+        }
     }
     if let Some(location) = &model.error_location {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "Location: statement {}, line {}, column {}",
-                location.statement_number, location.line, location.column
+        lines.push(Line::from(vec![
+            Span::styled("Location: ", theme.style(Token::Header)),
+            Span::styled(
+                format!(
+                    "statement {}, line {}, column {}",
+                    location.statement_number, location.line, location.column
+                ),
+                theme.style(Token::Info),
             ),
-            theme.style(Token::Info),
-        )));
+        ]));
         if let Some(marker) =
             crate::query::error_location::render_marker(model.editor.text(), location)
         {
@@ -1251,23 +1262,23 @@ pub(crate) fn render_error(
             }
         }
     } else if let Some(note) = &model.error_location_note {
-        lines.push(Line::from(Span::styled(
-            format!("Location: {}", sanitize_for_display(note)),
-            theme.style(Token::Warning),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("Location: ", theme.style(Token::Header)),
+            Span::styled(sanitize_for_display(note), theme.style(Token::Warning)),
+        ]));
     } else if let Some(position) = error.position {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "Location: unavailable for server character {}.",
-                position.character
+        lines.push(Line::from(vec![
+            Span::styled("Location: ", theme.style(Token::Header)),
+            Span::styled(
+                format!("unavailable for server character {}.", position.character),
+                theme.style(Token::Warning),
             ),
-            theme.style(Token::Warning),
-        )));
+        ]));
     } else if let Some(statement_number) = error.statement_number {
-        lines.push(Line::from(Span::styled(
-            format!("Statement: {statement_number}"),
-            theme.style(Token::Info),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("Statement: ", theme.style(Token::Header)),
+            Span::styled(statement_number.to_string(), theme.style(Token::Info)),
+        ]));
     }
     if let Some(cause) = &error.likely_cause {
         lines.push(Line::from(vec![
@@ -1275,19 +1286,15 @@ pub(crate) fn render_error(
                 presentation.icon(Icon::Warning),
                 theme.style(Token::Warning),
             ),
-            Span::styled(
-                format!("Likely cause: {}", sanitize_for_display(cause)),
-                theme.style(Token::Text),
-            ),
+            Span::styled("Likely cause: ", theme.style(Token::Warning)),
+            Span::styled(sanitize_for_display(cause), theme.style(Token::Text)),
         ]));
     }
     if let Some(action) = &error.next_action {
         lines.push(Line::from(vec![
             Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
-            Span::styled(
-                format!("Next: {}", sanitize_for_display(action)),
-                theme.style(Token::Info),
-            ),
+            Span::styled("Next: ", theme.style(Token::Header)),
+            Span::styled(sanitize_for_display(action), theme.style(Token::Info)),
         ]));
     }
     if model.error_expanded {
