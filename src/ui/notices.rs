@@ -10,7 +10,7 @@ use crate::ui::layout::{OverlayAnchor, overlay_box};
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Widget};
 
 pub(crate) struct View {
@@ -203,6 +203,19 @@ pub(crate) fn build(model: &Model, presentation: &Presentation, area: Rect) -> O
     })
 }
 
+pub(crate) fn style_notice_row(row: &str, theme: &crate::ui::theme::Theme) -> Line<'static> {
+    if row == "Client accounting, not a database error." {
+        Line::from(Span::styled(row.to_owned(), theme.style(Token::Header)))
+    } else if let Some((label, rest)) = row.split_once(": ") {
+        Line::from(vec![
+            Span::styled(format!("{label}: "), theme.style(Token::Info)),
+            Span::styled(rest.to_owned(), theme.style(Token::Text)),
+        ])
+    } else {
+        Line::from(Span::styled(row.to_owned(), theme.style(Token::Muted)))
+    }
+}
+
 pub(crate) fn render(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
     let Some(view) = build(model, presentation, area) else {
         return;
@@ -215,7 +228,7 @@ pub(crate) fn render(model: &Model, presentation: &Presentation, area: Rect, buf
             .iter()
             .skip(view.offset)
             .take(usize::from(view.body.height))
-            .map(|row| Line::from(row.clone()))
+            .map(|row| style_notice_row(row, &presentation.theme))
             .collect::<Vec<_>>()
     } else {
         vec![Line::from("Enlarge terminal to acknowledge.")]

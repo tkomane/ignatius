@@ -589,3 +589,97 @@ fn styled_toolbar_line_delimiters_and_accents() {
         .expect("controls span");
     assert_eq!(controls_span.style, info_style);
 }
+
+#[test]
+fn error_view_renders_multi_span_diagnostic_labels_and_preserves_words() {
+    use crate::diagnostics::{Diagnostic, DiagnosticKind, ObjectContext};
+    use crate::query::error_location::ErrorLocation;
+
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let mut model = Model::new(10);
+    let mut error = Diagnostic::new(DiagnosticKind::Query, "syntax error", "executing buffer");
+    error.object = Some(ObjectContext {
+        schema: Some("public".into()),
+        table: Some("users".into()),
+        column: None,
+        constraint: None,
+    });
+    model.error_location = Some(ErrorLocation {
+        cursor: 10,
+        token: None,
+        line: 1,
+        column: 5,
+        statement_number: 1,
+        character: 10,
+    });
+    error.likely_cause = Some("missing semicolon".into());
+    error.next_action = Some("add semicolon at end".into());
+
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+    super::render_error(&model, &error, &presentation, area, &mut buf);
+
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("While: executing buffer"));
+    assert!(text.contains("Object context: relation \"public\".\"users\""));
+    assert!(text.contains("Catalogue: "));
+    assert!(text.contains("Location: statement 1, line 1, column 5"));
+    assert!(text.contains("Likely cause: missing semicolon"));
+    assert!(text.contains("Next: add semicolon at end"));
+
+    let find_word_cell = |word: &str| -> (u16, u16) {
+        for y in 0..area.height {
+            let row_str: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if let Some(pos) = row_str.find(word) {
+                return (pos as u16, y);
+            }
+        }
+        panic!("could not find {word} in buffer: {text}");
+    };
+
+    // "While: " -> Token::Header (Bold)
+    let (while_x, while_y) = find_word_cell("While:");
+    assert!(
+        buf[(while_x, while_y)].modifier.contains(Modifier::BOLD),
+        "While: must be Header (bold)"
+    );
+
+    // "Object context: " -> Token::Header (Bold)
+    let (obj_x, obj_y) = find_word_cell("Object context:");
+    assert!(
+        buf[(obj_x, obj_y)].modifier.contains(Modifier::BOLD),
+        "Object context: must be Header (bold)"
+    );
+
+    // "Location: " -> Token::Header (Bold)
+    let (loc_x, loc_y) = find_word_cell("Location:");
+    assert!(
+        buf[(loc_x, loc_y)].modifier.contains(Modifier::BOLD),
+        "Location: must be Header (bold)"
+    );
+
+    // "Next: " -> Token::Header (Bold)
+    let (next_x, next_y) = find_word_cell("Next:");
+    assert!(
+        buf[(next_x, next_y)].modifier.contains(Modifier::BOLD),
+        "Next: must be Header (bold)"
+    );
+
+    // "Catalogue: " -> Token::Info
+    let info_fg = presentation.theme.color(Token::Info).unwrap();
+    let (cat_x, cat_y) = find_word_cell("Catalogue:");
+    assert_eq!(
+        buf[(cat_x, cat_y)].fg,
+        info_fg,
+        "Catalogue: must have Info fg"
+    );
+
+    // "Likely cause: " -> Token::Warning
+    let warn_fg = presentation.theme.color(Token::Warning).unwrap();
+    let (cause_x, cause_y) = find_word_cell("Likely cause:");
+    assert_eq!(
+        buf[(cause_x, cause_y)].fg,
+        warn_fg,
+        "Likely cause: must have Warning fg"
+    );
+}

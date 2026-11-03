@@ -196,3 +196,87 @@ fn reader_reopened_after_ack_keeps_latest_loss_summary_while_pending_is_zero() {
     assert!(painted.contains("Latest abandoned: an unknown"));
     assert!(!model.notice_state.pending.needs_report());
 }
+
+#[test]
+fn notice_overlay_renders_semantic_headers_and_key_value_spans() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::{ColorDepth, Theme, Token};
+    use crate::ui::{GlyphTier, Glyphs};
+    use ratatui::style::Modifier;
+
+    let theme = Theme::new(ThemeChoice::Dark, true);
+    let presentation = Presentation::new(theme, Glyphs::new(GlyphTier::Unicode), true);
+    let mut model = Model::new(10);
+    model.presentation = presentation.clone();
+    model.notice_state.pending = crate::query::result::NoticeCounts {
+        omitted: NoticeCount::Exact(5),
+        shortened: NoticeCount::AtLeast(2),
+        abandoned: NoticeCount::Unknown,
+    };
+    model.notice_details = Some(NoticeDetails {
+        snapshot: model.notice_state.snapshot(),
+        scroll: 0,
+    });
+
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+    render(&model, &model.presentation, area, &mut buf);
+
+    // 1. "Client accounting, not a database error." should be styled as Token::Header (Bold modifier)
+    let (header_y, header_x) = (0..area.height)
+        .find_map(|y| {
+            (0..area.width)
+                .find(|&x| buf[(x, y)].symbol() == "C" && buf[(x + 1, y)].symbol() == "l")
+                .map(|x| (y, x))
+        })
+        .expect("Client accounting row");
+    assert!(
+        buf[(header_x, header_y)].modifier.contains(Modifier::BOLD),
+        "header row should have Token::Header (bold modifier)"
+    );
+
+    // 2. "Pending omitted: " should have Token::Info fg, and the value ("5") should have Token::Text fg
+    let (omitted_y, omitted_label_x) = (0..area.height)
+        .find_map(|y| {
+            (0..area.width)
+                .find(|&x| buf[(x, y)].symbol() == "P" && buf[(x + 1, y)].symbol() == "e")
+                .map(|x| (y, x))
+        })
+        .expect("Pending omitted row");
+    let info_fg = presentation.theme.color(Token::Info).unwrap();
+    let text_fg = presentation.theme.color(Token::Text).unwrap();
+    assert_eq!(
+        buf[(omitted_label_x, omitted_y)].fg,
+        info_fg,
+        "Pending omitted label should have Token::Info fg"
+    );
+    let val_x = (0..area.width)
+        .find(|&x| buf[(x, omitted_y)].symbol() == "5")
+        .expect("digit 5 in Pending omitted row");
+    assert_eq!(
+        buf[(val_x, omitted_y)].fg,
+        text_fg,
+        "Pending omitted value should have Token::Text fg"
+    );
+
+    // 3. At Basic16 or ColorDepth::None, backgrounds remain Color::Reset
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let pres_no_color = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut buf_mono = Buffer::empty(area);
+        render(&model, &pres_no_color, area, &mut buf_mono);
+        let view = build(&model, &pres_no_color, area).unwrap();
+        for y in view.body.y..(view.body.y + view.body.height) {
+            for x in view.body.x..(view.body.x + view.body.width) {
+                assert_eq!(
+                    buf_mono[(x, y)].bg,
+                    ratatui::style::Color::Reset,
+                    "depth {depth:?} cell at ({x}, {y}) must have Reset background"
+                );
+            }
+        }
+    }
+}
