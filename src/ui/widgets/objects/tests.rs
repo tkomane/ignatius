@@ -242,3 +242,149 @@ fn a_connecting_tree_says_the_connection_is_being_established() {
         "the tree still says why it is empty: {tree}"
     );
 }
+
+#[test]
+fn objects_tree_renders_full_row_selection_and_semantic_icon_coloring() {
+    let mut model = Model::new(100);
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::ServerHandshake,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    update(&mut model, Message::Connected(session()));
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema("public", 2)]))),
+    );
+
+    let pres = presentation();
+    let theme = &pres.theme;
+    let selection_bg = theme.style(crate::ui::theme::Token::Selection).bg.unwrap();
+    let surface_pane_bg = theme
+        .surface(crate::ui::theme::Token::SurfacePane)
+        .bg
+        .unwrap();
+    let area = Rect::new(0, 0, 40, 10);
+
+    // 1. When focused on Objects: full row selection across the inner width
+    model.focus = Focus::Objects;
+    model.tree.selected = 0;
+    let mut buf = Buffer::empty(area);
+    render_objects(&model, &Keymap::new(), &pres, area, &mut buf);
+
+    // Selected row is at y = 1 (inside border). All cells from x=1 to x=38 must carry selection_bg.
+    for x in 1..39 {
+        assert_eq!(
+            buf[(x, 1)].bg,
+            selection_bg,
+            "x={x} on selected row must have selection background"
+        );
+    }
+    // Unselected row at y = 2 must NOT have selection background at trailing cells
+    assert_eq!(
+        buf[(38, 2)].bg,
+        surface_pane_bg,
+        "trailing cell on unselected row must have surface pane background"
+    );
+
+    // 2. When unfocused (Focus::Editor): semantic icon coloring and no selection bar
+    model.focus = Focus::Editor;
+    let mut buf_unfocused = Buffer::empty(area);
+    render_objects(&model, &Keymap::new(), &pres, area, &mut buf_unfocused);
+
+    // Every trailing cell must have surface pane background
+    for x in 1..39 {
+        assert_eq!(
+            buf_unfocused[(x, 1)].bg,
+            surface_pane_bg,
+            "unfocused tree row must keep pane surface background"
+        );
+    }
+
+    // Row 0 is Schema "public": chevron in Muted, icon in Focus, name in Header
+    let schema_icon_fg = theme.color(crate::ui::theme::Token::Focus).unwrap();
+    let chevron_fg = theme.color(crate::ui::theme::Token::Muted).unwrap();
+    let header_fg = theme.color(crate::ui::theme::Token::Header).unwrap();
+
+    // Row 0 starts at x = 1: chevron
+    assert_eq!(buf_unfocused[(1, 1)].fg, chevron_fg);
+    // Schema icon is at x = 3
+    assert_eq!(buf_unfocused[(3, 1)].fg, schema_icon_fg);
+    // Name "public" starts at x = 5
+    assert_eq!(buf_unfocused[(5, 1)].fg, header_fg);
+
+    // Row 1 is Group "tables (2)": guide at x=1..2 (Muted), chevron at x=3..4 (Muted), icon at x=5 (Info), "tables" at x=7 (Text), " (2)" at x=13 (Muted)
+    let info_fg = theme.color(crate::ui::theme::Token::Info).unwrap();
+    let text_fg = theme.color(crate::ui::theme::Token::Text).unwrap();
+    let muted_fg = theme.color(crate::ui::theme::Token::Muted).unwrap();
+
+    // Guide at x = 1
+    assert_eq!(buf_unfocused[(1, 2)].fg, muted_fg);
+    // Chevron at x = 3
+    assert_eq!(buf_unfocused[(3, 2)].fg, muted_fg);
+    // Group icon at x = 5
+    assert_eq!(buf_unfocused[(5, 2)].fg, info_fg);
+    // "tables" label starts at x = 7
+    assert_eq!(buf_unfocused[(7, 2)].fg, text_fg);
+    // " (2)" count starts at x = 13
+    assert_eq!(buf_unfocused[(13, 2)].fg, muted_fg);
+}
+
+#[test]
+fn editor_renders_cursorline_and_cursorlinenr_when_focused_and_unfocused() {
+    use super::super::render_editor;
+    let mut model = Model::new(100);
+    model.editor.set_text("SELECT 1;\nSELECT 2;");
+    model.editor.set_position(1, 1);
+
+    let pres = presentation();
+    let theme = &pres.theme;
+    let stripe_bg = theme.stripe().bg.unwrap();
+    let surface_pane_bg = theme
+        .surface(crate::ui::theme::Token::SurfacePane)
+        .bg
+        .unwrap();
+    let cursor_linenr_fg = theme.color(crate::ui::theme::Token::Focus).unwrap();
+    let unfocused_linenr_fg = theme.color(crate::ui::theme::Token::Header).unwrap();
+
+    let area = Rect::new(0, 0, 40, 10);
+
+    // 1. When focused on Editor: line 1 has CursorLine stripe and CursorLineNr electric blue
+    model.focus = Focus::Editor;
+    let mut buf = Buffer::empty(area);
+    render_editor(&model, &Keymap::new(), &pres, area, &mut buf);
+
+    // Row 1 (y=1) is Line 1 (cursor line). Line number fg is Focus, bg is stripe_bg.
+    assert_eq!(buf[(2, 1)].fg, cursor_linenr_fg);
+    assert_eq!(buf[(2, 1)].bg, stripe_bg);
+
+    // Across the full row (e.g. trailing empty cell at x=38), bg must be stripe_bg.
+    assert_eq!(
+        buf[(38, 1)].bg,
+        stripe_bg,
+        "trailing cell on active cursorline must carry stripe background"
+    );
+
+    // Row 2 (y=2) is Line 2 (not cursor line). Trailing empty cell must keep surface_pane_bg.
+    assert_eq!(
+        buf[(38, 2)].bg,
+        surface_pane_bg,
+        "trailing cell on non-cursorline must carry surface pane background"
+    );
+
+    // 2. When unfocused (Focus::Objects): no cursorline stripe, line number in Header
+    model.focus = Focus::Objects;
+    let mut buf_unfocused = Buffer::empty(area);
+    render_editor(&model, &Keymap::new(), &pres, area, &mut buf_unfocused);
+
+    // Line 1 is cursor line, but unfocused: line number fg is Header
+    assert_eq!(buf_unfocused[(2, 1)].fg, unfocused_linenr_fg);
+    // Trailing cell on line 1 must keep surface_pane_bg (no cursorline stripe when unfocused)
+    assert_eq!(
+        buf_unfocused[(38, 1)].bg,
+        surface_pane_bg,
+        "unfocused editor must not paint cursorline stripe"
+    );
+}

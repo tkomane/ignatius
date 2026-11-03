@@ -1,6 +1,6 @@
-use super::{input_cursor, overlay_block};
+use super::{input_cursor, overlay_block, syntax_token};
 use crate::app::model::Model;
-use crate::query::value::sanitize_for_display;
+use crate::query::value::{display_width, sanitize_for_display};
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
 use crate::ui::layout::{OverlayAnchor, overlay_box};
@@ -108,6 +108,29 @@ pub(crate) fn hit_row(
     Some(index)
 }
 
+fn highlight_sql_line(source: &str, theme: &Theme) -> Vec<Span<'static>> {
+    let syntax = crate::query::highlight::tokens(source);
+    let mut spans = Vec::new();
+    let mut run = String::new();
+    let mut run_style: Option<Style> = None;
+    for (byte, ch) in source.char_indices() {
+        let style = theme.style(syntax_token(crate::query::highlight::kind_at(
+            &syntax, byte,
+        )));
+        if run_style != Some(style) {
+            if let Some(previous) = run_style {
+                spans.push(Span::styled(std::mem::take(&mut run), previous));
+            }
+            run_style = Some(style);
+        }
+        run.push(ch);
+    }
+    if let Some(previous) = run_style {
+        spans.push(Span::styled(run, previous));
+    }
+    spans
+}
+
 pub(crate) fn render_palette(
     palette: &crate::app::palette::Palette,
     presentation: &Presentation,
@@ -198,6 +221,16 @@ pub(crate) fn render_palette(
                     format!("  {}", sanitize_for_display(&entry.detail)),
                     theme.style(Token::Muted).patch(selection),
                 ));
+            }
+            if selected {
+                let target_width = inner.width as usize;
+                let row_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+                if row_width < target_width {
+                    spans.push(Span::styled(
+                        " ".repeat(target_width - row_width),
+                        theme.style(Token::Selection),
+                    ));
+                }
             }
             let mut line = Line::from(spans);
             if selected {
@@ -343,6 +376,16 @@ pub(crate) fn render_palette(
                 theme.style(Token::Muted).patch(selection),
             ));
         }
+        if selected {
+            let target_width = list_width as usize;
+            let row_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+            if row_width < target_width {
+                spans.push(Span::styled(
+                    " ".repeat(target_width - row_width),
+                    theme.style(Token::Selection),
+                ));
+            }
+        }
         let mut line = Line::from(spans);
         if selected {
             line = line.style(theme.style(Token::Selection));
@@ -368,28 +411,57 @@ pub(crate) fn render_palette(
         .render(list_area, buf);
 
     if let Some(preview_raw) = palette.selected_preview() {
-        let preview_lines: Vec<Line<'static>> = preview_raw
-            .into_iter()
-            .map(|raw_line| {
-                if let Some((key, val)) = raw_line.split_once(": ") {
-                    Line::from(vec![
+        let mut in_sql_block = false;
+        let mut preview_lines: Vec<Line<'static>> = Vec::with_capacity(preview_raw.len());
+        for raw_line in preview_raw {
+            if raw_line == "SQL:" {
+                in_sql_block = true;
+                preview_lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(raw_line, theme.style(Token::Header)),
+                ]));
+                continue;
+            }
+            if in_sql_block && !raw_line.starts_with("  ") {
+                in_sql_block = false;
+            }
+
+            if in_sql_block {
+                let mut line_spans = vec![Span::raw(" ")];
+                line_spans.extend(highlight_sql_line(&raw_line, theme));
+                preview_lines.push(Line::from(line_spans));
+            } else if let Some((key, val)) = raw_line.split_once(": ") {
+                if key == "SQL" {
+                    let mut line_spans = vec![
                         Span::raw(" "),
-                        Span::styled(format!("{key}: "), theme.style(Token::Muted)),
-                        Span::styled(val.to_owned(), theme.style(Token::Text)),
-                    ])
-                } else if raw_line.ends_with(':') || raw_line == "No matching entry selected." {
-                    Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(raw_line, theme.style(Token::Muted)),
-                    ])
+                        Span::styled(format!("{key}: "), theme.style(Token::Header)),
+                    ];
+                    line_spans.extend(highlight_sql_line(val, theme));
+                    preview_lines.push(Line::from(line_spans));
                 } else {
-                    Line::from(vec![
+                    preview_lines.push(Line::from(vec![
                         Span::raw(" "),
-                        Span::styled(raw_line, theme.style(Token::Text)),
-                    ])
+                        Span::styled(format!("{key}: "), theme.style(Token::Header)),
+                        Span::styled(val.to_owned(), theme.style(Token::Text)),
+                    ]));
                 }
-            })
-            .collect();
+            } else if raw_line.ends_with(':') {
+                preview_lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(raw_line, theme.style(Token::Header)),
+                ]));
+            } else if raw_line == "No matching entry selected." {
+                preview_lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(raw_line, theme.style(Token::Muted)),
+                ]));
+            } else {
+                preview_lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(raw_line, theme.style(Token::Text)),
+                ]));
+            }
+        }
         let preview_area = Rect::new(preview_x, content_y, preview_w, content_height);
         Paragraph::new(preview_lines)
             .style(theme.surface(Token::SurfaceOverlay))

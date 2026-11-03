@@ -13,7 +13,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::ui::glyphs::{GlyphTier, Glyphs};
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{Presentation, buffer_to_string};
-use crate::ui::theme::{ColorDepth, Theme};
+use crate::ui::theme::{ColorDepth, Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::time::Duration;
@@ -459,4 +459,38 @@ fn us8_header_left_identity_and_right_context_alignment() {
         text_narrow.contains("Ignatius"),
         "product name must be preserved at 40 cols: {text_narrow}"
     );
+}
+
+#[test]
+fn header_renders_surface_alt_statusbar_and_semantic_connection_spans() {
+    let model = connected_model(crate::connection::Environment::Local);
+    let pres = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 100, 1);
+    let mut buf = Buffer::empty(area);
+    render_header(&model, &pres, area, &mut buf);
+
+    let surface_alt_bg = pres.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    // Verify background of first cell is SurfaceAlt
+    assert_eq!(buf[(0, 0)].bg, surface_alt_bg);
+
+    // Text string is preserved exactly
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("Ignatius:"));
+    assert!(text.contains("app@localhost:5432/orders"));
+
+    // Check cells for semantic connection target
+    // "app" should have Token::Info fg
+    let app_col = text[..text.find("app").unwrap()].chars().count() as u16;
+    let expected_info_fg = pres.theme.color(Token::Info).unwrap();
+    assert_eq!(buf[(app_col, 0)].fg, expected_info_fg);
+
+    // "@" should have Token::Muted fg
+    let at_col = text[..text.find("@localhost").unwrap()].chars().count() as u16;
+    let expected_muted_fg = pres.theme.color(Token::Muted).unwrap();
+    assert_eq!(buf[(at_col, 0)].fg, expected_muted_fg);
+
+    // "orders" should have Token::Header fg
+    let orders_col = text[..text.rfind("orders").unwrap()].chars().count() as u16;
+    let expected_header_fg = pres.theme.color(Token::Header).unwrap();
+    assert_eq!(buf[(orders_col, 0)].fg, expected_header_fg);
 }

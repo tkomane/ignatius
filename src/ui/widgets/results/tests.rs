@@ -492,3 +492,100 @@ fn expanded_selection_preserves_null_empty_and_literal_null_words_across_present
         }
     }
 }
+
+#[test]
+fn header_row_elevated_with_stripe_surface_at_depths_that_paint() {
+    let model = model_with(
+        &["id", "name"],
+        &[vec![Cell::Text("1".into()), Cell::Text("alice".into())]],
+    );
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let presentation = presentation_at(depth);
+        let area = Rect::new(0, 0, 60, 10);
+        let buf = render(&model, &presentation, area);
+        let header_row_y = (0..area.height)
+            .find(|&y| {
+                let row_str = (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>();
+                row_str.contains("id") && row_str.contains("name")
+            })
+            .expect("header row must exist");
+        let stripe_bg = presentation
+            .theme
+            .stripe()
+            .bg
+            .expect("stripe background must exist");
+        let selection_bg = presentation
+            .theme
+            .color(Token::Selection)
+            .expect("selection color");
+        let id_x = (0..area.width)
+            .find(|&x| buf[(x, header_row_y)].symbol() == "i")
+            .expect("column id must be present");
+        let name_x = (0..area.width)
+            .find(|&x| buf[(x, header_row_y)].symbol() == "n")
+            .expect("column name must be present");
+        assert_eq!(
+            buf[(id_x, header_row_y)].bg,
+            selection_bg,
+            "selected column header at depth {depth:?} must have selection background"
+        );
+        assert_eq!(
+            buf[(name_x, header_row_y)].bg,
+            stripe_bg,
+            "unselected column header at depth {depth:?} must have stripe background"
+        );
+        assert_eq!(
+            buf[(1, header_row_y)].bg,
+            stripe_bg,
+            "gutter cell at depth {depth:?} must have stripe background"
+        );
+    }
+}
+
+#[test]
+fn styled_toolbar_line_delimiters_and_accents() {
+    let theme = Theme::new(ThemeChoice::Dark, true);
+    let order_text = "rows 1..10 of 100 | natural database order | selected column 1: id";
+    let line = super::styled_toolbar_line(order_text, Token::Info, Some("selected column"), &theme);
+    let reconstructed: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert_eq!(reconstructed, order_text);
+
+    let border_style = theme.style(Token::Border);
+    let focus_style = theme.style(Token::Focus);
+    let info_style = theme.style(Token::Info);
+
+    let delimiter_spans: Vec<_> = line
+        .spans
+        .iter()
+        .filter(|s| s.content.as_ref() == " | ")
+        .collect();
+    assert_eq!(delimiter_spans.len(), 2);
+    for d in delimiter_spans {
+        assert_eq!(d.style, border_style);
+    }
+
+    let accent_span = line
+        .spans
+        .iter()
+        .find(|s| s.content.as_ref().starts_with("selected column"))
+        .expect("accent span");
+    assert_eq!(accent_span.style, focus_style);
+
+    let state_text = "shown 2/2 columns | types: hidden | freeze first: off | g grid controls";
+    let state_line = super::styled_toolbar_line(state_text, Token::Muted, None, &theme);
+    let reconstructed_state: String = state_line
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert_eq!(reconstructed_state, state_text);
+
+    let controls_span = state_line
+        .spans
+        .iter()
+        .find(|s| s.content.as_ref().contains("controls"))
+        .expect("controls span");
+    assert_eq!(controls_span.style, info_style);
+}

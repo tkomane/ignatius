@@ -612,10 +612,13 @@ fn render_results_placeholder(
                 Span::styled(presentation.icon(Icon::Info), theme.style(Token::Muted)),
                 Span::styled(" No query has run yet.", theme.style(Token::Text)),
             ]));
-            lines.push(Line::from(Span::styled(
-                format!("{run_key} Run the buffer after entering SQL."),
-                theme.style(Token::Info),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled(run_key, theme.style(Token::Focus)),
+                Span::styled(
+                    " Run the buffer after entering SQL.",
+                    theme.style(Token::Info),
+                ),
+            ]));
         }
         crate::app::discovery::ConnectionPosture::Lost
         | crate::app::discovery::ConnectionPosture::Failed => {
@@ -650,10 +653,13 @@ fn render_results_placeholder(
             theme.style(Token::Info),
         )));
     }
-    lines.push(Line::from(Span::styled(
-        format!("{palette_key} Command palette shows safe next actions."),
-        theme.style(Token::Muted),
-    )));
+    lines.push(Line::from(vec![
+        Span::styled(palette_key, theme.style(Token::Focus)),
+        Span::styled(
+            " Command palette shows safe next actions.",
+            theme.style(Token::Muted),
+        ),
+    ]));
     Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .render(inner, buf);
@@ -859,7 +865,12 @@ fn render_grid(
     } else {
         truncate_to_width(&full_order, grid_width, !presentation.glyphs.is_ascii())
     };
-    lines.push(Line::from(Span::styled(order, theme.style(Token::Info))));
+    lines.push(styled_toolbar_line(
+        &order,
+        Token::Info,
+        Some("selected column"),
+        theme,
+    ));
     let state_line = format!("{columns_label} | {type_label} | {freeze_label} | {controls_label}");
     let filter_window = (set.is_truncated() && !model.result_filter.trim().is_empty())
         .then(|| model.result_window_label());
@@ -878,10 +889,7 @@ fn render_grid(
     } else {
         truncate_to_width(&state_line, grid_width, !presentation.glyphs.is_ascii())
     };
-    lines.push(Line::from(Span::styled(
-        state_line,
-        theme.style(Token::Muted),
-    )));
+    lines.push(styled_toolbar_line(&state_line, Token::Muted, None, theme));
     let clipboard_note = model
         .clipboard_notice
         .as_ref()
@@ -910,13 +918,13 @@ fn render_grid(
 
     let mut header_spans = vec![Span::styled(
         format!("{}{padding}", " ".repeat(gutter)),
-        theme.style(Token::Muted),
+        theme.on_stripe(Token::Muted),
     )];
     for (position, index) in window.iter().enumerate() {
         if position > 0 {
             header_spans.push(Span::styled(
                 format!("{rule}{padding}"),
-                theme.style(Token::Border),
+                theme.on_stripe(Token::Border),
             ));
         }
         let name = set.columns.get(*index).map_or("unknown", String::as_str);
@@ -932,14 +940,14 @@ fn render_grid(
         let header_style = if Some(*index) == selected_column {
             theme.style(Token::Selection)
         } else {
-            theme.style(Token::Header)
+            theme.on_stripe(Token::Header)
         };
         header_spans.push(Span::styled(
             format!("{}{padding}", pad_to_width(&text, width)),
             header_style,
         ));
     }
-    lines.push(Line::from(header_spans));
+    lines.push(Line::from(header_spans).style(theme.stripe()));
 
     if has_type_row {
         let mut type_spans = vec![Span::styled(
@@ -1088,6 +1096,37 @@ fn cell_style(theme: &Theme, token: Token, selected: bool, striped: bool) -> Sty
     } else {
         theme.style(token)
     }
+}
+
+pub(crate) fn styled_toolbar_line(
+    text: &str,
+    primary: Token,
+    accent_prefix: Option<&str>,
+    theme: &Theme,
+) -> Line<'static> {
+    if text.is_empty() {
+        return Line::default();
+    }
+    let parts: Vec<&str> = text.split(" | ").collect();
+    let mut spans = Vec::with_capacity(parts.len() * 2);
+    for (i, part) in parts.into_iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let token = if let Some(prefix) = accent_prefix {
+            if part.starts_with(prefix) {
+                Token::Focus
+            } else {
+                primary
+            }
+        } else if primary == Token::Muted && part.contains("controls") {
+            Token::Info
+        } else {
+            primary
+        };
+        spans.push(Span::styled(part.to_owned(), theme.style(token)));
+    }
+    Line::from(spans)
 }
 
 /// A scroll indicator, so rows below the fold are visibly below the fold.

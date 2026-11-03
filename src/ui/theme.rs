@@ -491,13 +491,13 @@ fn modifier_only(token: Token) -> Style {
 
 const fn dark(token: Token) -> Rgb {
     match token {
-        Token::Surface => Rgb(0x18, 0x18, 0x25),
-        Token::SurfaceAlt => Rgb(0x1a, 0x1f, 0x26),
-        Token::SurfacePane => Rgb(0x1e, 0x1e, 0x2e),
-        Token::SurfaceOverlay => Rgb(0x31, 0x32, 0x44),
+        Token::Surface => Rgb(0x11, 0x13, 0x1d),
+        Token::SurfaceAlt => Rgb(0x22, 0x26, 0x3a),
+        Token::SurfacePane => Rgb(0x1b, 0x1e, 0x2e),
+        Token::SurfaceOverlay => Rgb(0x29, 0x2e, 0x42),
         Token::Text => Rgb(0xe6, 0xe9, 0xef),
         Token::Muted => Rgb(0x9a, 0xa4, 0xb2),
-        Token::Border => Rgb(0x39, 0x42, 0x4f),
+        Token::Border => Rgb(0x41, 0x48, 0x68),
         Token::Focus => Rgb(0x82, 0xaa, 0xff),
         Token::Success => Rgb(0x77, 0xd4, 0xa3),
         Token::Warning => Rgb(0xe6, 0xb4, 0x50),
@@ -522,8 +522,8 @@ const fn light(token: Token) -> Rgb {
     // hues are darkened and desaturated so they stay legible on near-white.
     match token {
         Token::Surface => Rgb(0xe6, 0xe9, 0xef),
-        Token::SurfaceAlt => Rgb(0xef, 0xf1, 0xf4),
-        Token::SurfacePane => Rgb(0xef, 0xf1, 0xf5),
+        Token::SurfaceAlt => Rgb(0xe2, 0xe6, 0xf0),
+        Token::SurfacePane => Rgb(0xf4, 0xf6, 0xf9),
         Token::SurfaceOverlay => Rgb(0xdc, 0xe0, 0xe8),
         Token::Text => Rgb(0x1a, 0x1e, 0x26),
         Token::Muted => Rgb(0x55, 0x5e, 0x6b),
@@ -617,6 +617,20 @@ impl Theme {
         let mut style = self.style(token);
         if let Some(background) = self.surface(Token::SurfaceAlt).bg {
             style = style.bg(background);
+        }
+        style
+    }
+
+    /// A subtle surface-backed badge: `SurfaceAlt` background (at depths that
+    /// paint surfaces) with bold `token` foreground.
+    #[must_use]
+    pub fn pill(&self, token: Token) -> Style {
+        let mut style = self.style(token);
+        if self.color && self.depth != ColorDepth::None {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if let Some(bg) = self.surface(Token::SurfaceAlt).bg {
+            style = style.bg(bg);
         }
         style
     }
