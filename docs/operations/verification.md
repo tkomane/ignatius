@@ -53,8 +53,27 @@ local-state recovery, `W11`, and `W13` packages on `main`:
 - **PR51 (`3e7c7b3`)**: Reconciliation of `README.md` (`## Where this is going`),
   `specs/025-gui-grade-experience/spec.md` (`Status` header), and regression
   assertions in `tests/documentation_matches_the_build.rs`.
+- **PR52 (`ca227d2`)**: Reconciliation of `docs/product/roadmap.md`,
+  `docs/status.md`, and `docs/operations/verification.md` across `PR41-PR51`.
+- **PR53 (`9a0f356`)**: 4-tier TokyoNight/Catppuccin surface architecture
+  (`Surface`, `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`), `Theme::pill`,
+  `\u{25c9}` database glyph, full-width `SurfaceAlt` header/footer statusbars,
+  `CursorLine`/`CursorLineNr` editor gutter, Neo-tree full-row selection and
+  semantic object icons, elevated `SurfaceAlt` grid header row, and Telescope
+  full-width selection with syntax-highlighted 60% SQL previews.
+- **PR54 (`810522c`)**: Plan Explorer (`EXPLAIN` / `EXPLAIN ANALYZE`) full-width
+  selection bars and multi-span semantic styling, Blink.cmp completion popup
+  full-width selection and kind colouring, Trouble.nvim multi-span diagnostic
+  error labels, and server notice retention overlay semantic styling.
+- **PR57 (`c1d4e7d`)**: 7-scene `112x32` workbench showcase acceptance suite and
+  capture hook (`workbench_showcase_scenes_preserve_elevated_chrome_and_overlays`
+  in `src/ui/acceptance/tests.rs`), 7 2x Retina showcase screenshots
+  (`docs/assets/screenshots/*.png`), complete `README.md` overhaul, design doc
+  reconciliation (`docs/design/theme-tokens.md`, `docs/design/icons-and-motion.md`,
+  `docs/design/information-architecture.md`, `CHANGELOG.md`), and bidirectional
+  `CHORDS` contract assertions in `tests/documentation_matches_the_build.rs`.
 
-### Separated verification evidence (2 November 2026)
+### Separated verification evidence (7 November 2026)
 
 - **Focused unit and contract evidence**:
   - `rg -n 'mod tests \{' src/`: 0 matches across `src/`.
@@ -77,15 +96,16 @@ local-state recovery, `W11`, and `W13` packages on `main`:
       sibling safety, export collision/unwritable-parent refusal, history
       trimming/clear, and saved-query path-traversal/corrupt-file recovery in
       isolated `tempfile::TempDir` fixtures.
-  - `cargo test --locked --lib ui::acceptance`: 4 passed (2,520-frame theme
-    matrix, `NO_COLOR` precedence, `J1-J8` reference journeys, and
-    `100x30`/`80x24`/`60x20`/`30x6` + live-resize viewport matrix).
+  - `cargo test --locked --lib ui::acceptance`: 5 passed (2,520-frame theme
+    matrix, `NO_COLOR` precedence, `J1-J8` reference journeys,
+    `100x30`/`80x24`/`60x20`/`30x6` + live-resize viewport matrix, and the
+    7-scene `112x32` workbench showcase suite).
 - **Full local verification suite (`cargo --locked xtask verify`)**:
   - `formatting` (`rustfmt --edition 2024 --check`): pass.
   - `lints` (`cargo clippy --locked --all-targets -- -D warnings`): pass.
   - `API documentation` (`cargo doc --locked --no-deps`): pass.
-  - `workspace tests`: pass (`1,296` library unit tests + `archive_helper_contract` 3,
-    `cli_contract` 67, `documentation_matches_the_build` 16,
+  - `workspace tests`: pass (`1,313` library unit tests + `archive_helper_contract` 3,
+    `cli_contract` 67, `documentation_matches_the_build` 17,
     `postgres_integration` 75, `release_contract` 16, `resource_bounds_contract` 4,
     `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4,
     `workflow_contract` 15, `xtask` 11).
@@ -96,11 +116,11 @@ local-state recovery, `W11`, and `W13` packages on `main`:
     passed.
   - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 terminal
     restoration tests passed.
-  - Hosted GitHub Actions on PR41 through PR51: all 17 executed checks passed on
-    every PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18
-    Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret
-    scan, workflow contract, release evidence scope, and CodeQL for
-    actions/python/rust).
+  - Hosted GitHub Actions on PR41 through PR54 and PR57: all executed CI and
+    CodeQL checks passed on every PR (Linux, macOS, Windows, PostgreSQL 14,
+    PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency
+    advisories/licences, secret scan, workflow contract, release evidence scope,
+    and CodeQL for actions/python/rust).
 - **Remaining unverified / open items**:
   - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI`
     is not set; covered on Linux CI).

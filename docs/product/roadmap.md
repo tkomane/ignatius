@@ -1,27 +1,28 @@
 # Roadmap
 
-**Reconciled 2026-11-02; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-11-07; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
-The implemented source through Feature 025 (`US1-US10`, `T001-T059`) is
+The implemented source through Feature 025 (`US1-US10`, `T001-T059`) and the
+Waves 13-15 4-tier TUI elevation and showcase suite (`PR53`, `PR54`, `PR57`) is
 consolidated on `main`. Resume from `main` and the [current status](../status.md);
 its dated PR/check records distinguish integrated code from remaining product,
 platform and release acceptance.
 
 Feature 025 `US1-US10` are implemented and merged on `main` (`PR41`, `PR42`,
-`PR43`, `PR46`, `PR51`): pasted SQL (`US1`), painted surfaces across four colour
+`PR43`, `PR46`, `PR51`, `PR53`, `PR54`, `PR57`): pasted SQL (`US1`), 4-tier painted surfaces across four colour
 depths (`US2`), dense grid headers and range indicators (`US3`), honest
 connecting stages (`US4`), manual and `ui.theme = "auto"` OSC 11 luminance
 themes (`US5`), mouse verb-table dispatch and default capture with keyboard
 parity (`US6`), resizable and zoomable panes with `comfortable`/`compact`
 density (`US7`), quiet `200 ms` threshold-gated chrome capsules (`US8`), 80%
-height / 60% preview command palettes (`US9`), and the bounded `1.4 s` boot
+height / 60% syntax-highlighted preview command palettes (`US9`), and the bounded `1.4 s` boot
 reveal (`US10`). Cross-cutting packages `W02`, `W03`, `W04`, `W06` subprocess
-tests, `W08`/`W09` automated reference-journey (`J1-J8`) and viewport-matrix
-(`100x30`, `80x24`, `60x20`, `30x6`) suites, `W10` operational resource bounds
+tests, `W08`/`W09` automated reference-journey (`J1-J8`), viewport-matrix
+(`100x30`, `80x24`, `60x20`, `30x6`), and 7-scene `112x32` workbench showcase suites, `W10` operational resource bounds
 (`W10-008` and `tests/resource_bounds_contract.rs`), `W11`/`W13` release trust
 verification (`xtask release sbom` and `trust verify`), and 100% sidecar
-`tests.rs` extraction (`PR44`, `PR45`, `PR47`, `PR48`, `PR49`, `PR50`) also
-passed all 17 hosted CI and CodeQL checks on `main`. Neither source integration
+`tests.rs` extraction (`PR44`, `PR45`, `PR47`, `PR48`, `PR49`, `PR50`, `PR52`) also
+passed all hosted CI and CodeQL checks on `main`. Neither source integration
 nor automated checks closes native terminal hand-use acceptance or release
 readiness.
 

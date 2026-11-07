@@ -92,20 +92,48 @@ and hosted GitHub Actions CI + CodeQL merge into `main`:
   vendor authentication, and owner-authorized release gates explicitly open),
   and added regression assertions in
   `tests/documentation_matches_the_build.rs`.
-- **Wave 12 (`docs/product/roadmap.md`, `docs/status.md`, and `docs/operations/verification.md`)**:
-  reconciled `docs/product/roadmap.md` with the merged `PR41-PR51` delivery
+- **Wave 12 ([PR52](https://github.com/tkomane/ignatius/pull/52), merged at `ca227d2`)**:
+  reconciled `docs/product/roadmap.md`, `docs/status.md`, and
+  `docs/operations/verification.md` with the merged `PR41-PR51` delivery
   waves while preserving all open native hand-use, ConPTY, live cloud vendor,
   and owner-gated release milestones (`M1-M4`, `008 T033/T035`).
+- **Wave 13 ([PR53](https://github.com/tkomane/ignatius/pull/53), merged at `9a0f356`)**:
+  delivered the 4-tier TokyoNight/Catppuccin surface architecture (`Surface`,
+  `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`), `Theme::pill(token)`,
+  `\u{25c9}` database glyph, full-width `SurfaceAlt` header/footer statusbars
+  with semantic `user@host:port/db` target spans, active `CursorLine` and
+  `CursorLineNr` in `src/ui/widgets/editor.rs`, Neo-tree full-row selection and
+  semantic object icons in `src/ui/widgets/objects.rs`, elevated `SurfaceAlt`
+  table header row and multi-span toolbar in `src/ui/widgets/results.rs`, and
+  Telescope full-width selection plus syntax-highlighted 60% SQL previews in
+  `src/ui/widgets/palette.rs`.
+- **Wave 14 ([PR54](https://github.com/tkomane/ignatius/pull/54), merged at `810522c`)**:
+  delivered Plan Explorer (`EXPLAIN` / `EXPLAIN ANALYZE`) full-width selection
+  bars and multi-span semantic styling in `src/ui/widgets/overlays.rs`,
+  Blink.cmp-style completion popup full-width selection and kind-based semantic
+  candidate colouring in `src/ui/widgets/editor.rs`, Trouble.nvim-style
+  multi-span diagnostic error labels in `src/ui/widgets/results.rs`, and server
+  notice retention overlay semantic styling in `src/ui/notices.rs`.
+- **Wave 15 ([PR57](https://github.com/tkomane/ignatius/pull/57), merged at `c1d4e7d`)**:
+  added the 7-scene workbench showcase acceptance suite and capture hook
+  (`workbench_showcase_scenes_preserve_elevated_chrome_and_overlays` in
+  `src/ui/acceptance/tests.rs`), rendered 7 2x Retina showcase screenshots
+  (`docs/assets/screenshots/*.png`), overhauled `README.md` with a complete
+  visual tour and verified keymap/chord/CLI documentation, reconciled
+  `docs/design/theme-tokens.md`, `docs/design/icons-and-motion.md`,
+  `docs/design/information-architecture.md`, and `CHANGELOG.md`, and added
+  `readme_showcase_and_workflow_guide_matches_the_build` in
+  `tests/documentation_matches_the_build.rs`.
 
-### Separated verification evidence (2 November 2026)
+### Separated verification evidence (7 November 2026)
 
-- **What focused unit and contract tests proved (`T049`, `T028`, `T028b`, `T032`, `W02`, `W03`, `W04`, `W06`, `W08`, `W09`, `W10`, `W11`)**:
+- **What focused unit and contract tests proved (`T049`, `T028`, `T028b`, `T032`, `W02`, `W03`, `W04`, `W06`, `W08`, `W09`, `W10`, `W11`, and Waves 13-15 TUI elevation)**:
   - `cargo fmt --all -- --check`: pass.
   - `rg -n 'mod tests \{' src/`: 0 matches (100% sidecar `tests.rs` compliance).
-  - `cargo test --locked --lib ui::acceptance`: 4 passed (including 2,520-frame theme matrix, `J1-J8` reference journeys, and `100x30`/`80x24`/`60x20`/`30x6` + live-resize viewport matrix).
+  - `cargo test --locked --lib ui::acceptance`: 5 passed (including 2,520-frame theme matrix, `J1-J8` reference journeys, `100x30`/`80x24`/`60x20`/`30x6` + live-resize viewport matrix, and the 7-scene `112x32` workbench showcase suite).
   - `cargo test --locked --test resource_bounds_contract`: 4 passed (local input/palette/completion p50 = `1.09 ms`, p95 = `2.40 ms`; 1,000-row grid interaction p50 = `3.85 ms`, p95 = `4.10 ms`; all 7 subsystem ceilings; local-state recovery).
-  - `cargo test --locked --lib ui::widgets`: 106 passed.
-  - `cargo test --locked --lib ui::theme`: 87 passed (including 10 OSC 11 parser & luminance tests).
+  - `cargo test --locked --lib ui::widgets`: 118 passed.
+  - `cargo test --locked --lib ui::theme`: 90 passed (including 4-tier surface hierarchy, `Theme::pill`, and 10 OSC 11 parser & luminance tests).
   - `cargo test --locked --lib ui::terminal`: 26 passed (including 10 staged-guard, probe/drain, and `Osc11LateReplyFilter` tests).
   - `cargo test --locked --lib diagnostics::doctor`: 14 passed (including 4 `theme` auto check tests).
   - `cargo test --locked --lib ui::layout`: 114 passed.
@@ -117,18 +145,18 @@ and hosted GitHub Actions CI + CodeQL merge into `main`:
   - `cargo test --locked --test runtime_privacy_contract`: 8 passed.
   - `cargo test --locked --test release_contract`: 16 passed.
   - `cargo test --locked --test theme_contract`: 4 passed.
-  - `cargo test --locked --test documentation_matches_the_build`: 16 passed.
+  - `cargo test --locked --test documentation_matches_the_build`: 17 passed (including on-disk verification of all 7 `docs/assets/screenshots/*.png` assets and bidirectional `README.md` `CHORDS` parity).
   - Normal-hyphen prose scan (`T051`): 0 em dashes or en dashes across all modified files.
 - **What the full local suite proved (`T050`, `cargo --locked xtask verify`)**:
   - `formatting`: pass.
   - `lints`: pass (`cargo clippy --locked --all-targets -- -D warnings`).
   - `API documentation`: pass.
-  - `workspace tests`: pass (1,296 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 16, `postgres_integration` 75, `release_contract` 16, `resource_bounds_contract` 4, `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
+  - `workspace tests`: pass (1,313 library unit tests plus all integration/contract binaries: `archive_helper_contract` 3, `cli_contract` 67, `documentation_matches_the_build` 17, `postgres_integration` 75, `release_contract` 16, `resource_bounds_contract` 4, `runtime_privacy_contract` 8, `terminal_restore` 6, `theme_contract` 4, `workflow_contract` 15, `xtask` 11).
   - `documentation tests`: pass.
 - **What live PostgreSQL, PTY and hosted CI evidence proved**:
   - Local macOS (Darwin arm64) against disposable PostgreSQL 18.6 plain (`127.0.0.1:55432`) and TLS (`localhost:55433`): all 75 database-backed integration tests passed (including `W03` adversarial parameter-boundary, concurrent-modification, and `standard_conforming_strings=off` refusal tests).
   - Local macOS real PTY (`tests/terminal_restore.rs`): all 6 restoration tests passed, including balanced mouse capture enable/disable (`ESC[?1000h` / `ESC[?1000l`) and alternate-screen-last ordering.
-  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), PR45 (`8087ff6`), PR47 (`a5e7abb`), PR48 (`8be5f6b`), PR49 (`92a5230`), PR50 (`3fdd291`), and PR51 (`3e7c7b3`): all 17 executed checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
+  - Hosted GitHub Actions on PR41 (`9f68cb3`), PR42 (`743683e`), PR43 (`7f8a95e`), PR44 (`f52d8b7`), PR46 (`dd7027c`), PR45 (`8087ff6`), PR47 (`a5e7abb`), PR48 (`8be5f6b`), PR49 (`92a5230`), PR50 (`3fdd291`), PR51 (`3e7c7b3`), PR52 (`ca227d2`), PR53 (`9a0f356`), PR54 (`810522c`), and PR57 (`c1d4e7d`): all executed CI and CodeQL checks passed on each PR (Linux, macOS, Windows, PostgreSQL 14, PostgreSQL 18, PostgreSQL 18 Unix socket on Linux, MSRV 1.90, dependency advisories/licences, secret scan, workflow contract, release evidence scope, and CodeQL for actions/python/rust).
 - **What remains unverified or open (reported separately, never merged with passes)**:
   - Local macOS `Unix socket integration`: skipped (`IGNATIUS_TEST_PG_SOCKET_URI is not set`); covered by the hosted Linux `PostgreSQL 18 Unix socket` CI job.
   - Native terminal emulator visual appearance and OSC 11 hand verification (`W08`), screen-reader hand use (`007 T032`), Windows 11 / ConPTY interactive hand use (`001 T051`, `001 T055a`, `W07-064`), Linux full-screen hand use (`001 T052`), live cloud-provider account authentication journeys (`W06`), and owner-gated release candidate assembly/signing/publication (`008 T033`, `008 T035`, `W12`, `W14`) remain open.
