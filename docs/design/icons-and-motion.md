@@ -39,8 +39,12 @@ are what someone reaches for when the terminal cannot cope.
 
 ## What is drawn
 
-**Header.** The product mark, target, and the header capsule set across four
-discrete badge domains:
+**Header.** The header and footer render on full-width `SurfaceAlt` statusbars.
+The product mark is styled via `Theme::pill(Token::Focus)`, the database icon
+uses `\u{25c9}` (`◉`) in the `unicode` tier to avoid CJK trigram font fallback on
+macOS terminals, and the target string (`user@host:port/db`) is split into
+semantic spans (`user` in `Token::Info`, `@host:port/` in `Token::Muted`, `db` in
+`Token::Header`). The header capsule set spans four discrete badge domains:
 
 - **Environment**: `PROD` (danger/red capsule); non-production local environments
   remain unbadged by default.
@@ -59,15 +63,27 @@ off, all capsules degrade to reversed text with unchanged words and brackets
 (`[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]`, `[TLS verify-full]`), ensuring
 complete readability on monochrome screens.
 
-**Results.** Row numbers in a gutter, alternating row backgrounds, a rule under
-the headers, a column rule between columns, and a scroll indicator when there are
-rows below the fold. Values that read as numbers are right-aligned. That is a
-heuristic on the shape of the value, not knowledge of its type, and it is never
-described as type-aware: the simple query protocol reports no type information.
+**Results.** Row numbers in a gutter, an elevated `SurfaceAlt` column header bar,
+alternating row backgrounds, a rule under the headers, a column rule between
+columns, and a scroll indicator when there are rows below the fold. The grid
+features a multi-span semantic toolbar with `Token::Border` pipe delimiters and
+`Token::Focus` selected column accents. When query errors occur, diagnostic labels
+are structured into multi-span coloured prefixes (`While:`, `Object context:`,
+`Catalogue:`, `Location:`, `Likely cause:`, `Next:`). Values that read as numbers
+are right-aligned. That is a heuristic on the shape of the value, not knowledge of
+its type, and it is never described as type-aware: the simple query protocol
+reports no type information.
 
 **Editor.** Line numbers and a block cursor drawn by the renderer, because the
-terminal's own cursor is hidden while the alternate screen is in use. Before
-this, the editor had no visible caret at all.
+terminal's own cursor is hidden while the alternate screen is in use. When
+focused, the active row is highlighted with a full-width `SurfaceAlt`
+`CursorLine`, and the active line number is emphasised as `CursorLineNr`
+(`Token::Focus` bold when focused, `Token::Header` bold when unfocused). The
+editor also features a Blink.cmp-style completion popup with a full-width
+selection bar and kind-based semantic colouring (keywords in `Token::SyntaxKeyword`,
+functions in `Token::SyntaxNumber`, tables and views in `Token::Info`, columns in
+`Token::Text`, and CTEs in `Token::Focus`). Before this, the editor had no visible
+caret at all.
 
 **Focus.** Three signals at once: the pane title says `[focused]`, the border
 becomes heavier, and the border colour changes. The first two survive with colour

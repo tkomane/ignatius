@@ -96,14 +96,12 @@ an optional `[keys] switch-theme = "alt+f12"` binding uses the same action.
 
 ## Painted surfaces and elevation
 
-The interface organizes visual hierarchy into three painted elevation levels:
+The interface organizes visual hierarchy into four painted elevation levels:
 
-- **Surface**: The base elevation used for the outer screen frame, header, and
-  footer.
-- **SurfacePane**: The pane interior elevation, raised one level above the base
-  surface for the object tree, editor, and results grid.
-- **SurfaceOverlay**: The overlay elevation, raised one level above panes for
-  floating overlays, popups, prompts, and modal dialogs.
+- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light).
+- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light).
+- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light).
+- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, and confirmation prompts (`#292e42` on Dark, `#dce0e8` on Light).
 
 Overlays employ Clear-then-block painting: every overlay paints a `Clear` widget
 over its bounding rectangle before rendering its block surface and contents. This
@@ -121,9 +119,14 @@ These styles use a token as a background rather than a foreground:
 - **Capsules**, for the production marker. The token becomes the background and
   the surface becomes the text. Contrast is the same pair the palette tests
   already hold to a threshold, so a capsule cannot drift into illegibility.
+- **Pills (`Theme::pill(token)`)**, for prominent inverted badges such as the
+  header brand mark, using the token as a background with the base Surface colour
+  as the foreground text.
 - **Stripes**, for alternating result rows. Text on a striped row is held to the
   same contrast thresholds as text on the main surface, by its own test.
-- **Selection**, with Surface ink on Selection fill at truecolor/256 depth.
+- **Selection**, with Surface ink on Selection fill at truecolor and `Indexed256`
+  depth. Full-width selection bars highlight the active row across the focused
+  Objects tree, command palette list, completion popup, and plan explorer tree.
   Expanded Results applies that ink after the field's Header, Focus and value
   token styles, preserving their bold/dim emphasis. Actual rendered-buffer tests
   check the composed styles; palette arithmetic alone cannot establish them.

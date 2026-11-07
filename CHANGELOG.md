@@ -8,10 +8,29 @@ source can generate user-facing notes.
 
 ## Unreleased
 
-- New: 3-level surface elevation ladder (Surface, SurfacePane, SurfaceOverlay)
-  and 4-tier colour depth (TrueColor, Indexed256, Basic16, None) with
-  `--color-depth` CLI flag and `ui.color-depth` configuration overrides. Basic16
+- New: 4-tier painted surface elevation hierarchy (Surface, SurfacePane, SurfaceAlt,
+  SurfaceOverlay) and 4-tier colour depth (TrueColor, Indexed256, Basic16, None)
+  with `--color-depth` CLI flag and `ui.color-depth` configuration overrides. Basic16
   and None fall back cleanly to unpainted surfaces.
+- New: Neovim/LazyVim-style SQL editor CursorLine (full-width SurfaceAlt highlight
+  when focused) and CursorLineNr (Token::Focus bold electric blue when focused,
+  Token::Header when unfocused).
+- New: Neo-tree semantic object icons and full-row selection bars in the Objects
+  explorer, distinguishing schemas, tables, views, sequences, functions, indexes,
+  extensions, and primary key columns.
+- New: Telescope-style command palette and plan explorer overlays with full-width
+  selection bars and syntax-highlighted SQL in the 60% right-hand preview pane
+  for saved queries and execution history.
+- New: Blink.cmp-style completion popup with full-width selection highlight and
+  distinct semantic tokens for SQL keywords, functions, tables, columns, and CTEs.
+- Improved: full-width SurfaceAlt statusbars for header and footer chrome, featuring
+  a `Theme::pill` brand badge, the `\u{25c9}` (`◉`) database glyph avoiding macOS CJK
+  fallback, and multi-span semantic connection target segments.
+- Improved: elevated SurfaceAlt Results column header bar, multi-span semantic grid
+  toolbar with Token::Border delimiters and Token::Focus column accents, and
+  structured multi-span coloured prefixes for diagnostic query error labels.
+- Improved: Plan Explorer tree with full-width selection bars and multi-span cost,
+  timing, and row metric labels.
 - New: Results grid range line displays visible slice and retained total
   (`rows M-N of Total retained`), 3-state local column sorting (natural,
   ascending, descending), and draggable column dividers with widths bounded

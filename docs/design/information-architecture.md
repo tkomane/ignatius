@@ -48,7 +48,8 @@ The connecting experience begins from frame 1:
 themselves, and the columns of relations. Its title is the breadcrumb to whatever
 is selected, so the path costs no extra row. Indent guides and chevrons make the
 shape readable at a glance; the group labels carry the kind in words, so nothing
-is lost when the icons are.
+is lost when the icons are. When focused, the active row is highlighted with a
+full-width selection bar across the entire sidebar width.
 
 **Header.** Facts about the connection that change rarely but matter constantly:
 product name, environment classification, read/write posture, target, transport
@@ -68,8 +69,9 @@ not rewrite SQL, wrap it into new source lines or create undo entries.
 **Completion menu.** A static, cursor-adjacent overlay over the editor. It
 answers `Ctrl+Space` with the current scope, candidate kind, schema or source,
 type/detail, visible and true counts, catalogue freshness, and the keys that
-accept, dismiss, or move. The menu is local after the snapshot load and never
-changes the editor before Enter.
+accept, dismiss, or move. The active candidate row is highlighted by a full-width
+selection bar, and unselected candidates carry kind-based semantic colouring.
+The menu is local after the snapshot load and never changes the editor before Enter.
 
 **Results pane.** Column headers, rows, and in the title the execution status and
 summary. Below the headers, the viewport range line reports position with exact
@@ -159,15 +161,17 @@ The workspace layout can be adjusted interactively during a session:
 ## Overlays
 
 Command palette overlays occupy 80% of terminal height with the text input field
-pinned at the top.
+pinned at the top. The active item in the list column carries a full-width selection bar.
 
 Overlays that display inspectable resources (definitions, saved queries,
-connection profiles, and dependencies) use a preview-bearing split layout:
+connection profiles, query history, and dependencies) use a preview-bearing split layout:
 40% left-hand list for item selection and 60% right-hand preview panel. Previews
 are assembled entirely from retained session data with zero network calls or
-query executions. For other purposes, overlays span the full dialog width. On
-terminals narrower than 80 columns, the preview panel is omitted cleanly to keep
-the selection list usable.
+query executions. Saved queries and query history feature syntax-highlighted SQL
+in the 60% right-hand preview pane. The query plan explorer overlay similarly uses
+full-width selection bars across its hierarchical plan tree. For other purposes,
+overlays span the full dialog width. On terminals narrower than 80 columns, the
+preview panel is omitted cleanly to keep the selection list usable.
 
 Help is centred, lists every binding with its description, and says `Esc to
 close` in its own title. The connection details surface is a second, read-only
