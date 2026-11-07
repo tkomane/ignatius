@@ -528,3 +528,105 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
         );
     }
 }
+
+#[test]
+fn readme_showcase_and_workflow_guide_matches_the_build() {
+    let expected_screenshots = [
+        "docs/assets/screenshots/workbench-overview.png",
+        "docs/assets/screenshots/completion-menu.png",
+        "docs/assets/screenshots/palette-preview.png",
+        "docs/assets/screenshots/plan-explorer.png",
+        "docs/assets/screenshots/error-diagnostics.png",
+        "docs/assets/screenshots/reviewed-update.png",
+        "docs/assets/screenshots/workbench-light.png",
+    ];
+
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in expected_screenshots {
+        assert!(
+            README.contains(path),
+            "README.md must showcase screenshot: {path}"
+        );
+        let full_path = repo_root.join(path);
+        let metadata = std::fs::metadata(&full_path)
+            .unwrap_or_else(|err| panic!("missing screenshot asset {path}: {err}"));
+        assert!(
+            metadata.len() > 10_000,
+            "screenshot asset {path} is unexpectedly small ({} bytes)",
+            metadata.len()
+        );
+    }
+
+    let required_onboarding_terms = [
+        "cargo xtask db up",
+        "cargo xtask run",
+        "cargo xtask install",
+        "ignatius query",
+        "Ctrl+K",
+    ];
+
+    for term in required_onboarding_terms {
+        assert!(
+            README.contains(term),
+            "README.md must contain onboarding command or chord: {term}"
+        );
+    }
+
+    assert!(
+        !README.contains("Themes, mouse, panes and the rest are specified and not yet"),
+        "README.md must not contain obsolete open-work wording"
+    );
+    assert!(
+        !README.contains("Ctrl+K t"),
+        "README.md must not promise unmapped Ctrl+K t"
+    );
+    assert!(
+        !README.contains("Ctrl+K {"),
+        "README.md must not promise unmapped Ctrl+K {{"
+    );
+    assert!(
+        !README.contains("Ctrl+K }"),
+        "README.md must not promise unmapped Ctrl+K }}"
+    );
+    assert!(
+        !README.contains("`h` / `j` / `k` / `l`"),
+        "README.md must not promise unmapped vim keys"
+    );
+    let chord_section = README
+        .split("### Two-Key Chord Menu (`Ctrl+K`)")
+        .nth(1)
+        .expect("README.md must contain the Two-Key Chord Menu section");
+    let chord_table = chord_section
+        .split("\n### ")
+        .next()
+        .unwrap_or(chord_section);
+    for (key, _, description) in CHORDS {
+        assert!(
+            chord_table.contains(&format!("| `{key}` |")),
+            "the chord `Ctrl+K {key}` ({description}) is missing from README.md chord table"
+        );
+    }
+    for line in chord_table.lines() {
+        let Some(rest) = line.strip_prefix("| `") else {
+            continue;
+        };
+        let Some((key, _)) = rest.split_once('`') else {
+            continue;
+        };
+        let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
+            continue;
+        };
+        assert!(
+            CHORDS.iter().any(|(bound, _, _)| *bound == key),
+            "README.md promises `Ctrl+K {key}` and this build does not bind it"
+        );
+    }
+    assert!(
+        !README.contains('\u{2014}'),
+        "README.md must not contain em dashes"
+    );
+    assert!(
+        !README.contains('\u{2013}'),
+        "README.md must not contain en dashes"
+    );
+}
