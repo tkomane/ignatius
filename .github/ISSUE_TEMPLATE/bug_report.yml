@@ -40,8 +40,9 @@ body:
   - type: textarea
     id: diagnostics
     attributes:
-      label: Diagnostics
-      description: Relevant output. Remove credentials, real data, host names and connection strings before pasting.
+      label: Redacted diagnostics or error text
+      description: >-
+        Relevant output. Please include `ignatius doctor` (or `ignatius doctor --json`) when reporting configuration, terminal, or connection setup issues. Review path-bearing lines before sharing, and never attach `history.jsonl`, connection URIs, or unredacted logs. Remove credentials, real data, host names and connection strings before pasting.
   - type: checkboxes
     id: safety
     attributes:

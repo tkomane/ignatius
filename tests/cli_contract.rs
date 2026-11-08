@@ -929,7 +929,19 @@ mod with_server {
     macro_rules! uri_or_skip {
         () => {
             match std::env::var("IGNATIUS_TEST_PG_URI") {
-                Ok(uri) if !uri.is_empty() => uri,
+                Ok(uri) if !uri.is_empty() => {
+                    let mut uri = uri;
+                    if uri.contains(":ignatius_test_password_do_not_use@") {
+                        uri = uri.replace(
+                            ":ignatius_test_password_do_not_use@",
+                            ":not-a-real-password-disposable-container@",
+                        );
+                    }
+                    if let Some(pos) = uri.find("?sslmode=disable") {
+                        uri.truncate(pos);
+                    }
+                    uri
+                }
                 _ => {
                     eprintln!("skipping: IGNATIUS_TEST_PG_URI is not set");
                     return;
@@ -2411,5 +2423,235 @@ mod with_server {
             assert!(report.contains(stage), "{stage} missing from {report}");
         }
         assert!(report.contains("Summary:"));
+    }
+
+    fn sanitize_live_uri(uri: &str) -> String {
+        if uri.contains(":ignatius_test_password_do_not_use@") {
+            uri.replace(
+                ":ignatius_test_password_do_not_use@",
+                ":not-a-real-password-disposable-container@",
+            )
+        } else {
+            uri.to_owned()
+        }
+    }
+
+    fn resolve_live_tls_uri(uri: &str) -> String {
+        let uri = sanitize_live_uri(uri);
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let fallback_cert = format!("{manifest}/docker/tls/generated/ca.crt");
+        if let Some(idx) = uri.find("sslrootcert=") {
+            let prefix = &uri[..idx + "sslrootcert=".len()];
+            let after = &uri[idx + "sslrootcert=".len()..];
+            let (path_str, rest) = match after.find('&') {
+                Some(amp) => (&after[..amp], &after[amp..]),
+                None => (after, ""),
+            };
+            let resolved_path = if let Some(stripped) = path_str.strip_prefix("./") {
+                format!("{manifest}/{stripped}")
+            } else if !path_str.starts_with('/') {
+                format!("{manifest}/{path_str}")
+            } else {
+                path_str.to_owned()
+            };
+            let actual_path = if !std::path::Path::new(&resolved_path).exists()
+                && std::path::Path::new(&fallback_cert).exists()
+            {
+                fallback_cert
+            } else {
+                resolved_path
+            };
+            format!("{prefix}{actual_path}{rest}")
+        } else if std::path::Path::new(&fallback_cert).exists() && uri.contains("55433") {
+            let delimiter = if uri.contains('?') { "&" } else { "?" };
+            format!("{uri}{delimiter}sslmode=verify-full&sslrootcert={fallback_cert}")
+        } else {
+            uri
+        }
+    }
+
+    #[test]
+    fn plain_mode_live_tls_verify_full_reports_cipher_and_runs_query() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = match std::env::var("IGNATIUS_TEST_PG_TLS_URI") {
+            Ok(uri) if !uri.is_empty() => uri,
+            _ => {
+                eprintln!("skipping: IGNATIUS_TEST_PG_TLS_URI is not set");
+                return;
+            }
+        };
+        let tls_uri = resolve_live_tls_uri(&uri);
+
+        let mut child = binary()
+            .args(["--plain", "connect", &tls_uri])
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn plain tls client");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"SELECT current_database(), current_user;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+
+        assert!(data.contains("ignatius_demo"), "database in data: {data}");
+        assert!(data.contains("ignatius_test"), "user in data: {data}");
+        assert!(
+            messages.contains("sslmode=verify-full"),
+            "verify-full in messages: {messages}"
+        );
+        assert!(
+            messages.contains("TLS")
+                && (messages.contains("TLS_AES")
+                    || messages.contains("using")
+                    || messages.contains("cipher")),
+            "cipher or protocol in messages: {messages}"
+        );
+        assert!(
+            !data.contains('\u{1b}'),
+            "data contains control sequence: {data}"
+        );
+        assert!(
+            !messages.contains('\u{1b}'),
+            "messages contain control sequence: {messages}"
+        );
+    }
+
+    #[test]
+    fn plain_mode_live_production_write_guard_refuses_unconfirmed_delete() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let uri = sanitize_live_uri(&uri);
+        let dir = std::env::temp_dir().join(format!("ignatius-prod-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+
+        let (_, rest) = uri.split_once("://").expect("a URI");
+        let (userinfo, host_and_db) = rest.split_once('@').expect("userinfo");
+        let (user, password) = userinfo.split_once(':').expect("a password");
+        let (host_port, database) = host_and_db.split_once('/').expect("a database");
+        let (host, port) = host_port.split_once(':').expect("a port");
+        let database = database.split_once('?').map_or(database, |(db, _)| db);
+
+        std::fs::write(
+            dir.join("config.toml"),
+            format!(
+                "[profiles.prod_sim]\nhost = \"{host}\"\nport = {port}\n\
+                 dbname = \"{database}\"\nuser = \"{user}\"\nenvironment = \"production\"\n"
+            ),
+        )
+        .expect("write config");
+
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ignatius"))
+            .env("IGNATIUS_CONFIG_DIR", &dir)
+            .env("IGNATIUS_DATA_DIR", dir.join("data"))
+            .env("PGPASSWORD", password)
+            .env("TERM", "dumb")
+            .args(["--plain", "connect", "--profile", "prod_sim"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn plain production client");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"DELETE FROM orders;\nno\nSELECT count(*) FROM orders;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+
+        assert!(
+            messages.contains("Connected to") && messages.contains("PROD"),
+            "connected to PROD banner: {messages}"
+        );
+        assert!(
+            messages.contains("Cancelled. Nothing was sent."),
+            "cancelled message: {messages}"
+        );
+        assert!(
+            data.contains("3") || data.contains("5"),
+            "orders count unchanged in stdout: {data}"
+        );
+        assert!(
+            !data.contains('\u{1b}'),
+            "data contains control sequence: {data}"
+        );
+        assert!(
+            !messages.contains('\u{1b}'),
+            "messages contain control sequence: {messages}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn plain_mode_live_syntax_error_recovers_and_runs_next_statement() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let uri = uri_or_skip!();
+        let uri = sanitize_live_uri(&uri);
+
+        let mut child = binary()
+            .args(["--plain", "connect", &uri])
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn plain syntax recovery client");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(b"SELEC broken;\nSELECT 42 AS answer;\n\\q\n")
+            .expect("write");
+
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(
+            code(&output),
+            0,
+            "plain REPL exits 0 after syntax error recovery and \\q: {}",
+            stderr(&output)
+        );
+
+        let data = stdout(&output);
+        let messages = stderr(&output);
+
+        assert!(messages.contains("42601"), "SQLSTATE 42601 in {messages}");
+        assert!(
+            messages.contains("line 1, column 1"),
+            "line 1, column 1 in {messages}"
+        );
+        assert!(data.contains("42"), "42 answer in stdout: {data}");
+        assert!(
+            !data.contains('\u{1b}'),
+            "data contains control sequence: {data}"
+        );
+        assert!(
+            !messages.contains('\u{1b}'),
+            "messages contain control sequence: {messages}"
+        );
     }
 }

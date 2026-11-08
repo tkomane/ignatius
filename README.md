@@ -397,7 +397,40 @@ In `--plain` mode, Ignatius disables the alternate screen buffer, raw mode, and 
 
 ---
 
+## Operations, Diagnostics, and Security
+
+Ignatius is built for predictable operations and operator control. Core maintenance and recovery workflows are immediately accessible:
+
+- **Installation & Builds:** Build and install locally via `cargo xtask install` (installs to `~/.local/bin/ignatius`) or run directly with `cargo xtask run`. Pre-compiled native release archives and reproducible checksums are documented in the [release operations guide](docs/operations/release.md).
+- **Diagnostics and Health Checks:** Run `ignatius doctor` to validate your environment, active shell, configuration path, terminal color capabilities, and network/TLS socket reachability.
+- **Rollback and Verification:** If a regression is detected, rollback instructions, previous artifact verification, and provenance signatures are maintained under [release operations](docs/operations/release.md).
+- **History and Privacy Management:** Interactive statement history is stored strictly on the local machine in your configuration directory. Inspect saved history via `ignatius history list` or permanently purge all recorded queries via `ignatius history clear --yes`.
+- **Uninstallation:** Remove the `ignatius` binary from your path (e.g., `rm ~/.local/bin/ignatius`) and remove the configuration directory (`~/.config/ignatius` on Linux/macOS or `%APPDATA%\ignatius` on Windows).
+
+---
+
+## Roadmap: Full pgAdmin Replacement Parity (M6)
+
+Ignatius is expanding to provide 100% capability parity with pgAdmin 4, bringing full database design, administration, and diagnostic tooling into a unified, lightweight terminal workbench and scriptable CLI.
+
+Milestone 6 defines 8 comprehensive vertical slices documented in the [Full pgAdmin Replacement Parity Architecture](docs/architecture/pgadmin-parity-plan.md) and the [Product Roadmap](docs/product/roadmap.md):
+
+1. **`026-schema-er-diagrams` (Interactive Schema & ER Diagrams):** Terminal-native ER diagram canvas (`Ctrl+K m`) with orthogonal connectors, 1-hop / 2-hop neighbourhood filtering for dense schemas, and CLI export (`ignatius diagram --format mermaid|dot|svg|ascii`).
+2. **`027-deep-catalog-and-ddl-generator` (Deep Catalog & DDL Generator):** Full `pg_catalog` inspection across indexes, constraints, triggers, sequences, enums, composite types, partitions, FDWs, and tablespaces, with deterministic `CREATE`/`ALTER`/`DROP` DDL generation (`ignatius ddl`).
+3. **`028-data-import-export-and-backup` (Streaming COPY & Backup/Restore):** High-throughput streaming `COPY` import/export (CSV, TSV, JSONL, SQL, Parquet), interactive TUI column-mapping import wizard with transactional rollback, and subprocess-isolated `pg_dump`/`pg_restore` orchestration.
+4. **`029-server-activity-and-locks-dashboard` (Server Activity & Locks Dashboard):** Real-time monitoring of `pg_stat_activity`, `pg_locks`, query age, wait events, and hierarchical blocking PID chains, with guarded backend cancellation and termination (`pg_cancel_backend` / `pg_terminate_backend`).
+5. **`030-visual-schema-designer-and-migrations` (Visual Schema Designer & Migrations):** Form-driven TUI designer for tables, columns, indexes, and constraints with live DDL preview, alongside dual-environment schema diffing and transactional migration generation (`BEGIN; ... COMMIT;`).
+6. **`031-roles-privileges-and-rls-auditor` (Roles, Privileges & RLS Auditor):** Visual browser for role inheritance trees, object privilege ACL matrices, and Row-Level Security (`RLS`) policy auditing with missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL.
+7. **`032-plpgsql-routine-runner-and-profiler` (PL/pgSQL Routine Runner & Profiler):** Signature discovery, typed parameter prompt harness, safe test execution within rollback savepoints, `RAISE NOTICE` diagnostic streams, and execution profiling.
+8. **`033-listen-notify-and-maintenance-ops` (LISTEN/NOTIFY & Maintenance Ops):** Dedicated asynchronous pub/sub event monitor for `LISTEN`/`NOTIFY` channels, plus guided maintenance runner for `VACUUM (VERBOSE, ANALYZE)`, `ANALYZE`, and `REINDEX CONCURRENTLY` with live progress bars from `pg_stat_progress_*`.
+
+---
+
 ## Documentation Index
+
+- `docs/architecture/pgadmin-parity-plan.md` - Full pgAdmin replacement parity architecture (M6: Features 026-033)
+- `docs/product/roadmap.md` - Milestone order, exit gates, and planned feature roadmap
+- `docs/operations/release.md` - Release verification, installation, rollback, and trust procedures
 
 - `docs/status.md` - Verified capabilities, testing matrices, and current progress
 - `docs/support/compatibility.md` - Supported PostgreSQL versions, platforms, and terminals

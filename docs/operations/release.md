@@ -627,6 +627,26 @@ discarding a schema or state file. A rollback rehearsal is not complete until
 the prior binary starts, the configuration validates and the recovery outcome
 is recorded for the platform.
 
+### Uninstallation and clean state removal
+
+To completely remove Ignatius or clean up local state:
+
+1. **Binary and staged releases**:
+   - macOS and Linux: remove `$HOME/.local/bin/ignatius` and any staged version
+     directories under `$HOME/.local/lib/ignatius`.
+   - Windows: remove `%LOCALAPPDATA%\Programs\Ignatius` and remove the binary
+     directory from the user `PATH` environment variable.
+2. **Configuration**:
+   - macOS and Linux: remove `$XDG_CONFIG_HOME/ignatius` (defaults to
+     `~/.config/ignatius`).
+   - Windows: remove `%APPDATA%\ignatius`.
+3. **Local query history and state**:
+   - Query history can be cleared while keeping the tool installed by running
+     `ignatius history clear --yes`.
+   - To remove all local data, query history, and logs entirely, remove
+     `$XDG_DATA_HOME/ignatius` (defaults to `~/.local/share/ignatius`) on macOS/Linux
+     and `%LOCALAPPDATA%\ignatius` on Windows.
+
 ## Non-publishing workflow dry run and authorization gate
 
 The local dry run on 2026-08-31 exercised the implemented packaging path for
@@ -889,6 +909,41 @@ When an advisory is reported:
    - verifies bundle integrity via `cargo xtask release trust verify`; and
    - publishes the candidate release only after all trust gates pass.
 
+### Trust-key revocation and rotation rehearsal (W15)
+
+Maintainers rehearse signing-identity revocation and trust-bundle rotation to
+ensure compromised identities cannot publish or validate releases:
+
+1. **Rehearsal protocol**:
+   - Maintainers simulate signing bundle revocation using synthetic or rotated
+     Sigstore bundles and in-toto provenance statements where `messageSignature`
+     is invalidated, revoked or stripped.
+   - Run trust verification to confirm fail-closed behavior:
+     ```bash
+     cargo --locked xtask release trust verify --manifest-dir=DIR --bundle-dir=DIR
+     ```
+     Verification must fail with non-zero exit code and explicitly name the
+     offending sidecar.
+   - Run release readiness check against the candidate catalog:
+     ```bash
+     cargo --locked xtask release check catalog.json
+     ```
+     `release check` must exit with code 1, reporting `Release readiness: blocked`
+     and citing `signatures_and_provenance_verified` or missing verified signature/provenance
+     evidence as blockers.
+2. **Rotating GitHub Actions OIDC workflow references**:
+   - When a workflow or signing identity is rotated, update the expected OIDC
+     issuer and SAN URI in the release verification workflow and repository secrets.
+   - Verify that previous signatures produced under older or revoked workflow
+     identities are rejected.
+3. **Operator rollback guidance**:
+   - If a published release candidate is revoked or defective, mark its catalogue
+     status as `withdrawn` or `blocked`.
+   - Publish a security advisory instructing operators to roll back to the last
+     verified build following the rollback runbook.
+   - Ensure operator rollback preserves configuration files and statement history
+     intact without data loss.
+
 ## Steps
 
 1. Update `CHANGELOG.md` under a new version heading. The changelog is the single
@@ -903,9 +958,23 @@ When an advisory is reported:
 6. Build artefacts in CI for each target from that tagged commit.
 7. Re-verify all three target bundles, aggregate their records and exact bytes,
    and inspect the retained nine-file scope.
-8. Publish checksums alongside the artefacts only after every remaining gate
+8. Execute the packaged-archive J8 and W04 rehearsal probes on each extracted archive
+   before recording candidate validation:
+   - J8 Identity Probe: run `version --verbose` and verify Cargo.toml version, git revision,
+     target triple, and build identity.
+   - J8 Diagnostics Probe: run `doctor --json` and verify status and checks without credential
+     disclosure.
+   - J8 Invalid Configuration Refusal Probe: run `doctor` with a malformed `config.toml` and
+     verify exit code 3 (`InvalidConfiguration`).
+   - J8 Preservation and Rollback Probe: verify existing configuration and `history.jsonl`
+     bytes remain 100% intact after candidate rehearsal and rollback.
+   - W04 Runtime Privacy Sentinel Probe: run candidate binary with `IGNATIUS_LOG=debug`
+     and `--plain` against an unreachable local endpoint with test statement stdin,
+     confirming passwords, cell payloads, query tokens, and driver internal targets
+     are never logged or displayed.
+9. Publish checksums alongside the artefacts only after every remaining gate
    and the exact publication authorization are recorded.
-9. Only then update any package manifest.
+10. Only then update any package manifest.
 
 ## Phased distribution
 

@@ -3340,3 +3340,424 @@ fn w11_trust_verify_cli_validates_complete_bundle_and_refuses_tampered_sidecars(
         "trust verify should pass after restoring sidecars"
     );
 }
+
+#[test]
+fn packaged_candidate_archive_passes_j8_operator_and_w04_privacy_probes() {
+    let temp = tempdir().expect("temporary directory");
+    let binary_src = PathBuf::from(env!("CARGO_BIN_EXE_ignatius"));
+    assert!(binary_src.exists(), "binary exists");
+
+    let source_dir = temp.path().join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let binary_name = binary_src
+        .file_name()
+        .expect("binary file name")
+        .to_str()
+        .expect("utf-8 binary name");
+    let staging_bin = source_dir.join(binary_name);
+    fs::copy(&binary_src, &staging_bin).expect("copy binary to staging");
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/create-release-archive.py");
+    let python = ["python3", "python"]
+        .into_iter()
+        .find(|candidate| Command::new(candidate).arg("--version").output().is_ok())
+        .expect("a Python 3 interpreter is required for release archive tests");
+
+    let archive_path = temp.path().join("ignatius-candidate.tar.gz");
+    let archive_output = Command::new(python)
+        .arg(&script)
+        .args([
+            "--format",
+            "tar.gz",
+            "--source-dir",
+            source_dir.to_str().expect("source dir"),
+            "--binary",
+            binary_name,
+            "--output",
+            archive_path.to_str().expect("archive output path"),
+        ])
+        .output()
+        .expect("run create-release-archive.py");
+    assert!(
+        archive_output.status.success(),
+        "create-release-archive.py failed: {}",
+        String::from_utf8_lossy(&archive_output.stderr)
+    );
+    assert!(archive_path.exists(), "candidate archive was created");
+
+    let extracted_dir = temp.path().join("extracted");
+    fs::create_dir_all(&extracted_dir).expect("create extracted dir");
+
+    let extract_script = r#"
+import sys, tarfile
+archive_path = sys.argv[1]
+destination = sys.argv[2]
+with tarfile.open(archive_path, "r:gz") as tar:
+    if hasattr(tarfile, "data_filter"):
+        tar.extractall(destination, filter="data")
+    else:
+        tar.extractall(destination)
+"#;
+    let extract_output = Command::new(python)
+        .args([
+            "-c",
+            extract_script,
+            archive_path.to_str().unwrap(),
+            extracted_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("extract candidate archive");
+    assert!(
+        extract_output.status.success(),
+        "tar extraction failed: {}",
+        String::from_utf8_lossy(&extract_output.stderr)
+    );
+
+    let extracted_bin = extracted_dir.join(binary_name);
+    assert!(extracted_bin.exists(), "extracted binary exists");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&extracted_bin, fs::Permissions::from_mode(0o755));
+    }
+
+    let isolated_env = temp.path().join("isolated_env");
+    let isolated_config = isolated_env.join("config");
+    let isolated_data = isolated_env.join("data");
+    let isolated_home = isolated_env.join("home");
+    fs::create_dir_all(&isolated_config).expect("create isolated config");
+    fs::create_dir_all(&isolated_data).expect("create isolated data");
+    fs::create_dir_all(&isolated_home).expect("create isolated home");
+
+    // Probe 1 (J8 Identity Probe)
+    let version_output = Command::new(&extracted_bin)
+        .args(["version", "--verbose"])
+        .env("IGNATIUS_CONFIG_DIR", &isolated_config)
+        .env("IGNATIUS_DATA_DIR", &isolated_data)
+        .env("HOME", &isolated_home)
+        .output()
+        .expect("run version --verbose");
+    assert_eq!(
+        version_output.status.code(),
+        Some(0),
+        "version --verbose must exit 0"
+    );
+    let version_stdout = String::from_utf8_lossy(&version_output.stdout);
+    assert!(
+        version_stdout.contains(env!("CARGO_PKG_VERSION")),
+        "version output must contain Cargo.toml version: {version_stdout}"
+    );
+    assert!(
+        version_stdout.contains("source revision:"),
+        "version output must contain git source revision: {version_stdout}"
+    );
+    assert!(
+        version_stdout.contains("target:"),
+        "version output must report target triple: {version_stdout}"
+    );
+    assert!(
+        version_stdout.contains("build identity:"),
+        "version output must report build identity: {version_stdout}"
+    );
+
+    // Probe 2 (J8 Diagnostics Probe)
+    let doctor_output = Command::new(&extracted_bin)
+        .args(["doctor", "--json"])
+        .env("IGNATIUS_CONFIG_DIR", &isolated_config)
+        .env("IGNATIUS_DATA_DIR", &isolated_data)
+        .env("HOME", &isolated_home)
+        .output()
+        .expect("run doctor --json");
+    assert_eq!(
+        doctor_output.status.code(),
+        Some(0),
+        "doctor --json must exit 0"
+    );
+    let doctor_stdout = String::from_utf8_lossy(&doctor_output.stdout);
+    let doctor_json: Value = serde_json::from_str(&doctor_stdout)
+        .expect("doctor --json output must parse as valid JSON");
+    let checks = doctor_json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("doctor output must contain checks array");
+    assert!(!checks.is_empty(), "checks array must not be empty");
+    for check in checks {
+        assert!(
+            check.get("status").is_some(),
+            "each check must report a status: {check:?}"
+        );
+    }
+    assert!(
+        !doctor_stdout.contains("password"),
+        "doctor must not disclose credentials: {doctor_stdout}"
+    );
+
+    // Probe 3 (J8 Invalid Configuration Refusal Probe)
+    let malformed_config_dir = isolated_env.join("malformed_config");
+    fs::create_dir_all(&malformed_config_dir).expect("create malformed config dir");
+    fs::write(
+        malformed_config_dir.join("config.toml"),
+        b"default_connection = 123\n",
+    )
+    .expect("write malformed config.toml");
+
+    let invalid_doctor_output = Command::new(&extracted_bin)
+        .args(["doctor"])
+        .env("IGNATIUS_CONFIG_DIR", &malformed_config_dir)
+        .env("IGNATIUS_DATA_DIR", &isolated_data)
+        .env("HOME", &isolated_home)
+        .output()
+        .expect("run doctor with invalid config");
+    assert_eq!(
+        invalid_doctor_output.status.code(),
+        Some(3),
+        "invalid configuration must exit 3 (ExitCode::InvalidConfiguration)"
+    );
+
+    // Probe 4 (J8 Preservation & Rollback Probe)
+    let preserved_config_dir = isolated_env.join("preserved_config");
+    let preserved_data_dir = isolated_env.join("preserved_data");
+    fs::create_dir_all(&preserved_config_dir).expect("create preserved config dir");
+    fs::create_dir_all(&preserved_data_dir).expect("create preserved data dir");
+
+    let initial_config = b"schema_version = 1\n\n[profiles.prod]\nhost = \"db.example.internal\"\nport = 5432\ndbname = \"analytics\"\nuser = \"analyst\"\nsslmode = \"verify-full\"\n";
+    let initial_history = b"{\"timestamp\":\"2026-11-08T12:00:00Z\",\"query\":\"SELECT 42;\",\"connection\":\"prod\"}\n";
+
+    fs::write(preserved_config_dir.join("config.toml"), initial_config)
+        .expect("write valid config.toml");
+    fs::write(preserved_data_dir.join("history.jsonl"), initial_history)
+        .expect("write valid history.jsonl");
+
+    let preserved_version = Command::new(&extracted_bin)
+        .args(["version", "--verbose"])
+        .env("IGNATIUS_CONFIG_DIR", &preserved_config_dir)
+        .env("IGNATIUS_DATA_DIR", &preserved_data_dir)
+        .env("HOME", &isolated_home)
+        .output()
+        .expect("run version during preservation probe");
+    assert!(preserved_version.status.success());
+
+    let preserved_doctor = Command::new(&extracted_bin)
+        .args(["doctor", "--json"])
+        .env("IGNATIUS_CONFIG_DIR", &preserved_config_dir)
+        .env("IGNATIUS_DATA_DIR", &preserved_data_dir)
+        .env("HOME", &isolated_home)
+        .output()
+        .expect("run doctor during preservation probe");
+    assert!(preserved_doctor.status.success());
+
+    let final_config = fs::read(preserved_config_dir.join("config.toml"))
+        .expect("read config.toml after candidate run");
+    let final_history = fs::read(preserved_data_dir.join("history.jsonl"))
+        .expect("read history.jsonl after candidate run");
+
+    assert_eq!(
+        final_config, initial_config,
+        "config.toml must be preserved 100% intact across candidate runs and rollback"
+    );
+    assert_eq!(
+        final_history, initial_history,
+        "history.jsonl must be preserved 100% intact across candidate runs and rollback"
+    );
+
+    // Probe 5 (W04 Packaged Binary Runtime Privacy Sentinel Probe)
+    use std::io::Write;
+    let mut child = Command::new(&extracted_bin)
+        .args([
+            "--plain",
+            "connect",
+            "postgres://sentinel_user:super_secret_w12_password@127.0.0.1:1/sentinel_db?sslmode=disable",
+        ])
+        .env("IGNATIUS_LOG", "debug")
+        .env("IGNATIUS_CONFIG_DIR", &isolated_config)
+        .env("IGNATIUS_DATA_DIR", &isolated_data)
+        .env("HOME", &isolated_home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn packaged candidate for privacy probe");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin
+            .write_all(b"SELECT 'w12_secret_cell_payload' WHERE 'w12_secret_query_token' = '1';\n");
+    }
+    let privacy_output = child.wait_with_output().expect("wait for privacy child");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&privacy_output.stdout),
+        String::from_utf8_lossy(&privacy_output.stderr)
+    );
+
+    assert!(
+        !combined.contains("super_secret_w12_password"),
+        "privacy sentinel: password leaked in output: {combined}"
+    );
+    assert!(
+        !combined.contains("w12_secret_cell_payload"),
+        "privacy sentinel: cell payload leaked in output: {combined}"
+    );
+    assert!(
+        !combined.contains("w12_secret_query_token"),
+        "privacy sentinel: query token leaked in output: {combined}"
+    );
+    assert!(
+        !combined.contains("tokio_postgres"),
+        "privacy sentinel: internal driver target leaked in output: {combined}"
+    );
+}
+
+#[test]
+fn trust_verify_rejects_revoked_or_untrusted_signing_bundle_and_candidate_check_stays_blocked() {
+    let temp = tempdir().expect("temporary directory");
+    let bundle_dir = temp.path().join("bundle");
+    fs::create_dir_all(&bundle_dir).expect("create bundle dir");
+
+    let payload = b"candidate archive payload for revocation and rotation rehearsal\n";
+    let (hex, b64) = fixture_digest_for_contract(payload);
+
+    let archive_name = "ignatius-0.1.0-preview.1-aarch64-apple-darwin.tar.gz";
+    let archive_path = bundle_dir.join(archive_name);
+    fs::write(&archive_path, payload).expect("write archive");
+
+    let sums_path = bundle_dir.join("SHA256SUMS");
+    fs::write(&sums_path, format!("{hex}  {archive_name}\n")).expect("write SHA256SUMS");
+
+    let sig_path = bundle_dir.join(format!("{archive_name}.sig"));
+    fs::write(&sig_path, b"synthetic revoked signature bytes\n").expect("write sig");
+
+    let pem_path = bundle_dir.join(format!("{archive_name}.pem"));
+    fs::write(
+        &pem_path,
+        b"-----BEGIN CERTIFICATE-----\nMIIC...revoked...certificate\n-----END CERTIFICATE-----\n",
+    )
+    .expect("write pem");
+
+    let cdx_path = bundle_dir.join("ignatius-0.1.0.cdx.json");
+    fs::write(
+        &cdx_path,
+        b"{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"version\":1,\"components\":[]}\n",
+    )
+    .expect("write cdx");
+
+    // Simulate a revoked/compromised signing bundle missing messageSignature/digest
+    let sigstore_path = bundle_dir.join(format!("{archive_name}.sigstore.json"));
+    let revoked_sigstore = json!({
+        "status": "revoked",
+        "reason": "compromised signing identity key revoked by maintainer",
+        "revocationMaterial": {
+            "revokedAt": "2026-11-08T18:00:00Z"
+        }
+    });
+    fs::write(
+        &sigstore_path,
+        serde_json::to_string_pretty(&revoked_sigstore).expect("revoked sigstore json"),
+    )
+    .expect("write revoked sigstore sidecar");
+
+    let intoto_path = bundle_dir.join(format!("{archive_name}.intoto.jsonl"));
+    let intoto_content = format!(
+        "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"{archive_name}\",\"digest\":{{\"sha256\":\"{hex}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
+    );
+    fs::write(&intoto_path, &intoto_content).expect("write intoto");
+
+    let manifest_path = bundle_dir.join("release-manifest.json");
+    let manifest_json = json!({
+        "schema_version": 1,
+        "product_version": "0.1.0-preview.1",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "build_identity": "ci-rehearsal-2026-08-16",
+        "artefacts": [{
+            "name": archive_name,
+            "target": "aarch64-apple-darwin",
+            "format": "tar.gz",
+            "size_bytes": payload.len(),
+            "checksum_algorithm": "sha256",
+            "checksum": hex
+        }]
+    });
+    fs::write(
+        &manifest_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&manifest_json).expect("manifest json")
+        ),
+    )
+    .expect("write manifest");
+
+    // Run xtask release trust verify and assert fail-closed refusal naming the sidecar
+    let trust_verify = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    assert!(
+        !trust_verify.status.success(),
+        "trust verify must fail closed against revoked signing bundle"
+    );
+    let trust_verify_text = output_text(&trust_verify);
+    assert!(
+        trust_verify_text.contains(&format!("{archive_name}.sigstore.json")),
+        "diagnostic must name the offending sidecar: {trust_verify_text}"
+    );
+
+    // Also test when provenance statement subject is invalidated due to revoked key
+    let valid_sigstore = format!(
+        "{{\"messageSignature\":{{\"messageDigest\":{{\"algorithm\":\"SHA2_256\",\"digest\":\"{b64}\"}},\"signature\":\"AAA=\"}}}}"
+    );
+    fs::write(&sigstore_path, &valid_sigstore).expect("restore valid sigstore");
+
+    let invalidated_intoto = format!(
+        "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"{archive_name}\",\"digest\":{{\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1/revoked\"}}\n"
+    );
+    fs::write(&intoto_path, &invalidated_intoto).expect("write invalidated intoto");
+
+    let provenance_verify = run_xtask(vec![
+        "release".to_owned(),
+        "trust".to_owned(),
+        "verify".to_owned(),
+        format!("--manifest-dir={}", bundle_dir.display()),
+        format!("--bundle-dir={}", bundle_dir.display()),
+    ]);
+    assert!(
+        !provenance_verify.status.success(),
+        "trust verify must fail closed against invalidated in-toto provenance"
+    );
+    let provenance_verify_text = output_text(&provenance_verify);
+    assert!(
+        provenance_verify_text.contains(&format!("{archive_name}.intoto.jsonl")),
+        "diagnostic must name the offending sidecar: {provenance_verify_text}"
+    );
+
+    // Candidate record check with signatures_and_provenance_verified = false (due to revocation)
+    let mut catalogue = fixture("valid-candidate.json");
+    let record = &mut catalogue["records"][0];
+    record["status"] = json!("candidate");
+    record["blockers"] =
+        json!(["signatures_and_provenance_verified is false: signing identity revoked"]);
+    record["artefacts"][0]["signature_status"] = json!("invalid");
+    record["artefacts"][0]["provenance_status"] = json!("invalid");
+
+    let (_temp, check_output) = run_catalogue(catalogue, None);
+    assert_eq!(
+        check_output.status.code(),
+        Some(1),
+        "xtask release check must exit code 1 for candidate with revoked signing identity"
+    );
+    let check_text = output_text(&check_output);
+    assert!(
+        check_text.contains("signatures_and_provenance_verified"),
+        "blocking gate output must list signatures_and_provenance_verified: {check_text}"
+    );
+    assert!(
+        check_text.contains("without verified signature evidence"),
+        "blocking gate output must list unverified signature: {check_text}"
+    );
+    assert!(
+        check_text.contains("without verified provenance evidence"),
+        "blocking gate output must list unverified provenance: {check_text}"
+    );
+}

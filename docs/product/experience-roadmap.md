@@ -323,10 +323,73 @@ bounded 500-node, 1 MiB view keeps a large or malformed response recoverable.
   density, quiet chrome domain capsules with 200 ms elapsed gating, and 80%/60%
   palette previews from retained data.
 
+## 7. Full pgAdmin replacement parity - Features 026-033
+
+The owner's strategic expansion directs that Ignatius must become a full-on
+replacement for pgAdmin 4: anything pgAdmin can do, Ignatius must be able to
+do, including schema diagrams, DDL scripts, data imports/exports, server
+diagnostics, and administrative operations.
+
+Rather than adopting pgAdmin's browser bloat, background latency, or unreviewed
+mutations, Ignatius brings these capabilities into the terminal and CLI
+under strict constitutional principles: pure state transitions, bounded memory,
+explicit SQL previews before any mutation, and production write guards.
+
+The planned experience comprises 8 vertical slices:
+
+- **Interactive Schema and ER Diagrams (`026-schema-er-diagrams`)**: Visualizes
+  relational entity structures directly in the terminal (`Ctrl+K m`) using
+  orthogonal box-drawing connectors, primary/foreign key badges, and cardinality
+  markers. Crucially, neighbourhood focus filtering (1-hop / 2-hop foreign-key
+  subgraph) keeps complex schemas intelligible on standard 80-column displays,
+  while non-interactive CLI commands export to Mermaid (`.mmd`), Graphviz (`.dot`),
+  SVG, and deterministic ASCII.
+- **Deep Catalog Inspection and DDL Generation (`027-deep-catalog-and-ddl-generator`)**:
+  Expands the Neo-tree sidebar to complete `pg_catalog` coverage: indexes,
+  constraints, triggers, sequences, enums, composite types, declarative partitions,
+  FDWs, and tablespaces. Synthesizes deterministic `CREATE`, `ALTER`, and `DROP`
+  DDL into review overlays, the editor buffer, or the CLI (`ignatius ddl`).
+- **Streaming Data Import/Export and Backup (`028-data-import-export-and-backup`)**:
+  Builds upon retained-result exports with high-throughput streaming `COPY`
+  workflows for CSV, TSV, JSONL, SQL `INSERT`, and Parquet with constant memory
+  overhead. Adds an interactive TUI column-mapping import wizard with transactional
+  rollback on error, alongside subprocess-isolated, credential-redacted
+  `pg_dump` and `pg_restore` orchestration with live progress telemetry.
+- **Live Server Activity and Lock Monitor (`029-server-activity-and-locks-dashboard`)**:
+  Surfaces real-time PostgreSQL telemetry (`pg_stat_activity`, `pg_locks`,
+  `pg_stat_database`), displaying active queries, client PIDs, query age, wait
+  events, and hierarchical blocking PID trees. Enables guarded backend
+  cancellation and termination (`pg_cancel_backend` / `pg_terminate_backend`)
+  with explicit multi-step review and production write guards.
+- **Visual Schema Designer and Migrations (`030-visual-schema-designer-and-migrations`)**:
+  Provides a form-driven TUI builder for tables, columns, indexes, and
+  constraints with live DDL preview, alongside dual-environment schema diffing
+  that generates clean, reviewable, transactional SQL migration scripts
+  (`BEGIN; ... COMMIT;`), never mutating schemas behind the user's back.
+- **Role, Privilege, and RLS Auditor (`031-roles-privileges-and-rls-auditor`)**:
+  Visualizes role inheritance trees, object ACL grant matrices, and Row-Level
+  Security (`RLS`) policies. Highlights missing security policies in multi-tenant
+  tables and generates reviewed `GRANT`, `REVOKE`, and `CREATE POLICY` SQL.
+- **PL/pgSQL Routine Runner and Profiler (`032-plpgsql-routine-runner-and-profiler`)**:
+  Discovers procedure and function signatures, prompts for typed arguments
+  using the safe parameter boundary, executes routines in safe rollback
+  savepoints for risk-free testing, and streams `RAISE NOTICE` diagnostics
+  and per-step execution profiles.
+- **LISTEN/NOTIFY and Maintenance Operations (`033-listen-notify-and-maintenance-ops`)**:
+  Provides an asynchronous pub/sub event monitor for `LISTEN` channels and guarded
+  `NOTIFY` dispatch, plus a guided maintenance runner for `VACUUM (VERBOSE, ANALYZE)`,
+  `ANALYZE`, and `REINDEX CONCURRENTLY` with live progress bars driven by
+  `pg_stat_progress_*` system views.
+
 ## What is deliberately not on the list
 
-- **Entity-relationship diagrams and schema comparison.** Real features of real
-  products, and neither survives contact with an 80-column terminal.
+- **Unfocused full-database wallcharts and unreviewed schema mutations.** Unfocused
+  full-database wallcharts are replaced by neighbourhood-scoped terminal ER diagrams
+  and exportable Mermaid/DOT/SVG artifacts (`026-schema-er-diagrams`), while
+  unreviewed schema mutations are replaced by deterministic, reviewed transactional
+  schema diffs (`030-visual-schema-designer-and-migrations`). Constitutional
+  non-goals (generic multi-database abstraction, silent cloud uploads/telemetry,
+  accounts/sync, BI dashboards, and plugin marketplaces) remain strictly excluded.
 - **A second database.** Principle II. The optimisation for PostgreSQL is the
   product.
 - **Anything that uploads a query, a result or a schema.** Principle III, and it

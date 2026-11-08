@@ -83,6 +83,7 @@ chain; the later experience work preserves its source-bound, deliberate action.
 | What success looks like | [Product outcomes and acceptance journeys](acceptance.md) |
 | Assignable work, dependencies and definitions of done | [Agent delivery plan, W01-W16](agent-delivery-plan.md) |
 | Architecture and extension boundaries | [Components](../architecture/containers-and-components.md), [runtime](../architecture/runtime-state.md), [trust context](../architecture/context.md) |
+| Full pgAdmin replacement parity plan (M6) | [Full pgAdmin replacement parity plan](../architecture/pgadmin-parity-plan.md) |
 | How agents take and return work | [Agent playbook](../operations/agent-playbook.md) |
 | What is actually done now | [Status](../status.md), current worktree, each feature's `tasks.md` |
 
@@ -119,6 +120,7 @@ below; broadening the feature list does not move a milestone forward.
 | M3 Verifiable release candidate | An operator can identify, verify, install and roll back the candidate | W11-W13 plus M1/M2 | Canonical technical evidence, inventory, signatures/provenance, runtime privacy, recovery and support prerequisites accepted; any final owner gate stays blocking in 008 T033 |
 | M4 Owner-approved distribution | The reviewed candidate reaches only the authorized destination | W14 | Explicit owner decision, readiness check passes after required authorization, and authorized bytes/metadata independently verified; T033/T035/status/catalogue accurately closed |
 | M5 Supported daily tool | Patches keep pace with real usage and supported environments | W15; W16 when justified | Each maintenance cycle closes reported failures and repeats affected release gates; new scope starts from observed jobs |
+| M6 Full pgAdmin replacement parity | Every daily and administrative job for which users reach for pgAdmin is completable in the terminal and CLI | W16 (Features 026-033) | Schema/ER diagrams, deep catalog/DDL generator, streaming COPY/backup, server activity/locks, guided schema designer/diff, role/RLS auditor, routine runner and maintenance ops specified, implemented and verified under M1-M3 gates |
 
 ```mermaid
 flowchart LR
@@ -132,6 +134,7 @@ flowchart LR
     M2 --> M3
     M3 --> M4["M4 Owner decision and authorized distribution"]
     M4 --> M5["M5 Maintenance and evidenced next slices"]
+    M5 --> M6["M6 Full pgAdmin replacement parity (026-033)"]
 ```
 
 ## Start here
@@ -195,3 +198,38 @@ PostgreSQL workflows, concurrency protection, connection options and platform
 convenience. Each needs evidence of a real job, a complete specification and
 the same acceptance gates. No new feature is required merely to keep the
 roadmap busy.
+
+### Planned pgAdmin replacement parity slices (M6 / Features 026-033)
+
+Following the user directive to deliver a complete, terminal-native replacement
+for pgAdmin 4 without GUI bloat or opaque mutations, Milestone 6 defines 8
+vertical slices detailed in the [pgAdmin replacement parity plan](../architecture/pgadmin-parity-plan.md):
+
+- **`026-schema-er-diagrams`**: Interactive terminal ER diagram canvas (`Ctrl+K m`),
+  orthogonal Unicode/Braille/ASCII edge routing, 1-hop/2-hop neighbourhood filtering,
+  and deterministic Mermaid/DOT/SVG/ASCII diagram export (`ignatius diagram`).
+- **`027-deep-catalog-and-ddl-generator`**: Full `pg_catalog` inspection across
+  indexes, constraints, triggers, sequences, enums, composite types, partitions,
+  FDWs and tablespaces, with deterministic `CREATE`/`ALTER`/`DROP` DDL generation
+  into the editor buffer or CLI (`ignatius ddl`).
+- **`028-data-import-export-and-backup`**: High-throughput streaming `COPY` import/export
+  for CSV, TSV, JSONL, SQL `INSERT` and Parquet; interactive column-mapping import
+  wizard with transactional rollback; and subprocess-isolated `pg_dump`/`pg_restore`
+  orchestration with credential redaction and live progress telemetry.
+- **`029-server-activity-and-locks-dashboard`**: Live server activity monitor
+  (`pg_stat_activity`, `pg_locks`, `pg_stat_database`), hierarchical blocking PID
+  tree, query age/wait event tracking, and guarded `pg_cancel_backend`/`pg_terminate_backend`
+  actions with explicit multi-step review.
+- **`030-visual-schema-designer-and-migrations`**: Form-driven TUI builder for tables,
+  columns, indexes and constraints with live DDL preview; dual-environment schema
+  diffing; and deterministic transactional migration script generation (`BEGIN; ... COMMIT;`).
+- **`031-roles-privileges-and-rls-auditor`**: Visual browser for role inheritance,
+  object privilege ACL matrix, and Row-Level Security (`RLS`) policy auditing with
+  missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL generation.
+- **`032-plpgsql-routine-runner-and-profiler`**: Discovery of function/procedure
+  signatures, typed argument prompt harness, execution inside safe rollback savepoints,
+  `RAISE NOTICE` stream capture, and per-step execution profiling.
+- **`033-listen-notify-and-maintenance-ops`**: Dedicated asynchronous `LISTEN`/`NOTIFY`
+  event stream monitor and guided maintenance runner for `VACUUM`, `ANALYZE`, and
+  `REINDEX CONCURRENTLY` with live telemetry from `pg_stat_progress_*`.
+
