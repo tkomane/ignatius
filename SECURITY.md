@@ -7,9 +7,11 @@ this repository: <https://github.com/tkomane/ignatius/security/advisories/new>.
 A report there is visible only to the maintainer.
 
 Include what you did, what happened, what you expected, and the version from
-`ignatius version --verbose`. Please do not include real credentials or real data
-in a report; synthetic examples are enough to reproduce anything this project
-does.
+`ignatius version --verbose`. When environment, configuration or transport
+diagnostics are relevant, also include `ignatius doctor --json` (redacted of
+private filesystem paths or connection targets if needed). Please do not
+include real credentials or real data in a report; synthetic examples are enough
+to reproduce anything this project does.
 
 Expect an acknowledgement within seven days and an assessment within thirty. If a
 fix is warranted, you will be credited unless you prefer otherwise.
@@ -64,7 +66,48 @@ marketing:
 - **Nothing is signed or notarised.** Do not treat any artefact as authenticated
   until this document says otherwise.
 
+## Severity triage and response targets
+
+Security reports and data-loss defects are triaged ahead of feature work while
+preserving the exact affected build identity (`version`, `git_sha`, `build_id`,
+and `target`). Ignatius uses a 4-tier severity rubric:
+
+- **Critical**: Remote or local credential/secret disclosure, secret exfiltration,
+  or unauthenticated TLS/transport bypass. Target initial response: within 48 hours;
+  targeted advisory and patch candidate: within 7 days.
+- **High**: Query or result privacy leakage across boundaries, inadvertent logging
+  of SQL or cell payloads, or improper authorization bypass during write operations.
+  Target initial response: within 5 days; targeted patch candidate: within 14 days.
+- **Medium**: Local confidentiality boundary weaknesses, unexpected environment
+  exposure, or local availability defects causing persistent inability to run queries.
+  Target initial response: within 7 days; targeted patch candidate: within 30 days.
+- **Low**: Minor diagnostic disclosure without secret exposure, non-critical terminal
+  restoration defects, or cosmetic inconsistencies. Triaged during normal release
+  maintenance cycles.
+
+## Trust-key revocation and rollback handling
+
+In the event of a compromised build workflow identity, a revoked Sigstore signing
+certificate, or a defective release candidate, Ignatius enforces a strict fail-closed
+posture:
+
+1. **Catalogue revocation**: The candidate record in the release catalogue is immediately
+   marked with status `blocked` or `withdrawn`, recording the revocation reason in its
+   blockers list.
+2. **Fail-closed verification**: Both `cargo xtask release trust verify` and
+   `cargo xtask release check` refuse revoked, rotated or unverified signing bundles,
+   blocking release readiness across all tooling.
+3. **Advisory publication**: A private or public security advisory is published
+   documenting the affected build identity and revocation details.
+4. **Operator rollback**: Operators are guided to immediately roll back to the last
+   verified build following the rollback runbook in `docs/operations/release.md`,
+   preserving local configuration and query history without data loss.
+
 ## Supported versions
 
 Nothing is released, so nothing is supported. This section will list supported
-versions and their end dates once there is a release.
+versions and their end dates once there is a release. See
+[docs/support/compatibility.md](docs/support/compatibility.md) for the validated
+platform and PostgreSQL server matrix (PostgreSQL 14-18 across macOS, Linux, and
+Windows).
+

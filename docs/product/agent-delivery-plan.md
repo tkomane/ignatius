@@ -453,6 +453,23 @@ or an invented market comparison as the priority score.
 | Additional architectures/distribution channels | Identified users cannot install the current targets | Full build/runtime/rollback/signing/support cost, not compile-only expansion |
 | Session/workspace convenience | Measured navigation or repetition problem after W09 | No automatic query replay, result persistence or hidden connection switching |
 
-Generic databases, an AI upload path, accounts/sync, migrations, BI and a plugin
+### Milestone 6: Full pgAdmin Replacement Parity Packages (Features 026-033)
+
+Milestone 6 expands Ignatius into a complete, terminal-native replacement for pgAdmin 4.
+Each slice has an architectural blueprint in the [pgAdmin replacement parity plan](../architecture/pgadmin-parity-plan.md)
+and follows the strict Elm reducer architecture, bounded memory, and explicit SQL preview invariants.
+
+| Package & Feature Slug | Primary Modules | CLI / TUI Surfaces | Safety & Privacy Invariants | Verification Gates |
+| --- | --- | --- | --- | --- |
+| **`026-schema-er-diagrams`**<br>Interactive Schema & ER Diagrams | `src/ui/widgets/diagram.rs`<br>`src/ui/canvas/`<br>`src/postgres/schema_graph.rs` | TUI canvas (`Ctrl+K m`), palette action, CLI `ignatius diagram` (`--format mermaid\|dot\|svg\|ascii`) | Bounded 200-node graph cap; neighbourhood 1-hop/2-hop filtering; no mutations | Pure reducer graph layout tests, CLI format snapshot tests, 80x24 ASCII degradation |
+| **`027-deep-catalog-and-ddl-generator`**<br>Deep Catalog & DDL Generator | `src/postgres/catalog.rs`<br>`src/query/ddl.rs`<br>`src/ui/widgets/sidebar.rs` | Sidebar inspection (`Ctrl+K d`), review overlay, CLI `ignatius ddl` | Zero hidden writes; exact reconstructed DDL; safe identifier quoting; no side effects | Full `pg_catalog` query tests across PG14-18, deterministic DDL diff tests |
+| **`028-data-import-export-and-backup`**<br>Streaming COPY & Backup/Restore | `src/postgres/copy.rs`<br>`src/ui/widgets/import_wizard.rs`<br>`src/cli/backup.rs` | TUI import column mapper, CLI `ignatius import`/`export`/`backup`/`restore` | Constant memory streaming; dry-run preview; transactional rollback on error; credential redaction | Subprocess isolation tests, streaming memory benchmark, rollback verification |
+| **`029-server-activity-and-locks-dashboard`**<br>Server Activity & Locks Dashboard | `src/postgres/activity.rs`<br>`src/ui/widgets/activity.rs` | Dedicated activity view (`Ctrl+K s`), CLI `ignatius activity`/`locks`/`kill` | Read-only session refusal; explicit multi-step PID confirmation; query preview | Lock tree hierarchy tests, termination confirmation mock tests, PG14-18 matrix |
+| **`030-visual-schema-designer-and-migrations`**<br>Visual Schema Designer & Migrations | `src/ui/widgets/designer.rs`<br>`src/postgres/diff.rs` | Form-driven TUI designer, CLI `ignatius diff` (`--output migration.sql`) | Zero automatic DDL application; strictly transactional migrations (`BEGIN; ... COMMIT;`) | Schema diffing unit tests, transactional migration syntax checks |
+| **`031-roles-privileges-and-rls-auditor`**<br>Roles, Privileges & RLS Auditor | `src/postgres/security.rs`<br>`src/ui/widgets/security_audit.rs` | Security audit matrix overlay, CLI `ignatius audit` | Explicit SQL preview for all grants/revocations/policies; no privilege escalation | Role inheritance graph tests, RLS policy parser tests, ACL permission matrix |
+| **`032-plpgsql-routine-runner-and-profiler`**<br>PL/pgSQL Routine Runner & Profiler | `src/postgres/routines.rs`<br>`src/ui/widgets/routine_runner.rs` | Typed argument modal, CLI `ignatius run-routine`/`profile-routine` | Optional rollback savepoints; safe parameter binding; diagnostic stream redaction | Parameter harness unit tests, notice stream capture tests, rollback verification |
+| **`033-listen-notify-and-maintenance-ops`**<br>LISTEN/NOTIFY & Maintenance Ops | `src/postgres/pubsub.rs`<br>`src/postgres/maintenance.rs`<br>`src/ui/widgets/maintenance.rs` | Asynchronous pub/sub monitor, maintenance runner, CLI `ignatius listen`/`notify`/`maintain` | Lock escalation warnings; live progress tracking; explicit production confirmation | Async event notification tests, progress parser tests, maintenance dry-run checks |
+
+Generic databases, an AI upload path, accounts/sync, BI and a plugin
 marketplace remain outside the vision. Reopening a constitutional constraint
 requires the constitution's explicit amendment process, not a roadmap task.

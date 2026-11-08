@@ -49,10 +49,15 @@ The difference is what the tool tells you about itself:
 
 ## What it will not become
 
-A generic multi-database client. A migration framework. An admin console. A
-visual schema editor. A BI tool. A place that sends your schema to an AI
-provider. A plugin marketplace. Each of those is a different product, and taking
-one on would cost the focus that makes this one worth using.
+A generic multi-database client. A place that sends your schema to an AI provider.
+A cloud account or sync service. A BI tool. A plugin marketplace. Each of those is
+a different product, and taking one on would cost the focus that makes this one
+worth using.
+
+Full pgAdmin replacement parity (M6) does not compromise this boundary: schema diagrams,
+deep catalog inspection, DDL generation, streaming COPY/backup, live activity dashboards,
+and role auditing belong in Ignatius as transparent, terminal-native, SQL-first workflows
+with explicit preview and write guards rather than opaque, bloated GUI wizards.
 
 ## How success will be judged
 

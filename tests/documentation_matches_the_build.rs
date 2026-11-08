@@ -36,6 +36,9 @@ const THEME_TOKENS: &str = include_str!("../docs/design/theme-tokens.md");
 const TERMINAL_COMPATIBILITY: &str = include_str!("../docs/design/terminal-compatibility.md");
 const ICONS_AND_MOTION: &str = include_str!("../docs/design/icons-and-motion.md");
 const INFORMATION_ARCHITECTURE: &str = include_str!("../docs/design/information-architecture.md");
+const PGADMIN_PARITY_PLAN: &str = include_str!("../docs/architecture/pgadmin-parity-plan.md");
+const AGENT_DELIVERY_PLAN: &str = include_str!("../docs/product/agent-delivery-plan.md");
+const VISION: &str = include_str!("../docs/product/vision.md");
 
 #[test]
 fn every_chord_the_build_offers_is_in_the_keymap_document() {
@@ -629,4 +632,62 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         !README.contains('\u{2013}'),
         "README.md must not contain en dashes"
     );
+}
+
+#[test]
+fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
+    let m6_feature_slugs = [
+        "026-schema-er-diagrams",
+        "027-deep-catalog-and-ddl-generator",
+        "028-data-import-export-and-backup",
+        "029-server-activity-and-locks-dashboard",
+        "030-visual-schema-designer-and-migrations",
+        "031-roles-privileges-and-rls-auditor",
+        "032-plpgsql-routine-runner-and-profiler",
+        "033-listen-notify-and-maintenance-ops",
+    ];
+
+    for slug in m6_feature_slugs {
+        assert!(
+            PGADMIN_PARITY_PLAN.contains(slug),
+            "docs/architecture/pgadmin-parity-plan.md must document M6 feature slug {slug}"
+        );
+        assert!(
+            PRODUCT_ROADMAP.contains(slug),
+            "docs/product/roadmap.md must document M6 feature slug {slug}"
+        );
+        assert!(
+            EXPERIENCE_ROADMAP.contains(slug),
+            "docs/product/experience-roadmap.md must document M6 feature slug {slug}"
+        );
+        assert!(
+            AGENT_DELIVERY_PLAN.contains(slug),
+            "docs/product/agent-delivery-plan.md must document M6 feature slug {slug}"
+        );
+        assert!(
+            README.contains(slug),
+            "README.md must document M6 feature slug {slug}"
+        );
+    }
+
+    for (name, content) in [
+        (
+            "docs/architecture/pgadmin-parity-plan.md",
+            PGADMIN_PARITY_PLAN,
+        ),
+        ("docs/product/roadmap.md", PRODUCT_ROADMAP),
+        ("docs/product/experience-roadmap.md", EXPERIENCE_ROADMAP),
+        ("docs/product/agent-delivery-plan.md", AGENT_DELIVERY_PLAN),
+        ("docs/product/vision.md", VISION),
+        ("README.md", README),
+    ] {
+        assert!(
+            !content.contains('\u{2014}'),
+            "{name} must not contain Unicode em dashes"
+        );
+        assert!(
+            !content.contains('\u{2013}'),
+            "{name} must not contain Unicode en dashes"
+        );
+    }
 }

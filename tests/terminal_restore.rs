@@ -333,3 +333,233 @@ fn the_client_draws_something_before_it_is_asked_to_leave() {
         "the quit hint should be on screen: the user has to know how to leave"
     );
 }
+
+fn assert_clean_terminal_restoration(session: &str) {
+    for (on, off, what) in [
+        ("\x1b[?1049h", "\x1b[?1049l", "alternate screen"),
+        ("\x1b[?2004h", "\x1b[?2004l", "bracketed paste"),
+        ("\x1b[?25l", "\x1b[?25h", "cursor visibility"),
+        ("\x1b[?1000h", "\x1b[?1000l", "mouse capture"),
+    ] {
+        assert!(session.contains(on), "{what} was never enabled");
+        assert!(session.contains(off), "{what} was left enabled");
+    }
+
+    let show_cursor = session.rfind("\x1b[?25h").expect("cursor restored");
+    let leave_screen = session.rfind("\x1b[?1049l").expect("screen left");
+    assert!(
+        show_cursor < leave_screen,
+        "the cursor must be restored before the screen is handed back, \
+         or the restore applies to a screen the user never sees"
+    );
+}
+
+fn resolve_live_uri(env_var: &str) -> Option<String> {
+    let uri = std::env::var(env_var).ok()?;
+    if uri.is_empty() {
+        return None;
+    }
+    let uri = if uri.contains(":ignatius_test_password_do_not_use@") {
+        uri.replace(
+            ":ignatius_test_password_do_not_use@",
+            ":not-a-real-password-disposable-container@",
+        )
+    } else {
+        uri
+    };
+    Some(resolve_sslrootcert(&uri))
+}
+
+fn resolve_sslrootcert(uri: &str) -> String {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let fallback_cert = format!("{manifest}/docker/tls/generated/ca.crt");
+    if let Some(idx) = uri.find("sslrootcert=") {
+        let prefix = &uri[..idx + "sslrootcert=".len()];
+        let after = &uri[idx + "sslrootcert=".len()..];
+        let (path_str, rest) = match after.find('&') {
+            Some(amp) => (&after[..amp], &after[amp..]),
+            None => (after, ""),
+        };
+        let resolved_path = if let Some(stripped) = path_str.strip_prefix("./") {
+            format!("{manifest}/{stripped}")
+        } else if !path_str.starts_with('/') {
+            format!("{manifest}/{path_str}")
+        } else {
+            path_str.to_owned()
+        };
+        let actual_path = if !std::path::Path::new(&resolved_path).exists()
+            && std::path::Path::new(&fallback_cert).exists()
+        {
+            fallback_cert
+        } else {
+            resolved_path
+        };
+        format!("{prefix}{actual_path}{rest}")
+    } else if std::path::Path::new(&fallback_cert).exists() && uri.contains("55433") {
+        let delimiter = if uri.contains('?') { "&" } else { "?" };
+        format!("{uri}{delimiter}sslmode=verify-full&sslrootcert={fallback_cert}")
+    } else {
+        uri.to_owned()
+    }
+}
+
+fn run_live_pty(
+    cols: u16,
+    rows: u16,
+    uri: &str,
+    extra_args: &[&str],
+    input_fn: impl FnOnce(&mut std::process::ChildStdin) + Send + 'static,
+) -> Option<String> {
+    if Command::new("script").arg("--version").output().is_err()
+        && Command::new("script").arg("-h").output().is_err()
+    {
+        eprintln!("skipping: `script` is not available to allocate a pty");
+        return None;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_ignatius");
+    let args_str = extra_args.join(" ");
+    let inner = format!("stty rows {rows} cols {cols}; exec {binary} {args_str} connect '{uri}'");
+
+    let mut command = Command::new("script");
+    if cfg!(target_os = "linux") {
+        command.args(["-e", "-q", "-c", &inner, "/dev/null"]);
+    } else {
+        command.args(["-q", "/dev/null", "sh", "-c", &inner]);
+    }
+    command.current_dir(env!("CARGO_MANIFEST_DIR"));
+
+    let _state = isolate_terminal_command(&mut command);
+    let mut stdout = tempfile::tempfile().expect("private PTY stdout capture");
+    let mut stderr = tempfile::tempfile().expect("private PTY stderr capture");
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(stdout.try_clone().expect("PTY stdout capture"))
+        .stderr(stderr.try_clone().expect("PTY stderr capture"))
+        .spawn()
+        .expect("spawn live client under a pty");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let writer = std::thread::spawn(move || {
+        input_fn(&mut stdin);
+    });
+
+    let (status, timed_out) = wait_for_owned_child(&mut child, Duration::from_secs(25));
+    writer.join().expect("join live PTY input writer");
+    let stdout = captured_bytes(&mut stdout);
+    let stderr = captured_bytes(&mut stderr);
+
+    assert!(
+        !timed_out,
+        "the owned live PTY child exceeded its deadline: {:?}",
+        String::from_utf8_lossy(&stderr)
+    );
+    assert!(
+        status.success(),
+        "the live client did not exit cleanly: {:?}",
+        String::from_utf8_lossy(&stderr)
+    );
+    Some(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+#[test]
+fn live_postgres_pty_workbench_connects_queries_and_restores_across_viewport_matrix() {
+    let Some(uri) = resolve_live_uri("IGNATIUS_TEST_PG_URI") else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_URI is not set");
+        return;
+    };
+
+    // 1. Full layout (100x30): connects, runs query buffer with Ctrl+R, verifies output, restores
+    let full = run_live_pty(100, 30, &uri, &[], |stdin| {
+        std::thread::sleep(Duration::from_secs(3));
+        let _ = stdin.write_all(b"\x12"); // Ctrl+R: run buffer
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(1500));
+        let _ = stdin.write_all(QUIT);
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(500));
+    });
+    if let Some(session) = full {
+        assert!(session.contains("Ignatius"), "interface rendered in 100x30");
+        assert!(
+            session.contains("1 row") || session.contains("Ready") || session.contains("SELECT"),
+            "query executed or status updated: {session}"
+        );
+        assert_clean_terminal_restoration(&session);
+    }
+
+    // 2. Standard VT100 viewport (80x24): connects, renders workbench, restores cleanly
+    let vt100 = run_live_pty(80, 24, &uri, &[], |stdin| {
+        std::thread::sleep(Duration::from_secs(3));
+        let _ = stdin.write_all(QUIT);
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(500));
+    });
+    if let Some(session) = vt100 {
+        assert!(session.contains("Ignatius"), "interface rendered in 80x24");
+        assert_clean_terminal_restoration(&session);
+    }
+
+    // 3. Compact viewport (60x20): connects, renders compact layout, restores cleanly
+    let compact = run_live_pty(60, 20, &uri, &[], |stdin| {
+        std::thread::sleep(Duration::from_secs(3));
+        let _ = stdin.write_all(QUIT);
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(500));
+    });
+    if let Some(session) = compact {
+        assert!(
+            session.contains("ignatius_demo") || session.contains("Editor"),
+            "compact interface rendered in 60x20: {session}"
+        );
+        assert_clean_terminal_restoration(&session);
+    }
+
+    // 4. Sub-minimum viewport (30x6): renders too-small notification, restores cleanly
+    let too_small = run_live_pty(30, 6, &uri, &[], |stdin| {
+        std::thread::sleep(Duration::from_secs(2));
+        let _ = stdin.write_all(QUIT);
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(500));
+    });
+    if let Some(session) = too_small {
+        assert!(
+            session.contains("30x6") || (session.contains("Terminal") && session.contains("small")),
+            "too small notification rendered in 30x6: {session}"
+        );
+        assert_clean_terminal_restoration(&session);
+    }
+}
+
+#[test]
+fn live_postgres_tls_verify_full_pty_renders_trust_badge_and_restores_cleanly() {
+    let Some(tls_uri) = resolve_live_uri("IGNATIUS_TEST_PG_TLS_URI") else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_TLS_URI is not set");
+        return;
+    };
+
+    let session = run_live_pty(100, 30, &tls_uri, &[], |stdin| {
+        std::thread::sleep(Duration::from_secs(3));
+        // Open command palette (Ctrl+P)
+        let _ = stdin.write_all(b"\x10");
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(800));
+        // Activate "Connection and auth details" (Enter) to open trust surface
+        let _ = stdin.write_all(b"\r");
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(800));
+        // Quit cleanly (Ctrl+Q)
+        let _ = stdin.write_all(QUIT);
+        let _ = stdin.flush();
+        std::thread::sleep(Duration::from_millis(500));
+    });
+
+    if let Some(transcript) = session {
+        assert!(transcript.contains("Ignatius"), "interface rendered");
+        assert!(
+            transcript.contains("TLS") && transcript.contains("verify-full"),
+            "trust surface details rendered in transcript: {transcript}"
+        );
+        assert_clean_terminal_restoration(&transcript);
+    }
+}
