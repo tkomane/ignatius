@@ -46,7 +46,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 | **Query Tool & SQL Editor** | `001-foundation-vertical-slice`<br>`012-schema-completion`<br>`013-errors-at-cursor`<br>`025-gui-grade-experience` | Merged (`M0-M5`) | Multi-line syntax-highlighted editor, active line numbers, word-level undo/redo, Blink.cmp-style schema-aware autocomplete popup (`Ctrl+Space`), Trouble.nvim-style error pinning, and bounded bracketed paste. |
 | **Visual Explain / Analyze** | `016-explain-analyze-plan-viewer` | Merged (`M0-M5`) | Interactive plan tree (`Ctrl+K l` / `Ctrl+K a`), estimated vs actual cost/timing breakdown, buffer hit tracking, and automatic expensive-node highlighting. |
 | **Object Explorer (Catalog Tree)** | `001-foundation-vertical-slice`<br>`025-gui-grade-experience`<br>`027-deep-catalog-and-ddl-generator` | Core Merged (`M0-M5`), Deep Catalog Planned (`M6`) | Neo-tree style hierarchical sidebar (`Ctrl+B`), instant fuzzy filtering (`/`), full `pg_catalog` entity inspection, and deterministic DDL generation (`Ctrl+K d`). |
-| **Schema & ERD Visualizer** | `026-schema-er-diagrams` | Planned (`M6`) | Interactive terminal ERD canvas (`Ctrl+K m`), orthogonal box-drawing/Braille connectors, neighbourhood focus (1-hop / 2-hop), and Mermaid/DOT/SVG/ASCII export (`ignatius diagram`). |
+| **Schema & ERD Visualizer** | `026-schema-er-diagrams` | Implemented (`M6`) | Interactive terminal ERD canvas (`Ctrl+K m`), orthogonal box-drawing/Braille connectors, neighbourhood focus (1-hop / 2-hop), pure `src/diagram/` engine, `Session::schema_graph`, and CLI exporter (`ignatius diagram --format mermaid|dot|svg|ascii|unicode`). |
 | **DDL Script Generator** | `027-deep-catalog-and-ddl-generator` | Planned (`M6`) | Reconstructs complete, deterministic `CREATE` / `ALTER` / `DROP` DDL from `pg_catalog` for all object types; opens into SQL editor buffer or CLI (`ignatius ddl <object>`). |
 | **Import / Export Wizard** | `021-format-first-export`<br>`028-data-import-export-and-backup` | Retained Export Merged (`M0-M5`), Streaming COPY & Import Planned (`M6`) | Streaming `COPY ... TO STDOUT` / `FROM STDIN` for CSV, TSV, JSONL, SQL `INSERT`, and Parquet; interactive TUI import column mapper; transactional rollback on error; CLI streaming export (`--output`). |
 | **Backup and Restore** | `028-data-import-export-and-backup` | Planned (`M6`) | Subprocess-isolated orchestration of `pg_dump` and `pg_restore` with dry-run command inspection, credential redaction, and bounded progress telemetry. |
@@ -61,6 +61,8 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 ## 3. Detailed Specification Breakdown for Features 026-033
 
 ### Feature 026: Interactive Schema and Entity-Relationship (ER) Diagrams (`026-schema-er-diagrams`)
+
+**Status: Implemented on `main`.** The pure `src/diagram/` engine, `pg_catalog` foreign-key graph extractor (`Session::schema_graph`), `ignatius diagram` CLI subcommand, and `Ctrl+K m` interactive TUI ER diagram overlay are fully implemented.
 
 - **Objective:** Enable engineers to explore, understand, and document relational database schemas visually within the terminal without relying on third-party web tools or bloated GUI clients.
 - **TUI Experience:**

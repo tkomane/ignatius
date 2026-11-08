@@ -299,6 +299,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `w` | Save the buffer as a named query |
 | `o` | Open a saved query |
 | `e` | Write the rows on screen to a file |
+| `m` | Open the schema ER diagram |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -360,6 +361,10 @@ ignatius history clear --yes
 ignatius saved list
 ignatius saved run active_user_counts "$DATABASE_URL"
 
+# Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
+ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
+ignatius diagram "$DATABASE_URL" --table orders --hops 1 --format unicode
+
 # Shell completion generator
 ignatius completions zsh > ~/.zfunc/_ignatius
 ```
@@ -415,7 +420,7 @@ Ignatius is expanding to provide 100% capability parity with pgAdmin 4, bringing
 
 Milestone 6 defines 8 comprehensive vertical slices documented in the [Full pgAdmin Replacement Parity Architecture](docs/architecture/pgadmin-parity-plan.md) and the [Product Roadmap](docs/product/roadmap.md):
 
-1. **`026-schema-er-diagrams` (Interactive Schema & ER Diagrams):** Terminal-native ER diagram canvas (`Ctrl+K m`) with orthogonal connectors, 1-hop / 2-hop neighbourhood filtering for dense schemas, and CLI export (`ignatius diagram --format mermaid|dot|svg|ascii`).
+1. **`026-schema-er-diagrams` (Interactive Schema & ER Diagrams) [Implemented]:** Terminal-native ER diagram canvas (`Ctrl+K m`) with orthogonal connectors, 1-hop / 2-hop neighbourhood filtering for dense schemas, and CLI export (`ignatius diagram --format mermaid|dot|svg|ascii|unicode`).
 2. **`027-deep-catalog-and-ddl-generator` (Deep Catalog & DDL Generator):** Full `pg_catalog` inspection across indexes, constraints, triggers, sequences, enums, composite types, partitions, FDWs, and tablespaces, with deterministic `CREATE`/`ALTER`/`DROP` DDL generation (`ignatius ddl`).
 3. **`028-data-import-export-and-backup` (Streaming COPY & Backup/Restore):** High-throughput streaming `COPY` import/export (CSV, TSV, JSONL, SQL, Parquet), interactive TUI column-mapping import wizard with transactional rollback, and subprocess-isolated `pg_dump`/`pg_restore` orchestration.
 4. **`029-server-activity-and-locks-dashboard` (Server Activity & Locks Dashboard):** Real-time monitoring of `pg_stat_activity`, `pg_locks`, query age, wait events, and hierarchical blocking PID chains, with guarded backend cancellation and termination (`pg_cancel_backend` / `pg_terminate_backend`).

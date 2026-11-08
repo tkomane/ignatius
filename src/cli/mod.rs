@@ -232,6 +232,64 @@ pub enum Command {
         #[arg(long)]
         verbose: bool,
     },
+
+    /// Render or export a schema entity-relationship (ER) diagram.
+    Diagram(DiagramArgs),
+}
+
+/// Output representation format for schema ER diagrams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliDiagramFormat {
+    /// Terminal cards using Unicode box-drawing.
+    Unicode,
+    /// Terminal cards using ASCII.
+    Ascii,
+    /// Mermaid erDiagram syntax.
+    Mermaid,
+    /// Graphviz DOT syntax.
+    Dot,
+    /// Standalone vector SVG.
+    Svg,
+}
+
+impl From<CliDiagramFormat> for crate::diagram::DiagramFormat {
+    fn from(format: CliDiagramFormat) -> Self {
+        match format {
+            CliDiagramFormat::Unicode => Self::Unicode,
+            CliDiagramFormat::Ascii => Self::Ascii,
+            CliDiagramFormat::Mermaid => Self::Mermaid,
+            CliDiagramFormat::Dot => Self::Dot,
+            CliDiagramFormat::Svg => Self::Svg,
+        }
+    }
+}
+
+/// Arguments for the diagram command.
+#[derive(Debug, Args, Clone)]
+pub struct DiagramArgs {
+    /// Connection target: a URI, a keyword string, or a database name.
+    pub target: Option<String>,
+    /// Schema to inspect (defaults to all non-system schemas).
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Anchor table for neighbourhood traversal.
+    #[arg(short = 't', long, value_name = "TABLE")]
+    pub table: Option<String>,
+    /// Neighbourhood hop distance (1 or 2).
+    #[arg(long, value_name = "HOPS", value_parser = clap::value_parser!(u8).range(1..=2))]
+    pub hops: Option<u8>,
+    /// Output representation format.
+    #[arg(long, value_enum)]
+    pub format: Option<CliDiagramFormat>,
+    /// Destination file to write diagram output to.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
 }
 
 /// History sub-commands.
@@ -518,6 +576,10 @@ pub struct Presentation {
     pub unicode_capable: bool,
     /// Whether to show technical detail in errors.
     pub verbose: bool,
+    /// Whether plain output mode was requested.
+    pub plain: bool,
+    /// Whether colour output is disabled.
+    pub no_color: bool,
 }
 
 impl Presentation {
@@ -530,6 +592,7 @@ impl Presentation {
         let mut presentation = self.clone();
         presentation.color =
             crate::ui::terminal::should_use_color(self.color_override.unwrap_or(configured), facts);
+        presentation.no_color = !presentation.color;
         presentation
     }
 
@@ -598,6 +661,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             out,
             err,
         ),
+        Some(Command::Diagram(args)) => diagram_command(args, &paths, &presentation, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -676,8 +740,9 @@ fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> P
         global.glyphs.map(|choice| choice.tier(unicode_capable))
     };
 
+    let color = crate::ui::terminal::should_use_color(color_mode, facts);
     Presentation {
-        color: crate::ui::terminal::should_use_color(color_mode, facts),
+        color,
         color_override,
         color_depth: global.color_depth,
         glyphs: glyph_override.unwrap_or(if unicode_capable {
@@ -688,6 +753,8 @@ fn resolve_presentation(global: &GlobalArgs, facts: &doctor::TerminalFacts) -> P
         glyph_override,
         unicode_capable,
         verbose: global.verbose,
+        plain: global.plain,
+        no_color: !color,
     }
 }
 
@@ -1420,6 +1487,82 @@ fn check_command(
         doctor::CheckStatus::Fail => ExitCode::Connection,
         _ => ExitCode::Success,
     })
+}
+
+fn diagram_command(
+    args: &DiagramArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    use crate::diagram::{DiagramFormat, DiagramHopDepth};
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let mut graph = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let graph = session.schema_graph(args.schema.as_deref()).await;
+        drop(session);
+        graph
+    })?;
+
+    if let Some(ref table) = args.table {
+        let depth = match args.hops.unwrap_or(1) {
+            1 => DiagramHopDepth::OneHop,
+            _ => DiagramHopDepth::TwoHops,
+        };
+        graph = graph.filter_neighborhood(table, depth);
+    }
+
+    let format = match args.format {
+        Some(f) => DiagramFormat::from(f),
+        None => {
+            if presentation.no_color || presentation.plain {
+                DiagramFormat::Ascii
+            } else {
+                DiagramFormat::Unicode
+            }
+        }
+    };
+
+    let rendered = graph.render(format);
+
+    if let Some(ref destination) = args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "Wrote {} diagram ({} table(s), {} relationship(s)) to {}",
+            format.label(),
+            graph.tables.len(),
+            graph.edges.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    } else {
+        out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    }
 }
 
 /// Reads SQL from the chosen source, refusing to hang on a terminal.

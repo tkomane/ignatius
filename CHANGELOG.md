@@ -8,6 +8,11 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `026-schema-er-diagrams` delivers an interactive Schema ER Diagram
+  overlay (`Ctrl+K m` / `schema-diagram`) with 1-hop / 2-hop / all-tables
+  neighbourhood filtering and live Unicode/Mermaid toggle, plus the `ignatius diagram`
+  CLI subcommand exporting `mermaid`, `dot`, `svg`, `ascii`, and `unicode` diagrams
+  from live `pg_catalog` primary-key and foreign-key metadata.
 - New: 4-tier painted surface elevation hierarchy (Surface, SurfacePane, SurfaceAlt,
   SurfaceOverlay) and 4-tier colour depth (TrueColor, Indexed256, Basic16, None)
   with `--color-depth` CLI flag and `ui.color-depth` configuration overrides. Basic16

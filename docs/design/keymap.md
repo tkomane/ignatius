@@ -113,11 +113,17 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `c` | Copy the selected result value |
 | `u` | Generate a reviewed UPDATE from the selected cell |
 | `q` | Format the SQL buffer |
+| `m` | Open the schema ER diagram |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
 over the copy limit is explained without sending anything. The printable `c`
 remains editor input everywhere outside the chord.
+
+With the workbench active, `Ctrl+K m` opens the interactive schema ER diagram
+overlay for the active database and schema, rendering tables, primary/foreign
+keys, cardinality markers, and neighbourhood-focused subgraphs. The printable `m`
+remains ordinary editor input outside the chord.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -366,7 +372,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `shrink-pane`, `grow-pane`, `zoom-pane`,
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
-`toggle-history-recording`,
+`toggle-history-recording`, `schema-diagram`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

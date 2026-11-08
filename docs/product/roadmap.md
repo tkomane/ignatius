@@ -205,9 +205,11 @@ Following the user directive to deliver a complete, terminal-native replacement
 for pgAdmin 4 without GUI bloat or opaque mutations, Milestone 6 defines 8
 vertical slices detailed in the [pgAdmin replacement parity plan](../architecture/pgadmin-parity-plan.md):
 
-- **`026-schema-er-diagrams`**: Interactive terminal ER diagram canvas (`Ctrl+K m`),
-  orthogonal Unicode/Braille/ASCII edge routing, 1-hop/2-hop neighbourhood filtering,
-  and deterministic Mermaid/DOT/SVG/ASCII diagram export (`ignatius diagram`).
+- **`026-schema-er-diagrams`** [Implemented]: Interactive terminal ER diagram canvas
+  (`Ctrl+K m`), orthogonal Unicode/Braille/ASCII edge routing, 1-hop/2-hop neighbourhood
+  filtering, and deterministic Mermaid/DOT/SVG/ASCII/Unicode diagram export (`ignatius diagram`).
+  Its pure `src/diagram/` engine, `pg_catalog` foreign-key graph extractor
+  (`Session::schema_graph`), CLI subcommand, and interactive TUI overlay are implemented on `main`.
 - **`027-deep-catalog-and-ddl-generator`**: Full `pg_catalog` inspection across
   indexes, constraints, triggers, sequences, enums, composite types, partitions,
   FDWs and tablespaces, with deterministic `CREATE`/`ALTER`/`DROP` DDL generation

@@ -1,5 +1,30 @@
 # Verification
 
+## Wave 18 (026-schema-er-diagrams) and Waves 16-17 Delivery - 8 November 2026
+
+Pull requests #40, #55, #56, #58, and #59, along with Wave 18 Feature `026-schema-er-diagrams`,
+expanded Ignatius with full pgAdmin replacement parity planning and implementation:
+
+- **Dependabot toolchain and dependency updates**:
+  - `PR40` (`2751c39`): pinned `dtolnay/rust-toolchain`.
+  - `PR55` (`47b244c`): updated `github/codeql-action` to `v4.39.3`.
+  - `PR56` (`3dc6f43`): bumped `toml` to `1.2.0+spec-1.1.0` and `unicode-width` to `0.2.3`.
+- **PR58 (`5d4e5ba`)**: Wave 16 status, verification log, and roadmap reconciliation through Wave 15 (`PR57`).
+- **PR59 (`067688f`)**: Wave 17 delivered the `M6: Full pgAdmin Replacement Parity` architectural plan
+  (`docs/architecture/pgadmin-parity-plan.md`) and roadmap expansion for Features `026` through `033`;
+  live PostgreSQL + real-PTY viewport matrix (`100x30`, `80x24`, `60x20`, `30x6`) and `TLS verify-full`
+  restoration tests in `tests/terminal_restore.rs`; live `--plain` TLS/write-guard/recovery tests in
+  `tests/cli_contract.rs`; and `W12`/`W13`/`W15` packaged candidate `J8`/`W04` probes and trust-key
+  revocation rehearsals in `tests/release_contract.rs`.
+- **Wave 18 (`026-schema-er-diagrams`)**:
+  - Implemented the pure `src/diagram/` layout engine computing entity coordinates, orthogonal
+    Unicode box-drawing connectors, and ASCII degradation without I/O.
+  - Implemented live `pg_catalog` foreign-key and primary-key graph extraction (`Session::schema_graph`).
+  - Added the `ignatius diagram` CLI subcommand exporting `mermaid`, `dot`, `svg`, `ascii`,
+    and `unicode` diagrams with 1-hop / 2-hop neighbourhood filtering (`--hops`).
+  - Added the interactive TUI Schema ER Diagram overlay (`Ctrl+K m` / `schema-diagram`) with
+    live neighbourhood focus filtering, pan/zoom, and export toggle.
+
 ## Feature 025 completion, sidecar test extraction, and W10/W08/W09 contract verification - 2 November 2026
 
 Eleven sequential pull requests ([PR41](https://github.com/tkomane/ignatius/pull/41)

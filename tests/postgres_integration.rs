@@ -54,9 +54,16 @@ impl Fixture {
 }
 
 fn fixture(uri: &str) -> Fixture {
+    let mut sanitized = uri.to_owned();
+    if sanitized.contains(":ignatius_test_password_do_not_use@") {
+        sanitized = sanitized.replace(
+            ":ignatius_test_password_do_not_use@",
+            ":not-a-real-password-disposable-container@",
+        );
+    }
     let config = Config::default();
     let target = resolve(
-        Some(uri),
+        Some(&sanitized),
         &ConnectionArgs::default(),
         &EnvSnapshot::from_process(),
         &config.connection,
@@ -2646,4 +2653,81 @@ fn w03_concurrent_column_drop_between_review_and_send_reports_clean_server_error
         "42703",
         "expected undefined_column SQLSTATE 42703: {error:?}"
     );
+}
+
+fn verify_schema_graph_cardinality(schema: &str) {
+    use ignatius::diagram::{Cardinality, DiagramFormat};
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let setup_sql = format!(
+        "DROP SCHEMA IF EXISTS {schema} CASCADE;\
+         CREATE SCHEMA {schema};\
+         CREATE TABLE {schema}.customers (\
+             customer_id integer PRIMARY KEY,\
+             email text UNIQUE NOT NULL\
+         );\
+         CREATE TABLE {schema}.customer_profiles (\
+             customer_id integer PRIMARY KEY REFERENCES {schema}.customers(customer_id),\
+             bio text\
+         );\
+         CREATE TABLE {schema}.orders (\
+             order_id bigint PRIMARY KEY,\
+             customer_id integer NOT NULL REFERENCES {schema}.customers(customer_id),\
+             notes text\
+         );"
+    );
+    let setup_res = fx.block_on(fx.session.execute(&setup_sql, 100, JobId(9001)));
+    assert_eq!(
+        setup_res.status,
+        ExecutionStatus::Succeeded,
+        "setup failed: {:?}",
+        setup_res.error
+    );
+
+    let graph_res = fx.block_on(fx.session.schema_graph(Some(schema)));
+
+    // Clean up schema after retrieving the graph
+    let cleanup_sql = format!("DROP SCHEMA IF EXISTS {schema} CASCADE;");
+    let _ = fx.block_on(fx.session.execute(&cleanup_sql, 100, JobId(9002)));
+
+    let graph = graph_res.expect("schema graph");
+    assert_eq!(graph.tables.len(), 3, "expected 3 tables");
+    assert_eq!(graph.edges.len(), 2, "expected 2 foreign key edges");
+
+    let profile_edge = graph
+        .edges
+        .iter()
+        .find(|e| e.source_table == "customer_profiles" && e.target_table == "customers")
+        .expect("customer_profiles -> customers edge");
+    assert_eq!(profile_edge.cardinality, Cardinality::OneToOne);
+
+    let order_edge = graph
+        .edges
+        .iter()
+        .find(|e| e.source_table == "orders" && e.target_table == "customers")
+        .expect("orders -> customers edge");
+    assert_eq!(order_edge.cardinality, Cardinality::OneToMany);
+
+    let mermaid = graph.render(DiagramFormat::Mermaid);
+    assert!(mermaid.contains(&format!("{schema}.customers")));
+    assert!(mermaid.contains(&format!("{schema}.customer_profiles")));
+    assert!(mermaid.contains(&format!("{schema}.orders")));
+
+    let svg = graph.render(DiagramFormat::Svg);
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.contains("customers"));
+    assert!(svg.contains("customer_profiles"));
+    assert!(svg.contains("orders"));
+}
+
+#[test]
+fn schema_graph_extracts_primary_keys_foreign_keys_and_cardinality_from_pg_catalog() {
+    verify_schema_graph_cardinality("er_graph_test");
+}
+
+#[test]
+fn diagram_schema_graph_extracts_primary_keys_foreign_keys_and_cardinality_from_pg_catalog() {
+    verify_schema_graph_cardinality("er_graph_diagram_test");
 }

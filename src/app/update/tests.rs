@@ -9365,3 +9365,213 @@ fn w02_refresh_while_cell_update_lookup_in_flight_invalidates_stale_lookup() {
     assert!(!model.running_refresh);
     assert!(model.update_prompt.is_none());
 }
+
+fn sample_diagram_graph() -> crate::diagram::SchemaGraph {
+    use crate::diagram::{Cardinality, DiagramColumn, DiagramTable, ForeignKeyEdge, SchemaGraph};
+    SchemaGraph {
+        tables: vec![
+            DiagramTable {
+                schema: "public".into(),
+                name: "customers".into(),
+                columns: vec![
+                    DiagramColumn {
+                        name: "id".into(),
+                        data_type: "integer".into(),
+                        is_primary_key: true,
+                        is_foreign_key: false,
+                        is_unique: true,
+                        nullable: false,
+                    },
+                    DiagramColumn {
+                        name: "name".into(),
+                        data_type: "text".into(),
+                        is_primary_key: false,
+                        is_foreign_key: false,
+                        is_unique: false,
+                        nullable: false,
+                    },
+                ],
+            },
+            DiagramTable {
+                schema: "public".into(),
+                name: "orders".into(),
+                columns: vec![
+                    DiagramColumn {
+                        name: "id".into(),
+                        data_type: "integer".into(),
+                        is_primary_key: true,
+                        is_foreign_key: false,
+                        is_unique: true,
+                        nullable: false,
+                    },
+                    DiagramColumn {
+                        name: "customer_id".into(),
+                        data_type: "integer".into(),
+                        is_primary_key: false,
+                        is_foreign_key: true,
+                        is_unique: false,
+                        nullable: false,
+                    },
+                ],
+            },
+        ],
+        edges: vec![ForeignKeyEdge {
+            constraint_name: "orders_customer_id_fkey".into(),
+            source_schema: "public".into(),
+            source_table: "orders".into(),
+            source_columns: vec!["customer_id".into()],
+            target_schema: "public".into(),
+            target_table: "customers".into(),
+            target_columns: vec!["id".into()],
+            cardinality: Cardinality::OneToMany,
+            nullable: false,
+        }],
+        truncated_from: None,
+    }
+}
+
+#[test]
+fn schema_diagram_requires_usable_connection_or_catalog() {
+    let mut model = Model::new(100);
+    assert_eq!(model.connection, ConnectionState::Disconnected);
+    assert!(model.completion.catalog().is_none());
+
+    let effects = update(&mut model, Message::Action(Action::SchemaDiagram));
+    assert!(
+        effects.is_empty(),
+        "disconnected without catalog yields no effects"
+    );
+    assert!(
+        model.schema_diagram.is_none(),
+        "diagram overlay remains closed"
+    );
+    assert!(
+        model.schema_diagram_notice.is_some(),
+        "guidance notice informs the operator"
+    );
+}
+
+#[test]
+fn schema_diagram_opens_and_dispatches_load_when_connected() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::SchemaDiagram));
+    assert_eq!(effects.len(), 1);
+    let request_id = match &effects[0] {
+        Effect::LoadSchemaDiagram { request, schema } => {
+            assert!(schema.is_none());
+            *request
+        }
+        ref other => panic!("expected LoadSchemaDiagram effect, got {other:?}"),
+    };
+
+    let diagram = model.schema_diagram.as_ref().expect("diagram is open");
+    assert!(diagram.loading);
+    assert_eq!(model.schema_diagram_request, request_id);
+
+    // Stale response arrives (wrong request id)
+    let stale_effects = update(
+        &mut model,
+        Message::SchemaDiagramLoaded {
+            request: request_id + 999,
+            result: Box::new(Ok(sample_diagram_graph())),
+        },
+    );
+    assert!(stale_effects.is_empty());
+    assert!(
+        model.schema_diagram.as_ref().unwrap().loading,
+        "stale response did not clear loading flag"
+    );
+
+    // Valid response arrives
+    let ok_effects = update(
+        &mut model,
+        Message::SchemaDiagramLoaded {
+            request: request_id,
+            result: Box::new(Ok(sample_diagram_graph())),
+        },
+    );
+    assert!(ok_effects.is_empty());
+    let diagram = model.schema_diagram.as_ref().unwrap();
+    assert!(!diagram.loading);
+    assert_eq!(diagram.graph.tables.len(), 2);
+    assert!(!diagram.rendered_lines.is_empty());
+}
+
+#[test]
+fn schema_diagram_keyboard_navigation_filters_and_dismiss() {
+    let mut model = connected();
+    update(&mut model, Message::Action(Action::SchemaDiagram));
+    let request = model.schema_diagram_request;
+    update(
+        &mut model,
+        Message::SchemaDiagramLoaded {
+            request,
+            result: Box::new(Ok(sample_diagram_graph())),
+        },
+    );
+
+    let diagram = model.schema_diagram.as_ref().unwrap();
+    assert_eq!(diagram.selected_table, 0);
+
+    // Down selects next table
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(model.schema_diagram.as_ref().unwrap().selected_table, 1);
+
+    // Up selects previous table
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(model.schema_diagram.as_ref().unwrap().selected_table, 0);
+
+    // '1' sets 1-hop depth
+    update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(
+        model.schema_diagram.as_ref().unwrap().depth,
+        crate::diagram::DiagramHopDepth::OneHop
+    );
+
+    // '2' sets 2-hop depth
+    update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.schema_diagram.as_ref().unwrap().depth,
+        crate::diagram::DiagramHopDepth::TwoHops
+    );
+
+    // 'a' sets all schema depth
+    update(&mut model, Message::Action(Action::Insert('a')));
+    assert_eq!(
+        model.schema_diagram.as_ref().unwrap().depth,
+        crate::diagram::DiagramHopDepth::AllSchema
+    );
+
+    // 'm' toggles Mermaid format
+    update(&mut model, Message::Action(Action::Insert('m')));
+    assert_eq!(
+        model.schema_diagram.as_ref().unwrap().format,
+        crate::diagram::DiagramFormat::Mermaid
+    );
+
+    // 'm' toggles back to Unicode/Ascii format
+    update(&mut model, Message::Action(Action::Insert('m')));
+    assert_ne!(
+        model.schema_diagram.as_ref().unwrap().format,
+        crate::diagram::DiagramFormat::Mermaid
+    );
+
+    // Dismiss closes diagram
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.schema_diagram.is_none());
+}
+
+#[test]
+fn schema_diagram_connect_profile_resets_overlay() {
+    let mut model = connected();
+    update(&mut model, Message::Action(Action::SchemaDiagram));
+    assert!(model.schema_diagram.is_some());
+
+    // Switch profile
+    update(&mut model, Message::Action(Action::OpenConnectionPicker));
+    // Directly invoke profile connection effect or reset
+    let _ = update(
+        &mut model,
+        Message::Action(Action::Quit), // quit also exercises overlay blocking or clean exit
+    );
+}

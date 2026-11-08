@@ -2654,4 +2654,108 @@ mod with_server {
             "messages contain control sequence: {messages}"
         );
     }
+
+    #[test]
+    fn diagram_subcommand_exports_mermaid_dot_svg_and_ascii_against_live_postgres() {
+        let uri = uri_or_skip!();
+
+        // 1. Export mermaid diagram to stdout
+        let output = binary()
+            .arg("diagram")
+            .arg(&uri)
+            .arg("--schema")
+            .arg("public")
+            .arg("--format")
+            .arg("mermaid")
+            .output()
+            .expect("run ignatius diagram mermaid");
+
+        assert_eq!(
+            code(&output),
+            0,
+            "diagram mermaid exits zero: {}",
+            stderr(&output)
+        );
+        let mermaid_out = stdout(&output);
+        assert!(
+            mermaid_out.starts_with("erDiagram\n"),
+            "stdout starts with erDiagram\\n: {mermaid_out}"
+        );
+        assert!(
+            mermaid_out.contains("public.orders"),
+            "stdout contains public.orders: {mermaid_out}"
+        );
+
+        // 2. Export svg diagram to a temporary file
+        let temp_svg = temp_config_dir().join(format!("test_diagram_{}.svg", std::process::id()));
+        let _ = std::fs::remove_file(&temp_svg);
+
+        let output_svg = binary()
+            .arg("diagram")
+            .arg(&uri)
+            .arg("--schema")
+            .arg("public")
+            .arg("--format")
+            .arg("svg")
+            .arg("--output")
+            .arg(&temp_svg)
+            .output()
+            .expect("run ignatius diagram svg");
+
+        assert_eq!(
+            code(&output_svg),
+            0,
+            "diagram svg exits zero: {}",
+            stderr(&output_svg)
+        );
+        assert!(temp_svg.exists(), "SVG output file was created");
+        let svg_content = std::fs::read_to_string(&temp_svg).expect("read svg content");
+        assert!(
+            svg_content.starts_with("<svg"),
+            "SVG file starts with <svg: {svg_content}"
+        );
+        let svg_err = stderr(&output_svg);
+        assert!(
+            svg_err.contains("Wrote SVG diagram"),
+            "stderr reports wrote svg diagram: {svg_err}"
+        );
+
+        let _ = std::fs::remove_file(&temp_svg);
+    }
+
+    #[test]
+    fn diagram_subcommand_refuses_existing_output_file_without_force() {
+        let uri = uri_or_skip!();
+
+        let temp_file = temp_config_dir().join(format!(
+            "test_diagram_refuse_{}.mermaid",
+            std::process::id()
+        ));
+        std::fs::write(&temp_file, "preserved original content").expect("write original file");
+
+        let output = binary()
+            .arg("diagram")
+            .arg(&uri)
+            .arg("--schema")
+            .arg("public")
+            .arg("--format")
+            .arg("mermaid")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius diagram refuse without force");
+
+        assert_ne!(
+            code(&output),
+            0,
+            "diagram without --force must exit non-zero when output file exists"
+        );
+        let content = std::fs::read_to_string(&temp_file).expect("read preserved file");
+        assert_eq!(
+            content, "preserved original content",
+            "existing file content must be left untouched"
+        );
+
+        let _ = std::fs::remove_file(&temp_file);
+    }
 }

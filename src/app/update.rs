@@ -673,6 +673,27 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::SchemaDiagramLoaded { request, result } => {
+            if request != model.schema_diagram_request {
+                return Vec::new();
+            }
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.loading = false;
+                match *result {
+                    Ok(graph) => {
+                        diagram.graph = graph;
+                        if diagram.selected_table >= diagram.graph.tables.len() {
+                            diagram.selected_table = diagram.graph.tables.len().saturating_sub(1);
+                        }
+                        diagram.rebuild_rendered(!model.presentation.glyphs.is_ascii());
+                    }
+                    Err(diagnostic) => {
+                        diagram.error = Some(diagnostic.headline);
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1021,6 +1042,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.definition.is_some() {
         return definition_action(model, action);
     }
+    if model.schema_diagram.is_some() {
+        return schema_diagram_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1183,6 +1207,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::OpenQuery => vec![Effect::ListQueries],
         Action::ShowDefinition => show_definition(model),
         Action::ShowDependencies => show_dependencies(model),
+        Action::SchemaDiagram => schema_diagram_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -1583,6 +1608,121 @@ fn definition_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.definition = None;
             return apply_action(model, other);
         }
+    }
+    Vec::new()
+}
+
+/// Opens the schema entity-relationship (ER) diagram overlay.
+fn schema_diagram_open(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_ready() && model.completion.catalog().is_none() {
+        model.schema_diagram_notice =
+            Some("Connect to a database before opening the schema diagram.".to_owned());
+        return Vec::new();
+    }
+    let unicode = !model.presentation.glyphs.is_ascii();
+    let initial_graph = if let Some(catalog) = model.completion.catalog() {
+        crate::diagram::SchemaGraph::from_completion_catalog(catalog)
+    } else {
+        crate::diagram::SchemaGraph::default()
+    };
+    model.schema_diagram_request = model.schema_diagram_request.wrapping_add(1);
+    let request = model.schema_diagram_request;
+    let mut state = crate::app::model::SchemaDiagramState::new(initial_graph, unicode);
+    if model.connection.is_ready() {
+        state.loading = true;
+        model.schema_diagram = Some(state);
+        vec![Effect::LoadSchemaDiagram {
+            request,
+            schema: None,
+        }]
+    } else {
+        state.loading = false;
+        model.schema_diagram = Some(state);
+        Vec::new()
+    }
+}
+
+/// Handles input while the schema ER diagram overlay is on screen.
+fn schema_diagram_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let unicode = !model.presentation.glyphs.is_ascii();
+    match action {
+        Action::Dismiss | Action::SchemaDiagram => {
+            model.schema_diagram = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.select_prev(unicode);
+            }
+        }
+        Action::Move(Direction::Down) => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.select_next(unicode);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.scroll_up(10);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.scroll_down(10);
+            }
+        }
+        Action::Move(Direction::Left) => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.scroll_left(4);
+            }
+        }
+        Action::Move(Direction::Right) => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.scroll_right(4);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.set_depth(crate::diagram::DiagramHopDepth::OneHop, unicode);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.set_depth(crate::diagram::DiagramHopDepth::TwoHops, unicode);
+            }
+        }
+        Action::Insert('a' | 'A') => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                diagram.set_depth(crate::diagram::DiagramHopDepth::AllSchema, unicode);
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                let next_format = if diagram.format == crate::diagram::DiagramFormat::Mermaid {
+                    if unicode {
+                        crate::diagram::DiagramFormat::Unicode
+                    } else {
+                        crate::diagram::DiagramFormat::Ascii
+                    }
+                } else {
+                    crate::diagram::DiagramFormat::Mermaid
+                };
+                diagram.set_format(next_format, unicode);
+            }
+        }
+        Action::Insert('u' | 'U') => {
+            if let Some(diagram) = &mut model.schema_diagram {
+                let format = if unicode {
+                    crate::diagram::DiagramFormat::Unicode
+                } else {
+                    crate::diagram::DiagramFormat::Ascii
+                };
+                diagram.set_format(format, unicode);
+            }
+        }
+        _ => {}
     }
     Vec::new()
 }
@@ -4094,6 +4234,8 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.clipboard_notice = None;
     model.inspector = None;
     model.definition = None;
+    model.schema_diagram = None;
+    model.schema_diagram_notice = None;
     model.pending_dependencies = None;
     model.connection_details = false;
     model.result_filter.clear();

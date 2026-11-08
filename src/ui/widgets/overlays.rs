@@ -965,5 +965,190 @@ pub(crate) fn render_help(
     .render(view.rail_area, buf);
 }
 
+/// Shows an interactive schema entity-relationship (ER) diagram overlay.
+pub(crate) fn render_schema_diagram(
+    diagram: &crate::app::model::SchemaDiagramState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let box_width = (area.width.saturating_mul(86) / 100)
+        .max(40)
+        .min(area.width);
+    let box_height = (area.height.saturating_mul(82) / 100)
+        .max(12)
+        .min(area.height);
+    let x = area.x + (area.width.saturating_sub(box_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(box_height)) / 2;
+    let box_area = Rect::new(x, y, box_width, box_height);
+    if box_area.width < 20 || box_area.height < 6 {
+        return;
+    }
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let title = if diagram.loading {
+        format!(
+            " {}Schema ER Diagram (reading catalog...) ",
+            presentation.icon(Icon::Database)
+        )
+    } else {
+        format!(
+            " {}Schema ER Diagram ({} table{}, {} - {}) ",
+            presentation.icon(Icon::Database),
+            diagram.graph.tables.len(),
+            if diagram.graph.tables.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            diagram.depth.label(),
+            diagram.format.label(),
+        )
+    };
+    overlay_block(title, presentation).render(box_area, buf);
+
+    let inner = Rect::new(
+        box_area.x.saturating_add(1),
+        box_area.y.saturating_add(1),
+        box_area.width.saturating_sub(2),
+        box_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 2 {
+        return;
+    }
+
+    let body_height = inner.height.saturating_sub(1);
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_height);
+    let footer_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+
+    let left_width = (body_area.width.saturating_mul(28) / 100)
+        .max(16)
+        .min(body_area.width.saturating_sub(4));
+    let right_width = body_area.width.saturating_sub(left_width).saturating_sub(1);
+    let left_area = Rect::new(body_area.x, body_area.y, left_width, body_area.height);
+    let right_area = Rect::new(
+        body_area.x.saturating_add(left_width).saturating_add(1),
+        body_area.y,
+        right_width,
+        body_area.height,
+    );
+
+    let visible_rows = usize::from(left_area.height);
+    let scroll_offset = if diagram.selected_table >= visible_rows {
+        diagram
+            .selected_table
+            .saturating_sub(visible_rows.saturating_sub(1))
+    } else {
+        0
+    };
+
+    let mut table_lines = Vec::new();
+    for (idx, table) in diagram
+        .graph
+        .tables
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_rows)
+    {
+        let is_selected = idx == diagram.selected_table;
+        let prefix = if is_selected { "> " } else { "  " };
+        let name = table.qualified_name();
+        let display_name = format!("{prefix}{name}");
+        let styled_line = if is_selected {
+            Line::from(Span::styled(
+                display_name,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(display_name, theme.style(Token::Text)))
+        };
+        table_lines.push(styled_line);
+    }
+    if table_lines.is_empty() {
+        table_lines.push(Line::from(Span::styled(
+            "No tables",
+            theme.style(Token::Muted),
+        )));
+    }
+    Paragraph::new(table_lines).render(left_area, buf);
+
+    let divider_x = body_area.x.saturating_add(left_width);
+    let border_sym = if presentation.glyphs.is_ascii() {
+        "|"
+    } else {
+        "│"
+    };
+    for row in body_area.y..body_area.bottom() {
+        if let Some(cell) = buf.cell_mut((divider_x, row)) {
+            cell.set_symbol(border_sym);
+            cell.set_style(theme.style(Token::Border));
+        }
+    }
+
+    let right_visible_rows = usize::from(right_area.height);
+    let mut diagram_lines = Vec::new();
+    if let Some(error) = &diagram.error {
+        diagram_lines.push(Line::from(Span::styled(
+            format!("Error reading schema: {error}"),
+            theme.style(Token::Danger),
+        )));
+    } else if diagram.loading {
+        diagram_lines.push(Line::from(Span::styled(
+            "Loading schema graph from pg_catalog...",
+            theme.style(Token::Muted),
+        )));
+    } else {
+        for line in diagram
+            .rendered_lines
+            .iter()
+            .skip(diagram.scroll_y)
+            .take(right_visible_rows)
+        {
+            let scrolled_line: String = line.chars().skip(diagram.scroll_x).collect();
+            diagram_lines.push(Line::from(Span::styled(
+                scrolled_line,
+                theme.style(Token::Text),
+            )));
+        }
+    }
+    Paragraph::new(diagram_lines).render(right_area, buf);
+
+    let footer_hints = vec![
+        Span::styled(
+            " [↑/↓] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Table  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[1] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("1-hop  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[2] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("2-hop  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[a] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("All  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[m] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Format  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

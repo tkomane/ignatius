@@ -580,6 +580,36 @@ fn connection_picker_has_a_named_chord_without_stealing_printable_n() {
 }
 
 #[test]
+fn schema_diagram_has_a_named_chord_without_stealing_printable_m() {
+    assert_eq!(
+        chord_action('m'),
+        Some(Action::SchemaDiagram),
+        "Ctrl+K m is the schema ER diagram entry point"
+    );
+    assert_eq!(
+        chord_action('M'),
+        Some(Action::SchemaDiagram),
+        "the chord popup accepts the shifted printable key too"
+    );
+
+    let keymap = Keymap::new();
+    assert_eq!(
+        keymap.resolve(&press(KeyCode::Char('m'), KeyModifiers::NONE)),
+        Some(Action::Insert('m')),
+        "plain m remains available for editor text"
+    );
+    assert_eq!(
+        keymap.contextual_hint(&Action::SchemaDiagram),
+        Some(("Ctrl+K m".to_owned(), "ER diagram"))
+    );
+    assert_eq!(
+        action_named("schema-diagram"),
+        Some(Action::SchemaDiagram),
+        "schema-diagram is configurable by name"
+    );
+}
+
+#[test]
 fn every_chord_is_listed_and_resolves_to_what_it_says() {
     for (key, action, description) in CHORDS {
         assert!(!description.is_empty(), "{key} has no description");

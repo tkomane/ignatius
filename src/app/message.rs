@@ -117,6 +117,8 @@ pub enum Action {
     Undo,
     /// Put back what undo took away.
     Redo,
+    /// Open the interactive schema entity-relationship (ER) diagram overlay.
+    SchemaDiagram,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -214,6 +216,7 @@ impl Action {
             Self::ToggleHistoryRecording,
             Self::Undo,
             Self::Redo,
+            Self::SchemaDiagram,
         ]
     }
 }
@@ -514,6 +517,13 @@ pub enum Message {
         /// How long the statement in flight has been running, when one is.
         running_for: Option<std::time::Duration>,
     },
+    /// The schema ER diagram graph finished loading from pg_catalog.
+    SchemaDiagramLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// The loaded schema graph, or why it could not be read.
+        result: Box<Result<crate::diagram::SchemaGraph, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -652,5 +662,12 @@ pub enum Effect {
         request: u64,
         /// The source relation named by the retained SELECT.
         relation: crate::query::RelationReference,
+    },
+    /// Read the schema entity-relationship diagram graph from pg_catalog.
+    LoadSchemaDiagram {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional schema filter. None includes all user schemas.
+        schema: Option<String>,
     },
 }
