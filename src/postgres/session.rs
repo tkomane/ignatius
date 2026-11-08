@@ -294,6 +294,14 @@ impl Session {
         crate::postgres::metadata::completion_catalog(&self.client).await
     }
 
+    /// Reads the live schema and foreign-key relationship graph for ER diagram rendering.
+    pub async fn schema_graph(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::diagram::SchemaGraph, Diagnostic> {
+        crate::postgres::metadata::schema_graph(&self.client, schema).await
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

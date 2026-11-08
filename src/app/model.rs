@@ -134,6 +134,12 @@ impl ConnectionState {
         matches!(self, Self::Connected(_))
     }
 
+    /// Whether the connection is active and ready for catalog queries.
+    #[must_use]
+    pub const fn is_ready(&self) -> bool {
+        self.is_usable()
+    }
+
     /// Short text for the status bar. Never colour alone.
     #[must_use]
     pub fn label(&self) -> String {
@@ -275,6 +281,140 @@ impl Definition {
     /// Scrolls up.
     pub const fn scroll_up(&mut self) {
         self.scroll = self.scroll.saturating_sub(1);
+    }
+}
+
+/// Interactive state for the entity-relationship (ER) diagram overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SchemaDiagramState {
+    /// Complete loaded entity-relationship graph.
+    pub graph: crate::diagram::SchemaGraph,
+    /// Currently focused index in `graph.tables`.
+    pub selected_table: usize,
+    /// Traversal depth around the selected table.
+    pub depth: crate::diagram::DiagramHopDepth,
+    /// Selected output format (Unicode, ASCII, or Mermaid).
+    pub format: crate::diagram::DiagramFormat,
+    /// Vertical scroll offset for the rendered diagram pane.
+    pub scroll_y: usize,
+    /// Horizontal scroll offset for the rendered diagram pane.
+    pub scroll_x: usize,
+    /// Whether the diagram graph is currently loading in the background.
+    pub loading: bool,
+    /// Failure message when catalog reading fails.
+    pub error: Option<String>,
+    /// Pre-rendered text lines for fast viewport rendering.
+    pub rendered_lines: Vec<String>,
+    /// Active schema filter, if any.
+    pub filter_schema: Option<String>,
+}
+
+impl SchemaDiagramState {
+    /// Constructs an initial diagram state from a graph.
+    #[must_use]
+    pub fn new(graph: crate::diagram::SchemaGraph, unicode: bool) -> Self {
+        let mut state = Self {
+            graph,
+            selected_table: 0,
+            depth: crate::diagram::DiagramHopDepth::AllSchema,
+            format: if unicode {
+                crate::diagram::DiagramFormat::Unicode
+            } else {
+                crate::diagram::DiagramFormat::Ascii
+            },
+            scroll_y: 0,
+            scroll_x: 0,
+            loading: false,
+            error: None,
+            rendered_lines: Vec::new(),
+            filter_schema: None,
+        };
+        state.rebuild_rendered(unicode);
+        state
+    }
+
+    /// Re-renders diagram text into `self.rendered_lines` according to active filters.
+    pub fn rebuild_rendered(&mut self, unicode: bool) {
+        let view_graph = if let Some(schema) = &self.filter_schema {
+            self.graph.filter_schema(schema)
+        } else {
+            self.graph.clone()
+        };
+
+        let final_graph = match self.depth {
+            crate::diagram::DiagramHopDepth::AllSchema => view_graph,
+            crate::diagram::DiagramHopDepth::OneHop | crate::diagram::DiagramHopDepth::TwoHops => {
+                if let Some(table) = self.graph.tables.get(self.selected_table) {
+                    view_graph.filter_neighborhood(&table.qualified_name(), self.depth)
+                } else {
+                    view_graph
+                }
+            }
+        };
+
+        let format = if self.format == crate::diagram::DiagramFormat::Mermaid {
+            crate::diagram::DiagramFormat::Mermaid
+        } else if unicode {
+            crate::diagram::DiagramFormat::Unicode
+        } else {
+            crate::diagram::DiagramFormat::Ascii
+        };
+
+        let rendered = final_graph.render(format);
+        self.rendered_lines = rendered.lines().map(ToOwned::to_owned).collect();
+    }
+
+    /// Selects the next table in `graph.tables` if available.
+    pub fn select_next(&mut self, unicode: bool) {
+        if !self.graph.tables.is_empty() && self.selected_table + 1 < self.graph.tables.len() {
+            self.selected_table += 1;
+            if self.depth != crate::diagram::DiagramHopDepth::AllSchema {
+                self.rebuild_rendered(unicode);
+            }
+        }
+    }
+
+    /// Selects the previous table in `graph.tables` if available.
+    pub fn select_prev(&mut self, unicode: bool) {
+        if self.selected_table > 0 {
+            self.selected_table -= 1;
+            if self.depth != crate::diagram::DiagramHopDepth::AllSchema {
+                self.rebuild_rendered(unicode);
+            }
+        }
+    }
+
+    /// Scrolls down by `amount` lines.
+    pub fn scroll_down(&mut self, amount: usize) {
+        let max = self.rendered_lines.len().saturating_sub(1);
+        self.scroll_y = (self.scroll_y + amount).min(max);
+    }
+
+    /// Scrolls up by `amount` lines.
+    pub const fn scroll_up(&mut self, amount: usize) {
+        self.scroll_y = self.scroll_y.saturating_sub(amount);
+    }
+
+    /// Scrolls right by `amount` columns.
+    pub const fn scroll_right(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_add(amount);
+    }
+
+    /// Scrolls left by `amount` columns.
+    pub const fn scroll_left(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_sub(amount);
+    }
+
+    /// Sets neighbourhood depth and rebuilds the rendered diagram.
+    pub fn set_depth(&mut self, depth: crate::diagram::DiagramHopDepth, unicode: bool) {
+        self.depth = depth;
+        self.rebuild_rendered(unicode);
+    }
+
+    /// Sets diagram format and rebuilds the rendered diagram.
+    pub fn set_format(&mut self, format: crate::diagram::DiagramFormat, unicode: bool) {
+        self.format = format;
+        self.rebuild_rendered(unicode);
     }
 }
 
@@ -1524,6 +1664,12 @@ pub struct Model {
     pub credential_presentation: Option<crate::connection::cloud::ProviderPresentation>,
     /// Whether the read-only connection trust surface is open.
     pub connection_details: bool,
+    /// Interactive schema entity-relationship (ER) diagram overlay state.
+    pub schema_diagram: Option<SchemaDiagramState>,
+    /// Request counter for in-flight schema diagram queries.
+    pub schema_diagram_request: u64,
+    /// Feedback banner shown when diagram action is unavailable.
+    pub schema_diagram_notice: Option<String>,
 }
 
 impl Model {

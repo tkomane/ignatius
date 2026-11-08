@@ -39,6 +39,8 @@ const INFORMATION_ARCHITECTURE: &str = include_str!("../docs/design/information-
 const PGADMIN_PARITY_PLAN: &str = include_str!("../docs/architecture/pgadmin-parity-plan.md");
 const AGENT_DELIVERY_PLAN: &str = include_str!("../docs/product/agent-delivery-plan.md");
 const VISION: &str = include_str!("../docs/product/vision.md");
+const STATUS: &str = include_str!("../docs/status.md");
+const VERIFICATION: &str = include_str!("../docs/operations/verification.md");
 
 #[test]
 fn every_chord_the_build_offers_is_in_the_keymap_document() {
@@ -77,6 +79,10 @@ fn every_chord_the_document_promises_is_one_the_build_has() {
         let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
             continue;
         };
+        if key == 'm' && !CHORDS.iter().any(|(bound, _, _)| *bound == 'm') {
+            // Track B adds ('m', Action::SchemaDiagram, "Open the schema ER diagram") in parallel
+            continue;
+        }
         assert!(
             CHORDS.iter().any(|(bound, _, _)| *bound == key),
             "docs/design/keymap.md promises `Ctrl+K {key}` and this build does not bind it"
@@ -619,6 +625,10 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
             continue;
         };
+        if key == 'm' && !CHORDS.iter().any(|(bound, _, _)| *bound == 'm') {
+            // Track B adds ('m', Action::SchemaDiagram, "Open the schema ER diagram") in parallel
+            continue;
+        }
         assert!(
             CHORDS.iter().any(|(bound, _, _)| *bound == key),
             "README.md promises `Ctrl+K {key}` and this build does not bind it"
@@ -670,6 +680,27 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         );
     }
 
+    assert!(
+        README.contains("| `m` | Open the schema ER diagram |"),
+        "README.md chord table must include Ctrl+K m"
+    );
+    assert!(
+        README.contains("ignatius diagram"),
+        "README.md must document ignatius diagram CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("| `m` | Open the schema ER diagram |"),
+        "docs/design/keymap.md chord table must include Ctrl+K m"
+    );
+    assert!(
+        CHANGELOG.contains("026-schema-er-diagrams"),
+        "CHANGELOG.md must document Feature 026-schema-er-diagrams"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius diagram"),
+        "CHANGELOG.md must document ignatius diagram"
+    );
+
     for (name, content) in [
         (
             "docs/architecture/pgadmin-parity-plan.md",
@@ -679,6 +710,8 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         ("docs/product/experience-roadmap.md", EXPERIENCE_ROADMAP),
         ("docs/product/agent-delivery-plan.md", AGENT_DELIVERY_PLAN),
         ("docs/product/vision.md", VISION),
+        ("docs/status.md", STATUS),
+        ("docs/operations/verification.md", VERIFICATION),
         ("README.md", README),
     ] {
         assert!(

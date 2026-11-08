@@ -1022,5 +1022,173 @@ pub async fn extensions(client: &Client) -> Result<Vec<ObjectSummary>, Diagnosti
         .collect())
 }
 
+/// Reads the live schema and foreign-key relationship graph from `pg_catalog`
+/// for ER diagram rendering (`026-schema-er-diagrams`).
+pub async fn schema_graph(
+    client: &Client,
+    schema: Option<&str>,
+) -> Result<crate::diagram::SchemaGraph, Diagnostic> {
+    use crate::diagram::{Cardinality, DiagramColumn, DiagramTable, ForeignKeyEdge, SchemaGraph};
+
+    const COLUMNS_QUERY: &str = "SELECT \
+         n.nspname::text AS schema, \
+         c.relname::text AS table_name, \
+         a.attname::text AS column_name, \
+         pg_catalog.format_type(a.atttypid, a.atttypmod)::text AS data_type, \
+         NOT a.attnotnull AS nullable, \
+         COALESCE(BOOL_OR(i.indisprimary), false) AS is_pk, \
+         COALESCE(BOOL_OR(i.indisunique AND NOT i.indisprimary), false) AS is_unique \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         LEFT JOIN pg_catalog.pg_attribute a \
+           ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+         LEFT JOIN pg_catalog.pg_index i \
+           ON i.indrelid = c.oid AND a.attnum = ANY(i.indkey) \
+         WHERE c.relkind IN ('r', 'p') \
+           AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
+           AND ($1::text IS NULL OR lower(n.nspname::text) = lower($1::text)) \
+         GROUP BY n.nspname, c.relname, a.attnum, a.attname, a.atttypid, a.atttypmod, a.attnotnull \
+         ORDER BY n.nspname, c.relname, a.attnum";
+
+    const FK_QUERY: &str = "SELECT \
+         con.conname::text AS constraint_name, \
+         src_ns.nspname::text AS source_schema, \
+         src_cls.relname::text AS source_table, \
+         ARRAY( \
+             SELECT att.attname::text \
+             FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) \
+             JOIN pg_catalog.pg_attribute att \
+               ON att.attrelid = con.conrelid AND att.attnum = k.attnum \
+             ORDER BY k.ord \
+         ) AS source_columns, \
+         tgt_ns.nspname::text AS target_schema, \
+         tgt_cls.relname::text AS target_table, \
+         ARRAY( \
+             SELECT att.attname::text \
+             FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord) \
+             JOIN pg_catalog.pg_attribute att \
+               ON att.attrelid = con.confrelid AND att.attnum = k.attnum \
+             ORDER BY k.ord \
+         ) AS target_columns, \
+         EXISTS( \
+             SELECT 1 FROM pg_catalog.pg_index idx \
+             WHERE idx.indrelid = con.conrelid \
+               AND idx.indisunique \
+               AND idx.indkey::smallint[] @> con.conkey \
+               AND con.conkey @> idx.indkey::smallint[] \
+         ) AS is_one_to_one, \
+         EXISTS( \
+             SELECT 1 FROM unnest(con.conkey) AS k(attnum) \
+             JOIN pg_catalog.pg_attribute att \
+               ON att.attrelid = con.conrelid AND att.attnum = k.attnum \
+             WHERE NOT att.attnotnull \
+         ) AS is_nullable \
+         FROM pg_catalog.pg_constraint con \
+         JOIN pg_catalog.pg_class src_cls ON src_cls.oid = con.conrelid \
+         JOIN pg_catalog.pg_namespace src_ns ON src_ns.oid = src_cls.relnamespace \
+         JOIN pg_catalog.pg_class tgt_cls ON tgt_cls.oid = con.confrelid \
+         JOIN pg_catalog.pg_namespace tgt_ns ON tgt_ns.oid = tgt_cls.relnamespace \
+         WHERE con.contype = 'f' \
+           AND src_ns.nspname !~ '^pg_' AND src_ns.nspname <> 'information_schema' \
+           AND tgt_ns.nspname !~ '^pg_' AND tgt_ns.nspname <> 'information_schema' \
+           AND ($1::text IS NULL OR lower(src_ns.nspname::text) = lower($1::text) OR lower(tgt_ns.nspname::text) = lower($1::text)) \
+         ORDER BY src_ns.nspname, src_cls.relname, con.conname";
+
+    let col_rows = client
+        .query(COLUMNS_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let fk_rows = client
+        .query(FK_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+
+    let mut edges: Vec<ForeignKeyEdge> = Vec::with_capacity(fk_rows.len());
+    let mut fk_columns: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
+
+    for row in &fk_rows {
+        let constraint_name: String = row.get("constraint_name");
+        let source_schema: String = row.get("source_schema");
+        let source_table: String = row.get("source_table");
+        let source_columns: Vec<String> = row.get("source_columns");
+        let target_schema: String = row.get("target_schema");
+        let target_table: String = row.get("target_table");
+        let target_columns: Vec<String> = row.get("target_columns");
+        let is_one_to_one: bool = row.get("is_one_to_one");
+        let is_nullable: bool = row.get("is_nullable");
+
+        for col in &source_columns {
+            fk_columns.insert((source_schema.clone(), source_table.clone(), col.clone()));
+        }
+
+        edges.push(ForeignKeyEdge {
+            constraint_name,
+            source_schema,
+            source_table,
+            source_columns,
+            target_schema,
+            target_table,
+            target_columns,
+            cardinality: if is_one_to_one {
+                Cardinality::OneToOne
+            } else {
+                Cardinality::OneToMany
+            },
+            nullable: is_nullable,
+        });
+    }
+
+    let mut tables: Vec<DiagramTable> = Vec::new();
+    for row in &col_rows {
+        let tbl_schema: String = row.get("schema");
+        let tbl_name: String = row.get("table_name");
+        if tables
+            .last()
+            .is_none_or(|last| last.schema != tbl_schema || last.name != tbl_name)
+        {
+            tables.push(DiagramTable {
+                schema: tbl_schema.clone(),
+                name: tbl_name.clone(),
+                columns: Vec::new(),
+            });
+        }
+        let col_name: Option<String> = row.get("column_name");
+        if let Some(col_name) = col_name {
+            let data_type: Option<String> = row.get("data_type");
+            let nullable: Option<bool> = row.get("nullable");
+            let is_pk: bool = row.get("is_pk");
+            let is_unique: bool = row.get("is_unique");
+            let is_fk = fk_columns.contains(&(tbl_schema, tbl_name, col_name.clone()));
+            if let Some(last) = tables.last_mut() {
+                last.columns.push(DiagramColumn {
+                    name: col_name,
+                    data_type: data_type.unwrap_or_else(|| "unknown".to_owned()),
+                    is_primary_key: is_pk,
+                    is_foreign_key: is_fk,
+                    is_unique,
+                    nullable: nullable.unwrap_or(true),
+                });
+            }
+        }
+    }
+
+    let kept: std::collections::BTreeSet<(String, String)> = tables
+        .iter()
+        .map(|t| (t.schema.clone(), t.name.clone()))
+        .collect();
+    edges.retain(|e| {
+        kept.contains(&(e.source_schema.clone(), e.source_table.clone()))
+            && kept.contains(&(e.target_schema.clone(), e.target_table.clone()))
+    });
+
+    Ok(SchemaGraph {
+        tables,
+        edges,
+        truncated_from: None,
+    }
+    .bounded())
+}
+
 #[cfg(test)]
 mod tests;

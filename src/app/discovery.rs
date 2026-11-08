@@ -315,6 +315,7 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::ToggleInspector,
         Action::ShowDefinition,
         Action::ShowDependencies,
+        Action::SchemaDiagram,
         Action::SaveQuery,
         Action::ExportRows,
         Action::OpenQuery,
@@ -475,6 +476,9 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         Action::OpenHistory | Action::ToggleHistoryRecording => {
             ctx.history != HistoryPosture::Disabled
         }
+        Action::SchemaDiagram => {
+            model.connection.is_ready() || model.completion.catalog().is_some()
+        }
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -620,6 +624,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
                 "focus a populated object tree".to_owned()
             }
         }
+        Action::SchemaDiagram => "connect to a database first".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
         | Action::Backspace
@@ -659,7 +664,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         Action::StartFilter
         | Action::ReloadObjects
         | Action::ShowDefinition
-        | Action::ShowDependencies => "Objects",
+        | Action::ShowDependencies
+        | Action::SchemaDiagram => "Objects",
         Action::OpenQuery | Action::OpenHistory | Action::ToggleHistoryRecording => "Files/History",
         Action::OpenConnectionPicker | Action::SwitchTheme => "Session",
         Action::Cancel

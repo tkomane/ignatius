@@ -26,6 +26,7 @@ pub mod clipboard;
 pub mod config;
 pub mod connection;
 pub mod diagnostics;
+pub mod diagram;
 pub mod exit_code;
 pub mod history;
 pub mod platform;
