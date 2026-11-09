@@ -1637,5 +1637,182 @@ pub async fn server_activity(
     .bounded())
 }
 
+/// Reads the live roles (`pg_roles`, `pg_auth_members`), table Row-Level Security
+/// posture and policies (`pg_class`, `pg_policy`), and table privilege grants
+/// (`information_schema.role_table_grants`) for the Roles, Privileges, & RLS Auditor
+/// (`031-roles-privileges-and-rls-auditor`).
+pub async fn security_audit(
+    client: &Client,
+    schema: Option<&str>,
+) -> Result<crate::audit::SecurityAuditSnapshot, Diagnostic> {
+    use crate::audit::{
+        RlsPolicyEntry, RoleAuditEntry, SecurityAuditSnapshot, TableGrantEntry, TableRlsAudit,
+    };
+
+    const ROLES_QUERY: &str = "SELECT \
+         r.rolname::text AS name, \
+         r.rolsuper AS is_superuser, \
+         r.rolcanlogin AS can_login, \
+         r.rolcreatedb AS can_create_db, \
+         r.rolcreaterole AS can_create_role, \
+         r.rolinherit AS inherit, \
+         r.rolbypassrls AS bypass_rls, \
+         r.rolconnlimit AS connection_limit, \
+         ARRAY( \
+             SELECT g.rolname::text \
+             FROM pg_catalog.pg_auth_members m \
+             JOIN pg_catalog.pg_roles g ON g.oid = m.roleid \
+             WHERE m.member = r.oid \
+             ORDER BY g.rolname \
+         ) AS member_of \
+         FROM pg_catalog.pg_roles r \
+         WHERE r.rolname !~ '^pg_' \
+         ORDER BY r.rolname";
+
+    const TABLES_RLS_QUERY: &str = "SELECT \
+         n.nspname::text AS schema, \
+         c.relname::text AS table_name, \
+         pg_catalog.pg_get_userbyid(c.relowner)::text AS owner, \
+         c.relrowsecurity AS rls_enabled, \
+         c.relforcerowsecurity AS rls_forced \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE c.relkind IN ('r', 'p') \
+           AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
+           AND ($1::text IS NULL OR lower(n.nspname::text) = lower($1::text)) \
+         ORDER BY n.nspname, c.relname";
+
+    const POLICIES_QUERY: &str = "SELECT \
+         n.nspname::text AS schema, \
+         c.relname::text AS table_name, \
+         p.polname::text AS policy_name, \
+         p.polpermissive AS permissive, \
+         CASE p.polcmd \
+             WHEN '*' THEN 'ALL' \
+             WHEN 'r' THEN 'SELECT' \
+             WHEN 'a' THEN 'INSERT' \
+             WHEN 'w' THEN 'UPDATE' \
+             WHEN 'd' THEN 'DELETE' \
+             ELSE p.polcmd::text \
+         END AS command, \
+         CASE \
+             WHEN p.polroles = ARRAY[0::oid] THEN ARRAY['PUBLIC'::text] \
+             ELSE ARRAY( \
+                 SELECT r.rolname::text \
+                 FROM unnest(p.polroles) AS roid \
+                 JOIN pg_catalog.pg_roles r ON r.oid = roid \
+                 ORDER BY r.rolname \
+             ) \
+         END AS roles, \
+         pg_catalog.pg_get_expr(p.polqual, p.polrelid)::text AS using_expr, \
+         pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)::text AS with_check_expr \
+         FROM pg_catalog.pg_policy p \
+         JOIN pg_catalog.pg_class c ON c.oid = p.polrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
+           AND ($1::text IS NULL OR lower(n.nspname::text) = lower($1::text)) \
+         ORDER BY n.nspname, c.relname, p.polname";
+
+    const GRANTS_QUERY: &str = "SELECT \
+         g.table_schema::text AS schema, \
+         g.table_name::text AS table_name, \
+         g.grantee::text AS grantee, \
+         ARRAY_AGG(DISTINCT g.privilege_type::text ORDER BY g.privilege_type::text) AS privileges, \
+         BOOL_OR(g.is_grantable = 'YES') AS is_grantable \
+         FROM information_schema.role_table_grants g \
+         WHERE g.table_schema !~ '^pg_' AND g.table_schema <> 'information_schema' \
+           AND ($1::text IS NULL OR lower(g.table_schema::text) = lower($1::text)) \
+         GROUP BY g.table_schema, g.table_name, g.grantee \
+         ORDER BY g.table_schema, g.table_name, g.grantee";
+
+    let role_rows = client
+        .query(ROLES_QUERY, &[])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let mut roles = Vec::with_capacity(role_rows.len());
+    for row in &role_rows {
+        roles.push(RoleAuditEntry {
+            name: row.get("name"),
+            is_superuser: row.get("is_superuser"),
+            can_login: row.get("can_login"),
+            can_create_db: row.get("can_create_db"),
+            can_create_role: row.get("can_create_role"),
+            inherit: row.get("inherit"),
+            bypass_rls: row.get("bypass_rls"),
+            connection_limit: row.get("connection_limit"),
+            member_of: row.get("member_of"),
+        });
+    }
+
+    let tbl_rows = client
+        .query(TABLES_RLS_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let pol_rows = client
+        .query(POLICIES_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+
+    let mut policies_by_table: std::collections::BTreeMap<(String, String), Vec<RlsPolicyEntry>> =
+        std::collections::BTreeMap::new();
+    for row in &pol_rows {
+        let s: String = row.get("schema");
+        let t: String = row.get("table_name");
+        policies_by_table
+            .entry((s.clone(), t.clone()))
+            .or_default()
+            .push(RlsPolicyEntry {
+                schema: s,
+                table: t,
+                policy_name: row.get("policy_name"),
+                permissive: row.get("permissive"),
+                command: row.get("command"),
+                roles: row.get("roles"),
+                using_expr: row.get("using_expr"),
+                with_check_expr: row.get("with_check_expr"),
+            });
+    }
+
+    let mut tables = Vec::with_capacity(tbl_rows.len());
+    for row in &tbl_rows {
+        let s: String = row.get("schema");
+        let t: String = row.get("table_name");
+        let policies = policies_by_table
+            .remove(&(s.clone(), t.clone()))
+            .unwrap_or_default();
+        tables.push(TableRlsAudit {
+            schema: s,
+            table: t,
+            owner: row.get("owner"),
+            rls_enabled: row.get("rls_enabled"),
+            rls_forced: row.get("rls_forced"),
+            policies,
+        });
+    }
+
+    let grant_rows = client
+        .query(GRANTS_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let mut grants = Vec::with_capacity(grant_rows.len());
+    for row in &grant_rows {
+        grants.push(TableGrantEntry {
+            schema: row.get("schema"),
+            table: row.get("table_name"),
+            grantee: row.get("grantee"),
+            privileges: row.get("privileges"),
+            is_grantable: row.get("is_grantable"),
+        });
+    }
+
+    Ok(SecurityAuditSnapshot {
+        roles,
+        tables,
+        grants,
+        truncated: false,
+    }
+    .bounded())
+}
+
 #[cfg(test)]
 mod tests;

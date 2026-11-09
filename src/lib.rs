@@ -21,6 +21,7 @@
 
 pub mod activity;
 pub mod app;
+pub mod audit;
 pub mod branding;
 pub mod cli;
 pub mod clipboard;

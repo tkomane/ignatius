@@ -905,38 +905,89 @@ pub(crate) fn render_chords(
 ) {
     let theme = &presentation.theme;
     let chords = crate::ui::keymap::CHORDS;
-    let height = u16::try_from(chords.len())
+    let single_col_height = u16::try_from(chords.len())
         .unwrap_or(u16::MAX)
         .saturating_add(2);
-    let chord_area = overlay_box(
-        area,
-        presentation,
-        (60, height),
-        height.min(area.height),
-        OverlayAnchor::Bottom,
-    );
-    ratatui::widgets::Clear.render(chord_area, buf);
 
-    let lines: Vec<Line> = chords
-        .iter()
-        .map(|(key, _, description)| {
-            Line::from(vec![
-                Span::styled(
+    let use_two_columns = single_col_height > area.height && area.width >= 90;
+    if use_two_columns {
+        let split_at = chords.len().div_ceil(2);
+        let col1 = &chords[..split_at];
+        let col2 = &chords[split_at..];
+        let height = u16::try_from(split_at)
+            .unwrap_or(u16::MAX)
+            .saturating_add(2);
+        let max_width = 110u16.min(area.width.saturating_sub(2));
+        let chord_area = overlay_box(
+            area,
+            presentation,
+            (max_width, height),
+            height.min(area.height),
+            OverlayAnchor::Bottom,
+        );
+        ratatui::widgets::Clear.render(chord_area, buf);
+
+        let col_width = usize::from(chord_area.width.saturating_sub(4) / 2);
+        let mut lines = Vec::new();
+        for i in 0..split_at {
+            let mut spans = Vec::new();
+            if let Some((key, _, description)) = col1.get(i) {
+                spans.push(Span::styled(
                     format!(" {key}  "),
                     theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(*description, theme.style(Token::Text)),
-            ])
-        })
-        .collect();
+                ));
+                let pad = col_width.saturating_sub(4);
+                let text = format!("{:<pad$}", description);
+                spans.push(Span::styled(text, theme.style(Token::Text)));
+            }
+            if let Some((key, _, description)) = col2.get(i) {
+                spans.push(Span::styled(
+                    format!(" {key}  "),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(*description, theme.style(Token::Text)));
+            }
+            lines.push(Line::from(spans));
+        }
 
-    let prefix = keymap
-        .contextual_hint(&crate::app::Action::BeginPrefix)
-        .map(|(key, _)| key)
-        .unwrap_or_else(|| "Ctrl+K".to_owned());
-    Paragraph::new(lines)
-        .block(overlay_block(format!(" {prefix}  then "), presentation))
-        .render(chord_area, buf);
+        let prefix = keymap
+            .contextual_hint(&crate::app::Action::BeginPrefix)
+            .map(|(key, _)| key)
+            .unwrap_or_else(|| "Ctrl+K".to_owned());
+        Paragraph::new(lines)
+            .block(overlay_block(format!(" {prefix}  then "), presentation))
+            .render(chord_area, buf);
+    } else {
+        let chord_area = overlay_box(
+            area,
+            presentation,
+            (60, single_col_height),
+            single_col_height.min(area.height),
+            OverlayAnchor::Bottom,
+        );
+        ratatui::widgets::Clear.render(chord_area, buf);
+
+        let lines: Vec<Line> = chords
+            .iter()
+            .map(|(key, _, description)| {
+                Line::from(vec![
+                    Span::styled(
+                        format!(" {key}  "),
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(*description, theme.style(Token::Text)),
+                ])
+            })
+            .collect();
+
+        let prefix = keymap
+            .contextual_hint(&crate::app::Action::BeginPrefix)
+            .map(|(key, _)| key)
+            .unwrap_or_else(|| "Ctrl+K".to_owned());
+        Paragraph::new(lines)
+            .block(overlay_block(format!(" {prefix}  then "), presentation))
+            .render(chord_area, buf);
+    }
 }
 pub(crate) fn render_help(
     model: &crate::app::Model,
@@ -1324,6 +1375,236 @@ pub(crate) fn render_server_activity(
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),
         ),
         Span::styled("Draft Terminate SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
+/// Shows an interactive roles, privilege grants, and Row-Level Security (RLS) auditor overlay.
+pub(crate) fn render_security_audit(
+    audit: &crate::app::model::SecurityAuditState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let box_width = (area.width.saturating_mul(86) / 100)
+        .max(40)
+        .min(area.width);
+    let box_height = (area.height.saturating_mul(82) / 100)
+        .max(12)
+        .min(area.height);
+    let x = area.x + (area.width.saturating_sub(box_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(box_height)) / 2;
+    let box_area = Rect::new(x, y, box_width, box_height);
+    if box_area.width < 20 || box_area.height < 6 {
+        return;
+    }
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let title = if audit.loading {
+        format!(
+            " {}Security & RLS Auditor (reading catalog...) ",
+            presentation.icon(Icon::Schema)
+        )
+    } else {
+        format!(
+            " {}Security & RLS Auditor ({}) ",
+            presentation.icon(Icon::Schema),
+            audit.section.label()
+        )
+    };
+    overlay_block(title, presentation).render(box_area, buf);
+
+    let inner = Rect::new(
+        box_area.x.saturating_add(1),
+        box_area.y.saturating_add(1),
+        box_area.width.saturating_sub(2),
+        box_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 2 {
+        return;
+    }
+
+    let body_height = inner.height.saturating_sub(1);
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_height);
+    let footer_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+
+    let left_width = 28u16.min(body_area.width.saturating_sub(4)).max(16);
+    let right_width = body_area.width.saturating_sub(left_width).saturating_sub(1);
+    let left_area = Rect::new(body_area.x, body_area.y, left_width, body_area.height);
+    let right_area = Rect::new(
+        body_area.x.saturating_add(left_width).saturating_add(1),
+        body_area.y,
+        right_width,
+        body_area.height,
+    );
+
+    let visible_rows = usize::from(left_area.height);
+    let scroll_offset = if audit.selected_index >= visible_rows {
+        audit
+            .selected_index
+            .saturating_sub(visible_rows.saturating_sub(1))
+    } else {
+        0
+    };
+
+    let mut item_lines = Vec::new();
+    match audit.section {
+        crate::audit::AuditSection::Roles => {
+            for (idx, r) in audit
+                .snapshot
+                .roles
+                .iter()
+                .enumerate()
+                .skip(scroll_offset)
+                .take(visible_rows)
+            {
+                let is_selected = idx == audit.selected_index;
+                let prefix = if is_selected { "> " } else { "  " };
+                let super_tag = if r.is_superuser { " [SUPER]" } else { "" };
+                let label = format!("{prefix}{}{super_tag}", r.name);
+                let styled_line = if is_selected {
+                    Line::from(Span::styled(
+                        label,
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ))
+                } else if r.is_superuser {
+                    Line::from(Span::styled(label, theme.style(Token::Danger)))
+                } else {
+                    Line::from(Span::styled(label, theme.style(Token::Text)))
+                };
+                item_lines.push(styled_line);
+            }
+        }
+        crate::audit::AuditSection::RlsPolicies => {
+            for (idx, tbl) in audit
+                .snapshot
+                .tables
+                .iter()
+                .enumerate()
+                .skip(scroll_offset)
+                .take(visible_rows)
+            {
+                let is_selected = idx == audit.selected_index;
+                let prefix = if is_selected { "> " } else { "  " };
+                let badge = if tbl.rls_enabled {
+                    " [RLS ON]"
+                } else {
+                    " [RLS OFF]"
+                };
+                let label = format!("{prefix}{}{badge}", tbl.table);
+                let styled_line = if is_selected {
+                    Line::from(Span::styled(
+                        label,
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ))
+                } else if !tbl.rls_enabled {
+                    Line::from(Span::styled(label, theme.style(Token::Warning)))
+                } else {
+                    Line::from(Span::styled(label, theme.style(Token::Text)))
+                };
+                item_lines.push(styled_line);
+            }
+        }
+        crate::audit::AuditSection::Grants => {
+            for (idx, g) in audit
+                .snapshot
+                .grants
+                .iter()
+                .enumerate()
+                .skip(scroll_offset)
+                .take(visible_rows)
+            {
+                let is_selected = idx == audit.selected_index;
+                let prefix = if is_selected { "> " } else { "  " };
+                let label = format!("{prefix}{} -> {}", g.table, g.grantee);
+                let styled_line = if is_selected {
+                    Line::from(Span::styled(
+                        label,
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ))
+                } else {
+                    Line::from(Span::styled(label, theme.style(Token::Text)))
+                };
+                item_lines.push(styled_line);
+            }
+        }
+    }
+    if item_lines.is_empty() {
+        item_lines.push(Line::from(Span::styled(
+            "No items",
+            theme.style(Token::Muted),
+        )));
+    }
+    Paragraph::new(item_lines).render(left_area, buf);
+
+    let divider_x = body_area.x.saturating_add(left_width);
+    let border_sym = if presentation.glyphs.is_ascii() {
+        "|"
+    } else {
+        "│"
+    };
+    for row in body_area.y..body_area.bottom() {
+        if let Some(cell) = buf.cell_mut((divider_x, row)) {
+            cell.set_symbol(border_sym);
+            cell.set_style(theme.style(Token::Border));
+        }
+    }
+
+    let right_visible_rows = usize::from(right_area.height);
+    let mut report_lines = Vec::new();
+    if let Some(error) = &audit.error {
+        report_lines.push(Line::from(Span::styled(
+            format!("Error reading security audit: {error}"),
+            theme.style(Token::Danger),
+        )));
+    } else if audit.loading {
+        report_lines.push(Line::from(Span::styled(
+            "Loading security audit data from server...",
+            theme.style(Token::Muted),
+        )));
+    } else {
+        for line in audit
+            .rendered_lines
+            .iter()
+            .skip(audit.scroll_y)
+            .take(right_visible_rows)
+        {
+            let scrolled_line: String = line.chars().skip(audit.scroll_x).collect();
+            report_lines.push(Line::from(Span::styled(
+                sanitize_for_display(&scrolled_line),
+                theme.style(Token::Text),
+            )));
+        }
+    }
+    Paragraph::new(report_lines).render(right_area, buf);
+
+    let footer_hints = vec![
+        Span::styled(
+            " [↑/↓] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Select  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[s/1/2/3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Section (Roles/RLS/Grants)  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e/Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Draft Reviewed SQL  ", theme.style(Token::Muted)),
         Span::styled(
             "[Esc] ",
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),

@@ -2951,4 +2951,103 @@ mod with_server {
 
         let _ = std::fs::remove_file(&temp_file);
     }
+
+    #[test]
+    fn audit_subcommand_exports_roles_rls_and_grants_and_protects_existing_files() {
+        let uri = uri_or_skip!();
+
+        // 1. Run ignatius audit <uri> (default all-sections table format)
+        let output = binary()
+            .arg("audit")
+            .arg(&uri)
+            .output()
+            .expect("run ignatius audit");
+
+        assert_eq!(code(&output), 0, "audit exits zero: {}", stderr(&output));
+        let out = stdout(&output);
+        assert!(out.contains("Roles:"), "stdout contains Roles: {out}");
+        assert!(
+            out.contains("RLS POSTURE"),
+            "stdout contains RLS POSTURE: {out}"
+        );
+        assert!(
+            out.contains("PRIVILEGES"),
+            "stdout contains PRIVILEGES: {out}"
+        );
+
+        // 2. Run ignatius audit <uri> --section rls --schema public
+        let rls_output = binary()
+            .arg("audit")
+            .arg(&uri)
+            .arg("--section")
+            .arg("rls")
+            .arg("--schema")
+            .arg("public")
+            .output()
+            .expect("run ignatius audit --section rls --schema public");
+
+        assert_eq!(
+            code(&rls_output),
+            0,
+            "audit --section rls exits zero: {}",
+            stderr(&rls_output)
+        );
+
+        // 3. Run ignatius audit <uri> --format json --output <path>
+        let temp_file = temp_config_dir().join(format!("test_audit_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&temp_file);
+
+        let json_output = binary()
+            .arg("audit")
+            .arg(&uri)
+            .arg("--format")
+            .arg("json")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius audit --format json --output");
+
+        assert_eq!(
+            code(&json_output),
+            0,
+            "audit json output exits zero: {}",
+            stderr(&json_output)
+        );
+        assert!(temp_file.exists(), "audit JSON output file created");
+        let json_content = std::fs::read_to_string(&temp_file).expect("read audit JSON file");
+        assert!(
+            json_content.contains("\"roles\""),
+            "JSON contains roles: {json_content}"
+        );
+        assert!(
+            json_content.contains("\"tables\""),
+            "JSON contains tables: {json_content}"
+        );
+        assert!(
+            json_content.contains("\"grants\""),
+            "JSON contains grants: {json_content}"
+        );
+
+        // 4. Verify running ignatius audit <uri> --output <same_path> without --force exits non-zero and preserves file
+        let conflict_output = binary()
+            .arg("audit")
+            .arg(&uri)
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius audit conflict");
+
+        assert_ne!(
+            code(&conflict_output),
+            0,
+            "audit without --force must exit non-zero when output file exists"
+        );
+        let preserved_content = std::fs::read_to_string(&temp_file).expect("read preserved file");
+        assert_eq!(
+            preserved_content, json_content,
+            "existing file content must be preserved untouched"
+        );
+
+        let _ = std::fs::remove_file(&temp_file);
+    }
 }

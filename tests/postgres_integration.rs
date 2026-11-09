@@ -2979,3 +2979,86 @@ fn server_activity_captures_backends_and_lock_blocker_tree() {
         "tree must contain a waiter with depth 1: {tree:?}"
     );
 }
+
+#[test]
+fn security_audit_captures_roles_rls_policies_and_privilege_grants() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let setup_sql = "
+        CREATE SCHEMA IF NOT EXISTS audit_test_schema;
+        CREATE TABLE audit_test_schema.tenant_invoices (
+            id int PRIMARY KEY,
+            tenant_id int NOT NULL,
+            amount int
+        );
+        ALTER TABLE audit_test_schema.tenant_invoices ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY invoice_tenant_isolation ON audit_test_schema.tenant_invoices
+            FOR ALL TO PUBLIC
+            USING (tenant_id = 42)
+            WITH CHECK (tenant_id = 42);
+        GRANT SELECT, INSERT ON audit_test_schema.tenant_invoices TO PUBLIC;
+    ";
+    let setup_res = fx.block_on(fx.session.execute(setup_sql, 100, JobId(9301)));
+    assert_eq!(
+        setup_res.status,
+        ExecutionStatus::Succeeded,
+        "setup failed: {:?}",
+        setup_res.error
+    );
+
+    let audit_res = fx.block_on(fx.session.security_audit(Some("audit_test_schema")));
+
+    let _ = fx.block_on(fx.session.execute(
+        "DROP SCHEMA audit_test_schema CASCADE;",
+        100,
+        JobId(9302),
+    ));
+
+    let snapshot = audit_res.expect("security audit snapshot");
+
+    assert!(
+        snapshot.roles.iter().any(|r| r.name == "ignatius_test"),
+        "roles must contain ignatius_test: {:?}",
+        snapshot.roles
+    );
+
+    let table = snapshot
+        .tables
+        .iter()
+        .find(|t| t.schema == "audit_test_schema" && t.table == "tenant_invoices")
+        .expect("table tenant_invoices must be in audit tables");
+    assert!(table.rls_enabled, "RLS must be enabled on tenant_invoices");
+    assert_eq!(table.policies.len(), 1, "exactly one policy attached");
+    let policy = &table.policies[0];
+    assert_eq!(policy.policy_name, "invoice_tenant_isolation");
+    assert!(
+        policy
+            .using_expr
+            .as_deref()
+            .unwrap_or("")
+            .contains("tenant_id = 42"),
+        "using_expr contains tenant_id = 42: {:?}",
+        policy.using_expr
+    );
+
+    let grant = snapshot
+        .grants
+        .iter()
+        .find(|g| {
+            g.schema == "audit_test_schema"
+                && g.table == "tenant_invoices"
+                && g.grantee.eq_ignore_ascii_case("PUBLIC")
+        })
+        .expect("public grant on tenant_invoices");
+    assert!(
+        grant.privileges.iter().any(|p| p == "SELECT"),
+        "grant contains SELECT: {:?}",
+        grant.privileges
+    );
+    assert!(
+        grant.privileges.iter().any(|p| p == "INSERT"),
+        "grant contains INSERT: {:?}",
+        grant.privileges
+    );
+}

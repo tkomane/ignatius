@@ -9872,3 +9872,288 @@ fn server_activity_drafts_cancel_and_terminate_sql_into_editor_with_undo() {
     update(&mut model, Message::Action(Action::Undo));
     assert_eq!(model.editor.text(), initial_editor_text);
 }
+
+fn sample_audit_snapshot() -> crate::audit::SecurityAuditSnapshot {
+    crate::audit::SecurityAuditSnapshot {
+        roles: vec![
+            crate::audit::RoleAuditEntry {
+                name: "postgres".to_owned(),
+                is_superuser: true,
+                can_login: true,
+                can_create_db: true,
+                can_create_role: true,
+                inherit: true,
+                bypass_rls: true,
+                connection_limit: -1,
+                member_of: Vec::new(),
+            },
+            crate::audit::RoleAuditEntry {
+                name: "analyst".to_owned(),
+                is_superuser: false,
+                can_login: true,
+                can_create_db: false,
+                can_create_role: false,
+                inherit: true,
+                bypass_rls: false,
+                connection_limit: 10,
+                member_of: vec!["reporting_group".to_owned()],
+            },
+        ],
+        tables: vec![
+            crate::audit::TableRlsAudit {
+                schema: "public".to_owned(),
+                table: "orders".to_owned(),
+                owner: "postgres".to_owned(),
+                rls_enabled: false,
+                rls_forced: false,
+                policies: Vec::new(),
+            },
+            crate::audit::TableRlsAudit {
+                schema: "public".to_owned(),
+                table: "customers".to_owned(),
+                owner: "postgres".to_owned(),
+                rls_enabled: true,
+                rls_forced: false,
+                policies: vec![crate::audit::RlsPolicyEntry {
+                    schema: "public".to_owned(),
+                    table: "customers".to_owned(),
+                    policy_name: "customer_isolation".to_owned(),
+                    permissive: true,
+                    command: "SELECT".to_owned(),
+                    roles: vec!["analyst".to_owned()],
+                    using_expr: Some("tenant_id = 42".to_owned()),
+                    with_check_expr: None,
+                }],
+            },
+        ],
+        grants: vec![crate::audit::TableGrantEntry {
+            schema: "public".to_owned(),
+            table: "orders".to_owned(),
+            grantee: "analyst".to_owned(),
+            privileges: vec!["SELECT".to_owned(), "INSERT".to_owned()],
+            is_grantable: false,
+        }],
+        truncated: false,
+    }
+}
+
+#[test]
+fn security_audit_requires_connection() {
+    let mut model = Model::new(100);
+    assert_eq!(model.connection, ConnectionState::Disconnected);
+    let effects = update(&mut model, Message::Action(Action::SecurityAudit));
+    assert!(effects.is_empty(), "refused while disconnected");
+    assert!(model.security_audit.is_none());
+}
+
+#[test]
+fn security_audit_opens_and_dispatches_load_when_connected() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::SecurityAudit));
+    assert_eq!(
+        effects,
+        vec![Effect::LoadSecurityAudit { request: 1 }],
+        "dispatches security audit effect with request ID"
+    );
+    assert!(model.security_audit.is_some(), "overlay state is active");
+    assert!(
+        model
+            .security_audit
+            .as_ref()
+            .is_some_and(|audit| audit.loading),
+        "overlay starts in loading state"
+    );
+
+    // Stale responses are discarded
+    update(
+        &mut model,
+        Message::SecurityAuditLoaded {
+            request: 999,
+            result: Box::new(Ok(sample_audit_snapshot())),
+        },
+    );
+    assert!(
+        model
+            .security_audit
+            .as_ref()
+            .is_some_and(|audit| audit.loading),
+        "stale snapshot is ignored"
+    );
+
+    // Matching request populates snapshot
+    update(
+        &mut model,
+        Message::SecurityAuditLoaded {
+            request: 1,
+            result: Box::new(Ok(sample_audit_snapshot())),
+        },
+    );
+    let audit = model
+        .security_audit
+        .as_ref()
+        .expect("audit state present after load");
+    assert!(!audit.loading);
+    assert_eq!(audit.section, crate::audit::AuditSection::Roles);
+    assert_eq!(audit.item_count(), 2);
+    assert_eq!(audit.selected_index, 0);
+    assert!(!audit.rendered_lines.is_empty());
+
+    // Cycle sections with 's'
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.section),
+        Some(crate::audit::AuditSection::RlsPolicies)
+    );
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.item_count()),
+        Some(2)
+    );
+
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.section),
+        Some(crate::audit::AuditSection::Grants)
+    );
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.item_count()),
+        Some(1)
+    );
+
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.section),
+        Some(crate::audit::AuditSection::Roles)
+    );
+
+    // Direct section selection with '2', '3', '1'
+    update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.section),
+        Some(crate::audit::AuditSection::RlsPolicies)
+    );
+    update(&mut model, Message::Action(Action::Insert('3')));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.section),
+        Some(crate::audit::AuditSection::Grants)
+    );
+    update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.section),
+        Some(crate::audit::AuditSection::Roles)
+    );
+
+    // Navigation through items
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.selected_index),
+        Some(1)
+    );
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(
+        model.security_audit.as_ref().map(|a| a.selected_index),
+        Some(0)
+    );
+
+    // Dismiss closes overlay
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.security_audit.is_none());
+}
+
+#[test]
+fn security_audit_drafts_reviewed_sql_into_editor_with_undo() {
+    let mut model = connected();
+    let initial_editor_text = "SELECT 42;".to_owned();
+    model.editor.set_text(&initial_editor_text);
+
+    update(&mut model, Message::Action(Action::SecurityAudit));
+    let request = model.security_audit_request;
+    update(
+        &mut model,
+        Message::SecurityAuditLoaded {
+            request,
+            result: Box::new(Ok(sample_audit_snapshot())),
+        },
+    );
+
+    // Section Roles, selected role is 'postgres'. Press 'e' to draft role script into editor
+    update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(model.security_audit.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model.editor.text().contains("ALTER ROLE \"postgres\" WITH LOGIN SUPERUSER CREATEDB CREATEROLE INHERIT BYPASSRLS CONNECTION LIMIT -1;"),
+        "drafts reviewed role SQL: {}",
+        model.editor.text()
+    );
+
+    // Undo restores prior editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(
+        model.editor.text(),
+        initial_editor_text,
+        "undo restores editor text"
+    );
+
+    // Open security audit, switch to RlsPolicies ('2'), press Enter to draft RLS remediation SQL
+    update(&mut model, Message::Action(Action::SecurityAudit));
+    let request2 = model.security_audit_request;
+    update(
+        &mut model,
+        Message::SecurityAuditLoaded {
+            request: request2,
+            result: Box::new(Ok(sample_audit_snapshot())),
+        },
+    );
+    update(&mut model, Message::Action(Action::Insert('2')));
+    update(&mut model, Message::Action(Action::Activate));
+
+    assert!(model.security_audit.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model
+            .editor
+            .text()
+            .contains("ALTER TABLE \"public\".\"orders\" ENABLE ROW LEVEL SECURITY;"),
+        "drafts reviewed RLS enable SQL: {}",
+        model.editor.text()
+    );
+    assert!(
+        model
+            .editor
+            .text()
+            .contains("CREATE POLICY \"orders_isolation_policy\" ON \"public\".\"orders\""),
+        "drafts starter tenant isolation policy: {}",
+        model.editor.text()
+    );
+
+    // Undo restores prior editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_editor_text);
+
+    // Open security audit, switch to Grants ('3'), press 'e' to draft grant SQL
+    update(&mut model, Message::Action(Action::SecurityAudit));
+    let request3 = model.security_audit_request;
+    update(
+        &mut model,
+        Message::SecurityAuditLoaded {
+            request: request3,
+            result: Box::new(Ok(sample_audit_snapshot())),
+        },
+    );
+    update(&mut model, Message::Action(Action::Insert('3')));
+    update(&mut model, Message::Action(Action::Insert('e')));
+
+    assert!(model.security_audit.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model
+            .editor
+            .text()
+            .contains("GRANT SELECT, INSERT ON TABLE \"public\".\"orders\" TO \"analyst\";"),
+        "drafts reviewed grant SQL: {}",
+        model.editor.text()
+    );
+
+    // Undo restores prior editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_editor_text);
+}

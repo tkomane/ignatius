@@ -537,6 +537,137 @@ impl ServerActivityState {
     }
 }
 
+/// Interactive state for the roles, privilege grants, and RLS auditor overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SecurityAuditState {
+    /// Complete bounded security audit snapshot across roles, tables, and grants.
+    pub snapshot: crate::audit::SecurityAuditSnapshot,
+    /// Currently active view section (Roles, RLS Policies, or Grants).
+    pub section: crate::audit::AuditSection,
+    /// Currently focused index in the active section list.
+    pub selected_index: usize,
+    /// Vertical scroll offset for the rendered text pane.
+    pub scroll_y: usize,
+    /// Horizontal scroll offset for the rendered text pane.
+    pub scroll_x: usize,
+    /// Whether the audit snapshot is currently loading in the background.
+    pub loading: bool,
+    /// Failure message when audit catalog reading fails.
+    pub error: Option<String>,
+    /// Pre-rendered text lines for fast viewport rendering.
+    pub rendered_lines: Vec<String>,
+}
+
+impl SecurityAuditState {
+    /// Constructs an initial security audit state from a snapshot.
+    #[must_use]
+    pub fn new(snapshot: crate::audit::SecurityAuditSnapshot, unicode: bool) -> Self {
+        let mut state = Self {
+            snapshot,
+            section: crate::audit::AuditSection::Roles,
+            selected_index: 0,
+            scroll_y: 0,
+            scroll_x: 0,
+            loading: false,
+            error: None,
+            rendered_lines: Vec::new(),
+        };
+        state.rebuild_rendered(unicode);
+        state
+    }
+
+    /// Total items in the currently active section.
+    #[must_use]
+    pub fn item_count(&self) -> usize {
+        match self.section {
+            crate::audit::AuditSection::Roles => self.snapshot.roles.len(),
+            crate::audit::AuditSection::RlsPolicies => self.snapshot.tables.len(),
+            crate::audit::AuditSection::Grants => self.snapshot.grants.len(),
+        }
+    }
+
+    /// Re-renders audit report text into `self.rendered_lines` according to active section.
+    pub fn rebuild_rendered(&mut self, unicode: bool) {
+        let rendered = self.snapshot.render_text(Some(self.section), unicode);
+        self.rendered_lines = rendered.lines().map(ToOwned::to_owned).collect();
+    }
+
+    /// Selects the next item in the active section list if available.
+    pub fn select_next(&mut self) {
+        let count = self.item_count();
+        if count > 0 && self.selected_index + 1 < count {
+            self.selected_index += 1;
+        }
+    }
+
+    /// Selects the previous item in the active section list if available.
+    pub fn select_prev(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    /// Cycles to the next section tab (Roles -> RlsPolicies -> Grants -> Roles).
+    pub fn cycle_section(&mut self, unicode: bool) {
+        self.section = self.section.next();
+        self.selected_index = 0;
+        self.scroll_y = 0;
+        self.scroll_x = 0;
+        self.rebuild_rendered(unicode);
+    }
+
+    /// Directly sets the active section tab.
+    pub fn set_section(&mut self, section: crate::audit::AuditSection, unicode: bool) {
+        self.section = section;
+        self.selected_index = 0;
+        self.scroll_y = 0;
+        self.scroll_x = 0;
+        self.rebuild_rendered(unicode);
+    }
+
+    /// Generates reviewed SQL for the currently selected item in the active section.
+    #[must_use]
+    pub fn drafted_sql(&self) -> Option<String> {
+        match self.section {
+            crate::audit::AuditSection::Roles => {
+                let role = self.snapshot.roles.get(self.selected_index)?;
+                Some(crate::audit::SecurityAuditSnapshot::reviewed_role_sql(role))
+            }
+            crate::audit::AuditSection::RlsPolicies => {
+                let table = self.snapshot.tables.get(self.selected_index)?;
+                Some(crate::audit::SecurityAuditSnapshot::reviewed_rls_remediation_sql(table))
+            }
+            crate::audit::AuditSection::Grants => {
+                let grant = self.snapshot.grants.get(self.selected_index)?;
+                Some(crate::audit::SecurityAuditSnapshot::reviewed_grant_sql(
+                    grant,
+                ))
+            }
+        }
+    }
+
+    /// Scrolls down by `amount` lines.
+    pub fn scroll_down(&mut self, amount: usize) {
+        let max = self.rendered_lines.len().saturating_sub(1);
+        self.scroll_y = (self.scroll_y + amount).min(max);
+    }
+
+    /// Scrolls up by `amount` lines.
+    pub const fn scroll_up(&mut self, amount: usize) {
+        self.scroll_y = self.scroll_y.saturating_sub(amount);
+    }
+
+    /// Scrolls right by `amount` columns.
+    pub const fn scroll_right(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_add(amount);
+    }
+
+    /// Scrolls left by `amount` columns.
+    pub const fn scroll_left(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_sub(amount);
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -1793,6 +1924,10 @@ pub struct Model {
     pub server_activity: Option<ServerActivityState>,
     /// Request counter for in-flight server activity queries.
     pub server_activity_request: u64,
+    /// Interactive roles, privilege grants, and Row-Level Security (RLS) auditor overlay state.
+    pub security_audit: Option<SecurityAuditState>,
+    /// Request counter for in-flight security audit queries.
+    pub security_audit_request: u64,
 }
 
 impl Model {

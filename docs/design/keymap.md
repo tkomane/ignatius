@@ -115,6 +115,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `q` | Format the SQL buffer |
 | `m` | Open the schema ER diagram |
 | `j` | Open the server activity and locks dashboard |
+| `t` | Open the roles, privileges, and RLS auditor |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -146,6 +147,18 @@ Activity & Locks Dashboard overlay, displaying real-time telemetry from
 - `Esc` closes the overlay without side effects.
 The printable `j` remains ordinary editor input outside the chord and overlay.
 The `ignatius activity` CLI command provides non-interactive parity.
+
+With the workbench active, `Ctrl+K t` (`security-audit`) opens the Roles,
+Privileges, & RLS Auditor overlay, displaying live PostgreSQL security posture
+from `pg_roles`, `pg_tables`, `pg_policy`, and `information_schema.table_privileges`.
+Inside the overlay:
+- `Up` / `Down` navigates and selects active roles, tables, or privilege grants.
+- `s` or `1` / `2` / `3` switches between `Roles & Memberships` (`1`), `Row-Level Security (RLS)` (`2`), and `Table Privilege Grants` (`3`).
+- `r` explicitly refreshes the live security audit snapshot without closing the overlay.
+- `e` or `Enter` loads reviewed remediation / role / grant SQL (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY`, `ALTER ROLE`, `GRANT` / `REVOKE`) into the SQL editor buffer as an undoable edit (`Ctrl+Z`), with zero hidden writes.
+- `Esc` closes the overlay without side effects.
+The printable `t` remains ordinary editor input outside the chord and overlay.
+The `ignatius audit` CLI command provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -394,7 +407,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `shrink-pane`, `grow-pane`, `zoom-pane`,
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
-`toggle-history-recording`, `schema-diagram`, `server-activity`,
+`toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

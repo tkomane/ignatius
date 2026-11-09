@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `031-roles-privileges-and-rls-auditor` delivers the `ignatius audit`
+  CLI subcommand with `--section roles|rls|grants`, `--schema`, `--format table|json`,
+  and `--output`, plus the interactive `Ctrl+K t` (`security-audit`) TUI Security &
+  RLS Auditor overlay featuring `[1]`/`[2]`/`[3]` section tabs, `[r]` live snapshot
+  refresh, and `[e]`/`Enter` reviewed remediation / role / grant SQL drafting into the
+  editor with undo support and zero hidden writes.
 - New: Feature `029-server-activity-and-locks-dashboard` delivers the `ignatius activity`
   CLI subcommand with `--locks`, `--format table|json`, and `--output`, plus the
   interactive `Ctrl+K j` (`server-activity`) TUI Server Activity & Locks Dashboard

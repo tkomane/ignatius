@@ -716,6 +716,28 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::SecurityAuditLoaded { request, result } => {
+            if request != model.security_audit_request {
+                return Vec::new();
+            }
+            if let Some(audit) = &mut model.security_audit {
+                audit.loading = false;
+                match *result {
+                    Ok(snapshot) => {
+                        audit.snapshot = snapshot;
+                        let count = audit.item_count();
+                        if audit.selected_index >= count {
+                            audit.selected_index = count.saturating_sub(1);
+                        }
+                        audit.rebuild_rendered(!model.presentation.glyphs.is_ascii());
+                    }
+                    Err(diagnostic) => {
+                        audit.error = Some(diagnostic.headline);
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -981,6 +1003,7 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.definition.is_some()
         || model.schema_diagram.is_some()
         || model.server_activity.is_some()
+        || model.security_audit.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1071,6 +1094,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.server_activity.is_some() {
         return server_activity_action(model, action);
+    }
+    if model.security_audit.is_some() {
+        return security_audit_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1236,6 +1262,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ShowDependencies => show_dependencies(model),
         Action::SchemaDiagram => schema_diagram_open(model),
         Action::ServerActivity => server_activity_open(model),
+        Action::SecurityAudit => security_audit_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -1887,6 +1914,113 @@ fn server_activity_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     editor.set_text(sql);
                 });
                 model.server_activity = None;
+                model.focus = Focus::Editor;
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the roles, privilege grants, and RLS auditor overlay.
+fn security_audit_open(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    let unicode = !model.presentation.glyphs.is_ascii();
+    model.security_audit_request = model.security_audit_request.wrapping_add(1);
+    let request = model.security_audit_request;
+    let mut state = crate::app::model::SecurityAuditState::new(
+        crate::audit::SecurityAuditSnapshot::default(),
+        unicode,
+    );
+    state.loading = true;
+    model.security_audit = Some(state);
+    vec![Effect::LoadSecurityAudit { request }]
+}
+
+/// Handles input while the roles, privilege grants, and RLS auditor overlay is on screen.
+fn security_audit_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let unicode = !model.presentation.glyphs.is_ascii();
+    match action {
+        Action::Dismiss | Action::SecurityAudit => {
+            model.security_audit = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.select_prev();
+            }
+        }
+        Action::Move(Direction::Down) => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.select_next();
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.scroll_up(10);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.scroll_down(10);
+            }
+        }
+        Action::Move(Direction::Left) => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.scroll_left(4);
+            }
+        }
+        Action::Move(Direction::Right) => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.scroll_right(4);
+            }
+        }
+        Action::Insert('s' | 'S') | Action::FocusNext => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.cycle_section(unicode);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.set_section(crate::audit::AuditSection::Roles, unicode);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.set_section(crate::audit::AuditSection::RlsPolicies, unicode);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(audit) = &mut model.security_audit {
+                audit.set_section(crate::audit::AuditSection::Grants, unicode);
+            }
+        }
+        Action::Insert('r' | 'R') | Action::ReloadObjects | Action::RefreshResult => {
+            if model.connection.is_ready() {
+                model.security_audit_request = model.security_audit_request.wrapping_add(1);
+                let request = model.security_audit_request;
+                if let Some(audit) = &mut model.security_audit {
+                    audit.loading = true;
+                    audit.error = None;
+                }
+                return vec![Effect::LoadSecurityAudit { request }];
+            }
+        }
+        Action::Insert('e' | 'E') | Action::Activate => {
+            let sql = model
+                .security_audit
+                .as_ref()
+                .and_then(crate::app::model::SecurityAuditState::drafted_sql);
+            if let Some(sql) = sql {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.security_audit = None;
                 model.focus = Focus::Editor;
             }
         }
@@ -4405,6 +4539,7 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.schema_diagram = None;
     model.schema_diagram_notice = None;
     model.server_activity = None;
+    model.security_audit = None;
     model.pending_dependencies = None;
     model.connection_details = false;
     model.result_filter.clear();
