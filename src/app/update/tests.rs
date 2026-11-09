@@ -1792,6 +1792,7 @@ fn split_modal_models() -> Vec<Model> {
         definition: None,
         error: None,
         scroll: 0,
+        include_drop: false,
     });
     cases.push(definition);
     let mut completion = base.clone();
@@ -7496,6 +7497,7 @@ fn notice_reader_saved_query_choice_reveals_covered_inspector_and_definition() {
                 definition: Some(definition_of("orders")),
                 error: None,
                 scroll: 0,
+                include_drop: false,
             });
         } else {
             update(&mut model, Message::Action(Action::ToggleInspector));
@@ -9574,4 +9576,96 @@ fn schema_diagram_connect_profile_resets_overlay() {
         &mut model,
         Message::Action(Action::Quit), // quit also exercises overlay blocking or clean exit
     );
+}
+
+#[test]
+fn definition_overlay_toggles_drop_header_and_loads_ddl_into_editor_with_undo() {
+    let mut model = with_selected_table();
+    let initial_editor_text = "SELECT 1;".to_owned();
+    model.editor.set_text(&initial_editor_text);
+
+    let effects = update(&mut model, Message::Action(Action::ShowDefinition));
+    let Effect::LoadDefinition { request, .. } = &effects[0] else {
+        panic!("expected definition load, got {effects:?}");
+    };
+    let request = *request;
+
+    update(
+        &mut model,
+        Message::DefinitionLoaded {
+            request,
+            result: Box::new(Ok(definition_of("orders"))),
+        },
+    );
+
+    let open = model.definition.as_ref().expect("definition overlay open");
+    assert!(!open.include_drop, "include_drop defaults to false");
+
+    // Toggle DROP header on with 'd'
+    update(&mut model, Message::Action(Action::Insert('d')));
+    assert!(
+        model.definition.as_ref().unwrap().include_drop,
+        "include_drop toggled to true"
+    );
+
+    // Toggle back with 'D'
+    update(&mut model, Message::Action(Action::Insert('D')));
+    assert!(
+        !model.definition.as_ref().unwrap().include_drop,
+        "include_drop toggled to false"
+    );
+
+    // Re-enable DROP header before loading into editor
+    update(&mut model, Message::Action(Action::Insert('d')));
+    assert!(model.definition.as_ref().unwrap().include_drop);
+
+    // Load into editor with 'e'
+    update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(model.definition.is_none(), "definition overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "focus returned to editor");
+    assert!(
+        model.editor.text().starts_with("DROP TABLE IF EXISTS"),
+        "editor text begins with canonical DROP header: {}",
+        model.editor.text()
+    );
+
+    // Undo restores initial editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(
+        model.editor.text(),
+        initial_editor_text,
+        "Ctrl+Z restores prior editor content"
+    );
+}
+
+#[test]
+fn definition_overlay_activate_loads_ddl_into_editor() {
+    let mut model = with_selected_table();
+    let initial_editor_text = "SELECT 42;".to_owned();
+    model.editor.set_text(&initial_editor_text);
+
+    let effects = update(&mut model, Message::Action(Action::ShowDefinition));
+    let Effect::LoadDefinition { request, .. } = &effects[0] else {
+        panic!("expected definition load, got {effects:?}");
+    };
+    let request = *request;
+
+    update(
+        &mut model,
+        Message::DefinitionLoaded {
+            request,
+            result: Box::new(Ok(definition_of("orders"))),
+        },
+    );
+
+    // Press Enter (Activate) to load without DROP header
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.definition.is_none());
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(model.editor.text().contains("column_1 text"));
+    assert!(!model.editor.text().starts_with("DROP TABLE"));
+
+    // Undo restores initial text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_editor_text);
 }

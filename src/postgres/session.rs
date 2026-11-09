@@ -302,6 +302,15 @@ impl Session {
         crate::postgres::metadata::schema_graph(&self.client, schema).await
     }
 
+    /// Generates a deterministic DDL bundle for a single object or an entire schema.
+    pub async fn generate_ddl(
+        &self,
+        schema: &str,
+        object: Option<&str>,
+    ) -> Result<crate::ddl::DdlBundle, Diagnostic> {
+        crate::postgres::metadata::generate_ddl(&self.client, schema, object).await
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

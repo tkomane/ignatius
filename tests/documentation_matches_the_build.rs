@@ -701,6 +701,38 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         "CHANGELOG.md must document ignatius diagram"
     );
 
+    assert!(
+        README.contains("ignatius ddl"),
+        "README.md must document ignatius ddl CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("ignatius ddl"),
+        "docs/design/keymap.md must document ignatius ddl CLI subcommand"
+    );
+    assert!(
+        CHANGELOG.contains("027-deep-catalog-and-ddl-generator"),
+        "CHANGELOG.md must document Feature 027-deep-catalog-and-ddl-generator"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius ddl"),
+        "CHANGELOG.md must document ignatius ddl"
+    );
+
+    for (name, content) in [
+        ("README.md", README),
+        ("docs/design/keymap.md", KEYMAP),
+        ("CHANGELOG.md", CHANGELOG),
+    ] {
+        assert!(
+            content.contains("Toggle DROP"),
+            "{name} must document Toggle DROP"
+        );
+        assert!(
+            content.contains("Load in Editor"),
+            "{name} must document Load in Editor"
+        );
+    }
+
     for (name, content) in [
         (
             "docs/architecture/pgadmin-parity-plan.md",

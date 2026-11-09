@@ -8,6 +8,14 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `027-deep-catalog-and-ddl-generator` delivers a pure `src/ddl/`
+  synthesis engine and `Session::generate_ddl` `pg_catalog` extractor covering
+  enums, sequences, tables (constraints, non-duplicate indexes, triggers), views,
+  materialized views, overloaded functions/procedures, and extensions; the
+  `ignatius ddl` CLI subcommand (`--schema`, `--object`, `--drop`, `--output`,
+  `--force`); and TUI `Ctrl+K d` Definition / DDL overlay enhancements (`d` to
+  Toggle DROP with `DROP ... IF EXISTS ... CASCADE`, `e` or `Enter` for Load in Editor
+  with undo support).
 - New: Feature `026-schema-er-diagrams` delivers an interactive Schema ER Diagram
   overlay (`Ctrl+K m` / `schema-diagram`) with 1-hop / 2-hop / all-tables
   neighbourhood filtering and live Unicode/Mermaid toggle, plus the `ignatius diagram`

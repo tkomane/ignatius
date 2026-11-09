@@ -834,8 +834,8 @@ pub(crate) fn render_definition(
             theme.style(Token::Muted),
         )));
 
-        let text = &definition.text;
-        let syntax = crate::query::highlight::tokens(text);
+        let text = definition.full_script(open.include_drop);
+        let syntax = crate::query::highlight::tokens(&text);
         let mut start = 0usize;
         for (index, source) in text.lines().enumerate() {
             let line_start = start;
@@ -886,7 +886,7 @@ pub(crate) fn render_definition(
     Paragraph::new(lines)
         .block(overlay_block(
             format!(
-                " {}Definition  arrows scroll, Esc closes ",
+                " {}Definition  [e/Enter] Load in Editor  [d] Toggle DROP  arrows scroll, Esc closes ",
                 presentation.icon(Icon::Schema)
             ),
             presentation,

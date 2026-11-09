@@ -258,21 +258,45 @@ pub struct Definition {
     pub error: Option<String>,
     /// First visible line.
     pub scroll: usize,
+    /// Whether to include the DROP statement header in DDL generation and display.
+    pub include_drop: bool,
 }
 
 impl Definition {
     /// The lines of the definition, empty while it is loading.
     #[must_use]
-    pub fn lines(&self) -> Vec<&str> {
+    pub fn lines(&self) -> Vec<String> {
         self.definition
             .as_ref()
-            .map(|definition| definition.text.lines().collect())
+            .map(|definition| {
+                definition
+                    .full_script(self.include_drop)
+                    .lines()
+                    .map(ToOwned::to_owned)
+                    .collect()
+            })
             .unwrap_or_default()
+    }
+
+    /// Number of lines in the active script, empty while loading.
+    #[must_use]
+    pub fn line_count(&self) -> usize {
+        self.definition
+            .as_ref()
+            .map(|definition| {
+                let base = definition.text.lines().count();
+                if self.include_drop {
+                    base.saturating_add(2)
+                } else {
+                    base
+                }
+            })
+            .unwrap_or(0)
     }
 
     /// Scrolls down, stopping with the last line on screen.
     pub fn scroll_down(&mut self, height: usize) {
-        let max = self.lines().len().saturating_sub(height);
+        let max = self.line_count().saturating_sub(height);
         if self.scroll < max {
             self.scroll += 1;
         }

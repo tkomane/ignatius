@@ -1,5 +1,25 @@
 # Verification
 
+## Wave 19 (027-deep-catalog-and-ddl-generator) and Wave 18 Delivery - 9 November 2026
+
+Pull request #60 (Wave 18) and Wave 19 Feature `027-deep-catalog-and-ddl-generator` advanced
+Milestone 6 full pgAdmin replacement parity:
+
+- **PR60 (`8d460b9`)**: delivered Feature `026-schema-er-diagrams` with all 16 hosted
+  GitHub Actions CI and CodeQL checks green, including the pure `src/diagram/` engine,
+  `Session::schema_graph`, `ignatius diagram` CLI subcommand, and `Ctrl+K m` interactive
+  TUI ER diagram overlay.
+- **Wave 19 (`027-deep-catalog-and-ddl-generator`)**:
+  - Implemented the pure `src/ddl/` synthesis engine generating deterministic PostgreSQL
+    DDL statements across enums, sequences, tables (primary/foreign keys, unique/check
+    constraints, non-duplicate secondary indexes, and triggers), views, materialized views,
+    overloaded routines, and extensions.
+  - Implemented `Session::generate_ddl` querying `pg_catalog` metadata.
+  - Added the `ignatius ddl` CLI subcommand (`--schema`, `--object`, `--drop`, `--output`, `--force`).
+  - Enhanced the TUI `Ctrl+K d` (`show-definition`) Definition / DDL overlay with `d` to
+    Toggle DROP (`DROP ... IF EXISTS ... CASCADE;`) and `e` / `Enter` to Load in Editor as
+    an undoable edit buffer.
+
 ## Wave 18 (026-schema-er-diagrams) and Waves 16-17 Delivery - 8 November 2026
 
 Pull requests #40, #55, #56, #58, and #59, along with Wave 18 Feature `026-schema-er-diagrams`,

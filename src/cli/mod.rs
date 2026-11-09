@@ -235,6 +235,35 @@ pub enum Command {
 
     /// Render or export a schema entity-relationship (ER) diagram.
     Diagram(DiagramArgs),
+
+    /// Generate deterministic SQL DDL scripts for a schema or database object.
+    Ddl(DdlArgs),
+}
+
+/// Arguments for the ddl command.
+#[derive(Debug, Args, Clone)]
+pub struct DdlArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Optional object name to inspect (e.g. table or view name).
+    pub object_pos: Option<String>,
+    /// Schema to inspect (defaults to "public").
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Database object name to inspect.
+    #[arg(long, value_name = "OBJECT")]
+    pub object: Option<String>,
+    /// Include DROP statements before CREATE statements.
+    #[arg(long)]
+    pub drop: bool,
+    /// Destination file to write DDL output to.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
 }
 
 /// Output representation format for schema ER diagrams.
@@ -662,6 +691,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             err,
         ),
         Some(Command::Diagram(args)) => diagram_command(args, &paths, &presentation, out, err),
+        Some(Command::Ddl(args)) => ddl_command(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -1555,6 +1585,98 @@ fn diagram_command(
             format.label(),
             graph.tables.len(),
             graph.edges.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    } else {
+        out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    }
+}
+
+fn ddl_command(
+    args: &DdlArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let (target_raw, object_raw) = match (args.target.as_deref(), args.object_pos.as_deref()) {
+        (Some(t), Some(o)) => (Some(t), Some(o)),
+        (Some(single), None) => {
+            if args.object.is_some()
+                || single.starts_with("postgres://")
+                || single.starts_with("postgresql://")
+                || single.starts_with('@')
+                || single.contains('=')
+            {
+                (Some(single), None)
+            } else if single.contains('.') {
+                (None, Some(single))
+            } else {
+                (Some(single), None)
+            }
+        }
+        (None, Some(o)) => (None, Some(o)),
+        (None, None) => (None, None),
+    };
+
+    let object_ident = args.object.as_deref().or(object_raw);
+    let (schema_name, object_name) = match object_ident {
+        Some(ident) => {
+            if let Some((s, obj)) = ident.split_once('.') {
+                (s.to_owned(), Some(obj.to_owned()))
+            } else {
+                (
+                    args.schema.clone().unwrap_or_else(|| "public".to_owned()),
+                    Some(ident.to_owned()),
+                )
+            }
+        }
+        None => (
+            args.schema.clone().unwrap_or_else(|| "public".to_owned()),
+            None,
+        ),
+    };
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(target_raw, &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let bundle = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let result = session
+            .generate_ddl(&schema_name, object_name.as_deref())
+            .await;
+        drop(session);
+        result
+    })?;
+
+    let rendered = bundle.render_sql(args.drop);
+
+    if let Some(ref destination) = args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "Wrote DDL ({} object(s)) to {}",
+            bundle.objects.len(),
             destination.display()
         )
         .map_err(io_diagnostic)?;

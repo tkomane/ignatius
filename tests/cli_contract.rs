@@ -2758,4 +2758,103 @@ mod with_server {
 
         let _ = std::fs::remove_file(&temp_file);
     }
+
+    #[test]
+    fn ddl_subcommand_exports_object_and_schema_ddl_with_optional_drop_headers() {
+        let uri = uri_or_skip!();
+
+        // 1. Export single table DDL with drop header to stdout
+        let output = binary()
+            .arg("ddl")
+            .arg(&uri)
+            .arg("public.orders")
+            .arg("--drop")
+            .output()
+            .expect("run ignatius ddl public.orders --drop");
+
+        assert_eq!(
+            code(&output),
+            0,
+            "ddl public.orders exits zero: {}",
+            stderr(&output)
+        );
+        let sql_out = stdout(&output);
+        assert!(
+            sql_out.contains("DROP TABLE IF EXISTS \"public\".\"orders\" CASCADE;"),
+            "stdout contains drop table statement: {sql_out}"
+        );
+        assert!(
+            sql_out.contains("CREATE TABLE \"public\".\"orders\""),
+            "stdout contains create table statement: {sql_out}"
+        );
+
+        // 2. Export entire public schema DDL to a file
+        let temp_ddl = temp_config_dir().join(format!("test_ddl_{}.sql", std::process::id()));
+        let _ = std::fs::remove_file(&temp_ddl);
+
+        let output_file = binary()
+            .arg("ddl")
+            .arg(&uri)
+            .arg("--schema")
+            .arg("public")
+            .arg("--output")
+            .arg(&temp_ddl)
+            .output()
+            .expect("run ignatius ddl schema output");
+
+        assert_eq!(
+            code(&output_file),
+            0,
+            "ddl schema output exits zero: {}",
+            stderr(&output_file)
+        );
+        assert!(temp_ddl.exists(), "DDL output file was created");
+        let ddl_content = std::fs::read_to_string(&temp_ddl).expect("read ddl content");
+        assert!(
+            ddl_content.contains("CREATE TABLE \"public\".\"orders\""),
+            "DDL contains create table orders: {ddl_content}"
+        );
+        assert!(
+            ddl_content.contains("CREATE OR REPLACE VIEW \"public\".\"recent_orders\""),
+            "DDL contains create or replace view recent_orders: {ddl_content}"
+        );
+        let ddl_err = stderr(&output_file);
+        assert!(
+            ddl_err.contains("Wrote DDL"),
+            "stderr reports wrote DDL: {ddl_err}"
+        );
+
+        let _ = std::fs::remove_file(&temp_ddl);
+    }
+
+    #[test]
+    fn ddl_subcommand_refuses_existing_output_file_without_force() {
+        let uri = uri_or_skip!();
+
+        let temp_file =
+            temp_config_dir().join(format!("test_ddl_refuse_{}.sql", std::process::id()));
+        std::fs::write(&temp_file, "preserved ddl content").expect("write original file");
+
+        let output = binary()
+            .arg("ddl")
+            .arg(&uri)
+            .arg("orders")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius ddl refuse without force");
+
+        assert_ne!(
+            code(&output),
+            0,
+            "ddl without --force must exit non-zero when output file exists"
+        );
+        let content = std::fs::read_to_string(&temp_file).expect("read preserved file");
+        assert_eq!(
+            content, "preserved ddl content",
+            "existing file content must be left untouched"
+        );
+
+        let _ = std::fs::remove_file(&temp_file);
+    }
 }

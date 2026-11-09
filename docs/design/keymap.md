@@ -125,6 +125,15 @@ overlay for the active database and schema, rendering tables, primary/foreign
 keys, cardinality markers, and neighbourhood-focused subgraphs. The printable `m`
 remains ordinary editor input outside the chord.
 
+With an object selected in the sidebar, `Ctrl+K d` (`show-definition`) opens
+the Definition / DDL overlay synthesizing a deterministic PostgreSQL DDL script
+from `pg_catalog`. Inside the DDL overlay, pressing `d` triggers Toggle DROP
+(adding or removing `DROP ... IF EXISTS ... CASCADE;`), while pressing `e` or
+`Enter` triggers Load in Editor (loading the generated DDL script directly into
+the SQL editor buffer as an undoable edit). Pressing `Esc` dismisses the overlay.
+The printable `d` remains ordinary editor input outside the chord and overlay.
+The `ignatius ddl` CLI command provides non-interactive parity.
+
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
 the projection. It resolves the relation in the session's search path, refuses
