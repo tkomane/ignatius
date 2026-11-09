@@ -2857,4 +2857,98 @@ mod with_server {
 
         let _ = std::fs::remove_file(&temp_file);
     }
+
+    #[test]
+    fn activity_subcommand_renders_backends_locks_and_json_and_protects_existing_files() {
+        let uri = uri_or_skip!();
+
+        // 1. Run ignatius activity <uri> (default table format)
+        let output = binary()
+            .arg("activity")
+            .arg(&uri)
+            .output()
+            .expect("run ignatius activity");
+
+        assert_eq!(code(&output), 0, "activity exits zero: {}", stderr(&output));
+        let out = stdout(&output);
+        assert!(
+            out.contains("Database:"),
+            "stdout contains Database header: {out}"
+        );
+        assert!(
+            out.contains("Cache Hit:"),
+            "stdout contains Cache Hit: {out}"
+        );
+        assert!(out.contains("PID"), "stdout contains PID column: {out}");
+        assert!(out.contains("STATE"), "stdout contains STATE column: {out}");
+
+        // 2. Run ignatius activity <uri> --locks
+        let locks_output = binary()
+            .arg("activity")
+            .arg(&uri)
+            .arg("--locks")
+            .output()
+            .expect("run ignatius activity --locks");
+
+        assert_eq!(
+            code(&locks_output),
+            0,
+            "activity --locks exits zero: {}",
+            stderr(&locks_output)
+        );
+
+        // 3. Run ignatius activity <uri> --format json --output <path>
+        let temp_file =
+            temp_config_dir().join(format!("test_activity_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&temp_file);
+
+        let json_output = binary()
+            .arg("activity")
+            .arg(&uri)
+            .arg("--format")
+            .arg("json")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius activity --format json --output");
+
+        assert_eq!(
+            code(&json_output),
+            0,
+            "activity json output exits zero: {}",
+            stderr(&json_output)
+        );
+        assert!(temp_file.exists(), "activity JSON output file created");
+        let json_content = std::fs::read_to_string(&temp_file).expect("read activity JSON file");
+        assert!(
+            json_content.contains("\"active_connections\""),
+            "JSON contains active_connections: {json_content}"
+        );
+        assert!(
+            json_content.contains("\"backends\""),
+            "JSON contains backends: {json_content}"
+        );
+
+        // 4. Verify running ignatius activity <uri> --output <same_path> without --force exits non-zero and preserves file
+        let conflict_output = binary()
+            .arg("activity")
+            .arg(&uri)
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius activity conflict");
+
+        assert_ne!(
+            code(&conflict_output),
+            0,
+            "activity without --force must exit non-zero when output file exists"
+        );
+        let preserved_content = std::fs::read_to_string(&temp_file).expect("read preserved file");
+        assert_eq!(
+            preserved_content, json_content,
+            "existing file content must be preserved untouched"
+        );
+
+        let _ = std::fs::remove_file(&temp_file);
+    }
 }

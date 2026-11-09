@@ -114,6 +114,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `u` | Generate a reviewed UPDATE from the selected cell |
 | `q` | Format the SQL buffer |
 | `m` | Open the schema ER diagram |
+| `j` | Open the server activity and locks dashboard |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -133,6 +134,18 @@ from `pg_catalog`. Inside the DDL overlay, pressing `d` triggers Toggle DROP
 the SQL editor buffer as an undoable edit). Pressing `Esc` dismisses the overlay.
 The printable `d` remains ordinary editor input outside the chord and overlay.
 The `ignatius ddl` CLI command provides non-interactive parity.
+
+With the workbench active, `Ctrl+K j` (`server-activity`) opens the Server
+Activity & Locks Dashboard overlay, displaying real-time telemetry from
+`pg_stat_activity` and `pg_locks`. Inside the overlay:
+- `Up` / `Down` navigates and selects active backend processes.
+- `l` toggles between the flat Active Backends table and the hierarchical Lock Blocker Tree (`LocksTree`).
+- `r` explicitly refreshes the live snapshot without closing the overlay.
+- `c` or `Enter` prepares a reviewed `SELECT pg_catalog.pg_cancel_backend(pid);` statement and loads it into the SQL editor buffer (undoable via `Ctrl+Z`, zero hidden writes).
+- `x` prepares a reviewed `SELECT pg_catalog.pg_terminate_backend(pid);` statement and loads it into the SQL editor buffer (undoable via `Ctrl+Z`, zero hidden writes).
+- `Esc` closes the overlay without side effects.
+The printable `j` remains ordinary editor input outside the chord and overlay.
+The `ignatius activity` CLI command provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -381,7 +394,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `shrink-pane`, `grow-pane`, `zoom-pane`,
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
-`toggle-history-recording`, `schema-diagram`,
+`toggle-history-recording`, `schema-diagram`, `server-activity`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

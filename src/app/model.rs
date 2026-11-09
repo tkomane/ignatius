@@ -442,6 +442,101 @@ impl SchemaDiagramState {
     }
 }
 
+/// Interactive state for the server activity and locks dashboard overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ServerActivityState {
+    /// Complete bounded server activity and lock contention snapshot.
+    pub snapshot: crate::activity::ServerActivitySnapshot,
+    /// Currently focused index in `snapshot.backends`.
+    pub selected_backend: usize,
+    /// Current view mode (Backends list vs Locks tree).
+    pub mode: crate::activity::ActivityViewMode,
+    /// Vertical scroll offset for the rendered text pane.
+    pub scroll_y: usize,
+    /// Horizontal scroll offset for the rendered text pane.
+    pub scroll_x: usize,
+    /// Whether the snapshot is currently loading in the background.
+    pub loading: bool,
+    /// Failure message when telemetry reading fails.
+    pub error: Option<String>,
+    /// Pre-rendered text lines for fast viewport rendering.
+    pub rendered_lines: Vec<String>,
+}
+
+impl ServerActivityState {
+    /// Constructs an initial server activity state from a snapshot.
+    #[must_use]
+    pub fn new(snapshot: crate::activity::ServerActivitySnapshot, unicode: bool) -> Self {
+        let mut state = Self {
+            snapshot,
+            selected_backend: 0,
+            mode: crate::activity::ActivityViewMode::Backends,
+            scroll_y: 0,
+            scroll_x: 0,
+            loading: false,
+            error: None,
+            rendered_lines: Vec::new(),
+        };
+        state.rebuild_rendered(unicode);
+        state
+    }
+
+    /// Re-renders activity text into `self.rendered_lines` according to active mode.
+    pub fn rebuild_rendered(&mut self, unicode: bool) {
+        let rendered = self.snapshot.render_text(self.mode, unicode);
+        self.rendered_lines = rendered.lines().map(ToOwned::to_owned).collect();
+    }
+
+    /// Selects the next backend process if available.
+    pub fn select_next(&mut self) {
+        if !self.snapshot.backends.is_empty()
+            && self.selected_backend + 1 < self.snapshot.backends.len()
+        {
+            self.selected_backend += 1;
+        }
+    }
+
+    /// Selects the previous backend process if available.
+    pub fn select_prev(&mut self) {
+        if self.selected_backend > 0 {
+            self.selected_backend -= 1;
+        }
+    }
+
+    /// Toggles between active backends and hierarchical lock blocker tree.
+    pub fn toggle_mode(&mut self, unicode: bool) {
+        self.mode = self.mode.toggle();
+        self.rebuild_rendered(unicode);
+    }
+
+    /// Returns the currently selected backend process, if any.
+    #[must_use]
+    pub fn selected_process(&self) -> Option<&crate::activity::BackendProcess> {
+        self.snapshot.backends.get(self.selected_backend)
+    }
+
+    /// Scrolls down by `amount` lines.
+    pub fn scroll_down(&mut self, amount: usize) {
+        let max = self.rendered_lines.len().saturating_sub(1);
+        self.scroll_y = (self.scroll_y + amount).min(max);
+    }
+
+    /// Scrolls up by `amount` lines.
+    pub const fn scroll_up(&mut self, amount: usize) {
+        self.scroll_y = self.scroll_y.saturating_sub(amount);
+    }
+
+    /// Scrolls right by `amount` columns.
+    pub const fn scroll_right(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_add(amount);
+    }
+
+    /// Scrolls left by `amount` columns.
+    pub const fn scroll_left(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_sub(amount);
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -1694,6 +1789,10 @@ pub struct Model {
     pub schema_diagram_request: u64,
     /// Feedback banner shown when diagram action is unavailable.
     pub schema_diagram_notice: Option<String>,
+    /// Interactive server activity and lock contention dashboard overlay state.
+    pub server_activity: Option<ServerActivityState>,
+    /// Request counter for in-flight server activity queries.
+    pub server_activity_request: u64,
 }
 
 impl Model {

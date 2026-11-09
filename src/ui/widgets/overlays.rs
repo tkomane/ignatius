@@ -1150,5 +1150,188 @@ pub(crate) fn render_schema_diagram(
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
 }
 
+/// Shows an interactive server activity and lock contention dashboard overlay.
+pub(crate) fn render_server_activity(
+    activity: &crate::app::model::ServerActivityState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let box_width = (area.width.saturating_mul(86) / 100)
+        .max(40)
+        .min(area.width);
+    let box_height = (area.height.saturating_mul(82) / 100)
+        .max(12)
+        .min(area.height);
+    let x = area.x + (area.width.saturating_sub(box_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(box_height)) / 2;
+    let box_area = Rect::new(x, y, box_width, box_height);
+    if box_area.width < 20 || box_area.height < 6 {
+        return;
+    }
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let title = if activity.loading {
+        format!(
+            " {}Server Activity & Locks (reading telemetry...) ",
+            presentation.icon(Icon::Schema)
+        )
+    } else {
+        format!(
+            " {}Server Activity & Locks ({}) - {} backends ",
+            presentation.icon(Icon::Schema),
+            activity.mode.label(),
+            activity.snapshot.backends.len()
+        )
+    };
+    overlay_block(title, presentation).render(box_area, buf);
+
+    let inner = Rect::new(
+        box_area.x.saturating_add(1),
+        box_area.y.saturating_add(1),
+        box_area.width.saturating_sub(2),
+        box_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 2 {
+        return;
+    }
+
+    let body_height = inner.height.saturating_sub(1);
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_height);
+    let footer_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+
+    let left_width = 28u16.min(body_area.width.saturating_sub(4)).max(16);
+    let right_width = body_area.width.saturating_sub(left_width).saturating_sub(1);
+    let left_area = Rect::new(body_area.x, body_area.y, left_width, body_area.height);
+    let right_area = Rect::new(
+        body_area.x.saturating_add(left_width).saturating_add(1),
+        body_area.y,
+        right_width,
+        body_area.height,
+    );
+
+    let visible_rows = usize::from(left_area.height);
+    let scroll_offset = if activity.selected_backend >= visible_rows {
+        activity
+            .selected_backend
+            .saturating_sub(visible_rows.saturating_sub(1))
+    } else {
+        0
+    };
+
+    let mut backend_lines = Vec::new();
+    for (idx, b) in activity
+        .snapshot
+        .backends
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_rows)
+    {
+        let is_selected = idx == activity.selected_backend;
+        let prefix = if is_selected { "> " } else { "  " };
+        let blocked_tag = if !b.blocked_by.is_empty() {
+            " [BLOCKED]"
+        } else {
+            ""
+        };
+        let label = format!("{prefix}PID {} ({}){blocked_tag}", b.pid, b.username);
+        let styled_line = if is_selected {
+            Line::from(Span::styled(
+                label,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ))
+        } else if !b.blocked_by.is_empty() {
+            Line::from(Span::styled(label, theme.style(Token::Danger)))
+        } else {
+            Line::from(Span::styled(label, theme.style(Token::Text)))
+        };
+        backend_lines.push(styled_line);
+    }
+    if backend_lines.is_empty() {
+        backend_lines.push(Line::from(Span::styled(
+            "No backends",
+            theme.style(Token::Muted),
+        )));
+    }
+    Paragraph::new(backend_lines).render(left_area, buf);
+
+    let divider_x = body_area.x.saturating_add(left_width);
+    let border_sym = if presentation.glyphs.is_ascii() {
+        "|"
+    } else {
+        "│"
+    };
+    for row in body_area.y..body_area.bottom() {
+        if let Some(cell) = buf.cell_mut((divider_x, row)) {
+            cell.set_symbol(border_sym);
+            cell.set_style(theme.style(Token::Border));
+        }
+    }
+
+    let right_visible_rows = usize::from(right_area.height);
+    let mut activity_lines = Vec::new();
+    if let Some(error) = &activity.error {
+        activity_lines.push(Line::from(Span::styled(
+            format!("Error reading activity: {error}"),
+            theme.style(Token::Danger),
+        )));
+    } else if activity.loading {
+        activity_lines.push(Line::from(Span::styled(
+            "Loading server activity and locks from server...",
+            theme.style(Token::Muted),
+        )));
+    } else {
+        for line in activity
+            .rendered_lines
+            .iter()
+            .skip(activity.scroll_y)
+            .take(right_visible_rows)
+        {
+            let scrolled_line: String = line.chars().skip(activity.scroll_x).collect();
+            activity_lines.push(Line::from(Span::styled(
+                sanitize_for_display(&scrolled_line),
+                theme.style(Token::Text),
+            )));
+        }
+    }
+    Paragraph::new(activity_lines).render(right_area, buf);
+
+    let footer_hints = vec![
+        Span::styled(
+            " [↑/↓] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Backend  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[l] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Toggle Locks Tree  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[c/Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Draft Cancel SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[x] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Draft Terminate SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

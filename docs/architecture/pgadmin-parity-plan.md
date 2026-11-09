@@ -50,7 +50,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 | **DDL Script Generator** | `027-deep-catalog-and-ddl-generator` | Implemented (`M6`) | Reconstructs complete, deterministic `CREATE` / `ALTER` / `DROP` DDL from `pg_catalog` for all object types; opens into interactive `Ctrl+K d` overlay (with Toggle DROP and Load in Editor) or CLI (`ignatius ddl`). |
 | **Import / Export Wizard** | `021-format-first-export`<br>`028-data-import-export-and-backup` | Retained Export Merged (`M0-M5`), Streaming COPY & Import Planned (`M6`) | Streaming `COPY ... TO STDOUT` / `FROM STDIN` for CSV, TSV, JSONL, SQL `INSERT`, and Parquet; interactive TUI import column mapper; transactional rollback on error; CLI streaming export (`--output`). |
 | **Backup and Restore** | `028-data-import-export-and-backup` | Planned (`M6`) | Subprocess-isolated orchestration of `pg_dump` and `pg_restore` with dry-run command inspection, credential redaction, and bounded progress telemetry. |
-| **Server Activity & Locks Dashboard** | `029-server-activity-and-locks-dashboard` | Planned (`M6`) | Dedicated live dashboard tracking `pg_stat_activity`, `pg_locks`, blocking PID tree, query age, wait events, and guarded `pg_cancel_backend` / `pg_terminate_backend`. |
+| **Server Activity & Locks Dashboard** | `029-server-activity-and-locks-dashboard` | Implemented (`M6`) | Dedicated live dashboard tracking `pg_stat_activity`, `pg_locks`, blocking PID tree, query age, wait events, and guarded `pg_cancel_backend` / `pg_terminate_backend` via interactive `Ctrl+K j` overlay and scriptable `ignatius activity` CLI subcommand. |
 | **Table / Schema Designer & Diff** | `030-visual-schema-designer-and-migrations` | Planned (`M6`) | Form-driven TUI designer for tables/columns/constraints; schema comparison between environments producing reviewable transactional migration SQL (`BEGIN; ... COMMIT;`). |
 | **Role, Grant & RLS Manager** | `031-roles-privileges-and-rls-auditor` | Planned (`M6`) | Visual audit matrix of role hierarchy, object ACL grants, and Row-Level Security (`RLS`) policies (`USING` / `WITH CHECK`); generates reviewed `GRANT` / `REVOKE` / `POLICY` SQL. |
 | **PL/pgSQL Routine Runner & Debugger** | `032-plpgsql-routine-runner-and-profiler` | Planned (`M6`) | Discovers function/procedure signatures, prompts for typed parameters via safe parameter harness, executes in optional rollback savepoint, captures `RAISE NOTICE` stream and execution profile. |
@@ -144,8 +144,10 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 
 ### Feature 029: Server Activity, Lock Blocker Tree, and Performance Monitor (`029-server-activity-and-locks-dashboard`)
 
+**Status: Implemented on `main`.** The pure server activity and lock tree engine (`src/activity/`), `Session::server_activity`, `ignatius activity` CLI subcommand, and interactive `Ctrl+K j` (`server-activity`) TUI dashboard overlay are fully implemented.
+
 - **Objective:** Provide a truthful, real-time diagnostic window into PostgreSQL server health, connection activity, and lock contention to troubleshoot performance bottlenecks.
-- **Live Telemetry Surface (`Ctrl+K s` / Activity Mode):**
+- **Live Telemetry Surface (`Ctrl+K j` / `server-activity`):**
   - **Active Backends (`pg_stat_activity`):** Displays connected clients, process IDs (`PID`), client IP addresses, authenticated users, application names, transaction start times, query age, wait event types, and current query text.
   - **Lock Contention & Blocker Tree (`pg_locks`):** Visualizes blocking PID chains hierarchically:
     ```text
@@ -161,11 +163,11 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
   - **Multi-Step Safety Review:** Selecting a PID opens a modal stating PID, user, database, client IP, wait duration, and the full SQL text.
   - **Refusal in Read-Only Sessions:** Administrative terminations are disabled in read-only sessions (`--read-only`) and require explicit typed confirmation on production profiles.
 - **CLI Commands:**
-  - Non-interactive server health checks:
+  - Non-interactive server health checks and activity export:
     ```bash
-    ignatius activity "$DATABASE_URL" --format table
-    ignatius locks "$DATABASE_URL" --tree
-    ignatius kill "$DATABASE_URL" --pid 14201 --action cancel
+    ignatius activity "$DATABASE_URL"
+    ignatius activity "$DATABASE_URL" --locks
+    ignatius activity "$DATABASE_URL" --format json --output activity.json
     ```
 
 ---

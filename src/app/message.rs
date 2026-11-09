@@ -119,6 +119,8 @@ pub enum Action {
     Redo,
     /// Open the interactive schema entity-relationship (ER) diagram overlay.
     SchemaDiagram,
+    /// Open the interactive server activity and lock blocker tree dashboard overlay.
+    ServerActivity,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -217,6 +219,7 @@ impl Action {
             Self::Undo,
             Self::Redo,
             Self::SchemaDiagram,
+            Self::ServerActivity,
         ]
     }
 }
@@ -524,6 +527,13 @@ pub enum Message {
         /// The loaded schema graph, or why it could not be read.
         result: Box<Result<crate::diagram::SchemaGraph, Diagnostic>>,
     },
+    /// The live server activity and lock contention snapshot finished loading.
+    ServerActivityLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// The loaded server activity snapshot, or why it could not be read.
+        result: Box<Result<crate::activity::ServerActivitySnapshot, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -669,5 +679,10 @@ pub enum Effect {
         request: u64,
         /// Optional schema filter. None includes all user schemas.
         schema: Option<String>,
+    },
+    /// Read the live server activity and lock blocker tree from pg_stat_activity and pg_locks.
+    LoadServerActivity {
+        /// Identity used to reject a late response.
+        request: u64,
     },
 }

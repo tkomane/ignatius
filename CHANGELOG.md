@@ -8,6 +8,12 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `029-server-activity-and-locks-dashboard` delivers the `ignatius activity`
+  CLI subcommand with `--locks`, `--format table|json`, and `--output`, plus the
+  interactive `Ctrl+K j` (`server-activity`) TUI Server Activity & Locks Dashboard
+  featuring `[l]` Lock Blocker Tree toggle, `[r]` live refresh, and `[c]`/`[x]`
+  reviewed `pg_cancel_backend` and `pg_terminate_backend` SQL drafting into the
+  editor with undo support.
 - New: Feature `027-deep-catalog-and-ddl-generator` delivers a pure `src/ddl/`
   synthesis engine and `Session::generate_ddl` `pg_catalog` extractor covering
   enums, sequences, tables (constraints, non-duplicate indexes, triggers), views,

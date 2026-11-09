@@ -311,6 +311,13 @@ impl Session {
         crate::postgres::metadata::generate_ddl(&self.client, schema, object).await
     }
 
+    /// Reads the live server activity, lock contention, and database health telemetry.
+    pub async fn server_activity(
+        &self,
+    ) -> Result<crate::activity::ServerActivitySnapshot, Diagnostic> {
+        crate::postgres::metadata::server_activity(&self.client).await
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

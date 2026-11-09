@@ -112,6 +112,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("move-buffer-start", Action::MoveBufferStart),
     ("move-buffer-end", Action::MoveBufferEnd),
     ("schema-diagram", Action::SchemaDiagram),
+    ("server-activity", Action::ServerActivity),
 ];
 
 /// The action a configuration name means.
@@ -760,6 +761,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         "Write the rows on screen to a file",
     ),
     ('m', Action::SchemaDiagram, "Open the schema ER diagram"),
+    (
+        'j',
+        Action::ServerActivity,
+        "Open the server activity and locks dashboard",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -863,6 +869,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::ToggleHistoryRecording => "Private",
         Action::Redo => "Redo",
         Action::SchemaDiagram => "ER diagram",
+        Action::ServerActivity => "Activity",
     }
 }
 

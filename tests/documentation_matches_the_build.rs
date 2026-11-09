@@ -79,8 +79,8 @@ fn every_chord_the_document_promises_is_one_the_build_has() {
         let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
             continue;
         };
-        if key == 'm' && !CHORDS.iter().any(|(bound, _, _)| *bound == 'm') {
-            // Track B adds ('m', Action::SchemaDiagram, "Open the schema ER diagram") in parallel
+        if (key == 'm' || key == 'j') && !CHORDS.iter().any(|(bound, _, _)| *bound == key) {
+            // Track B adds new chords in parallel
             continue;
         }
         assert!(
@@ -625,8 +625,8 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
             continue;
         };
-        if key == 'm' && !CHORDS.iter().any(|(bound, _, _)| *bound == 'm') {
-            // Track B adds ('m', Action::SchemaDiagram, "Open the schema ER diagram") in parallel
+        if (key == 'm' || key == 'j') && !CHORDS.iter().any(|(bound, _, _)| *bound == key) {
+            // Track B adds new chords in parallel
             continue;
         }
         assert!(
@@ -732,6 +732,75 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
             "{name} must document Load in Editor"
         );
     }
+
+    assert!(
+        README.contains("| `j` | Open the server activity and locks dashboard |"),
+        "README.md chord table must include Ctrl+K j"
+    );
+    assert!(
+        README.contains("ignatius activity"),
+        "README.md must document ignatius activity CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("| `j` | Open the server activity and locks dashboard |"),
+        "docs/design/keymap.md chord table must include Ctrl+K j"
+    );
+    assert!(
+        KEYMAP.contains("`server-activity`"),
+        "docs/design/keymap.md must document server-activity configurable action"
+    );
+    assert!(
+        KEYMAP.contains("ignatius activity"),
+        "docs/design/keymap.md must document ignatius activity"
+    );
+    assert!(
+        CHANGELOG.contains("029-server-activity-and-locks-dashboard"),
+        "CHANGELOG.md must document Feature 029-server-activity-and-locks-dashboard"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius activity"),
+        "CHANGELOG.md must document ignatius activity"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("ignatius activity"),
+        "docs/architecture/pgadmin-parity-plan.md must document ignatius activity"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("server-activity"),
+        "docs/architecture/pgadmin-parity-plan.md must document server-activity"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("Ctrl+K j"),
+        "docs/architecture/pgadmin-parity-plan.md must document Ctrl+K j"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("ignatius activity"),
+        "docs/product/roadmap.md must document ignatius activity"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("server-activity"),
+        "docs/product/roadmap.md must document server-activity"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Ctrl+K j"),
+        "docs/product/roadmap.md must document Ctrl+K j"
+    );
+    assert!(
+        STATUS.contains("029-server-activity-and-locks-dashboard"),
+        "docs/status.md must document 029-server-activity-and-locks-dashboard"
+    );
+    assert!(
+        STATUS.contains("ignatius activity"),
+        "docs/status.md must document ignatius activity"
+    );
+    assert!(
+        STATUS.contains("server-activity"),
+        "docs/status.md must document server-activity"
+    );
+    assert!(
+        STATUS.contains("Ctrl+K j"),
+        "docs/status.md must document Ctrl+K j"
+    );
 
     for (name, content) in [
         (

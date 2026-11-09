@@ -1,5 +1,23 @@
 # Verification
 
+## Wave 20 (029-server-activity-and-locks-dashboard) and Wave 19 Delivery - 9 November 2026
+
+Pull request #61 (Wave 19) and Wave 20 Feature `029-server-activity-and-locks-dashboard` delivered
+the third Milestone 6 full pgAdmin replacement parity slice:
+
+- **PR61 (`4b85a92`)**: delivered Feature `027-deep-catalog-and-ddl-generator` with all 16 hosted
+  GitHub Actions CI and CodeQL checks green, including the pure `src/ddl/` engine,
+  `Session::generate_ddl`, `ignatius ddl` CLI subcommand, and `Ctrl+K d` DDL overlay.
+- **Wave 20 (`029-server-activity-and-locks-dashboard`)**:
+  - Implemented the pure `src/activity/` engine parsing `pg_stat_activity` processes, database
+    telemetry, and constructing the hierarchical lock blocker tree (`LocksTree`).
+  - Implemented `Session::server_activity` querying `pg_stat_activity`, `pg_locks`, and
+    `pg_stat_database`.
+  - Added the `ignatius activity` CLI subcommand with `--locks`, `--format table|json`, and `--output`.
+  - Added the interactive TUI Server Activity & Locks Dashboard overlay on `Ctrl+K j` (`server-activity`)
+    with `Up`/`Down` process navigation, `l` table/tree toggle, `r` live refresh, and `c`/`x` reviewed
+    backend cancellation/termination SQL drafting.
+
 ## Wave 19 (027-deep-catalog-and-ddl-generator) and Wave 18 Delivery - 9 November 2026
 
 Pull request #60 (Wave 18) and Wave 19 Feature `027-deep-catalog-and-ddl-generator` advanced

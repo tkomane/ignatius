@@ -1533,5 +1533,109 @@ pub async fn generate_ddl(
     .bounded())
 }
 
+/// Reads the live server activity, lock contention (`pg_blocking_pids` / `pg_locks`),
+/// and database health metrics (`pg_stat_database`) for the Server Activity & Locks
+/// Dashboard (`029-server-activity-and-locks-dashboard`).
+pub async fn server_activity(
+    client: &Client,
+) -> Result<crate::activity::ServerActivitySnapshot, Diagnostic> {
+    use crate::activity::{BackendProcess, DatabaseHealthMetrics, ServerActivitySnapshot};
+
+    const DB_STATS_QUERY: &str = "SELECT \
+         d.datname::text AS database, \
+         COALESCE(d.numbackends, 0)::bigint AS active_connections, \
+         COALESCE(d.xact_commit, 0)::bigint AS xact_commit, \
+         COALESCE(d.xact_rollback, 0)::bigint AS xact_rollback, \
+         CASE \
+             WHEN COALESCE(d.blks_hit, 0) + COALESCE(d.blks_read, 0) = 0 THEN 10000::bigint \
+             ELSE ((COALESCE(d.blks_hit, 0)::numeric * 10000) / (COALESCE(d.blks_hit, 0) + COALESCE(d.blks_read, 0)))::bigint \
+         END AS cache_hit_bps, \
+         COALESCE(d.deadlocks, 0)::bigint AS deadlocks, \
+         COALESCE(d.temp_bytes, 0)::bigint AS temp_bytes \
+         FROM pg_catalog.pg_stat_database d \
+         WHERE d.datname = pg_catalog.current_database()";
+
+    const ACTIVITY_QUERY: &str = "SELECT \
+         a.pid AS pid, \
+         COALESCE(a.datname::text, '-') AS database, \
+         COALESCE(a.usename::text, 'system') AS username, \
+         COALESCE(a.application_name::text, '') AS application_name, \
+         COALESCE(pg_catalog.host(a.client_addr)::text, 'local') AS client_addr, \
+         COALESCE(a.state::text, 'unknown') AS state, \
+         a.wait_event_type::text AS wait_event_type, \
+         a.wait_event::text AS wait_event, \
+         GREATEST(0, (EXTRACT(EPOCH FROM (pg_catalog.clock_timestamp() - COALESCE(a.query_start, a.backend_start))) * 1000)::bigint) AS query_age_ms, \
+         CASE \
+             WHEN a.xact_start IS NULL THEN NULL \
+             ELSE GREATEST(0, (EXTRACT(EPOCH FROM (pg_catalog.clock_timestamp() - a.xact_start)) * 1000)::bigint) \
+         END AS xact_age_ms, \
+         COALESCE(a.query::text, '') AS query, \
+         COALESCE(pg_catalog.pg_blocking_pids(a.pid), ARRAY[]::integer[]) AS blocked_by, \
+         ( \
+             SELECT l.mode::text || ' on ' || COALESCE(c.relname::text, l.locktype::text) \
+             FROM pg_catalog.pg_locks l \
+             LEFT JOIN pg_catalog.pg_class c ON c.oid = l.relation \
+             WHERE l.pid = a.pid \
+               AND (NOT l.granted OR l.mode IN ('AccessExclusiveLock', 'ExclusiveLock', 'ShareRowExclusiveLock', 'RowExclusiveLock')) \
+             ORDER BY l.granted ASC, l.mode DESC \
+             LIMIT 1 \
+         ) AS lock_summary, \
+         (a.pid = pg_catalog.pg_backend_pid()) AS is_self \
+         FROM pg_catalog.pg_stat_activity a \
+         WHERE a.backend_type = 'client backend' \
+           AND (a.datname IS NULL OR a.datname = pg_catalog.current_database()) \
+         ORDER BY a.pid";
+
+    let db_rows = client
+        .query(DB_STATS_QUERY, &[])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let metrics = db_rows
+        .first()
+        .map_or_else(DatabaseHealthMetrics::default, |row| {
+            DatabaseHealthMetrics {
+                database: row.get("database"),
+                active_connections: row.get("active_connections"),
+                xact_commit: row.get("xact_commit"),
+                xact_rollback: row.get("xact_rollback"),
+                cache_hit_bps: row.get("cache_hit_bps"),
+                deadlocks: row.get("deadlocks"),
+                temp_bytes: row.get("temp_bytes"),
+            }
+        });
+
+    let act_rows = client
+        .query(ACTIVITY_QUERY, &[])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+
+    let mut backends = Vec::with_capacity(act_rows.len());
+    for row in &act_rows {
+        backends.push(BackendProcess {
+            pid: row.get("pid"),
+            database: row.get("database"),
+            username: row.get("username"),
+            application_name: row.get("application_name"),
+            client_addr: row.get("client_addr"),
+            state: row.get("state"),
+            wait_event_type: row.get("wait_event_type"),
+            wait_event: row.get("wait_event"),
+            query_age_ms: row.get("query_age_ms"),
+            xact_age_ms: row.get("xact_age_ms"),
+            query: row.get("query"),
+            blocked_by: row.get("blocked_by"),
+            lock_summary: row.get("lock_summary"),
+            is_self: row.get("is_self"),
+        });
+    }
+
+    Ok(ServerActivitySnapshot {
+        metrics,
+        backends,
+        truncated_from: None,
+    }
+    .bounded())
+}
+
 #[cfg(test)]
 mod tests;

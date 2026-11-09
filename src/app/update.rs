@@ -694,6 +694,28 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::ServerActivityLoaded { request, result } => {
+            if request != model.server_activity_request {
+                return Vec::new();
+            }
+            if let Some(activity) = &mut model.server_activity {
+                activity.loading = false;
+                match *result {
+                    Ok(snapshot) => {
+                        activity.snapshot = snapshot;
+                        if activity.selected_backend >= activity.snapshot.backends.len() {
+                            activity.selected_backend =
+                                activity.snapshot.backends.len().saturating_sub(1);
+                        }
+                        activity.rebuild_rendered(!model.presentation.glyphs.is_ascii());
+                    }
+                    Err(diagnostic) => {
+                        activity.error = Some(diagnostic.headline);
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -957,6 +979,8 @@ fn pane_input_owned(model: &Model) -> bool {
     model.notice_details.is_some()
         || model.inspector.is_some()
         || model.definition.is_some()
+        || model.schema_diagram.is_some()
+        || model.server_activity.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1044,6 +1068,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.schema_diagram.is_some() {
         return schema_diagram_action(model, action);
+    }
+    if model.server_activity.is_some() {
+        return server_activity_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1208,6 +1235,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ShowDefinition => show_definition(model),
         Action::ShowDependencies => show_dependencies(model),
         Action::SchemaDiagram => schema_diagram_open(model),
+        Action::ServerActivity => server_activity_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -1747,6 +1775,119 @@ fn schema_diagram_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     crate::diagram::DiagramFormat::Ascii
                 };
                 diagram.set_format(format, unicode);
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the server activity and locks dashboard overlay.
+fn server_activity_open(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    let unicode = !model.presentation.glyphs.is_ascii();
+    model.server_activity_request = model.server_activity_request.wrapping_add(1);
+    let request = model.server_activity_request;
+    let mut state = crate::app::model::ServerActivityState::new(
+        crate::activity::ServerActivitySnapshot::default(),
+        unicode,
+    );
+    state.loading = true;
+    model.server_activity = Some(state);
+    vec![Effect::LoadServerActivity { request }]
+}
+
+/// Handles input while the server activity and locks dashboard overlay is on screen.
+fn server_activity_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let unicode = !model.presentation.glyphs.is_ascii();
+    match action {
+        Action::Dismiss | Action::ServerActivity => {
+            model.server_activity = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) => {
+            if let Some(act) = &mut model.server_activity {
+                act.select_prev();
+            }
+        }
+        Action::Move(Direction::Down) => {
+            if let Some(act) = &mut model.server_activity {
+                act.select_next();
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(act) = &mut model.server_activity {
+                act.scroll_up(10);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(act) = &mut model.server_activity {
+                act.scroll_down(10);
+            }
+        }
+        Action::Move(Direction::Left) => {
+            if let Some(act) = &mut model.server_activity {
+                act.scroll_left(4);
+            }
+        }
+        Action::Move(Direction::Right) => {
+            if let Some(act) = &mut model.server_activity {
+                act.scroll_right(4);
+            }
+        }
+        Action::Insert('l' | 'L') => {
+            if let Some(act) = &mut model.server_activity {
+                act.toggle_mode(unicode);
+            }
+        }
+        Action::Insert('r' | 'R') | Action::ReloadObjects | Action::RefreshResult => {
+            if model.connection.is_ready() {
+                model.server_activity_request = model.server_activity_request.wrapping_add(1);
+                let request = model.server_activity_request;
+                if let Some(act) = &mut model.server_activity {
+                    act.loading = true;
+                    act.error = None;
+                }
+                return vec![Effect::LoadServerActivity { request }];
+            }
+        }
+        Action::Insert('c' | 'C') | Action::Activate => {
+            let sql = model
+                .server_activity
+                .as_ref()
+                .and_then(|act| act.selected_process())
+                .map(|proc| {
+                    crate::activity::ServerActivitySnapshot::reviewed_backend_signal_sql(
+                        proc, false,
+                    )
+                });
+            if let Some(sql) = sql {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.server_activity = None;
+                model.focus = Focus::Editor;
+            }
+        }
+        Action::Insert('x' | 'X') => {
+            let sql = model
+                .server_activity
+                .as_ref()
+                .and_then(|act| act.selected_process())
+                .map(|proc| {
+                    crate::activity::ServerActivitySnapshot::reviewed_backend_signal_sql(proc, true)
+                });
+            if let Some(sql) = sql {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.server_activity = None;
+                model.focus = Focus::Editor;
             }
         }
         _ => {}
@@ -4263,6 +4404,7 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.definition = None;
     model.schema_diagram = None;
     model.schema_diagram_notice = None;
+    model.server_activity = None;
     model.pending_dependencies = None;
     model.connection_details = false;
     model.result_filter.clear();
