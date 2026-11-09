@@ -121,6 +121,8 @@ pub enum Action {
     SchemaDiagram,
     /// Open the interactive server activity and lock blocker tree dashboard overlay.
     ServerActivity,
+    /// Open the interactive roles, privilege grants, and Row-Level Security (RLS) auditor overlay.
+    SecurityAudit,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -220,6 +222,7 @@ impl Action {
             Self::Redo,
             Self::SchemaDiagram,
             Self::ServerActivity,
+            Self::SecurityAudit,
         ]
     }
 }
@@ -534,6 +537,13 @@ pub enum Message {
         /// The loaded server activity snapshot, or why it could not be read.
         result: Box<Result<crate::activity::ServerActivitySnapshot, Diagnostic>>,
     },
+    /// The live security audit (roles, RLS posture/policies, and grants) finished loading.
+    SecurityAuditLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// The loaded security audit snapshot, or why it could not be read.
+        result: Box<Result<crate::audit::SecurityAuditSnapshot, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -682,6 +692,11 @@ pub enum Effect {
     },
     /// Read the live server activity and lock blocker tree from pg_stat_activity and pg_locks.
     LoadServerActivity {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Read the live roles, Row-Level Security posture/policies, and privilege grants.
+    LoadSecurityAudit {
         /// Identity used to reject a late response.
         request: u64,
     },

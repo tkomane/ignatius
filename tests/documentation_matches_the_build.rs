@@ -79,7 +79,9 @@ fn every_chord_the_document_promises_is_one_the_build_has() {
         let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
             continue;
         };
-        if (key == 'm' || key == 'j') && !CHORDS.iter().any(|(bound, _, _)| *bound == key) {
+        if (key == 'm' || key == 'j' || key == 't')
+            && !CHORDS.iter().any(|(bound, _, _)| *bound == key)
+        {
             // Track B adds new chords in parallel
             continue;
         }
@@ -586,10 +588,6 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         "README.md must not contain obsolete open-work wording"
     );
     assert!(
-        !README.contains("Ctrl+K t"),
-        "README.md must not promise unmapped Ctrl+K t"
-    );
-    assert!(
         !README.contains("Ctrl+K {"),
         "README.md must not promise unmapped Ctrl+K {{"
     );
@@ -625,7 +623,9 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         let Some(key) = key.chars().next().filter(|_| key.chars().count() == 1) else {
             continue;
         };
-        if (key == 'm' || key == 'j') && !CHORDS.iter().any(|(bound, _, _)| *bound == key) {
+        if (key == 'm' || key == 'j' || key == 't')
+            && !CHORDS.iter().any(|(bound, _, _)| *bound == key)
+        {
             // Track B adds new chords in parallel
             continue;
         }
@@ -800,6 +800,75 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
     assert!(
         STATUS.contains("Ctrl+K j"),
         "docs/status.md must document Ctrl+K j"
+    );
+
+    assert!(
+        README.contains("| `t` | Open the roles, privileges, and RLS auditor |"),
+        "README.md chord table must include Ctrl+K t"
+    );
+    assert!(
+        README.contains("ignatius audit"),
+        "README.md must document ignatius audit CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("| `t` | Open the roles, privileges, and RLS auditor |"),
+        "docs/design/keymap.md chord table must include Ctrl+K t"
+    );
+    assert!(
+        KEYMAP.contains("`security-audit`"),
+        "docs/design/keymap.md must document security-audit configurable action"
+    );
+    assert!(
+        KEYMAP.contains("ignatius audit"),
+        "docs/design/keymap.md must document ignatius audit"
+    );
+    assert!(
+        CHANGELOG.contains("031-roles-privileges-and-rls-auditor"),
+        "CHANGELOG.md must document Feature 031-roles-privileges-and-rls-auditor"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius audit"),
+        "CHANGELOG.md must document ignatius audit"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("ignatius audit"),
+        "docs/architecture/pgadmin-parity-plan.md must document ignatius audit"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("security-audit"),
+        "docs/architecture/pgadmin-parity-plan.md must document security-audit"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("Ctrl+K t"),
+        "docs/architecture/pgadmin-parity-plan.md must document Ctrl+K t"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("ignatius audit"),
+        "docs/product/roadmap.md must document ignatius audit"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("security-audit"),
+        "docs/product/roadmap.md must document security-audit"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Ctrl+K t"),
+        "docs/product/roadmap.md must document Ctrl+K t"
+    );
+    assert!(
+        STATUS.contains("031-roles-privileges-and-rls-auditor"),
+        "docs/status.md must document 031-roles-privileges-and-rls-auditor"
+    );
+    assert!(
+        STATUS.contains("ignatius audit"),
+        "docs/status.md must document ignatius audit"
+    );
+    assert!(
+        STATUS.contains("security-audit"),
+        "docs/status.md must document security-audit"
+    );
+    assert!(
+        STATUS.contains("Ctrl+K t"),
+        "docs/status.md must document Ctrl+K t"
     );
 
     for (name, content) in [

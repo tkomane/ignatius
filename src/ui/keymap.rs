@@ -113,6 +113,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("move-buffer-end", Action::MoveBufferEnd),
     ("schema-diagram", Action::SchemaDiagram),
     ("server-activity", Action::ServerActivity),
+    ("security-audit", Action::SecurityAudit),
 ];
 
 /// The action a configuration name means.
@@ -766,6 +767,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::ServerActivity,
         "Open the server activity and locks dashboard",
     ),
+    (
+        't',
+        Action::SecurityAudit,
+        "Open the roles, privileges, and RLS auditor",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -870,6 +876,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::Redo => "Redo",
         Action::SchemaDiagram => "ER diagram",
         Action::ServerActivity => "Activity",
+        Action::SecurityAudit => "Security audit",
     }
 }
 

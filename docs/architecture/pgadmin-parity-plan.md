@@ -52,7 +52,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 | **Backup and Restore** | `028-data-import-export-and-backup` | Planned (`M6`) | Subprocess-isolated orchestration of `pg_dump` and `pg_restore` with dry-run command inspection, credential redaction, and bounded progress telemetry. |
 | **Server Activity & Locks Dashboard** | `029-server-activity-and-locks-dashboard` | Implemented (`M6`) | Dedicated live dashboard tracking `pg_stat_activity`, `pg_locks`, blocking PID tree, query age, wait events, and guarded `pg_cancel_backend` / `pg_terminate_backend` via interactive `Ctrl+K j` overlay and scriptable `ignatius activity` CLI subcommand. |
 | **Table / Schema Designer & Diff** | `030-visual-schema-designer-and-migrations` | Planned (`M6`) | Form-driven TUI designer for tables/columns/constraints; schema comparison between environments producing reviewable transactional migration SQL (`BEGIN; ... COMMIT;`). |
-| **Role, Grant & RLS Manager** | `031-roles-privileges-and-rls-auditor` | Planned (`M6`) | Visual audit matrix of role hierarchy, object ACL grants, and Row-Level Security (`RLS`) policies (`USING` / `WITH CHECK`); generates reviewed `GRANT` / `REVOKE` / `POLICY` SQL. |
+| **Role, Grant & RLS Manager** | `031-roles-privileges-and-rls-auditor` | Implemented (`M6`) | Visual audit matrix of role hierarchy, object ACL grants, and Row-Level Security (`RLS`) policies (`USING` / `WITH CHECK`) via interactive `Ctrl+K t` (`security-audit`) overlay and scriptable `ignatius audit` CLI subcommand. |
 | **PL/pgSQL Routine Runner & Debugger** | `032-plpgsql-routine-runner-and-profiler` | Planned (`M6`) | Discovers function/procedure signatures, prompts for typed parameters via safe parameter harness, executes in optional rollback savepoint, captures `RAISE NOTICE` stream and execution profile. |
 | **LISTEN / NOTIFY & Maintenance Ops** | `033-listen-notify-and-maintenance-ops` | Planned (`M6`) | Interactive pub/sub event stream monitor (`LISTEN`/`NOTIFY`); guided maintenance runner for `VACUUM`, `ANALYZE`, and `REINDEX CONCURRENTLY` with live progress from `pg_stat_progress_*`. |
 
@@ -206,7 +206,18 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 
 ### Feature 031: Roles, Privileges, and Row-Level Security (RLS) Auditor (`031-roles-privileges-and-rls-auditor`)
 
+**Status: Implemented on `main`.** The pure `src/audit/` security analysis engine, `Session::security_audit` extractor, `ignatius audit` CLI subcommand, and `Ctrl+K t` (`security-audit`) interactive TUI overlay are fully implemented.
+
 - **Objective:** Give security auditors and database administrators clear visibility into PostgreSQL authentication hierarchies, permission grants, and row-level security policies.
+- **TUI Experience (`Ctrl+K t` / `security-audit`):**
+  - Interactive Security & RLS Auditor overlay with dedicated section views toggled via `s` or `1`/`2`/`3`:
+    - `1` Roles & Memberships: role attributes (`LOGIN`, `SUPERUSER`, `BYPASSRLS`), connection limits, validity dates, and group inheritance.
+    - `2` Row-Level Security (RLS): relation RLS flags, policy definitions (`USING` / `WITH CHECK`), and missing-policy warnings.
+    - `3` Table Privilege Grants: tabular cross-reference of role permissions across relations.
+  - Interactive `Up`/`Down` navigation and row selection.
+  - `r` explicitly refreshes the live snapshot from `pg_catalog` and `information_schema`.
+  - `e` or `Enter` loads reviewed remediation / role / grant SQL (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY`, `ALTER ROLE`, `GRANT` / `REVOKE`) directly into the SQL editor buffer as an undoable edit (`Ctrl+Z`), with zero hidden writes.
+  - `Esc` closes the overlay without side effects.
 - **Role Hierarchy & Membership Browser:**
   - Visualizes role inheritance trees (`pg_roles` and `pg_auth_members`), highlighting superuser attributes, login permissions, bypass RLS rights, connection limits, and role validity dates.
 - **ACL Privilege Grant Matrix:**
@@ -223,9 +234,14 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 - **CLI Commands:**
   - Automated security and compliance audits:
     ```bash
-    ignatius audit roles "$DATABASE_URL" --format table
-    ignatius audit rls "$DATABASE_URL" --schema public --check-missing
-    ignatius audit grants "$DATABASE_URL" --table orders --role analyst_role
+    # Audit roles, table Row-Level Security (RLS) posture/policies, and privilege grants
+    ignatius audit "$DATABASE_URL"
+
+    # Focus on Row-Level Security policies in the public schema
+    ignatius audit "$DATABASE_URL" --section rls --schema public
+
+    # Export a machine-readable JSON security and compliance report atomically to disk
+    ignatius audit "$DATABASE_URL" --format json --output security-audit.json
     ```
 
 ---

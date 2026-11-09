@@ -229,9 +229,11 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
 - **`030-visual-schema-designer-and-migrations`**: Form-driven TUI builder for tables,
   columns, indexes and constraints with live DDL preview; dual-environment schema
   diffing; and deterministic transactional migration script generation (`BEGIN; ... COMMIT;`).
-- **`031-roles-privileges-and-rls-auditor`**: Visual browser for role inheritance,
+- **`031-roles-privileges-and-rls-auditor`** [Implemented]: Visual browser for role inheritance,
   object privilege ACL matrix, and Row-Level Security (`RLS`) policy auditing with
   missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL generation.
+  Its pure `src/audit/` engine, `Session::security_audit` extractor, `ignatius audit` CLI
+  subcommand, and interactive `Ctrl+K t` (`security-audit`) TUI overlay are implemented on `main`.
 - **`032-plpgsql-routine-runner-and-profiler`**: Discovery of function/procedure
   signatures, typed argument prompt harness, execution inside safe rollback savepoints,
   `RAISE NOTICE` stream capture, and per-step execution profiling.

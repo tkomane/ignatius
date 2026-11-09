@@ -241,6 +241,57 @@ pub enum Command {
 
     /// Inspect live server activity, lock blocker chains, and database health metrics.
     Activity(ActivityArgs),
+
+    /// Audit database roles, privilege grants, and Row-Level Security (RLS) policies.
+    Audit(AuditArgs),
+}
+
+/// Arguments for the audit command.
+#[derive(Debug, Args, Clone)]
+pub struct AuditArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Filter tables, policies, and grants to one schema.
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Limit output to a single audit section: roles, rls, or grants.
+    #[arg(long, value_enum)]
+    pub section: Option<CliAuditSection>,
+    /// Output format: table or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliActivityFormat::Table)]
+    pub format: CliActivityFormat,
+    /// Write the security audit report to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Audit section filter for the audit command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliAuditSection {
+    /// Overview of database roles, attributes, and group memberships.
+    Roles,
+    /// Row-Level Security (RLS) posture and policy definitions.
+    Rls,
+    /// Tabular privilege grants across relations.
+    Grants,
+}
+
+impl CliAuditSection {
+    /// Maps CLI audit section to domain audit section.
+    #[must_use]
+    pub const fn into_domain(self) -> crate::audit::AuditSection {
+        match self {
+            Self::Roles => crate::audit::AuditSection::Roles,
+            Self::Rls => crate::audit::AuditSection::RlsPolicies,
+            Self::Grants => crate::audit::AuditSection::Grants,
+        }
+    }
 }
 
 /// Arguments for the activity command.
@@ -727,6 +778,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Diagram(args)) => diagram_command(args, &paths, &presentation, out, err),
         Some(Command::Ddl(args)) => ddl_command(args, &paths, out, err),
         Some(Command::Activity(args)) => run_activity(args, &paths, &presentation, out, err),
+        Some(Command::Audit(args)) => run_audit(args, &paths, &presentation, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -1775,6 +1827,67 @@ fn run_activity(
             err,
             "Wrote server activity snapshot ({} backend(s)) to {}",
             snapshot.backends.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    } else {
+        out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    }
+}
+
+fn run_audit(
+    args: &AuditArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let snapshot = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let result = session.security_audit(args.schema.as_deref()).await;
+        drop(session);
+        result
+    })?;
+
+    let rendered = match args.format {
+        CliActivityFormat::Json => snapshot.render_json(),
+        CliActivityFormat::Table => snapshot.render_text(
+            args.section.map(CliAuditSection::into_domain),
+            presentation.glyphs != crate::ui::GlyphTier::Ascii,
+        ),
+    };
+
+    if let Some(ref destination) = args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "Wrote security audit report ({} role(s), {} table(s), {} grant(s)) to {}",
+            snapshot.roles.len(),
+            snapshot.tables.len(),
+            snapshot.grants.len(),
             destination.display()
         )
         .map_err(io_diagnostic)?;

@@ -318,6 +318,14 @@ impl Session {
         crate::postgres::metadata::server_activity(&self.client).await
     }
 
+    /// Reads the live roles, table Row-Level Security posture/policies, and privilege grants.
+    pub async fn security_audit(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::audit::SecurityAuditSnapshot, Diagnostic> {
+        crate::postgres::metadata::security_audit(&self.client, schema).await
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

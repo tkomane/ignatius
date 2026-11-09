@@ -1,5 +1,21 @@
 # Verification
 
+## Wave 21 (031-roles-privileges-and-rls-auditor) Delivery - 9 November 2026
+
+Wave 21 Feature `031-roles-privileges-and-rls-auditor` delivered the fourth Milestone 6
+full pgAdmin replacement parity slice:
+
+- **Wave 21 (`031-roles-privileges-and-rls-auditor`)**:
+  - Implemented pure `src/audit/` security analysis engine structuring role hierarchies,
+    ACL privilege matrices, and Row-Level Security (`RLS`) policy posture.
+  - Implemented `Session::security_audit` querying `pg_roles`, `pg_auth_members`, `pg_tables`,
+    `pg_policy`, and `information_schema.table_privileges`.
+  - Added the `ignatius audit` CLI subcommand with `--section roles|rls|grants`, `--schema`,
+    `--format table|json`, and atomic streaming export (`--output`).
+  - Added the interactive TUI Security & RLS Auditor overlay on `Ctrl+K t` (`security-audit`)
+    with `Up`/`Down` navigation, `s` or `1`/`2`/`3` section switching, `r` live snapshot refresh,
+    and `e`/`Enter` reviewed remediation / role / grant SQL drafting into the SQL editor buffer.
+
 ## Wave 20 (029-server-activity-and-locks-dashboard) and Wave 19 Delivery - 9 November 2026
 
 Pull request #61 (Wave 19) and Wave 20 Feature `029-server-activity-and-locks-dashboard` delivered
