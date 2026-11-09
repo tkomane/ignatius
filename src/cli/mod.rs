@@ -238,6 +238,40 @@ pub enum Command {
 
     /// Generate deterministic SQL DDL scripts for a schema or database object.
     Ddl(DdlArgs),
+
+    /// Inspect live server activity, lock blocker chains, and database health metrics.
+    Activity(ActivityArgs),
+}
+
+/// Arguments for the activity command.
+#[derive(Debug, Args, Clone)]
+pub struct ActivityArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Display the hierarchical lock blocker tree instead of the backend table.
+    #[arg(long)]
+    pub locks: bool,
+    /// Output format: table or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliActivityFormat::Table)]
+    pub format: CliActivityFormat,
+    /// Write the activity snapshot to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Output representation format for server activity and locks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliActivityFormat {
+    /// Tabular or hierarchical text representation.
+    Table,
+    /// Machine-readable JSON snapshot.
+    Json,
 }
 
 /// Arguments for the ddl command.
@@ -692,6 +726,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         ),
         Some(Command::Diagram(args)) => diagram_command(args, &paths, &presentation, out, err),
         Some(Command::Ddl(args)) => ddl_command(args, &paths, out, err),
+        Some(Command::Activity(args)) => run_activity(args, &paths, &presentation, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -1677,6 +1712,69 @@ fn ddl_command(
             err,
             "Wrote DDL ({} object(s)) to {}",
             bundle.objects.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    } else {
+        out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    }
+}
+
+fn run_activity(
+    args: &ActivityArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let snapshot = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let result = session.server_activity().await;
+        drop(session);
+        result
+    })?;
+
+    let rendered = match args.format {
+        CliActivityFormat::Json => snapshot.render_json(),
+        CliActivityFormat::Table => {
+            let mode = if args.locks {
+                crate::activity::ActivityViewMode::LocksTree
+            } else {
+                crate::activity::ActivityViewMode::Backends
+            };
+            snapshot.render_text(mode, presentation.glyphs != crate::ui::GlyphTier::Ascii)
+        }
+    };
+
+    if let Some(ref destination) = args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "Wrote server activity snapshot ({} backend(s)) to {}",
+            snapshot.backends.len(),
             destination.display()
         )
         .map_err(io_diagnostic)?;

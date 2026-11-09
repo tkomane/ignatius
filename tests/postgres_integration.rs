@@ -2881,3 +2881,101 @@ fn ddl_generator_reconstructs_enums_sequences_tables_constraints_indexes_trigger
         "sequence must be dropped before type"
     );
 }
+
+#[test]
+fn server_activity_captures_backends_and_lock_blocker_tree() {
+    let uri = target_or_skip!();
+    let fx_a = fixture(&uri);
+    let fx_b = fixture(&uri);
+
+    let setup_sql = "
+        CREATE TABLE IF NOT EXISTS activity_lock_test (id int PRIMARY KEY, val text);
+        INSERT INTO activity_lock_test (id, val) VALUES (1, 'init') ON CONFLICT (id) DO UPDATE SET val = 'init';
+    ";
+    let setup_res = fx_a.block_on(fx_a.session.execute(setup_sql, 100, JobId(9200)));
+    assert_eq!(
+        setup_res.status,
+        ExecutionStatus::Succeeded,
+        "setup table failed: {:?}",
+        setup_res.error
+    );
+
+    // In session A, begin a transaction and take an exclusive row lock
+    let lock_res = fx_a.block_on(fx_a.session.execute(
+        "BEGIN; UPDATE activity_lock_test SET val = 'locked' WHERE id = 1;",
+        100,
+        JobId(9201),
+    ));
+    assert_eq!(
+        lock_res.status,
+        ExecutionStatus::Succeeded,
+        "session A locking row failed: {:?}",
+        lock_res.error
+    );
+
+    // Spawn session B in background thread attempting to update the same row
+    let handle = std::thread::spawn(move || {
+        fx_b.block_on(fx_b.session.execute(
+            "UPDATE activity_lock_test SET val = 'waiting' WHERE id = 1;",
+            100,
+            JobId(9202),
+        ))
+    });
+
+    // Wait briefly so session B connects and waits on the row lock held by session A
+    std::thread::sleep(Duration::from_millis(250));
+
+    // Capture server activity from session A
+    let snapshot_res = fx_a.block_on(fx_a.session.server_activity());
+
+    // Release the lock in session A so session B can proceed
+    let rollback_res = fx_a.block_on(fx_a.session.execute("ROLLBACK;", 100, JobId(9203)));
+    assert_eq!(
+        rollback_res.status,
+        ExecutionStatus::Succeeded,
+        "session A rollback failed: {:?}",
+        rollback_res.error
+    );
+
+    // Wait for session B to complete
+    let bg_res = handle.join().expect("session B thread completed");
+    assert_eq!(
+        bg_res.status,
+        ExecutionStatus::Succeeded,
+        "session B query failed: {:?}",
+        bg_res.error
+    );
+
+    // Clean up test table
+    let _ = fx_a.block_on(fx_a.session.execute(
+        "DROP TABLE IF EXISTS activity_lock_test;",
+        100,
+        JobId(9204),
+    ));
+
+    let snapshot = snapshot_res.expect("server activity snapshot");
+
+    assert!(
+        !snapshot.backends.is_empty(),
+        "snapshot must contain backends"
+    );
+    assert!(
+        snapshot.metrics.active_connections >= 2,
+        "active connections >= 2: {}",
+        snapshot.metrics.active_connections
+    );
+
+    let tree = snapshot.lock_blocker_tree();
+    assert!(
+        !tree.is_empty(),
+        "lock blocker tree must not be empty during lock contention"
+    );
+    assert!(
+        tree.iter().any(|node| node.depth == 0),
+        "tree must contain a root blocker with depth 0: {tree:?}"
+    );
+    assert!(
+        tree.iter().any(|node| node.depth == 1),
+        "tree must contain a waiter with depth 1: {tree:?}"
+    );
+}

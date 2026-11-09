@@ -9669,3 +9669,206 @@ fn definition_overlay_activate_loads_ddl_into_editor() {
     update(&mut model, Message::Action(Action::Undo));
     assert_eq!(model.editor.text(), initial_editor_text);
 }
+
+fn sample_activity_snapshot() -> crate::activity::ServerActivitySnapshot {
+    use crate::activity::{BackendProcess, DatabaseHealthMetrics, ServerActivitySnapshot};
+    ServerActivitySnapshot {
+        metrics: DatabaseHealthMetrics {
+            database: "orders".into(),
+            active_connections: 4,
+            xact_commit: 1200,
+            xact_rollback: 5,
+            cache_hit_bps: 9942,
+            deadlocks: 0,
+            temp_bytes: 0,
+        },
+        backends: vec![
+            BackendProcess {
+                pid: 14201,
+                database: "orders".into(),
+                username: "analyst".into(),
+                application_name: "psql".into(),
+                client_addr: "127.0.0.1".into(),
+                state: "active".into(),
+                wait_event_type: Some("Lock".into()),
+                wait_event: Some("relation".into()),
+                query_age_ms: 5400,
+                xact_age_ms: Some(12000),
+                query: "SELECT * FROM orders FOR UPDATE;".into(),
+                blocked_by: vec![14200],
+                lock_summary: Some("relation public.orders ExclusiveLock".into()),
+                is_self: false,
+            },
+            BackendProcess {
+                pid: 14200,
+                database: "orders".into(),
+                username: "batch_job".into(),
+                application_name: "etl_runner".into(),
+                client_addr: "10.0.0.2".into(),
+                state: "idle in transaction".into(),
+                wait_event_type: Some("Client".into()),
+                wait_event: Some("ClientRead".into()),
+                query_age_ms: 15400,
+                xact_age_ms: Some(30000),
+                query: "UPDATE orders SET status = 'processing';".into(),
+                blocked_by: Vec::new(),
+                lock_summary: None,
+                is_self: false,
+            },
+        ],
+        truncated_from: None,
+    }
+}
+
+#[test]
+fn server_activity_requires_connection() {
+    let mut model = Model::new(100);
+    assert_eq!(model.connection, ConnectionState::Disconnected);
+
+    let effects = update(&mut model, Message::Action(Action::ServerActivity));
+    assert!(effects.is_empty(), "disconnected yields no effects");
+    assert!(model.server_activity.is_none(), "overlay remains closed");
+}
+
+#[test]
+fn server_activity_opens_and_dispatches_load_when_connected() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::ServerActivity));
+    assert_eq!(effects.len(), 1);
+    let request_id = match &effects[0] {
+        Effect::LoadServerActivity { request } => *request,
+        ref other => panic!("expected LoadServerActivity effect, got {other:?}"),
+    };
+
+    let act = model.server_activity.as_ref().expect("activity is open");
+    assert!(act.loading);
+    assert_eq!(model.server_activity_request, request_id);
+
+    // Stale response arrives (wrong request id)
+    let stale_effects = update(
+        &mut model,
+        Message::ServerActivityLoaded {
+            request: request_id + 999,
+            result: Box::new(Ok(sample_activity_snapshot())),
+        },
+    );
+    assert!(stale_effects.is_empty());
+    assert!(
+        model.server_activity.as_ref().unwrap().loading,
+        "stale response did not clear loading flag"
+    );
+
+    // Valid response arrives
+    let ok_effects = update(
+        &mut model,
+        Message::ServerActivityLoaded {
+            request: request_id,
+            result: Box::new(Ok(sample_activity_snapshot())),
+        },
+    );
+    assert!(ok_effects.is_empty());
+    let act = model.server_activity.as_ref().unwrap();
+    assert!(!act.loading);
+    assert_eq!(act.snapshot.backends.len(), 2);
+    assert!(!act.rendered_lines.is_empty());
+
+    // Toggle view mode between Backends and LocksTree
+    assert_eq!(act.mode, crate::activity::ActivityViewMode::Backends);
+    update(&mut model, Message::Action(Action::Insert('l')));
+    assert_eq!(
+        model.server_activity.as_ref().unwrap().mode,
+        crate::activity::ActivityViewMode::LocksTree
+    );
+    update(&mut model, Message::Action(Action::Insert('l')));
+    assert_eq!(
+        model.server_activity.as_ref().unwrap().mode,
+        crate::activity::ActivityViewMode::Backends
+    );
+
+    // Down/Up navigation
+    assert_eq!(model.server_activity.as_ref().unwrap().selected_backend, 0);
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(model.server_activity.as_ref().unwrap().selected_backend, 1);
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(model.server_activity.as_ref().unwrap().selected_backend, 0);
+
+    // Dismiss closes overlay
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.server_activity.is_none());
+}
+
+#[test]
+fn server_activity_drafts_cancel_and_terminate_sql_into_editor_with_undo() {
+    let mut model = connected();
+    let initial_editor_text = "SELECT 100;".to_owned();
+    model.editor.set_text(&initial_editor_text);
+
+    update(&mut model, Message::Action(Action::ServerActivity));
+    let request = model.server_activity_request;
+    update(
+        &mut model,
+        Message::ServerActivityLoaded {
+            request,
+            result: Box::new(Ok(sample_activity_snapshot())),
+        },
+    );
+
+    // Selected backend is PID 14201. Press 'c' to draft cancel SQL into editor
+    update(&mut model, Message::Action(Action::Insert('c')));
+    assert!(model.server_activity.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model.editor.text().contains("pg_cancel_backend(14201)"),
+        "drafts safe pg_cancel_backend: {}",
+        model.editor.text()
+    );
+    assert!(
+        model
+            .editor
+            .text()
+            .contains("CANCEL running query for PID 14201"),
+        "comment explains the action: {}",
+        model.editor.text()
+    );
+
+    // Undo restores prior editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(
+        model.editor.text(),
+        initial_editor_text,
+        "undo restores editor text"
+    );
+
+    // Open activity again, select second backend (PID 14200), press 'x' for terminate
+    update(&mut model, Message::Action(Action::ServerActivity));
+    let request2 = model.server_activity_request;
+    update(
+        &mut model,
+        Message::ServerActivityLoaded {
+            request: request2,
+            result: Box::new(Ok(sample_activity_snapshot())),
+        },
+    );
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    update(&mut model, Message::Action(Action::Insert('x')));
+
+    assert!(model.server_activity.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model.editor.text().contains("pg_terminate_backend(14200)"),
+        "drafts safe pg_terminate_backend: {}",
+        model.editor.text()
+    );
+    assert!(
+        model
+            .editor
+            .text()
+            .contains("TERMINATE session for PID 14200"),
+        "comment explains the action: {}",
+        model.editor.text()
+    );
+
+    // Undo restores prior editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_editor_text);
+}

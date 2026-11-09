@@ -19,6 +19,7 @@
 //! - [`history`] - what was run, and the rules about keeping it
 //! - [`platform`] - narrow macOS, Windows and Linux differences
 
+pub mod activity;
 pub mod app;
 pub mod branding;
 pub mod cli;

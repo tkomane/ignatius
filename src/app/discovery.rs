@@ -316,6 +316,7 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::ShowDefinition,
         Action::ShowDependencies,
         Action::SchemaDiagram,
+        Action::ServerActivity,
         Action::SaveQuery,
         Action::ExportRows,
         Action::OpenQuery,
@@ -479,6 +480,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         Action::SchemaDiagram => {
             model.connection.is_ready() || model.completion.catalog().is_some()
         }
+        Action::ServerActivity => model.connection.is_ready(),
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -625,6 +627,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
             }
         }
         Action::SchemaDiagram => "connect to a database first".to_owned(),
+        Action::ServerActivity => "connect to a database first".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
         | Action::Backspace
@@ -667,7 +670,7 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ShowDependencies
         | Action::SchemaDiagram => "Objects",
         Action::OpenQuery | Action::OpenHistory | Action::ToggleHistoryRecording => "Files/History",
-        Action::OpenConnectionPicker | Action::SwitchTheme => "Session",
+        Action::OpenConnectionPicker | Action::SwitchTheme | Action::ServerActivity => "Session",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

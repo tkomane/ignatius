@@ -220,10 +220,12 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
   for CSV, TSV, JSONL, SQL `INSERT` and Parquet; interactive column-mapping import
   wizard with transactional rollback; and subprocess-isolated `pg_dump`/`pg_restore`
   orchestration with credential redaction and live progress telemetry.
-- **`029-server-activity-and-locks-dashboard`**: Live server activity monitor
+- **`029-server-activity-and-locks-dashboard`** [Implemented]: Live server activity monitor
   (`pg_stat_activity`, `pg_locks`, `pg_stat_database`), hierarchical blocking PID
   tree, query age/wait event tracking, and guarded `pg_cancel_backend`/`pg_terminate_backend`
-  actions with explicit multi-step review.
+  actions with explicit multi-step review. Its pure `src/activity/` engine,
+  `Session::server_activity` extractor, `ignatius activity` CLI subcommand, and interactive
+  `Ctrl+K j` (`server-activity`) TUI dashboard overlay are implemented on `main`.
 - **`030-visual-schema-designer-and-migrations`**: Form-driven TUI builder for tables,
   columns, indexes and constraints with live DDL preview; dual-environment schema
   diffing; and deterministic transactional migration script generation (`BEGIN; ... COMMIT;`).

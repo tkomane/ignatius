@@ -25,8 +25,8 @@ use crate::ui::widgets::{
     render_connection_details, render_copy_confirmation, render_definition, render_editor,
     render_error, render_footer, render_header, render_help, render_inspector, render_name_prompt,
     render_objects, render_palette, render_parameter_prompt, render_password_prompt,
-    render_plan_confirmation, render_results, render_schema_diagram, render_update_review,
-    render_update_value_prompt,
+    render_plan_confirmation, render_results, render_schema_diagram, render_server_activity,
+    render_update_review, render_update_value_prompt,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -114,6 +114,9 @@ fn render_with(
     }
     if let Some(diagram) = &model.schema_diagram {
         render_schema_diagram(diagram, presentation, area, buf);
+    }
+    if let Some(activity) = &model.server_activity {
+        render_server_activity(activity, presentation, area, buf);
     }
     if model.help_open {
         render_help(model, presentation, area, buf);

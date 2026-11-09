@@ -4,6 +4,30 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 20 (029-server-activity-and-locks-dashboard) and Wave 19 Delivery - 9 November 2026
+
+Resume from `main` on branch `feat/029-server-activity-and-locks-dashboard`. Feature
+`029-server-activity-and-locks-dashboard` (the third M6 pgAdmin replacement parity slice)
+and Wave 19 ([PR61](https://github.com/tkomane/ignatius/pull/61), merged at `4b85a92`)
+have completed implementation and verification:
+
+- **Wave 19 ([PR61](https://github.com/tkomane/ignatius/pull/61), merged at `4b85a92`)**:
+  delivered Feature `027-deep-catalog-and-ddl-generator`: pure `src/ddl/` engine,
+  `Session::generate_ddl` `pg_catalog` extractor, `ignatius ddl` CLI subcommand, and
+  interactive TUI `Ctrl+K d` Definition overlay enhancements (Toggle DROP and Load in Editor).
+- **Wave 20 (`029-server-activity-and-locks-dashboard`)**:
+  delivered the third M6 full pgAdmin replacement slice:
+  - Pure `src/activity/` layout and hierarchy engine parsing `pg_stat_activity` backend
+    records, database health metrics (commits, rollbacks, cache hit ratio, deadlocks, temp files),
+    and building the multi-root hierarchical lock blocker tree (`LocksTree`).
+  - Live `pg_catalog` extraction via `Session::server_activity` querying `pg_stat_activity`,
+    `pg_locks`, and `pg_stat_database`.
+  - `ignatius activity` CLI subcommand with `--locks` blocker tree visualization,
+    `--format table|json`, and atomic streaming export (`--output`).
+  - Interactive TUI Server Activity & Locks Dashboard overlay on `Ctrl+K j` (`server-activity`):
+    `Up`/`Down` process selection, `l` table/tree view toggle, `r` live snapshot refresh,
+    and `c` (cancel backend) / `x` (terminate backend) drafted review scripts in the SQL editor.
+
 ## Wave 19 (027-deep-catalog-and-ddl-generator) and Wave 18 Delivery - 9 November 2026
 
 Resume from `main` on branch `feat/027-deep-catalog-and-ddl-generator`. Feature
