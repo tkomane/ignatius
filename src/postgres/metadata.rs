@@ -674,6 +674,22 @@ impl Definition {
             quote_identifier(&self.name)
         )
     }
+
+    /// Canonical `DROP ... IF EXISTS ... CASCADE;` statement for this object.
+    #[must_use]
+    pub fn drop_statement(&self) -> String {
+        crate::ddl::canonical_drop_statement(self.kind, &self.schema, &self.name, None)
+    }
+
+    /// Returns the definition text optionally prefixed by its `DROP ... IF EXISTS` statement.
+    #[must_use]
+    pub fn full_script(&self, include_drop: bool) -> String {
+        if include_drop {
+            format!("{}\n\n{}", self.drop_statement(), self.text)
+        } else {
+            self.text.clone()
+        }
+    }
 }
 
 /// Reads an object's definition.
@@ -737,6 +753,14 @@ pub async fn definition(client: &Client, object: &ObjectSummary) -> Result<Defin
                 name,
             )
             .await?,
+        ),
+        ObjectKind::Sequence => (
+            DefinitionSource::Assembled,
+            assemble_sequence(client, schema, name).await?,
+        ),
+        ObjectKind::Extension => (
+            DefinitionSource::Assembled,
+            assemble_extension(client, name).await?,
         ),
         _ => (
             DefinitionSource::Assembled,
@@ -866,7 +890,12 @@ async fn assemble_relation(
              FROM pg_catalog.pg_index i \
              JOIN pg_catalog.pg_class c ON c.oid = i.indrelid \
              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
-             WHERE n.nspname = $1 AND c.relname = $2 AND NOT i.indisprimary \
+             WHERE n.nspname = $1 AND c.relname = $2 \
+               AND NOT i.indisprimary \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM pg_catalog.pg_constraint con \
+                   WHERE con.conindid = i.indexrelid \
+               ) \
              ORDER BY i.indexrelid",
             &[&schema, &relation],
         )
@@ -880,7 +909,113 @@ async fn assemble_relation(
         }
     }
 
+    let triggers = client
+        .query(
+            "SELECT pg_catalog.pg_get_triggerdef(t.oid, true)::text AS definition \
+             FROM pg_catalog.pg_trigger t \
+             JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 AND NOT t.tgisinternal \
+             ORDER BY t.tgname",
+            &[&schema, &relation],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    if !triggers.is_empty() {
+        text.push('\n');
+        for row in &triggers {
+            let definition: String = row.get("definition");
+            text.push_str(&format!("{definition};\n"));
+        }
+    }
+
     Ok(text)
+}
+
+/// Assembles a `CREATE SEQUENCE` statement from `pg_sequence`.
+async fn assemble_sequence(
+    client: &Client,
+    schema: &str,
+    sequence: &str,
+) -> Result<String, Diagnostic> {
+    let rows = client
+        .query(
+            "SELECT pg_catalog.format_type(s.seqtypid, NULL)::text AS data_type, \
+                    s.seqstart AS start_value, \
+                    s.seqincrement AS increment_by, \
+                    s.seqmin AS min_value, \
+                    s.seqmax AS max_value, \
+                    s.seqcache AS cache_size, \
+                    s.seqcycle AS is_cycled \
+             FROM pg_catalog.pg_sequence s \
+             JOIN pg_catalog.pg_class c ON c.oid = s.seqrelid \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2",
+            &[&schema, &sequence],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let row = rows.first().ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Query,
+            format!(
+                "no sequence definition for {}.{}",
+                quote_identifier(schema),
+                quote_identifier(sequence)
+            ),
+            "reading a sequence definition",
+        )
+        .likely_cause("the sequence does not exist, or the role may not see it")
+        .next_action("reload the object tree")
+    })?;
+    Ok(format!(
+        "{}\n",
+        crate::ddl::format_sequence_ddl(crate::ddl::SequenceDdlSpec {
+            schema,
+            name: sequence,
+            data_type: &row.get::<_, String>("data_type"),
+            start_value: row.get::<_, i64>("start_value"),
+            increment_by: row.get::<_, i64>("increment_by"),
+            min_value: row.get::<_, i64>("min_value"),
+            max_value: row.get::<_, i64>("max_value"),
+            cache_size: row.get::<_, i64>("cache_size"),
+            is_cycled: row.get::<_, bool>("is_cycled"),
+        })
+    ))
+}
+
+/// Assembles a `CREATE EXTENSION` statement from `pg_extension`.
+async fn assemble_extension(client: &Client, extension: &str) -> Result<String, Diagnostic> {
+    let rows = client
+        .query(
+            "SELECT e.extname::text AS name, e.extversion::text AS version, n.nspname::text AS schema \
+             FROM pg_catalog.pg_extension e \
+             JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace \
+             WHERE e.extname = $1",
+            &[&extension],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let row = rows.first().ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Query,
+            format!(
+                "no extension definition for {}",
+                quote_identifier(extension)
+            ),
+            "reading an extension definition",
+        )
+        .likely_cause("the extension is not installed")
+        .next_action("reload the object tree")
+    })?;
+    let ext_schema: String = row.get("schema");
+    let ext_version: String = row.get("version");
+    Ok(format!(
+        "CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA {} VERSION '{}';\n",
+        quote_identifier(extension),
+        quote_identifier(&ext_schema),
+        ext_version.replace('\'', "''")
+    ))
 }
 
 /// What an object needs, and what needs it.
@@ -1185,6 +1320,214 @@ pub async fn schema_graph(
     Ok(SchemaGraph {
         tables,
         edges,
+        truncated_from: None,
+    }
+    .bounded())
+}
+
+/// Generates a deterministic [`crate::ddl::DdlBundle`] for either one named object
+/// (`object = Some(...)`) or all user objects in `schema` (`027-deep-catalog-and-ddl-generator`).
+pub async fn generate_ddl(
+    client: &Client,
+    schema: &str,
+    object: Option<&str>,
+) -> Result<crate::ddl::DdlBundle, Diagnostic> {
+    use crate::ddl::{
+        DdlBundle, DdlCategory, DdlObject, canonical_drop_statement, format_enum_ddl,
+        format_sequence_ddl,
+    };
+
+    let mut objects: Vec<DdlObject> = Vec::new();
+
+    // 1. Custom ENUM types in schema
+    let enum_rows = client
+        .query(
+            "SELECT t.typname::text AS name, \
+                    ARRAY( \
+                        SELECT e.enumlabel::text \
+                        FROM pg_catalog.pg_enum e \
+                        WHERE e.enumtypid = t.oid \
+                        ORDER BY e.enumsortorder \
+                    ) AS labels \
+             FROM pg_catalog.pg_type t \
+             JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace \
+             WHERE n.nspname = $1 \
+               AND t.typtype = 'e' \
+               AND ($2::text IS NULL OR t.typname::text = $2::text) \
+             ORDER BY t.typname",
+            &[&schema, &object],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    for row in &enum_rows {
+        let name: String = row.get("name");
+        let labels: Vec<String> = row.get("labels");
+        objects.push(DdlObject {
+            category: DdlCategory::Type,
+            kind: ObjectKind::Table,
+            schema: schema.to_owned(),
+            name: name.clone(),
+            drop_statement: format!(
+                "DROP TYPE IF EXISTS {}.{} CASCADE;",
+                quote_identifier(schema),
+                quote_identifier(&name)
+            ),
+            create_statement: format_enum_ddl(schema, &name, &labels),
+            dependent_statements: Vec::new(),
+        });
+    }
+
+    // 2. Sequences in schema (when requested directly or for whole-schema export)
+    let seq_rows = client
+        .query(
+            "SELECT c.relname::text AS name, \
+                    pg_catalog.format_type(s.seqtypid, NULL)::text AS data_type, \
+                    s.seqstart AS start_value, \
+                    s.seqincrement AS increment_by, \
+                    s.seqmin AS min_value, \
+                    s.seqmax AS max_value, \
+                    s.seqcache AS cache_size, \
+                    s.seqcycle AS is_cycled \
+             FROM pg_catalog.pg_sequence s \
+             JOIN pg_catalog.pg_class c ON c.oid = s.seqrelid \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 \
+               AND ($2::text IS NULL OR c.relname::text = $2::text) \
+             ORDER BY c.relname",
+            &[&schema, &object],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    for row in &seq_rows {
+        let name: String = row.get("name");
+        objects.push(DdlObject {
+            category: DdlCategory::Sequence,
+            kind: ObjectKind::Sequence,
+            schema: schema.to_owned(),
+            name: name.clone(),
+            drop_statement: canonical_drop_statement(ObjectKind::Sequence, schema, &name, None),
+            create_statement: format_sequence_ddl(crate::ddl::SequenceDdlSpec {
+                schema,
+                name: &name,
+                data_type: &row.get::<_, String>("data_type"),
+                start_value: row.get::<_, i64>("start_value"),
+                increment_by: row.get::<_, i64>("increment_by"),
+                min_value: row.get::<_, i64>("min_value"),
+                max_value: row.get::<_, i64>("max_value"),
+                cache_size: row.get::<_, i64>("cache_size"),
+                is_cycled: row.get::<_, bool>("is_cycled"),
+            }),
+            dependent_statements: Vec::new(),
+        });
+    }
+
+    // 3. Relations (Tables, Partitioned Tables, Foreign Tables, Views, Materialized Views, standalone Indexes)
+    let rel_rows = client
+        .query(
+            "SELECT c.relname::text AS name, c.relkind::text AS relkind \
+             FROM pg_catalog.pg_class c \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 \
+               AND c.relkind IN ('r', 'p', 'f', 'v', 'm', 'i') \
+               AND ($2::text IS NULL OR c.relname::text = $2::text) \
+             ORDER BY c.relname",
+            &[&schema, &object],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+
+    for row in &rel_rows {
+        let name: String = row.get("name");
+        let relkind: String = row.get("relkind");
+        let Some(kind) = ObjectKind::from_relkind(&relkind) else {
+            continue;
+        };
+        // In whole-schema mode, skip standalone indexes because table DDL already includes them.
+        if object.is_none() && kind == ObjectKind::Index {
+            continue;
+        }
+        let summary = ObjectSummary {
+            kind,
+            schema: schema.to_owned(),
+            name: name.clone(),
+            readable: true,
+            detail: None,
+        };
+        let def = definition(client, &summary).await?;
+        let category = match kind {
+            ObjectKind::View | ObjectKind::MaterializedView => DdlCategory::View,
+            ObjectKind::Index => DdlCategory::Index,
+            _ => DdlCategory::Table,
+        };
+        objects.push(DdlObject {
+            category,
+            kind,
+            schema: schema.to_owned(),
+            name: name.clone(),
+            drop_statement: canonical_drop_statement(kind, schema, &name, None),
+            create_statement: def.text,
+            dependent_statements: Vec::new(),
+        });
+    }
+
+    // 4. Functions & Procedures (supporting overloaded signatures)
+    let fn_rows = client
+        .query(
+            "SELECT p.proname::text AS name, \
+                    pg_catalog.pg_get_functiondef(p.oid)::text AS definition, \
+                    pg_catalog.pg_get_function_identity_arguments(p.oid)::text AS identity_args \
+             FROM pg_catalog.pg_proc p \
+             JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname = $1 \
+               AND p.prokind IN ('f', 'p') \
+               AND ($2::text IS NULL OR p.proname::text = $2::text) \
+             ORDER BY p.proname, p.oid",
+            &[&schema, &object],
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    for row in &fn_rows {
+        let name: String = row.get("name");
+        let Some(def_text) = row.get::<_, Option<String>>("definition") else {
+            continue;
+        };
+        let identity_args: String = row.get("identity_args");
+        objects.push(DdlObject {
+            category: DdlCategory::Routine,
+            kind: ObjectKind::Function,
+            schema: schema.to_owned(),
+            name: name.clone(),
+            drop_statement: canonical_drop_statement(
+                ObjectKind::Function,
+                schema,
+                &name,
+                Some(&identity_args),
+            ),
+            create_statement: def_text,
+            dependent_statements: Vec::new(),
+        });
+    }
+
+    if let Some(target_name) = object
+        && objects.is_empty()
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Query,
+            format!(
+                "no DDL definition found for {}.{}",
+                quote_identifier(schema),
+                quote_identifier(target_name)
+            ),
+            "generating object DDL",
+        )
+        .likely_cause("the object does not exist in that schema, or the role may not see it")
+        .next_action("check the schema and object name with ignatius query or the object tree"));
+    }
+
+    Ok(DdlBundle {
+        schema: schema.to_owned(),
+        target_object: object.map(str::to_owned),
+        objects,
         truncated_from: None,
     }
     .bounded())

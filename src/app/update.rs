@@ -1507,6 +1507,7 @@ fn show_definition(model: &mut Model) -> Vec<Effect> {
         definition: None,
         error: None,
         scroll: 0,
+        include_drop: false,
     });
     vec![Effect::LoadDefinition {
         request,
@@ -1593,6 +1594,32 @@ fn definition_action(model: &mut Model, action: Action) -> Vec<Effect> {
             if let Some(open) = model.definition.as_mut() {
                 for _ in 0..step {
                     open.scroll_up();
+                }
+            }
+        }
+        Action::Insert('d' | 'D') => {
+            if let Some(open) = model.definition.as_mut()
+                && open.definition.is_some()
+            {
+                open.include_drop = !open.include_drop;
+                open.scroll = 0;
+            }
+        }
+        Action::Activate | Action::Insert('e' | 'E') => {
+            if model
+                .definition
+                .as_ref()
+                .is_some_and(|open| open.definition.is_some())
+            {
+                let Some(open) = model.definition.take() else {
+                    return Vec::new();
+                };
+                if let Some(definition) = open.definition {
+                    let script = definition.full_script(open.include_drop);
+                    edit_editor(model, |editor| {
+                        editor.set_text(script);
+                    });
+                    model.focus = Focus::Editor;
                 }
             }
         }

@@ -25,6 +25,7 @@ pub mod cli;
 pub mod clipboard;
 pub mod config;
 pub mod connection;
+pub mod ddl;
 pub mod diagnostics;
 pub mod diagram;
 pub mod exit_code;

@@ -210,10 +210,12 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
   filtering, and deterministic Mermaid/DOT/SVG/ASCII/Unicode diagram export (`ignatius diagram`).
   Its pure `src/diagram/` engine, `pg_catalog` foreign-key graph extractor
   (`Session::schema_graph`), CLI subcommand, and interactive TUI overlay are implemented on `main`.
-- **`027-deep-catalog-and-ddl-generator`**: Full `pg_catalog` inspection across
+- **`027-deep-catalog-and-ddl-generator`** [Implemented]: Full `pg_catalog` inspection across
   indexes, constraints, triggers, sequences, enums, composite types, partitions,
   FDWs and tablespaces, with deterministic `CREATE`/`ALTER`/`DROP` DDL generation
-  into the editor buffer or CLI (`ignatius ddl`).
+  into the editor buffer or CLI (`ignatius ddl`). Its pure `src/ddl/` engine,
+  `Session::generate_ddl` extractor, CLI subcommand, and interactive `Ctrl+K d`
+  DDL overlay (with Toggle DROP and Load in Editor) are implemented on `main`.
 - **`028-data-import-export-and-backup`**: High-throughput streaming `COPY` import/export
   for CSV, TSV, JSONL, SQL `INSERT` and Parquet; interactive column-mapping import
   wizard with transactional rollback; and subprocess-isolated `pg_dump`/`pg_restore`

@@ -47,7 +47,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 | **Visual Explain / Analyze** | `016-explain-analyze-plan-viewer` | Merged (`M0-M5`) | Interactive plan tree (`Ctrl+K l` / `Ctrl+K a`), estimated vs actual cost/timing breakdown, buffer hit tracking, and automatic expensive-node highlighting. |
 | **Object Explorer (Catalog Tree)** | `001-foundation-vertical-slice`<br>`025-gui-grade-experience`<br>`027-deep-catalog-and-ddl-generator` | Core Merged (`M0-M5`), Deep Catalog Planned (`M6`) | Neo-tree style hierarchical sidebar (`Ctrl+B`), instant fuzzy filtering (`/`), full `pg_catalog` entity inspection, and deterministic DDL generation (`Ctrl+K d`). |
 | **Schema & ERD Visualizer** | `026-schema-er-diagrams` | Implemented (`M6`) | Interactive terminal ERD canvas (`Ctrl+K m`), orthogonal box-drawing/Braille connectors, neighbourhood focus (1-hop / 2-hop), pure `src/diagram/` engine, `Session::schema_graph`, and CLI exporter (`ignatius diagram --format mermaid|dot|svg|ascii|unicode`). |
-| **DDL Script Generator** | `027-deep-catalog-and-ddl-generator` | Planned (`M6`) | Reconstructs complete, deterministic `CREATE` / `ALTER` / `DROP` DDL from `pg_catalog` for all object types; opens into SQL editor buffer or CLI (`ignatius ddl <object>`). |
+| **DDL Script Generator** | `027-deep-catalog-and-ddl-generator` | Implemented (`M6`) | Reconstructs complete, deterministic `CREATE` / `ALTER` / `DROP` DDL from `pg_catalog` for all object types; opens into interactive `Ctrl+K d` overlay (with Toggle DROP and Load in Editor) or CLI (`ignatius ddl`). |
 | **Import / Export Wizard** | `021-format-first-export`<br>`028-data-import-export-and-backup` | Retained Export Merged (`M0-M5`), Streaming COPY & Import Planned (`M6`) | Streaming `COPY ... TO STDOUT` / `FROM STDIN` for CSV, TSV, JSONL, SQL `INSERT`, and Parquet; interactive TUI import column mapper; transactional rollback on error; CLI streaming export (`--output`). |
 | **Backup and Restore** | `028-data-import-export-and-backup` | Planned (`M6`) | Subprocess-isolated orchestration of `pg_dump` and `pg_restore` with dry-run command inspection, credential redaction, and bounded progress telemetry. |
 | **Server Activity & Locks Dashboard** | `029-server-activity-and-locks-dashboard` | Planned (`M6`) | Dedicated live dashboard tracking `pg_stat_activity`, `pg_locks`, blocking PID tree, query age, wait events, and guarded `pg_cancel_backend` / `pg_terminate_backend`. |
@@ -87,6 +87,8 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 ---
 
 ### Feature 027: Deep Catalog and DDL Inspector/Generator (`027-deep-catalog-and-ddl-generator`)
+
+**Status: Implemented on `main`.** The pure `src/ddl/` engine, `pg_catalog` extractor (`Session::generate_ddl`), `ignatius ddl` CLI subcommand, and `Ctrl+K d` DDL overlay (with Toggle DROP and Load in Editor) are fully implemented.
 
 - **Objective:** Provide exhaustive inspection and complete DDL script generation for every database object type supported by PostgreSQL.
 - **Catalog Entity Expansion:**

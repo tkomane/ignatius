@@ -260,6 +260,7 @@ fn density_overlay_models() -> Vec<(&'static str, Model)> {
         definition: None,
         error: None,
         scroll: 0,
+        include_drop: false,
     });
     cases.push(("definition", m));
     let mut m = base.clone();
@@ -1573,6 +1574,7 @@ fn a_definition_is_shown_as_sql_with_where_it_came_from() {
         }),
         error: None,
         scroll: 0,
+        include_drop: false,
     });
 
     let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
@@ -1615,6 +1617,7 @@ fn a_definition_says_it_is_loading_and_says_when_it_failed() {
         definition: None,
         error: None,
         scroll: 0,
+        include_drop: false,
     });
     let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
     assert!(text.contains("Reading the catalogue"), "{text}");
@@ -1626,6 +1629,7 @@ fn a_definition_says_it_is_loading_and_says_when_it_failed() {
         definition: None,
         error: Some("permission denied for table orders".to_owned()),
         scroll: 0,
+        include_drop: false,
     });
     let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
     assert!(text.contains("permission denied"), "{text}");
@@ -1650,6 +1654,7 @@ fn a_long_definition_scrolls_and_says_where_it_is() {
         }),
         error: None,
         scroll: 10,
+        include_drop: false,
     });
     let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 34);
     assert!(text.contains("column_11"), "the window moved: {text}");

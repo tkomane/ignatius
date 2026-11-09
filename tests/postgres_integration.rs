@@ -2731,3 +2731,153 @@ fn schema_graph_extracts_primary_keys_foreign_keys_and_cardinality_from_pg_catal
 fn diagram_schema_graph_extracts_primary_keys_foreign_keys_and_cardinality_from_pg_catalog() {
     verify_schema_graph_cardinality("er_graph_diagram_test");
 }
+
+#[test]
+fn ddl_generator_reconstructs_enums_sequences_tables_constraints_indexes_triggers_and_views() {
+    use ignatius::ddl::DdlCategory;
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let setup_sql = "
+        DROP SCHEMA IF EXISTS ddl_test_schema CASCADE;
+        CREATE SCHEMA ddl_test_schema;
+        CREATE TYPE ddl_test_schema.ticket_status AS ENUM ('open', 'closed');
+        CREATE SEQUENCE ddl_test_schema.ticket_seq START WITH 100 INCREMENT BY 5;
+        CREATE TABLE ddl_test_schema.tickets (
+            id bigint PRIMARY KEY DEFAULT nextval('ddl_test_schema.ticket_seq'),
+            code text UNIQUE NOT NULL,
+            status ddl_test_schema.ticket_status NOT NULL DEFAULT 'open'
+        );
+        CREATE INDEX idx_tickets_status ON ddl_test_schema.tickets (status);
+        CREATE OR REPLACE FUNCTION ddl_test_schema.touch_ticket() RETURNS trigger AS $$
+        BEGIN
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER trg_tickets_update BEFORE UPDATE ON ddl_test_schema.tickets
+            FOR EACH ROW EXECUTE FUNCTION ddl_test_schema.touch_ticket();
+        CREATE VIEW ddl_test_schema.open_tickets AS
+            SELECT id, code FROM ddl_test_schema.tickets WHERE status = 'open';
+    ";
+    let setup_res = fx.block_on(fx.session.execute(setup_sql, 100, JobId(9101)));
+    assert_eq!(
+        setup_res.status,
+        ExecutionStatus::Succeeded,
+        "setup failed: {:?}",
+        setup_res.error
+    );
+
+    let schema_res = fx.block_on(fx.session.generate_ddl("ddl_test_schema", None));
+    let table_res = fx.block_on(fx.session.generate_ddl("ddl_test_schema", Some("tickets")));
+
+    // Clean up schema after retrieving DDL bundles
+    let _ = fx.block_on(fx.session.execute(
+        "DROP SCHEMA IF EXISTS ddl_test_schema CASCADE;",
+        100,
+        JobId(9102),
+    ));
+
+    let schema_bundle = schema_res.expect("schema ddl");
+    let table_bundle = table_res.expect("table ddl");
+
+    // Assert schema bundle contents
+    assert!(
+        schema_bundle
+            .objects
+            .iter()
+            .any(|o| o.name == "ticket_status" && o.category == DdlCategory::Type),
+        "schema bundle must contain ticket_status enum"
+    );
+    assert!(
+        schema_bundle
+            .objects
+            .iter()
+            .any(|o| o.name == "ticket_seq" && o.category == DdlCategory::Sequence),
+        "schema bundle must contain ticket_seq sequence"
+    );
+    assert!(
+        schema_bundle
+            .objects
+            .iter()
+            .any(|o| o.name == "tickets" && o.category == DdlCategory::Table),
+        "schema bundle must contain tickets table"
+    );
+    assert!(
+        schema_bundle
+            .objects
+            .iter()
+            .any(|o| o.name == "open_tickets" && o.category == DdlCategory::View),
+        "schema bundle must contain open_tickets view"
+    );
+    assert!(
+        schema_bundle
+            .objects
+            .iter()
+            .any(|o| o.name == "touch_ticket" && o.category == DdlCategory::Routine),
+        "schema bundle must contain touch_ticket trigger function"
+    );
+
+    // Assert table-focused bundle
+    assert_eq!(table_bundle.objects.len(), 1, "table bundle has 1 object");
+    let tickets_obj = &table_bundle.objects[0];
+    assert_eq!(tickets_obj.name, "tickets");
+    assert!(
+        tickets_obj.create_statement.contains("PRIMARY KEY"),
+        "create statement includes primary key: {}",
+        tickets_obj.create_statement
+    );
+    assert!(
+        tickets_obj.create_statement.contains("UNIQUE"),
+        "create statement includes unique constraint: {}",
+        tickets_obj.create_statement
+    );
+    assert!(
+        tickets_obj.create_statement.contains("idx_tickets_status"),
+        "secondary index in table create statement: {}",
+        tickets_obj.create_statement
+    );
+    assert!(
+        tickets_obj.create_statement.contains("trg_tickets_update"),
+        "trigger in table create statement: {}",
+        tickets_obj.create_statement
+    );
+    // Verify no duplicate constraint-backing index
+    assert!(
+        !tickets_obj
+            .create_statement
+            .contains("CREATE UNIQUE INDEX tickets_pkey"),
+        "primary key index must not be duplicated as separate index statement"
+    );
+
+    // Assert render_sql with drop statements in reverse dependency order
+    let rendered_with_drop = schema_bundle.render_sql(true);
+    let drop_fn_pos = rendered_with_drop
+        .find("DROP FUNCTION IF EXISTS")
+        .expect("contains DROP FUNCTION");
+    let drop_view_pos = rendered_with_drop
+        .find("DROP VIEW IF EXISTS")
+        .expect("contains DROP VIEW");
+    let drop_table_pos = rendered_with_drop
+        .find("DROP TABLE IF EXISTS")
+        .expect("contains DROP TABLE");
+    let drop_seq_pos = rendered_with_drop
+        .find("DROP SEQUENCE IF EXISTS")
+        .expect("contains DROP SEQUENCE");
+    let drop_type_pos = rendered_with_drop
+        .find("DROP TYPE IF EXISTS")
+        .expect("contains DROP TYPE");
+
+    assert!(
+        drop_fn_pos < drop_view_pos || drop_view_pos < drop_table_pos,
+        "views and functions must be dropped before tables"
+    );
+    assert!(
+        drop_table_pos < drop_seq_pos,
+        "table must be dropped before sequence"
+    );
+    assert!(
+        drop_seq_pos < drop_type_pos,
+        "sequence must be dropped before type"
+    );
+}

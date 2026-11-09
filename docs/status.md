@@ -1,8 +1,33 @@
 # Status
 
-**Updated: 2026-11-08.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-09.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 19 (027-deep-catalog-and-ddl-generator) and Wave 18 Delivery - 9 November 2026
+
+Resume from `main` on branch `feat/027-deep-catalog-and-ddl-generator`. Feature
+`027-deep-catalog-and-ddl-generator` (the second M6 pgAdmin replacement parity slice)
+and Wave 18 ([PR60](https://github.com/tkomane/ignatius/pull/60), merged at `8d460b9`)
+have completed implementation and verification:
+
+- **Wave 18 ([PR60](https://github.com/tkomane/ignatius/pull/60), merged at `8d460b9`)**:
+  delivered Feature `026-schema-er-diagrams`: pure `src/diagram/` layout engine,
+  `Session::schema_graph` extractor, `ignatius diagram` CLI exporter (`mermaid`,
+  `dot`, `svg`, `ascii`, `unicode`), and `Ctrl+K m` interactive TUI ER diagram
+  overlay with neighbourhood filtering (`1-hop`/`2-hop`), with all 16 hosted
+  GitHub Actions CI and CodeQL checks passing on `main`.
+- **Wave 19 (`027-deep-catalog-and-ddl-generator`)**:
+  delivered the second M6 full pgAdmin replacement slice:
+  - Pure `src/ddl/` synthesis engine generating deterministic PostgreSQL DDL
+    scripts across enums, sequences, tables (with primary/foreign keys, unique/check
+    constraints, non-duplicate secondary indexes, and triggers), views, materialized
+    views, overloaded routines (functions/procedures), and extensions.
+  - Live `pg_catalog` metadata extraction via `Session::generate_ddl`.
+  - `ignatius ddl` CLI subcommand (`--schema`, `--object`, `--drop`, `--output`, `--force`).
+  - Interactive TUI Definition / DDL overlay enhancements on `Ctrl+K d` (`show-definition`):
+    `d` to Toggle DROP (`DROP ... IF EXISTS ... CASCADE;`) and `e` / `Enter` to Load in
+    Editor as an undoable edit buffer.
 
 ## Wave 18 (026-schema-er-diagrams) and Waves 16-17 Delivery - 8 November 2026
 
