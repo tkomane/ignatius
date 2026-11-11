@@ -398,8 +398,33 @@ ignatius diff "$DATABASE_URL" --source-schema public --target-schema reporting
 ignatius diff "$DATABASE_URL" --source-schema public --target-schema reporting --format tree
 ignatius diff "$DATABASE_URL" --source-schema public --target-schema reporting --format json --output diff.json
 
+# Streaming data import (CSV, TSV, JSONL) with transactional safety
+ignatius import "$DATABASE_URL" orders data.csv --delimiter ',' --header
+ignatius import "$DATABASE_URL" logs events.jsonl --format jsonl
+
+# Streaming data export to stdout or constant-memory file output
+ignatius export "$DATABASE_URL" -c "SELECT * FROM orders" --format csv --output orders.csv
+ignatius export "$DATABASE_URL" --table users --format jsonl
+
+# Subprocess-isolated backup and restore via pg_dump/pg_restore with credential redaction
+ignatius backup "$DATABASE_URL" backup.dump --format custom
+ignatius restore "$DATABASE_URL" backup.dump --clean
+
+# Safe testing harness execution and profiling of PL/pgSQL routines
+ignatius run-routine "$DATABASE_URL" process_order -a 42 -a "expedited" --rollback
+ignatius profile-routine "$DATABASE_URL" calculate_tax --format json
+
+# Asynchronous LISTEN/NOTIFY event monitoring and dispatch
+ignatius listen "$DATABASE_URL" order_events --timeout 30 --format jsonl
+ignatius notify "$DATABASE_URL" order_events "order #1042 placed"
+
+# Guarded database maintenance and live progress telemetry
+ignatius maintain "$DATABASE_URL" vacuum --target orders --analyze
+ignatius maintain "$DATABASE_URL" reindex --target orders --concurrently
+ignatius maintain "$DATABASE_URL" progress --format table
+
 # Shell completion generator
-ignatius completions zsh > ~/.zfunc/_ignatius
+ignatius completion zsh > ~/.zfunc/_ignatius
 ```
 
 ### Process Exit Codes
