@@ -757,6 +757,43 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::ImportPreviewLoaded { request, result } => {
+            if request != model.import_wizard_request {
+                return Vec::new();
+            }
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.loading = false;
+                match *result {
+                    Ok(prev) => {
+                        wizard.preview = Some(prev);
+                        wizard.error = None;
+                        wizard.rebuild_sql();
+                    }
+                    Err(diagnostic) => {
+                        wizard.error = Some(diagnostic.headline);
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::ImportExecuted { request, result } => {
+            if request != model.import_wizard_request {
+                return Vec::new();
+            }
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.loading = false;
+                match *result {
+                    Ok(res) => {
+                        wizard.result = Some(res);
+                        wizard.error = None;
+                    }
+                    Err(diagnostic) => {
+                        wizard.error = Some(diagnostic.headline);
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1024,6 +1061,7 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.server_activity.is_some()
         || model.security_audit.is_some()
         || model.schema_diff.is_some()
+        || model.import_wizard.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1120,6 +1158,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.schema_diff.is_some() {
         return schema_diff_action(model, action);
+    }
+    if model.import_wizard.is_some() {
+        return import_wizard_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1287,6 +1328,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ServerActivity => server_activity_open(model),
         Action::SecurityAudit => security_audit_open(model),
         Action::SchemaDiff => schema_diff_open(model),
+        Action::ImportData => import_wizard_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -2184,7 +2226,166 @@ fn schema_diff_action(model: &mut Model, action: Action) -> Vec<Effect> {
     Vec::new()
 }
 
-/// The statements that have run, as palette entries.
+fn import_wizard_open(model: &mut Model) -> Vec<Effect> {
+    if model.import_wizard.is_some() {
+        model.import_wizard = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    let table = if let Some(selected) = model.tree.selected_row() {
+        selected.label
+    } else {
+        "orders".to_owned()
+    };
+    let schema = "public".to_owned();
+    let mut state = crate::app::model::ImportWizardState::new(schema.clone(), table.clone());
+    let file_path = format!("{table}.csv");
+    state.file_path = file_path.clone();
+    state.rebuild_sql();
+    model.import_wizard_request = model.import_wizard_request.wrapping_add(1);
+    let request = model.import_wizard_request;
+    state.loading = true;
+    model.import_wizard = Some(state);
+    vec![Effect::LoadImportPreview {
+        request,
+        file_path,
+        schema,
+        table,
+    }]
+}
+
+/// Handles input while the bulk data import wizard overlay is on screen.
+fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ImportData => {
+            model.import_wizard = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(wizard) = &mut model.import_wizard {
+                if wizard.step == crate::app::model::ImportWizardStep::ColumnMapping {
+                    wizard.move_column_selection(-1);
+                } else {
+                    wizard.scroll_y = wizard.scroll_y.saturating_sub(1);
+                }
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(wizard) = &mut model.import_wizard {
+                if wizard.step == crate::app::model::ImportWizardStep::ColumnMapping {
+                    wizard.move_column_selection(1);
+                } else {
+                    wizard.scroll_y = wizard.scroll_y.saturating_add(1);
+                }
+            }
+        }
+        Action::Insert(' ') => {
+            if let Some(wizard) = model
+                .import_wizard
+                .as_mut()
+                .filter(|w| w.step == crate::app::model::ImportWizardStep::ColumnMapping)
+            {
+                wizard.toggle_column_skip();
+            }
+        }
+        Action::Insert('d' | 'D') => {
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.dry_run = !wizard.dry_run;
+                wizard.rebuild_sql();
+            }
+        }
+        Action::Insert('s' | 'S') | Action::FocusNext => {
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.step = wizard.step.next();
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.step = crate::app::model::ImportWizardStep::SourceFile;
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.step = crate::app::model::ImportWizardStep::ColumnMapping;
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(wizard) = &mut model.import_wizard {
+                wizard.step = crate::app::model::ImportWizardStep::Execute;
+            }
+        }
+        Action::Insert('r' | 'R') | Action::ReloadObjects | Action::RefreshResult => {
+            if model.connection.is_ready() {
+                model.import_wizard_request = model.import_wizard_request.wrapping_add(1);
+                let request = model.import_wizard_request;
+                if let Some(wizard) = &mut model.import_wizard {
+                    wizard.loading = true;
+                    wizard.error = None;
+                    return vec![Effect::LoadImportPreview {
+                        request,
+                        file_path: wizard.file_path.clone(),
+                        schema: wizard.schema.clone(),
+                        table: wizard.table.clone(),
+                    }];
+                }
+            }
+        }
+        Action::Insert('e' | 'E') => {
+            let sql = model.import_wizard.as_ref().map(|w| w.copy_sql.clone());
+            if let Some(sql) = sql {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.import_wizard = None;
+                model.focus = Focus::Editor;
+            }
+        }
+        Action::Activate => {
+            if let Some(wizard) = &mut model.import_wizard {
+                if wizard.step == crate::app::model::ImportWizardStep::Execute {
+                    wizard.loading = true;
+                    wizard.error = None;
+                    model.import_wizard_request = model.import_wizard_request.wrapping_add(1);
+                    let request = model.import_wizard_request;
+                    let options = crate::transfer::ImportOptions {
+                        schema: wizard.schema.clone(),
+                        table: wizard.table.clone(),
+                        file_path: wizard.file_path.clone(),
+                        format: wizard.format,
+                        delimiter: wizard.delimiter,
+                        has_header: wizard.has_header,
+                        null_string: wizard.null_string.clone(),
+                        quote: wizard.quote,
+                        escape: wizard.escape,
+                        columns: wizard.preview.as_ref().map_or(Vec::new(), |p| {
+                            p.column_mappings
+                                .iter()
+                                .filter(|m| !m.skip)
+                                .map(|m| m.target_column.clone())
+                                .collect()
+                        }),
+                        dry_run: wizard.dry_run,
+                        transactional: wizard.transactional,
+                    };
+                    return vec![Effect::ExecuteImport {
+                        request,
+                        options,
+                        data: Vec::new(),
+                    }];
+                } else {
+                    wizard.step = wizard.step.next();
+                }
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
 ///
 /// A separate list rather than a section of the main palette: someone looking
 /// for a past statement is not looking for a command, and a hundred statements

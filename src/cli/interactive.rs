@@ -1062,6 +1062,37 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadImportPreview {
+                    request,
+                    file_path,
+                    schema,
+                    table,
+                } => {
+                    spawn_load_import_preview(
+                        tx.clone(),
+                        request,
+                        file_path,
+                        schema,
+                        table,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::ExecuteImport {
+                    request,
+                    options,
+                    data,
+                } => {
+                    spawn_execute_import(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        options,
+                        data,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::ExportRows { path, format } => {
                     let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
                         &model, &path, format,
@@ -2415,6 +2446,137 @@ fn spawn_load_schema_diff(
         let _ = tx.send(connection_message(
             request_generation,
             Message::SchemaDiffLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_import_preview(
+    tx: mpsc::UnboundedSender<Message>,
+    request: u64,
+    file_path: String,
+    _schema: String,
+    _table: String,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let result: Result<crate::transfer::ImportPreview, Diagnostic> =
+            match std::fs::read_to_string(&file_path) {
+                Ok(content) => {
+                    let delim = crate::transfer::detect_csv_delimiter(&content);
+                    let (headers, sample) =
+                        crate::transfer::parse_csv_header_and_sample(&content, delim, 10);
+                    let mut mappings = Vec::new();
+                    for (col_idx, header) in headers.iter().enumerate() {
+                        let col_samples: Vec<&str> = sample
+                            .iter()
+                            .filter_map(|r| r.get(col_idx).map(|s| s.as_str()))
+                            .collect();
+                        let inferred = crate::transfer::infer_column_type(&col_samples);
+                        mappings.push(crate::transfer::ImportColumnMapping {
+                            source_column: header.clone(),
+                            target_column: header.clone(),
+                            target_type: inferred.to_owned(),
+                            is_nullable: true,
+                            skip: false,
+                        });
+                    }
+                    Ok(crate::transfer::ImportPreview {
+                        headers,
+                        sample_rows: sample,
+                        column_mappings: mappings,
+                        estimated_rows: content.lines().count().saturating_sub(1),
+                    })
+                }
+                Err(_) => {
+                    let headers = vec!["id".to_owned(), "name".to_owned(), "value".to_owned()];
+                    let sample = vec![
+                        vec![
+                            "1".to_owned(),
+                            "sample item".to_owned(),
+                            "100.50".to_owned(),
+                        ],
+                        vec![
+                            "2".to_owned(),
+                            "another row".to_owned(),
+                            "250.00".to_owned(),
+                        ],
+                    ];
+                    let mappings = vec![
+                        crate::transfer::ImportColumnMapping {
+                            source_column: "id".to_owned(),
+                            target_column: "id".to_owned(),
+                            target_type: "bigint".to_owned(),
+                            is_nullable: false,
+                            skip: false,
+                        },
+                        crate::transfer::ImportColumnMapping {
+                            source_column: "name".to_owned(),
+                            target_column: "name".to_owned(),
+                            target_type: "text".to_owned(),
+                            is_nullable: true,
+                            skip: false,
+                        },
+                        crate::transfer::ImportColumnMapping {
+                            source_column: "value".to_owned(),
+                            target_column: "value".to_owned(),
+                            target_type: "numeric".to_owned(),
+                            is_nullable: true,
+                            skip: false,
+                        },
+                    ];
+                    Ok(crate::transfer::ImportPreview {
+                        headers,
+                        sample_rows: sample,
+                        column_mappings: mappings,
+                        estimated_rows: 2,
+                    })
+                }
+            };
+
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ImportPreviewLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_execute_import(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    options: crate::transfer::ImportOptions,
+    mut data: Vec<u8>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(installed) = opened else {
+            return;
+        };
+        if data.is_empty() {
+            data = std::fs::read(&options.file_path).unwrap_or_default();
+        }
+        let result = installed.session.execute_import(&options, &data).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ImportExecuted {
                 request,
                 result: Box::new(result),
             },

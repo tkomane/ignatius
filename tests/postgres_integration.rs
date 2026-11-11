@@ -3142,3 +3142,116 @@ fn live_postgres_schema_snapshot_and_diff_detects_tables_columns_and_synthesizes
         "adds discontinued column: {migration_sql}"
     );
 }
+
+#[test]
+fn live_postgres_streaming_copy_in_and_out_with_transactional_rollback() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let setup_sql = "
+        CREATE TABLE IF NOT EXISTS public.test_streaming_copy (
+            id integer PRIMARY KEY,
+            title text NOT NULL,
+            amount numeric(10,2) NOT NULL
+        );
+        TRUNCATE TABLE public.test_streaming_copy;
+    ";
+    let setup_res = fx.block_on(fx.session.execute(setup_sql, 100, JobId(9501)));
+    assert_eq!(
+        setup_res.status,
+        ExecutionStatus::Succeeded,
+        "setup failed: {:?}",
+        setup_res.error
+    );
+
+    // 1. Bulk import CSV data
+    let csv_data =
+        b"id,title,amount\n1,First Item,19.99\n2,Second Item,49.50\n3,Third Item,120.00\n";
+    let import_options = ignatius::transfer::ImportOptions {
+        schema: "public".to_owned(),
+        table: "test_streaming_copy".to_owned(),
+        file_path: "data.csv".to_owned(),
+        format: ignatius::transfer::TransferFormat::Csv,
+        delimiter: b',',
+        has_header: true,
+        null_string: "".to_owned(),
+        quote: b'"',
+        escape: b'"',
+        columns: Vec::new(),
+        dry_run: false,
+        transactional: true,
+    };
+
+    let import_res = fx.block_on(fx.session.execute_import(&import_options, csv_data));
+    assert!(
+        import_res.is_ok(),
+        "import succeeded: {:?}",
+        import_res.err()
+    );
+    let res = import_res.unwrap();
+    assert_eq!(res.rows_imported, 3);
+
+    // Verify row count
+    let count_res = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM public.test_streaming_copy",
+        100,
+        JobId(9502),
+    ));
+    assert_eq!(count_res.status, ExecutionStatus::Succeeded);
+
+    // 2. Bulk export query
+    let export_options = ignatius::transfer::ExportOptions {
+        query: "SELECT id, title, amount FROM public.test_streaming_copy ORDER BY id".to_owned(),
+        output_path: None,
+        format: ignatius::transfer::TransferFormat::Csv,
+        delimiter: b',',
+        has_header: true,
+        null_string: "".to_owned(),
+        quote: b'"',
+        escape: b'"',
+    };
+
+    let export_res = fx.block_on(fx.session.execute_export(&export_options));
+    assert!(
+        export_res.is_ok(),
+        "export succeeded: {:?}",
+        export_res.err()
+    );
+    let exported = String::from_utf8_lossy(&export_res.unwrap()).to_string();
+    assert!(exported.contains("id,title,amount"));
+    assert!(exported.contains("1,First Item,19.99"));
+    assert!(exported.contains("2,Second Item,49.50"));
+    assert!(exported.contains("3,Third Item,120.00"));
+
+    // 3. Dry-run test verifies that data is rolled back
+    let dry_run_csv = b"id,title,amount\n4,Dry Run Item,999.00\n";
+    let mut dry_run_opts = import_options.clone();
+    dry_run_opts.dry_run = true;
+    let dry_res = fx.block_on(fx.session.execute_import(&dry_run_opts, dry_run_csv));
+    assert!(
+        dry_res.is_ok(),
+        "dry-run import returned ok: {:?}",
+        dry_res.err()
+    );
+    assert!(dry_res.unwrap().status.contains("rolled back"));
+
+    // Verify row 4 is NOT in database
+    let check_res = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM public.test_streaming_copy WHERE id = 4",
+        100,
+        JobId(9503),
+    ));
+    assert_eq!(check_res.status, ExecutionStatus::Succeeded);
+
+    // 4. Invalid data triggers automatic rollback and error
+    let bad_csv = b"id,title,amount\n5,Bad Item,NOT_A_NUMBER\n";
+    let bad_res = fx.block_on(fx.session.execute_import(&import_options, bad_csv));
+    assert!(bad_res.is_err(), "bad csv import must fail");
+
+    // Clean up
+    let _ = fx.block_on(fx.session.execute(
+        "DROP TABLE public.test_streaming_copy",
+        100,
+        JobId(9504),
+    ));
+}

@@ -833,6 +833,170 @@ impl SchemaDiffState {
     }
 }
 
+/// Active step in the bulk data import wizard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportWizardStep {
+    /// Step 1: File selection and sample data preview.
+    #[default]
+    SourceFile,
+    /// Step 2: Interactive column mapping and type validation.
+    ColumnMapping,
+    /// Step 3: Transactional review and SQL execution.
+    Execute,
+}
+
+impl ImportWizardStep {
+    /// Next step in sequence.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::SourceFile => Self::ColumnMapping,
+            Self::ColumnMapping => Self::Execute,
+            Self::Execute => Self::SourceFile,
+        }
+    }
+
+    /// Previous step in sequence.
+    #[must_use]
+    pub const fn prev(self) -> Self {
+        match self {
+            Self::SourceFile => Self::Execute,
+            Self::ColumnMapping => Self::SourceFile,
+            Self::Execute => Self::ColumnMapping,
+        }
+    }
+}
+
+/// Interactive state for the bulk data import wizard (`028-data-import-export-and-backup`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportWizardState {
+    /// Active wizard step.
+    pub step: ImportWizardStep,
+    /// Path to the source file on disk.
+    pub file_path: String,
+    /// Destination schema.
+    pub schema: String,
+    /// Destination table.
+    pub table: String,
+    /// Detected or chosen transfer format.
+    pub format: crate::transfer::TransferFormat,
+    /// Delimiter byte.
+    pub delimiter: u8,
+    /// Whether file has header row.
+    pub has_header: bool,
+    /// String representing NULL.
+    pub null_string: String,
+    /// Quote character.
+    pub quote: u8,
+    /// Escape character.
+    pub escape: u8,
+    /// Loaded file preview and inferred column mappings.
+    pub preview: Option<crate::transfer::ImportPreview>,
+    /// Selected column index in the column mapping grid.
+    pub selected_column_idx: usize,
+    /// Whether this is a dry-run test (transaction rollback).
+    pub dry_run: bool,
+    /// Whether import runs inside transaction.
+    pub transactional: bool,
+    /// Whether file preview or import execution is currently loading.
+    pub loading: bool,
+    /// Error message if preview or execution failed.
+    pub error: Option<String>,
+    /// Result summary of the import.
+    pub result: Option<crate::transfer::ImportResult>,
+    /// Generated COPY SQL statement for review.
+    pub copy_sql: String,
+    /// Scroll offset Y.
+    pub scroll_y: usize,
+}
+
+impl ImportWizardState {
+    /// Creates a new import wizard state targeting a schema and table.
+    #[must_use]
+    pub fn new(schema: String, table: String) -> Self {
+        let mut state = Self {
+            step: ImportWizardStep::SourceFile,
+            file_path: String::new(),
+            schema: if schema.is_empty() {
+                "public".to_owned()
+            } else {
+                schema
+            },
+            table,
+            format: crate::transfer::TransferFormat::Csv,
+            delimiter: b',',
+            has_header: true,
+            null_string: String::new(),
+            quote: b'"',
+            escape: b'"',
+            preview: None,
+            selected_column_idx: 0,
+            dry_run: false,
+            transactional: true,
+            loading: false,
+            error: None,
+            result: None,
+            copy_sql: String::new(),
+            scroll_y: 0,
+        };
+        state.rebuild_sql();
+        state
+    }
+
+    /// Rebuilds the preview SQL statement from current mappings and options.
+    pub fn rebuild_sql(&mut self) {
+        let active_cols: Vec<String> = if let Some(ref prev) = self.preview {
+            prev.column_mappings
+                .iter()
+                .filter(|m| !m.skip)
+                .map(|m| m.target_column.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let options = crate::transfer::ImportOptions {
+            schema: self.schema.clone(),
+            table: self.table.clone(),
+            file_path: self.file_path.clone(),
+            format: self.format,
+            delimiter: self.delimiter,
+            has_header: self.has_header,
+            null_string: self.null_string.clone(),
+            quote: self.quote,
+            escape: self.escape,
+            columns: active_cols,
+            dry_run: self.dry_run,
+            transactional: self.transactional,
+        };
+
+        self.copy_sql = crate::transfer::build_copy_from_sql(&options);
+    }
+
+    /// Toggles the skipped state of the selected column mapping.
+    pub fn toggle_column_skip(&mut self) {
+        if let Some(mapping) = self
+            .preview
+            .as_mut()
+            .and_then(|prev| prev.column_mappings.get_mut(self.selected_column_idx))
+        {
+            mapping.skip = !mapping.skip;
+        }
+        self.rebuild_sql();
+    }
+
+    /// Moves the column mapping selection index.
+    pub fn move_column_selection(&mut self, delta: isize) {
+        let count = self.preview.as_ref().map_or(0, |p| p.column_mappings.len());
+        if count == 0 {
+            self.selected_column_idx = 0;
+            return;
+        }
+        let next = (self.selected_column_idx as isize + delta).clamp(0, count as isize - 1);
+        self.selected_column_idx = next as usize;
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2097,6 +2261,10 @@ pub struct Model {
     pub schema_diff: Option<SchemaDiffState>,
     /// Request counter for in-flight schema diff queries.
     pub schema_diff_request: u64,
+    /// Interactive bulk data import wizard overlay state.
+    pub import_wizard: Option<ImportWizardState>,
+    /// Request counter for in-flight import operations.
+    pub import_wizard_request: u64,
 }
 
 impl Model {

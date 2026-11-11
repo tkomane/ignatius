@@ -1,5 +1,23 @@
 # Verification
 
+## Wave 23 (028-data-import-export-and-backup) Delivery - 11 November 2026
+
+Wave 23 Feature `028-data-import-export-and-backup` delivered the sixth Milestone 6
+full pgAdmin replacement parity slice:
+
+- **Wave 23 (`028-data-import-export-and-backup`)**:
+  - Implemented pure `src/transfer/` streaming transfer engine for high-throughput `COPY` import/export
+    (CSV, TSV, JSONL, SQL INSERT, Binary), automatic delimiter detection, sample parsing, type inference,
+    and subprocess-isolated `pg_dump`/`pg_restore` command construction with credential redaction.
+  - Implemented `Session::execute_import` and `Session::execute_export` streaming 64KB chunks through
+    PostgreSQL `COPY FROM STDIN` and `COPY TO STDOUT` with transactional isolation and rollback.
+  - Added headless scriptable CLI subcommands `ignatius import`, `ignatius export`, `ignatius backup`,
+    and `ignatius restore` with production write protection (`--confirm-production`), atomic overwrite guards (`--force`),
+    and command preview (`--dry-run`).
+  - Added interactive TUI Data Import Wizard overlay on `Ctrl+K <` (`import-data`) with multi-step
+    navigation (`[1] Source File`, `[2] Column Mapping`, `[3] Review & Run`), live SQL preview,
+    and dry-run transactional rollback verification.
+
 ## Wave 22 (030-visual-schema-designer-and-migrations) Delivery - 11 November 2026
 
 Wave 22 Feature `030-visual-schema-designer-and-migrations` delivered the fifth Milestone 6

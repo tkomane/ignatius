@@ -1879,5 +1879,363 @@ pub(crate) fn render_schema_diff(
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
 }
 
+/// Renders the interactive Bulk Data Import Wizard overlay (`028-data-import-export-and-backup`).
+pub(crate) fn render_import_wizard(
+    state: &crate::app::model::ImportWizardState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = area
+        .width
+        .saturating_mul(85)
+        .checked_div(100)
+        .unwrap_or(area.width)
+        .max(64)
+        .min(area.width);
+    let modal_height = area
+        .height
+        .saturating_mul(85)
+        .checked_div(100)
+        .unwrap_or(area.height)
+        .max(18)
+        .min(area.height);
+
+    let modal_x = area
+        .x
+        .saturating_add(area.width.saturating_sub(modal_width) / 2);
+    let modal_y = area
+        .y
+        .saturating_add(area.height.saturating_sub(modal_height) / 2);
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_type(if presentation.glyphs.is_ascii() {
+            ratatui::widgets::BorderType::Plain
+        } else {
+            ratatui::widgets::BorderType::Rounded
+        })
+        .border_style(theme.style(Token::Focus))
+        .title(format!(
+            " Import & Bulk Data Transfer Wizard: \"{}\".\"{}\" ",
+            state.schema, state.table
+        ));
+    let inner = block.inner(modal_area);
+    block.render(modal_area, buf);
+
+    if inner.height < 6 || inner.width < 30 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Step pills
+            Constraint::Length(1), // Spacer
+            Constraint::Min(4),    // Body
+            Constraint::Length(1), // Footer hints
+        ])
+        .split(inner);
+
+    let step_area = chunks[0];
+    let body_area = chunks[2];
+    let footer_area = chunks[3];
+
+    let step_spans = vec![
+        Span::styled(" Step: ", theme.style(Token::Muted)),
+        Span::styled(
+            if state.step == crate::app::model::ImportWizardStep::SourceFile {
+                " [1] Source File "
+            } else {
+                "  1  Source File "
+            },
+            if state.step == crate::app::model::ImportWizardStep::SourceFile {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(
+            if state.step == crate::app::model::ImportWizardStep::ColumnMapping {
+                " [2] Column Mapping "
+            } else {
+                "  2  Column Mapping "
+            },
+            if state.step == crate::app::model::ImportWizardStep::ColumnMapping {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(
+            if state.step == crate::app::model::ImportWizardStep::Execute {
+                " [3] Review & Run "
+            } else {
+                "  3  Review & Run "
+            },
+            if state.step == crate::app::model::ImportWizardStep::Execute {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+    ];
+    Paragraph::new(Line::from(step_spans)).render(step_area, buf);
+
+    let visible_rows = usize::from(body_area.height);
+
+    match state.step {
+        crate::app::model::ImportWizardStep::SourceFile => {
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled("File path: ", theme.style(Token::Muted)),
+                Span::styled(
+                    &state.file_path,
+                    theme.style(Token::Text).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "  (Format: {}, Delimiter: '{}')",
+                        state.format, state.delimiter as char
+                    ),
+                    theme.style(Token::Muted),
+                ),
+            ]));
+            lines.push(Line::from(""));
+
+            if let Some(ref err) = state.error {
+                lines.push(Line::from(Span::styled(
+                    format!("Error: {err}"),
+                    theme.style(Token::Danger),
+                )));
+            } else if state.loading {
+                lines.push(Line::from(Span::styled(
+                    "Analyzing source file structure and sample data...",
+                    theme.style(Token::Muted),
+                )));
+            } else if let Some(ref prev) = state.preview {
+                lines.push(Line::from(vec![
+                    Span::styled("Detected Headers: ", theme.style(Token::Muted)),
+                    Span::styled(prev.headers.join(", "), theme.style(Token::Focus)),
+                ]));
+                lines.push(Line::from(Span::styled(
+                    format!("Sample rows (showing up to {}):", prev.sample_rows.len()),
+                    theme.style(Token::Muted),
+                )));
+                for (row_idx, row) in prev
+                    .sample_rows
+                    .iter()
+                    .enumerate()
+                    .take(visible_rows.saturating_sub(5))
+                {
+                    let preview_str = row.join(" | ");
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {:2}: ", row_idx + 1), theme.style(Token::Muted)),
+                        Span::styled(preview_str, theme.style(Token::Text)),
+                    ]));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "No file preview available. Press [r] to analyze file.",
+                    theme.style(Token::Muted),
+                )));
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::ImportWizardStep::ColumnMapping => {
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled("   ", theme.style(Token::Muted)),
+                Span::styled(
+                    format!("{:<20}", "Source Column"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  ", theme.style(Token::Muted)),
+                Span::styled(
+                    format!("{:<20}", "Target Column"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  ", theme.style(Token::Muted)),
+                Span::styled(
+                    format!("{:<14}", "Inferred Type"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  ", theme.style(Token::Muted)),
+                Span::styled(
+                    "Skip",
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            if let Some(ref prev) = state.preview {
+                for (idx, mapping) in prev
+                    .column_mappings
+                    .iter()
+                    .enumerate()
+                    .skip(state.scroll_y)
+                    .take(visible_rows.saturating_sub(2))
+                {
+                    let is_selected = idx == state.selected_column_idx;
+                    let cursor = if is_selected { "> " } else { "  " };
+                    let skip_box = if mapping.skip { "[x]" } else { "[ ]" };
+                    let row_style = if is_selected {
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                    } else if mapping.skip {
+                        theme.style(Token::Muted)
+                    } else {
+                        theme.style(Token::Text)
+                    };
+
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            cursor,
+                            if is_selected {
+                                theme.style(Token::Focus)
+                            } else {
+                                theme.style(Token::Muted)
+                            },
+                        ),
+                        Span::styled(format!("{:<20}", mapping.source_column), row_style),
+                        Span::styled("  ", theme.style(Token::Muted)),
+                        Span::styled(format!("{:<20}", mapping.target_column), row_style),
+                        Span::styled("  ", theme.style(Token::Muted)),
+                        Span::styled(format!("{:<14}", mapping.target_type), row_style),
+                        Span::styled("  ", theme.style(Token::Muted)),
+                        Span::styled(
+                            skip_box,
+                            if mapping.skip {
+                                theme.style(Token::Warning)
+                            } else {
+                                theme.style(Token::Success)
+                            },
+                        ),
+                    ]));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "No columns mapped. Return to Step 1 to load preview.",
+                    theme.style(Token::Muted),
+                )));
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::ImportWizardStep::Execute => {
+            let mut lines = Vec::new();
+            lines.push(Line::from(Span::styled(
+                "Transactional Execution Review:",
+                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+
+            let dry_run_str = if state.dry_run {
+                "[x] Dry-run test mode enabled (will ROLLBACK)"
+            } else {
+                "[ ] Dry-run (will COMMIT)"
+            };
+            lines.push(Line::from(vec![
+                Span::styled("Safety Mode: ", theme.style(Token::Muted)),
+                Span::styled(
+                    dry_run_str,
+                    if state.dry_run {
+                        theme.style(Token::Warning)
+                    } else {
+                        theme.style(Token::Success)
+                    },
+                ),
+                Span::styled("  (Press 'd' to toggle)", theme.style(Token::Muted)),
+            ]));
+            lines.push(Line::from(""));
+
+            lines.push(Line::from(Span::styled(
+                "Generated SQL DDL / Protocol Statement:",
+                theme.style(Token::Muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                &state.copy_sql,
+                theme
+                    .style(Token::SyntaxKeyword)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+
+            if let Some(ref res) = state.result {
+                lines.push(Line::from(vec![
+                    Span::styled("Execution Result: ", theme.style(Token::Muted)),
+                    Span::styled(
+                        &res.status,
+                        theme.style(Token::Success).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            " ({} rows, {} bytes in {}ms)",
+                            res.rows_imported, res.bytes_processed, res.elapsed_ms
+                        ),
+                        theme.style(Token::Muted),
+                    ),
+                ]));
+            } else if state.loading {
+                lines.push(Line::from(Span::styled(
+                    "Streaming data into database via COPY protocol...",
+                    theme.style(Token::Focus),
+                )));
+            } else if let Some(ref err) = state.error {
+                lines.push(Line::from(Span::styled(
+                    format!("Execution Failed: {err}"),
+                    theme.style(Token::Danger),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "Ready to execute. Press [Enter] to run import or [e] to load in SQL editor.",
+                    theme.style(Token::Focus),
+                )));
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+    }
+
+    let footer_hints = vec![
+        Span::styled(
+            " [Tab/1/2/3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Step  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Space] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Toggle Skip  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[d] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Dry-run  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Load in Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Run  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

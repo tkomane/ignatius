@@ -4,6 +4,30 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 23 (028-data-import-export-and-backup) Delivery - 11 November 2026
+
+Resume on branch `feat/028-data-import-export-and-backup`. Feature
+`028-data-import-export-and-backup` (the sixth M6 pgAdmin replacement parity slice)
+has completed implementation and verification:
+
+- **Wave 23 (`028-data-import-export-and-backup`)**:
+  delivered the sixth M6 full pgAdmin replacement slice:
+  - Pure `src/transfer/` streaming transfer engine for COPY import/export (CSV, TSV, JSONL, SQL INSERT, Binary),
+    automatic delimiter detection, header parsing, column type inference, and subprocess-isolated
+    `pg_dump`/`pg_restore` command construction with credential redaction.
+  - Live PostgreSQL streaming primitives in `Session::execute_import` and `Session::execute_export`
+    streaming 64KB chunks through `tokio_postgres::CopyInSink` and `tokio_postgres::CopyOutStream`
+    with transactional safety (`BEGIN; ... COMMIT;`), dry-run preview, and rollback on error.
+  - Headless scriptable CLI subcommands:
+    - `ignatius import`: streams delimiter-delimited files or JSONL into PostgreSQL with transactional safety and production confirmation guards (`--confirm-production`).
+    - `ignatius export`: streams queries or tables into CSV, TSV, JSONL, or SQL INSERT format to stdout or output files with overwrite protection (`--force`).
+    - `ignatius backup`: builds and executes `pg_dump` jobs with `--dry-run` inspection and credential redaction.
+    - `ignatius restore`: builds and executes `pg_restore` jobs with `--dry-run` inspection and credential redaction.
+  - Interactive TUI Data Import Wizard overlay on `Ctrl+K <` (`import-data`):
+    - `[1] Source File`: file path input, format detection, delimiter override, header toggle, and live row sample preview.
+    - `[2] Column Mapping`: target column mapping list, automatic type inference, `Space` toggle to skip columns, and arrow navigation.
+    - `[3] Review & Run`: live `COPY` SQL preview, `d` dry-run toggle, transactional rollback guarantee, and `Enter` execution into results.
+
 ## Wave 22 (030-visual-schema-designer-and-migrations) Delivery - 11 November 2026
 
 Resume on branch `feat/030-visual-schema-designer-and-migrations`. Feature

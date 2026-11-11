@@ -117,6 +117,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `j` | Open the server activity and locks dashboard |
 | `t` | Open the roles, privileges, and RLS auditor |
 | `k` | Open the schema diff and migration designer |
+| `<` | Open the data import wizard |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -171,6 +172,20 @@ comparisons and live visual table blueprint drafting. Inside the overlay:
 - `Esc` closes the overlay without side effects.
 The printable `k` remains ordinary editor input outside the chord and overlay.
 The `ignatius diff` CLI command provides non-interactive parity.
+
+With the workbench active, `Ctrl+K <` (`import-data`) opens the Bulk Data Import
+Wizard overlay, providing interactive source file preview, column mapping, and
+transactional bulk data loading via PostgreSQL's streaming `COPY ... FROM STDIN`
+protocol. Inside the overlay:
+- `Tab` or `s` or `1` / `2` / `3` cycles between `Source File` (`1`), `Column Mapping` (`2`), and `Review & Run` (`3`).
+- `Up` / `Down` or `k` / `j` navigates columns in the mapping grid.
+- `Space` toggles whether a column is imported or skipped.
+- `d` toggles dry-run mode (runs inside a transaction followed by immediate rollback).
+- `r` reloads the file preview and sample rows.
+- `e` loads the generated `COPY` SQL statement directly into the SQL editor buffer.
+- `Enter` executes the import in Step 3 or advances to the next step.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius import`, `ignatius export`, `ignatius backup`, and `ignatius restore` CLI subcommands provide non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -420,7 +435,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
-`schema-diff`,
+`schema-diff`, `import-data`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

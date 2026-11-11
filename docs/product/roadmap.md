@@ -216,10 +216,12 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
   into the editor buffer or CLI (`ignatius ddl`). Its pure `src/ddl/` engine,
   `Session::generate_ddl` extractor, CLI subcommand, and interactive `Ctrl+K d`
   DDL overlay (with Toggle DROP and Load in Editor) are implemented on `main`.
-- **`028-data-import-export-and-backup`**: High-throughput streaming `COPY` import/export
-  for CSV, TSV, JSONL, SQL `INSERT` and Parquet; interactive column-mapping import
-  wizard with transactional rollback; and subprocess-isolated `pg_dump`/`pg_restore`
-  orchestration with credential redaction and live progress telemetry.
+- **`028-data-import-export-and-backup`** [Implemented]: High-throughput streaming `COPY` import/export
+  for CSV, TSV, JSONL, and SQL; interactive column-mapping import wizard (`Ctrl+K <` / `import-data`)
+  with transactional rollback; scriptable CLI (`ignatius import`, `ignatius export`, `ignatius backup`,
+  `ignatius restore`); and subprocess-isolated `pg_dump`/`pg_restore` orchestration with credential redaction.
+  Its pure `src/transfer/` engine, `Session::execute_import` and `Session::execute_export` streaming extractors,
+  CLI subcommands, and interactive TUI overlay are implemented on `main`.
 - **`029-server-activity-and-locks-dashboard`** [Implemented]: Live server activity monitor
   (`pg_stat_activity`, `pg_locks`, `pg_stat_database`), hierarchical blocking PID
   tree, query age/wait event tracking, and guarded `pg_cancel_backend`/`pg_terminate_backend`

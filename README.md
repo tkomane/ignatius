@@ -303,6 +303,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `j` | Open the server activity and locks dashboard |
 | `t` | Open the roles, privileges, and RLS auditor |
 | `k` | Open the schema diff and migration designer |
+| `<` | Open the data import wizard |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -452,7 +453,7 @@ Milestone 6 defines 8 comprehensive vertical slices documented in the [Full pgAd
 
 1. **`026-schema-er-diagrams` (Interactive Schema & ER Diagrams) [Implemented]:** Terminal-native ER diagram canvas (`Ctrl+K m`) with orthogonal connectors, 1-hop / 2-hop neighbourhood filtering for dense schemas, and CLI export (`ignatius diagram --format mermaid|dot|svg|ascii|unicode`).
 2. **`027-deep-catalog-and-ddl-generator` (Deep Catalog & DDL Generator) [Implemented]:** Full `pg_catalog` inspection across indexes, constraints, triggers, sequences, enums, composite types, partitions, FDWs, and tablespaces, with deterministic `CREATE`/`ALTER`/`DROP` DDL generation into the interactive `Ctrl+K d` Definition overlay (with Toggle DROP and Load in Editor actions) and scriptable CLI (`ignatius ddl`).
-3. **`028-data-import-export-and-backup` (Streaming COPY & Backup/Restore):** High-throughput streaming `COPY` import/export (CSV, TSV, JSONL, SQL, Parquet), interactive TUI column-mapping import wizard with transactional rollback, and subprocess-isolated `pg_dump`/`pg_restore` orchestration.
+3. **`028-data-import-export-and-backup` (Streaming COPY & Backup/Restore) [Implemented]:** High-throughput streaming `COPY` import/export (CSV, TSV, JSONL, SQL), interactive TUI column-mapping import wizard (`Ctrl+K <` / `import-data`) with transactional rollback, scriptable CLI (`ignatius import`, `ignatius export`, `ignatius backup`, `ignatius restore`), and subprocess-isolated `pg_dump`/`pg_restore` orchestration.
 4. **`029-server-activity-and-locks-dashboard` (Server Activity & Locks Dashboard) [Implemented]:** Real-time monitoring of `pg_stat_activity`, `pg_locks`, query age, wait events, and hierarchical blocking PID chains, with guarded backend cancellation and termination (`pg_cancel_backend` / `pg_terminate_backend`) via interactive `Ctrl+K j` overlay and scriptable `ignatius activity` CLI subcommand.
 5. **`030-visual-schema-designer-and-migrations` (Visual Schema Designer & Migrations) [Implemented]:** Form-driven TUI designer for tables, columns, indexes, and constraints with live DDL preview, alongside dual-environment schema diffing and transactional migration generation (`BEGIN; ... COMMIT;`) via interactive `Ctrl+K k` overlay and scriptable `ignatius diff` CLI subcommand.
 6. **`031-roles-privileges-and-rls-auditor` (Roles, Privileges & RLS Auditor) [Implemented]:** Visual browser for role inheritance trees, object privilege ACL matrices, and Row-Level Security (`RLS`) policy auditing with missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL via interactive `Ctrl+K t` overlay and scriptable `ignatius audit` CLI subcommand.

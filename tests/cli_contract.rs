@@ -3177,4 +3177,133 @@ mod with_server {
             stderr(&missing_args_output)
         );
     }
+
+    #[test]
+    fn import_export_backup_restore_subcommands_contract() {
+        let uri = uri_or_skip!();
+
+        // 1. Export query to CSV on stdout
+        let export_output = binary()
+            .arg("export")
+            .arg(&uri)
+            .arg("SELECT 1 AS num, 'hello' AS greeting")
+            .arg("--format")
+            .arg("csv")
+            .output()
+            .expect("run ignatius export");
+
+        assert_eq!(
+            code(&export_output),
+            0,
+            "export exits zero: {}",
+            stderr(&export_output)
+        );
+        let export_out = stdout(&export_output);
+        assert!(
+            export_out.contains("num,greeting"),
+            "export stdout contains CSV header: {export_out}"
+        );
+        assert!(
+            export_out.contains("1,hello"),
+            "export stdout contains CSV row: {export_out}"
+        );
+
+        // 2. Export query to file with output overwrite protection
+        let temp_file = temp_config_dir().join(format!("test_export_{}.csv", std::process::id()));
+        let _ = std::fs::remove_file(&temp_file);
+
+        let export_file_output = binary()
+            .arg("export")
+            .arg(&uri)
+            .arg("SELECT 42 AS answer")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius export --output");
+
+        assert_eq!(
+            code(&export_file_output),
+            0,
+            "export to file exits zero: {}",
+            stderr(&export_file_output)
+        );
+        assert!(temp_file.exists(), "export file created");
+        let content = std::fs::read_to_string(&temp_file).expect("read exported file");
+        assert!(
+            content.contains("answer"),
+            "file content contains answer: {content}"
+        );
+        assert!(
+            content.contains("42"),
+            "file content contains 42: {content}"
+        );
+
+        // Export without --force refuses to overwrite
+        let conflict_output = binary()
+            .arg("export")
+            .arg(&uri)
+            .arg("SELECT 99 AS answer")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius export conflict");
+
+        assert_ne!(
+            code(&conflict_output),
+            0,
+            "export without --force must fail on existing file"
+        );
+        let preserved = std::fs::read_to_string(&temp_file).expect("read preserved file");
+        assert_eq!(preserved, content, "file preserved untouched");
+        let _ = std::fs::remove_file(&temp_file);
+
+        // 3. Backup with --dry-run prints command and redacted env
+        let dump_file = temp_config_dir().join(format!("test_backup_{}.dump", std::process::id()));
+        let backup_output = binary()
+            .arg("backup")
+            .arg(&uri)
+            .arg("--output")
+            .arg(&dump_file)
+            .arg("--dry-run")
+            .output()
+            .expect("run ignatius backup --dry-run");
+
+        assert_eq!(
+            code(&backup_output),
+            0,
+            "backup --dry-run exits zero: {}",
+            stderr(&backup_output)
+        );
+        let backup_out = stdout(&backup_output);
+        assert!(
+            backup_out.contains("Command: pg_dump"),
+            "stdout contains pg_dump: {backup_out}"
+        );
+        assert!(
+            backup_out.contains("-F c"),
+            "stdout contains format custom: {backup_out}"
+        );
+
+        // 4. Restore with --dry-run prints command and redacted env
+        let restore_output = binary()
+            .arg("restore")
+            .arg(&uri)
+            .arg("--input")
+            .arg(&dump_file)
+            .arg("--dry-run")
+            .output()
+            .expect("run ignatius restore --dry-run");
+
+        assert_eq!(
+            code(&restore_output),
+            0,
+            "restore --dry-run exits zero: {}",
+            stderr(&restore_output)
+        );
+        let restore_out = stdout(&restore_output);
+        assert!(
+            restore_out.contains("Command: pg_restore"),
+            "stdout contains pg_restore: {restore_out}"
+        );
+    }
 }

@@ -940,6 +940,91 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         "docs/status.md must document Ctrl+K k"
     );
 
+    assert!(
+        README.contains("| `<` | Open the data import wizard |"),
+        "README.md chord table must include Ctrl+K <"
+    );
+    assert!(
+        README.contains("ignatius import"),
+        "README.md must document ignatius import CLI subcommand"
+    );
+    assert!(
+        README.contains("ignatius export"),
+        "README.md must document ignatius export CLI subcommand"
+    );
+    assert!(
+        README.contains("ignatius backup"),
+        "README.md must document ignatius backup CLI subcommand"
+    );
+    assert!(
+        README.contains("ignatius restore"),
+        "README.md must document ignatius restore CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("| `<` | Open the data import wizard |"),
+        "docs/design/keymap.md chord table must include Ctrl+K <"
+    );
+    assert!(
+        KEYMAP.contains("`import-data`"),
+        "docs/design/keymap.md must document import-data configurable action"
+    );
+    assert!(
+        KEYMAP.contains("ignatius import"),
+        "docs/design/keymap.md must document ignatius import"
+    );
+    assert!(
+        CHANGELOG.contains("028-data-import-export-and-backup"),
+        "CHANGELOG.md must document Feature 028-data-import-export-and-backup"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius import"),
+        "CHANGELOG.md must document ignatius import"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("ignatius import"),
+        "docs/architecture/pgadmin-parity-plan.md must document ignatius import"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("import-data"),
+        "docs/architecture/pgadmin-parity-plan.md must document import-data"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("Ctrl+K <"),
+        "docs/architecture/pgadmin-parity-plan.md must document Ctrl+K <"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("028-data-import-export-and-backup"),
+        "docs/product/roadmap.md must document 028-data-import-export-and-backup"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("ignatius import"),
+        "docs/product/roadmap.md must document ignatius import"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("import-data"),
+        "docs/product/roadmap.md must document import-data"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Ctrl+K <"),
+        "docs/product/roadmap.md must document Ctrl+K <"
+    );
+    assert!(
+        STATUS.contains("028-data-import-export-and-backup"),
+        "docs/status.md must document 028-data-import-export-and-backup"
+    );
+    assert!(
+        STATUS.contains("ignatius import"),
+        "docs/status.md must document ignatius import"
+    );
+    assert!(
+        STATUS.contains("import-data"),
+        "docs/status.md must document import-data"
+    );
+    assert!(
+        STATUS.contains("Ctrl+K <"),
+        "docs/status.md must document Ctrl+K <"
+    );
+
     for (name, content) in [
         (
             "docs/architecture/pgadmin-parity-plan.md",

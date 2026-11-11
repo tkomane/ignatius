@@ -8,6 +8,16 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `028-data-import-export-and-backup` delivers the pure
+  `src/transfer/` bulk data transfer, streaming COPY, and backup/restore engine;
+  live PostgreSQL `Session::execute_import` and `Session::execute_export` streaming
+  primitives; the `ignatius import`, `ignatius export`, `ignatius backup`, and
+  `ignatius restore` CLI subcommands; and the interactive `Ctrl+K <` (`import-data`)
+  TUI Bulk Data Import Wizard overlay featuring `[1] Source File`, `[2] Column Mapping`,
+  and `[3] Review & Run` steps, `[Space]` skip toggle, `[d]` transactional dry-run toggle,
+  and `[e]`/`Enter` reviewed `COPY ... FROM STDIN` SQL drafting into the editor with
+  undo support and zero hidden writes.
+
 - New: Feature `030-visual-schema-designer-and-migrations` delivers the pure
   `src/migration/` schema diff, visual table designer, and transactional migration
   engine; live `pg_catalog` schema extractors (`Session::schema_snapshot` and
