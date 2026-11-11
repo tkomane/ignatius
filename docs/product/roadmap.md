@@ -121,6 +121,9 @@ below; broadening the feature list does not move a milestone forward.
 | M4 Owner-approved distribution | The reviewed candidate reaches only the authorized destination | W14 | Explicit owner decision, readiness check passes after required authorization, and authorized bytes/metadata independently verified; T033/T035/status/catalogue accurately closed |
 | M5 Supported daily tool | Patches keep pace with real usage and supported environments | W15; W16 when justified | Each maintenance cycle closes reported failures and repeats affected release gates; new scope starts from observed jobs |
 | M6 Full pgAdmin replacement parity | Every daily and administrative job for which users reach for pgAdmin is completable in the terminal and CLI | W16 (Features 026-033) | Schema/ER diagrams, deep catalog/DDL generator, streaming COPY/backup, server activity/locks, guided schema designer/diff, role/RLS auditor, routine runner and maintenance ops specified, implemented and verified under M1-M3 gates |
+| M7 Enterprise Observability & Query Performance Forensics | High-resolution slow query profiling, cache diagnostics, and lock-free bloat intelligence | W16 (Features 034-037) | `pg_stat_statements` slow query profiling, buffer hit ratio diagnostics, transaction freeze monitoring, and zero-lock index bloat intelligence |
+| M8 Cross-Environment Data Synchronization, Masking & Seeding | Privacy-compliant test data masking, deterministic synthetic seeding, and cross-environment sync | W16 (Features 038-040) | PII rule-based masking, deterministic synthetic relational data generation adhering to foreign-key DAGs, and reviewable transactional sync scripts |
+| M9 Multi-Buffer Editor Workspaces & Scratchpad Persistence | Multi-tab query editing and crash-resilient local scratchpad session persistence | W16 (Features 041-043) | Multi-tab editor workspaces (`Ctrl+N`/`Ctrl+W`), persistent named scratchpads under `IGNATIUS_DATA_DIR`, and automatic unsaved buffer crash recovery |
 
 ```mermaid
 flowchart LR
@@ -135,6 +138,9 @@ flowchart LR
     M3 --> M4["M4 Owner decision and authorized distribution"]
     M4 --> M5["M5 Maintenance and evidenced next slices"]
     M5 --> M6["M6 Full pgAdmin replacement parity (026-033)"]
+    M6 --> M7["M7 Observability & Query Performance (034-037)"]
+    M7 --> M8["M8 Data Sync, Masking & Seeding (038-040)"]
+    M8 --> M9["M9 Multi-Buffer & Scratchpads (041-043)"]
 ```
 
 ## Start here
