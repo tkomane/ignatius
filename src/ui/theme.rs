@@ -640,10 +640,10 @@ impl Theme {
     pub const fn banner_anchors(&self) -> (Rgb, Rgb) {
         match &self.active {
             ActivePalette::Builtin(ThemeChoice::Dark) => {
-                (Rgb(0xCB, 0xA6, 0xF7), Rgb(0x89, 0xDC, 0xEB))
+                (Rgb(0xFF, 0x6A, 0x00), Rgb(0xFB, 0xBF, 0x24))
             }
             ActivePalette::Builtin(ThemeChoice::Light) => {
-                (Rgb(0x6B, 0x21, 0xA8), Rgb(0x0A, 0x55, 0x74))
+                (Rgb(0x1C, 0x1E, 0x26), Rgb(0x9E, 0x32, 0x00))
             }
             ActivePalette::Builtin(ThemeChoice::HighContrast) => {
                 (Rgb(0xB5, 0xD0, 0xFF), Rgb(0x7D, 0xF0, 0xFF))
