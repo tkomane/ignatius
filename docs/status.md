@@ -1,8 +1,26 @@
 # Status
 
-**Updated: 2026-11-09.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-11.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 22 (030-visual-schema-designer-and-migrations) Delivery - 11 November 2026
+
+Resume on branch `feat/030-visual-schema-designer-and-migrations`. Feature
+`030-visual-schema-designer-and-migrations` (the fifth M6 pgAdmin replacement parity slice)
+has completed implementation and verification:
+
+- **Wave 22 (`030-visual-schema-designer-and-migrations`)**:
+  delivered the fifth M6 full pgAdmin replacement slice:
+  - Pure `src/migration/` schema diff, visual table designer, and transactional migration engine
+    comparing tables, columns, constraints, and indexes to synthesize reviewable `BEGIN; ... COMMIT;`
+    migration scripts, visual tree diffs (`+`, `~`, `-`), and structured JSON reports.
+  - Live `pg_catalog` schema extractors `Session::schema_snapshot` and `Session::schema_diff`.
+  - `ignatius diff` CLI subcommand supporting single-database dual-schema and cross-database comparisons
+    with `--source-schema`, `--target-schema`, `--target2`, `--format sql|tree|json`, and `--output`.
+  - Interactive TUI Schema Diff, Table Designer, and Migration Generator overlay on `Ctrl+K k` (`schema-diff`):
+    `[1]`/`[2]`/`[3]` tabs, column focus navigation, live DDL preview, `[r]` live refresh, and `[e]`/`Enter`
+    transactional migration drafting into the SQL editor buffer with undo support.
 
 ## Wave 21 (031-roles-privileges-and-rls-auditor) Delivery - 9 November 2026
 

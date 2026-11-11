@@ -3050,4 +3050,131 @@ mod with_server {
 
         let _ = std::fs::remove_file(&temp_file);
     }
+
+    #[test]
+    fn diff_subcommand_compares_schemas_generates_sql_and_protects_existing_files() {
+        let uri = uri_or_skip!();
+
+        // 1. Run ignatius diff <uri> --source-schema public --target-schema public (identical schemas)
+        let output = binary()
+            .arg("diff")
+            .arg(&uri)
+            .arg("--source-schema")
+            .arg("public")
+            .arg("--target-schema")
+            .arg("public")
+            .output()
+            .expect("run ignatius diff identical");
+
+        assert_eq!(code(&output), 0, "diff exits zero: {}", stderr(&output));
+        let out = stdout(&output);
+        assert!(
+            out.contains("no migration necessary"),
+            "identical schemas report no migration necessary: {out}"
+        );
+
+        // 2. Run ignatius diff <uri> --source-schema public --target-schema reporting --format tree
+        let tree_output = binary()
+            .arg("diff")
+            .arg(&uri)
+            .arg("--source-schema")
+            .arg("public")
+            .arg("--target-schema")
+            .arg("reporting")
+            .arg("--format")
+            .arg("tree")
+            .output()
+            .expect("run ignatius diff --format tree");
+
+        assert_eq!(
+            code(&tree_output),
+            0,
+            "diff --format tree exits zero: {}",
+            stderr(&tree_output)
+        );
+        let tree_out = stdout(&tree_output);
+        assert!(
+            tree_out.contains("Schema Diff: public -> reporting"),
+            "stdout contains tree header: {tree_out}"
+        );
+
+        // 3. Run ignatius diff <uri> --source-schema public --target-schema reporting --format json --output <path>
+        let temp_file = temp_config_dir().join(format!("test_diff_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&temp_file);
+
+        let json_output = binary()
+            .arg("diff")
+            .arg(&uri)
+            .arg("--source-schema")
+            .arg("public")
+            .arg("--target-schema")
+            .arg("reporting")
+            .arg("--format")
+            .arg("json")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius diff --format json --output");
+
+        assert_eq!(
+            code(&json_output),
+            0,
+            "diff json output exits zero: {}",
+            stderr(&json_output)
+        );
+        assert!(temp_file.exists(), "diff JSON output file created");
+        let json_content = std::fs::read_to_string(&temp_file).expect("read diff JSON file");
+        assert!(
+            json_content.contains("\"schema_version\": 1"),
+            "JSON contains schema_version: {json_content}"
+        );
+        assert!(
+            json_content.contains("\"source_schema\": \"public\""),
+            "JSON contains source_schema: {json_content}"
+        );
+
+        // 4. Verify running ignatius diff <uri> without --force exits non-zero and preserves file
+        let conflict_output = binary()
+            .arg("diff")
+            .arg(&uri)
+            .arg("--source-schema")
+            .arg("public")
+            .arg("--target-schema")
+            .arg("reporting")
+            .arg("--output")
+            .arg(&temp_file)
+            .output()
+            .expect("run ignatius diff conflict");
+
+        assert_ne!(
+            code(&conflict_output),
+            0,
+            "diff without --force must exit non-zero when output file exists"
+        );
+        let preserved_content = std::fs::read_to_string(&temp_file).expect("read preserved file");
+        assert_eq!(
+            preserved_content, json_content,
+            "existing file content must be preserved untouched"
+        );
+
+        let _ = std::fs::remove_file(&temp_file);
+
+        // 5. Verify error when neither target2 nor target_schema is provided
+        let missing_args_output = binary()
+            .arg("diff")
+            .arg(&uri)
+            .output()
+            .expect("run ignatius diff without target2 or target_schema");
+
+        assert_ne!(
+            code(&missing_args_output),
+            0,
+            "diff without target schema or target2 must fail"
+        );
+        assert!(
+            stderr(&missing_args_output).contains("missing target schema"),
+            "stderr explains missing target schema: {}",
+            stderr(&missing_args_output)
+        );
+    }
 }

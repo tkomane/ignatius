@@ -738,6 +738,25 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::SchemaDiffLoaded { request, result } => {
+            if request != model.schema_diff_request {
+                return Vec::new();
+            }
+            if let Some(diff_state) = &mut model.schema_diff {
+                diff_state.loading = false;
+                match *result {
+                    Ok(diff) => {
+                        diff_state.diff = Some(diff);
+                        diff_state.error = None;
+                        diff_state.rebuild(!model.presentation.glyphs.is_ascii());
+                    }
+                    Err(diagnostic) => {
+                        diff_state.error = Some(diagnostic.headline);
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1004,6 +1023,7 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.schema_diagram.is_some()
         || model.server_activity.is_some()
         || model.security_audit.is_some()
+        || model.schema_diff.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1097,6 +1117,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.security_audit.is_some() {
         return security_audit_action(model, action);
+    }
+    if model.schema_diff.is_some() {
+        return schema_diff_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1263,6 +1286,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::SchemaDiagram => schema_diagram_open(model),
         Action::ServerActivity => server_activity_open(model),
         Action::SecurityAudit => security_audit_open(model),
+        Action::SchemaDiff => schema_diff_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -2021,6 +2045,137 @@ fn security_audit_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     editor.set_text(sql);
                 });
                 model.security_audit = None;
+                model.focus = Focus::Editor;
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+fn schema_diff_open(model: &mut Model) -> Vec<Effect> {
+    if model.schema_diff.is_some() {
+        model.schema_diff = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    let unicode = !model.presentation.glyphs.is_ascii();
+    model.schema_diff_request = model.schema_diff_request.wrapping_add(1);
+    let request = model.schema_diff_request;
+    let mut state = crate::app::model::SchemaDiffState::new(
+        None,
+        "public".to_owned(),
+        "public".to_owned(),
+        unicode,
+    );
+    state.loading = true;
+    model.schema_diff = Some(state);
+    vec![Effect::LoadSchemaDiff {
+        request,
+        source_schema: "public".to_owned(),
+        target_schema: "public".to_owned(),
+    }]
+}
+
+/// Handles input while the schema diff, table designer, and migration generator overlay is on screen.
+fn schema_diff_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let unicode = !model.presentation.glyphs.is_ascii();
+    match action {
+        Action::Dismiss | Action::SchemaDiff => {
+            model.schema_diff = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(diff) = &mut model.schema_diff {
+                if diff.active_tab == crate::app::model::SchemaDiffTab::TableDesigner {
+                    diff.prev_column();
+                } else {
+                    diff.scroll_up(1);
+                }
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(diff) = &mut model.schema_diff {
+                if diff.active_tab == crate::app::model::SchemaDiffTab::TableDesigner {
+                    diff.next_column();
+                } else {
+                    diff.scroll_down(1);
+                }
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.scroll_up(10);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.scroll_down(10);
+            }
+        }
+        Action::Move(Direction::Left) | Action::Insert('h' | 'H') => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.scroll_left(4);
+            }
+        }
+        Action::Move(Direction::Right) | Action::Insert('l' | 'L') => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.scroll_right(4);
+            }
+        }
+        Action::Insert('s' | 'S') | Action::FocusNext => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.cycle_tab(unicode);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.set_tab(crate::app::model::SchemaDiffTab::DiffTree, unicode);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.set_tab(crate::app::model::SchemaDiffTab::TableDesigner, unicode);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(diff) = &mut model.schema_diff {
+                diff.set_tab(crate::app::model::SchemaDiffTab::MigrationSql, unicode);
+            }
+        }
+        Action::Insert('r' | 'R') | Action::ReloadObjects | Action::RefreshResult => {
+            if model.connection.is_ready() {
+                model.schema_diff_request = model.schema_diff_request.wrapping_add(1);
+                let request = model.schema_diff_request;
+                let (src, tgt) = if let Some(diff) = &mut model.schema_diff {
+                    diff.loading = true;
+                    diff.error = None;
+                    (diff.source_schema.clone(), diff.target_schema.clone())
+                } else {
+                    ("public".to_owned(), "public".to_owned())
+                };
+                return vec![Effect::LoadSchemaDiff {
+                    request,
+                    source_schema: src,
+                    target_schema: tgt,
+                }];
+            }
+        }
+        Action::Insert('e' | 'E') | Action::Activate => {
+            let sql = model
+                .schema_diff
+                .as_ref()
+                .map(crate::app::model::SchemaDiffState::drafted_sql);
+            if let Some(sql) = sql {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.schema_diff = None;
                 model.focus = Focus::Editor;
             }
         }

@@ -1047,6 +1047,21 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadSchemaDiff {
+                    request,
+                    source_schema,
+                    target_schema,
+                } => {
+                    spawn_load_schema_diff(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        source_schema,
+                        target_schema,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::ExportRows { path, format } => {
                     let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
                         &model, &path, format,
@@ -2366,6 +2381,40 @@ fn spawn_load_security_audit(
         let _ = tx.send(connection_message(
             request_generation,
             Message::SecurityAuditLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_schema_diff(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    source_schema: String,
+    target_schema: String,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(installed) = opened else {
+            return;
+        };
+        let result = installed
+            .session
+            .schema_diff(&source_schema, &target_schema)
+            .await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::SchemaDiffLoaded {
                 request,
                 result: Box::new(result),
             },

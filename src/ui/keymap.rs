@@ -114,6 +114,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("schema-diagram", Action::SchemaDiagram),
     ("server-activity", Action::ServerActivity),
     ("security-audit", Action::SecurityAudit),
+    ("schema-diff", Action::SchemaDiff),
 ];
 
 /// The action a configuration name means.
@@ -772,6 +773,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::SecurityAudit,
         "Open the roles, privileges, and RLS auditor",
     ),
+    (
+        'k',
+        Action::SchemaDiff,
+        "Open the schema diff and migration designer",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -877,6 +883,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::SchemaDiagram => "ER diagram",
         Action::ServerActivity => "Activity",
         Action::SecurityAudit => "Security audit",
+        Action::SchemaDiff => "Schema diff",
     }
 }
 

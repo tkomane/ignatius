@@ -174,6 +174,8 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 
 ### Feature 030: Visual Schema Designer, Migrations, and Diff Generator (`030-visual-schema-designer-and-migrations`)
 
+**Status: Implemented on `main`.** The pure `src/migration/` schema diff, table designer, and migration generator engine, `Session::schema_snapshot` and `Session::schema_diff` extractors, `ignatius diff` CLI subcommand, and interactive `Ctrl+K k` (`schema-diff`) TUI overlay are fully implemented.
+
 - **Objective:** Enable engineers to design, alter, and compare database schemas with visual guidance while maintaining strict, reviewable, transactional SQL migration contracts.
 - **Visual Schema Designer:**
   - Form-based TUI modal for creating and modifying tables, columns, indexes, and constraints.

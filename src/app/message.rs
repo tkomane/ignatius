@@ -123,6 +123,8 @@ pub enum Action {
     ServerActivity,
     /// Open the interactive roles, privilege grants, and Row-Level Security (RLS) auditor overlay.
     SecurityAudit,
+    /// Compare schemas and generate reviewable transactional SQL migrations.
+    SchemaDiff,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -223,6 +225,7 @@ impl Action {
             Self::SchemaDiagram,
             Self::ServerActivity,
             Self::SecurityAudit,
+            Self::SchemaDiff,
         ]
     }
 }
@@ -544,6 +547,13 @@ pub enum Message {
         /// The loaded security audit snapshot, or why it could not be read.
         result: Box<Result<crate::audit::SecurityAuditSnapshot, Diagnostic>>,
     },
+    /// The live schema diff finished loading.
+    SchemaDiffLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// The loaded schema diff, or why it could not be read.
+        result: Box<Result<crate::migration::SchemaDiff, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -699,5 +709,14 @@ pub enum Effect {
     LoadSecurityAudit {
         /// Identity used to reject a late response.
         request: u64,
+    },
+    /// Read the schema diff between two schemas.
+    LoadSchemaDiff {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Source schema name.
+        source_schema: String,
+        /// Target schema name.
+        target_schema: String,
     },
 }

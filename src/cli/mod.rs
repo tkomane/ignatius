@@ -244,6 +244,9 @@ pub enum Command {
 
     /// Audit database roles, privilege grants, and Row-Level Security (RLS) policies.
     Audit(AuditArgs),
+
+    /// Compare schemas and generate reviewable, transactional SQL migration scripts.
+    Diff(DiffArgs),
 }
 
 /// Arguments for the audit command.
@@ -292,6 +295,49 @@ impl CliAuditSection {
             Self::Grants => crate::audit::AuditSection::Grants,
         }
     }
+}
+
+/// Arguments for the diff command (`030-visual-schema-designer-and-migrations`).
+#[derive(Debug, Args, Clone)]
+pub struct DiffArgs {
+    /// Connection target or source database: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Optional second connection target (e.g. staging or production database).
+    #[arg(long, value_name = "TARGET")]
+    pub target2: Option<String>,
+    /// Source schema name (default: "public").
+    #[arg(long, value_name = "SCHEMA", default_value = "public")]
+    pub source_schema: String,
+    /// Target schema name (e.g. "staging" when comparing within one database).
+    #[arg(long, value_name = "SCHEMA")]
+    pub target_schema: Option<String>,
+    /// Output representation format: sql (default), tree, or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliDiffFormat::Sql)]
+    pub format: CliDiffFormat,
+    /// Generate migration statements without BEGIN and COMMIT wrapper.
+    #[arg(long)]
+    pub no_transaction: bool,
+    /// Write the schema diff or migration script to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Output representation format for schema diffs and migrations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliDiffFormat {
+    /// Reviewable transactional SQL migration script (`BEGIN; ... COMMIT;`).
+    #[default]
+    Sql,
+    /// Human-readable visual tree showing additions (+), modifications (~), and deletions (-).
+    Tree,
+    /// Machine-readable structured JSON report (`schema_version: 1`).
+    Json,
 }
 
 /// Arguments for the activity command.
@@ -779,6 +825,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Ddl(args)) => ddl_command(args, &paths, out, err),
         Some(Command::Activity(args)) => run_activity(args, &paths, &presentation, out, err),
         Some(Command::Audit(args)) => run_audit(args, &paths, &presentation, out, err),
+        Some(Command::Diff(args)) => run_diff(args, &paths, &presentation, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -1888,6 +1935,127 @@ fn run_audit(
             snapshot.roles.len(),
             snapshot.tables.len(),
             snapshot.grants.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    } else {
+        out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+        Ok(ExitCode::Success)
+    }
+}
+
+fn run_diff(
+    args: &DiffArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let target2_info = if let Some(ref target2_str) = args.target2 {
+        let (requested2, conn_args2) = resolve_target_and_profile(
+            Some(target2_str.as_str()),
+            &args.connection,
+            &loaded.config,
+        )?;
+        let t2 = crate::connection::resolve(
+            requested2,
+            &conn_args2,
+            &EnvSnapshot::from_process(),
+            &loaded.config.connection,
+        )?;
+        Some(authenticate_target(t2, &loaded.config)?)
+    } else {
+        None
+    };
+
+    let target_schema = match (&args.target_schema, &args.target2) {
+        (Some(ts), _) => ts.clone(),
+        (None, Some(_)) => args.source_schema.clone(),
+        (None, None) => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "missing target schema or second connection target to compare",
+                "comparing schemas with ignatius diff",
+            )
+            .likely_cause(
+                "ignatius diff requires either --target-schema <SCHEMA> within the same database or --target2 <TARGET> to compare across databases",
+            )
+            .next_action(
+                "specify --target-schema <SCHEMA> (e.g. --target-schema staging) or --target2 <TARGET>",
+            ));
+        }
+    };
+
+    let diff = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+
+        if let Some(ref t2) = target2_info {
+            let session2 = crate::postgres::session::connect_reported(
+                t2,
+                std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+            )
+            .await
+            .value?;
+            let source_snap = session.schema_snapshot(&args.source_schema).await;
+            let target_snap = session2.schema_snapshot(&target_schema).await;
+            drop(session);
+            drop(session2);
+            let s_snap = source_snap?;
+            let t_snap = target_snap?;
+            Ok(crate::migration::compute_schema_diff(&s_snap, &t_snap))
+        } else {
+            let res = session
+                .schema_diff(&args.source_schema, &target_schema)
+                .await;
+            drop(session);
+            res
+        }
+    })?;
+
+    let rendered = match args.format {
+        CliDiffFormat::Sql => {
+            let options = crate::migration::MigrationOptions {
+                use_transaction: !args.no_transaction,
+                include_comments: true,
+                target_schema_override: None,
+            };
+            crate::migration::generate_migration_sql(&diff, &options)
+        }
+        CliDiffFormat::Tree => crate::migration::render_diff_tree(
+            &diff,
+            presentation.glyphs != crate::ui::GlyphTier::Ascii,
+        ),
+        CliDiffFormat::Json => crate::migration::render_diff_json(&diff),
+    };
+
+    if let Some(ref destination) = args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "Wrote schema diff ({} change(s)) to {}",
+            diff.total_changes(),
             destination.display()
         )
         .map_err(io_diagnostic)?;

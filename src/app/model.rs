@@ -668,6 +668,171 @@ impl SecurityAuditState {
     }
 }
 
+/// Which view tab is active in the Schema Diff & Migration Designer overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SchemaDiffTab {
+    /// Visual schema diff tree (+, ~, -).
+    #[default]
+    DiffTree,
+    /// Interactive Table Designer with live DDL preview.
+    TableDesigner,
+    /// Transactional SQL migration script (BEGIN; ... COMMIT;).
+    MigrationSql,
+}
+
+impl SchemaDiffTab {
+    /// Human-readable title for tabs.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::DiffTree => "Schema Diff",
+            Self::TableDesigner => "Table Designer",
+            Self::MigrationSql => "Migration SQL",
+        }
+    }
+
+    /// Cycles to the next tab.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::DiffTree => Self::TableDesigner,
+            Self::TableDesigner => Self::MigrationSql,
+            Self::MigrationSql => Self::DiffTree,
+        }
+    }
+}
+
+/// Interactive state for the Schema Diff, Table Designer, and Migration Generator overlay (`030-visual-schema-designer-and-migrations`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SchemaDiffState {
+    /// Source schema name (default: "public").
+    pub source_schema: String,
+    /// Target schema name (e.g. "staging" or "public").
+    pub target_schema: String,
+    /// Loaded structural difference between the two schemas.
+    pub diff: Option<crate::migration::SchemaDiff>,
+    /// Active tab in the overlay.
+    pub active_tab: SchemaDiffTab,
+    /// Interactive table draft in the Visual Table Designer.
+    pub blueprint: crate::migration::TableBlueprint,
+    /// Scroll offset Y in lines.
+    pub scroll_y: usize,
+    /// Scroll offset X in columns.
+    pub scroll_x: usize,
+    /// Whether schema metadata is actively loading in background.
+    pub loading: bool,
+    /// Failure message if metadata query failed.
+    pub error: Option<String>,
+    /// Pre-rendered diff tree lines.
+    pub tree_lines: Vec<String>,
+    /// Pre-rendered migration SQL script.
+    pub migration_sql: String,
+}
+
+impl SchemaDiffState {
+    /// Constructs a new schema diff state.
+    #[must_use]
+    pub fn new(
+        diff: Option<crate::migration::SchemaDiff>,
+        source_schema: String,
+        target_schema: String,
+        unicode: bool,
+    ) -> Self {
+        let mut state = Self {
+            source_schema,
+            target_schema,
+            diff,
+            active_tab: SchemaDiffTab::DiffTree,
+            blueprint: crate::migration::TableBlueprint::default(),
+            scroll_y: 0,
+            scroll_x: 0,
+            loading: false,
+            error: None,
+            tree_lines: Vec::new(),
+            migration_sql: String::new(),
+        };
+        state.rebuild(unicode);
+        state
+    }
+
+    /// Re-renders diff tree and migration SQL from the current diff.
+    pub fn rebuild(&mut self, unicode: bool) {
+        if let Some(ref d) = self.diff {
+            let tree = crate::migration::render_diff_tree(d, unicode);
+            self.tree_lines = tree.lines().map(ToOwned::to_owned).collect();
+            let options = crate::migration::MigrationOptions::default();
+            self.migration_sql = crate::migration::generate_migration_sql(d, &options);
+        } else {
+            self.tree_lines = vec!["  (Loading schema metadata...)".to_owned()];
+            self.migration_sql = "-- Loading schema metadata...\n".to_owned();
+        }
+    }
+
+    /// Cycles active tab.
+    pub fn cycle_tab(&mut self, unicode: bool) {
+        self.active_tab = self.active_tab.next();
+        self.scroll_y = 0;
+        self.scroll_x = 0;
+        self.rebuild(unicode);
+    }
+
+    /// Directly sets active tab.
+    pub fn set_tab(&mut self, tab: SchemaDiffTab, unicode: bool) {
+        self.active_tab = tab;
+        self.scroll_y = 0;
+        self.scroll_x = 0;
+        self.rebuild(unicode);
+    }
+
+    /// Returns the SQL to load into the SQL editor buffer.
+    #[must_use]
+    pub fn drafted_sql(&self) -> String {
+        match self.active_tab {
+            SchemaDiffTab::TableDesigner => self.blueprint.to_create_table_sql(),
+            SchemaDiffTab::DiffTree | SchemaDiffTab::MigrationSql => self.migration_sql.clone(),
+        }
+    }
+
+    /// Scrolls down by `amount` lines.
+    pub fn scroll_down(&mut self, amount: usize) {
+        let max = match self.active_tab {
+            SchemaDiffTab::DiffTree => self.tree_lines.len().saturating_sub(1),
+            SchemaDiffTab::MigrationSql => self.migration_sql.lines().count().saturating_sub(1),
+            SchemaDiffTab::TableDesigner => self.blueprint.columns.len().saturating_sub(1),
+        };
+        self.scroll_y = (self.scroll_y + amount).min(max);
+    }
+
+    /// Scrolls up by `amount` lines.
+    pub const fn scroll_up(&mut self, amount: usize) {
+        self.scroll_y = self.scroll_y.saturating_sub(amount);
+    }
+
+    /// Scrolls right by `amount` columns.
+    pub const fn scroll_right(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_add(amount);
+    }
+
+    /// Scrolls left by `amount` columns.
+    pub const fn scroll_left(&mut self, amount: usize) {
+        self.scroll_x = self.scroll_x.saturating_sub(amount);
+    }
+
+    /// Moves focus to next column in Table Designer.
+    pub fn next_column(&mut self) {
+        if self.blueprint.focused_column + 1 < self.blueprint.columns.len() {
+            self.blueprint.focused_column += 1;
+        }
+    }
+
+    /// Moves focus to previous column in Table Designer.
+    pub fn prev_column(&mut self) {
+        if self.blueprint.focused_column > 0 {
+            self.blueprint.focused_column -= 1;
+        }
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -1928,6 +2093,10 @@ pub struct Model {
     pub security_audit: Option<SecurityAuditState>,
     /// Request counter for in-flight security audit queries.
     pub security_audit_request: u64,
+    /// Interactive schema diff, table designer, and migration generator overlay state.
+    pub schema_diff: Option<SchemaDiffState>,
+    /// Request counter for in-flight schema diff queries.
+    pub schema_diff_request: u64,
 }
 
 impl Model {

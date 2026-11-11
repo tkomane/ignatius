@@ -1,5 +1,20 @@
 # Verification
 
+## Wave 22 (030-visual-schema-designer-and-migrations) Delivery - 11 November 2026
+
+Wave 22 Feature `030-visual-schema-designer-and-migrations` delivered the fifth Milestone 6
+full pgAdmin replacement parity slice:
+
+- **Wave 22 (`030-visual-schema-designer-and-migrations`)**:
+  - Implemented pure `src/migration/` schema diff, table designer, and transactional migration
+    generator engine synthesizing `BEGIN; ... COMMIT;` SQL scripts, visual tree diffs, and JSON reports.
+  - Implemented `Session::schema_snapshot` and `Session::schema_diff` live catalog extractors.
+  - Added the `ignatius diff` CLI subcommand with `--source-schema`, `--target-schema`, `--target2`,
+    `--format sql|tree|json`, and atomic streaming export (`--output`).
+  - Added the interactive TUI Schema Diff, Table Designer, and Migration Generator overlay on `Ctrl+K k`
+    (`schema-diff`) with `[1]`/`[2]`/`[3]` tabs, column focus navigation, live DDL preview, `[r]` live
+    refresh, and `[e]`/`Enter` reviewed transactional migration drafting into the SQL editor buffer.
+
 ## Wave 21 (031-roles-privileges-and-rls-auditor) Delivery - 9 November 2026
 
 Wave 21 Feature `031-roles-privileges-and-rls-auditor` delivered the fourth Milestone 6

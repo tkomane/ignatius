@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `030-visual-schema-designer-and-migrations` delivers the pure
+  `src/migration/` schema diff, visual table designer, and transactional migration
+  engine; live `pg_catalog` schema extractors (`Session::schema_snapshot` and
+  `Session::schema_diff`); the `ignatius diff` CLI subcommand (`--source-schema`,
+  `--target-schema`, `--target2`, `--format sql|tree|json`, `--output`, `--force`);
+  and the interactive `Ctrl+K k` (`schema-diff`) TUI Schema Diff, Table Designer,
+  and Migration Generator overlay with `[1]`/`[2]`/`[3]` tabs, column focus
+  navigation, `[r]` live refresh, and `[e]`/`Enter` reviewed `BEGIN; ... COMMIT;`
+  transactional migration drafting into the editor with undo support.
 - New: Feature `031-roles-privileges-and-rls-auditor` delivers the `ignatius audit`
   CLI subcommand with `--section roles|rls|grants`, `--schema`, `--format table|json`,
   and `--output`, plus the interactive `Ctrl+K t` (`security-audit`) TUI Security &
