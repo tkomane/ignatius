@@ -306,6 +306,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `<` | Open the data import wizard |
 | `(` | Open the routine runner and profiler |
 | `>` | Open the maintenance operations and pub-sub monitor |
+| `%` | Open the query performance and stat statements forensics |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -423,6 +424,11 @@ ignatius maintain "$DATABASE_URL" vacuum --target orders --analyze
 ignatius maintain "$DATABASE_URL" reindex --target orders --concurrently
 ignatius maintain "$DATABASE_URL" progress --format table
 
+# Query execution performance forensics and pg_stat_statements telemetry
+ignatius profile-queries "$DATABASE_URL" --sort mean --limit 20 --format table
+ignatius profile-queries "$DATABASE_URL" --format json -o perf_report.json
+ignatius profile-queries "$DATABASE_URL" --reset
+
 # Shell completion generator
 ignatius completion zsh > ~/.zfunc/_ignatius
 ```
@@ -486,6 +492,7 @@ Milestone 6 defines 8 comprehensive vertical slices documented in the [Full pgAd
 6. **`031-roles-privileges-and-rls-auditor` (Roles, Privileges & RLS Auditor) [Implemented]:** Visual browser for role inheritance trees, object privilege ACL matrices, and Row-Level Security (`RLS`) policy auditing with missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL via interactive `Ctrl+K t` overlay and scriptable `ignatius audit` CLI subcommand.
 7. **`032-plpgsql-routine-runner-and-profiler` (PL/pgSQL Routine Runner & Profiler) [Implemented]:** Routine signature discovery (`pg_proc`), typed parameter binding and validation, safe test harness execution inside transactional savepoint rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`), multi-set tabular result rendering, notice capture (`RAISE NOTICE`), `plpgsql_check` / static analysis profiling, scriptable CLI (`ignatius run-routine`, `ignatius profile-routine`), and interactive TUI overlay (`Ctrl+K (` / `routine-runner`).
 8. **`033-listen-notify-and-maintenance-ops` (LISTEN/NOTIFY & Maintenance Ops) [Implemented]:** Dedicated asynchronous pub/sub event monitor for `LISTEN`/`NOTIFY` channels, guarded maintenance runner for `VACUUM (VERBOSE, ANALYZE)`, `VACUUM FULL`, `ANALYZE`, and `REINDEX CONCURRENTLY` with bloat and lock estimation (`AccessExclusiveLock` vs `ShareUpdateExclusiveLock`), live progress telemetry from `pg_stat_progress_*`, scriptable CLI (`ignatius listen`, `ignatius notify`, `ignatius maintain`), and interactive TUI overlay (`Ctrl+K >` / `maintenance-ops`).
+9. **`034-query-performance-and-stat-statements` (Query Performance & `pg_stat_statements` Forensics) [Implemented]:** Live query execution forensics gathered from `pg_stat_statements`, aggregate and per-query buffer cache hit ratios, execution duration distributions (min, max, mean, stddev), shared block I/O statistics, dynamic ranking by total time, mean time, calls, rows, or cache hit ratio, safe stat reset (`SELECT pg_stat_statements_reset()`), scriptable CLI (`ignatius profile-queries`), and Field Industrial TUI overlay (`Ctrl+K %` / `query-performance`).
 
 ---
 

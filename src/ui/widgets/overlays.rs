@@ -917,7 +917,7 @@ pub(crate) fn render_chords(
         let height = u16::try_from(split_at)
             .unwrap_or(u16::MAX)
             .saturating_add(2);
-        let max_width = 110u16.min(area.width.saturating_sub(2));
+        let max_width = 116u16.min(area.width.saturating_sub(2));
         let chord_area = overlay_box(
             area,
             presentation,
@@ -3147,6 +3147,409 @@ pub(crate) fn render_maintenance_ops(
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),
         ),
         Span::styled("Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
+/// Renders the Query Performance & pg_stat_statements Forensics overlay (`034-query-performance-and-stat-statements`).
+pub(crate) fn render_query_performance(
+    state: &crate::app::model::QueryPerformanceState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} QUERY PERFORMANCE FORENSICS · PG_STAT_STATEMENTS ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace (table + inspector split)
+            Constraint::Length(1), // Status / Reset prompt
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let body_area = chunks[2];
+    let status_area = chunks[3];
+    let footer_area = chunks[4];
+
+    // Hardware Capsules Bar
+    let snapshot_opt = state.snapshot.as_ref();
+    let hit_ratio = snapshot_opt.map_or(100.0, |s| s.global_hit_ratio);
+    let tracked_count = snapshot_opt.map_or(0, |s| s.queries.len());
+    let total_calls: u64 = snapshot_opt.map_or(0, |s| s.total_calls);
+    let total_time_ms: f64 = snapshot_opt.map_or(0.0, |s| s.total_time_ms);
+
+    let hit_token = if hit_ratio >= 98.0 {
+        Token::Success
+    } else if hit_ratio >= 90.0 {
+        Token::Focus
+    } else {
+        Token::Warning
+    };
+
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("HIT RATIO: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{hit_ratio:.1}%"),
+            theme.style(hit_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("TRACKED: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{tracked_count}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("CALLS: ", theme.style(Token::Muted)),
+        Span::styled(format!("{total_calls}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("EXEC TIME: ", theme.style(Token::Muted)),
+        Span::styled(
+            crate::perf::format_duration_ms(total_time_ms),
+            theme.style(Token::Text),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("SORT: ", theme.style(Token::Muted)),
+        Span::styled(
+            state.sort_order.display_name(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Body: check if extension unavailable
+    if let Some(snapshot) = snapshot_opt {
+        if !snapshot.extension_available {
+            let mut lines = Vec::new();
+            lines.push(Line::from(Span::styled(
+                "Telemetry Unavailable: pg_stat_statements is not installed or enabled.",
+                theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            if let Some(reason) = &snapshot.missing_reason {
+                lines.push(Line::from(Span::styled(reason, theme.style(Token::Muted))));
+                lines.push(Line::from(""));
+            }
+            lines.push(Line::from(Span::styled(
+                "To enable performance tracking in PostgreSQL:",
+                theme.style(Token::Text).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  1. Add to postgresql.conf: shared_preload_libraries = 'pg_stat_statements'",
+                theme.style(Token::Muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  2. Restart PostgreSQL daemon",
+                theme.style(Token::Muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  3. Run SQL: CREATE EXTENSION IF NOT EXISTS pg_stat_statements;",
+                theme.style(Token::Focus),
+            )));
+            Paragraph::new(lines).render(body_area, buf);
+            return;
+        }
+
+        if snapshot.queries.is_empty() {
+            let lines = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No query execution statistics recorded yet for the current database.",
+                    theme.style(Token::Muted),
+                )),
+                Line::from(Span::styled(
+                    "Execute queries in the editor or application to populate pg_stat_statements.",
+                    theme.style(Token::Muted),
+                )),
+            ];
+            Paragraph::new(lines).render(body_area, buf);
+        } else {
+            // Split body area: Table (top 58%) + Selected Query Detail (bottom 42%)
+            let body_split = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(58),
+                    Constraint::Length(1), // Split rule
+                    Constraint::Percentage(42),
+                ])
+                .split(body_area);
+
+            let table_area = body_split[0];
+            let split_rule_area = body_split[1];
+            let detail_area = body_split[2];
+
+            // Render horizontal split rule
+            let sep = "─".repeat(split_rule_area.width as usize);
+            Paragraph::new(Line::from(Span::styled(sep, theme.style(Token::Border))))
+                .render(split_rule_area, buf);
+
+            // Table Header
+            let mut table_lines = Vec::new();
+            table_lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<4}", "#"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<8}", "CALLS"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<11}", "TOTAL TIME"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<11}", "MEAN TIME"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<9}", "CACHE HIT"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "QUERY STATEMENT",
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            let visible_rows = table_area.height.saturating_sub(1) as usize;
+            let start_idx = if state.selected_idx >= visible_rows {
+                state
+                    .selected_idx
+                    .saturating_sub(visible_rows.saturating_sub(1))
+            } else {
+                0
+            };
+
+            for (idx, entry) in snapshot
+                .queries
+                .iter()
+                .enumerate()
+                .skip(start_idx)
+                .take(visible_rows)
+            {
+                let is_sel = idx == state.selected_idx;
+                let rank = idx + 1;
+                let calls_str = format!("{:<8}", entry.calls);
+                let total_str = format!(
+                    "{:<11}",
+                    crate::perf::format_duration_ms(entry.total_exec_time_ms)
+                );
+                let mean_str = format!(
+                    "{:<11}",
+                    crate::perf::format_duration_ms(entry.mean_exec_time_ms)
+                );
+                let hit_ratio = entry.hit_ratio();
+                let hit_str = format!("{:<9}", format!("{hit_ratio:.1}%"));
+
+                let query_snippet = crate::perf::format_query_snippet(&entry.query, 60);
+
+                let line_style = if is_sel {
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                } else {
+                    theme.style(Token::Text)
+                };
+
+                let marker = if is_sel { "▶ " } else { "  " };
+
+                table_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{marker}{:<2}", rank),
+                        if is_sel {
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Muted)
+                        },
+                    ),
+                    Span::styled(calls_str, line_style),
+                    Span::styled(total_str, line_style),
+                    Span::styled(mean_str, line_style),
+                    Span::styled(
+                        hit_str,
+                        if hit_ratio < 90.0 {
+                            theme.style(Token::Warning)
+                        } else {
+                            line_style
+                        },
+                    ),
+                    Span::styled(
+                        query_snippet,
+                        if is_sel {
+                            theme.style(Token::Text).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Muted)
+                        },
+                    ),
+                ]));
+            }
+            Paragraph::new(table_lines).render(table_area, buf);
+
+            // Detail Area: Detailed Telemetry for Selected Entry
+            if let Some(entry) = state.selected_entry() {
+                let mut detail_lines = Vec::new();
+                let timing_row = format!(
+                    "TIMING: min={} · max={} · mean={} · stddev={}",
+                    crate::perf::format_duration_ms(entry.min_exec_time_ms),
+                    crate::perf::format_duration_ms(entry.max_exec_time_ms),
+                    crate::perf::format_duration_ms(entry.mean_exec_time_ms),
+                    crate::perf::format_duration_ms(entry.stddev_exec_time_ms),
+                );
+                let io_row = format!(
+                    "BLOCK I/O: hit={} · read={} · dirtied={} · written={}",
+                    entry.shared_blks_hit,
+                    entry.shared_blks_read,
+                    entry.shared_blks_dirtied,
+                    entry.shared_blks_written,
+                );
+
+                detail_lines.push(Line::from(vec![
+                    Span::styled(timing_row, theme.style(Token::Text)),
+                    Span::styled("   ", theme.style(Token::Muted)),
+                    Span::styled(io_row, theme.style(Token::Muted)),
+                ]));
+
+                detail_lines.push(Line::from(Span::styled(
+                    "FULL STATEMENT (press [e] to load into editor):",
+                    theme.style(Token::Muted),
+                )));
+
+                let max_detail_lines = detail_area.height.saturating_sub(2) as usize;
+                for query_line in entry.query.lines().take(max_detail_lines.max(1)) {
+                    detail_lines.push(Line::from(Span::styled(
+                        query_line,
+                        theme.style(Token::Focus),
+                    )));
+                }
+
+                Paragraph::new(detail_lines).render(detail_area, buf);
+            }
+        }
+    } else if state.loading {
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Gathering query telemetry from pg_stat_statements...",
+                theme.style(Token::Focus),
+            )),
+        ];
+        Paragraph::new(lines).render(body_area, buf);
+    }
+
+    // Status Area / Reset Confirmation Banner
+    if state.confirm_reset {
+        let warn_line = Line::from(vec![
+            Span::styled(
+                " HAZARD: ",
+                theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Reset all pg_stat_statements metrics? Press ",
+                theme.style(Token::Text),
+            ),
+            Span::styled(
+                "[Enter]",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " to execute SELECT pg_stat_statements_reset() or ",
+                theme.style(Token::Text),
+            ),
+            Span::styled(
+                "[!]",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" to cancel.", theme.style(Token::Text)),
+        ]);
+        Paragraph::new(warn_line).render(status_area, buf);
+    } else if let Some(status) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(status, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Hints
+    let footer_spans = vec![
+        Span::styled(
+            "[m] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Mean Time  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[t] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Total Time  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[c] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Calls  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Rows  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[h] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Hit Ratio  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[!] ",
+            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Reset Stats  ", theme.style(Token::Muted)),
         Span::styled(
             "[Esc] ",
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),

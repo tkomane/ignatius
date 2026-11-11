@@ -928,6 +928,56 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::QueryPerformanceLoaded { request, result } => {
+            if request != model.query_performance_request {
+                return Vec::new();
+            }
+            if let Some(perf) = &mut model.query_performance {
+                perf.loading = false;
+                match *result {
+                    Ok(snapshot) => {
+                        perf.snapshot = Some(snapshot);
+                        perf.selected_idx = 0;
+                    }
+                    Err(diag) => {
+                        perf.status_message = Some(format!(
+                            "Failed to load performance telemetry: {}",
+                            diag.headline
+                        ));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::QueryPerformanceReset { request, result } => {
+            if request != model.query_performance_request {
+                return Vec::new();
+            }
+            if let Some(perf) = &mut model.query_performance {
+                perf.loading = false;
+                perf.confirm_reset = false;
+                match *result {
+                    Ok(()) => {
+                        perf.status_message =
+                            Some("Execution statistics reset successfully".to_owned());
+                        model.query_performance_request =
+                            model.query_performance_request.wrapping_add(1);
+                        let req = model.query_performance_request;
+                        let sort_order = perf.sort_order;
+                        perf.loading = true;
+                        return vec![Effect::LoadQueryPerformance {
+                            request: req,
+                            sort_order,
+                            limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+                        }];
+                    }
+                    Err(diag) => {
+                        perf.status_message = Some(format!("Reset failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1304,6 +1354,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.maintenance_ops.is_some() {
         return maintenance_ops_action(model, action);
     }
+    if model.query_performance.is_some() {
+        return query_performance_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1473,6 +1526,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ImportData => import_wizard_open(model),
         Action::RoutineRunner => routine_runner_open(model),
         Action::MaintenanceOps => maintenance_ops_open(model),
+        Action::QueryPerformance => query_performance_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -2855,6 +2909,150 @@ fn maintenance_ops_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     model.maintenance_ops = None;
                     model.focus = Focus::Editor;
                 }
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+fn query_performance_open(model: &mut Model) -> Vec<Effect> {
+    if model.query_performance.is_some() {
+        model.query_performance = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::QueryPerformanceState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.query_performance_request = model.query_performance_request.wrapping_add(1);
+    let request = model.query_performance_request;
+    let sort_order = state.sort_order;
+    model.query_performance = Some(state);
+
+    vec![Effect::LoadQueryPerformance {
+        request,
+        sort_order,
+        limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+    }]
+}
+
+/// Handles input while the query performance and stat statements overlay is on screen.
+fn query_performance_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::QueryPerformance => {
+            model.query_performance = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.move_selection(1);
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.sort_order = crate::perf::PerformanceSortOrder::MeanTime;
+                perf.loading = true;
+                model.query_performance_request = model.query_performance_request.wrapping_add(1);
+                let request = model.query_performance_request;
+                return vec![Effect::LoadQueryPerformance {
+                    request,
+                    sort_order: perf.sort_order,
+                    limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+                }];
+            }
+        }
+        Action::Insert('t' | 'T') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.sort_order = crate::perf::PerformanceSortOrder::TotalTime;
+                perf.loading = true;
+                model.query_performance_request = model.query_performance_request.wrapping_add(1);
+                let request = model.query_performance_request;
+                return vec![Effect::LoadQueryPerformance {
+                    request,
+                    sort_order: perf.sort_order,
+                    limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+                }];
+            }
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.sort_order = crate::perf::PerformanceSortOrder::Calls;
+                perf.loading = true;
+                model.query_performance_request = model.query_performance_request.wrapping_add(1);
+                let request = model.query_performance_request;
+                return vec![Effect::LoadQueryPerformance {
+                    request,
+                    sort_order: perf.sort_order,
+                    limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+                }];
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.sort_order = crate::perf::PerformanceSortOrder::Rows;
+                perf.loading = true;
+                model.query_performance_request = model.query_performance_request.wrapping_add(1);
+                let request = model.query_performance_request;
+                return vec![Effect::LoadQueryPerformance {
+                    request,
+                    sort_order: perf.sort_order,
+                    limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+                }];
+            }
+        }
+        Action::Insert('h' | 'H') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.sort_order = crate::perf::PerformanceSortOrder::HitRatio;
+                perf.loading = true;
+                model.query_performance_request = model.query_performance_request.wrapping_add(1);
+                let request = model.query_performance_request;
+                return vec![Effect::LoadQueryPerformance {
+                    request,
+                    sort_order: perf.sort_order,
+                    limit: crate::perf::DEFAULT_PERFORMANCE_LIMIT,
+                }];
+            }
+        }
+        Action::Insert('!') => {
+            if let Some(perf) = &mut model.query_performance {
+                perf.confirm_reset = !perf.confirm_reset;
+            }
+        }
+        Action::Activate | Action::Insert('\n') => {
+            if let Some(perf) = &mut model.query_performance
+                && perf.confirm_reset
+            {
+                perf.loading = true;
+                perf.confirm_reset = false;
+                model.query_performance_request = model.query_performance_request.wrapping_add(1);
+                let request = model.query_performance_request;
+                return vec![Effect::ResetQueryPerformance { request }];
+            }
+        }
+        Action::Insert('e' | 'E') => {
+            if let Some(perf) = model.query_performance.as_ref()
+                && let Some(entry) = perf.selected_entry()
+            {
+                let query = entry.query.clone();
+                edit_editor(model, |editor| {
+                    editor.set_text(query);
+                });
+                model.query_performance = None;
+                model.focus = Focus::Editor;
             }
         }
         _ => {}

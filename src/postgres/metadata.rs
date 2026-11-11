@@ -2136,5 +2136,105 @@ pub async fn query_maintenance_progress(
     Ok(entries)
 }
 
+/// Gathers query execution telemetry from pg_stat_statements.
+pub async fn query_performance(
+    client: &Client,
+    sort_order: crate::perf::PerformanceSortOrder,
+    limit: usize,
+) -> Result<crate::perf::QueryPerformanceSnapshot, Diagnostic> {
+    use crate::perf::{QueryPerformanceSnapshot, StatStatementEntry};
+
+    // 1. Check if pg_stat_statements extension is installed
+    const EXTENSION_CHECK_SQL: &str =
+        "SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'pg_stat_statements'";
+    let ext_rows = client
+        .query(EXTENSION_CHECK_SQL, &[])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    if ext_rows.is_empty() {
+        return Ok(QueryPerformanceSnapshot::unavailable(
+            "Extension 'pg_stat_statements' is not installed in the current database.",
+        ));
+    }
+
+    // 2. Query pg_stat_statements
+    const PERF_SQL: &str = r#"
+        SELECT
+            s.queryid,
+            COALESCE(s.query, '') AS query,
+            s.calls,
+            COALESCE(s.total_exec_time, 0.0)::float8 AS total_exec_time,
+            COALESCE(s.min_exec_time, 0.0)::float8 AS min_exec_time,
+            COALESCE(s.max_exec_time, 0.0)::float8 AS max_exec_time,
+            COALESCE(s.mean_exec_time, 0.0)::float8 AS mean_exec_time,
+            COALESCE(s.stddev_exec_time, 0.0)::float8 AS stddev_exec_time,
+            s.rows,
+            COALESCE(s.shared_blks_hit, 0) AS shared_blks_hit,
+            COALESCE(s.shared_blks_read, 0) AS shared_blks_read,
+            COALESCE(s.shared_blks_dirtied, 0) AS shared_blks_dirtied,
+            COALESCE(s.shared_blks_written, 0) AS shared_blks_written
+        FROM pg_stat_statements s
+        WHERE s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+        LIMIT $1;
+    "#;
+
+    let limit_param = (limit.clamp(1, crate::perf::MAX_PERFORMANCE_QUERIES)) as i64;
+    let rows = match client.query(PERF_SQL, &[&limit_param]).await {
+        Ok(rows) => rows,
+        Err(err) => {
+            return Ok(QueryPerformanceSnapshot::unavailable(format!(
+                "Failed to read pg_stat_statements: {err}"
+            )));
+        }
+    };
+
+    let mut entries = Vec::new();
+    for row in rows {
+        let query_id: i64 = row.get("queryid");
+        let query: String = row.get("query");
+        let calls: i64 = row.get("calls");
+        let total_exec_time: f64 = row.get("total_exec_time");
+        let min_exec_time: f64 = row.get("min_exec_time");
+        let max_exec_time: f64 = row.get("max_exec_time");
+        let mean_exec_time: f64 = row.get("mean_exec_time");
+        let stddev_exec_time: f64 = row.get("stddev_exec_time");
+        let rows_count: i64 = row.get("rows");
+        let shared_blks_hit: i64 = row.get("shared_blks_hit");
+        let shared_blks_read: i64 = row.get("shared_blks_read");
+        let shared_blks_dirtied: i64 = row.get("shared_blks_dirtied");
+        let shared_blks_written: i64 = row.get("shared_blks_written");
+
+        entries.push(StatStatementEntry {
+            query_id,
+            query,
+            calls: calls.max(0) as u64,
+            total_exec_time_ms: total_exec_time,
+            min_exec_time_ms: min_exec_time,
+            max_exec_time_ms: max_exec_time,
+            mean_exec_time_ms: mean_exec_time,
+            stddev_exec_time_ms: stddev_exec_time,
+            rows: rows_count.max(0) as u64,
+            shared_blks_hit: shared_blks_hit.max(0) as u64,
+            shared_blks_read: shared_blks_read.max(0) as u64,
+            shared_blks_dirtied: shared_blks_dirtied.max(0) as u64,
+            shared_blks_written: shared_blks_written.max(0) as u64,
+        });
+    }
+
+    Ok(QueryPerformanceSnapshot::new(
+        entries, true, None, sort_order,
+    ))
+}
+
+/// Resets execution statistics in pg_stat_statements.
+pub async fn reset_performance_stats(client: &Client) -> Result<(), Diagnostic> {
+    client
+        .execute("SELECT pg_stat_statements_reset();", &[])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

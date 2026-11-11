@@ -1274,6 +1274,70 @@ impl MaintenanceOpsState {
     }
 }
 
+/// State for the Query Performance and pg_stat_statements Forensics overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryPerformanceState {
+    /// Telemetry snapshot gathered from pg_stat_statements.
+    pub snapshot: Option<crate::perf::QueryPerformanceSnapshot>,
+    /// Active sort order.
+    pub sort_order: crate::perf::PerformanceSortOrder,
+    /// Selected index in the ranked statements list.
+    pub selected_idx: usize,
+    /// Whether an asynchronous fetch is currently in flight.
+    pub loading: bool,
+    /// Whether reset confirmation prompt is active.
+    pub confirm_reset: bool,
+    /// Status or diagnostic message shown in the overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for QueryPerformanceState {
+    fn default() -> Self {
+        Self {
+            snapshot: None,
+            sort_order: crate::perf::PerformanceSortOrder::TotalTime,
+            selected_idx: 0,
+            loading: true,
+            confirm_reset: false,
+            status_message: None,
+        }
+    }
+}
+
+impl QueryPerformanceState {
+    /// Number of ranked statements available.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.snapshot.as_ref().map_or(0, |s| s.queries.len())
+    }
+
+    /// Whether there are no statements available.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The currently selected entry, if any.
+    #[must_use]
+    pub fn selected_entry(&self) -> Option<&crate::perf::StatStatementEntry> {
+        self.snapshot
+            .as_ref()
+            .and_then(|s| s.queries.get(self.selected_idx))
+    }
+
+    /// Moves selection in the ranked statement list.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_idx = new_idx as usize;
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2550,6 +2614,10 @@ pub struct Model {
     pub maintenance_ops: Option<MaintenanceOpsState>,
     /// Request counter for in-flight maintenance operations.
     pub maintenance_ops_request: u64,
+    /// Interactive query performance and pg_stat_statements forensics overlay state.
+    pub query_performance: Option<QueryPerformanceState>,
+    /// Request counter for in-flight query performance operations.
+    pub query_performance_request: u64,
 }
 
 impl Model {

@@ -15,7 +15,7 @@ use crate::config::{self, Paths};
 use crate::connection::{ConnectionArgs, EnvSnapshot, Environment, SslMode};
 use crate::diagnostics::doctor;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use output::{Format, OutputOptions};
 use secrecy::SecretString;
 use std::io::{IsTerminal, Read, Write};
@@ -276,6 +276,10 @@ pub enum Command {
 
     /// Execute or monitor database maintenance operations (vacuum, analyze, reindex, progress).
     Maintain(MaintainArgs),
+
+    /// Profile query execution telemetry and stat statements forensics from pg_stat_statements.
+    #[command(name = "profile-queries")]
+    ProfileQueries(ProfileQueriesArgs),
 }
 
 /// Arguments for the audit command.
@@ -868,6 +872,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Listen(args)) => run_listen(args, &paths, out, err),
         Some(Command::Notify(args)) => run_notify(args, &paths, out, err),
         Some(Command::Maintain(args)) => run_maintain(args, &paths, &presentation, out, err),
+        Some(Command::ProfileQueries(args)) => run_profile_queries(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -3474,6 +3479,138 @@ fn run_maintain(
 fn io_diagnostic(err: std::io::Error) -> Diagnostic {
     Diagnostic::new(DiagnosticKind::Internal, err.to_string(), "writing output")
         .next_action("check the output stream and available space")
+}
+
+/// Output representation format for query performance profiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliPerformanceFormat {
+    /// Aligned tabular overview with statistics capsules.
+    #[default]
+    Table,
+    /// Structured JSON snapshot document.
+    Json,
+    /// Plain tab-delimited text.
+    Plain,
+}
+
+/// Arguments for the `profile-queries` command.
+#[derive(Debug, Args, Clone)]
+pub struct ProfileQueriesArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Metric to rank queries by (mean, total, calls, hit-ratio, io, rows).
+    #[arg(short = 's', long, value_name = "METRIC", default_value = "total")]
+    pub sort: String,
+    /// Maximum number of statements to return (1..200).
+    #[arg(short = 'l', long, value_name = "LIMIT", default_value_t = crate::perf::DEFAULT_PERFORMANCE_LIMIT)]
+    pub limit: usize,
+    /// Minimum execution calls required to include a statement.
+    #[arg(long, value_name = "COUNT", default_value_t = 0)]
+    pub min_calls: u64,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliPerformanceFormat::Table)]
+    pub format: CliPerformanceFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    /// Reset execution statistics in pg_stat_statements (SELECT pg_stat_statements_reset()).
+    #[arg(long)]
+    pub reset: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_profile_queries(
+    args: &ProfileQueriesArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing profile-queries command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    if args.reset {
+        rt.block_on(session.reset_performance_stats())?;
+        writeln!(
+            out,
+            "Reset pg_stat_statements query execution statistics successfully."
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Success);
+    }
+
+    let sort_order =
+        crate::perf::PerformanceSortOrder::from_str_loose(&args.sort).ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("unrecognized sort metric '{}'", args.sort),
+                "executing profile-queries command",
+            )
+            .likely_cause(format!(
+                "accepted sort metrics are: {}",
+                crate::perf::PerformanceSortOrder::ACCEPTED.join(", ")
+            ))
+            .next_action("choose one of: mean, total, calls, hit-ratio, io, rows")
+        })?;
+
+    let mut snapshot = rt.block_on(session.query_performance(sort_order, args.limit))?;
+
+    if args.min_calls > 0 {
+        snapshot.queries.retain(|q| q.calls >= args.min_calls);
+    }
+
+    let rendered = match args.format {
+        CliPerformanceFormat::Table => snapshot.render_table(),
+        CliPerformanceFormat::Json => snapshot.render_json().map_err(|e| {
+            Diagnostic::new(DiagnosticKind::Usage, e.to_string(), "serializing JSON")
+        })?,
+        CliPerformanceFormat::Plain => snapshot.render_plain(),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Performance report written to {}", dest.display()).map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
 }
 
 #[cfg(test)]
