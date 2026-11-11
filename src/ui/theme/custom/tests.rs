@@ -571,3 +571,33 @@ fn auto_selection_with_custom_definition_validates_custom_and_defaults_to_dark()
     let bad = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Text, Rgb(0, 0, 0));
     assert!(ValidatedThemes::resolve(ThemeSelection::Auto, Some(&bad)).is_err());
 }
+
+#[test]
+fn field_industrial_preset_validates_and_clears_all_contrast_matrix_roles() {
+    let toml = r##"
+        [ui]
+        theme = "custom"
+
+        [theme]
+        extends = "dark"
+        focus = "#FF6A00"
+        warning = "#F59E0B"
+        success = "#10B981"
+        border = "#2E3547"
+        header = "#F4F3EF"
+        syntax-keyword = "#82AAFF"
+    "##;
+    let (selection, definition) = lower(toml).expect("valid TOML");
+    assert_eq!(selection, ThemeSelection::Custom);
+    let definition = definition.expect("custom definition present");
+    let catalog = ValidatedThemes::resolve(selection, Some(&definition))
+        .expect("field industrial preset clears all contrast matrix rules");
+    let theme = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(theme.selection(), ThemeSelection::Custom);
+    assert_eq!(theme.rgb(Token::Focus), Rgb(0xFF, 0x6A, 0x00));
+    assert_eq!(theme.rgb(Token::Warning), Rgb(0xF5, 0x9E, 0x0B));
+    assert_eq!(theme.rgb(Token::Success), Rgb(0x10, 0xB9, 0x81));
+    assert_eq!(theme.rgb(Token::Border), Rgb(0x2E, 0x35, 0x47));
+    assert_eq!(theme.rgb(Token::Header), Rgb(0xF4, 0xF3, 0xEF));
+    assert_eq!(theme.rgb(Token::SyntaxKeyword), Rgb(0x82, 0xAA, 0xFF));
+}

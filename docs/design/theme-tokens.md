@@ -66,6 +66,24 @@ extends = "dark"
 syntax-keyword = "#C99CF0"
 ```
 
+### The Field Industrial Preset (Teenage Engineering & Dieter Rams aesthetic)
+
+For an artisan hardware aesthetic inspired by Teenage Engineering and Dieter Rams (Braun ET66), use this tactile, high-contrast palette with industrial safety orange accents, phosphor amber indicators, and warm bone typography:
+
+```toml
+[ui]
+theme = "custom"
+
+[theme]
+extends = "dark"
+focus = "#FF6A00"                  # Tactile industrial safety orange
+warning = "#F59E0B"                # Vintage phosphor amber indicator
+success = "#10B981"                # Alpine sage green
+border = "#2E3547"                 # Precision graphite hairline
+header = "#F4F3EF"                 # Warm bone / cream paper text
+syntax-keyword = "#82AAFF"         # Technical drafting cobalt
+```
+
 `ui.theme` accepts `dark`, `light`, `high-contrast`, `custom` and `auto`. When
 `ui.theme = "auto"`, startup probes the terminal background luminance over OSC 11
 within a 100 ms deadline before entering the alternate screen, selecting `light`
