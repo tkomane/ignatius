@@ -326,6 +326,23 @@ impl Session {
         crate::postgres::metadata::security_audit(&self.client, schema).await
     }
 
+    /// Reads a complete schema snapshot for schema diffing and migrations.
+    pub async fn schema_snapshot(
+        &self,
+        schema: &str,
+    ) -> Result<crate::migration::SchemaSnapshot, Diagnostic> {
+        crate::postgres::metadata::schema_snapshot(&self.client, schema).await
+    }
+
+    /// Computes structural differences between two schemas.
+    pub async fn schema_diff(
+        &self,
+        source_schema: &str,
+        target_schema: &str,
+    ) -> Result<crate::migration::SchemaDiff, Diagnostic> {
+        crate::postgres::metadata::schema_diff(&self.client, source_schema, target_schema).await
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

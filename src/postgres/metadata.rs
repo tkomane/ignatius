@@ -1814,5 +1814,165 @@ pub async fn security_audit(
     .bounded())
 }
 
+/// Reads the complete schema definition (tables, columns, constraints, indexes)
+/// from `pg_catalog` for schema diffing and migrations (`030-visual-schema-designer-and-migrations`).
+pub async fn schema_snapshot(
+    client: &Client,
+    schema: &str,
+) -> Result<crate::migration::SchemaSnapshot, Diagnostic> {
+    use crate::migration::{
+        ColumnDef, ConstraintDef, ConstraintKind, IndexDef, SchemaSnapshot, TableDef,
+    };
+
+    const TABLES_QUERY: &str = "SELECT \
+         c.relname::text AS table_name, \
+         n.nspname::text AS schema_name, \
+         obj_description(c.oid, 'pg_class')::text AS comment \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE c.relkind IN ('r', 'p') \
+           AND n.nspname = $1 \
+         ORDER BY c.relname";
+
+    const COLUMNS_QUERY: &str = "SELECT \
+         c.relname::text AS table_name, \
+         a.attname::text AS column_name, \
+         pg_catalog.format_type(a.atttypid, a.atttypmod)::text AS data_type, \
+         NOT a.attnotnull AS is_nullable, \
+         pg_catalog.pg_get_expr(d.adbin, d.adrelid)::text AS default_expression, \
+         (a.attidentity = 'a' OR a.attidentity = 'd') AS is_identity, \
+         COALESCE(BOOL_OR(i.indisprimary), false) AS is_pk, \
+         COALESCE(BOOL_OR(i.indisunique AND NOT i.indisprimary), false) AS is_unique \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+         LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum \
+         LEFT JOIN pg_catalog.pg_index i ON i.indrelid = c.oid AND a.attnum = ANY(i.indkey) \
+         WHERE c.relkind IN ('r', 'p') \
+           AND n.nspname = $1 \
+         GROUP BY c.relname, a.attnum, a.attname, a.atttypid, a.atttypmod, a.attnotnull, a.attidentity, d.adbin, d.adrelid \
+         ORDER BY c.relname, a.attnum";
+
+    const CONSTRAINTS_QUERY: &str = "SELECT \
+         c.relname::text AS table_name, \
+         con.conname::text AS constraint_name, \
+         con.contype::text AS constraint_type, \
+         pg_catalog.pg_get_constraintdef(con.oid)::text AS definition \
+         FROM pg_catalog.pg_constraint con \
+         JOIN pg_catalog.pg_class c ON c.oid = con.conrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = $1 \
+         ORDER BY c.relname, con.conname";
+
+    const INDEXES_QUERY: &str = "SELECT \
+         c.relname::text AS table_name, \
+         i.relname::text AS index_name, \
+         idx.indisunique AS is_unique, \
+         pg_catalog.pg_get_indexdef(idx.indexrelid)::text AS definition \
+         FROM pg_catalog.pg_index idx \
+         JOIN pg_catalog.pg_class c ON c.oid = idx.indrelid \
+         JOIN pg_catalog.pg_class i ON i.oid = idx.indexrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = $1 \
+           AND NOT idx.indisprimary \
+           AND NOT EXISTS ( \
+               SELECT 1 FROM pg_catalog.pg_constraint con \
+               WHERE con.conindid = idx.indexrelid \
+           ) \
+         ORDER BY c.relname, i.relname";
+
+    let tbl_rows = client
+        .query(TABLES_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let col_rows = client
+        .query(COLUMNS_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let con_rows = client
+        .query(CONSTRAINTS_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    let idx_rows = client
+        .query(INDEXES_QUERY, &[&schema])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+
+    let mut tables = Vec::with_capacity(tbl_rows.len());
+    for row in &tbl_rows {
+        let name: String = row.get("table_name");
+        let comment: Option<String> = row.get("comment");
+        tables.push(TableDef {
+            schema: schema.to_owned(),
+            name,
+            columns: Vec::new(),
+            constraints: Vec::new(),
+            indexes: Vec::new(),
+            comment,
+        });
+    }
+
+    for row in &col_rows {
+        let tbl_name: String = row.get("table_name");
+        if let Some(tbl) = tables.iter_mut().find(|t| t.name == tbl_name) {
+            tbl.columns.push(ColumnDef {
+                name: row.get("column_name"),
+                data_type: row.get("data_type"),
+                is_nullable: row.get("is_nullable"),
+                default_expr: row.get("default_expression"),
+                is_identity: row.get("is_identity"),
+                is_pk: row.get("is_pk"),
+                is_unique: row.get("is_unique"),
+            });
+        }
+    }
+
+    for row in &con_rows {
+        let tbl_name: String = row.get("table_name");
+        if let Some(tbl) = tables.iter_mut().find(|t| t.name == tbl_name) {
+            let ctype: String = row.get("constraint_type");
+            let kind = match ctype.as_str() {
+                "p" => ConstraintKind::PrimaryKey,
+                "f" => ConstraintKind::ForeignKey,
+                "u" => ConstraintKind::Unique,
+                "c" => ConstraintKind::Check,
+                _ => ConstraintKind::Other,
+            };
+            tbl.constraints.push(ConstraintDef {
+                name: row.get("constraint_name"),
+                kind,
+                definition: row.get("definition"),
+            });
+        }
+    }
+
+    for row in &idx_rows {
+        let tbl_name: String = row.get("table_name");
+        if let Some(tbl) = tables.iter_mut().find(|t| t.name == tbl_name) {
+            tbl.indexes.push(IndexDef {
+                name: row.get("index_name"),
+                definition: row.get("definition"),
+                is_unique: row.get("is_unique"),
+            });
+        }
+    }
+
+    Ok(SchemaSnapshot {
+        schema: schema.to_owned(),
+        tables,
+    })
+}
+
+/// Computes the diff between two schemas using the provided client.
+pub async fn schema_diff(
+    client: &Client,
+    source_schema: &str,
+    target_schema: &str,
+) -> Result<crate::migration::SchemaDiff, Diagnostic> {
+    let source = schema_snapshot(client, source_schema).await?;
+    let target = schema_snapshot(client, target_schema).await?;
+    Ok(crate::migration::compute_schema_diff(&source, &target))
+}
+
 #[cfg(test)]
 mod tests;

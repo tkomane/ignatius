@@ -871,6 +871,75 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         "docs/status.md must document Ctrl+K t"
     );
 
+    assert!(
+        README.contains("| `k` | Open the schema diff and migration designer |"),
+        "README.md chord table must include Ctrl+K k"
+    );
+    assert!(
+        README.contains("ignatius diff"),
+        "README.md must document ignatius diff CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("| `k` | Open the schema diff and migration designer |"),
+        "docs/design/keymap.md chord table must include Ctrl+K k"
+    );
+    assert!(
+        KEYMAP.contains("`schema-diff`"),
+        "docs/design/keymap.md must document schema-diff configurable action"
+    );
+    assert!(
+        KEYMAP.contains("ignatius diff"),
+        "docs/design/keymap.md must document ignatius diff"
+    );
+    assert!(
+        CHANGELOG.contains("030-visual-schema-designer-and-migrations"),
+        "CHANGELOG.md must document Feature 030-visual-schema-designer-and-migrations"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius diff"),
+        "CHANGELOG.md must document ignatius diff"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("ignatius diff"),
+        "docs/architecture/pgadmin-parity-plan.md must document ignatius diff"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("schema-diff"),
+        "docs/architecture/pgadmin-parity-plan.md must document schema-diff"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("Ctrl+K k"),
+        "docs/architecture/pgadmin-parity-plan.md must document Ctrl+K k"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("ignatius diff"),
+        "docs/product/roadmap.md must document ignatius diff"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("schema-diff"),
+        "docs/product/roadmap.md must document schema-diff"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Ctrl+K k"),
+        "docs/product/roadmap.md must document Ctrl+K k"
+    );
+    assert!(
+        STATUS.contains("030-visual-schema-designer-and-migrations"),
+        "docs/status.md must document 030-visual-schema-designer-and-migrations"
+    );
+    assert!(
+        STATUS.contains("ignatius diff"),
+        "docs/status.md must document ignatius diff"
+    );
+    assert!(
+        STATUS.contains("schema-diff"),
+        "docs/status.md must document schema-diff"
+    );
+    assert!(
+        STATUS.contains("Ctrl+K k"),
+        "docs/status.md must document Ctrl+K k"
+    );
+
     for (name, content) in [
         (
             "docs/architecture/pgadmin-parity-plan.md",

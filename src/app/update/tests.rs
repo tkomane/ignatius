@@ -10157,3 +10157,136 @@ fn security_audit_drafts_reviewed_sql_into_editor_with_undo() {
     update(&mut model, Message::Action(Action::Undo));
     assert_eq!(model.editor.text(), initial_editor_text);
 }
+
+#[test]
+fn schema_diff_overlay_lifecycle_navigation_and_editor_loading() {
+    let mut model = connected();
+
+    let initial_text = "SELECT 1;";
+    model.editor.set_text(initial_text.to_owned());
+
+    // 1. Open schema diff overlay
+    let effects = update(&mut model, Message::Action(Action::SchemaDiff));
+    assert_eq!(
+        effects,
+        vec![Effect::LoadSchemaDiff {
+            request: 1,
+            source_schema: "public".to_owned(),
+            target_schema: "public".to_owned(),
+        }]
+    );
+    assert!(model.schema_diff.is_some());
+    assert!(model.schema_diff.as_ref().unwrap().loading);
+
+    // 2. Load schema diff
+    let diff = crate::migration::SchemaDiff {
+        source_schema: "public".to_owned(),
+        target_schema: "public".to_owned(),
+        added_tables: vec![crate::migration::TableDef {
+            schema: "public".to_owned(),
+            name: "audit_logs".to_owned(),
+            columns: vec![crate::migration::ColumnDef {
+                name: "id".to_owned(),
+                data_type: "bigint".to_owned(),
+                is_nullable: false,
+                default_expr: None,
+                is_identity: true,
+                is_pk: true,
+                is_unique: true,
+            }],
+            constraints: Vec::new(),
+            indexes: Vec::new(),
+            comment: None,
+        }],
+        dropped_tables: Vec::new(),
+        modified_tables: Vec::new(),
+    };
+
+    update(
+        &mut model,
+        Message::SchemaDiffLoaded {
+            request: 1,
+            result: Box::new(Ok(diff)),
+        },
+    );
+
+    let state = model
+        .schema_diff
+        .as_ref()
+        .expect("schema diff state present");
+    assert!(!state.loading);
+    assert_eq!(state.active_tab, crate::app::model::SchemaDiffTab::DiffTree);
+    assert!(!state.tree_lines.is_empty());
+    assert!(
+        state
+            .migration_sql
+            .contains("CREATE TABLE \"public\".\"audit_logs\"")
+    );
+
+    // 3. Cycle tabs
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().active_tab,
+        crate::app::model::SchemaDiffTab::TableDesigner
+    );
+
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().active_tab,
+        crate::app::model::SchemaDiffTab::MigrationSql
+    );
+
+    update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().active_tab,
+        crate::app::model::SchemaDiffTab::DiffTree
+    );
+
+    // 4. In Table Designer: test column navigation
+    update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().active_tab,
+        crate::app::model::SchemaDiffTab::TableDesigner
+    );
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().blueprint.focused_column,
+        0
+    );
+
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().blueprint.focused_column,
+        1
+    );
+
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(
+        model.schema_diff.as_ref().unwrap().blueprint.focused_column,
+        0
+    );
+
+    // 5. Load generated SQL into editor buffer
+    update(&mut model, Message::Action(Action::Insert('3')));
+    update(&mut model, Message::Action(Action::Insert('e')));
+
+    assert!(model.schema_diff.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model
+            .editor
+            .text()
+            .contains("CREATE TABLE \"public\".\"audit_logs\""),
+        "editor text has migration SQL: {}",
+        model.editor.text()
+    );
+
+    // 6. Undo restores prior editor text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_text);
+
+    // 7. Toggle overlay open and dismiss with Esc
+    update(&mut model, Message::Action(Action::SchemaDiff));
+    assert!(model.schema_diff.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.schema_diff.is_none());
+}

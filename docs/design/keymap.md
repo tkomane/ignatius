@@ -116,6 +116,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `m` | Open the schema ER diagram |
 | `j` | Open the server activity and locks dashboard |
 | `t` | Open the roles, privileges, and RLS auditor |
+| `k` | Open the schema diff and migration designer |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -159,6 +160,17 @@ Inside the overlay:
 - `Esc` closes the overlay without side effects.
 The printable `t` remains ordinary editor input outside the chord and overlay.
 The `ignatius audit` CLI command provides non-interactive parity.
+
+With the workbench active, `Ctrl+K k` (`schema-diff`) opens the Schema Diff,
+Table Designer, and Migration Generator overlay, providing dual-environment schema
+comparisons and live visual table blueprint drafting. Inside the overlay:
+- `Up` / `Down` or `k` / `j` navigates diff rows or table designer columns.
+- `Tab` or `s` or `1` / `2` / `3` switches between `Schema Diff` (`1`), `Table Designer` (`2`), and `Migration SQL` (`3`).
+- `r` explicitly refreshes the live schema diff snapshot.
+- `e` or `Enter` loads the generated `BEGIN; ... COMMIT;` migration script or Table Designer DDL into the SQL editor buffer as an undoable edit (`Ctrl+Z`), with zero hidden writes.
+- `Esc` closes the overlay without side effects.
+The printable `k` remains ordinary editor input outside the chord and overlay.
+The `ignatius diff` CLI command provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -408,6 +420,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
+`schema-diff`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

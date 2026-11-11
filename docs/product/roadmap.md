@@ -226,9 +226,12 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
   actions with explicit multi-step review. Its pure `src/activity/` engine,
   `Session::server_activity` extractor, `ignatius activity` CLI subcommand, and interactive
   `Ctrl+K j` (`server-activity`) TUI dashboard overlay are implemented on `main`.
-- **`030-visual-schema-designer-and-migrations`**: Form-driven TUI builder for tables,
+- **`030-visual-schema-designer-and-migrations`** [Implemented]: Form-driven TUI builder for tables,
   columns, indexes and constraints with live DDL preview; dual-environment schema
   diffing; and deterministic transactional migration script generation (`BEGIN; ... COMMIT;`).
+  Its pure `src/migration/` engine, `Session::schema_snapshot` and `Session::schema_diff` extractors,
+  `ignatius diff` CLI subcommand, and interactive `Ctrl+K k` (`schema-diff`) TUI overlay
+  are implemented on `main`.
 - **`031-roles-privileges-and-rls-auditor`** [Implemented]: Visual browser for role inheritance,
   object privilege ACL matrix, and Row-Level Security (`RLS`) policy auditing with
   missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL generation.

@@ -3062,3 +3062,83 @@ fn security_audit_captures_roles_rls_policies_and_privilege_grants() {
         grant.privileges
     );
 }
+
+#[test]
+fn live_postgres_schema_snapshot_and_diff_detects_tables_columns_and_synthesizes_migration() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    let setup_sql = "
+        CREATE SCHEMA IF NOT EXISTS diff_test_v1;
+        CREATE SCHEMA IF NOT EXISTS diff_test_v2;
+
+        CREATE TABLE diff_test_v1.inventory (
+            item_id integer PRIMARY KEY,
+            sku text NOT NULL,
+            quantity integer DEFAULT 0
+        );
+
+        CREATE TABLE diff_test_v2.inventory (
+            item_id integer PRIMARY KEY,
+            sku text NOT NULL,
+            quantity integer DEFAULT 0,
+            price numeric(10,2) NOT NULL,
+            discontinued boolean DEFAULT false
+        );
+
+        CREATE TABLE diff_test_v2.suppliers (
+            supplier_id integer PRIMARY KEY,
+            name text NOT NULL
+        );
+    ";
+    let setup_res = fx.block_on(fx.session.execute(setup_sql, 100, JobId(9401)));
+    assert_eq!(
+        setup_res.status,
+        ExecutionStatus::Succeeded,
+        "setup failed: {:?}",
+        setup_res.error
+    );
+
+    let diff_res = fx.block_on(fx.session.schema_diff("diff_test_v1", "diff_test_v2"));
+
+    let _ = fx.block_on(fx.session.execute(
+        "DROP SCHEMA diff_test_v1 CASCADE; DROP SCHEMA diff_test_v2 CASCADE;",
+        100,
+        JobId(9402),
+    ));
+
+    let diff = diff_res.expect("schema diff result");
+    assert_eq!(diff.source_schema, "diff_test_v1");
+    assert_eq!(diff.target_schema, "diff_test_v2");
+    assert_eq!(diff.added_tables.len(), 1);
+    assert_eq!(diff.added_tables[0].name, "suppliers");
+    assert_eq!(diff.modified_tables.len(), 1);
+
+    let inv_diff = &diff.modified_tables[0];
+    assert_eq!(inv_diff.table_name, "inventory");
+    assert_eq!(inv_diff.added_columns.len(), 2);
+    assert!(inv_diff.added_columns.iter().any(|c| c.name == "price"));
+    assert!(
+        inv_diff
+            .added_columns
+            .iter()
+            .any(|c| c.name == "discontinued")
+    );
+
+    let migration_sql = ignatius::migration::generate_migration_sql(
+        &diff,
+        &ignatius::migration::MigrationOptions::default(),
+    );
+    assert!(
+        migration_sql.contains("CREATE TABLE \"diff_test_v2\".\"suppliers\""),
+        "creates new suppliers table: {migration_sql}"
+    );
+    assert!(
+        migration_sql.contains("ALTER TABLE \"diff_test_v2\".\"inventory\" ADD COLUMN \"price\" numeric(10,2) NOT NULL;"),
+        "adds price column: {migration_sql}"
+    );
+    assert!(
+        migration_sql.contains("ALTER TABLE \"diff_test_v2\".\"inventory\" ADD COLUMN \"discontinued\" boolean DEFAULT false;"),
+        "adds discontinued column: {migration_sql}"
+    );
+}

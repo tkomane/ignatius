@@ -1614,5 +1614,270 @@ pub(crate) fn render_security_audit(
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
 }
 
+/// Shows an interactive Schema Diff, Table Designer, and Migration Generator overlay (`030-visual-schema-designer-and-migrations`).
+pub(crate) fn render_schema_diff(
+    state: &crate::app::model::SchemaDiffState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let box_width = (area.width.saturating_mul(88) / 100)
+        .max(40)
+        .min(area.width);
+    let box_height = (area.height.saturating_mul(84) / 100)
+        .max(12)
+        .min(area.height);
+    let x = area.x + (area.width.saturating_sub(box_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(box_height)) / 2;
+    let box_area = Rect::new(x, y, box_width, box_height);
+    if box_area.width < 20 || box_area.height < 6 {
+        return;
+    }
+    ratatui::widgets::Clear.render(box_area, buf);
+
+    let title = if state.loading {
+        format!(
+            " {}Schema Diff & Migrations (reading metadata...) ",
+            presentation.icon(Icon::Schema)
+        )
+    } else {
+        format!(
+            " {}Schema Diff & Migrations [{}] ",
+            presentation.icon(Icon::Schema),
+            state.active_tab.label()
+        )
+    };
+    overlay_block(title, presentation).render(box_area, buf);
+
+    let inner = Rect::new(
+        box_area.x.saturating_add(1),
+        box_area.y.saturating_add(1),
+        box_area.width.saturating_sub(2),
+        box_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 3 {
+        return;
+    }
+
+    let tab_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    let body_area = Rect::new(
+        inner.x,
+        inner.y.saturating_add(1),
+        inner.width,
+        inner.height.saturating_sub(2),
+    );
+    let footer_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+
+    // Render tab bar
+    let tab_spans = vec![
+        Span::styled(
+            if state.active_tab == crate::app::model::SchemaDiffTab::DiffTree {
+                " [1] Schema Diff "
+            } else {
+                "  1  Schema Diff "
+            },
+            if state.active_tab == crate::app::model::SchemaDiffTab::DiffTree {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            if state.active_tab == crate::app::model::SchemaDiffTab::TableDesigner {
+                " [2] Table Designer "
+            } else {
+                "  2  Table Designer "
+            },
+            if state.active_tab == crate::app::model::SchemaDiffTab::TableDesigner {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            if state.active_tab == crate::app::model::SchemaDiffTab::MigrationSql {
+                " [3] Migration SQL "
+            } else {
+                "  3  Migration SQL "
+            },
+            if state.active_tab == crate::app::model::SchemaDiffTab::MigrationSql {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+    ];
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let visible_rows = usize::from(body_area.height);
+
+    match state.active_tab {
+        crate::app::model::SchemaDiffTab::DiffTree => {
+            let mut lines = Vec::new();
+            if let Some(error) = &state.error {
+                lines.push(Line::from(Span::styled(
+                    format!("Error reading schema diff: {error}"),
+                    theme.style(Token::Danger),
+                )));
+            } else if state.loading {
+                lines.push(Line::from(Span::styled(
+                    "Comparing schemas and analyzing catalog objects...",
+                    theme.style(Token::Muted),
+                )));
+            } else {
+                for raw_line in state
+                    .tree_lines
+                    .iter()
+                    .skip(state.scroll_y)
+                    .take(visible_rows)
+                {
+                    let scrolled: String = raw_line.chars().skip(state.scroll_x).collect();
+                    let trimmed = scrolled.trim_start();
+                    let style = if trimmed.starts_with('+') {
+                        theme.style(Token::Success)
+                    } else if trimmed.starts_with('~') {
+                        theme.style(Token::Warning)
+                    } else if trimmed.starts_with('-') {
+                        theme.style(Token::Danger)
+                    } else {
+                        theme.style(Token::Text)
+                    };
+                    lines.push(Line::from(Span::styled(
+                        sanitize_for_display(&scrolled),
+                        style,
+                    )));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::SchemaDiffTab::TableDesigner => {
+            let left_width = 32u16.min(body_area.width.saturating_sub(6)).max(18);
+            let right_width = body_area.width.saturating_sub(left_width).saturating_sub(1);
+            let left_area = Rect::new(body_area.x, body_area.y, left_width, body_area.height);
+            let right_area = Rect::new(
+                body_area.x.saturating_add(left_width).saturating_add(1),
+                body_area.y,
+                right_width,
+                body_area.height,
+            );
+
+            let mut col_lines = Vec::new();
+            col_lines.push(Line::from(Span::styled(
+                format!("Table: {}", state.blueprint.table_name),
+                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+            )));
+            col_lines.push(Line::from(""));
+            for (idx, col) in state.blueprint.columns.iter().enumerate() {
+                let is_focused = idx == state.blueprint.focused_column;
+                let prefix = if is_focused { "> " } else { "  " };
+                let pk_tag = if col.is_pk { " [PK]" } else { "" };
+                let not_null_tag = if col.not_null { " NOT NULL" } else { "" };
+                let label = format!(
+                    "{prefix}{}: {}{pk_tag}{not_null_tag}",
+                    col.name, col.data_type
+                );
+                let style = if is_focused {
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                } else {
+                    theme.style(Token::Text)
+                };
+                col_lines.push(Line::from(Span::styled(label, style)));
+            }
+            Paragraph::new(col_lines).render(left_area, buf);
+
+            // Divider
+            let divider_x = body_area.x.saturating_add(left_width);
+            let border_sym = if presentation.glyphs.is_ascii() {
+                "|"
+            } else {
+                "│"
+            };
+            for row in body_area.y..body_area.bottom() {
+                if let Some(cell) = buf.cell_mut((divider_x, row)) {
+                    cell.set_symbol(border_sym);
+                    cell.set_style(theme.style(Token::Border));
+                }
+            }
+
+            // Right side: live DDL preview
+            let ddl = state.blueprint.to_create_table_sql();
+            let mut preview_lines = Vec::new();
+            preview_lines.push(Line::from(Span::styled(
+                "Live DDL Preview:",
+                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+            )));
+            for line in ddl.lines().take(visible_rows.saturating_sub(1)) {
+                preview_lines.push(Line::from(Span::styled(
+                    sanitize_for_display(line),
+                    theme.style(Token::SyntaxKeyword),
+                )));
+            }
+            Paragraph::new(preview_lines).render(right_area, buf);
+        }
+        crate::app::model::SchemaDiffTab::MigrationSql => {
+            let mut sql_lines = Vec::new();
+            for raw_line in state
+                .migration_sql
+                .lines()
+                .skip(state.scroll_y)
+                .take(visible_rows)
+            {
+                let scrolled: String = raw_line.chars().skip(state.scroll_x).collect();
+                let style = if scrolled.starts_with("--") {
+                    theme.style(Token::Muted)
+                } else if scrolled.starts_with("BEGIN")
+                    || scrolled.starts_with("COMMIT")
+                    || scrolled.starts_with("CREATE")
+                    || scrolled.starts_with("ALTER")
+                    || scrolled.starts_with("DROP")
+                {
+                    theme
+                        .style(Token::SyntaxKeyword)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    theme.style(Token::Text)
+                };
+                sql_lines.push(Line::from(Span::styled(
+                    sanitize_for_display(&scrolled),
+                    style,
+                )));
+            }
+            Paragraph::new(sql_lines).render(body_area, buf);
+        }
+    }
+
+    let footer_hints = vec![
+        Span::styled(
+            " [Tab/1/2/3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tab  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e/Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Load in Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;
