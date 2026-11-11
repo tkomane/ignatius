@@ -343,6 +343,119 @@ impl Session {
         crate::postgres::metadata::schema_diff(&self.client, source_schema, target_schema).await
     }
 
+    /// Executes a bulk data import using `COPY ... FROM STDIN`.
+    ///
+    /// Streams input chunks into the database. If `transactional` is true, wraps the COPY
+    /// in `BEGIN ... COMMIT` with `ROLLBACK` on error. If `dry_run` is true, rolls back
+    /// at the end.
+    pub async fn execute_import(
+        &self,
+        options: &crate::transfer::ImportOptions,
+        data: &[u8],
+    ) -> Result<crate::transfer::ImportResult, Diagnostic> {
+        use futures_util::SinkExt;
+
+        let _guard = self.user_sql_gate.lock().await;
+        let start = std::time::Instant::now();
+
+        if options.transactional {
+            self.client
+                .batch_execute("BEGIN;")
+                .await
+                .map_err(|e| from_query_error(&e, 1))?;
+        }
+
+        let copy_sql = crate::transfer::build_copy_from_sql(options);
+        let sink_res = self.client.copy_in(&copy_sql).await;
+        let sink = match sink_res {
+            Ok(s) => s,
+            Err(e) => {
+                if options.transactional {
+                    let _ = self.client.batch_execute("ROLLBACK;").await;
+                }
+                return Err(from_query_error(&e, 1));
+            }
+        };
+
+        let mut sink = std::pin::pin!(sink);
+
+        // Stream data in 64KB chunks to keep bounded memory overhead
+        let chunk_size = 64 * 1024;
+        let mut offset = 0;
+
+        while offset < data.len() {
+            let end = (offset + chunk_size).min(data.len());
+            let chunk = bytes::Bytes::copy_from_slice(&data[offset..end]);
+            if let Err(e) = sink.as_mut().send(chunk).await {
+                if options.transactional {
+                    let _ = self.client.batch_execute("ROLLBACK;").await;
+                }
+                return Err(from_query_error(&e, 1));
+            }
+            offset = end;
+        }
+
+        let rows = match sink.finish().await {
+            Ok(r) => r,
+            Err(e) => {
+                if options.transactional {
+                    let _ = self.client.batch_execute("ROLLBACK;").await;
+                }
+                return Err(from_query_error(&e, 1));
+            }
+        };
+
+        let status = if options.dry_run {
+            if options.transactional {
+                let _ = self.client.batch_execute("ROLLBACK;").await;
+            }
+            format!("Dry-run successful: verified {rows} rows (rolled back)")
+        } else if options.transactional {
+            self.client
+                .batch_execute("COMMIT;")
+                .await
+                .map_err(|e| from_query_error(&e, 1))?;
+            format!("Committed {rows} rows")
+        } else {
+            format!("Imported {rows} rows")
+        };
+
+        Ok(crate::transfer::ImportResult {
+            rows_imported: rows,
+            bytes_processed: data.len() as u64,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            status,
+        })
+    }
+
+    /// Executes a bulk data export using `COPY ... TO STDOUT`.
+    ///
+    /// Streams chunks of exported data.
+    pub async fn execute_export(
+        &self,
+        options: &crate::transfer::ExportOptions,
+    ) -> Result<Vec<u8>, Diagnostic> {
+        use futures_util::StreamExt;
+
+        let _guard = self.user_sql_gate.lock().await;
+        let copy_sql = crate::transfer::build_copy_to_sql(options);
+        let stream = self
+            .client
+            .copy_out(&copy_sql)
+            .await
+            .map_err(|e| from_query_error(&e, 1))?;
+
+        let mut stream = std::pin::pin!(stream);
+        let mut buffer = Vec::new();
+
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(|e| from_query_error(&e, 1))?;
+            buffer.extend_from_slice(&chunk);
+        }
+
+        Ok(buffer)
+    }
+
     /// Indexes on a relation.
     pub async fn indexes(
         &self,

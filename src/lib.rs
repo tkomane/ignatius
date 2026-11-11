@@ -37,6 +37,7 @@ pub mod platform;
 pub mod postgres;
 pub mod queries;
 pub mod query;
+pub mod transfer;
 pub mod ui;
 
 pub use exit_code::ExitCode;

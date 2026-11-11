@@ -125,6 +125,8 @@ pub enum Action {
     SecurityAudit,
     /// Compare schemas and generate reviewable transactional SQL migrations.
     SchemaDiff,
+    /// Open the bulk data import and transfer wizard.
+    ImportData,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -226,6 +228,7 @@ impl Action {
             Self::ServerActivity,
             Self::SecurityAudit,
             Self::SchemaDiff,
+            Self::ImportData,
         ]
     }
 }
@@ -554,6 +557,20 @@ pub enum Message {
         /// The loaded schema diff, or why it could not be read.
         result: Box<Result<crate::migration::SchemaDiff, Diagnostic>>,
     },
+    /// A source file import preview and inferred column mappings finished loading.
+    ImportPreviewLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// The loaded preview, or why it could not be prepared.
+        result: Box<Result<crate::transfer::ImportPreview, Diagnostic>>,
+    },
+    /// A bulk data import execution finished.
+    ImportExecuted {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Result summary, or why the import failed.
+        result: Box<Result<crate::transfer::ImportResult, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -718,5 +735,25 @@ pub enum Effect {
         source_schema: String,
         /// Target schema name.
         target_schema: String,
+    },
+    /// Load a source file preview and infer column mappings for bulk import.
+    LoadImportPreview {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Source file path.
+        file_path: String,
+        /// Target schema name.
+        schema: String,
+        /// Target table name.
+        table: String,
+    },
+    /// Execute a bulk data import into the database.
+    ExecuteImport {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Import options.
+        options: crate::transfer::ImportOptions,
+        /// Raw file bytes to stream.
+        data: Vec<u8>,
     },
 }

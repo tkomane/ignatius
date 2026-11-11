@@ -247,6 +247,18 @@ pub enum Command {
 
     /// Compare schemas and generate reviewable, transactional SQL migration scripts.
     Diff(DiffArgs),
+
+    /// Bulk import data into a table using streaming COPY FROM STDIN.
+    Import(ImportArgs),
+
+    /// Bulk export queries or tables using streaming COPY TO STDOUT.
+    Export(ExportArgs),
+
+    /// Back up a database or schema using pg_dump with safe credential handling.
+    Backup(BackupArgs),
+
+    /// Restore a database or schema from backup using pg_restore.
+    Restore(RestoreArgs),
 }
 
 /// Arguments for the audit command.
@@ -826,6 +838,10 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Activity(args)) => run_activity(args, &paths, &presentation, out, err),
         Some(Command::Audit(args)) => run_audit(args, &paths, &presentation, out, err),
         Some(Command::Diff(args)) => run_diff(args, &paths, &presentation, out, err),
+        Some(Command::Import(args)) => run_import(args, &paths, &presentation, out, err),
+        Some(Command::Export(args)) => run_export(args, &paths, &presentation, out, err),
+        Some(Command::Backup(args)) => run_backup(args, &paths, &presentation, out, err),
+        Some(Command::Restore(args)) => run_restore(args, &paths, &presentation, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -2064,6 +2080,582 @@ fn run_diff(
         out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
         Ok(ExitCode::Success)
     }
+}
+
+/// Supported formats for the import and export CLI subcommands.
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq, Default)]
+pub enum CliTransferFormat {
+    /// Comma-separated values (RFC 4180).
+    #[default]
+    Csv,
+    /// Tab-separated values.
+    Tsv,
+    /// Newline-delimited JSON.
+    Jsonl,
+    /// SQL INSERT statements.
+    Sql,
+    /// PostgreSQL binary COPY protocol format.
+    Binary,
+}
+
+impl CliTransferFormat {
+    /// Converts to domain TransferFormat.
+    #[must_use]
+    pub const fn to_domain(self) -> crate::transfer::TransferFormat {
+        match self {
+            Self::Csv => crate::transfer::TransferFormat::Csv,
+            Self::Tsv => crate::transfer::TransferFormat::Tsv,
+            Self::Jsonl => crate::transfer::TransferFormat::Jsonl,
+            Self::Sql => crate::transfer::TransferFormat::SqlInsert,
+            Self::Binary => crate::transfer::TransferFormat::Binary,
+        }
+    }
+}
+
+/// Supported formats for the backup CLI subcommand.
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq, Default)]
+pub enum CliBackupFormat {
+    /// Custom pg_dump archive format (-F c).
+    #[default]
+    Custom,
+    /// Plain SQL script (-F p).
+    Plain,
+    /// Directory archive (-F d).
+    Directory,
+    /// Tar archive (-F t).
+    Tar,
+}
+
+impl CliBackupFormat {
+    /// Converts to domain BackupFormat.
+    #[must_use]
+    pub const fn to_domain(self) -> crate::transfer::BackupFormat {
+        match self {
+            Self::Custom => crate::transfer::BackupFormat::Custom,
+            Self::Plain => crate::transfer::BackupFormat::Plain,
+            Self::Directory => crate::transfer::BackupFormat::Directory,
+            Self::Tar => crate::transfer::BackupFormat::Tar,
+        }
+    }
+}
+
+/// Arguments for the import command.
+#[derive(Debug, Args, Clone)]
+pub struct ImportArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Destination table name.
+    #[arg(short = 't', long, value_name = "TABLE")]
+    pub table: String,
+    /// Source file path to import.
+    #[arg(short = 'f', long, value_name = "FILE")]
+    pub file: PathBuf,
+    /// Destination schema.
+    #[arg(short = 's', long, value_name = "SCHEMA", default_value = "public")]
+    pub schema: String,
+    /// Input file format.
+    #[arg(long, value_enum, default_value_t = CliTransferFormat::Csv)]
+    pub format: CliTransferFormat,
+    /// Field delimiter character.
+    #[arg(long, value_name = "CHAR")]
+    pub delimiter: Option<String>,
+    /// The input file does not contain a header row.
+    #[arg(long)]
+    pub no_header: bool,
+    /// Text representing NULL values.
+    #[arg(long, value_name = "TEXT", default_value = "")]
+    pub null: String,
+    /// Dry-run test: executes inside a transaction and rolls back.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Do not wrap the import in a transaction.
+    #[arg(long)]
+    pub no_transaction: bool,
+    /// Confirm write execution against a production target.
+    #[arg(long)]
+    pub confirm_production: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Arguments for the export command.
+#[derive(Debug, Args, Clone)]
+pub struct ExportArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// SQL query or table name to export.
+    #[arg(value_name = "QUERY")]
+    pub query: Option<String>,
+    /// Output file format.
+    #[arg(long, value_enum, default_value_t = CliTransferFormat::Csv)]
+    pub format: CliTransferFormat,
+    /// Field delimiter character.
+    #[arg(long, value_name = "CHAR")]
+    pub delimiter: Option<String>,
+    /// Omit header row from output.
+    #[arg(long)]
+    pub no_header: bool,
+    /// Text representing NULL values.
+    #[arg(long, value_name = "TEXT", default_value = "")]
+    pub null: String,
+    /// Output file path (defaults to standard output).
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Arguments for the backup command.
+#[derive(Debug, Args, Clone)]
+pub struct BackupArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Destination backup file or directory path.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: PathBuf,
+    /// Backup archive format.
+    #[arg(long, value_enum, default_value_t = CliBackupFormat::Custom)]
+    pub format: CliBackupFormat,
+    /// Filter backup to a single schema.
+    #[arg(short = 'n', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Filter backup to a single table.
+    #[arg(short = 't', long, value_name = "TABLE")]
+    pub table: Option<String>,
+    /// Drop database objects before recreating them.
+    #[arg(long)]
+    pub clean: bool,
+    /// Include commands to create the database in plain text dumps.
+    #[arg(long)]
+    pub create: bool,
+    /// Dump only table data, no schema DDL.
+    #[arg(long)]
+    pub data_only: bool,
+    /// Dump only schema DDL, no table data.
+    #[arg(long)]
+    pub schema_only: bool,
+    /// Print verbose progress and diagnostic messages.
+    #[arg(short = 'v', long)]
+    pub verbose: bool,
+    /// Print the pg_dump command and redacted environment without executing.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Arguments for the restore command.
+#[derive(Debug, Args, Clone)]
+pub struct RestoreArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Source backup file or directory path.
+    #[arg(short = 'i', long, value_name = "PATH")]
+    pub input: PathBuf,
+    /// Drop database objects before restoring them.
+    #[arg(long)]
+    pub clean: bool,
+    /// Create the database before restoring into it.
+    #[arg(long)]
+    pub create: bool,
+    /// Restore only table data.
+    #[arg(long)]
+    pub data_only: bool,
+    /// Restore only schema DDL.
+    #[arg(long)]
+    pub schema_only: bool,
+    /// Print verbose progress messages.
+    #[arg(short = 'v', long)]
+    pub verbose: bool,
+    /// Print the pg_restore command and redacted environment without executing.
+    #[arg(long)]
+    pub dry_run: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_import(
+    args: &ImportArgs,
+    paths: &Paths,
+    _presentation: &Presentation,
+    out: &mut impl Write,
+    _err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    if target.environment == crate::connection::Environment::Production && !args.confirm_production
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "refusing bulk import into a production database without confirmation",
+            "importing data with ignatius import",
+        )
+        .likely_cause("target is classified as production")
+        .next_action("pass --confirm-production if this import is intentional"));
+    }
+
+    let data = std::fs::read(&args.file).map_err(|e| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("could not read import file {}: {e}", args.file.display()),
+            "reading input file",
+        )
+        .next_action("verify that the file exists and is readable")
+    })?;
+
+    let delimiter = if let Some(ref d) = args.delimiter {
+        d.as_bytes().first().copied().unwrap_or(b',')
+    } else if args.format == CliTransferFormat::Tsv {
+        b'\t'
+    } else {
+        let sample = String::from_utf8_lossy(&data[..data.len().min(4096)]);
+        crate::transfer::detect_csv_delimiter(&sample)
+    };
+
+    let options = crate::transfer::ImportOptions {
+        schema: args.schema.clone(),
+        table: args.table.clone(),
+        file_path: args.file.display().to_string(),
+        format: args.format.to_domain(),
+        delimiter,
+        has_header: !args.no_header,
+        null_string: args.null.clone(),
+        quote: b'"',
+        escape: b'"',
+        columns: Vec::new(),
+        dry_run: args.dry_run,
+        transactional: !args.no_transaction,
+    };
+
+    let result = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let res = session.execute_import(&options, &data).await;
+        drop(session);
+        res
+    })?;
+
+    writeln!(out, "Import completed: {}", result.status).map_err(io_diagnostic)?;
+    writeln!(
+        out,
+        "Rows: {}, Bytes: {}, Elapsed: {}ms",
+        result.rows_imported, result.bytes_processed, result.elapsed_ms
+    )
+    .map_err(io_diagnostic)?;
+
+    Ok(ExitCode::Success)
+}
+
+fn run_export(
+    args: &ExportArgs,
+    paths: &Paths,
+    _presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "exporting data with ignatius export",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let query_or_table = match args
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(q) => q.to_string(),
+        None => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "an export query or table name is required",
+                "exporting data with ignatius export",
+            )
+            .next_action(
+                "pass a SQL query or table name, e.g. ignatius export \"SELECT * FROM users\"",
+            ));
+        }
+    };
+
+    let delimiter = if let Some(ref d) = args.delimiter {
+        d.as_bytes().first().copied().unwrap_or(b',')
+    } else if args.format == CliTransferFormat::Tsv {
+        b'\t'
+    } else {
+        b','
+    };
+
+    let options = crate::transfer::ExportOptions {
+        query: query_or_table,
+        output_path: args.output.as_ref().map(|p| p.display().to_string()),
+        format: args.format.to_domain(),
+        delimiter,
+        has_header: !args.no_header,
+        null_string: args.null.clone(),
+        quote: b'"',
+        escape: b'"',
+    };
+
+    let bytes = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let res = session.execute_export(&options).await;
+        drop(session);
+        res
+    })?;
+
+    if let Some(ref destination) = args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export.writer().write_all(&bytes).map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "Exported {} bytes to {}",
+            bytes.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+    } else {
+        out.write_all(&bytes).map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+fn run_backup(
+    args: &BackupArgs,
+    paths: &Paths,
+    _presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    if args.output.exists() && !args.force && !args.dry_run {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                args.output.display()
+            ),
+            "backing up database with ignatius backup",
+        )
+        .likely_cause("the target output backup file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let host_str = match &target.host {
+        crate::connection::Host::Tcp(h) => Some(h.clone()),
+        crate::connection::Host::Socket(s) => Some(s.display().to_string()),
+    };
+
+    let options = crate::transfer::BackupOptions {
+        database: target.database.clone(),
+        host: host_str,
+        port: Some(target.port),
+        user: Some(target.user.clone()),
+        output_path: args.output.display().to_string(),
+        format: args.format.to_domain(),
+        schema: args.schema.clone(),
+        table: args.table.clone(),
+        clean: args.clean,
+        create: args.create,
+        data_only: args.data_only,
+        schema_only: args.schema_only,
+        verbose: args.verbose,
+    };
+
+    use secrecy::ExposeSecret;
+    let password = target.password.as_ref().map(|p| p.expose_secret());
+
+    if args.dry_run {
+        let (cmd, cmd_args, env) = crate::transfer::build_pg_dump_command(&options, password, true);
+        writeln!(out, "Command: {} {}", cmd, cmd_args.join(" ")).map_err(io_diagnostic)?;
+        for (k, v) in env {
+            writeln!(out, "Env: {k}={v}").map_err(io_diagnostic)?;
+        }
+        return Ok(ExitCode::Success);
+    }
+
+    let (cmd, cmd_args, env) = crate::transfer::build_pg_dump_command(&options, password, false);
+    let mut process = std::process::Command::new(&cmd);
+    process.args(&cmd_args);
+    for (k, v) in env {
+        process.env(k, v);
+    }
+
+    let status = process.status().map_err(|e| {
+        Diagnostic::new(
+            DiagnosticKind::Internal,
+            format!("could not execute {cmd}: {e}"),
+            "running pg_dump subprocess",
+        )
+        .next_action("ensure PostgreSQL client utilities (pg_dump) are installed and on PATH")
+    })?;
+
+    if !status.success() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Internal,
+            format!("pg_dump exited with error code {:?}", status.code()),
+            "backing up database",
+        ));
+    }
+
+    writeln!(
+        err,
+        "Backup completed successfully to {}",
+        args.output.display()
+    )
+    .map_err(io_diagnostic)?;
+    Ok(ExitCode::Success)
+}
+
+fn run_restore(
+    args: &RestoreArgs,
+    paths: &Paths,
+    _presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    if !args.input.exists() && !args.dry_run {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("backup file does not exist: {}", args.input.display()),
+            "restoring database with ignatius restore",
+        )
+        .next_action("verify the backup file path"));
+    }
+
+    let host_str = match &target.host {
+        crate::connection::Host::Tcp(h) => Some(h.clone()),
+        crate::connection::Host::Socket(s) => Some(s.display().to_string()),
+    };
+
+    let options = crate::transfer::RestoreOptions {
+        database: target.database.clone(),
+        host: host_str,
+        port: Some(target.port),
+        user: Some(target.user.clone()),
+        input_path: args.input.display().to_string(),
+        clean: args.clean,
+        create: args.create,
+        data_only: args.data_only,
+        schema_only: args.schema_only,
+        verbose: args.verbose,
+    };
+
+    use secrecy::ExposeSecret;
+    let password = target.password.as_ref().map(|p| p.expose_secret());
+
+    if args.dry_run {
+        let (cmd, cmd_args, env) =
+            crate::transfer::build_pg_restore_command(&options, password, true);
+        writeln!(out, "Command: {} {}", cmd, cmd_args.join(" ")).map_err(io_diagnostic)?;
+        for (k, v) in env {
+            writeln!(out, "Env: {k}={v}").map_err(io_diagnostic)?;
+        }
+        return Ok(ExitCode::Success);
+    }
+
+    let (cmd, cmd_args, env) = crate::transfer::build_pg_restore_command(&options, password, false);
+    let mut process = std::process::Command::new(&cmd);
+    process.args(&cmd_args);
+    for (k, v) in env {
+        process.env(k, v);
+    }
+
+    let status = process.status().map_err(|e| {
+        Diagnostic::new(
+            DiagnosticKind::Internal,
+            format!("could not execute {cmd}: {e}"),
+            "running pg_restore subprocess",
+        )
+        .next_action("ensure PostgreSQL client utilities (pg_restore) are installed and on PATH")
+    })?;
+
+    if !status.success() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Internal,
+            format!("pg_restore exited with error code {:?}", status.code()),
+            "restoring database",
+        ));
+    }
+
+    writeln!(
+        err,
+        "Restore completed successfully from {}",
+        args.input.display()
+    )
+    .map_err(io_diagnostic)?;
+    Ok(ExitCode::Success)
 }
 
 /// Reads SQL from the chosen source, refusing to hang on a terminal.

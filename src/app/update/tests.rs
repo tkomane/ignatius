@@ -10290,3 +10290,142 @@ fn schema_diff_overlay_lifecycle_navigation_and_editor_loading() {
     update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.schema_diff.is_none());
 }
+
+#[test]
+fn import_wizard_overlay_lifecycle_navigation_and_editor_loading() {
+    let mut model = connected();
+
+    let initial_text = "SELECT 1;";
+    model.editor.set_text(initial_text.to_owned());
+
+    // 1. Open import wizard overlay
+    let effects = update(&mut model, Message::Action(Action::ImportData));
+    assert_eq!(
+        effects,
+        vec![Effect::LoadImportPreview {
+            request: 1,
+            file_path: "orders.csv".to_owned(),
+            schema: "public".to_owned(),
+            table: "orders".to_owned(),
+        }]
+    );
+    assert!(model.import_wizard.is_some());
+    assert!(model.import_wizard.as_ref().unwrap().loading);
+
+    // 2. Load import preview
+    let preview = crate::transfer::ImportPreview {
+        headers: vec![
+            "id".to_owned(),
+            "customer_id".to_owned(),
+            "total".to_owned(),
+        ],
+        sample_rows: vec![vec!["1".to_owned(), "42".to_owned(), "99.99".to_owned()]],
+        column_mappings: vec![
+            crate::transfer::ImportColumnMapping {
+                source_column: "id".to_owned(),
+                target_column: "id".to_owned(),
+                target_type: "bigint".to_owned(),
+                is_nullable: false,
+                skip: false,
+            },
+            crate::transfer::ImportColumnMapping {
+                source_column: "customer_id".to_owned(),
+                target_column: "customer_id".to_owned(),
+                target_type: "bigint".to_owned(),
+                is_nullable: false,
+                skip: false,
+            },
+            crate::transfer::ImportColumnMapping {
+                source_column: "total".to_owned(),
+                target_column: "total".to_owned(),
+                target_type: "numeric".to_owned(),
+                is_nullable: true,
+                skip: false,
+            },
+        ],
+        estimated_rows: 1,
+    };
+
+    update(
+        &mut model,
+        Message::ImportPreviewLoaded {
+            request: 1,
+            result: Box::new(Ok(preview)),
+        },
+    );
+
+    let state = model
+        .import_wizard
+        .as_ref()
+        .expect("import wizard state present");
+    assert!(!state.loading);
+    assert_eq!(state.step, crate::app::model::ImportWizardStep::SourceFile);
+    assert!(state.copy_sql.contains("COPY \"public\".\"orders\""));
+
+    // 3. Cycle steps
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(
+        model.import_wizard.as_ref().unwrap().step,
+        crate::app::model::ImportWizardStep::ColumnMapping
+    );
+
+    // 4. In Column Mapping: toggle column skip
+    assert!(
+        !model
+            .import_wizard
+            .as_ref()
+            .unwrap()
+            .preview
+            .as_ref()
+            .unwrap()
+            .column_mappings[0]
+            .skip
+    );
+    update(&mut model, Message::Action(Action::Insert(' ')));
+    assert!(
+        model
+            .import_wizard
+            .as_ref()
+            .unwrap()
+            .preview
+            .as_ref()
+            .unwrap()
+            .column_mappings[0]
+            .skip
+    );
+
+    // Navigate to next column
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(model.import_wizard.as_ref().unwrap().selected_column_idx, 1);
+
+    // 5. Toggle dry-run
+    assert!(!model.import_wizard.as_ref().unwrap().dry_run);
+    update(&mut model, Message::Action(Action::Insert('d')));
+    assert!(model.import_wizard.as_ref().unwrap().dry_run);
+
+    // 6. Go to Execute step and load SQL into editor
+    update(&mut model, Message::Action(Action::Insert('3')));
+    assert_eq!(
+        model.import_wizard.as_ref().unwrap().step,
+        crate::app::model::ImportWizardStep::Execute
+    );
+
+    update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(model.import_wizard.is_none(), "overlay closed");
+    assert_eq!(model.focus, Focus::Editor, "editor has focus");
+    assert!(
+        model.editor.text().contains("COPY \"public\".\"orders\""),
+        "editor text has COPY statement: {}",
+        model.editor.text()
+    );
+
+    // 7. Undo restores initial text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_text);
+
+    // 8. Dismiss with Esc
+    update(&mut model, Message::Action(Action::ImportData));
+    assert!(model.import_wizard.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.import_wizard.is_none());
+}
