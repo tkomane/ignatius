@@ -82,6 +82,7 @@ pub struct Session {
     info: SessionInfo,
     tls: crate::postgres::tls::TlsOptions,
     notices: Arc<Notices>,
+    notifications: Arc<tokio::sync::Mutex<Vec<crate::ops::PubSubNotification>>>,
     notice_privacy: Arc<AtomicBool>,
     connection_lost: Arc<AtomicBool>,
 }
@@ -519,6 +520,86 @@ impl Session {
             rolled_back,
             has_plpgsql_check,
         })
+    }
+
+    /// Returns the captured asynchronous notifications received since the connection opened (`033-listen-notify-and-maintenance-ops`).
+    pub async fn notifications(&self) -> Vec<crate::ops::PubSubNotification> {
+        let lock = self.notifications.lock().await;
+        lock.clone()
+    }
+
+    /// Clears the captured notifications log (`033-listen-notify-and-maintenance-ops`).
+    pub async fn clear_notifications(&self) {
+        let mut lock = self.notifications.lock().await;
+        lock.clear();
+    }
+
+    /// Executes a database maintenance operation (VACUUM, ANALYZE, REINDEX, CLUSTER) with notice and duration telemetry (`033-listen-notify-and-maintenance-ops`).
+    pub async fn execute_maintenance(
+        &self,
+        options: &crate::ops::MaintenanceOptions,
+    ) -> Result<crate::ops::MaintenanceResult, Diagnostic> {
+        let sql = crate::ops::build_maintenance_sql(options).map_err(|e| {
+            Diagnostic::new(DiagnosticKind::Usage, e, "validating maintenance options")
+        })?;
+
+        let _gate = self.user_sql_gate.lock().await;
+        let operation = self.notices.begin(crate::query::result::NoticeScope::Query);
+
+        let start = std::time::Instant::now();
+        let query_res = self.client.simple_query(&sql).await;
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let captured = operation.take_statement();
+        let notices: Vec<String> = captured.into_iter().map(|n| n.message).collect();
+
+        match query_res {
+            Ok(_) => Ok(crate::ops::MaintenanceResult {
+                executed_sql: sql,
+                success: true,
+                elapsed_ms,
+                notices,
+                message: format!("Maintenance completed successfully in {elapsed_ms:.2} ms"),
+            }),
+            Err(e) => Err(from_query_error(&e, 1)),
+        }
+    }
+
+    /// Queries active maintenance progress telemetry from pg_stat_progress_* (`033-listen-notify-and-maintenance-ops`).
+    pub async fn query_maintenance_progress(
+        &self,
+    ) -> Result<Vec<crate::ops::MaintenanceProgressEntry>, Diagnostic> {
+        crate::postgres::metadata::query_maintenance_progress(&self.client).await
+    }
+
+    /// Subscribes to an asynchronous pub/sub channel using LISTEN (`033-listen-notify-and-maintenance-ops`).
+    pub async fn listen_channel(&self, channel: &str) -> Result<(), Diagnostic> {
+        let sql = crate::ops::build_listen_sql(channel);
+        self.client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| from_query_error(&e, 1))
+    }
+
+    /// Unsubscribes from an asynchronous pub/sub channel using UNLISTEN (`033-listen-notify-and-maintenance-ops`).
+    pub async fn unlisten_channel(&self, channel: &str) -> Result<(), Diagnostic> {
+        let sql = crate::ops::build_unlisten_sql(channel);
+        self.client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| from_query_error(&e, 1))
+    }
+
+    /// Dispatches an asynchronous notification using NOTIFY (`033-listen-notify-and-maintenance-ops`).
+    pub async fn notify_channel(
+        &self,
+        channel: &str,
+        payload: Option<&str>,
+    ) -> Result<(), Diagnostic> {
+        let sql = crate::ops::build_notify_sql(channel, payload);
+        self.client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| from_query_error(&e, 1))
     }
 
     /// Executes a bulk data import using `COPY ... FROM STDIN`.
@@ -1393,7 +1474,7 @@ pub async fn connect_reported(
         let tls_config = client_config(&tls)?;
         let notice_privacy = Arc::new(AtomicBool::new(false));
 
-        let (client, notices, connection_lost) = match tls_config {
+        let (client, notices, notifications, connection_lost) = match tls_config {
             None => {
                 establish(
                     &config,
@@ -1440,6 +1521,7 @@ pub async fn connect_reported(
             info,
             tls,
             notices,
+            notifications,
             notice_privacy,
             connection_lost,
         })
@@ -1458,9 +1540,14 @@ pub async fn connect_reported(
     }
 }
 
-type Established = (Client, Arc<Notices>, Arc<AtomicBool>);
+type Established = (
+    Client,
+    Arc<Notices>,
+    Arc<tokio::sync::Mutex<Vec<crate::ops::PubSubNotification>>>,
+    Arc<AtomicBool>,
+);
 
-/// Connects, then moves the connection onto a task that forwards notices.
+/// Connects, then moves the connection onto a task that forwards notices and notifications.
 async fn establish<T>(
     config: &tokio_postgres::Config,
     tls: T,
@@ -1499,8 +1586,10 @@ where
     };
 
     let notices = Arc::new(Notices::default());
+    let notifications = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let connection_lost = Arc::new(AtomicBool::new(false));
     let task_notices = Arc::clone(&notices);
+    let task_notifications = Arc::clone(&notifications);
     let task_lost = Arc::clone(&connection_lost);
 
     tokio::spawn(async move {
@@ -1518,6 +1607,21 @@ where
                         notice.code().code(),
                     );
                 }
+                Ok(AsyncMessage::Notification(n)) => {
+                    let event = crate::ops::PubSubNotification {
+                        timestamp: chrono::Utc::now()
+                            .format("%Y-%m-%d %H:%M:%S UTC")
+                            .to_string(),
+                        channel: n.channel().to_string(),
+                        sender_pid: n.process_id() as u32,
+                        payload: n.payload().to_string(),
+                    };
+                    let mut lock = task_notifications.lock().await;
+                    if lock.len() >= 500 {
+                        lock.remove(0);
+                    }
+                    lock.push(event);
+                }
                 Ok(_) => {}
                 Err(_) => break,
             }
@@ -1525,7 +1629,7 @@ where
         task_lost.store(true, Ordering::SeqCst);
     });
 
-    Ok((client, notices, connection_lost))
+    Ok((client, notices, notifications, connection_lost))
 }
 
 /// Builds the driver configuration from a resolved target.

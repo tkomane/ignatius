@@ -305,6 +305,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `k` | Open the schema diff and migration designer |
 | `<` | Open the data import wizard |
 | `(` | Open the routine runner and profiler |
+| `>` | Open the maintenance operations and pub-sub monitor |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -459,7 +460,7 @@ Milestone 6 defines 8 comprehensive vertical slices documented in the [Full pgAd
 5. **`030-visual-schema-designer-and-migrations` (Visual Schema Designer & Migrations) [Implemented]:** Form-driven TUI designer for tables, columns, indexes, and constraints with live DDL preview, alongside dual-environment schema diffing and transactional migration generation (`BEGIN; ... COMMIT;`) via interactive `Ctrl+K k` overlay and scriptable `ignatius diff` CLI subcommand.
 6. **`031-roles-privileges-and-rls-auditor` (Roles, Privileges & RLS Auditor) [Implemented]:** Visual browser for role inheritance trees, object privilege ACL matrices, and Row-Level Security (`RLS`) policy auditing with missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL via interactive `Ctrl+K t` overlay and scriptable `ignatius audit` CLI subcommand.
 7. **`032-plpgsql-routine-runner-and-profiler` (PL/pgSQL Routine Runner & Profiler) [Implemented]:** Routine signature discovery (`pg_proc`), typed parameter binding and validation, safe test harness execution inside transactional savepoint rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`), multi-set tabular result rendering, notice capture (`RAISE NOTICE`), `plpgsql_check` / static analysis profiling, scriptable CLI (`ignatius run-routine`, `ignatius profile-routine`), and interactive TUI overlay (`Ctrl+K (` / `routine-runner`).
-8. **`033-listen-notify-and-maintenance-ops` (LISTEN/NOTIFY & Maintenance Ops):** Dedicated asynchronous pub/sub event monitor for `LISTEN`/`NOTIFY` channels, plus guided maintenance runner for `VACUUM (VERBOSE, ANALYZE)`, `ANALYZE`, and `REINDEX CONCURRENTLY` with live progress bars from `pg_stat_progress_*`.
+8. **`033-listen-notify-and-maintenance-ops` (LISTEN/NOTIFY & Maintenance Ops) [Implemented]:** Dedicated asynchronous pub/sub event monitor for `LISTEN`/`NOTIFY` channels, guarded maintenance runner for `VACUUM (VERBOSE, ANALYZE)`, `VACUUM FULL`, `ANALYZE`, and `REINDEX CONCURRENTLY` with bloat and lock estimation (`AccessExclusiveLock` vs `ShareUpdateExclusiveLock`), live progress telemetry from `pg_stat_progress_*`, scriptable CLI (`ignatius listen`, `ignatius notify`, `ignatius maintain`), and interactive TUI overlay (`Ctrl+K >` / `maintenance-ops`).
 
 ---
 

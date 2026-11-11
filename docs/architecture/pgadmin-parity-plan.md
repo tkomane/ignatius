@@ -54,7 +54,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 | **Table / Schema Designer & Diff** | `030-visual-schema-designer-and-migrations` | Implemented (`M6`) | Form-driven TUI designer for tables/columns/constraints (`Ctrl+K k` / `schema-diff`); schema comparison between environments producing reviewable transactional migration SQL (`BEGIN; ... COMMIT;`) and scriptable `ignatius diff` CLI subcommand. |
 | **Role, Grant & RLS Manager** | `031-roles-privileges-and-rls-auditor` | Implemented (`M6`) | Visual audit matrix of role hierarchy, object ACL grants, and Row-Level Security (`RLS`) policies (`USING` / `WITH CHECK`) via interactive `Ctrl+K t` (`security-audit`) overlay and scriptable `ignatius audit` CLI subcommand. |
 | **PL/pgSQL Routine Runner & Debugger** | `032-plpgsql-routine-runner-and-profiler` | Implemented (`M6`) | Discovers routine signatures (`pg_proc`), binds typed parameters with defaults, executes inside safe transactional savepoint rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`), captures `RAISE NOTICE` diagnostics, runs `plpgsql_check` / static profiling, scriptable CLI (`ignatius run-routine`, `ignatius profile-routine`), and interactive TUI overlay (`Ctrl+K (` / `routine-runner`). |
-| **LISTEN / NOTIFY & Maintenance Ops** | `033-listen-notify-and-maintenance-ops` | Planned (`M6`) | Interactive pub/sub event stream monitor (`LISTEN`/`NOTIFY`); guided maintenance runner for `VACUUM`, `ANALYZE`, and `REINDEX CONCURRENTLY` with live progress from `pg_stat_progress_*`. |
+| **LISTEN / NOTIFY & Maintenance Ops** | `033-listen-notify-and-maintenance-ops` | Implemented (`M6`) | Dedicated asynchronous pub/sub event monitor for `LISTEN`/`NOTIFY` channels; guided maintenance runner for `VACUUM (VERBOSE, ANALYZE)`, `VACUUM FULL`, `ANALYZE`, and `REINDEX CONCURRENTLY` with lock level estimation, live progress telemetry from `pg_stat_progress_*`, scriptable CLI (`ignatius listen`, `ignatius notify`, `ignatius maintain`), and interactive TUI overlay (`Ctrl+K >` / `maintenance-ops`). |
 
 ---
 
@@ -273,6 +273,8 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 ---
 
 ### Feature 033: LISTEN/NOTIFY Monitor and Guarded Maintenance Operations (`033-listen-notify-and-maintenance-ops`)
+
+**Status: Implemented on `main`.** The pure `src/ops/` engine, PostgreSQL background notification stream capture (`Session::notifications`), maintenance primitives (`Session::execute_maintenance`, `Session::query_maintenance_progress`), `ignatius listen`, `ignatius notify`, and `ignatius maintain` CLI subcommands, and `Ctrl+K >` interactive TUI overlay are fully implemented.
 
 - **Objective:** Provide a dedicated pub/sub monitor for asynchronous messaging and a guided, transparent workbench for critical database maintenance routines.
 - **Asynchronous LISTEN/NOTIFY Monitor:**

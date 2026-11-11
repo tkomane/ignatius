@@ -149,27 +149,28 @@ async fn live_session(startup_setting: Option<&str>) -> Option<Session> {
         client_key: target.client_key.clone(),
     };
     let notice_privacy = Arc::new(AtomicBool::new(false));
-    let (client, notices, connection_lost) = match client_config(&tls).expect("fixture TLS") {
-        None => {
-            establish(
-                &config,
-                tokio_postgres::NoTls,
-                &target,
-                Arc::clone(&notice_privacy),
-            )
-            .await
+    let (client, notices, notifications, connection_lost) =
+        match client_config(&tls).expect("fixture TLS") {
+            None => {
+                establish(
+                    &config,
+                    tokio_postgres::NoTls,
+                    &target,
+                    Arc::clone(&notice_privacy),
+                )
+                .await
+            }
+            Some(tls_config) => {
+                establish(
+                    &config,
+                    tokio_postgres_rustls::MakeRustlsConnect::new(tls_config),
+                    &target,
+                    Arc::clone(&notice_privacy),
+                )
+                .await
+            }
         }
-        Some(tls_config) => {
-            establish(
-                &config,
-                tokio_postgres_rustls::MakeRustlsConnect::new(tls_config),
-                &target,
-                Arc::clone(&notice_privacy),
-            )
-            .await
-        }
-    }
-    .expect("synthetic fixture connection");
+        .expect("synthetic fixture connection");
     let info = bootstrap(&client, &target).await.expect("session facts");
     Some(Session {
         client,
@@ -177,6 +178,7 @@ async fn live_session(startup_setting: Option<&str>) -> Option<Session> {
         info,
         tls,
         notices,
+        notifications,
         notice_privacy,
         connection_lost,
     })

@@ -1,5 +1,24 @@
 # Verification
 
+## Wave 25 (033-listen-notify-and-maintenance-ops) Delivery - 11 November 2026
+
+Wave 25 Feature `033-listen-notify-and-maintenance-ops` delivered the eighth Milestone 6
+full pgAdmin replacement parity slice:
+
+- **Wave 25 (`033-listen-notify-and-maintenance-ops`)**:
+  - Implemented pure `src/ops/` domain engine for maintenance operation building (`VACUUM`, `ANALYZE`, `REINDEX`, `CLUSTER`),
+    table lock level estimation (`AccessExclusiveLock` vs `ShareUpdateExclusiveLock`), pub/sub SQL building
+    (`LISTEN`, `UNLISTEN`, `NOTIFY`), and aligned tabular / JSON telemetry rendering.
+  - Implemented live PostgreSQL background notification capture via `tokio_postgres::AsyncMessage::Notification`
+    stored in `Session::notifications`, and primitives in `Session::listen_channel`, `Session::unlisten_channel`,
+    `Session::notify_channel`, `Session::execute_maintenance`, and `Session::query_maintenance_progress`.
+  - Added headless scriptable CLI subcommands `ignatius listen`, `ignatius notify`, and `ignatius maintain`
+    with parameter binding, timeout, format (`table`, `jsonl`, `plain`), and production confirmation (`--confirm-production`).
+  - Added interactive TUI Maintenance Operations & Pub/Sub Monitor overlay on `Ctrl+K >` (`maintenance-ops`)
+    with tabs `[1] Pub/Sub Monitor`, `[2] Maintenance Runner`, and `[3] Live Progress Telemetry`,
+    operation cycling (`[v]`), production guard toggle (`[p]`), execution (`[r]`), and reviewed maintenance
+    SQL drafting into the editor (`[e]`) with undo support and zero hidden writes.
+
 ## Wave 24 (032-plpgsql-routine-runner-and-profiler) Delivery - 11 November 2026
 
 Wave 24 Feature `032-plpgsql-routine-runner-and-profiler` delivered the seventh Milestone 6

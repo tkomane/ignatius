@@ -119,6 +119,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `k` | Open the schema diff and migration designer |
 | `<` | Open the data import wizard |
 | `(` | Open the routine runner and profiler |
+| `>` | Open maintenance operations and pub-sub monitor |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -202,6 +203,25 @@ multi-set tabular result rendering, notice capture (`RAISE NOTICE`), and
 - `e` loads the routine invocation SQL into the SQL editor buffer as an undoable edit (`Ctrl+Z`).
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius run-routine` and `ignatius profile-routine` CLI subcommands provide non-interactive parity.
+
+With the workbench active, `Ctrl+K >` (`maintenance-ops`) opens the Maintenance
+Operations and Pub/Sub Monitor overlay, providing dedicated pub/sub monitoring for
+`LISTEN` and `NOTIFY`, maintenance execution for `VACUUM`, `ANALYZE`, `REINDEX`,
+and `CLUSTER` with lock level estimation (`AccessExclusiveLock` vs `ShareUpdateExclusiveLock`),
+production safety confirmation guards, and real-time progress telemetry from
+`pg_stat_progress_vacuum`, `pg_stat_progress_cluster`, and `pg_stat_progress_create_index`.
+Inside the overlay:
+- `Tab` or `1` / `2` / `3` cycles between Pub/Sub Monitor (`1`), Maintenance Runner (`2`), and Live Progress Telemetry (`3`).
+- `Up` / `Down` or `k` / `j` navigates notification stream records or active telemetry rows.
+- `v` cycles through maintenance operations (`VACUUM (VERBOSE, ANALYZE)`, `VACUUM FULL`, `ANALYZE`, `REINDEX CONCURRENTLY`, `REINDEX`, `CLUSTER`).
+- `p` toggles production safety confirmation.
+- `l` issues `LISTEN` on the target channel.
+- `n` dispatches `NOTIFY` with the specified payload.
+- `r` or `Enter` executes the maintenance operation or polls notifications.
+- `e` loads the generated maintenance SQL into the SQL editor buffer as an undoable edit (`Ctrl+Z`).
+- `c` clears the notification buffer.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius listen`, `ignatius notify`, and `ignatius maintain` CLI subcommands provide non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in

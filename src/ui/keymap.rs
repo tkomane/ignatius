@@ -117,6 +117,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("schema-diff", Action::SchemaDiff),
     ("import-data", Action::ImportData),
     ("routine-runner", Action::RoutineRunner),
+    ("maintenance-ops", Action::MaintenanceOps),
 ];
 
 /// The action a configuration name means.
@@ -786,6 +787,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::RoutineRunner,
         "Open the routine runner and profiler",
     ),
+    (
+        '>',
+        Action::MaintenanceOps,
+        "Open maintenance operations and pub-sub monitor",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -894,6 +900,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::SchemaDiff => "Schema diff",
         Action::ImportData => "Import data",
         Action::RoutineRunner => "Routine runner",
+        Action::MaintenanceOps => "Maintenance ops",
     }
 }
 

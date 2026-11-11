@@ -1105,6 +1105,78 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         STATUS.contains("Ctrl+K ("),
         "docs/status.md must document Ctrl+K ("
     );
+    assert!(
+        KEYMAP.contains("| `>` | Open maintenance operations and pub-sub monitor |"),
+        "docs/design/keymap.md chord table must include Ctrl+K >"
+    );
+    assert!(
+        KEYMAP.contains("`maintenance-ops`"),
+        "docs/design/keymap.md must document maintenance-ops configurable action"
+    );
+    assert!(
+        KEYMAP.contains("ignatius listen"),
+        "docs/design/keymap.md must document ignatius listen"
+    );
+    assert!(
+        KEYMAP.contains("ignatius notify"),
+        "docs/design/keymap.md must document ignatius notify"
+    );
+    assert!(
+        KEYMAP.contains("ignatius maintain"),
+        "docs/design/keymap.md must document ignatius maintain"
+    );
+    assert!(
+        CHANGELOG.contains("033-listen-notify-and-maintenance-ops"),
+        "CHANGELOG.md must document Feature 033-listen-notify-and-maintenance-ops"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius maintain"),
+        "CHANGELOG.md must document ignatius maintain"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("ignatius maintain"),
+        "docs/architecture/pgadmin-parity-plan.md must document ignatius maintain"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("maintenance-ops"),
+        "docs/architecture/pgadmin-parity-plan.md must document maintenance-ops"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("Ctrl+K >"),
+        "docs/architecture/pgadmin-parity-plan.md must document Ctrl+K >"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("033-listen-notify-and-maintenance-ops"),
+        "docs/product/roadmap.md must document 033-listen-notify-and-maintenance-ops"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("ignatius maintain"),
+        "docs/product/roadmap.md must document ignatius maintain"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("maintenance-ops"),
+        "docs/product/roadmap.md must document maintenance-ops"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Ctrl+K >"),
+        "docs/product/roadmap.md must document Ctrl+K >"
+    );
+    assert!(
+        STATUS.contains("033-listen-notify-and-maintenance-ops"),
+        "docs/status.md must document 033-listen-notify-and-maintenance-ops"
+    );
+    assert!(
+        STATUS.contains("ignatius maintain"),
+        "docs/status.md must document ignatius maintain"
+    );
+    assert!(
+        STATUS.contains("maintenance-ops"),
+        "docs/status.md must document maintenance-ops"
+    );
+    assert!(
+        STATUS.contains("Ctrl+K >"),
+        "docs/status.md must document Ctrl+K >"
+    );
 
     for (name, content) in [
         (

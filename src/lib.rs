@@ -33,6 +33,7 @@ pub mod diagram;
 pub mod exit_code;
 pub mod history;
 pub mod migration;
+pub mod ops;
 pub mod platform;
 pub mod postgres;
 pub mod queries;

@@ -244,7 +244,9 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
   rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`), multi-set tabular result rendering, notice capture
   (`RAISE NOTICE`), `plpgsql_check` / static analysis profiling, scriptable CLI (`ignatius run-routine`,
   `ignatius profile-routine`), and interactive TUI overlay (`Ctrl+K (` / `routine-runner`).
-- **`033-listen-notify-and-maintenance-ops`**: Dedicated asynchronous `LISTEN`/`NOTIFY`
-  event stream monitor and guided maintenance runner for `VACUUM`, `ANALYZE`, and
-  `REINDEX CONCURRENTLY` with live telemetry from `pg_stat_progress_*`.
+- **`033-listen-notify-and-maintenance-ops`** [Implemented]: Dedicated asynchronous `LISTEN`/`NOTIFY`
+  event stream monitor and guarded maintenance runner for `VACUUM (VERBOSE, ANALYZE)`, `VACUUM FULL`,
+  `ANALYZE`, and `REINDEX CONCURRENTLY` with lock estimation, live progress telemetry from
+  `pg_stat_progress_*`, scriptable CLI (`ignatius listen`, `ignatius notify`, `ignatius maintain`),
+  and interactive TUI overlay (`Ctrl+K >` / `maintenance-ops`).
 

@@ -3439,4 +3439,113 @@ mod with_server {
             stderr(&cleanup)
         );
     }
+
+    #[test]
+    fn listen_notify_and_maintain_cli_subcommands() {
+        // 1. Validate help outputs without requiring live database
+        let listen_help = binary()
+            .args(["listen", "--help"])
+            .output()
+            .expect("run ignatius listen --help");
+        assert_eq!(code(&listen_help), 0);
+        let listen_help_str = stdout(&listen_help);
+        assert!(listen_help_str.contains("--timeout"));
+        assert!(listen_help_str.contains("--format"));
+        assert!(listen_help_str.contains("--output"));
+        assert!(listen_help_str.contains("--force"));
+
+        let notify_help = binary()
+            .args(["notify", "--help"])
+            .output()
+            .expect("run ignatius notify --help");
+        assert_eq!(code(&notify_help), 0);
+        let notify_help_str = stdout(&notify_help);
+        assert!(notify_help_str.contains("[CHANNEL]"));
+
+        let maintain_help = binary()
+            .args(["maintain", "--help"])
+            .output()
+            .expect("run ignatius maintain --help");
+        assert_eq!(code(&maintain_help), 0);
+        let maintain_help_str = stdout(&maintain_help);
+        assert!(maintain_help_str.contains("vacuum"));
+        assert!(maintain_help_str.contains("analyze"));
+        assert!(maintain_help_str.contains("reindex"));
+        assert!(maintain_help_str.contains("progress"));
+
+        let vacuum_help = binary()
+            .args(["maintain", "vacuum", "--help"])
+            .output()
+            .expect("run ignatius maintain vacuum --help");
+        assert_eq!(code(&vacuum_help), 0);
+        let vacuum_help_str = stdout(&vacuum_help);
+        assert!(vacuum_help_str.contains("--full"));
+        assert!(vacuum_help_str.contains("--freeze"));
+        assert!(vacuum_help_str.contains("--verbose"));
+        assert!(vacuum_help_str.contains("--analyze"));
+
+        // 2. Test live maintenance and notify against PostgreSQL container
+        let uri = uri_or_skip!();
+
+        // Dispatch a pub/sub notification
+        let notify_out = binary()
+            .args([
+                "notify",
+                &uri,
+                "ignatius_alerts",
+                "{\"alert\": \"test_event\"}",
+            ])
+            .output()
+            .expect("run ignatius notify");
+        assert_eq!(
+            code(&notify_out),
+            0,
+            "notify failed: {}",
+            stderr(&notify_out)
+        );
+        let notify_str = stdout(&notify_out);
+        assert!(notify_str.contains("Dispatched notification to channel \"ignatius_alerts\""));
+
+        // Run vacuum analyze
+        let maintain_vacuum = binary()
+            .args(["maintain", &uri, "vacuum", "--analyze", "--verbose"])
+            .output()
+            .expect("run ignatius maintain vacuum");
+        assert_eq!(
+            code(&maintain_vacuum),
+            0,
+            "maintain vacuum failed: {}",
+            stderr(&maintain_vacuum)
+        );
+        let vacuum_str = stdout(&maintain_vacuum);
+        assert!(vacuum_str.contains("Maintenance completed successfully"));
+
+        // Run analyze
+        let maintain_analyze = binary()
+            .args(["maintain", &uri, "analyze", "--verbose"])
+            .output()
+            .expect("run ignatius maintain analyze");
+        assert_eq!(
+            code(&maintain_analyze),
+            0,
+            "maintain analyze failed: {}",
+            stderr(&maintain_analyze)
+        );
+        let analyze_str = stdout(&maintain_analyze);
+        assert!(analyze_str.contains("Maintenance completed successfully"));
+
+        // Query maintenance progress report in JSON
+        let progress_out = binary()
+            .args(["maintain", &uri, "--format", "json", "progress"])
+            .output()
+            .expect("run ignatius maintain progress");
+        assert_eq!(
+            code(&progress_out),
+            0,
+            "maintain progress failed: {}",
+            stderr(&progress_out)
+        );
+        let progress_str = stdout(&progress_out);
+        assert!(progress_str.starts_with('[') || progress_str.contains("[]"));
+    }
 }

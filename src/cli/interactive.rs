@@ -1128,6 +1128,62 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadMaintenanceProgress { request } => {
+                    spawn_load_maintenance_progress(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::ExecuteMaintenance { request, options } => {
+                    spawn_execute_maintenance(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        options,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::SubscribeChannel { request, channel } => {
+                    spawn_subscribe_channel(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        channel,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::UnsubscribeChannel { request: _, channel } => {
+                    spawn_unsubscribe_channel(reader(&session, &metadata), channel);
+                }
+                Effect::DispatchNotification {
+                    request,
+                    channel,
+                    payload,
+                } => {
+                    spawn_dispatch_notification(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        channel,
+                        payload,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::PollNotifications { request } => {
+                    spawn_poll_notifications(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::ExportRows { path, format } => {
                     let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
                         &model, &path, format,
@@ -2705,6 +2761,173 @@ fn spawn_profile_routine(
             Message::RoutineProfiled {
                 request,
                 result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_maintenance_progress(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.query_maintenance_progress().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::MaintenanceProgressLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_execute_maintenance(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    options: crate::ops::MaintenanceOptions,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.execute_maintenance(&options).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::MaintenanceExecuted {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_subscribe_channel(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    channel: String,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.listen_channel(&channel).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ChannelSubscribed {
+                request,
+                channel,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_unsubscribe_channel(
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    channel: String,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let _ = session.unlisten_channel(&channel).await;
+    });
+}
+
+fn spawn_dispatch_notification(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    channel: String,
+    payload: Option<String>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.notify_channel(&channel, payload.as_deref()).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::NotificationDispatched {
+                request,
+                channel,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_poll_notifications(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let notifications = session.notifications().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::NotificationsPolled {
+                request,
+                notifications,
             },
         ));
     });

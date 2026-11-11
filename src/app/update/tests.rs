@@ -10604,3 +10604,166 @@ fn routine_runner_lifecycle_navigation_execution_and_editor_load() {
     update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.routine_runner.is_none());
 }
+
+#[test]
+fn maintenance_ops_lifecycle_navigation_execution_and_editor_load() {
+    let mut model = connected();
+    let initial_text = model.editor.text().to_string();
+
+    // 1. Open maintenance overlay
+    let effects = update(&mut model, Message::Action(Action::MaintenanceOps));
+    assert!(model.maintenance_ops.is_some());
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::LoadMaintenanceProgress { .. })),
+        "expected LoadMaintenanceProgress effect"
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::PollNotifications { .. })),
+        "expected PollNotifications effect"
+    );
+
+    // 2. Deliver progress telemetry
+    let sample_progress = vec![crate::ops::MaintenanceProgressEntry {
+        pid: 12345,
+        datname: "ignatius_demo".to_string(),
+        relname: Some("orders".to_string()),
+        command: "VACUUM".to_string(),
+        phase: "scanning heap".to_string(),
+        heap_blks_total: Some(1000),
+        heap_blks_scanned: Some(450),
+        heap_blks_vacuumed: Some(200),
+        index_vacuum_count: Some(0),
+        percent: Some(45.0),
+    }];
+
+    let req = model.maintenance_ops_request;
+    update(
+        &mut model,
+        Message::MaintenanceProgressLoaded {
+            request: req,
+            result: Box::new(Ok(sample_progress)),
+        },
+    );
+
+    let ops = model.maintenance_ops.as_ref().unwrap();
+    assert_eq!(ops.progress.len(), 1);
+    assert_eq!(ops.progress[0].pid, 12345);
+
+    // 3. Deliver pub/sub notification
+    let sample_notifications = vec![crate::ops::PubSubNotification {
+        timestamp: "2026-11-11 12:00:00".to_string(),
+        channel: "events".to_string(),
+        sender_pid: 999,
+        payload: "{\"status\": \"ready\"}".to_string(),
+    }];
+
+    update(
+        &mut model,
+        Message::NotificationsPolled {
+            request: req,
+            notifications: sample_notifications,
+        },
+    );
+    assert_eq!(
+        model.maintenance_ops.as_ref().unwrap().notifications.len(),
+        1
+    );
+
+    // 4. Tab navigation
+    update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.maintenance_ops.as_ref().unwrap().step,
+        crate::app::model::MaintenanceOpsStep::Maintain
+    );
+
+    update(&mut model, Message::Action(Action::Insert('3')));
+    assert_eq!(
+        model.maintenance_ops.as_ref().unwrap().step,
+        crate::app::model::MaintenanceOpsStep::Progress
+    );
+
+    update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(
+        model.maintenance_ops.as_ref().unwrap().step,
+        crate::app::model::MaintenanceOpsStep::PubSub
+    );
+
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(
+        model.maintenance_ops.as_ref().unwrap().step,
+        crate::app::model::MaintenanceOpsStep::Maintain
+    );
+
+    // 5. Cycle maintenance kind
+    update(&mut model, Message::Action(Action::Insert('v')));
+    assert!(matches!(
+        model.maintenance_ops.as_ref().unwrap().maintenance_kind,
+        crate::ops::MaintenanceKind::Vacuum { full: true, .. }
+    ));
+
+    // 6. Toggle production guard
+    assert!(!model.maintenance_ops.as_ref().unwrap().confirm_production);
+    update(&mut model, Message::Action(Action::Insert('p')));
+    assert!(model.maintenance_ops.as_ref().unwrap().confirm_production);
+    update(&mut model, Message::Action(Action::Insert('p')));
+    assert!(!model.maintenance_ops.as_ref().unwrap().confirm_production);
+
+    // 7. Execute maintenance
+    let run_effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(model.maintenance_ops.as_ref().unwrap().executing);
+    assert!(
+        run_effects
+            .iter()
+            .any(|e| matches!(e, Effect::ExecuteMaintenance { .. })),
+        "expected ExecuteMaintenance effect"
+    );
+
+    let exec_res = crate::ops::MaintenanceResult {
+        executed_sql: "VACUUM (FULL, VERBOSE, ANALYZE);".to_string(),
+        success: true,
+        elapsed_ms: 15.5,
+        notices: vec!["vacuuming entire database".to_string()],
+        message: "Maintenance completed successfully in 15.50ms".to_string(),
+    };
+    let req = model.maintenance_ops_request;
+    update(
+        &mut model,
+        Message::MaintenanceExecuted {
+            request: req,
+            result: Box::new(Ok(exec_res)),
+        },
+    );
+    assert!(!model.maintenance_ops.as_ref().unwrap().executing);
+    assert!(
+        model
+            .maintenance_ops
+            .as_ref()
+            .unwrap()
+            .last_result
+            .is_some()
+    );
+
+    // 8. Load in Editor
+    update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(model.maintenance_ops.is_none());
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(
+        model.editor.text().contains("VACUUM"),
+        "editor text has maintenance SQL: {}",
+        model.editor.text()
+    );
+
+    // 9. Undo restores initial text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_text);
+
+    // 10. Dismiss with Esc
+    update(&mut model, Message::Action(Action::MaintenanceOps));
+    assert!(model.maintenance_ops.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.maintenance_ops.is_none());
+}
