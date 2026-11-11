@@ -118,6 +118,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `t` | Open the roles, privileges, and RLS auditor |
 | `k` | Open the schema diff and migration designer |
 | `<` | Open the data import wizard |
+| `(` | Open the routine runner and profiler |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -186,6 +187,21 @@ protocol. Inside the overlay:
 - `Enter` executes the import in Step 3 or advances to the next step.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius import`, `ignatius export`, `ignatius backup`, and `ignatius restore` CLI subcommands provide non-interactive parity.
+
+With the workbench active, `Ctrl+K (` (`routine-runner`) opens the PL/pgSQL
+Routine Runner and Profiler overlay, providing routine signature discovery from
+`pg_proc`, typed parameter binding and validation, safe test harness execution
+inside transactional savepoint rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`),
+multi-set tabular result rendering, notice capture (`RAISE NOTICE`), and
+`plpgsql_check` / static analysis profiling. Inside the overlay:
+- `Tab` or `1` / `2` / `3` cycles between `Routines` (`1`), `Arguments & Run` (`2`), and `Profiler` (`3`).
+- `Up` / `Down` or `k` / `j` navigates routines in Step 1, arguments in Step 2, or scrolls profiling findings in Step 3.
+- `s` toggles savepoint rollback protection.
+- `r` or `Enter` executes the selected routine.
+- `p` runs the routine profiler.
+- `e` loads the routine invocation SQL into the SQL editor buffer as an undoable edit (`Ctrl+Z`).
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius run-routine` and `ignatius profile-routine` CLI subcommands provide non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -435,7 +451,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
-`schema-diff`, `import-data`,
+`schema-diff`, `import-data`, `routine-runner`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

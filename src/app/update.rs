@@ -794,6 +794,44 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::RoutinesLoaded { request, result } => {
+            if request != model.routine_runner_request {
+                return Vec::new();
+            }
+            if let Some(runner) = &mut model.routine_runner {
+                runner.executing = false;
+                if let Ok(routines) = *result {
+                    runner.routines = routines;
+                }
+            }
+            Vec::new()
+        }
+        Message::RoutineExecuted { request, result } => {
+            if request != model.routine_runner_request {
+                return Vec::new();
+            }
+            if let Some(runner) = &mut model.routine_runner {
+                runner.executing = false;
+                if let Ok(res) = *result {
+                    runner.last_result = Some(res);
+                    runner.step = crate::app::model::RoutineRunnerStep::Arguments;
+                }
+            }
+            Vec::new()
+        }
+        Message::RoutineProfiled { request, result } => {
+            if request != model.routine_runner_request {
+                return Vec::new();
+            }
+            if let Some(runner) = &mut model.routine_runner {
+                runner.executing = false;
+                if let Ok(report) = *result {
+                    runner.last_profile = Some(report);
+                    runner.step = crate::app::model::RoutineRunnerStep::Profile;
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1062,6 +1100,7 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.security_audit.is_some()
         || model.schema_diff.is_some()
         || model.import_wizard.is_some()
+        || model.routine_runner.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1161,6 +1200,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.import_wizard.is_some() {
         return import_wizard_action(model, action);
+    }
+    if model.routine_runner.is_some() {
+        return routine_runner_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1329,6 +1371,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::SecurityAudit => security_audit_open(model),
         Action::SchemaDiff => schema_diff_open(model),
         Action::ImportData => import_wizard_open(model),
+        Action::RoutineRunner => routine_runner_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -2386,6 +2429,160 @@ fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     Vec::new()
 }
+
+fn routine_runner_open(model: &mut Model) -> Vec<Effect> {
+    if model.routine_runner.is_some() {
+        model.routine_runner = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::RoutineRunnerState {
+        rollback_savepoint: true,
+        executing: true,
+        ..Default::default()
+    };
+
+    model.routine_runner_request = model.routine_runner_request.wrapping_add(1);
+    let request = model.routine_runner_request;
+    model.routine_runner = Some(state);
+
+    vec![Effect::LoadRoutines {
+        request,
+        schema: None,
+    }]
+}
+
+/// Handles input while the PL/pgSQL routine runner and profiler overlay is on screen.
+fn routine_runner_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::RoutineRunner => {
+            model.routine_runner = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(runner) = &mut model.routine_runner {
+                match runner.step {
+                    crate::app::model::RoutineRunnerStep::Routines => {
+                        runner.move_routine_selection(-1);
+                    }
+                    crate::app::model::RoutineRunnerStep::Arguments => {
+                        runner.move_arg_selection(-1);
+                    }
+                    crate::app::model::RoutineRunnerStep::Profile => {
+                        runner.scroll_y = runner.scroll_y.saturating_sub(1);
+                    }
+                }
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(runner) = &mut model.routine_runner {
+                match runner.step {
+                    crate::app::model::RoutineRunnerStep::Routines => {
+                        runner.move_routine_selection(1);
+                    }
+                    crate::app::model::RoutineRunnerStep::Arguments => {
+                        runner.move_arg_selection(1);
+                    }
+                    crate::app::model::RoutineRunnerStep::Profile => {
+                        runner.scroll_y = runner.scroll_y.saturating_add(1);
+                    }
+                }
+            }
+        }
+        Action::Insert('s' | 'S') => {
+            if let Some(runner) = &mut model.routine_runner {
+                runner.rollback_savepoint = !runner.rollback_savepoint;
+            }
+        }
+        Action::FocusNext | Action::Insert('\t') => {
+            if let Some(runner) = &mut model.routine_runner {
+                runner.step = runner.step.next();
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(runner) = &mut model.routine_runner {
+                runner.step = crate::app::model::RoutineRunnerStep::Routines;
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(runner) = &mut model.routine_runner {
+                runner.step = crate::app::model::RoutineRunnerStep::Arguments;
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(runner) = &mut model.routine_runner {
+                runner.step = crate::app::model::RoutineRunnerStep::Profile;
+            }
+        }
+        Action::Insert('r' | 'R') | Action::Activate => {
+            if let Some((schema, name, args, rollback)) =
+                model.routine_runner.as_ref().and_then(|r| {
+                    r.selected_routine().map(|s| {
+                        (
+                            s.schema.clone(),
+                            s.name.clone(),
+                            r.args.clone(),
+                            r.rollback_savepoint,
+                        )
+                    })
+                })
+            {
+                if let Some(runner) = &mut model.routine_runner {
+                    runner.executing = true;
+                }
+                model.routine_runner_request = model.routine_runner_request.wrapping_add(1);
+                let request = model.routine_runner_request;
+                let options = crate::routine::RoutineExecutionOptions {
+                    schema,
+                    name,
+                    args,
+                    rollback_savepoint: rollback,
+                    timeout_ms: Some(30_000),
+                };
+                return vec![Effect::ExecuteRoutine { request, options }];
+            }
+        }
+        Action::Insert('p' | 'P') => {
+            if let Some((schema, name)) = model.routine_runner.as_ref().and_then(|r| {
+                r.selected_routine()
+                    .map(|s| (s.schema.clone(), s.name.clone()))
+            }) {
+                if let Some(runner) = &mut model.routine_runner {
+                    runner.executing = true;
+                }
+                model.routine_runner_request = model.routine_runner_request.wrapping_add(1);
+                let request = model.routine_runner_request;
+                return vec![Effect::ProfileRoutine {
+                    request,
+                    schema,
+                    name,
+                }];
+            }
+        }
+        Action::Insert('e' | 'E') => {
+            if let Some(sql) = model.routine_runner.as_ref().and_then(|runner| {
+                runner
+                    .selected_routine()
+                    .map(|routine| crate::routine::build_routine_call_sql(routine, &runner.args))
+            }) {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.routine_runner = None;
+                model.focus = Focus::Editor;
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
 ///
 /// A separate list rather than a section of the main palette: someone looking
 /// for a past statement is not looking for a command, and a hundred statements

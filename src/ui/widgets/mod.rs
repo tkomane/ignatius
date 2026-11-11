@@ -15,8 +15,9 @@ pub(crate) use objects::render_objects;
 pub(crate) use overlays::{
     render_chords, render_confirmation, render_copy_confirmation, render_definition, render_help,
     render_import_wizard, render_name_prompt, render_parameter_prompt, render_password_prompt,
-    render_plan_confirmation, render_schema_diagram, render_schema_diff, render_security_audit,
-    render_server_activity, render_update_review, render_update_value_prompt,
+    render_plan_confirmation, render_routine_runner, render_schema_diagram, render_schema_diff,
+    render_security_audit, render_server_activity, render_update_review,
+    render_update_value_prompt,
 };
 pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
@@ -202,6 +203,7 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         || model.security_audit.is_some()
         || model.schema_diff.is_some()
         || model.import_wizard.is_some()
+        || model.routine_runner.is_some()
         || model.inspector.is_some()
         || model.help_open
     {
@@ -266,6 +268,7 @@ pub const fn overlay_blocks_panes(model: &Model) -> bool {
         || model.security_audit.is_some()
         || model.schema_diff.is_some()
         || model.import_wizard.is_some()
+        || model.routine_runner.is_some()
         || model.inspector.is_some()
         || model.help_open
         || model.completion.menu.is_some()

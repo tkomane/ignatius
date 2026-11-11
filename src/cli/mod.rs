@@ -259,6 +259,14 @@ pub enum Command {
 
     /// Restore a database or schema from backup using pg_restore.
     Restore(RestoreArgs),
+
+    /// Execute a stored procedure or function under a safe testing harness with rollback.
+    #[command(name = "run-routine")]
+    RunRoutine(RunRoutineArgs),
+
+    /// Profile a PL/pgSQL routine for performance bottlenecks, dead code, and injection risks.
+    #[command(name = "profile-routine")]
+    ProfileRoutine(ProfileRoutineArgs),
 }
 
 /// Arguments for the audit command.
@@ -842,6 +850,12 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Export(args)) => run_export(args, &paths, &presentation, out, err),
         Some(Command::Backup(args)) => run_backup(args, &paths, &presentation, out, err),
         Some(Command::Restore(args)) => run_restore(args, &paths, &presentation, out, err),
+        Some(Command::RunRoutine(args)) => {
+            run_routine_command(args, &paths, &presentation, out, err)
+        }
+        Some(Command::ProfileRoutine(args)) => {
+            profile_routine_command(args, &paths, &presentation, out, err)
+        }
         Some(Command::Connect {
             target,
             check,
@@ -2748,6 +2762,281 @@ pub(crate) fn authenticate_target(
     runtime()?
         .block_on(crate::connection::cloud::authenticate(target, &providers))
         .map_err(|error| *error)
+}
+
+/// Output format for routine execution and profiling reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
+pub enum CliRoutineFormat {
+    /// Human-readable tabular summary.
+    #[default]
+    Table,
+    /// Machine-readable structured JSON.
+    Json,
+}
+
+/// Arguments for the run-routine command (`032-plpgsql-routine-runner-and-profiler`).
+#[derive(Debug, Args, Clone)]
+pub struct RunRoutineArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Routine name or qualified name (e.g. public.calculate_tax).
+    pub routine: Option<String>,
+    /// Argument values in key=value or positional format.
+    #[arg(short = 'a', long = "param", value_name = "KEY=VALUE")]
+    pub params: Vec<String>,
+    /// Execute inside an automatic rollback savepoint (enabled by default).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub rollback: bool,
+    /// Output representation format: table (default) or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliRoutineFormat::Table)]
+    pub format: CliRoutineFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    /// Explicit confirmation required for non-rollback execution against production.
+    #[arg(long)]
+    pub confirm_production: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Arguments for the profile-routine command (`032-plpgsql-routine-runner-and-profiler`).
+#[derive(Debug, Args, Clone)]
+pub struct ProfileRoutineArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Routine name or qualified name (e.g. public.calculate_tax).
+    pub routine: Option<String>,
+    /// Output representation format: table (default) or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliRoutineFormat::Table)]
+    pub format: CliRoutineFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn parse_routine_identifier(raw: &str) -> (String, String) {
+    if let Some((schema, name)) = raw.split_once('.') {
+        (schema.trim().to_string(), name.trim().to_string())
+    } else {
+        ("public".to_string(), raw.trim().to_string())
+    }
+}
+
+fn parse_cli_routine_args(param_entries: &[String]) -> std::collections::BTreeMap<String, String> {
+    let mut args = std::collections::BTreeMap::new();
+    for (idx, entry) in param_entries.iter().enumerate() {
+        if let Some((k, v)) = entry.split_once('=') {
+            args.insert(k.trim().to_string(), v.trim().to_string());
+        } else {
+            args.insert(format!("${}", idx + 1), entry.trim().to_string());
+        }
+    }
+    args
+}
+
+fn run_routine_command(
+    args: &RunRoutineArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let routine_raw = match args
+        .routine
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(r) => r,
+        None => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "a routine name is required",
+                "running routine with ignatius run-routine",
+            )
+            .next_action("pass a routine name, e.g. ignatius run-routine calculate_tax"));
+        }
+    };
+
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing routine with ignatius run-routine",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    if !args.rollback && target.environment.is_production() && !args.confirm_production {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "refusing non-rollback routine execution against a production database without confirmation",
+            "executing routine without rollback",
+        )
+        .likely_cause("target is flagged as production and non-rollback execution can mutate data")
+        .next_action("pass --confirm-production or keep rollback enabled"));
+    }
+
+    let (schema, name) = parse_routine_identifier(routine_raw);
+    let parsed_args = parse_cli_routine_args(&args.params);
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let options = crate::routine::RoutineExecutionOptions {
+        schema,
+        name,
+        args: parsed_args,
+        rollback_savepoint: args.rollback,
+        timeout_ms: Some(30_000),
+    };
+
+    let result = rt.block_on(session.execute_routine(&options))?;
+
+    let rendered = match args.format {
+        CliRoutineFormat::Table => crate::routine::render_routine_result_table(&result),
+        CliRoutineFormat::Json => crate::routine::render_routine_result_json(&result),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Routine results written to {}", dest.display()).map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    if presentation.verbose {
+        writeln!(
+            err,
+            "Executed in {:.2}ms (rollback: {})",
+            result.elapsed_ms, result.rolled_back
+        )
+        .map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+fn profile_routine_command(
+    args: &ProfileRoutineArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let routine_raw = match args
+        .routine
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(r) => r,
+        None => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "a routine name is required",
+                "profiling routine with ignatius profile-routine",
+            )
+            .next_action("pass a routine name, e.g. ignatius profile-routine calculate_tax"));
+        }
+    };
+
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "profiling routine with ignatius profile-routine",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let (schema, name) = parse_routine_identifier(routine_raw);
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let report = rt.block_on(session.profile_routine(&schema, &name))?;
+
+    let rendered = match args.format {
+        CliRoutineFormat::Table => crate::routine::render_routine_profile_table(&report),
+        CliRoutineFormat::Json => crate::routine::render_routine_profile_json(&report),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Routine profile written to {}", dest.display()).map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    if presentation.verbose {
+        writeln!(
+            err,
+            "Profiled {} findings in {:.2}ms",
+            report.findings.len(),
+            report.elapsed_ms
+        )
+        .map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
 }
 
 fn io_diagnostic(err: std::io::Error) -> Diagnostic {

@@ -4,6 +4,29 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 24 (032-plpgsql-routine-runner-and-profiler) Delivery - 11 November 2026
+
+Resume on branch `feat/032-plpgsql-routine-runner-and-profiler`. Feature
+`032-plpgsql-routine-runner-and-profiler` (the seventh M6 pgAdmin replacement parity slice)
+has completed implementation and verification:
+
+- **Wave 24 (`032-plpgsql-routine-runner-and-profiler`)**:
+  delivered the seventh M6 full pgAdmin replacement slice:
+  - Pure `src/routine/` domain engine for routine signature discovery (`pg_proc`),
+    typed parameter binding and default fallback, safe test harness SQL synthesis
+    wrapped in transactional savepoints (`BEGIN; SAVEPOINT ...; ROLLBACK;`),
+    notice capture (`RAISE NOTICE/WARNING/INFO`), and `plpgsql_check` / static analysis profiling.
+  - Live PostgreSQL catalog and execution primitives in `Session::discover_routines`,
+    `Session::execute_routine`, and `Session::profile_routine`.
+  - Headless scriptable CLI subcommands:
+    - `ignatius run-routine`: executes functions and procedures with `-a/--param`, `--rollback`, `--confirm-production`, `--format table|json`, and `--output`.
+    - `ignatius profile-routine`: performs static and catalog code profiling with `--format table|json`, `--output`, and `--force`.
+  - Interactive TUI Routine Runner and Profiler overlay on `Ctrl+K (` (`routine-runner`):
+    - `[1] Select Routine`: catalog routine list, schema filtering, kind badges (`FUNCTION`, `PROCEDURE`, `AGGREGATE`), return types.
+    - `[2] Arguments & Test Harness`: parameter binding, default indicators, `[s]` savepoint rollback toggle, `[r]` execution, notice stream, and tabular results.
+    - `[3] Profiler & Findings`: severity-classified findings (`ERROR`, `WARNING`, `INFO`, `STYLE`), line numbers, statement hints, and routine source preview.
+    - `[e]` loads routine invocation SQL directly into the SQL editor buffer as an undoable edit (`Ctrl+Z`).
+
 ## Wave 23 (028-data-import-export-and-backup) Delivery - 11 November 2026
 
 Resume on branch `feat/028-data-import-export-and-backup`. Feature

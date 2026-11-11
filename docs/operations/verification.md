@@ -1,5 +1,25 @@
 # Verification
 
+## Wave 24 (032-plpgsql-routine-runner-and-profiler) Delivery - 11 November 2026
+
+Wave 24 Feature `032-plpgsql-routine-runner-and-profiler` delivered the seventh Milestone 6
+full pgAdmin replacement parity slice:
+
+- **Wave 24 (`032-plpgsql-routine-runner-and-profiler`)**:
+  - Implemented pure `src/routine/` domain engine for routine signature parsing (`pg_proc`),
+    typed parameter binding and default fallback, safe test harness SQL synthesis
+    wrapped in transactional savepoints (`BEGIN; SAVEPOINT ...; ROLLBACK;`),
+    notice capture (`RAISE NOTICE/WARNING/INFO`), and `plpgsql_check` / static analysis profiling.
+  - Implemented `Session::discover_routines`, `Session::execute_routine`, and `Session::profile_routine`
+    live catalog and execution primitives.
+  - Added headless scriptable CLI subcommands `ignatius run-routine` and `ignatius profile-routine`
+    with parameter binding (`-a/--param`), savepoint rollback (`--rollback`), production write protection
+    (`--confirm-production`), atomic overwrite guards (`--force`), and tabular / structured JSON output.
+  - Added interactive TUI Routine Runner and Profiler overlay on `Ctrl+K (` (`routine-runner`)
+    with step navigation (`[1] Select Routine`, `[2] Arguments & Test Harness`, `[3] Profiler & Findings`),
+    `[s]` savepoint rollback protection toggle, `[r]` execution, `[p]` profiling, and `[e]` reviewed
+    routine invocation SQL drafting into the editor with undo support and zero hidden writes.
+
 ## Wave 23 (028-data-import-export-and-backup) Delivery - 11 November 2026
 
 Wave 23 Feature `028-data-import-export-and-backup` delivered the sixth Milestone 6

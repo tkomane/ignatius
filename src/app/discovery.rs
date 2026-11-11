@@ -482,7 +482,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
             model.connection.is_ready() || model.completion.catalog().is_some()
         }
         Action::ServerActivity => model.connection.is_ready(),
-        Action::SecurityAudit | Action::SchemaDiff | Action::ImportData => {
+        Action::SecurityAudit | Action::SchemaDiff | Action::ImportData | Action::RoutineRunner => {
             model.connection.is_ready()
         }
         Action::DeleteForward
@@ -632,7 +632,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         }
         Action::SchemaDiagram => "connect to a database first".to_owned(),
         Action::ServerActivity => "connect to a database first".to_owned(),
-        Action::SecurityAudit | Action::SchemaDiff | Action::ImportData => {
+        Action::SecurityAudit | Action::SchemaDiff | Action::ImportData | Action::RoutineRunner => {
             "connect to a database first".to_owned()
         }
         Action::BeginPrefix
@@ -682,7 +682,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ServerActivity
         | Action::SecurityAudit
         | Action::SchemaDiff
-        | Action::ImportData => "Data",
+        | Action::ImportData
+        | Action::RoutineRunner => "Data",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

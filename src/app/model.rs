@@ -997,6 +997,121 @@ impl ImportWizardState {
     }
 }
 
+/// Active step inside the routine runner and profiler overlay (`032-plpgsql-routine-runner-and-profiler`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RoutineRunnerStep {
+    /// Select routine to test from database.
+    #[default]
+    Routines,
+    /// Configure arguments and run test harness.
+    Arguments,
+    /// View profiling report, diagnostics, and findings.
+    Profile,
+}
+
+impl RoutineRunnerStep {
+    /// Advances to the next step.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Routines => Self::Arguments,
+            Self::Arguments => Self::Profile,
+            Self::Profile => Self::Routines,
+        }
+    }
+
+    /// Moves to the previous step.
+    #[must_use]
+    pub const fn prev(self) -> Self {
+        match self {
+            Self::Routines => Self::Profile,
+            Self::Arguments => Self::Routines,
+            Self::Profile => Self::Arguments,
+        }
+    }
+}
+
+/// Interactive state for the routine runner and PL/pgSQL profiler (`032-plpgsql-routine-runner-and-profiler`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RoutineRunnerState {
+    /// Active tab/step.
+    pub step: RoutineRunnerStep,
+    /// Discovered routines in catalog.
+    pub routines: Vec<crate::routine::RoutineSignature>,
+    /// Selected index in the routine list.
+    pub selected_routine_idx: usize,
+    /// Arguments mapped by parameter name.
+    pub args: std::collections::BTreeMap<String, String>,
+    /// Selected argument index when editing arguments.
+    pub selected_arg_idx: usize,
+    /// Text buffer when typing an argument value.
+    pub arg_input: String,
+    /// Whether to wrap execution in an automatic savepoint rollback.
+    pub rollback_savepoint: bool,
+    /// Last execution result.
+    pub last_result: Option<crate::routine::RoutineExecutionResult>,
+    /// Last profiling report.
+    pub last_profile: Option<crate::routine::RoutineProfileReport>,
+    /// Whether a background operation is currently running.
+    pub executing: bool,
+    /// Scroll offset for viewing long reports or source code.
+    pub scroll_y: u16,
+    /// Filter string for fuzzy-matching routine names.
+    pub filter: String,
+}
+
+impl RoutineRunnerState {
+    /// Selected routine signature if available.
+    #[must_use]
+    pub fn selected_routine(&self) -> Option<&crate::routine::RoutineSignature> {
+        let filtered = self.filtered_routines();
+        filtered.get(self.selected_routine_idx).copied()
+    }
+
+    /// Filtered list of routines matching the filter text.
+    #[must_use]
+    pub fn filtered_routines(&self) -> Vec<&crate::routine::RoutineSignature> {
+        if self.filter.trim().is_empty() {
+            self.routines.iter().collect()
+        } else {
+            let needle = self.filter.to_lowercase();
+            self.routines
+                .iter()
+                .filter(|r| {
+                    r.name.to_lowercase().contains(&needle)
+                        || r.schema.to_lowercase().contains(&needle)
+                })
+                .collect()
+        }
+    }
+
+    /// Moves selection in the filtered routine list.
+    pub fn move_routine_selection(&mut self, delta: isize) {
+        let total = self.filtered_routines().len();
+        if total == 0 {
+            self.selected_routine_idx = 0;
+            return;
+        }
+        let current = self.selected_routine_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_routine_idx = new_idx as usize;
+    }
+
+    /// Moves selection in the argument list.
+    pub fn move_arg_selection(&mut self, delta: isize) {
+        let total = self
+            .selected_routine()
+            .map_or(0, |r| r.input_params().len());
+        if total == 0 {
+            self.selected_arg_idx = 0;
+            return;
+        }
+        let current = self.selected_arg_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_arg_idx = new_idx as usize;
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2265,6 +2380,10 @@ pub struct Model {
     pub import_wizard: Option<ImportWizardState>,
     /// Request counter for in-flight import operations.
     pub import_wizard_request: u64,
+    /// Interactive routine runner and PL/pgSQL profiler overlay state.
+    pub routine_runner: Option<RoutineRunnerState>,
+    /// Request counter for in-flight routine runner operations.
+    pub routine_runner_request: u64,
 }
 
 impl Model {

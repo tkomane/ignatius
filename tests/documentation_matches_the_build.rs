@@ -1025,6 +1025,87 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         "docs/status.md must document Ctrl+K <"
     );
 
+    assert!(
+        README.contains("| `(` | Open the routine runner and profiler |"),
+        "README.md chord table must include Ctrl+K ("
+    );
+    assert!(
+        README.contains("ignatius run-routine"),
+        "README.md must document ignatius run-routine CLI subcommand"
+    );
+    assert!(
+        README.contains("ignatius profile-routine"),
+        "README.md must document ignatius profile-routine CLI subcommand"
+    );
+    assert!(
+        KEYMAP.contains("| `(` | Open the routine runner and profiler |"),
+        "docs/design/keymap.md chord table must include Ctrl+K ("
+    );
+    assert!(
+        KEYMAP.contains("`routine-runner`"),
+        "docs/design/keymap.md must document routine-runner configurable action"
+    );
+    assert!(
+        KEYMAP.contains("ignatius run-routine"),
+        "docs/design/keymap.md must document ignatius run-routine"
+    );
+    assert!(
+        KEYMAP.contains("ignatius profile-routine"),
+        "docs/design/keymap.md must document ignatius profile-routine"
+    );
+    assert!(
+        CHANGELOG.contains("032-plpgsql-routine-runner-and-profiler"),
+        "CHANGELOG.md must document Feature 032-plpgsql-routine-runner-and-profiler"
+    );
+    assert!(
+        CHANGELOG.contains("ignatius run-routine"),
+        "CHANGELOG.md must document ignatius run-routine"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("ignatius run-routine"),
+        "docs/architecture/pgadmin-parity-plan.md must document ignatius run-routine"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("routine-runner"),
+        "docs/architecture/pgadmin-parity-plan.md must document routine-runner"
+    );
+    assert!(
+        PGADMIN_PARITY_PLAN.contains("Ctrl+K ("),
+        "docs/architecture/pgadmin-parity-plan.md must document Ctrl+K ("
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("032-plpgsql-routine-runner-and-profiler"),
+        "docs/product/roadmap.md must document 032-plpgsql-routine-runner-and-profiler"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("ignatius run-routine"),
+        "docs/product/roadmap.md must document ignatius run-routine"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("routine-runner"),
+        "docs/product/roadmap.md must document routine-runner"
+    );
+    assert!(
+        PRODUCT_ROADMAP.contains("Ctrl+K ("),
+        "docs/product/roadmap.md must document Ctrl+K ("
+    );
+    assert!(
+        STATUS.contains("032-plpgsql-routine-runner-and-profiler"),
+        "docs/status.md must document 032-plpgsql-routine-runner-and-profiler"
+    );
+    assert!(
+        STATUS.contains("ignatius run-routine"),
+        "docs/status.md must document ignatius run-routine"
+    );
+    assert!(
+        STATUS.contains("routine-runner"),
+        "docs/status.md must document routine-runner"
+    );
+    assert!(
+        STATUS.contains("Ctrl+K ("),
+        "docs/status.md must document Ctrl+K ("
+    );
+
     for (name, content) in [
         (
             "docs/architecture/pgadmin-parity-plan.md",
