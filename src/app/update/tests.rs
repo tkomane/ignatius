@@ -10429,3 +10429,178 @@ fn import_wizard_overlay_lifecycle_navigation_and_editor_loading() {
     update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.import_wizard.is_none());
 }
+
+#[test]
+fn routine_runner_lifecycle_navigation_execution_and_editor_load() {
+    let mut model = connected();
+    let initial_text = model.editor.text().to_string();
+
+    // 1. Open routine runner
+    let effects = update(&mut model, Message::Action(Action::RoutineRunner));
+    assert!(model.routine_runner.is_some());
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::LoadRoutines { .. })),
+        "expected LoadRoutines effect on open"
+    );
+
+    // 2. Deliver loaded routines
+    let sample_routines = vec![
+        crate::routine::RoutineSignature {
+            schema: "public".to_string(),
+            name: "calculate_tax".to_string(),
+            kind: crate::routine::RoutineKind::Function,
+            language: "plpgsql".to_string(),
+            return_type: "numeric".to_string(),
+            is_set_returning: false,
+            params: vec![
+                crate::routine::RoutineParam {
+                    name: "amount".to_string(),
+                    data_type: "numeric".to_string(),
+                    mode: crate::routine::ParamMode::In,
+                    default_value: None,
+                    has_default: false,
+                },
+                crate::routine::RoutineParam {
+                    name: "rate".to_string(),
+                    data_type: "numeric".to_string(),
+                    mode: crate::routine::ParamMode::In,
+                    default_value: Some("0.15".to_string()),
+                    has_default: true,
+                },
+            ],
+            source: "BEGIN RETURN amount * rate; END;".to_string(),
+            volatility: "immutable".to_string(),
+            security_definer: false,
+        },
+        crate::routine::RoutineSignature {
+            schema: "public".to_string(),
+            name: "log_event".to_string(),
+            kind: crate::routine::RoutineKind::Procedure,
+            language: "plpgsql".to_string(),
+            return_type: "void".to_string(),
+            is_set_returning: false,
+            params: vec![crate::routine::RoutineParam {
+                name: "msg".to_string(),
+                data_type: "text".to_string(),
+                mode: crate::routine::ParamMode::In,
+                default_value: None,
+                has_default: false,
+            }],
+            source: "BEGIN RAISE NOTICE '%', msg; END;".to_string(),
+            volatility: "volatile".to_string(),
+            security_definer: false,
+        },
+    ];
+
+    let req = model.routine_runner_request;
+    update(
+        &mut model,
+        Message::RoutinesLoaded {
+            request: req,
+            result: Box::new(Ok(sample_routines)),
+        },
+    );
+
+    let runner = model.routine_runner.as_ref().unwrap();
+    assert_eq!(runner.routines.len(), 2);
+    assert_eq!(runner.selected_routine_idx, 0);
+
+    // 3. Navigate routines
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(
+        model.routine_runner.as_ref().unwrap().selected_routine_idx,
+        1
+    );
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(
+        model.routine_runner.as_ref().unwrap().selected_routine_idx,
+        0
+    );
+
+    // 4. Switch to Arguments tab
+    update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.routine_runner.as_ref().unwrap().step,
+        crate::app::model::RoutineRunnerStep::Arguments
+    );
+
+    // 5. Toggle rollback savepoint
+    assert!(model.routine_runner.as_ref().unwrap().rollback_savepoint);
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert!(!model.routine_runner.as_ref().unwrap().rollback_savepoint);
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert!(model.routine_runner.as_ref().unwrap().rollback_savepoint);
+
+    // 6. Run routine
+    let run_effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(model.routine_runner.as_ref().unwrap().executing);
+    assert!(
+        run_effects
+            .iter()
+            .any(|e| matches!(e, Effect::ExecuteRoutine { .. })),
+        "expected ExecuteRoutine effect"
+    );
+
+    // Deliver execution result
+    let exec_res = crate::routine::RoutineExecutionResult {
+        routine_name: "public.calculate_tax".to_string(),
+        success: true,
+        columns: vec!["calculate_tax".to_string()],
+        rows: vec![vec!["15.00".to_string()]],
+        notices: vec![crate::routine::RoutineNotice {
+            severity: "NOTICE".to_string(),
+            message: "Tax computed".to_string(),
+            detail: None,
+            hint: None,
+            context: None,
+        }],
+        elapsed_ms: 1.25,
+        rolled_back: true,
+        executed_sql: "SELECT public.calculate_tax(100.0, 0.15);".to_string(),
+    };
+    let req = model.routine_runner_request;
+    update(
+        &mut model,
+        Message::RoutineExecuted {
+            request: req,
+            result: Box::new(Ok(exec_res)),
+        },
+    );
+    assert!(!model.routine_runner.as_ref().unwrap().executing);
+    assert!(model.routine_runner.as_ref().unwrap().last_result.is_some());
+
+    // 7. Profile routine
+    let prof_effects = update(&mut model, Message::Action(Action::Insert('p')));
+    assert!(model.routine_runner.as_ref().unwrap().executing);
+    assert!(
+        prof_effects
+            .iter()
+            .any(|e| matches!(e, Effect::ProfileRoutine { .. })),
+        "expected ProfileRoutine effect"
+    );
+
+    // 8. Load in Editor
+    update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(
+        model.routine_runner.is_none(),
+        "overlay closed after loading into editor"
+    );
+    assert_eq!(model.focus, Focus::Editor);
+    assert!(
+        model.editor.text().contains("\"public\".\"calculate_tax\""),
+        "editor text has routine call SQL: {}",
+        model.editor.text()
+    );
+
+    // 9. Undo restores initial text
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), initial_text);
+
+    // 10. Dismiss with Esc
+    update(&mut model, Message::Action(Action::RoutineRunner));
+    assert!(model.routine_runner.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.routine_runner.is_none());
+}

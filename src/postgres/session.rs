@@ -343,6 +343,184 @@ impl Session {
         crate::postgres::metadata::schema_diff(&self.client, source_schema, target_schema).await
     }
 
+    /// Discovers routine signatures in the database with optional schema and name filtering.
+    pub async fn discover_routines(
+        &self,
+        schema: Option<&str>,
+        routine_name: Option<&str>,
+    ) -> Result<Vec<crate::routine::RoutineSignature>, Diagnostic> {
+        crate::postgres::metadata::discover_routines(&self.client, schema, routine_name).await
+    }
+
+    /// Executes a routine under the safe testing harness with optional savepoint rollback and notice capture.
+    pub async fn execute_routine(
+        &self,
+        options: &crate::routine::RoutineExecutionOptions,
+    ) -> Result<crate::routine::RoutineExecutionResult, Diagnostic> {
+        let routines = self
+            .discover_routines(Some(&options.schema), Some(&options.name))
+            .await?;
+        let routine = routines.into_iter().next().ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!(
+                    "routine \"{}\".\"{}\" not found",
+                    options.schema, options.name
+                ),
+                "executing routine",
+            )
+            .likely_cause("the function or procedure name does not exist in the specified schema")
+            .next_action(
+                "verify the schema and routine name via ignatius run-routine or the object tree",
+            )
+        })?;
+
+        let _gate = self.user_sql_gate.lock().await;
+        let operation = self.notices.begin(crate::query::result::NoticeScope::Query);
+
+        let sql = crate::routine::build_test_harness_sql(
+            &routine,
+            &options.args,
+            options.rollback_savepoint,
+        );
+
+        let start = std::time::Instant::now();
+        let query_messages = self
+            .client
+            .simple_query(&sql)
+            .await
+            .map_err(|e| from_query_error(&e, 1))?;
+
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let captured_notices = operation.take_statement();
+
+        let notices = captured_notices
+            .into_iter()
+            .map(|n| crate::routine::RoutineNotice {
+                severity: n.severity,
+                message: n.message,
+                detail: None,
+                hint: None,
+                context: None,
+            })
+            .collect();
+
+        let mut columns = Vec::new();
+        let mut rows = Vec::new();
+
+        for msg in query_messages {
+            match msg {
+                tokio_postgres::SimpleQueryMessage::Row(row) => {
+                    if columns.is_empty() {
+                        let len = row.columns().len();
+                        for i in 0..len {
+                            columns.push(row.columns()[i].name().to_string());
+                        }
+                    }
+                    let mut row_vals = Vec::new();
+                    for i in 0..row.len() {
+                        row_vals.push(row.get(i).unwrap_or("").to_string());
+                    }
+                    rows.push(row_vals);
+                }
+                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                _ => {}
+            }
+        }
+
+        Ok(crate::routine::RoutineExecutionResult {
+            routine_name: format!("{}.{}", routine.schema, routine.name),
+            success: true,
+            columns,
+            rows,
+            notices,
+            elapsed_ms,
+            rolled_back: options.rollback_savepoint,
+            executed_sql: sql,
+        })
+    }
+
+    /// Profiles a PL/pgSQL routine using plpgsql_check if available or built-in static inspection.
+    pub async fn profile_routine(
+        &self,
+        schema: &str,
+        name: &str,
+    ) -> Result<crate::routine::RoutineProfileReport, Diagnostic> {
+        let routines = self.discover_routines(Some(schema), Some(name)).await?;
+        let routine = routines.into_iter().next().ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("routine \"{schema}\".\"{name}\" not found"),
+                "profiling routine",
+            )
+        })?;
+
+        let ext_check_query = "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'plpgsql_check') AS has_check;";
+        let ext_row = self.client.query_one(ext_check_query, &[]).await;
+        let has_plpgsql_check = ext_row.is_ok_and(|r| r.get("has_check"));
+
+        let mut findings = Vec::new();
+        if has_plpgsql_check {
+            let check_query = format!(
+                "SELECT * FROM plpgsql_check_function_tb('\"{}\".\"{}\"');",
+                routine.schema, routine.name
+            );
+            if let Ok(check_rows) = self.client.query(&check_query, &[]).await {
+                for row in check_rows {
+                    let msg: String = row.get("message");
+                    let lineno: Option<i32> = row.try_get("lineno").ok();
+                    let stmt: Option<String> = row.try_get("stmt").ok();
+                    findings.push(crate::routine::ProfileFinding {
+                        code: "plpgsql_check".to_string(),
+                        severity: crate::routine::ProfileFindingSeverity::Warning,
+                        message: msg,
+                        line: lineno.map(|l| l as usize),
+                        statement: stmt,
+                    });
+                }
+            }
+        }
+
+        if findings.is_empty() {
+            findings = crate::routine::static_inspect_routine_source(&routine);
+        }
+
+        let exec_options = crate::routine::RoutineExecutionOptions {
+            schema: schema.to_string(),
+            name: name.to_string(),
+            args: std::collections::BTreeMap::new(),
+            rollback_savepoint: true,
+            timeout_ms: Some(10000),
+        };
+
+        let exec_result = self.execute_routine(&exec_options).await;
+        let (elapsed_ms, notices, invocation_sql, rolled_back) = match exec_result {
+            Ok(res) => (
+                res.elapsed_ms,
+                res.notices,
+                res.executed_sql,
+                res.rolled_back,
+            ),
+            Err(_) => {
+                let call_sql = crate::routine::build_routine_call_sql(
+                    &routine,
+                    &std::collections::BTreeMap::new(),
+                );
+                (0.0, Vec::new(), call_sql, true)
+            }
+        };
+
+        Ok(crate::routine::RoutineProfileReport {
+            routine,
+            findings,
+            invocation_sql,
+            notices,
+            elapsed_ms,
+            rolled_back,
+            has_plpgsql_check,
+        })
+    }
+
     /// Executes a bulk data import using `COPY ... FROM STDIN`.
     ///
     /// Streams input chunks into the database. If `transactional` is true, wraps the COPY

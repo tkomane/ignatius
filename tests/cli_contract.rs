@@ -3306,4 +3306,137 @@ mod with_server {
             "stdout contains pg_restore: {restore_out}"
         );
     }
+
+    #[test]
+    fn routine_runner_and_profiler_cli_subcommands() {
+        // 1. Validate help outputs without requiring live database
+        let run_help = binary()
+            .args(["run-routine", "--help"])
+            .output()
+            .expect("run ignatius run-routine --help");
+        assert_eq!(code(&run_help), 0);
+        let run_help_str = stdout(&run_help);
+        assert!(run_help_str.contains("--param"));
+        assert!(run_help_str.contains("--rollback"));
+        assert!(run_help_str.contains("--confirm-production"));
+        assert!(run_help_str.contains("--format"));
+
+        let profile_help = binary()
+            .args(["profile-routine", "--help"])
+            .output()
+            .expect("run ignatius profile-routine --help");
+        assert_eq!(code(&profile_help), 0);
+        let profile_help_str = stdout(&profile_help);
+        assert!(profile_help_str.contains("--format"));
+        assert!(profile_help_str.contains("--output"));
+        assert!(profile_help_str.contains("--force"));
+
+        // 2. Test live routine execution and profiling against PostgreSQL container
+        let uri = uri_or_skip!();
+
+        // Setup test function
+        let setup = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "CREATE OR REPLACE FUNCTION public.ignatius_test_add(a integer, b integer) \
+                 RETURNS integer AS $$ BEGIN RETURN a + b; END; $$ LANGUAGE plpgsql;",
+            ])
+            .output()
+            .expect("create test function");
+        assert_eq!(
+            code(&setup),
+            0,
+            "create function failed: {}",
+            stderr(&setup)
+        );
+
+        // Execute via run-routine with JSON format
+        let run_json = binary()
+            .args([
+                "run-routine",
+                &uri,
+                "public.ignatius_test_add",
+                "-a",
+                "a=17",
+                "-a",
+                "b=25",
+                "--format",
+                "json",
+            ])
+            .output()
+            .expect("run-routine json");
+        assert_eq!(
+            code(&run_json),
+            0,
+            "run-routine json failed: {}",
+            stderr(&run_json)
+        );
+        let run_json_str = stdout(&run_json);
+        assert!(run_json_str.contains("\"success\": true"));
+        assert!(run_json_str.contains("\"42\""));
+
+        // Execute via run-routine with tabular format
+        let run_table = binary()
+            .args([
+                "run-routine",
+                &uri,
+                "public.ignatius_test_add",
+                "-a",
+                "a=5",
+                "-a",
+                "b=7",
+                "--format",
+                "table",
+            ])
+            .output()
+            .expect("run-routine table");
+        assert_eq!(
+            code(&run_table),
+            0,
+            "run-routine table failed: {}",
+            stderr(&run_table)
+        );
+        let run_table_str = stdout(&run_table);
+        assert!(run_table_str.contains("ignatius_test_add"));
+        assert!(run_table_str.contains("12"));
+
+        // Profile routine
+        let profile_table = binary()
+            .args([
+                "profile-routine",
+                &uri,
+                "public.ignatius_test_add",
+                "--format",
+                "table",
+            ])
+            .output()
+            .expect("profile-routine table");
+        assert_eq!(
+            code(&profile_table),
+            0,
+            "profile-routine table failed: {}",
+            stderr(&profile_table)
+        );
+        let profile_table_str = stdout(&profile_table);
+        assert!(profile_table_str.contains("ignatius_test_add"));
+
+        // Cleanup test function
+        let cleanup = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "DROP FUNCTION public.ignatius_test_add(integer, integer);",
+            ])
+            .output()
+            .expect("drop test function");
+        assert_eq!(
+            code(&cleanup),
+            0,
+            "drop function failed: {}",
+            stderr(&cleanup)
+        );
+    }
 }

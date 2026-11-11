@@ -239,9 +239,11 @@ vertical slices detailed in the [pgAdmin replacement parity plan](../architectur
   missing-policy detection and reviewed `GRANT`/`REVOKE`/`POLICY` SQL generation.
   Its pure `src/audit/` engine, `Session::security_audit` extractor, `ignatius audit` CLI
   subcommand, and interactive `Ctrl+K t` (`security-audit`) TUI overlay are implemented on `main`.
-- **`032-plpgsql-routine-runner-and-profiler`**: Discovery of function/procedure
-  signatures, typed argument prompt harness, execution inside safe rollback savepoints,
-  `RAISE NOTICE` stream capture, and per-step execution profiling.
+- **`032-plpgsql-routine-runner-and-profiler`** [Implemented]: Routine signature discovery (`pg_proc`),
+  typed parameter binding and validation, safe test harness execution inside transactional savepoint
+  rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`), multi-set tabular result rendering, notice capture
+  (`RAISE NOTICE`), `plpgsql_check` / static analysis profiling, scriptable CLI (`ignatius run-routine`,
+  `ignatius profile-routine`), and interactive TUI overlay (`Ctrl+K (` / `routine-runner`).
 - **`033-listen-notify-and-maintenance-ops`**: Dedicated asynchronous `LISTEN`/`NOTIFY`
   event stream monitor and guided maintenance runner for `VACUUM`, `ANALYZE`, and
   `REINDEX CONCURRENTLY` with live telemetry from `pg_stat_progress_*`.

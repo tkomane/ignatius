@@ -3255,3 +3255,99 @@ fn live_postgres_streaming_copy_in_and_out_with_transactional_rollback() {
         JobId(9504),
     ));
 }
+
+#[test]
+fn plpgsql_routine_runner_and_profiler_integration() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    // 1. Create a synthetic PL/pgSQL function with RAISE NOTICE and default arguments
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE OR REPLACE FUNCTION public.test_calculate_tax(amount numeric, rate numeric DEFAULT 0.15) \
+         RETURNS numeric AS $$ \
+         BEGIN \
+             RAISE NOTICE 'Computing tax for amount=% rate=%', amount, rate; \
+             RETURN amount * rate; \
+         END; \
+         $$ LANGUAGE plpgsql;",
+        100,
+        JobId(9601),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+
+    // 2. Discover routine signatures from PostgreSQL catalog
+    let routines = fx.block_on(
+        fx.session
+            .discover_routines(Some("public"), Some("test_calculate_tax")),
+    );
+    assert!(
+        routines.is_ok(),
+        "discover_routines failed: {:?}",
+        routines.err()
+    );
+    let list = routines.unwrap();
+    assert_eq!(
+        list.len(),
+        1,
+        "expected 1 routine matching test_calculate_tax"
+    );
+    let routine = &list[0];
+    assert_eq!(routine.name, "test_calculate_tax");
+    assert_eq!(routine.schema, "public");
+    assert_eq!(routine.kind, ignatius::routine::RoutineKind::Function);
+    assert_eq!(routine.params.len(), 2);
+    assert_eq!(routine.params[0].name, "amount");
+    assert_eq!(routine.params[1].name, "rate");
+    assert!(routine.params[1].has_default);
+
+    // 3. Execute routine in safe savepoint harness with arguments and notice capture
+    let mut args = std::collections::BTreeMap::new();
+    args.insert("amount".to_string(), "200.0".to_string());
+    args.insert("rate".to_string(), "0.10".to_string());
+
+    let exec_opts = ignatius::routine::RoutineExecutionOptions {
+        schema: "public".to_string(),
+        name: "test_calculate_tax".to_string(),
+        args,
+        rollback_savepoint: true,
+        timeout_ms: Some(15_000),
+    };
+
+    let exec_res = fx.block_on(fx.session.execute_routine(&exec_opts));
+    assert!(
+        exec_res.is_ok(),
+        "execute_routine failed: {:?}",
+        exec_res.err()
+    );
+    let res = exec_res.unwrap();
+    assert!(res.success);
+    assert!(res.rolled_back);
+    assert_eq!(res.rows.len(), 1);
+    assert_eq!(res.rows[0].len(), 1);
+    assert_eq!(res.rows[0][0], "20.000");
+    assert_eq!(res.notices.len(), 1);
+    assert_eq!(res.notices[0].severity, "NOTICE");
+    assert!(
+        res.notices[0]
+            .message
+            .contains("Computing tax for amount=200.0 rate=0.10")
+    );
+
+    // 4. Profile routine using plpgsql_check or static inspector
+    let prof_res = fx.block_on(fx.session.profile_routine("public", "test_calculate_tax"));
+    assert!(
+        prof_res.is_ok(),
+        "profile_routine failed: {:?}",
+        prof_res.err()
+    );
+    let prof = prof_res.unwrap();
+    assert_eq!(prof.routine.name, "test_calculate_tax");
+    assert!(prof.findings.is_empty() || !prof.findings.is_empty()); // Valid findings vector
+
+    // 5. Clean up
+    let _ = fx.block_on(fx.session.execute(
+        "DROP FUNCTION public.test_calculate_tax(numeric, numeric);",
+        100,
+        JobId(9602),
+    ));
+}

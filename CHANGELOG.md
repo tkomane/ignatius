@@ -8,6 +8,18 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `032-plpgsql-routine-runner-and-profiler` delivers the pure
+  `src/routine/` routine signature parsing, call generation, and profiling engine;
+  live PostgreSQL `Session::discover_routines`, `Session::execute_routine`, and
+  `Session::profile_routine` execution primitives with safe transactional savepoint
+  rollback (`BEGIN; SAVEPOINT ...; ROLLBACK;`) and asynchronous `RAISE NOTICE` capture;
+  the `ignatius run-routine` and `ignatius profile-routine` CLI subcommands; and
+  the interactive `Ctrl+K (` (`routine-runner`) TUI Routine Runner and Profiler
+  overlay featuring `[1] Select Routine`, `[2] Arguments & Test Harness`, and
+  `[3] Profiler & Findings` tabs, `[s]` savepoint rollback protection toggle,
+  `[r]` execution, `[p]` profiling, and `[e]` reviewed routine invocation SQL
+  drafting into the editor with undo support and zero hidden writes.
+
 - New: Feature `028-data-import-export-and-backup` delivers the pure
   `src/transfer/` bulk data transfer, streaming COPY, and backup/restore engine;
   live PostgreSQL `Session::execute_import` and `Session::execute_export` streaming

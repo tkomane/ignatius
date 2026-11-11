@@ -127,6 +127,8 @@ pub enum Action {
     SchemaDiff,
     /// Open the bulk data import and transfer wizard.
     ImportData,
+    /// Open the interactive routine runner and PL/pgSQL profiler overlay.
+    RoutineRunner,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -229,6 +231,7 @@ impl Action {
             Self::SecurityAudit,
             Self::SchemaDiff,
             Self::ImportData,
+            Self::RoutineRunner,
         ]
     }
 }
@@ -571,6 +574,27 @@ pub enum Message {
         /// Result summary, or why the import failed.
         result: Box<Result<crate::transfer::ImportResult, Diagnostic>>,
     },
+    /// Routine signatures finished loading from catalog.
+    RoutinesLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Routine signatures, or error.
+        result: Box<Result<Vec<crate::routine::RoutineSignature>, Diagnostic>>,
+    },
+    /// Routine execution finished.
+    RoutineExecuted {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Execution result, or error.
+        result: Box<Result<crate::routine::RoutineExecutionResult, Diagnostic>>,
+    },
+    /// Routine profiling finished.
+    RoutineProfiled {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Profiling report, or error.
+        result: Box<Result<crate::routine::RoutineProfileReport, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -755,5 +779,28 @@ pub enum Effect {
         options: crate::transfer::ImportOptions,
         /// Raw file bytes to stream.
         data: Vec<u8>,
+    },
+    /// Discover available routine signatures from pg_proc.
+    LoadRoutines {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional schema filter.
+        schema: Option<String>,
+    },
+    /// Execute a routine with specified options under safe testing harness.
+    ExecuteRoutine {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Routine execution options.
+        options: crate::routine::RoutineExecutionOptions,
+    },
+    /// Profile a routine.
+    ProfileRoutine {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Schema name.
+        schema: String,
+        /// Routine name.
+        name: String,
     },
 }

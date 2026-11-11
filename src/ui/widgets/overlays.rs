@@ -2237,5 +2237,496 @@ pub(crate) fn render_import_wizard(
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
 }
 
+/// Renders the PL/pgSQL Routine Runner and Profiler overlay (`032-plpgsql-routine-runner-and-profiler`).
+pub(crate) fn render_routine_runner(
+    state: &crate::app::model::RoutineRunnerState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(88) / 100)
+        .max(64)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(86) / 100)
+        .max(18)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} PL/pgSQL Routine Runner & Profiler [{}] ",
+        presentation.icon(Icon::Function),
+        match state.step {
+            crate::app::model::RoutineRunnerStep::Routines => "Catalog Routines",
+            crate::app::model::RoutineRunnerStep::Arguments => "Arguments & Run",
+            crate::app::model::RoutineRunnerStep::Profile => "Code Profiler",
+        }
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Step tabs
+            Constraint::Length(1), // Spacer
+            Constraint::Min(4),    // Body
+            Constraint::Length(1), // Footer hints
+        ])
+        .split(inner);
+
+    let step_area = chunks[0];
+    let body_area = chunks[2];
+    let footer_area = chunks[3];
+
+    // 1. Step Tab bar
+    let tab_spans = vec![
+        Span::styled(
+            if state.step == crate::app::model::RoutineRunnerStep::Routines {
+                " [1] Select Routine "
+            } else {
+                "  1  Select Routine "
+            },
+            if state.step == crate::app::model::RoutineRunnerStep::Routines {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            if state.step == crate::app::model::RoutineRunnerStep::Arguments {
+                " [2] Arguments & Test Harness "
+            } else {
+                "  2  Arguments & Test Harness "
+            },
+            if state.step == crate::app::model::RoutineRunnerStep::Arguments {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            if state.step == crate::app::model::RoutineRunnerStep::Profile {
+                " [3] Profiler & Findings "
+            } else {
+                "  3  Profiler & Findings "
+            },
+            if state.step == crate::app::model::RoutineRunnerStep::Profile {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+    ];
+    Paragraph::new(Line::from(tab_spans)).render(step_area, buf);
+
+    // 2. Body Area
+    let visible_rows = usize::from(body_area.height);
+
+    match state.step {
+        crate::app::model::RoutineRunnerStep::Routines => {
+            let mut lines = Vec::new();
+            if !state.filter.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("Filter: ", theme.style(Token::Focus)),
+                    Span::styled(&state.filter, theme.style(Token::Text)),
+                ]));
+            }
+            let filtered = state.filtered_routines();
+            if filtered.is_empty() {
+                if state.executing {
+                    lines.push(Line::from(Span::styled(
+                        "Loading routine signatures from pg_proc...",
+                        theme.style(Token::Muted),
+                    )));
+                } else {
+                    lines.push(Line::from(Span::styled(
+                        "No matching routines found in database catalog.",
+                        theme.style(Token::Muted),
+                    )));
+                }
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "   SCHEMA    ",
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("│ ", theme.style(Token::Border)),
+                    Span::styled(
+                        "ROUTINE NAME                   ",
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("│ ", theme.style(Token::Border)),
+                    Span::styled(
+                        "KIND      ",
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("│ ", theme.style(Token::Border)),
+                    Span::styled(
+                        "RETURNS                        ",
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                for (idx, r) in filtered
+                    .iter()
+                    .enumerate()
+                    .skip(usize::from(state.scroll_y))
+                    .take(visible_rows.saturating_sub(lines.len()))
+                {
+                    let is_sel = idx == state.selected_routine_idx;
+                    let cursor = if is_sel { "> " } else { "  " };
+                    let row_style = if is_sel {
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Text)
+                    };
+                    let kind_str = match r.kind {
+                        crate::routine::RoutineKind::Function => "FUNCTION",
+                        crate::routine::RoutineKind::Procedure => "PROCEDURE",
+                        crate::routine::RoutineKind::Aggregate => "AGGREGATE",
+                        crate::routine::RoutineKind::Window => "WINDOW",
+                    };
+                    let unicode = !presentation.glyphs.is_ascii();
+                    lines.push(Line::from(vec![
+                        Span::styled(cursor, row_style),
+                        Span::styled(
+                            format!(
+                                "{:<11}",
+                                sanitize_for_display(&truncate_to_width(&r.schema, 11, unicode))
+                            ),
+                            row_style,
+                        ),
+                        Span::styled("│ ", theme.style(Token::Border)),
+                        Span::styled(
+                            format!(
+                                "{:<30}",
+                                sanitize_for_display(&truncate_to_width(&r.name, 30, unicode))
+                            ),
+                            row_style,
+                        ),
+                        Span::styled("│ ", theme.style(Token::Border)),
+                        Span::styled(format!("{:<10}", kind_str), row_style),
+                        Span::styled("│ ", theme.style(Token::Border)),
+                        Span::styled(
+                            sanitize_for_display(&truncate_to_width(&r.return_type, 30, unicode)),
+                            row_style,
+                        ),
+                    ]));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::RoutineRunnerStep::Arguments => {
+            let Some(r) = state.selected_routine() else {
+                Paragraph::new(Line::from(Span::styled(
+                    "No routine selected. Switch to tab [1] to select one.",
+                    theme.style(Token::Muted),
+                )))
+                .render(body_area, buf);
+                return;
+            };
+
+            let mut lines = Vec::new();
+            let rollback_span = if state.rollback_savepoint {
+                Span::styled(
+                    "[X] Safe Rollback (Savepoint Protected)",
+                    theme.style(Token::Success).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(
+                    "[ ] Live Commit (Caution: Mutating)",
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                )
+            };
+            lines.push(Line::from(vec![
+                Span::styled("Target: ", theme.style(Token::Muted)),
+                Span::styled(
+                    format!("{}.{}", r.schema, r.name),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  Mode: ", theme.style(Token::Muted)),
+                rollback_span,
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("Signature: {}", r.display_signature()),
+                theme.style(Token::Text),
+            )));
+            lines.push(Line::from(Span::styled(
+                "─────────────────────────────────────────────────────────────────",
+                theme.style(Token::Border),
+            )));
+
+            let input_params = r.input_params();
+            if input_params.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "No input arguments required for this routine.",
+                    theme.style(Token::Muted),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "Arguments & Bound Values:",
+                    theme.style(Token::Focus),
+                )));
+                for (idx, p) in input_params.iter().enumerate() {
+                    let is_sel = idx == state.selected_arg_idx;
+                    let cursor = if is_sel { "> " } else { "  " };
+                    let val = state
+                        .args
+                        .get(&p.name)
+                        .map(|s| s.as_str())
+                        .or(p.default_value.as_deref())
+                        .unwrap_or("");
+                    let style = if is_sel {
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Text)
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(cursor, style),
+                        Span::styled(format!("{:<16}", p.name), style),
+                        Span::styled(
+                            format!("({:?} {}) = ", p.mode, p.data_type),
+                            theme.style(Token::Muted),
+                        ),
+                        Span::styled(
+                            if val.is_empty() {
+                                "<NULL / empty>"
+                            } else {
+                                val
+                            },
+                            if val.is_empty() {
+                                theme.style(Token::Muted)
+                            } else {
+                                theme.style(Token::Success)
+                            },
+                        ),
+                    ]));
+                }
+            }
+
+            let call_sql = crate::routine::build_routine_call_sql(r, &state.args);
+            lines.push(Line::from(vec![
+                Span::styled("Generated SQL: ", theme.style(Token::Muted)),
+                Span::styled(call_sql, theme.style(Token::Focus)),
+            ]));
+
+            if state.executing {
+                lines.push(Line::from(Span::styled(
+                    "Executing routine within test harness...",
+                    theme.style(Token::Focus),
+                )));
+            } else if let Some(res) = &state.last_result {
+                lines.push(Line::from(Span::styled(
+                    "─────────────────────────────────────────────────────────────────",
+                    theme.style(Token::Border),
+                )));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("Execution Succeeded ({:.2} ms)", res.elapsed_ms),
+                        theme.style(Token::Success).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        if res.rolled_back {
+                            " [Rolled Back Cleanly]"
+                        } else {
+                            " [Committed]"
+                        },
+                        theme.style(Token::Muted),
+                    ),
+                ]));
+                for notice in &res.notices {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  [{}] ", notice.severity),
+                            theme.style(Token::Warning),
+                        ),
+                        Span::styled(&notice.message, theme.style(Token::Text)),
+                    ]));
+                }
+                for row in res.rows.iter().take(5) {
+                    let formatted = row.join(" │ ");
+                    lines.push(Line::from(Span::styled(
+                        format!("  ROW: {formatted}"),
+                        theme.style(Token::Text),
+                    )));
+                }
+                if res.rows.len() > 5 {
+                    lines.push(Line::from(Span::styled(
+                        format!("  ... and {} more rows", res.rows.len() - 5),
+                        theme.style(Token::Muted),
+                    )));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::RoutineRunnerStep::Profile => {
+            let Some(r) = state.selected_routine() else {
+                Paragraph::new(Line::from(Span::styled(
+                    "No routine selected. Switch to tab [1] to select one.",
+                    theme.style(Token::Muted),
+                )))
+                .render(body_area, buf);
+                return;
+            };
+
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled("Profiling Target: ", theme.style(Token::Muted)),
+                Span::styled(
+                    format!("{}.{}", r.schema, r.name),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            if state.executing {
+                lines.push(Line::from(Span::styled(
+                    "Running static and catalog profiler...",
+                    theme.style(Token::Focus),
+                )));
+            } else if let Some(prof) = &state.last_profile {
+                let engine_name = if prof.has_plpgsql_check {
+                    "plpgsql_check"
+                } else {
+                    "ignatius-static"
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("Engine: {engine_name}  "),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("Findings: {}", prof.findings.len()),
+                        if prof.findings.is_empty() {
+                            theme.style(Token::Success)
+                        } else {
+                            theme.style(Token::Warning)
+                        },
+                    ),
+                ]));
+                lines.push(Line::from(Span::styled(
+                    "─────────────────────────────────────────────────────────────────",
+                    theme.style(Token::Border),
+                )));
+                if prof.findings.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "✓ No issues, warnings, or anti-patterns detected in routine.",
+                        theme.style(Token::Success),
+                    )));
+                } else {
+                    for f in &prof.findings {
+                        let sev_style = match f.severity {
+                            crate::routine::ProfileFindingSeverity::Error => {
+                                theme.style(Token::Danger)
+                            }
+                            crate::routine::ProfileFindingSeverity::Warning => {
+                                theme.style(Token::Warning)
+                            }
+                            crate::routine::ProfileFindingSeverity::Info
+                            | crate::routine::ProfileFindingSeverity::Style => {
+                                theme.style(Token::Muted)
+                            }
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("[{:?}] ", f.severity),
+                                sev_style.add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(
+                                    "{}:{} ",
+                                    f.code,
+                                    f.line.map(|l| format!("line {l}")).unwrap_or_default()
+                                ),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(&f.message, theme.style(Token::Text)),
+                        ]));
+                        if let Some(stmt) = &f.statement {
+                            lines.push(Line::from(Span::styled(
+                                format!("     Statement: {stmt}"),
+                                theme.style(Token::Muted),
+                            )));
+                        }
+                    }
+                }
+                if !prof.routine.source.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "─── Routine Source Definition ─────────────────────────────────────",
+                        theme.style(Token::Border),
+                    )));
+                    for line in prof.routine.source.lines().take(10) {
+                        lines.push(Line::from(Span::styled(line, theme.style(Token::Text))));
+                    }
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "Press 'p' to profile routine with plpgsql_check and static rules.",
+                    theme.style(Token::Focus),
+                )));
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+    }
+
+    // 3. Footer hints
+    let footer_spans = vec![
+        Span::styled(
+            "[Tab/1-3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Step  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Select  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r/Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Run  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[p] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Profile  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[s] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Rollback  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

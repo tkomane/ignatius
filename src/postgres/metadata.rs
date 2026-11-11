@@ -1974,5 +1974,78 @@ pub async fn schema_diff(
     Ok(crate::migration::compute_schema_diff(&source, &target))
 }
 
+/// Discovers routine signatures with parameter lists, data types, and default values.
+pub async fn discover_routines(
+    client: &Client,
+    schema_filter: Option<&str>,
+    routine_name: Option<&str>,
+) -> Result<Vec<crate::routine::RoutineSignature>, Diagnostic> {
+    let query = "\
+        SELECT \
+            n.nspname::text AS schema_name, \
+            p.proname::text AS routine_name, \
+            p.prokind::text AS prokind, \
+            l.lanname::text AS language_name, \
+            pg_catalog.pg_get_function_result(p.oid)::text AS return_type, \
+            pg_catalog.pg_get_function_arguments(p.oid)::text AS arguments, \
+            p.prosrc::text AS source_code, \
+            p.proretset AS is_set_returning, \
+            p.prosecdef AS security_definer, \
+            p.provolatile::text AS provolatile \
+        FROM pg_catalog.pg_proc p \
+        JOIN pg_catalog.pg_namespace n ON p.pronamespace = n.oid \
+        JOIN pg_catalog.pg_language l ON p.prolang = l.oid \
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') \
+          AND ($1::text IS NULL OR n.nspname = $1::text) \
+          AND ($2::text IS NULL OR p.proname = $2::text) \
+        ORDER BY n.nspname, p.proname;";
+
+    let rows = client
+        .query(query, &[&schema_filter, &routine_name])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    let mut routines = Vec::new();
+    for row in rows {
+        let schema: String = row.get("schema_name");
+        let name: String = row.get("routine_name");
+        let prokind_str: String = row.get("prokind");
+        let kind = match prokind_str.chars().next() {
+            Some('p') => crate::routine::RoutineKind::Procedure,
+            Some('a') => crate::routine::RoutineKind::Aggregate,
+            Some('w') => crate::routine::RoutineKind::Window,
+            _ => crate::routine::RoutineKind::Function,
+        };
+        let language: String = row.get("language_name");
+        let return_type: String = row.get("return_type");
+        let raw_args: String = row.get("arguments");
+        let params = crate::routine::parse_routine_arguments(&raw_args);
+        let source: String = row.get("source_code");
+        let is_set_returning: bool = row.get("is_set_returning");
+        let security_definer: bool = row.get("security_definer");
+        let provolatile_str: String = row.get("provolatile");
+        let volatility = match provolatile_str.chars().next() {
+            Some('i') => "immutable".to_string(),
+            Some('s') => "stable".to_string(),
+            _ => "volatile".to_string(),
+        };
+
+        routines.push(crate::routine::RoutineSignature {
+            schema,
+            name,
+            kind,
+            language,
+            return_type,
+            is_set_returning,
+            params,
+            source,
+            volatility,
+            security_definer,
+        });
+    }
+
+    Ok(routines)
+}
+
 #[cfg(test)]
 mod tests;
