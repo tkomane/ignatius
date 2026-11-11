@@ -1184,6 +1184,30 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadQueryPerformance {
+                    request,
+                    sort_order,
+                    limit,
+                } => {
+                    spawn_load_query_performance(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        sort_order,
+                        limit,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::ResetQueryPerformance { request } => {
+                    spawn_reset_query_performance(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::ExportRows { path, format } => {
                     let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
                         &model, &path, format,
@@ -2928,6 +2952,66 @@ fn spawn_poll_notifications(
             Message::NotificationsPolled {
                 request,
                 notifications,
+            },
+        ));
+    });
+}
+
+fn spawn_load_query_performance(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    sort_order: crate::perf::PerformanceSortOrder,
+    limit: usize,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.query_performance(sort_order, limit).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::QueryPerformanceLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_reset_query_performance(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.reset_performance_stats().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::QueryPerformanceReset {
+                request,
+                result: Box::new(result),
             },
         ));
     });

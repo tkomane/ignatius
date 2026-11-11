@@ -1,8 +1,32 @@
 # Status
 
-**Updated: 2026-11-11.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-12.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 26 (034-query-performance-and-stat-statements) Delivery - 12 November 2026
+
+Resume on branch `feat/034-query-performance-and-stat-statements`. Feature
+`034-query-performance-and-stat-statements` (the first M7 Enterprise Observability slice)
+has completed implementation and verification:
+
+- **Wave 26 (`034-query-performance-and-stat-statements`)**:
+  delivered the first M7 observability and query forensics slice:
+  - Pure `src/perf/` domain engine for query execution forensics from `pg_stat_statements`,
+    buffer cache hit ratio calculation (`shared_blks_hit` vs `shared_blks_read`), duration
+    distribution formatters (min, max, mean, stddev), snippet sanitization, and aligned
+    tabular, JSON, and plain text renderers.
+  - Live PostgreSQL catalog query in `Session::query_performance` with safe preflight checking
+    for `pg_catalog.pg_extension`, and `Session::reset_performance_stats` (`SELECT pg_stat_statements_reset()`).
+  - Headless scriptable CLI subcommand `ignatius profile-queries`:
+    - `--sort mean|total|calls|hit-ratio|io|rows`: dynamic ranking across all key latency and resource metrics.
+    - `--limit`, `--min-calls`: query set sizing and noise filtering.
+    - `--format table|json|plain`, `--output`, `--force`: flexible machine/script integration.
+    - `--reset`: reset statement metrics safely from the command line.
+  - Interactive Field Industrial TUI Query Performance Forensics overlay on `Ctrl+K %` (`query-performance`):
+    - Teenage Engineering / Dieter Rams hardware status capsules: `HIT RATIO`, `TRACKED`, `CALLS`, `EXEC TIME`, `SORT`.
+    - Dual-pane layout: ranked query list (top) with high-contrast active cursor and full statement inspector (bottom) detailing execution timing (min, max, mean, stddev) and buffer block I/O.
+    - Hotkey sort switching (`[m]`, `[t]`, `[c]`, `[r]`, `[h]`), editor load (`[e]`), and guarded statistics reset prompt (`[!]` / `[Enter]`).
 
 ## Wave 25 (033-listen-notify-and-maintenance-ops) Delivery - 11 November 2026
 

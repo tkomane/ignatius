@@ -120,6 +120,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `<` | Open the data import wizard |
 | `(` | Open the routine runner and profiler |
 | `>` | Open maintenance operations and pub-sub monitor |
+| `%` | Open query performance and stat forensics |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -222,6 +223,22 @@ Inside the overlay:
 - `c` clears the notification buffer.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius listen`, `ignatius notify`, and `ignatius maintain` CLI subcommands provide non-interactive parity.
+
+With the workbench active, `Ctrl+K %` (`query-performance`) opens the Query
+Performance and `pg_stat_statements` Forensics overlay, providing aggregate
+cache hit ratios, execution duration distributions (min, max, mean, stddev),
+per-query block I/O statistics, dynamic ranking by total time, mean time, calls,
+rows, or cache hit ratio, and safe stat reset. Inside the overlay:
+- `Up` / `Down` or `k` / `j` navigates the ranked query list.
+- `m` sorts by mean execution time.
+- `t` sorts by total execution time.
+- `c` sorts by total calls.
+- `r` sorts by returned rows.
+- `h` sorts by cache hit ratio (ascending, highlighting worst cache performers).
+- `e` loads the selected normalized SQL query into the SQL editor buffer as an undoable edit (`Ctrl+Z`).
+- `!` prompts to reset `pg_stat_statements` statistics (`SELECT pg_stat_statements_reset()`).
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius profile-queries` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -471,7 +488,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `begin-prefix`, `start-filter`, `reload-objects`, `complete`, `show-definition`,
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
-`schema-diff`, `import-data`, `routine-runner`,
+`schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
 `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.

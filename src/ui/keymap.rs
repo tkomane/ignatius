@@ -118,6 +118,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("import-data", Action::ImportData),
     ("routine-runner", Action::RoutineRunner),
     ("maintenance-ops", Action::MaintenanceOps),
+    ("query-performance", Action::QueryPerformance),
 ];
 
 /// The action a configuration name means.
@@ -792,6 +793,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::MaintenanceOps,
         "Open maintenance operations and pub-sub monitor",
     ),
+    (
+        '%',
+        Action::QueryPerformance,
+        "Open query performance and stat forensics",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -901,6 +907,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::ImportData => "Import data",
         Action::RoutineRunner => "Routine runner",
         Action::MaintenanceOps => "Maintenance ops",
+        Action::QueryPerformance => "Query performance",
     }
 }
 

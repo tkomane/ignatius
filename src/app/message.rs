@@ -131,6 +131,8 @@ pub enum Action {
     RoutineRunner,
     /// Open the maintenance runner and pub/sub notification monitor overlay.
     MaintenanceOps,
+    /// Open the query performance and pg_stat_statements forensics overlay.
+    QueryPerformance,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -235,6 +237,7 @@ impl Action {
             Self::ImportData,
             Self::RoutineRunner,
             Self::MaintenanceOps,
+            Self::QueryPerformance,
         ]
     }
 }
@@ -621,6 +624,20 @@ pub enum Message {
         /// Result.
         result: Box<Result<(), Diagnostic>>,
     },
+    /// Query performance telemetry loaded from pg_stat_statements.
+    QueryPerformanceLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Snapshot or error.
+        result: Box<Result<crate::perf::QueryPerformanceSnapshot, Diagnostic>>,
+    },
+    /// Query performance statistics reset executed.
+    QueryPerformanceReset {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Result or error.
+        result: Box<Result<(), Diagnostic>>,
+    },
     /// Pub/Sub notification dispatched.
     NotificationDispatched {
         /// Which request this answers, so a late answer is discarded.
@@ -882,6 +899,20 @@ pub enum Effect {
     },
     /// Poll unread notifications from session buffer.
     PollNotifications {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Load query performance snapshot from pg_stat_statements.
+    LoadQueryPerformance {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Desired sort order.
+        sort_order: crate::perf::PerformanceSortOrder,
+        /// Maximum number of statements to return.
+        limit: usize,
+    },
+    /// Reset query performance statistics in pg_stat_statements.
+    ResetQueryPerformance {
         /// Identity used to reject a late response.
         request: u64,
     },

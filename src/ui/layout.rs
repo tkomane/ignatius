@@ -25,9 +25,10 @@ use crate::ui::widgets::{
     render_connection_details, render_copy_confirmation, render_definition, render_editor,
     render_error, render_footer, render_header, render_help, render_import_wizard,
     render_inspector, render_maintenance_ops, render_name_prompt, render_objects, render_palette,
-    render_parameter_prompt, render_password_prompt, render_plan_confirmation, render_results,
-    render_routine_runner, render_schema_diagram, render_schema_diff, render_security_audit,
-    render_server_activity, render_update_review, render_update_value_prompt,
+    render_parameter_prompt, render_password_prompt, render_plan_confirmation,
+    render_query_performance, render_results, render_routine_runner, render_schema_diagram,
+    render_schema_diff, render_security_audit, render_server_activity, render_update_review,
+    render_update_value_prompt,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -133,6 +134,9 @@ fn render_with(
     }
     if let Some(ops) = &model.maintenance_ops {
         render_maintenance_ops(ops, presentation, area, buf);
+    }
+    if let Some(perf) = &model.query_performance {
+        render_query_performance(perf, presentation, area, buf);
     }
     if model.help_open {
         render_help(model, presentation, area, buf);

@@ -344,6 +344,20 @@ impl Session {
         crate::postgres::metadata::schema_diff(&self.client, source_schema, target_schema).await
     }
 
+    /// Reads live query execution statistics from pg_stat_statements.
+    pub async fn query_performance(
+        &self,
+        sort_order: crate::perf::PerformanceSortOrder,
+        limit: usize,
+    ) -> Result<crate::perf::QueryPerformanceSnapshot, Diagnostic> {
+        crate::postgres::metadata::query_performance(&self.client, sort_order, limit).await
+    }
+
+    /// Resets execution statistics in pg_stat_statements.
+    pub async fn reset_performance_stats(&self) -> Result<(), Diagnostic> {
+        crate::postgres::metadata::reset_performance_stats(&self.client).await
+    }
+
     /// Discovers routine signatures in the database with optional schema and name filtering.
     pub async fn discover_routines(
         &self,
