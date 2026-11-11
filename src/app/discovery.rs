@@ -482,9 +482,11 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
             model.connection.is_ready() || model.completion.catalog().is_some()
         }
         Action::ServerActivity => model.connection.is_ready(),
-        Action::SecurityAudit | Action::SchemaDiff | Action::ImportData | Action::RoutineRunner => {
-            model.connection.is_ready()
-        }
+        Action::SecurityAudit
+        | Action::SchemaDiff
+        | Action::ImportData
+        | Action::RoutineRunner
+        | Action::MaintenanceOps => model.connection.is_ready(),
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -632,9 +634,11 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         }
         Action::SchemaDiagram => "connect to a database first".to_owned(),
         Action::ServerActivity => "connect to a database first".to_owned(),
-        Action::SecurityAudit | Action::SchemaDiff | Action::ImportData | Action::RoutineRunner => {
-            "connect to a database first".to_owned()
-        }
+        Action::SecurityAudit
+        | Action::SchemaDiff
+        | Action::ImportData
+        | Action::RoutineRunner
+        | Action::MaintenanceOps => "connect to a database first".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
         | Action::Backspace
@@ -683,7 +687,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::SecurityAudit
         | Action::SchemaDiff
         | Action::ImportData
-        | Action::RoutineRunner => "Data",
+        | Action::RoutineRunner
+        | Action::MaintenanceOps => "Data",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

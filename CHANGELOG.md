@@ -8,6 +8,20 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `033-listen-notify-and-maintenance-ops` delivers the pure
+  `src/ops/` maintenance planning, lock level estimation, pub/sub notification,
+  and progress telemetry engine; live PostgreSQL `Session::notifications`,
+  `Session::listen_channel`, `Session::unlisten_channel`, `Session::notify_channel`,
+  `Session::execute_maintenance`, and `Session::query_maintenance_progress` primitives
+  with background asynchronous `AsyncMessage::Notification` stream capture;
+  the scriptable `ignatius listen`, `ignatius notify`, and `ignatius maintain`
+  CLI subcommands; and the interactive `Ctrl+K >` (`maintenance-ops`) TUI Maintenance
+  Operations & Pub/Sub Monitor overlay featuring `[1] Pub/Sub Monitor`,
+  `[2] Maintenance Runner`, and `[3] Live Progress Telemetry` tabs, `[v]` operation
+  cycling (`VACUUM`, `ANALYZE`, `REINDEX`, `CLUSTER`), `[p]` production safety
+  confirmation toggle, `[l]` listen, `[n]` notify, `[r]` execution, and `[e]` reviewed
+  maintenance SQL drafting into the editor with undo support and zero hidden writes.
+
 - New: Feature `032-plpgsql-routine-runner-and-profiler` delivers the pure
   `src/routine/` routine signature parsing, call generation, and profiling engine;
   live PostgreSQL `Session::discover_routines`, `Session::execute_routine`, and

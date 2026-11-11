@@ -2047,5 +2047,94 @@ pub async fn discover_routines(
     Ok(routines)
 }
 
+/// Queries PostgreSQL progress reporting views for active maintenance operations (`033-listen-notify-and-maintenance-ops`).
+pub async fn query_maintenance_progress(
+    client: &tokio_postgres::Client,
+) -> Result<Vec<crate::ops::MaintenanceProgressEntry>, Diagnostic> {
+    let sql = r#"
+        SELECT
+            p.pid,
+            d.datname,
+            c.relname,
+            'VACUUM' AS command,
+            p.phase,
+            p.heap_blks_total,
+            p.heap_blks_scanned,
+            p.heap_blks_vacuumed,
+            p.index_vacuum_count
+        FROM pg_stat_progress_vacuum p
+        JOIN pg_database d ON d.oid = p.datid
+        LEFT JOIN pg_class c ON c.oid = p.relid
+        UNION ALL
+        SELECT
+            p.pid,
+            d.datname,
+            c.relname,
+            'CLUSTER' AS command,
+            p.phase,
+            p.heap_blks_total,
+            p.heap_blks_scanned,
+            0::bigint AS heap_blks_vacuumed,
+            0::bigint AS index_vacuum_count
+        FROM pg_stat_progress_cluster p
+        JOIN pg_database d ON d.oid = p.datid
+        LEFT JOIN pg_class c ON c.oid = p.relid
+        UNION ALL
+        SELECT
+            p.pid,
+            d.datname,
+            c.relname,
+            'CREATE INDEX' AS command,
+            p.phase,
+            p.blocks_total AS heap_blks_total,
+            p.blocks_done AS heap_blks_scanned,
+            0::bigint AS heap_blks_vacuumed,
+            0::bigint AS index_vacuum_count
+        FROM pg_stat_progress_create_index p
+        JOIN pg_database d ON d.oid = p.datid
+        LEFT JOIN pg_class c ON c.oid = p.relid;
+    "#;
+
+    let rows = client
+        .query(sql, &[])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        let pid: i32 = row.get("pid");
+        let datname: String = row.get("datname");
+        let relname: Option<String> = row.get("relname");
+        let command: String = row.get("command");
+        let phase: String = row.get("phase");
+        let heap_blks_total: Option<i64> = row.get("heap_blks_total");
+        let heap_blks_scanned: Option<i64> = row.get("heap_blks_scanned");
+        let heap_blks_vacuumed: Option<i64> = row.get("heap_blks_vacuumed");
+        let index_vacuum_count: Option<i64> = row.get("index_vacuum_count");
+
+        let percent = match (heap_blks_scanned, heap_blks_total) {
+            (Some(s), Some(t)) if t > 0 => {
+                Some(((s as f64) / (t as f64) * 100.0).clamp(0.0, 100.0))
+            }
+            _ => None,
+        };
+
+        entries.push(crate::ops::MaintenanceProgressEntry {
+            pid: pid as u32,
+            datname,
+            relname,
+            command,
+            phase,
+            heap_blks_total,
+            heap_blks_scanned,
+            heap_blks_vacuumed,
+            index_vacuum_count,
+            percent,
+        });
+    }
+
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests;

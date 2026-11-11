@@ -1112,6 +1112,168 @@ impl RoutineRunnerState {
     }
 }
 
+/// Active step / tab in the maintenance operations and pub/sub monitor overlay (`033-listen-notify-and-maintenance-ops`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MaintenanceOpsStep {
+    /// Pub/Sub channel listener and notification dispatcher.
+    #[default]
+    PubSub,
+    /// Maintenance operations runner (VACUUM, ANALYZE, REINDEX).
+    Maintain,
+    /// Live progress telemetry monitor (pg_stat_progress_*).
+    Progress,
+}
+
+impl MaintenanceOpsStep {
+    /// Advances to the next tab.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::PubSub => Self::Maintain,
+            Self::Maintain => Self::Progress,
+            Self::Progress => Self::PubSub,
+        }
+    }
+
+    /// Moves to the previous tab.
+    #[must_use]
+    pub const fn prev(self) -> Self {
+        match self {
+            Self::PubSub => Self::Progress,
+            Self::Maintain => Self::PubSub,
+            Self::Progress => Self::Maintain,
+        }
+    }
+}
+
+/// Interactive state for the maintenance operations runner and pub/sub monitor (`033-listen-notify-and-maintenance-ops`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaintenanceOpsState {
+    /// Active tab/step.
+    pub step: MaintenanceOpsStep,
+    /// Subscribed channel names.
+    pub channels: Vec<String>,
+    /// Notification channel input buffer.
+    pub channel_input: String,
+    /// Notification payload input buffer.
+    pub payload_input: String,
+    /// Editing mode for input buffers: 0 = channel, 1 = payload, 2 = target table.
+    pub edit_focus: usize,
+    /// Log of received notifications.
+    pub notifications: Vec<crate::ops::PubSubNotification>,
+    /// Selected index in notification log or progress table.
+    pub selected_idx: usize,
+    /// Maintenance operation kind (Vacuum, Analyze, Reindex).
+    pub maintenance_kind: crate::ops::MaintenanceKind,
+    /// Target relation or table name for maintenance.
+    pub target_relation: String,
+    /// Whether user confirmed maintenance on production.
+    pub confirm_production: bool,
+    /// Last maintenance execution result.
+    pub last_result: Option<crate::ops::MaintenanceResult>,
+    /// Live progress entries from pg_stat_progress_*.
+    pub progress: Vec<crate::ops::MaintenanceProgressEntry>,
+    /// Whether a background operation is currently running.
+    pub executing: bool,
+    /// Scroll offset for viewing logs or telemetry.
+    pub scroll_y: u16,
+    /// Status message displayed in the overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for MaintenanceOpsState {
+    fn default() -> Self {
+        Self {
+            step: MaintenanceOpsStep::PubSub,
+            channels: Vec::new(),
+            channel_input: "events".to_owned(),
+            payload_input: String::new(),
+            edit_focus: 0,
+            notifications: Vec::new(),
+            selected_idx: 0,
+            maintenance_kind: crate::ops::MaintenanceKind::Vacuum {
+                full: false,
+                freeze: false,
+                verbose: true,
+                analyze: true,
+            },
+            target_relation: String::new(),
+            confirm_production: false,
+            last_result: None,
+            progress: Vec::new(),
+            executing: false,
+            scroll_y: 0,
+            status_message: None,
+        }
+    }
+}
+
+impl MaintenanceOpsState {
+    /// Scroll down.
+    pub fn scroll_down(&mut self) {
+        self.scroll_y = self.scroll_y.saturating_add(1);
+    }
+
+    /// Scroll up.
+    pub fn scroll_up(&mut self) {
+        self.scroll_y = self.scroll_y.saturating_sub(1);
+    }
+
+    /// Moves selection in the notification log or progress list.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = match self.step {
+            MaintenanceOpsStep::PubSub => self.notifications.len(),
+            MaintenanceOpsStep::Maintain => 0,
+            MaintenanceOpsStep::Progress => self.progress.len(),
+        };
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_idx = new_idx as usize;
+    }
+
+    /// Cycles the maintenance operation kind.
+    pub fn cycle_maintenance_kind(&mut self) {
+        self.maintenance_kind = match self.maintenance_kind {
+            crate::ops::MaintenanceKind::Vacuum { full: false, .. } => {
+                crate::ops::MaintenanceKind::Vacuum {
+                    full: true,
+                    freeze: false,
+                    verbose: true,
+                    analyze: true,
+                }
+            }
+            crate::ops::MaintenanceKind::Vacuum { full: true, .. } => {
+                crate::ops::MaintenanceKind::Analyze { verbose: true }
+            }
+            crate::ops::MaintenanceKind::Analyze { .. } => crate::ops::MaintenanceKind::Reindex {
+                concurrently: true,
+                scope: crate::ops::ReindexScope::Table,
+            },
+            crate::ops::MaintenanceKind::Reindex {
+                concurrently: true,
+                scope,
+            } => crate::ops::MaintenanceKind::Reindex {
+                concurrently: false,
+                scope,
+            },
+            crate::ops::MaintenanceKind::Reindex {
+                concurrently: false,
+                ..
+            } => crate::ops::MaintenanceKind::Cluster { verbose: true },
+            crate::ops::MaintenanceKind::Cluster { .. } => crate::ops::MaintenanceKind::Vacuum {
+                full: false,
+                freeze: false,
+                verbose: true,
+                analyze: true,
+            },
+        };
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2384,6 +2546,10 @@ pub struct Model {
     pub routine_runner: Option<RoutineRunnerState>,
     /// Request counter for in-flight routine runner operations.
     pub routine_runner_request: u64,
+    /// Interactive maintenance operations runner and pub/sub monitor overlay state.
+    pub maintenance_ops: Option<MaintenanceOpsState>,
+    /// Request counter for in-flight maintenance operations.
+    pub maintenance_ops_request: u64,
 }
 
 impl Model {

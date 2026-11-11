@@ -2728,5 +2728,433 @@ pub(crate) fn render_routine_runner(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Renders the Maintenance Operations & Pub/Sub Monitor overlay (`033-listen-notify-and-maintenance-ops`).
+pub(crate) fn render_maintenance_ops(
+    state: &crate::app::model::MaintenanceOpsState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(88) / 100)
+        .max(64)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(86) / 100)
+        .max(18)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} Maintenance & Pub/Sub Monitor [{}] ",
+        presentation.icon(Icon::Database),
+        match state.step {
+            crate::app::model::MaintenanceOpsStep::PubSub => "Pub/Sub Monitor",
+            crate::app::model::MaintenanceOpsStep::Maintain => "Maintenance Runner",
+            crate::app::model::MaintenanceOpsStep::Progress => "Live Progress",
+        }
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Step tabs
+            Constraint::Length(1), // Spacer
+            Constraint::Min(4),    // Body
+            Constraint::Length(1), // Status message
+            Constraint::Length(1), // Footer hints
+        ])
+        .split(inner);
+
+    let step_area = chunks[0];
+    let body_area = chunks[2];
+    let status_area = chunks[3];
+    let footer_area = chunks[4];
+
+    // 1. Step Tab bar
+    let tab_spans = vec![
+        Span::styled(
+            if state.step == crate::app::model::MaintenanceOpsStep::PubSub {
+                " [1] Pub/Sub Monitor "
+            } else {
+                "  1  Pub/Sub Monitor "
+            },
+            if state.step == crate::app::model::MaintenanceOpsStep::PubSub {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            if state.step == crate::app::model::MaintenanceOpsStep::Maintain {
+                " [2] Maintenance Runner "
+            } else {
+                "  2  Maintenance Runner "
+            },
+            if state.step == crate::app::model::MaintenanceOpsStep::Maintain {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            if state.step == crate::app::model::MaintenanceOpsStep::Progress {
+                " [3] Live Progress Telemetry "
+            } else {
+                "  3  Live Progress Telemetry "
+            },
+            if state.step == crate::app::model::MaintenanceOpsStep::Progress {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+    ];
+    Paragraph::new(Line::from(tab_spans)).render(step_area, buf);
+
+    // 2. Body Area
+    let visible_rows = usize::from(body_area.height);
+
+    match state.step {
+        crate::app::model::MaintenanceOpsStep::PubSub => {
+            let mut lines = Vec::new();
+            let channel_str = if state.channels.is_empty() {
+                "(none - press [l] to listen)".to_owned()
+            } else {
+                state.channels.join(", ")
+            };
+            lines.push(Line::from(vec![
+                Span::styled("Active Channels: ", theme.style(Token::Muted)),
+                Span::styled(
+                    channel_str,
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  │  Target: ", theme.style(Token::Muted)),
+                Span::styled(&state.channel_input, theme.style(Token::Focus)),
+                Span::styled("  │  Total Received: ", theme.style(Token::Muted)),
+                Span::styled(
+                    state.notifications.len().to_string(),
+                    theme.style(Token::Info),
+                ),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "─".repeat(usize::from(body_area.width)),
+                theme.style(Token::Border),
+            )));
+
+            if state.notifications.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "No notifications received yet. Press [l] to LISTEN on target channel, [n] to NOTIFY, [r] to poll.",
+                    theme.style(Token::Muted),
+                )));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<20}", "RECEIVED"),
+                        theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{:<16}", "CHANNEL"),
+                        theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{:<8}", "PID"),
+                        theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "PAYLOAD",
+                        theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+
+                let skip = if state.selected_idx >= visible_rows.saturating_sub(4) {
+                    state
+                        .selected_idx
+                        .saturating_sub(visible_rows.saturating_sub(5))
+                } else {
+                    0
+                };
+
+                for (idx, n) in state
+                    .notifications
+                    .iter()
+                    .enumerate()
+                    .skip(skip)
+                    .take(visible_rows.saturating_sub(3))
+                {
+                    let is_sel = idx == state.selected_idx;
+                    let style = if is_sel {
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Text)
+                    };
+
+                    let prefix = if is_sel { "▶ " } else { "  " };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{}{:<18}", prefix, n.timestamp), style),
+                        Span::styled(format!("{:<16}", n.channel), style),
+                        Span::styled(format!("{:<8}", n.sender_pid), style),
+                        Span::styled(n.payload.clone(), style),
+                    ]));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::MaintenanceOpsStep::Maintain => {
+            let mut lines = Vec::new();
+            let lock_name = crate::ops::estimate_maintenance_lock_level(&state.maintenance_kind);
+            let target_str = if state.target_relation.trim().is_empty() {
+                "Entire Database (all tables)".to_owned()
+            } else {
+                format!("Relation: {}", state.target_relation.trim())
+            };
+            let opts = crate::ops::MaintenanceOptions {
+                kind: state.maintenance_kind.clone(),
+                target: if state.target_relation.trim().is_empty() {
+                    None
+                } else {
+                    Some(state.target_relation.trim().to_owned())
+                },
+                confirm_production: state.confirm_production,
+            };
+            let generated_sql =
+                crate::ops::build_maintenance_sql(&opts).unwrap_or_else(|err| format!("-- {err}"));
+
+            lines.push(Line::from(vec![
+                Span::styled("Target: ", theme.style(Token::Muted)),
+                Span::styled(
+                    target_str,
+                    theme.style(Token::Text).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Operation: ", theme.style(Token::Muted)),
+                Span::styled(
+                    state.maintenance_kind.display_name(),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "  (Press [v] to cycle operation)",
+                    theme.style(Token::Muted),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Estimated Lock: ", theme.style(Token::Muted)),
+                Span::styled(
+                    lock_name,
+                    if lock_name.contains("AccessExclusive") {
+                        theme.style(Token::Danger).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Success).add_modifier(Modifier::BOLD)
+                    },
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Production Guard: ", theme.style(Token::Muted)),
+                Span::styled(
+                    if state.confirm_production {
+                        "[X] Confirmed for production"
+                    } else {
+                        "[ ] Confirmation required for locking ops"
+                    },
+                    if state.confirm_production {
+                        theme.style(Token::Warning).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Muted)
+                    },
+                ),
+                Span::styled("  (Press [p] to toggle)", theme.style(Token::Muted)),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "─".repeat(usize::from(body_area.width)),
+                theme.style(Token::Border),
+            )));
+            lines.push(Line::from(vec![
+                Span::styled("Generated SQL: ", theme.style(Token::Muted)),
+                Span::styled(generated_sql, theme.style(Token::Focus)),
+            ]));
+            lines.push(Line::default());
+
+            if let Some(res) = &state.last_result {
+                lines.push(Line::from(vec![
+                    Span::styled("Execution Result: ", theme.style(Token::Muted)),
+                    Span::styled(
+                        &res.message,
+                        theme.style(Token::Success).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                for notice in &res.notices {
+                    lines.push(Line::from(vec![
+                        Span::styled("  Notice: ", theme.style(Token::Muted)),
+                        Span::styled(notice, theme.style(Token::Text)),
+                    ]));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "Press [r/Enter] to run maintenance, or [e] to export SQL to the interactive editor.",
+                    theme.style(Token::Muted),
+                )));
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+        crate::app::model::MaintenanceOpsStep::Progress => {
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<8}", "PID"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<12}", "COMMAND"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<16}", "PHASE"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<20}", "RELATION"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<16}", "BLOCKS"),
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "PROGRESS",
+                    theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "─".repeat(usize::from(body_area.width)),
+                theme.style(Token::Border),
+            )));
+
+            if state.progress.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "No background maintenance operations currently active in pg_stat_progress_*. Press [r] to refresh.",
+                    theme.style(Token::Muted),
+                )));
+            } else {
+                for (idx, entry) in state
+                    .progress
+                    .iter()
+                    .enumerate()
+                    .take(visible_rows.saturating_sub(2))
+                {
+                    let is_sel = idx == state.selected_idx;
+                    let style = if is_sel {
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Text)
+                    };
+                    let blocks = match (entry.heap_blks_scanned, entry.heap_blks_total) {
+                        (Some(d), Some(t)) => format!("{d}/{t}"),
+                        (Some(d), None) => format!("{d}"),
+                        _ => "-".to_owned(),
+                    };
+                    let pct = entry
+                        .percent
+                        .map(|p| format!("{p:.1}%"))
+                        .unwrap_or_else(|| "-".to_owned());
+
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{:<8}", entry.pid), style),
+                        Span::styled(format!("{:<12}", entry.command), style),
+                        Span::styled(format!("{:<16}", entry.phase), style),
+                        Span::styled(
+                            format!("{:<20}", entry.relname.as_deref().unwrap_or("-")),
+                            style,
+                        ),
+                        Span::styled(format!("{:<16}", blocks), style),
+                        Span::styled(pct, style),
+                    ]));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+    }
+
+    // 3. Status message line
+    if let Some(ref msg) = state.status_message {
+        Paragraph::new(Line::from(vec![
+            Span::styled("Status: ", theme.style(Token::Muted)),
+            Span::styled(msg, theme.style(Token::Focus).add_modifier(Modifier::BOLD)),
+        ]))
+        .render(status_area, buf);
+    }
+
+    // 4. Footer Hints
+    let footer_spans = vec![
+        Span::styled(
+            "[Tab/1-3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[k/j] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Select  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r/Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Run/Poll  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[v] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Kind  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[p] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Prod Guard  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[l] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Listen  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[n] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Notify  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

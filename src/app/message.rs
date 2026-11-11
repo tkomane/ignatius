@@ -129,6 +129,8 @@ pub enum Action {
     ImportData,
     /// Open the interactive routine runner and PL/pgSQL profiler overlay.
     RoutineRunner,
+    /// Open the maintenance runner and pub/sub notification monitor overlay.
+    MaintenanceOps,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -232,6 +234,7 @@ impl Action {
             Self::SchemaDiff,
             Self::ImportData,
             Self::RoutineRunner,
+            Self::MaintenanceOps,
         ]
     }
 }
@@ -595,6 +598,45 @@ pub enum Message {
         /// Profiling report, or error.
         result: Box<Result<crate::routine::RoutineProfileReport, Diagnostic>>,
     },
+    /// Maintenance live progress entries loaded from pg_stat_progress_*.
+    MaintenanceProgressLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Progress entries, or error.
+        result: Box<Result<Vec<crate::ops::MaintenanceProgressEntry>, Diagnostic>>,
+    },
+    /// Maintenance operation executed.
+    MaintenanceExecuted {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Execution result, or error.
+        result: Box<Result<crate::ops::MaintenanceResult, Diagnostic>>,
+    },
+    /// Channel subscription registered.
+    ChannelSubscribed {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Channel name.
+        channel: String,
+        /// Result.
+        result: Box<Result<(), Diagnostic>>,
+    },
+    /// Pub/Sub notification dispatched.
+    NotificationDispatched {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Channel name.
+        channel: String,
+        /// Result.
+        result: Box<Result<(), Diagnostic>>,
+    },
+    /// Pub/Sub notifications polled from session buffer.
+    NotificationsPolled {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Newly received notifications.
+        notifications: Vec<crate::ops::PubSubNotification>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -802,5 +844,45 @@ pub enum Effect {
         schema: String,
         /// Routine name.
         name: String,
+    },
+    /// Load maintenance live progress from pg_stat_progress_*.
+    LoadMaintenanceProgress {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Execute maintenance operation (vacuum, analyze, reindex).
+    ExecuteMaintenance {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Maintenance options.
+        options: crate::ops::MaintenanceOptions,
+    },
+    /// Subscribe to a pub/sub channel using LISTEN.
+    SubscribeChannel {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Channel name.
+        channel: String,
+    },
+    /// Unsubscribe from a pub/sub channel using UNLISTEN.
+    UnsubscribeChannel {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Channel name.
+        channel: String,
+    },
+    /// Dispatch a pub/sub notification using NOTIFY.
+    DispatchNotification {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Channel name.
+        channel: String,
+        /// Optional payload string.
+        payload: Option<String>,
+    },
+    /// Poll unread notifications from session buffer.
+    PollNotifications {
+        /// Identity used to reject a late response.
+        request: u64,
     },
 }

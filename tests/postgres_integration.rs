@@ -3351,3 +3351,78 @@ fn plpgsql_routine_runner_and_profiler_integration() {
         JobId(9602),
     ));
 }
+
+#[test]
+fn postgres_listen_notify_and_maintenance_operations() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+
+    // 1. Listen on a custom channel
+    let channel = "ignatius_integ_channel";
+    let listen_res = fx.block_on(fx.session.listen_channel(channel));
+    assert!(
+        listen_res.is_ok(),
+        "listen_channel failed: {:?}",
+        listen_res.err()
+    );
+
+    // 2. Notify on that channel
+    let payload = "{\"event\": \"order_placed\", \"order_id\": 101}";
+    let notify_res = fx.block_on(fx.session.notify_channel(channel, Some(payload)));
+    assert!(
+        notify_res.is_ok(),
+        "notify_channel failed: {:?}",
+        notify_res.err()
+    );
+
+    // 3. Wait briefly for async notification message loop to deliver to session
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let notifications = fx.block_on(fx.session.notifications());
+    assert!(
+        !notifications.is_empty(),
+        "expected at least 1 received notification"
+    );
+    let matched = notifications.iter().find(|n| n.channel == channel);
+    assert!(
+        matched.is_some(),
+        "expected notification on channel {channel}"
+    );
+    assert_eq!(matched.unwrap().payload, payload);
+
+    // 4. Unlisten from channel
+    let unlisten_res = fx.block_on(fx.session.unlisten_channel(channel));
+    assert!(
+        unlisten_res.is_ok(),
+        "unlisten_channel failed: {:?}",
+        unlisten_res.err()
+    );
+
+    // 5. Query maintenance progress view
+    let prog_res = fx.block_on(fx.session.query_maintenance_progress());
+    assert!(
+        prog_res.is_ok(),
+        "query_maintenance_progress failed: {:?}",
+        prog_res.err()
+    );
+
+    // 6. Execute maintenance: VACUUM ANALYZE
+    let options = ignatius::ops::MaintenanceOptions {
+        kind: ignatius::ops::MaintenanceKind::Vacuum {
+            full: false,
+            freeze: false,
+            verbose: true,
+            analyze: true,
+        },
+        target: None,
+        confirm_production: false,
+    };
+    let maint_res = fx.block_on(fx.session.execute_maintenance(&options));
+    assert!(
+        maint_res.is_ok(),
+        "execute_maintenance failed: {:?}",
+        maint_res.err()
+    );
+    let res = maint_res.unwrap();
+    assert!(res.success);
+    assert!(res.message.contains("Maintenance completed successfully"));
+}

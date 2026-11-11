@@ -832,6 +832,102 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::MaintenanceProgressLoaded { request, result } => {
+            if request != model.maintenance_ops_request {
+                return Vec::new();
+            }
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.executing = false;
+                match *result {
+                    Ok(progress) => {
+                        ops.progress = progress;
+                        ops.status_message = Some("Progress updated".to_owned());
+                    }
+                    Err(diag) => {
+                        ops.status_message = Some(format!("Error: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::MaintenanceExecuted { request, result } => {
+            if request != model.maintenance_ops_request {
+                return Vec::new();
+            }
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.executing = false;
+                match *result {
+                    Ok(res) => {
+                        ops.status_message = Some(res.message.clone());
+                        ops.last_result = Some(res);
+                    }
+                    Err(diag) => {
+                        ops.status_message = Some(format!("Execution failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::ChannelSubscribed {
+            request,
+            channel,
+            result,
+        } => {
+            if request != model.maintenance_ops_request {
+                return Vec::new();
+            }
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.executing = false;
+                match *result {
+                    Ok(()) => {
+                        if !ops.channels.contains(&channel) {
+                            ops.channels.push(channel.clone());
+                        }
+                        ops.status_message = Some(format!("Subscribed to \"{channel}\""));
+                    }
+                    Err(diag) => {
+                        ops.status_message = Some(format!("Subscribe failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::NotificationDispatched {
+            request,
+            channel,
+            result,
+        } => {
+            if request != model.maintenance_ops_request {
+                return Vec::new();
+            }
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.executing = false;
+                match *result {
+                    Ok(()) => {
+                        ops.status_message = Some(format!("Notification sent to \"{channel}\""));
+                    }
+                    Err(diag) => {
+                        ops.status_message = Some(format!("Notify failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::NotificationsPolled {
+            request,
+            notifications,
+        } => {
+            if request != model.maintenance_ops_request {
+                return Vec::new();
+            }
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.executing = false;
+                for notification in notifications {
+                    ops.notifications.push(notification);
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1101,6 +1197,7 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.schema_diff.is_some()
         || model.import_wizard.is_some()
         || model.routine_runner.is_some()
+        || model.maintenance_ops.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1203,6 +1300,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.routine_runner.is_some() {
         return routine_runner_action(model, action);
+    }
+    if model.maintenance_ops.is_some() {
+        return maintenance_ops_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1372,6 +1472,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::SchemaDiff => schema_diff_open(model),
         Action::ImportData => import_wizard_open(model),
         Action::RoutineRunner => routine_runner_open(model),
+        Action::MaintenanceOps => maintenance_ops_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -2576,6 +2677,184 @@ fn routine_runner_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 });
                 model.routine_runner = None;
                 model.focus = Focus::Editor;
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+fn maintenance_ops_open(model: &mut Model) -> Vec<Effect> {
+    if model.maintenance_ops.is_some() {
+        model.maintenance_ops = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::MaintenanceOpsState {
+        executing: true,
+        ..Default::default()
+    };
+
+    model.maintenance_ops_request = model.maintenance_ops_request.wrapping_add(1);
+    let request = model.maintenance_ops_request;
+    model.maintenance_ops = Some(state);
+
+    vec![
+        Effect::LoadMaintenanceProgress { request },
+        Effect::PollNotifications { request },
+    ]
+}
+
+/// Handles input while the maintenance operations and pub/sub monitor overlay is on screen.
+fn maintenance_ops_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::MaintenanceOps => {
+            model.maintenance_ops = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.move_selection(1);
+            }
+        }
+        Action::FocusNext | Action::Insert('\t') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.step = ops.step.next();
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.step = crate::app::model::MaintenanceOpsStep::PubSub;
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.step = crate::app::model::MaintenanceOpsStep::Maintain;
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.step = crate::app::model::MaintenanceOpsStep::Progress;
+            }
+        }
+        Action::Insert('v' | 'V') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.cycle_maintenance_kind();
+            }
+        }
+        Action::Insert('p' | 'P') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.confirm_production = !ops.confirm_production;
+            }
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.notifications.clear();
+                ops.selected_idx = 0;
+                ops.status_message = Some("Notifications cleared".to_owned());
+            }
+        }
+        Action::Insert('l' | 'L') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                let channel = ops.channel_input.trim().to_owned();
+                if !channel.is_empty() {
+                    ops.executing = true;
+                    model.maintenance_ops_request = model.maintenance_ops_request.wrapping_add(1);
+                    let request = model.maintenance_ops_request;
+                    return vec![Effect::SubscribeChannel { request, channel }];
+                }
+            }
+        }
+        Action::Insert('u' | 'U') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                let channel = ops.channel_input.trim().to_owned();
+                if !channel.is_empty() {
+                    ops.executing = true;
+                    ops.channels.retain(|c| c != &channel);
+                    model.maintenance_ops_request = model.maintenance_ops_request.wrapping_add(1);
+                    let request = model.maintenance_ops_request;
+                    return vec![Effect::UnsubscribeChannel { request, channel }];
+                }
+            }
+        }
+        Action::Insert('n' | 'N') => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                let channel = ops.channel_input.trim().to_owned();
+                if !channel.is_empty() {
+                    ops.executing = true;
+                    let payload = if ops.payload_input.trim().is_empty() {
+                        None
+                    } else {
+                        Some(ops.payload_input.clone())
+                    };
+                    model.maintenance_ops_request = model.maintenance_ops_request.wrapping_add(1);
+                    let request = model.maintenance_ops_request;
+                    return vec![Effect::DispatchNotification {
+                        request,
+                        channel,
+                        payload,
+                    }];
+                }
+            }
+        }
+        Action::Insert('r' | 'R') | Action::Activate => {
+            if let Some(ops) = &mut model.maintenance_ops {
+                ops.executing = true;
+                model.maintenance_ops_request = model.maintenance_ops_request.wrapping_add(1);
+                let request = model.maintenance_ops_request;
+                match ops.step {
+                    crate::app::model::MaintenanceOpsStep::Maintain => {
+                        let target = if ops.target_relation.trim().is_empty() {
+                            None
+                        } else {
+                            Some(ops.target_relation.trim().to_owned())
+                        };
+                        let options = crate::ops::MaintenanceOptions {
+                            kind: ops.maintenance_kind.clone(),
+                            target,
+                            confirm_production: ops.confirm_production,
+                        };
+                        return vec![Effect::ExecuteMaintenance { request, options }];
+                    }
+                    crate::app::model::MaintenanceOpsStep::Progress => {
+                        return vec![Effect::LoadMaintenanceProgress { request }];
+                    }
+                    crate::app::model::MaintenanceOpsStep::PubSub => {
+                        return vec![Effect::PollNotifications { request }];
+                    }
+                }
+            }
+        }
+        Action::Insert('e' | 'E') => {
+            if let Some(ops) = model.maintenance_ops.as_ref() {
+                let target = if ops.target_relation.trim().is_empty() {
+                    None
+                } else {
+                    Some(ops.target_relation.trim().to_owned())
+                };
+                let options = crate::ops::MaintenanceOptions {
+                    kind: ops.maintenance_kind.clone(),
+                    target,
+                    confirm_production: ops.confirm_production,
+                };
+                if let Ok(sql) = crate::ops::build_maintenance_sql(&options) {
+                    edit_editor(model, |editor| {
+                        editor.set_text(sql);
+                    });
+                    model.maintenance_ops = None;
+                    model.focus = Focus::Editor;
+                }
             }
         }
         _ => {}

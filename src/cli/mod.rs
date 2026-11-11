@@ -267,6 +267,15 @@ pub enum Command {
     /// Profile a PL/pgSQL routine for performance bottlenecks, dead code, and injection risks.
     #[command(name = "profile-routine")]
     ProfileRoutine(ProfileRoutineArgs),
+
+    /// Listen for asynchronous pub/sub notifications on a channel.
+    Listen(ListenArgs),
+
+    /// Dispatch an asynchronous pub/sub notification to a channel.
+    Notify(NotifyArgs),
+
+    /// Execute or monitor database maintenance operations (vacuum, analyze, reindex, progress).
+    Maintain(MaintainArgs),
 }
 
 /// Arguments for the audit command.
@@ -856,6 +865,9 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::ProfileRoutine(args)) => {
             profile_routine_command(args, &paths, &presentation, out, err)
         }
+        Some(Command::Listen(args)) => run_listen(args, &paths, out, err),
+        Some(Command::Notify(args)) => run_notify(args, &paths, out, err),
+        Some(Command::Maintain(args)) => run_maintain(args, &paths, &presentation, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -3034,6 +3046,426 @@ fn profile_routine_command(
             report.elapsed_ms
         )
         .map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output stream format for pub/sub event stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
+pub enum CliStreamFormat {
+    /// Human-readable aligned table.
+    #[default]
+    Table,
+    /// Line-delimited JSON.
+    Jsonl,
+    /// Plain payload string only.
+    Plain,
+}
+
+/// Arguments for the listen command (`033-listen-notify-and-maintenance-ops`).
+#[derive(Debug, Args, Clone)]
+pub struct ListenArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Pub/Sub channel topic to listen on.
+    pub channel: Option<String>,
+    /// Seconds to listen for incoming notifications before exiting (default: 10s).
+    #[arg(short = 't', long, default_value_t = 10)]
+    pub timeout: u64,
+    /// Output representation format: table (default), jsonl, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliStreamFormat::Table)]
+    pub format: CliStreamFormat,
+    /// Destination file to write captured notification stream.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Arguments for the notify command (`033-listen-notify-and-maintenance-ops`).
+#[derive(Debug, Args, Clone)]
+pub struct NotifyArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Pub/Sub channel topic to dispatch message to.
+    pub channel: Option<String>,
+    /// Notification payload string (text or JSON).
+    pub payload: Option<String>,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Maintenance subcommands for `ignatius maintain`.
+#[derive(Debug, Subcommand, Clone)]
+pub enum MaintainAction {
+    /// Garbage-collect dead tuples and optimize table storage (VACUUM).
+    Vacuum {
+        /// Relation/table to vacuum (or omit for entire database).
+        #[arg(value_name = "TABLE")]
+        table: Option<String>,
+        /// Reclaim maximum space by rewriting relation on disk (requires exclusive lock).
+        #[arg(long)]
+        full: bool,
+        /// Freeze tuple transaction IDs.
+        #[arg(long)]
+        freeze: bool,
+        /// Print progress details and dead tuple statistics.
+        #[arg(long)]
+        verbose: bool,
+        /// Update optimizer statistics during vacuum.
+        #[arg(long)]
+        analyze: bool,
+    },
+    /// Collect optimizer query statistics on tables (ANALYZE).
+    Analyze {
+        /// Relation/table to analyze (or omit for entire database).
+        #[arg(value_name = "TABLE")]
+        table: Option<String>,
+        /// Print progress details.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Rebuild indexes to eliminate bloat and fragmentation (REINDEX).
+    Reindex {
+        /// Relation/table or index to reindex.
+        #[arg(value_name = "TARGET")]
+        target: Option<String>,
+        /// Build the index concurrently without blocking writes.
+        #[arg(long)]
+        concurrently: bool,
+        /// Reindex an entire schema.
+        #[arg(long)]
+        schema: bool,
+        /// Reindex the entire database.
+        #[arg(long)]
+        database: bool,
+    },
+    /// Inspect active maintenance operations from pg_stat_progress_*.
+    Progress,
+}
+
+/// Arguments for the maintain command (`033-listen-notify-and-maintenance-ops`).
+#[derive(Debug, Args, Clone)]
+pub struct MaintainArgs {
+    /// The maintenance command to run.
+    #[command(subcommand)]
+    pub action: MaintainAction,
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Output representation format: table (default) or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliRoutineFormat::Table)]
+    pub format: CliRoutineFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    /// Explicit confirmation required for maintenance on production targets.
+    #[arg(long)]
+    pub confirm_production: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_listen(
+    args: &ListenArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let channel = match args.channel.as_deref() {
+        Some(ch) if !ch.trim().is_empty() => ch.trim(),
+        _ => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "a pub/sub channel name is required",
+                "listening on pub/sub channel",
+            )
+            .likely_cause("ignatius listen expects [TARGET] [CHANNEL]")
+            .next_action("provide channel name: ignatius listen [TARGET] <CHANNEL>"));
+        }
+    };
+
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "capturing notification stream with ignatius listen",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    rt.block_on(session.listen_channel(channel))?;
+    writeln!(
+        err,
+        "Listening on channel \"{}\" (timeout: {}s)...",
+        channel, args.timeout
+    )
+    .map_err(io_diagnostic)?;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(args.timeout);
+    while std::time::Instant::now() < deadline {
+        rt.block_on(tokio::time::sleep(std::time::Duration::from_millis(50)));
+    }
+
+    let events = rt.block_on(session.notifications());
+    let _ = rt.block_on(session.unlisten_channel(channel));
+
+    let rendered = match args.format {
+        CliStreamFormat::Table => crate::ops::render_notifications_table(&events),
+        CliStreamFormat::Jsonl => crate::ops::render_notifications_jsonl(&events),
+        CliStreamFormat::Plain => {
+            let mut buf = String::new();
+            for ev in &events {
+                buf.push_str(&ev.payload);
+                buf.push('\n');
+            }
+            buf
+        }
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(
+            err,
+            "Captured {} notifications to {}",
+            events.len(),
+            dest.display()
+        )
+        .map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+fn run_notify(
+    args: &NotifyArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    _err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let channel = match args.channel.as_deref() {
+        Some(ch) if !ch.trim().is_empty() => ch.trim(),
+        _ => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "a pub/sub channel name is required",
+                "dispatching notification with ignatius notify",
+            )
+            .likely_cause("ignatius notify expects [TARGET] [CHANNEL] [PAYLOAD]")
+            .next_action("pass a channel name, e.g. ignatius notify order_events '{\"id\": 1}'"));
+        }
+    };
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    rt.block_on(session.notify_channel(channel, args.payload.as_deref()))?;
+    writeln!(out, "Dispatched notification to channel \"{}\"", channel).map_err(io_diagnostic)?;
+
+    Ok(ExitCode::Success)
+}
+
+fn run_maintain(
+    args: &MaintainArgs,
+    paths: &Paths,
+    presentation: &Presentation,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing maintenance command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    match &args.action {
+        MaintainAction::Progress => {
+            let progress = rt.block_on(session.query_maintenance_progress())?;
+            let rendered = match args.format {
+                CliRoutineFormat::Table => crate::ops::render_maintenance_progress_table(&progress),
+                CliRoutineFormat::Json => crate::ops::render_maintenance_progress_json(&progress),
+            };
+
+            if let Some(ref dest) = args.output {
+                std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+                writeln!(err, "Progress report written to {}", dest.display())
+                    .map_err(io_diagnostic)?;
+            } else {
+                write!(out, "{rendered}").map_err(io_diagnostic)?;
+            }
+        }
+        MaintainAction::Vacuum {
+            table,
+            full,
+            freeze,
+            verbose,
+            analyze,
+        } => {
+            let kind = crate::ops::MaintenanceKind::Vacuum {
+                full: *full,
+                freeze: *freeze,
+                verbose: *verbose,
+                analyze: *analyze,
+            };
+            if target.environment.is_production() && *full && !args.confirm_production {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "refusing VACUUM FULL against production database without confirmation",
+                    "executing maintenance command",
+                )
+                .likely_cause("VACUUM FULL acquires AccessExclusiveLock, blocking concurrent reads and writes")
+                .next_action("pass --confirm-production to confirm table-locking maintenance"));
+            }
+
+            let opts = crate::ops::MaintenanceOptions {
+                kind,
+                target: table.clone(),
+                confirm_production: args.confirm_production,
+            };
+
+            let res = rt.block_on(session.execute_maintenance(&opts))?;
+            for notice in &res.notices {
+                writeln!(err, "{notice}").map_err(io_diagnostic)?;
+            }
+            writeln!(out, "{}", res.message).map_err(io_diagnostic)?;
+            if presentation.verbose {
+                writeln!(err, "Executed: {}", res.executed_sql).map_err(io_diagnostic)?;
+            }
+        }
+        MaintainAction::Analyze { table, verbose } => {
+            let kind = crate::ops::MaintenanceKind::Analyze { verbose: *verbose };
+            let opts = crate::ops::MaintenanceOptions {
+                kind,
+                target: table.clone(),
+                confirm_production: args.confirm_production,
+            };
+
+            let res = rt.block_on(session.execute_maintenance(&opts))?;
+            for notice in &res.notices {
+                writeln!(err, "{notice}").map_err(io_diagnostic)?;
+            }
+            writeln!(out, "{}", res.message).map_err(io_diagnostic)?;
+        }
+        MaintainAction::Reindex {
+            target: reindex_target,
+            concurrently,
+            schema,
+            database,
+        } => {
+            let scope = if *database {
+                crate::ops::ReindexScope::Database
+            } else if *schema {
+                crate::ops::ReindexScope::Schema
+            } else {
+                crate::ops::ReindexScope::Table
+            };
+
+            let kind = crate::ops::MaintenanceKind::Reindex {
+                concurrently: *concurrently,
+                scope,
+            };
+
+            if target.environment.is_production() && !*concurrently && !args.confirm_production {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "refusing non-concurrent REINDEX against production database without confirmation",
+                    "executing maintenance command",
+                )
+                .likely_cause("REINDEX without CONCURRENTLY locks out concurrent reads and writes")
+                .next_action("pass --concurrently or --confirm-production"));
+            }
+
+            let opts = crate::ops::MaintenanceOptions {
+                kind,
+                target: reindex_target.clone(),
+                confirm_production: args.confirm_production,
+            };
+
+            let res = rt.block_on(session.execute_maintenance(&opts))?;
+            for notice in &res.notices {
+                writeln!(err, "{notice}").map_err(io_diagnostic)?;
+            }
+            writeln!(out, "{}", res.message).map_err(io_diagnostic)?;
+        }
     }
 
     Ok(ExitCode::Success)

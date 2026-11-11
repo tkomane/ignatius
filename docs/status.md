@@ -4,6 +4,30 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 25 (033-listen-notify-and-maintenance-ops) Delivery - 11 November 2026
+
+Resume on branch `feat/033-listen-notify-and-maintenance-ops`. Feature
+`033-listen-notify-and-maintenance-ops` (the eighth M6 pgAdmin replacement parity slice)
+has completed implementation and verification:
+
+- **Wave 25 (`033-listen-notify-and-maintenance-ops`)**:
+  delivered the eighth M6 full pgAdmin replacement slice:
+  - Pure `src/ops/` domain engine for maintenance operation building (`VACUUM`, `ANALYZE`, `REINDEX`, `CLUSTER`),
+    table lock level estimation (`AccessExclusiveLock` vs `ShareUpdateExclusiveLock`), pub/sub SQL building
+    (`LISTEN`, `UNLISTEN`, `NOTIFY`), and aligned tabular / JSON telemetry rendering.
+  - Live PostgreSQL background notification capture via `tokio_postgres::AsyncMessage::Notification`
+    stored in `Session::notifications`, and primitives in `Session::listen_channel`, `Session::unlisten_channel`,
+    `Session::notify_channel`, `Session::execute_maintenance`, and `Session::query_maintenance_progress`.
+  - Headless scriptable CLI subcommands:
+    - `ignatius listen`: monitors pub/sub channels with `--timeout`, `--format table|jsonl|plain`, and `--output`.
+    - `ignatius notify`: dispatches notifications with optional payloads.
+    - `ignatius maintain`: runs `vacuum`, `analyze`, `reindex`, and `progress` with `--confirm-production`, `--format`, and `--output`.
+  - Interactive TUI Maintenance Operations & Pub/Sub Monitor overlay on `Ctrl+K >` (`maintenance-ops`):
+    - `[1] Pub/Sub Monitor`: active channel list, target input, captured notification stream, and `[c]` clear buffer.
+    - `[2] Maintenance Runner`: target selection, `[v]` operation cycling, estimated lock severity, production guard toggle (`[p]`), and `[r]` execution.
+    - `[3] Live Progress Telemetry`: active background maintenance operations from `pg_stat_progress_vacuum`, `pg_stat_progress_cluster`, and `pg_stat_progress_create_index`.
+    - `[e]` loads generated maintenance SQL directly into the SQL editor buffer as an undoable edit (`Ctrl+Z`).
+
 ## Wave 24 (032-plpgsql-routine-runner-and-profiler) Delivery - 11 November 2026
 
 Resume on branch `feat/032-plpgsql-routine-runner-and-profiler`. Feature
