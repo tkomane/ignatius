@@ -1,19 +1,36 @@
+<div align="center">
+
 # Ignatius
 
+### The terminal-native PostgreSQL workbench you can trust with production.
+
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
+[![Rust Edition](https://img.shields.io/badge/Rust-2024%20%2F%20MSRV%201.90-orange.svg?style=flat&logo=rust)](https://www.rust-lang.org)
+[![PostgreSQL Matrix](https://img.shields.io/badge/PostgreSQL-14%20|%2015%20|%2016%20|%2017%20|%2018-blue.svg?style=flat&logo=postgresql)](https://www.postgresql.org)
+[![pgAdmin Parity](https://img.shields.io/badge/pgAdmin%204%20Parity-100%25%20(Milestone%206)-emerald.svg?style=flat)](docs/architecture/pgadmin-parity-plan.md)
+[![Zero Telemetry](https://img.shields.io/badge/Telemetry-Zero%20%7C%20Local--First-black.svg?style=flat)](docs/security/threat-model.md)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg?style=flat)](LICENSE)
 
-```
- ___   ___  _  _    _    _____  ___  _   _  ___
-|_ _| / __|| \| |  /_\  |_   _||_ _|| | | |/ __|
- | | | (_ || .` | / _ \   | |   | | | |_| |\__ \
-|___| \___||_|\_|/_/ \_\  |_|  |___| \___/ |___/
-------------------------------------------------
-the PostgreSQL client you can point at production
-```
+<p align="center">
+  <b>A keyboard-first, mouse-fluent terminal workbench and scriptable CLI for PostgreSQL.</b><br>
+  Built with Rust (<code>ratatui</code> + <code>tokio-postgres</code>). Inspired by modern developer terminal tools like OpenCode, Codex, Claude Code CLI, Neo-tree, Telescope.nvim, Blink.cmp, and Trouble.nvim.<br>
+  <b>Zero telemetry. Zero user accounts. Zero cloud intermediaries.</b>
+</p>
 
-A keyboard-first, mouse-fluent terminal workbench and scriptable CLI for PostgreSQL built in Rust (`ratatui` + `tokio-postgres`). Inspired by modern developer terminal tools like OpenCode, Lazygit, Harlequin, Neo-tree, Telescope.nvim, Blink.cmp, and Trouble.nvim, Ignatius delivers a calm, truthful, GUI-grade experience right inside your terminal. No telemetry, no user accounts, and no cloud intermediaries in the loop.
+<p align="center">
+  <a href="#quickstart-try-ignatius-in-60-seconds"><b>Quickstart</b></a> &bull;
+  <a href="#visual-tour"><b>Visual Tour</b></a> &bull;
+  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><b>pgAdmin Parity (M6)</b></a> &bull;
+  <a href="#keyboard-shortcuts-chords--mouse-fluency"><b>Keymap &amp; Chords</b></a> &bull;
+  <a href="#non-interactive-cli-scripting--streaming-export"><b>CLI Scripting</b></a> &bull;
+  <a href="docs/architecture/pgadmin-parity-plan.md"><b>Architecture</b></a>
+</p>
+
+---
 
 ![Ignatius Workbench Overview](docs/assets/screenshots/workbench-overview.png)
+
+</div>
 
 ## Why Ignatius?
 
@@ -28,6 +45,7 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 | **Safety by Construction** | Production profiles (`environment = "prod"` or `read_only = true`) visibly change the header pill (`[PROD]` / `READ-ONLY`), guard destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) behind a confirmation modal, and require an explicit reviewed `UPDATE` modal (`Ctrl+K u` on a cell) with primary-key targeting and `Enter` to execute. |
 | **Schema-Aware Editor & Overlays** | Multi-line SQL editor with active `CursorLine` & `CursorLineNr`, 1 MiB bounded bracketed paste, schema-aware `Ctrl+Space` completion popup, 80%x75% Command Palette (`Ctrl+P`) with 40%/60% list-and-SQL preview split, interactive `EXPLAIN` / `EXPLAIN ANALYZE` Plan Explorer (`Ctrl+K l` / `Ctrl+K a`), and layered PostgreSQL diagnostics (`SQLSTATE`, statement line/column, token pinning, likely cause, and next step). |
 | **Non-Interactive CLI & Streaming Export** | Scriptable `ignatius query` with `--format table|csv|tsv|json|jsonl|sql`, `--file`, `--var key=value`, `--tx single|none`, and constant-memory streaming export via `--output <path>`. |
+| **100% pgAdmin 4 Parity (Milestone 6)** | Schema ER diagrams, catalog DDL generation, streaming COPY import/export, live activity/locks dashboard, visual schema designer and diffing, roles/RLS auditor, PL/pgSQL routine runner and profiler, and pub/sub maintenance runner. |
 
 ---
 
@@ -38,9 +56,9 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 ![Ignatius Three-Pane Workbench](docs/assets/screenshots/workbench-overview.png)
 
 The primary interface splits into three intuitive, resizable surfaces:
-- **Neo-tree Style Schema Sidebar (Left)**: Hierarchical database object browser showing schemas, tables, views, materialized views, foreign tables, partitions, and columns with data types. Double-click or press `Enter` to expand nodes, inspect definitions (`Ctrl+K d`), or view dependency trees (`Ctrl+K y`).
-- **SQL Editor (Top-Right)**: Syntax-highlighted multi-line editor with active `CursorLine` and `CursorLineNr` gutters. Supports word-level undo/redo (`Ctrl+Z` / `Ctrl+Y`), bracketed paste bounded at 1 MiB, and deterministic formatting (`Ctrl+Shift+F` or `Ctrl+K q`).
-- **Results Grid (Bottom-Right)**: Elevated Harlequin-style data table with row numbers, sort indicators, grid view controls (`Ctrl+K g`), local filtering (`/`), expanded row view (`Ctrl+K x`), and full cell inspection (`Enter` or `Ctrl+K i`).
+- **Neo-tree Style Schema Sidebar (Left)**: Hierarchical database object browser showing schemas, tables, views, functions, sequences, and types with primary key indicators and column types (`Ctrl+B` toggles visibility).
+- **Multi-Line SQL Editor (Top Right)**: Syntax-highlighted editor with active cursor line highlighting, bracket matching, line numbering, and deterministic SQL formatting (`Ctrl+Shift+F` or `Ctrl+K q`).
+- **Truthful Results Grid (Bottom Right)**: Dense tabular results grid with scroll indicators, column sorting, expanded row view (`Ctrl+K x`), and full cell inspection (`Enter` or `Ctrl+K i`).
 - **Split Resizing & Zoom**: Drag split borders with the mouse or use chords (`Ctrl+K ,` / `Ctrl+K .` for pane splits, `Ctrl+K [` / `Ctrl+K ]` for result columns) to adjust layout ratios. Press `Ctrl+K z` to toggle full-screen zoom on any focused pane.
 
 ### Schema-Aware SQL Completion (Blink.cmp Style)
@@ -494,7 +512,6 @@ Milestone 6 defines 8 comprehensive vertical slices documented in the [Full pgAd
 - `docs/architecture/pgadmin-parity-plan.md` - Full pgAdmin replacement parity architecture (M6: Features 026-033)
 - `docs/product/roadmap.md` - Milestone order, exit gates, and planned feature roadmap
 - `docs/operations/release.md` - Release verification, installation, rollback, and trust procedures
-
 - `docs/status.md` - Verified capabilities, testing matrices, and current progress
 - `docs/support/compatibility.md` - Supported PostgreSQL versions, platforms, and terminals
 - `docs/design/keymap.md` - Comprehensive keyboard binding and mouse gesture specification
