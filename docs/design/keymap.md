@@ -121,6 +121,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `(` | Open the routine runner and profiler |
 | `>` | Open maintenance operations and pub-sub monitor |
 | `%` | Open query performance and stat forensics |
+| `^` | Open index advisor and bloat forensics |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -239,6 +240,17 @@ rows, or cache hit ratio, and safe stat reset. Inside the overlay:
 - `!` prompts to reset `pg_stat_statements` statistics (`SELECT pg_stat_statements_reset()`).
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius profile-queries` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K ^` (`index-advisor`) opens the Index Advisor
+and Bloat Forensics overlay, providing catalog analysis of duplicate and prefix-covered
+indexes, lock-free B-tree page bloat estimation, unindexed foreign key detection, and
+HypoPG hypothetical index profiling. Inside the overlay:
+- `1`, `2`, `3` switch between tabs (`Redundant & Unused`, `B-Tree Bloat`, `Unindexed FKs`).
+- `Up` / `Down` or `k` / `j` navigates the findings in the active tab.
+- `e` loads the remediation SQL (DROP, REINDEX, or CREATE INDEX) into the editor buffer as an undoable edit (`Ctrl+Z`).
+- `c` copies the remediation SQL to the clipboard via OSC 52.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius index-advisor` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -489,7 +501,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

@@ -2236,5 +2236,377 @@ pub async fn reset_performance_stats(client: &Client) -> Result<(), Diagnostic> 
     Ok(())
 }
 
+/// Queries the database catalog for index redundancy, bloat metrics, and unindexed foreign keys.
+pub async fn analyze_indexes(
+    client: &Client,
+    min_size_bytes: u64,
+) -> Result<crate::advisor::AdvisorReport, Diagnostic> {
+    use crate::advisor::{
+        AdvisorReport, IndexBloatMetric, RedundantIndex, RedundantReason, UnindexedForeignKey,
+    };
+    use std::collections::HashMap;
+
+    // 1. Check if hypopg is available
+    const EXT_CHECK: &str = "SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'hypopg'";
+    let hypopg_installed = client
+        .query(EXT_CHECK, &[])
+        .await
+        .map(|rows| !rows.is_empty())
+        .unwrap_or(false);
+
+    // 2. Query user indexes
+    const INDEXES_SQL: &str = r#"
+        SELECT
+            n.nspname AS schema_name,
+            t.relname AS table_name,
+            i.relname AS index_name,
+            idx.indisunique AS is_unique,
+            idx.indisprimary AS is_primary,
+            pg_relation_size(i.oid) AS size_bytes,
+            COALESCE(stat.idx_scan, 0) AS scans,
+            ARRAY(
+                SELECT pg_get_indexdef(idx.indexrelid, k + 1, true)
+                FROM generate_subscripts(idx.indkey, 1) as k
+                ORDER BY k
+            ) AS columns,
+            am.amname AS access_method
+        FROM pg_index idx
+        JOIN pg_class i ON i.oid = idx.indexrelid
+        JOIN pg_class t ON t.oid = idx.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_am am ON am.oid = i.relam
+        LEFT JOIN pg_stat_user_indexes stat ON stat.indexrelid = idx.indexrelid
+        WHERE n.nspname NOT IN ('pg_catalog', 'pg_toast', 'information_schema')
+          AND t.relkind = 'r'
+        ORDER BY n.nspname, t.relname, pg_relation_size(i.oid) DESC;
+    "#;
+
+    let index_rows = client
+        .query(INDEXES_SQL, &[])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    struct RawIdx {
+        schema: String,
+        table: String,
+        index_name: String,
+        is_unique: bool,
+        is_primary: bool,
+        size_bytes: u64,
+        scans: u64,
+        columns: Vec<String>,
+        access_method: String,
+    }
+
+    let mut table_indexes: HashMap<(String, String), Vec<RawIdx>> = HashMap::new();
+    for row in index_rows {
+        let schema: String = row.get("schema_name");
+        let table: String = row.get("table_name");
+        let index_name: String = row.get("index_name");
+        let is_unique: bool = row.get("is_unique");
+        let is_primary: bool = row.get("is_primary");
+        let size_i64: i64 = row.get("size_bytes");
+        let scans_i64: i64 = row.get("scans");
+        let columns: Vec<String> = row.get("columns");
+        let access_method: String = row.get("access_method");
+
+        table_indexes
+            .entry((schema.clone(), table.clone()))
+            .or_default()
+            .push(RawIdx {
+                schema,
+                table,
+                index_name,
+                is_unique,
+                is_primary,
+                size_bytes: size_i64.max(0) as u64,
+                scans: scans_i64.max(0) as u64,
+                columns,
+                access_method,
+            });
+    }
+
+    let mut redundant_indexes = Vec::new();
+    for ((_schema, _table), idxs) in &table_indexes {
+        for (i, current) in idxs.iter().enumerate() {
+            let mut flagged = false;
+            for (j, other) in idxs.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                if current.access_method != other.access_method {
+                    continue;
+                }
+                // Check exact duplicate
+                if current.columns == other.columns {
+                    // Pick the smaller or lexicographically later as redundant
+                    if (current.size_bytes < other.size_bytes)
+                        || (current.size_bytes == other.size_bytes
+                            && current.index_name > other.index_name)
+                    {
+                        redundant_indexes.push(RedundantIndex {
+                            schema: current.schema.clone(),
+                            table: current.table.clone(),
+                            index_name: current.index_name.clone(),
+                            covering_index: Some(other.index_name.clone()),
+                            reason: RedundantReason::ExactDuplicate,
+                            columns: current.columns.clone(),
+                            size_bytes: current.size_bytes,
+                            scans: current.scans,
+                        });
+                        flagged = true;
+                        break;
+                    }
+                }
+                // Check prefix covered
+                else if other.columns.len() > current.columns.len()
+                    && other.columns[..current.columns.len()] == current.columns[..]
+                    && (!current.is_unique || other.is_unique)
+                {
+                    redundant_indexes.push(RedundantIndex {
+                        schema: current.schema.clone(),
+                        table: current.table.clone(),
+                        index_name: current.index_name.clone(),
+                        covering_index: Some(other.index_name.clone()),
+                        reason: RedundantReason::PrefixCovered,
+                        columns: current.columns.clone(),
+                        size_bytes: current.size_bytes,
+                        scans: current.scans,
+                    });
+                    flagged = true;
+                    break;
+                }
+            }
+
+            if !flagged
+                && current.scans == 0
+                && !current.is_unique
+                && !current.is_primary
+                && current.size_bytes >= min_size_bytes
+            {
+                redundant_indexes.push(RedundantIndex {
+                    schema: current.schema.clone(),
+                    table: current.table.clone(),
+                    index_name: current.index_name.clone(),
+                    covering_index: None,
+                    reason: RedundantReason::Unused,
+                    columns: current.columns.clone(),
+                    size_bytes: current.size_bytes,
+                    scans: 0,
+                });
+            }
+        }
+    }
+
+    // 3. Query B-Tree bloat metrics
+    const BLOAT_SQL: &str = r#"
+        SELECT
+            n.nspname AS schema_name,
+            t.relname AS table_name,
+            i.relname AS index_name,
+            pg_relation_size(i.oid) AS total_bytes,
+            COALESCE(i.reltuples, 0)::float8 AS reltuples,
+            COALESCE(i.relpages, 0) AS relpages
+        FROM pg_class i
+        JOIN pg_index idx ON idx.indexrelid = i.oid
+        JOIN pg_class t ON t.oid = idx.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_am am ON am.oid = i.relam
+        WHERE am.amname = 'btree'
+          AND n.nspname NOT IN ('pg_catalog', 'pg_toast', 'information_schema')
+          AND t.relkind = 'r'
+          AND i.relpages > 5
+        ORDER BY pg_relation_size(i.oid) DESC;
+    "#;
+
+    let mut bloated_indexes = Vec::new();
+    if let Ok(bloat_rows) = client.query(BLOAT_SQL, &[]).await {
+        for row in bloat_rows {
+            let schema: String = row.get("schema_name");
+            let table: String = row.get("table_name");
+            let index_name: String = row.get("index_name");
+            let total_bytes_i64: i64 = row.get("total_bytes");
+            let reltuples: f64 = row.get("reltuples");
+            let relpages: i32 = row.get("relpages");
+
+            let total_bytes = total_bytes_i64.max(0) as u64;
+            let relpages = relpages.max(0) as u64;
+
+            // Estimated live pages assuming ~32 bytes per index tuple and 7960 usable page bytes
+            let expected_pages = ((reltuples.max(0.0) * 32.0) / 7960.0).ceil() as u64;
+            if relpages > expected_pages && expected_pages > 0 {
+                let wasted_pages = relpages.saturating_sub(expected_pages);
+                let wasted_bytes = (wasted_pages.saturating_mul(8192)).min(total_bytes);
+                let bloat_pct =
+                    ((wasted_bytes as f64) / (total_bytes.max(1) as f64) * 100.0).clamp(0.0, 99.9);
+
+                if bloat_pct >= 25.0 && wasted_bytes >= min_size_bytes {
+                    bloated_indexes.push(IndexBloatMetric {
+                        schema,
+                        table,
+                        index_name,
+                        total_bytes,
+                        wasted_bytes,
+                        bloat_pct,
+                    });
+                }
+            }
+        }
+    }
+
+    // 4. Query unindexed foreign keys
+    const FK_SQL: &str = r#"
+        SELECT
+            c.conname AS constraint_name,
+            n.nspname AS schema_name,
+            child.relname AS child_table,
+            parent.relname AS parent_table,
+            ARRAY(
+                SELECT a.attname
+                FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+                JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+                ORDER BY k.ord
+            ) AS fk_columns
+        FROM pg_constraint c
+        JOIN pg_class child ON child.oid = c.conrelid
+        JOIN pg_class parent ON parent.oid = c.confrelid
+        JOIN pg_namespace n ON n.oid = child.relnamespace
+        WHERE c.contype = 'f'
+          AND n.nspname NOT IN ('pg_catalog', 'pg_toast', 'information_schema')
+        ORDER BY n.nspname, child.relname, c.conname;
+    "#;
+
+    let mut unindexed_foreign_keys = Vec::new();
+    if let Ok(fk_rows) = client.query(FK_SQL, &[]).await {
+        for row in fk_rows {
+            let constraint_name: String = row.get("constraint_name");
+            let schema: String = row.get("schema_name");
+            let child_table: String = row.get("child_table");
+            let parent_table: String = row.get("parent_table");
+            let fk_columns: Vec<String> = row.get("fk_columns");
+
+            if let Some(table_idxs) = table_indexes.get(&(schema.clone(), child_table.clone())) {
+                let has_covering_index = table_idxs.iter().any(|idx| {
+                    idx.columns.len() >= fk_columns.len()
+                        && idx.columns[..fk_columns.len()] == fk_columns[..]
+                });
+                if !has_covering_index {
+                    unindexed_foreign_keys.push(UnindexedForeignKey {
+                        constraint_name,
+                        schema,
+                        child_table,
+                        columns: fk_columns,
+                        parent_table,
+                    });
+                }
+            } else {
+                unindexed_foreign_keys.push(UnindexedForeignKey {
+                    constraint_name,
+                    schema,
+                    child_table,
+                    columns: fk_columns,
+                    parent_table,
+                });
+            }
+        }
+    }
+
+    Ok(AdvisorReport {
+        redundant_indexes,
+        bloated_indexes,
+        unindexed_foreign_keys,
+        hypo_tests: Vec::new(),
+        hypopg_installed,
+    })
+}
+
+/// Tests a proposed index against a query using the HypoPG extension.
+pub async fn test_hypothetical_index(
+    client: &Client,
+    query_text: &str,
+    create_index_sql: &str,
+) -> Result<crate::advisor::HypoIndexTestResult, Diagnostic> {
+    use crate::advisor::HypoIndexTestResult;
+
+    // Check if hypopg is available
+    const EXT_CHECK: &str = "SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'hypopg'";
+    let hypopg_installed = client
+        .query(EXT_CHECK, &[])
+        .await
+        .map(|rows| !rows.is_empty())
+        .unwrap_or(false);
+
+    if !hypopg_installed {
+        return Ok(HypoIndexTestResult {
+            proposed_index_sql: create_index_sql.to_string(),
+            query_text: query_text.to_string(),
+            hypo_available: false,
+            original_cost: 0.0,
+            hypo_cost: 0.0,
+            cost_reduction_pct: 0.0,
+            used_in_plan: false,
+            notice: Some(
+                "HypoPG extension is not installed in the target database. Run 'CREATE EXTENSION hypopg;' to enable hypothetical index profiling.".into(),
+            ),
+        });
+    }
+
+    // 1. Measure baseline plan cost
+    let baseline_explain_sql = format!("EXPLAIN (FORMAT JSON) {}", query_text);
+    let baseline_rows = client
+        .query(&baseline_explain_sql, &[])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+    let baseline_json: String = baseline_rows[0].get(0);
+    let orig_cost = extract_total_cost(&baseline_json).unwrap_or(0.0);
+
+    // 2. Create hypothetical index
+    client
+        .execute(
+            "SELECT * FROM hypopg_create_index($1);",
+            &[&create_index_sql],
+        )
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    // 3. Measure plan cost with hypothetical index active
+    let hypo_rows = client
+        .query(&baseline_explain_sql, &[])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+    let hypo_json: String = hypo_rows[0].get(0);
+    let hypo_cost = extract_total_cost(&hypo_json).unwrap_or(orig_cost);
+    let used_in_plan = hypo_json.contains("Index Scan") || hypo_json.contains("Index Only Scan");
+
+    // 4. Always reset HypoPG state
+    let _ = client.execute("SELECT hypopg_reset();", &[]).await;
+
+    let savings_pct = if orig_cost > 0.0 && hypo_cost < orig_cost {
+        ((orig_cost - hypo_cost) / orig_cost * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+
+    Ok(HypoIndexTestResult {
+        proposed_index_sql: create_index_sql.to_string(),
+        query_text: query_text.to_string(),
+        hypo_available: true,
+        original_cost: orig_cost,
+        hypo_cost,
+        cost_reduction_pct: savings_pct,
+        used_in_plan,
+        notice: None,
+    })
+}
+
+fn extract_total_cost(json_str: &str) -> Option<f64> {
+    let val: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    val.as_array()?
+        .first()?
+        .get("Plan")?
+        .get("Total Cost")?
+        .as_f64()
+}
+
 #[cfg(test)]
 mod tests;

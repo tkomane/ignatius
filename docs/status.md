@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 27 (035-index-advisor-and-bloat-forensics) Delivery - 12 November 2026
+
+Resume on branch `feat/035-index-advisor-and-bloat-forensics`. Feature
+`035-index-advisor-and-bloat-forensics` (the second M7 Enterprise Observability & Query Forensics slice)
+has completed implementation and verification:
+
+- **Wave 27 (`035-index-advisor-and-bloat-forensics`)**:
+  delivered the second M7 observability and query performance forensics slice:
+  - Pure `src/advisor/` domain engine for index redundancy detection (exact duplicate and
+    prefix-covered index matching), lock-free B-tree page bloat estimation, unindexed
+    foreign key opportunity detection, HypoPG hypothetical index evaluation, overall
+    index health scoring (`0..100%`), reclaimable disk space calculation, non-blocking remediation
+    SQL generation (`DROP INDEX CONCURRENTLY`, `REINDEX INDEX CONCURRENTLY`, `CREATE INDEX CONCURRENTLY`),
+    and aligned tabular, JSON, and plain text renderers.
+  - Live PostgreSQL catalog query in `Session::analyze_indexes` and HypoPG harness with automatic
+    cleanup guarantees in `Session::test_hypothetical_index`.
+  - Headless scriptable CLI subcommand `ignatius index-advisor`:
+    - `-s, --section all|redundant|bloat|unindexed|hypo`: diagnostic section filtering.
+    - `-f, --format table|json|plain`, `-o, --output`, `--force`: scriptable machine/terminal output.
+    - `--min-size <MB>`: noise reduction filtering by minimum index size.
+  - Interactive Field Industrial TUI Index Advisor & Bloat Forensics overlay on `Ctrl+K ^` (`index-advisor`):
+    - Teenage Engineering / Dieter Rams status capsules: `[HEALTH]`, `[RECLAIMABLE]`, `[REDUNDANT]`, `[BLOATED]`, `[UNINDEXED FK]`, `[HYPOPG]`.
+    - Tabbed dual-pane view: `[1] Redundant & Unused`, `[2] B-Tree Bloat`, `[3] Unindexed FKs` with active cursor selection, details pane with suggested remediation SQL preview.
+    - Hotkeys: `[e]` load suggested non-blocking DDL into editor with undo support, `[c]` copy SQL to clipboard via OSC 52, `[1]`/`[2]`/`[3]` quick tab switching.
+
 ## Wave 26 (034-query-performance-and-stat-statements) Delivery - 12 November 2026
 
 Resume on branch `feat/034-query-performance-and-stat-statements`. Feature

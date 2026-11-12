@@ -978,6 +978,46 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::IndexAdvisorLoaded { request, result } => {
+            if model.index_advisor_request != request {
+                return Vec::new();
+            }
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.loading = false;
+                match *result {
+                    Ok(report) => {
+                        advisor.report = Some(report);
+                        advisor.status_message = None;
+                    }
+                    Err(diag) => {
+                        advisor.status_message =
+                            Some(format!("Catalog analysis failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::HypoIndexTested { request, result } => {
+            if model.index_advisor_request != request {
+                return Vec::new();
+            }
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.loading = false;
+                match *result {
+                    Ok(hypo_result) => {
+                        if let Some(report) = &mut advisor.report {
+                            report.hypo_tests.push(hypo_result);
+                        }
+                        advisor.status_message = Some("Hypothetical index evaluated".to_owned());
+                    }
+                    Err(diag) => {
+                        advisor.status_message =
+                            Some(format!("HypoPG test failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1357,6 +1397,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.query_performance.is_some() {
         return query_performance_action(model, action);
     }
+    if model.index_advisor.is_some() {
+        return index_advisor_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1527,6 +1570,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::RoutineRunner => routine_runner_open(model),
         Action::MaintenanceOps => maintenance_ops_open(model),
         Action::QueryPerformance => query_performance_open(model),
+        Action::IndexAdvisor => index_advisor_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3053,6 +3097,101 @@ fn query_performance_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 });
                 model.query_performance = None;
                 model.focus = Focus::Editor;
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the index advisor and bloat forensics overlay.
+fn index_advisor_open(model: &mut Model) -> Vec<Effect> {
+    if model.index_advisor.is_some() {
+        model.index_advisor = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::IndexAdvisorState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.index_advisor_request = model.index_advisor_request.wrapping_add(1);
+    let request = model.index_advisor_request;
+    model.index_advisor = Some(state);
+
+    vec![Effect::LoadIndexAdvisor {
+        request,
+        min_size_bytes: 0,
+    }]
+}
+
+/// Handles input while the index advisor and bloat forensics overlay is on screen.
+fn index_advisor_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::IndexAdvisor => {
+            model.index_advisor = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.set_tab(2);
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(advisor) = &mut model.index_advisor {
+                advisor.loading = true;
+            }
+            model.index_advisor_request = model.index_advisor_request.wrapping_add(1);
+            let request = model.index_advisor_request;
+            return vec![Effect::LoadIndexAdvisor {
+                request,
+                min_size_bytes: 0,
+            }];
+        }
+        Action::Insert('e' | 'E') => {
+            if let Some(advisor) = &model.index_advisor
+                && let Some(sql) = advisor.selected_sql()
+            {
+                edit_editor(model, |editor| {
+                    editor.set_text(sql);
+                });
+                model.index_advisor = None;
+                model.focus = Focus::Editor;
+            }
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(advisor) = &model.index_advisor
+                && let Some(sql) = advisor.selected_sql()
+                && let Ok(payload) = crate::clipboard::ClipboardPayload::try_new(sql)
+            {
+                return vec![Effect::CopyValue { payload }];
             }
         }
         _ => {}

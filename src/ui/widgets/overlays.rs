@@ -3559,5 +3559,481 @@ pub(crate) fn render_query_performance(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Renders the interactive Index Advisor & Bloat Forensics overlay.
+pub(crate) fn render_index_advisor(
+    state: &crate::app::model::IndexAdvisorState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} INDEX ADVISOR & BLOAT FORENSICS · HYPOPG ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Tab selectors
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace (table + detail split)
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let tab_area = chunks[1];
+    let body_area = chunks[3];
+    let status_area = chunks[4];
+    let footer_area = chunks[5];
+
+    let report_opt = state.report.as_ref();
+    let health_score = report_opt.map_or(100, |r| r.health_score());
+    let reclaimable_str = report_opt.map_or_else(|| "0 B".to_string(), |r| r.format_reclaimable());
+    let redundant_cnt = report_opt.map_or(0, |r| r.redundant_indexes.len());
+    let bloated_cnt = report_opt.map_or(0, |r| r.bloated_indexes.len());
+    let unindexed_cnt = report_opt.map_or(0, |r| r.unindexed_foreign_keys.len());
+    let hypo_ready = report_opt.is_some_and(|r| r.hypopg_installed);
+
+    let score_token = if health_score >= 90 {
+        Token::Success
+    } else if health_score >= 75 {
+        Token::Focus
+    } else {
+        Token::Warning
+    };
+
+    // Hardware Capsules Bar
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("HEALTH: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{health_score}%"),
+            theme.style(score_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("RECLAIMABLE: ", theme.style(Token::Muted)),
+        Span::styled(
+            reclaimable_str,
+            theme.style(Token::Success).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("REDUNDANT: ", theme.style(Token::Muted)),
+        Span::styled(format!("{redundant_cnt}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("BLOATED: ", theme.style(Token::Muted)),
+        Span::styled(format!("{bloated_cnt}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("UNINDEXED FK: ", theme.style(Token::Muted)),
+        Span::styled(format!("{unindexed_cnt}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("HYPOPG: ", theme.style(Token::Muted)),
+        Span::styled(
+            if hypo_ready { "ENABLED" } else { "ABSENT" },
+            theme.style(if hypo_ready {
+                Token::Success
+            } else {
+                Token::Muted
+            }),
+        ),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Tab Selectors
+    let tab_spans = vec![
+        Span::styled(
+            format!(" [1] Redundant ({redundant_cnt}) "),
+            if state.active_tab == 0 {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            format!(" [2] B-Tree Bloat ({bloated_cnt}) "),
+            if state.active_tab == 1 {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            format!(" [3] Unindexed Foreign Keys ({unindexed_cnt}) "),
+            if state.active_tab == 2 {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+    ];
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    // Body Workspace
+    if state.loading {
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Analyzing database catalog for index opportunities, duplicates, and bloat...",
+                theme.style(Token::Muted),
+            )),
+        ];
+        Paragraph::new(lines).render(body_area, buf);
+    } else if let Some(report) = report_opt {
+        let body_split = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(56),
+                Constraint::Length(1), // Split rule
+                Constraint::Percentage(44),
+            ])
+            .split(body_area);
+
+        let table_area = body_split[0];
+        let split_rule_area = body_split[1];
+        let detail_area = body_split[2];
+
+        let sep = "─".repeat(split_rule_area.width as usize);
+        Paragraph::new(Line::from(Span::styled(sep, theme.style(Token::Border))))
+            .render(split_rule_area, buf);
+
+        // Render Table according to active tab
+        match state.active_tab {
+            0 => {
+                if report.redundant_indexes.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No duplicate, prefix-covered, or unused indexes detected.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(table_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{:<24}", "TABLE"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<26}", "INDEX"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<16}", "REASON"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:>10}", "SIZE"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:>8}", "SCANS"), theme.style(Token::Muted)),
+                        Span::raw(" "),
+                        Span::styled("COVERED BY", theme.style(Token::Muted)),
+                    ]));
+
+                    let visible_rows = table_area.height.saturating_sub(1) as usize;
+                    let scroll_offset = state
+                        .selected_idx
+                        .saturating_sub(visible_rows.saturating_sub(1));
+
+                    for (idx, item) in report
+                        .redundant_indexes
+                        .iter()
+                        .enumerate()
+                        .skip(scroll_offset)
+                        .take(visible_rows)
+                    {
+                        let is_selected = idx == state.selected_idx;
+                        let row_style = if is_selected {
+                            theme.style(Token::Selection).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+
+                        let table_str = format!("{}.{}", item.schema, item.table);
+                        let covered = item.covering_index.as_deref().unwrap_or("-");
+
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<24}", crate::advisor::truncate_str(&table_str, 24)),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!(
+                                    "{:<26}",
+                                    crate::advisor::truncate_str(&item.index_name, 26)
+                                ),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!("{:<16}", item.reason.label()),
+                                if is_selected {
+                                    row_style
+                                } else {
+                                    theme.style(Token::Warning)
+                                },
+                            ),
+                            Span::styled(
+                                format!("{:>10}", crate::advisor::format_bytes(item.size_bytes)),
+                                row_style,
+                            ),
+                            Span::styled(format!("{:>8}", item.scans), row_style),
+                            Span::raw(" "),
+                            Span::styled(crate::advisor::truncate_str(covered, 24), row_style),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(table_area, buf);
+                }
+            }
+            1 => {
+                if report.bloated_indexes.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No bloated B-Tree indexes exceeding threshold detected.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(table_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{:<24}", "TABLE"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<26}", "INDEX"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:>10}", "TOTAL"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:>10}", "WASTED"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:>8}", "BLOAT %"), theme.style(Token::Muted)),
+                    ]));
+
+                    let visible_rows = table_area.height.saturating_sub(1) as usize;
+                    let scroll_offset = state
+                        .selected_idx
+                        .saturating_sub(visible_rows.saturating_sub(1));
+
+                    for (idx, item) in report
+                        .bloated_indexes
+                        .iter()
+                        .enumerate()
+                        .skip(scroll_offset)
+                        .take(visible_rows)
+                    {
+                        let is_selected = idx == state.selected_idx;
+                        let row_style = if is_selected {
+                            theme.style(Token::Selection).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+
+                        let table_str = format!("{}.{}", item.schema, item.table);
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<24}", crate::advisor::truncate_str(&table_str, 24)),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!(
+                                    "{:<26}",
+                                    crate::advisor::truncate_str(&item.index_name, 26)
+                                ),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!("{:>10}", crate::advisor::format_bytes(item.total_bytes)),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!("{:>10}", crate::advisor::format_bytes(item.wasted_bytes)),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!("{:>7.1}%", item.bloat_pct),
+                                if is_selected {
+                                    row_style
+                                } else if item.bloat_pct >= 50.0 {
+                                    theme.style(Token::Warning).add_modifier(Modifier::BOLD)
+                                } else {
+                                    theme.style(Token::Text)
+                                },
+                            ),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(table_area, buf);
+                }
+            }
+            2 => {
+                if report.unindexed_foreign_keys.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "All foreign keys have supporting child indexes.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(table_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{:<28}", "CONSTRAINT"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<24}", "CHILD TABLE"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<20}", "COLUMNS"), theme.style(Token::Muted)),
+                        Span::styled("REFERENCES", theme.style(Token::Muted)),
+                    ]));
+
+                    let visible_rows = table_area.height.saturating_sub(1) as usize;
+                    let scroll_offset = state
+                        .selected_idx
+                        .saturating_sub(visible_rows.saturating_sub(1));
+
+                    for (idx, item) in report
+                        .unindexed_foreign_keys
+                        .iter()
+                        .enumerate()
+                        .skip(scroll_offset)
+                        .take(visible_rows)
+                    {
+                        let is_selected = idx == state.selected_idx;
+                        let row_style = if is_selected {
+                            theme.style(Token::Selection).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+
+                        let child_str = format!("{}.{}", item.schema, item.child_table);
+                        let cols_str = item.columns.join(", ");
+
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!(
+                                    "{:<28}",
+                                    crate::advisor::truncate_str(&item.constraint_name, 28)
+                                ),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!("{:<24}", crate::advisor::truncate_str(&child_str, 24)),
+                                row_style,
+                            ),
+                            Span::styled(
+                                format!("{:<20}", crate::advisor::truncate_str(&cols_str, 20)),
+                                row_style,
+                            ),
+                            Span::styled(
+                                crate::advisor::truncate_str(&item.parent_table, 24),
+                                row_style,
+                            ),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(table_area, buf);
+                }
+            }
+            _ => {}
+        }
+
+        // Render Lower Detail Inspector
+        let mut detail_lines = Vec::new();
+        detail_lines.push(Line::from(Span::styled(
+            "Remediation SQL (Press [e] to load into Editor or [c] to copy):",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        )));
+        if let Some(sql) = state.selected_sql() {
+            detail_lines.push(Line::from(""));
+            detail_lines.push(Line::from(Span::styled(
+                sql,
+                theme.style(Token::Text).add_modifier(Modifier::BOLD),
+            )));
+        } else {
+            detail_lines.push(Line::from(Span::styled(
+                "No item selected",
+                theme.style(Token::Muted),
+            )));
+        }
+
+        if !report.hypo_tests.is_empty() {
+            detail_lines.push(Line::from(""));
+            detail_lines.push(Line::from(Span::styled(
+                "Hypothetical Index Profiling (HypoPG):",
+                theme.style(Token::Muted),
+            )));
+            for t in &report.hypo_tests {
+                detail_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:.1}% savings", t.cost_reduction_pct),
+                        theme.style(Token::Success),
+                    ),
+                    Span::styled(
+                        format!(
+                            " (baseline: {:.1} -> hypo: {:.1})",
+                            t.original_cost, t.hypo_cost
+                        ),
+                        theme.style(Token::Muted),
+                    ),
+                ]));
+            }
+        }
+
+        Paragraph::new(detail_lines).render(detail_area, buf);
+    }
+
+    // Status Message Line
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(msg, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Bar
+    let footer_spans = vec![
+        Span::styled(
+            "[1/2/3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓/j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[e] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Editor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[c] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Copy SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

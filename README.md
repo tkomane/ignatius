@@ -352,6 +352,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `(` | Open the routine runner and profiler |
 | `>` | Open the maintenance operations and pub-sub monitor |
 | `%` | Open query performance and stat forensics |
+| `^` | Open index advisor and bloat forensics |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:

@@ -1208,6 +1208,27 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadIndexAdvisor { request, min_size_bytes } => {
+                    spawn_load_index_advisor(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        min_size_bytes,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::TestHypoIndex { request, query, create_index_sql } => {
+                    spawn_test_hypo_index(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        query,
+                        create_index_sql,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::ExportRows { path, format } => {
                     let _ = tx.send(Message::RowsExported(Box::new(export_visible_rows(
                         &model, &path, format,
@@ -3010,6 +3031,69 @@ fn spawn_reset_query_performance(
         let _ = tx.send(connection_message(
             request_generation,
             Message::QueryPerformanceReset {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_index_advisor(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    min_size_bytes: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.analyze_indexes(min_size_bytes).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::IndexAdvisorLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_test_hypo_index(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    query: String,
+    create_index_sql: String,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session
+            .test_hypothetical_index(&query, &create_index_sql)
+            .await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::HypoIndexTested {
                 request,
                 result: Box::new(result),
             },

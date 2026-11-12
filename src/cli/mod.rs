@@ -280,6 +280,10 @@ pub enum Command {
     /// Profile query execution telemetry and stat statements forensics from pg_stat_statements.
     #[command(name = "profile-queries")]
     ProfileQueries(ProfileQueriesArgs),
+
+    /// Analyze redundant indexes, B-tree bloat forensics, and unindexed foreign keys.
+    #[command(name = "index-advisor")]
+    IndexAdvisor(IndexAdvisorArgs),
 }
 
 /// Arguments for the audit command.
@@ -873,6 +877,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Notify(args)) => run_notify(args, &paths, out, err),
         Some(Command::Maintain(args)) => run_maintain(args, &paths, &presentation, out, err),
         Some(Command::ProfileQueries(args)) => run_profile_queries(args, &paths, out, err),
+        Some(Command::IndexAdvisor(args)) => run_index_advisor(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -3606,6 +3611,133 @@ fn run_profile_queries(
     if let Some(ref dest) = args.output {
         std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
         writeln!(err, "Performance report written to {}", dest.display()).map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output representation format for index advisor forensics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliAdvisorFormat {
+    /// Aligned tabular overview with status capsules.
+    #[default]
+    Table,
+    /// Structured JSON report document.
+    Json,
+    /// Plain text report.
+    Plain,
+}
+
+/// Filter section for index advisor reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliAdvisorSection {
+    /// Include all diagnostics (redundant, bloat, unindexed, hypo).
+    #[default]
+    All,
+    /// Redundant and duplicate indexes.
+    Redundant,
+    /// B-Tree index bloat forensics.
+    Bloat,
+    /// Missing foreign key indexes.
+    Unindexed,
+    /// Hypothetical index test results.
+    Hypo,
+}
+
+impl From<CliAdvisorSection> for crate::advisor::AdvisorSection {
+    fn from(val: CliAdvisorSection) -> Self {
+        match val {
+            CliAdvisorSection::All => crate::advisor::AdvisorSection::All,
+            CliAdvisorSection::Redundant => crate::advisor::AdvisorSection::Redundant,
+            CliAdvisorSection::Bloat => crate::advisor::AdvisorSection::Bloat,
+            CliAdvisorSection::Unindexed => crate::advisor::AdvisorSection::Unindexed,
+            CliAdvisorSection::Hypo => crate::advisor::AdvisorSection::Hypo,
+        }
+    }
+}
+
+/// Arguments for the `index-advisor` command.
+#[derive(Debug, Args, Clone)]
+pub struct IndexAdvisorArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, redundant, bloat, unindexed, hypo).
+    #[arg(short = 's', long, value_enum, default_value_t = CliAdvisorSection::All)]
+    pub section: CliAdvisorSection,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliAdvisorFormat::Table)]
+    pub format: CliAdvisorFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite existing output file.
+    #[arg(long)]
+    pub force: bool,
+    /// Minimum index size in MB to report for bloat or redundant indexes.
+    #[arg(long, value_name = "MB", default_value_t = 0)]
+    pub min_size: u64,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_index_advisor(
+    args: &IndexAdvisorArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing index-advisor command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let min_bytes = args.min_size.saturating_mul(1024 * 1024);
+    let report = rt.block_on(session.analyze_indexes(min_bytes))?;
+
+    let section = crate::advisor::AdvisorSection::from(args.section);
+    let rendered = match args.format {
+        CliAdvisorFormat::Table => report.render_table(section),
+        CliAdvisorFormat::Json => report.render_json(),
+        CliAdvisorFormat::Plain => report.render_plain(section),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Index advisor report written to {}", dest.display())
+            .map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
     }
