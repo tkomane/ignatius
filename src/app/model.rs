@@ -1420,6 +1420,67 @@ impl IndexAdvisorState {
     }
 }
 
+/// State for the Transaction, WAL, and Checkpointer Observability overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WalObservabilityState {
+    /// Telemetry gathered from catalog analysis.
+    pub report: Option<crate::telemetry::TelemetryReport>,
+    /// Active tab in the observability overlay (0: Checkpoints & WAL, 1: Transactions & XID Freeze, 2: Replication & Standbys).
+    pub active_tab: usize,
+    /// Selected item index in the active tab (e.g. database list or standby list).
+    pub selected_idx: usize,
+    /// Whether an asynchronous fetch is currently in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for WalObservabilityState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl WalObservabilityState {
+    /// Items count for the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        match self.active_tab {
+            0 => 1,
+            1 => report.databases.len().max(report.xid_freeze.len()),
+            2 => report.standbys.len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection up or down within the current tab.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_idx = new_idx as usize;
+    }
+
+    /// Switches the active tab (0: Checkpoints & WAL, 1: Transactions & XID Freeze, 2: Replication & Standbys).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2704,6 +2765,10 @@ pub struct Model {
     pub index_advisor: Option<IndexAdvisorState>,
     /// Request counter for in-flight index advisor queries.
     pub index_advisor_request: u64,
+    /// Interactive transaction, WAL, and checkpointer observability overlay state.
+    pub wal_observability: Option<WalObservabilityState>,
+    /// Request counter for in-flight WAL observability queries.
+    pub wal_observability_request: u64,
 }
 
 impl Model {

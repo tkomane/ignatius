@@ -488,7 +488,8 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::RoutineRunner
         | Action::MaintenanceOps
         | Action::QueryPerformance
-        | Action::IndexAdvisor => model.connection.is_ready(),
+        | Action::IndexAdvisor
+        | Action::WalObservability => model.connection.is_ready(),
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -642,7 +643,8 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::RoutineRunner
         | Action::MaintenanceOps
         | Action::QueryPerformance
-        | Action::IndexAdvisor => "connect to a database first".to_owned(),
+        | Action::IndexAdvisor
+        | Action::WalObservability => "connect to a database first".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
         | Action::Backspace
@@ -694,7 +696,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::RoutineRunner
         | Action::MaintenanceOps
         | Action::QueryPerformance
-        | Action::IndexAdvisor => "Data",
+        | Action::IndexAdvisor
+        | Action::WalObservability => "Data",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

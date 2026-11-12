@@ -380,6 +380,13 @@ impl Session {
         .await
     }
 
+    /// Queries PostgreSQL telemetry catalogs for checkpointer, WAL, transaction, and replication statistics.
+    pub async fn wal_and_transaction_telemetry(
+        &self,
+    ) -> Result<crate::telemetry::TelemetryReport, Diagnostic> {
+        crate::postgres::metadata::wal_and_transaction_telemetry(&self.client).await
+    }
+
     /// Discovers routine signatures in the database with optional schema and name filtering.
     pub async fn discover_routines(
         &self,

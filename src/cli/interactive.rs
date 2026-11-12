@@ -1218,6 +1218,15 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadWalObservability { request } => {
+                    spawn_load_wal_observability(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::TestHypoIndex { request, query, create_index_sql } => {
                     spawn_test_hypo_index(
                         tx.clone(),
@@ -3061,6 +3070,35 @@ fn spawn_load_index_advisor(
         let _ = tx.send(connection_message(
             request_generation,
             Message::IndexAdvisorLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_wal_observability(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.wal_and_transaction_telemetry().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::WalObservabilityLoaded {
                 request,
                 result: Box::new(result),
             },

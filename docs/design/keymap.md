@@ -122,6 +122,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `>` | Open maintenance operations and pub-sub monitor |
 | `%` | Open query performance and stat forensics |
 | `^` | Open index advisor and bloat forensics |
+| `&` | Open transaction, WAL, and checkpointer observability |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -251,6 +252,16 @@ HypoPG hypothetical index profiling. Inside the overlay:
 - `c` copies the remediation SQL to the clipboard via OSC 52.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius index-advisor` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K &` (`wal-observability`) opens the Transaction,
+WAL, and Checkpointer Observability cockpit, presenting real-time checkpointer cadence,
+write-ahead logging generation velocity, database commit/rollback ratios, transaction
+ID (XID) freeze horizons, and streaming replication standby telemetry. Inside the overlay:
+- `1`, `2`, `3` switch between tabs (`Checkpoints & WAL`, `Transactions & XID Freeze`, `Replication & Standbys`).
+- `Up` / `Down` or `k` / `j` navigates items in the active view.
+- `r` refreshes the live telemetry snapshot from the catalog.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius wal-stats` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -501,7 +512,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

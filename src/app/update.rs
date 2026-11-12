@@ -1018,6 +1018,25 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::WalObservabilityLoaded { request, result } => {
+            if model.wal_observability_request != request {
+                return Vec::new();
+            }
+            if let Some(wal) = &mut model.wal_observability {
+                wal.loading = false;
+                match *result {
+                    Ok(report) => {
+                        wal.report = Some(report);
+                        wal.status_message = None;
+                    }
+                    Err(diag) => {
+                        wal.status_message =
+                            Some(format!("Telemetry fetch failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1400,6 +1419,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.index_advisor.is_some() {
         return index_advisor_action(model, action);
     }
+    if model.wal_observability.is_some() {
+        return wal_observability_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1571,6 +1593,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::MaintenanceOps => maintenance_ops_open(model),
         Action::QueryPerformance => query_performance_open(model),
         Action::IndexAdvisor => index_advisor_open(model),
+        Action::WalObservability => wal_observability_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3193,6 +3216,76 @@ fn index_advisor_action(model: &mut Model, action: Action) -> Vec<Effect> {
             {
                 return vec![Effect::CopyValue { payload }];
             }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the transaction, WAL, and checkpointer observability overlay.
+fn wal_observability_open(model: &mut Model) -> Vec<Effect> {
+    if model.wal_observability.is_some() {
+        model.wal_observability = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::WalObservabilityState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.wal_observability_request = model.wal_observability_request.wrapping_add(1);
+    let request = model.wal_observability_request;
+    model.wal_observability = Some(state);
+
+    vec![Effect::LoadWalObservability { request }]
+}
+
+/// Handles input while the transaction, WAL, and checkpointer observability overlay is on screen.
+fn wal_observability_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::WalObservability => {
+            model.wal_observability = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(wal) = &mut model.wal_observability {
+                wal.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(wal) = &mut model.wal_observability {
+                wal.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(wal) = &mut model.wal_observability {
+                wal.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(wal) = &mut model.wal_observability {
+                wal.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(wal) = &mut model.wal_observability {
+                wal.set_tab(2);
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(wal) = &mut model.wal_observability {
+                wal.loading = true;
+            }
+            model.wal_observability_request = model.wal_observability_request.wrapping_add(1);
+            let request = model.wal_observability_request;
+            return vec![Effect::LoadWalObservability { request }];
         }
         _ => {}
     }
