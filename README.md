@@ -550,9 +550,15 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - **Live Forensics Engine**: Integrates natively with `pg_stat_statements` to track cache hit ratios, execution duration distributions (min, max, mean, stddev), call counts, returned row volumes, and shared block I/O statistics (hit, read, dirtied, written).
   - **Field Industrial TUI Overlay (`Ctrl+K %` / `query-performance`)**: Two-column layout featuring hardware status capsules (`HIT RATIO`, `TRACKED`, `CALLS`, `EXEC TIME`, `SORT`), ranked table with dynamic multi-key sorting (Total Time, Mean Time, Calls, Rows, Cache Hit Ratio), and a detailed query inspector with sanitized query text and block stats.
   - **Non-Interactive CLI (`ignatius profile-queries`)**: Scriptable query forensics with `--sort`, `--limit`, `--min-calls`, `--format table|json|plain`, `--output <path>`, and safe telemetry reset (`--reset` / `SELECT pg_stat_statements_reset()`).
+- **`035-index-advisor-and-bloat-forensics` (Index Advisor, Bloat Forensics & HypoPG) [Implemented]:**
+  - **Duplicate & Prefix Index Analysis**: Audits PostgreSQL catalogs for exact duplicate indexes and multi-column indexes rendering leading single-column indexes redundant, calculating reclaimable disk space.
+  - **Lock-Free B-Tree Page Bloat Estimation**: Calculates live pages versus wasted sparse space from `pg_class` and `pg_stats` catalog telemetry without issuing table locks.
+  - **Foreign Key Opportunity Detection**: Flags child foreign key constraints lacking supporting indexes to prevent sequential-scan locks during cascading parent deletes/updates.
+  - **HypoPG Hypothetical Index Validation**: Evaluates proposed candidate index impact on `EXPLAIN` execution plans with cost reduction percentages and automatic reset guarantees.
+  - **Field Industrial TUI Overlay (`Ctrl+K ^` / `index-advisor`)**: Status capsules (`[HEALTH]`, `[RECLAIMABLE]`, `[REDUNDANT]`, `[BLOATED]`, `[UNINDEXED FK]`, `[HYPOPG]`), dual-pane table/detail inspector across tabs `[1]`, `[2]`, `[3]`, and hotkeys `[e]` (load non-blocking cleanup SQL into editor) and `[c]` (copy SQL via OSC 52).
+  - **Non-Interactive CLI (`ignatius index-advisor`)**: Scriptable index auditing with `-s, --section all|redundant|bloat|unindexed|hypo`, `-f, --format table|json|plain`, `-o, --output`, `--force`, and `--min-size <MB>`.
 
 ### In-Flight Milestone 7 Roadmap
-- **`035-index-advisor-and-bloat-forensics`**: HypoPG hypothetical index creation and EXPLAIN validation, duplicate/redundant index detection, and btree index page bloat estimation.
 - **`036-transaction-and-wal-observability`**: Checkpointer telemetry, WAL write rates, commit/rollback ratios, and replication lag tracking.
 - **`037-connection-pool-and-pgbouncer-telemetry`**: Integrated PgBouncer pool health, client wait queues, and server connection exhaustion alerts.
 
