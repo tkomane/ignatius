@@ -101,8 +101,11 @@ covered by their focused and full gates. Native hand use in Warp, Windows
 Terminal and Linux terminals, screen-reader use, live resize, and a real
 power-loss or kernel-panic test remain outside this evidence. The journal is per
 data directory, not per process, so concurrent clients sharing one data
-directory share one recovery slot. No M10 scope is defined yet; the next source
-work should start from an observed job under W16 rather than inventing one.
+directory share one recovery slot. Milestone 10 (Developer Workflow & CI
+Automation) is the active source milestone: Features 044, 045 and 046 are
+specified under `specs/`, with M11 defined as the following operational data
+lifecycle set. Implementation evidence for M10 is recorded in its own Wave
+section once the features are verified.
 
 ## Wave 34 (042-persistent-scratchpad-and-snippet-library) Delivery - 12 November 2026
 

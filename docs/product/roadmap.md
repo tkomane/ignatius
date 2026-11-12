@@ -124,12 +124,18 @@ below; broadening the feature list does not move a milestone forward.
 | M7 Enterprise Observability & Query Performance Forensics | High-resolution slow query profiling, cache diagnostics, and lock-free bloat intelligence | W16 (Features 034-037) | `pg_stat_statements` slow query profiling, buffer hit ratio diagnostics, transaction freeze monitoring, and zero-lock index bloat intelligence |
 | M8 Cross-Environment Data Synchronization, Masking & Seeding | Privacy-compliant test data masking, deterministic synthetic seeding, and cross-environment sync | W16 (Features 038-040) | PII rule-based masking, deterministic synthetic relational data generation adhering to foreign-key DAGs, and reviewable transactional sync scripts |
 | M9 Multi-Buffer Editor Workspaces & Scratchpad Persistence | Multi-tab query editing and crash-resilient local scratchpad session persistence | W16 (Features 041-043) | Multi-tab editor workspaces (`Ctrl+N`/`Ctrl+W`), persistent named scratchpads under `IGNATIUS_DATA_DIR`, and automatic unsaved buffer crash recovery |
+| M10 Developer Workflow & CI Automation | Unsafe SQL is caught before CI, migrations apply once with an audit trail, and schema documentation is reproducible | W16 (Features 044-046) | Offline lint findings and thresholds, checksummed forward-only migration ledger with drift refusal, deterministic data dictionary export |
+| M11 Operational Data Lifecycle | Backups are proven restorable, partitions are managed deliberately, and growth/retention risks are visible | W16 (Features 047-049) | Restore-drill evidence, reviewed partition lifecycle DDL, bounded retention and growth audit |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
 `docs/status.md`. Native hand use, screen-reader use and live terminal resize
-remain evidence gaps under M1/M2 rather than M9 source work. No M10 feature set
-is defined; the next source slice follows an observed job under W16.
+remain evidence gaps under M1/M2 rather than M9 source work.
+
+M10 is the active source milestone. It is deliberately CLI-first: the linter,
+migration runner and documentation generator are the jobs a team performs in a
+repository or release pipeline, not only inside a terminal session. M11 is
+defined but not started; it opens only after M10 verification is recorded.
 
 ```mermaid
 flowchart LR
@@ -147,6 +153,8 @@ flowchart LR
     M6 --> M7["M7 Observability & Query Performance (034-037)"]
     M7 --> M8["M8 Data Sync, Masking & Seeding (038-040)"]
     M8 --> M9["M9 Multi-Buffer & Scratchpads (041-043)"]
+    M9 --> M10["M10 Developer Workflow & CI (044-046)"]
+    M10 --> M11["M11 Operational Data Lifecycle (047-049)"]
 ```
 
 ## Start here

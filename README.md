@@ -658,6 +658,14 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `041-multi-tab-and-split-editor-buffers` [Implemented]: Multi-tab SQL workspace with split editing and independent execution contexts.
   - `042-persistent-scratchpad-and-snippet-library` [Implemented]: Built-in and user SQL snippet library with search, categories, and headless CLI access.
   - `043-session-state-and-crash-recovery` [Implemented]: Atomic unsaved-buffer journal, startup restore capsule, clean-exit safety, and headless `ignatius recovery` routes.
+- **Milestone 10: Developer Workflow & CI Automation (`044` - `046`)**:
+  - `044-sql-linter-and-safety-analyzer`: Offline, deterministic SQL safety findings with table/JSON/SARIF reports, CI thresholds, and an interactive findings overlay.
+  - `045-migration-runner-and-ledger`: Forward-only, checksummed migrations with a ledger, drift refusal, transactional apply, advisory locking, and a reviewed TUI runner.
+  - `046-schema-documentation-generator`: Deterministic Markdown, JSON and Mermaid data dictionaries generated from catalog metadata.
+- **Milestone 11: Operational Data Lifecycle (`047` - `049`)**:
+  - `047-backup-verification-and-restore-drills`: Restore a backup into a scratch target and prove row counts and key invariants.
+  - `048-partition-lifecycle-manager`: Reviewed create, attach, detach and drop operations for range-partitioned tables.
+  - `049-retention-and-growth-audit`: Surface unbounded tables, stale partitions, and retention-policy gaps without touching data.
 
 ---
 
