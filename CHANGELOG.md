@@ -8,6 +8,34 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `047-restore-drills` advances Milestone 11 with
+  `ignatius restore-drill`. It reads an archive table of contents with
+  `pg_restore --list`, restores into a newly created scratch database from
+  `TEMPLATE template0`, compares user relation counts with the source, and
+  reports the outcome, duration and restored size. A passing drill drops the
+  scratch database unless `--keep`; a failed drill keeps it for inspection
+  unless `--drop-on-failure`. The command never restores into the source,
+  requires `--allow-production` on a production target, and `--dry-run` shows
+  every step with credentials redacted.
+
+- New: Feature `048-partition-lifecycle` advances Milestone 11 with
+  `ignatius partition status` and `ignatius partition plan`. Status reports
+  range, list and hash parents with keys, child bounds, sizes and row estimates,
+  bounded to 500 parents and 5000 partitions. Plan generates reviewed
+  `CREATE TABLE ... PARTITION OF` SQL for aligned daily, weekly, monthly or
+  yearly intervals, refuses overlaps and unsupported shapes, and can append
+  detach and drop statements for partitions fully before `--expire-before`.
+  It never executes DDL; the reviewed file belongs in the migration process.
+
+- New: Feature `049-retention-and-growth-audit` advances Milestone 11 with a
+  read-only `ignatius growth` audit. It ranks relations by total, heap, index and
+  TOAST bytes, reports dead tuples and vacuum debt, measures net growth since the
+  statistics reset, and lists sequence headroom and unpartitioned partitioning
+  candidates. Reads are bounded to 200 relations and 200 sequences; findings are
+  `sequence-exhaustion` (critical), `vacuum-debt` and `partitioning-candidate`
+  (warning), with `--fail-on warning|critical` for automation. No table rows are
+  read and no statistics are changed.
+
 - New: Feature `046-schema-documentation-generator` advances Milestone 10 with a
   deterministic data dictionary generated from catalog metadata. The pure `src/dbdoc/`
   model renders Markdown with a table of contents, stable JSON, or a Mermaid `erDiagram`;

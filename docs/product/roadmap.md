@@ -135,15 +135,27 @@ remain evidence gaps under M1/M2 rather than M9 source work.
 M10 is delivered in source as of 2026-11-12: the linter, migration runner and
 documentation generator are implemented and covered by focused and full gates.
 The milestone is deliberately CLI-first because those are jobs a team performs
-in a repository or release pipeline, not only inside a terminal session. M11 is
-defined and not started; its first slice should open from an observed
-operational job.
+in a repository or release pipeline, not only inside a terminal session.
 
-M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
-implemented, and each carries focused and full verification recorded in
-`docs/status.md`. Native hand use, screen-reader use and live terminal resize
-remain evidence gaps under M1/M2 rather than M9 source work. No M10 feature set
-is defined; the next source slice follows an observed job under W16.
+M11 is delivered in source as of 2026-11-12: Features 047, 048 and 049 are
+implemented and carry focused and full verification in `docs/status.md` Wave 37.
+
+- **`047-restore-drills`** [Implemented]: `ignatius restore-drill` restores an
+  archive into a scratch database created from `TEMPLATE template0`, compares
+  user relation counts with the source, never restores into the source, and
+  follows an explicit keep/drop retention policy. Production targets require
+  `--allow-production`; `--dry-run` shows the plan with credentials redacted.
+- **`048-partition-lifecycle`** [Implemented]: `ignatius partition status`
+  reports range, list and hash partition sets within fixed bounds, and
+  `ignatius partition plan` emits reviewed aligned DDL with overlap refusal and
+  optional expiry. It has no apply command; reviewed SQL is applied through the
+  migration ledger.
+- **`049-retention-and-growth-audit`** [Implemented]: `ignatius growth` is a
+  read-only, catalog-statistics audit for sequence exhaustion, vacuum debt and
+  partitioning candidates, bounded to 200 relations and 200 sequences.
+
+No new feature is implied by milestone completion; the next source slice opens
+from an observed job under W16.
 
 ```mermaid
 flowchart LR

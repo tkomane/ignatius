@@ -4,6 +4,95 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 37 (047-049, Milestone 11) Delivery - 12 November 2026
+
+Resume on branch `feat/m11-operational-data`. Milestone 11 (Operational Data
+Lifecycle) is implemented and verified in this working tree:
+
+- **Feature `047-restore-drills`**:
+  - `ignatius restore-drill <target> --backup PATH` reads the archive table of
+    contents with `pg_restore --list`, creates `<source>_ignatius_drill_<UTC>`
+    from `TEMPLATE template0`, restores with `--exit-on-error`, compares user
+    relation counts with the source, and measures the restored database.
+  - The source database is never the restore target. The scratch name is
+    checked against the 63-byte identifier limit, the source name and
+    `postgres`/`template0`/`template1`; an existing name and a missing
+    `CREATEDB` privilege are refused before any change.
+  - A passed drill drops the scratch unless `--keep`; a failed drill keeps it
+    for inspection unless `--drop-on-failure`; `--keep` wins. A production
+    target requires `--allow-production`, and `--dry-run` inspects the archive
+    and prints every step with `PGPASSWORD=[redacted]` without changing the
+    server.
+  - Exit 0 passed, 1 ran and failed, 2 refused before changes. The report is
+    table or JSON and carries archive format, TOC entries, relation counts,
+    restored size, duration and a bounded failure reason.
+  - `docs/design/restore-drills.md` is compared with the build for formats,
+    flags and exit codes.
+- **Feature `048-partition-lifecycle`**:
+  - `ignatius partition status` reports range, list and hash parents with
+    strategy, key, child bounds, sizes, row estimates and default partitions,
+    bounded to 500 parents and 5000 partitions.
+  - `ignatius partition plan --table billing.invoices --period monthly
+    --start 2026-12-01 --count 3` emits reviewed `CREATE TABLE ... PARTITION
+    OF` DDL for aligned daily, weekly, monthly and yearly intervals and refuses
+    overlaps, unsupported key shapes and unparsable bounds.
+  - `--expire-before` appends reviewed detach and drop statements only for
+    partitions wholly before the cutoff; `MAXVALUE` and default partitions are
+    never expired.
+  - There is deliberately no apply command: the reviewed file is applied
+    through the migration ledger so one audit path records schema change.
+  - The live contract caught two real bugs: overlap detection ignored the lower
+    endpoint when the upper bound was `MAXVALUE`, and the PostgreSQL `+00`
+    offset needed chrono's `%#z` format.
+- **Feature `049-retention-and-growth-audit`**:
+  - `ignatius growth` is read-only and works from catalog statistics, bounded
+    to 200 relations and 200 sequences.
+  - It reports table and index growth, sequence usage, vacuum debt and
+    partition candidates, with stable findings: `sequence-exhaustion`
+    (critical), `vacuum-debt` and `partitioning-candidate` (warning).
+  - A missing statistics window on a fresh database is reported as
+    `unavailable` rather than as zero growth.
+  - `docs/design/growth-audit.md` is compared with the build in both
+    directions.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked --lib growth::` | 17 passed |
+| `cargo test --locked --lib partition::` | 15 passed |
+| `cargo test --locked --lib drill::` | 12 passed |
+| `cargo test --locked --test growth_contract` | 3 passed against live PostgreSQL |
+| `cargo test --locked --test partition_contract` | 4 passed against live PostgreSQL |
+| `cargo test --locked --test drill_contract` | 4 passed against live PostgreSQL |
+| `cargo test --locked --test documentation_matches_the_build` | 22 passed |
+| `cargo xtask verify` | Pass, 1975 tests, one semantic skip |
+
+The authoritative `cargo xtask verify` exited successfully against the
+disposable `postgres:18.6-alpine` plain and TLS fixtures on ports 55432 and
+55433. Formatting, lints, API documentation, 1551 library tests, every
+integration suite and 22 documentation matches passed across 42 suites, 1975
+tests in total. The PostgreSQL 18 Unix-socket gate remained a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` was not set; that skip is not live socket
+evidence. The run used the configured external build cache at
+`/Volumes/UtilityBuildCache/Storage/Build/cargo` with no override and
+Rust/Cargo 1.99.1. The disposable services were torn down with
+`cargo xtask db down` after the run, and `cargo xtask db status` reported
+`Not running.`
+
+Live drill evidence covers passing custom and tar archives that drop scratch,
+`--keep` that leaves a queryable scratch, a damaged directory archive that
+fails and keeps scratch, `--drop-on-failure` retry, dry-run creating nothing,
+and refusal of plain SQL, system and source scratch names. Live partition
+evidence covers a seeded range, list and timestamptz fixture, an unchanged
+catalog after a plan, overlap refusal, unsupported strategy refusal and
+argument refusal. Live growth evidence covers sequence exhaustion, vacuum debt,
+partition candidates, an empty schema and a fresh database without a
+statistics window.
+
+Milestone 11 is complete in source. Native hand use, screen-reader use and
+release evidence remain separate from this source delivery.
+
 ## Wave 36 (044-046, Milestone 10) Delivery - 12 November 2026
 
 Resume on branch `feat/m10-developer-workflow`. Milestone 10 (Developer
@@ -72,9 +161,10 @@ nothing, and transaction-control refusal. Live documentation evidence covers a p
 index, check constraint, table and column comments and an RLS policy, plus an
 empty schema and a missing schema.
 
-Milestone 11 (Operational Data Lifecycle, Features 047-049) is defined in the
-roadmap but not started. Native hand use, screen-reader use and release
-evidence remain separate from this source delivery.
+Milestone 11 (Operational Data Lifecycle, Features 047-049) is delivered in
+source; its evidence is recorded in Wave 37 above. Native hand use,
+screen-reader use and release evidence remain separate from this source
+delivery.
 
 ## Wave 35 (043-session-state-and-crash-recovery) Delivery - 12 November 2026
 
@@ -174,10 +264,9 @@ Terminal and Linux terminals, screen-reader use, live resize, and a real
 power-loss or kernel-panic test remain outside this evidence. The journal is per
 data directory, not per process, so concurrent clients sharing one data
 directory share one recovery slot. Milestone 10 (Developer Workflow & CI
-Automation) is the active source milestone: Features 044, 045 and 046 are
-specified under `specs/`, with M11 defined as the following operational data
-lifecycle set. Implementation evidence for M10 is recorded in its own Wave
-section once the features are verified.
+Automation) is delivered in source: Features 044, 045 and 046 are verified and
+recorded in Wave 36. Milestone 11 (Operational Data Lifecycle) is delivered in
+source: Features 047, 048 and 049 are verified and recorded in Wave 37.
 
 ## Wave 34 (042-persistent-scratchpad-and-snippet-library) Delivery - 12 November 2026
 
