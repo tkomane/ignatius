@@ -130,6 +130,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("next-buffer", Action::NextEditorBuffer),
     ("prev-buffer", Action::PrevEditorBuffer),
     ("split-buffer", Action::ToggleEditorSplit),
+    ("snippet-library", Action::SnippetLibrary),
 ];
 
 /// The action a configuration name means.
@@ -860,6 +861,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::ToggleEditorSplit,
         "Toggle editor buffer split mode",
     ),
+    (
+        ';',
+        Action::SnippetLibrary,
+        "Open snippet and scratchpad library",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -981,6 +987,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::NextEditorBuffer => "Next buffer",
         Action::PrevEditorBuffer => "Previous buffer",
         Action::ToggleEditorSplit => "Toggle split",
+        Action::SnippetLibrary => "Snippet library",
     }
 }
 

@@ -155,6 +155,8 @@ pub enum Action {
     PrevEditorBuffer,
     /// Toggle editor split layout (None, Vertical, Horizontal).
     ToggleEditorSplit,
+    /// Open the persistent scratchpad and snippet library overlay.
+    SnippetLibrary,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -271,6 +273,7 @@ impl Action {
             Self::NextEditorBuffer,
             Self::PrevEditorBuffer,
             Self::ToggleEditorSplit,
+            Self::SnippetLibrary,
         ]
     }
 }

@@ -96,6 +96,14 @@ Ignatius brings high-velocity IDE workflows into the terminal without the webvie
 - **Dual Split-Buffer Editing**: Press `Ctrl+K \` to toggle split layouts (`None` -> `Vertical` side-by-side -> `Horizontal` stacked). Compare baseline queries with optimized statements or write migrations while watching real-time query executions side-by-side.
 - **Multi-File CLI Preloading**: Launch Ignatius with pre-loaded files using `ignatius --file main.sql --file migration.sql` to immediately initialize separate editor tabs at startup.
 
+### Persistent Scratchpad & SQL Snippet Library (`Ctrl+K ;`)
+
+Never re-type diagnostic queries or boilerplate CTE patterns from memory again:
+- **Curated Production Built-ins**: Immediate access to battle-tested PostgreSQL templates including buffer cache hit ratios (`cache-hit-ratio`), table and index disk usage (`table-sizes`), active locks tree (`active-locks`), B-tree index bloat estimation (`index-bloat`), idle-in-transaction connection killers (`kill-idle-tx`), constant-time keyset pagination (`keyset-pagination`), atomic upserts (`upsert-conflict`), and row-level temporal audit triggers (`audit-trigger`).
+- **Dieter Rams Field Industrial Cockpit**: High-density hardware capsules (`[SNIPPETS: 8/8]`, `[CATEGORY: PERFORMANCE]`, `[SCOPE: BUILT-IN]`) frame a 40%/60% split browser. View categorized templates on the left and a live syntax-highlighted SQL preview with detailed operational instructions on the right.
+- **Fluid Keyboard Workflow**: Press `Enter` to insert the selected template directly into the active editor buffer, `n` to instantiate it as an independent buffer tab, `Tab` to cycle categories, or `a` to instantly capture the active editor buffer into a persistent custom user snippet stored in `~/.config/ignatius/snippets/`.
+- **Scriptable Headless CLI**: Automate snippet workflows in CI/CD or terminal scripts via `ignatius snippet list`, `ignatius snippet show cache-hit-ratio`, and `ignatius snippet add my-query --file script.sql`.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -375,6 +383,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `}` | Switch to next SQL editor buffer |
 | `{` | Switch to previous SQL editor buffer |
 | `\` | Toggle editor buffer split mode |
+| `;` | Open snippet and scratchpad library |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
