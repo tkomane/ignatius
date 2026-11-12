@@ -1875,6 +1875,47 @@ impl SyntheticSeedState {
     }
 }
 
+/// Interactive SQL snippet and scratchpad library overlay state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnippetLibraryState {
+    /// Pure snippet library holding built-in and user-loaded snippets.
+    pub library: crate::snippet::SnippetLibrary,
+    /// Optional directory where user snippets are persisted.
+    pub directory: Option<std::path::PathBuf>,
+    /// Status or notification message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for SnippetLibraryState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SnippetLibraryState {
+    /// Creates a new snippet library state with default built-ins.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            library: crate::snippet::SnippetLibrary::new(),
+            directory: None,
+            status_message: None,
+        }
+    }
+
+    /// Creates a new snippet library state loaded from a user snippets directory.
+    #[must_use]
+    pub fn with_directory(dir: std::path::PathBuf) -> Self {
+        let mut lib = crate::snippet::SnippetLibrary::new();
+        lib.load_user_directory(&dir);
+        Self {
+            library: lib,
+            directory: Some(dir),
+            status_message: None,
+        }
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -3181,6 +3222,8 @@ pub struct Model {
     pub synthetic_seed: Option<SyntheticSeedState>,
     /// Request counter for in-flight synthetic seed catalog queries.
     pub synthetic_seed_request: u64,
+    /// Interactive snippet and scratchpad library overlay state.
+    pub snippet_library: Option<SnippetLibraryState>,
 }
 
 impl Model {

@@ -4,6 +4,34 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 34 (042-persistent-scratchpad-and-snippet-library) Delivery - 12 November 2026
+
+Resume on branch `feat/042-persistent-scratchpad-and-snippet-library`. Feature
+`042-persistent-scratchpad-and-snippet-library` (the second slice of Milestone 9 Multi-Buffer Editor & Scratchpad Persistence)
+has completed implementation and verification:
+
+- **Wave 34 (`042-persistent-scratchpad-and-snippet-library`)**:
+  delivered the snippet and scratchpad library slice:
+  - Pure `src/snippet/` domain engine for managing curated built-in and user-saved SQL snippets
+    (`Snippet`, `SnippetCategory`: `All`, `Admin`, `Performance`, `Patterns`, `User`, `SnippetLibrary`),
+    category filtering and cycling, search queries, path-traversal safety boundaries, and atomic file persistence.
+  - Curated catalog of 8 production PostgreSQL query templates:
+    `cache-hit-ratio`, `table-sizes`, `active-locks`, `index-bloat`, `kill-idle-tx`, `keyset-pagination`, `upsert-conflict`, `audit-trigger`.
+  - Integrated `SnippetLibraryState` into `Model` in `src/app/model.rs` and wired reducer handlers in `src/app/update.rs`
+    with automatic buffer synchronization and new buffer tab creation.
+  - Dedicated chord and configurable key binding in `src/ui/keymap.rs`, `docs/design/keymap.md`, and `README.md`:
+    - `Ctrl+K ;` (`snippet-library`): open snippet and scratchpad library overlay.
+  - Dieter Rams Field Industrial snippet browser overlay in `src/ui/widgets/overlays.rs`:
+    - Top hardware capsules: `[SNIPPETS: n/total]`, `[CATEGORY: ALL | ADMIN | PERFORMANCE | PATTERNS | USER]`, `[SCOPE: BUILT-IN | USER]`.
+    - Split-pane layout: 40% snippet list with category pills on left; 60% syntax-highlighted SQL preview with description and usage notes on right.
+    - Quick actions: `Enter` insert into active editor buffer, `n` open in new editor tab, `Tab` cycle category, `a` save current buffer as snippet, `d` delete user snippet, `Esc` dismiss.
+  - Headless scriptable CLI subcommand `ignatius snippet` in `src/cli/mod.rs`:
+    - `ignatius snippet list [--category <CAT>] [--format table|json]`
+    - `ignatius snippet show <NAME> [--format sql|json]`
+    - `ignatius snippet add <NAME> [--title <TITLE>] [--description <DESC>] [--category <CAT>] [--sql <SQL> | --file <PATH>]`
+  - Comprehensive acceptance integration contract test suite in `tests/snippet_contract.rs` (5 tests passing) and sidecar unit tests in `src/snippet/tests.rs` (7 tests passing).
+  - Full verification battery passed cleanly (`cargo xtask verify`).
+
 ## Wave 33 (041-multi-tab-and-split-editor-buffers) Delivery - 12 November 2026
 
 Resume on branch `feat/041-multi-tab-and-split-editor-buffers`. Feature

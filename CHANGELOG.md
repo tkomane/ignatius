@@ -8,6 +8,22 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `042-persistent-scratchpad-and-snippet-library` advances Milestone 9
+  (Multi-Buffer Editor & Scratchpad Persistence) with the pure `src/snippet/` snippet
+  and scratchpad library engine; 8 curated production built-in PostgreSQL templates
+  (`cache-hit-ratio`, `table-sizes`, `active-locks`, `index-bloat`, `kill-idle-tx`,
+  `keyset-pagination`, `upsert-conflict`, and `audit-trigger`); category organization
+  (`SnippetCategory`: `All`, `Admin`, `Performance`, `Patterns`, `User`); search and
+  filter capabilities; file persistence for user-defined scratchpads in `~/.config/ignatius/snippets/`
+  with path-traversal safety boundaries; scriptable headless CLI subcommand `ignatius snippet`
+  (`list`, `show <NAME>`, `add <NAME> [--sql <SQL> | --file <PATH>]`, formats: `--format table|json|sql`);
+  and the interactive `Ctrl+K ;` (`snippet-library`) Dieter Rams Field Industrial snippet browser
+  overlay featuring top hardware capsules (`[SNIPPETS: n/total]`, `[CATEGORY: ...]`, `[SCOPE: BUILT-IN | USER]`),
+  dual split layout (left 40% snippet selector list, right 60% syntax-highlighted SQL preview with
+  title, description, and usage instructions), hotkey navigation, category cycling (`Tab`),
+  direct buffer insertion (`Enter`), instant new buffer tab spawning (`n`), buffer capture (`a`),
+  and user snippet deletion (`d`).
+
 - New: Feature `041-multi-tab-and-split-editor-buffers` begins Milestone 9 (Multi-Buffer
   Editor & Scratchpad Persistence) with the pure `src/buffer/` multi-buffer engine;
   support for up to 16 concurrent SQL editor buffers (`EditorBuffer`, `BufferManager`,

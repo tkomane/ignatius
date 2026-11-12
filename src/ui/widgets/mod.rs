@@ -18,7 +18,7 @@ pub(crate) use overlays::{
     render_index_advisor, render_maintenance_ops, render_name_prompt, render_parameter_prompt,
     render_password_prompt, render_plan_confirmation, render_query_performance,
     render_routine_runner, render_schema_diagram, render_schema_diff, render_security_audit,
-    render_server_activity, render_synthetic_seed, render_update_review,
+    render_server_activity, render_snippet_library, render_synthetic_seed, render_update_review,
     render_update_value_prompt, render_wal_observability,
 };
 pub(crate) use palette::{render_connection_details, render_palette};

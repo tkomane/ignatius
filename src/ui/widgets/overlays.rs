@@ -6287,5 +6287,280 @@ pub(crate) fn render_synthetic_seed(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+pub(crate) fn render_snippet_library(
+    state: &crate::app::model::SnippetLibraryState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} SQL SNIPPET & SCRATCHPAD LIBRARY ",
+        presentation.icon(Icon::Editor),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main split workspace
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkeys
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let body_area = chunks[2];
+    let status_area = chunks[3];
+    let footer_area = chunks[4];
+
+    let filtered = state.library.filtered_snippets();
+    let total_count = state.library.total_count();
+
+    // Dieter Rams hardware status capsules
+    let mut capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("SNIPPETS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}/{}", filtered.len(), total_count),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("CATEGORY: ", theme.style(Token::Muted)),
+        Span::styled(
+            state.library.category_filter.label(),
+            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+
+    if let Some(selected) = state.library.selected_snippet() {
+        capsules.push(Span::styled("[", theme.style(Token::Border)));
+        capsules.push(Span::styled("SCOPE: ", theme.style(Token::Muted)));
+        let scope_label = if selected.is_builtin {
+            "BUILT-IN"
+        } else {
+            "USER"
+        };
+        let scope_token = if selected.is_builtin {
+            Token::Text
+        } else {
+            Token::Focus
+        };
+        capsules.push(Span::styled(
+            scope_label,
+            theme.style(scope_token).add_modifier(Modifier::BOLD),
+        ));
+        capsules.push(Span::styled("] ", theme.style(Token::Border)));
+    }
+
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Split body into left (list) and right (preview)
+    let body_split = Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Length(1), // Separator
+            Constraint::Percentage(60),
+        ])
+        .split(body_area);
+
+    let list_area = body_split[0];
+    let sep_area = body_split[1];
+    let preview_area = body_split[2];
+
+    // Draw vertical separator
+    let sep_char = if presentation.glyphs.is_ascii() {
+        "|"
+    } else {
+        "│"
+    };
+    for y in sep_area.y..sep_area.y.saturating_add(sep_area.height) {
+        buf.set_stringn(sep_area.x, y, sep_char, 1, theme.style(Token::Border));
+    }
+
+    // Left pane: snippet list
+    let selected_idx = state
+        .library
+        .selected_idx
+        .min(filtered.len().saturating_sub(1));
+    let mut list_lines = Vec::new();
+
+    if filtered.is_empty() {
+        list_lines.push(Line::from(Span::styled(
+            " No snippets in this category",
+            theme.style(Token::Muted),
+        )));
+    } else {
+        let max_visible = list_area.height as usize;
+        let scroll = if selected_idx >= max_visible {
+            selected_idx.saturating_sub(max_visible - 1)
+        } else {
+            0
+        };
+
+        for (i, snippet) in filtered.iter().enumerate().skip(scroll).take(max_visible) {
+            let is_sel = i == selected_idx;
+            let (badge, badge_token) = match snippet.category {
+                crate::snippet::SnippetCategory::Admin => ("[ADM] ", Token::Warning),
+                crate::snippet::SnippetCategory::Performance => ("[PRF] ", Token::Focus),
+                crate::snippet::SnippetCategory::Patterns => ("[PAT] ", Token::Info),
+                crate::snippet::SnippetCategory::User => ("[USR] ", Token::Success),
+                crate::snippet::SnippetCategory::All => ("[ALL] ", Token::Muted),
+            };
+
+            let line_spans = if is_sel {
+                vec![
+                    Span::styled("> ", theme.style(Token::Focus).add_modifier(Modifier::BOLD)),
+                    Span::styled(badge, theme.style(badge_token).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &snippet.name,
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    ),
+                ]
+            } else {
+                vec![
+                    Span::styled("  ", theme.style(Token::Muted)),
+                    Span::styled(badge, theme.style(badge_token)),
+                    Span::styled(&snippet.name, theme.style(Token::Text)),
+                ]
+            };
+            list_lines.push(Line::from(line_spans));
+        }
+    }
+    Paragraph::new(list_lines).render(list_area, buf);
+
+    // Right pane: SQL preview and details
+    if let Some(snippet) = state.library.selected_snippet() {
+        let mut preview_lines = Vec::new();
+
+        // Header
+        preview_lines.push(Line::from(vec![
+            Span::styled("TITLE: ", theme.style(Token::Muted)),
+            Span::styled(
+                &snippet.title,
+                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        preview_lines.push(Line::from(vec![
+            Span::styled("ABOUT: ", theme.style(Token::Muted)),
+            Span::styled(&snippet.description, theme.style(Token::Info)),
+        ]));
+        preview_lines.push(Line::from(Span::styled(
+            "──────────────────────────────────────────────",
+            theme.style(Token::Border),
+        )));
+
+        // Syntax-highlighted SQL
+        let syntax = crate::query::highlight::tokens(&snippet.sql);
+        let mut start = 0usize;
+        let available_sql_height = (preview_area.height as usize).saturating_sub(4);
+
+        for (line_idx, source) in snippet.sql.lines().enumerate().take(available_sql_height) {
+            let line_start = start;
+            start += source.len() + 1;
+            let line_nr = format!("{:>3} │ ", line_idx + 1);
+            let mut spans = vec![Span::styled(line_nr, theme.style(Token::Muted))];
+
+            let mut run = String::new();
+            let mut run_style: Option<Style> = None;
+            for (byte, ch) in source.char_indices() {
+                let style = theme.style(syntax_token(crate::query::highlight::kind_at(
+                    &syntax,
+                    line_start + byte,
+                )));
+                if run_style != Some(style) {
+                    if let Some(previous) = run_style {
+                        spans.push(Span::styled(std::mem::take(&mut run), previous));
+                    }
+                    run_style = Some(style);
+                }
+                run.push_str(&sanitize_for_display(&ch.to_string()));
+            }
+            if let Some(previous) = run_style {
+                spans.push(Span::styled(run, previous));
+            }
+            preview_lines.push(Line::from(spans));
+        }
+
+        Paragraph::new(preview_lines).render(preview_area, buf);
+    }
+
+    // Status message
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(
+            format!(" * {msg}"),
+            theme.style(Token::Warning),
+        )))
+        .render(status_area, buf);
+    }
+
+    // Hotkey footer
+    let footer_spans = vec![
+        Span::styled(
+            " [Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Insert at Cursor  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[n] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Open in Tab  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Tab] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Cycle Category  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[a] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Add Buffer  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[d] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Delete User  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

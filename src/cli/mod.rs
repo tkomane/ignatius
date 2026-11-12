@@ -311,6 +311,10 @@ pub enum Command {
     /// Synthesize deterministic mock test fixtures across database tables with referential integrity.
     #[command(name = "seed")]
     Seed(SeedArgs),
+
+    /// Inspect, show, or persist reusable SQL snippets and scratchpads.
+    #[command(name = "snippet")]
+    Snippet(SnippetArgs),
 }
 
 /// Arguments for the audit command.
@@ -910,6 +914,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::MaskRules(args)) => run_mask_rules(args, &paths, out, err),
         Some(Command::Sync(args)) => run_sync(args, &paths, out, err),
         Some(Command::Seed(args)) => run_seed(args, &paths, out, err),
+        Some(Command::Snippet(args)) => run_snippet(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -4406,6 +4411,257 @@ fn run_seed(
         writeln!(err, "Synthetic fixtures written to {}", dest.display()).map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for the snippet command.
+#[derive(Debug, Args, Clone)]
+pub struct SnippetArgs {
+    #[command(subcommand)]
+    pub action: SnippetAction,
+}
+
+/// Actions available for the snippet command.
+#[derive(Debug, Subcommand, Clone)]
+pub enum SnippetAction {
+    /// List available built-in and user snippets.
+    List {
+        /// Filter by category: all, admin, performance, patterns, user.
+        #[arg(short = 'c', long, value_enum, default_value = "all")]
+        category: CliSnippetCategory,
+        /// Output format: table or json.
+        #[arg(short = 'f', long, value_enum, default_value = "table")]
+        format: CliSnippetFormat,
+    },
+    /// Display a snippet's SQL or metadata.
+    Show {
+        /// Unique snippet identifier or name.
+        name: String,
+        /// Output format: sql or json.
+        #[arg(short = 'f', long, value_enum, default_value = "sql")]
+        format: CliSnippetShowFormat,
+    },
+    /// Save a reusable SQL snippet to disk.
+    Add {
+        /// Unique snippet name (alphanumeric, hyphens, underscores).
+        name: String,
+        /// Human-readable title.
+        #[arg(short = 't', long)]
+        title: Option<String>,
+        /// Description of the snippet's purpose.
+        #[arg(short = 'd', long)]
+        description: Option<String>,
+        /// Categorical domain: admin, performance, patterns, user.
+        #[arg(short = 'c', long, value_enum, default_value = "user")]
+        category: CliSnippetCategory,
+        /// Path to SQL file to read snippet contents from. Use '-' for stdin.
+        #[arg(short = 'f', long, value_name = "PATH")]
+        file: Option<PathBuf>,
+        /// Inline SQL statement for the snippet.
+        #[arg(short = 's', long, value_name = "SQL", conflicts_with = "file")]
+        sql: Option<String>,
+    },
+}
+
+/// Categorical domain for snippet filtering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliSnippetCategory {
+    All,
+    Admin,
+    Performance,
+    Patterns,
+    User,
+}
+
+impl From<CliSnippetCategory> for crate::snippet::SnippetCategory {
+    fn from(val: CliSnippetCategory) -> Self {
+        match val {
+            CliSnippetCategory::All => Self::All,
+            CliSnippetCategory::Admin => Self::Admin,
+            CliSnippetCategory::Performance => Self::Performance,
+            CliSnippetCategory::Patterns => Self::Patterns,
+            CliSnippetCategory::User => Self::User,
+        }
+    }
+}
+
+/// Output format for snippet listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliSnippetFormat {
+    Table,
+    Json,
+}
+
+/// Output format for snippet display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliSnippetShowFormat {
+    Sql,
+    Json,
+}
+
+fn run_snippet(
+    args: &SnippetArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let snippets_dir = paths.config_dir.join("snippets");
+    let mut library = crate::snippet::SnippetLibrary::new();
+    library.load_user_directory(&snippets_dir);
+
+    match &args.action {
+        SnippetAction::List { category, format } => {
+            let cat: crate::snippet::SnippetCategory = (*category).into();
+            library.category_filter = cat;
+            let snippets = library.filtered_snippets();
+
+            match format {
+                CliSnippetFormat::Json => {
+                    let json = serde_json::to_string_pretty(&snippets).map_err(|e| {
+                        Diagnostic::new(
+                            DiagnosticKind::Usage,
+                            format!("failed to serialize snippets to JSON: {e}"),
+                            "formatting snippet list",
+                        )
+                    })?;
+                    writeln!(out, "{json}").map_err(io_diagnostic)?;
+                }
+                CliSnippetFormat::Table => {
+                    if snippets.is_empty() {
+                        writeln!(err, "No snippets found for the selected category.")
+                            .map_err(io_diagnostic)?;
+                    } else {
+                        writeln!(
+                            out,
+                            "{:<20} {:<12} {:<8} TITLE",
+                            "NAME", "CATEGORY", "BUILTIN"
+                        )
+                        .map_err(io_diagnostic)?;
+                        writeln!(
+                            out,
+                            "{:<20} {:<12} {:<8} -----------------------------------",
+                            "--------------------", "------------", "--------",
+                        )
+                        .map_err(io_diagnostic)?;
+                        for s in snippets {
+                            let builtin_label = if s.is_builtin { "yes" } else { "no" };
+                            writeln!(
+                                out,
+                                "{:<20} {:<12} {:<8} {}",
+                                s.name,
+                                s.category.label(),
+                                builtin_label,
+                                s.title
+                            )
+                            .map_err(io_diagnostic)?;
+                        }
+                    }
+                }
+            }
+        }
+        SnippetAction::Show { name, format } => {
+            let target_name = name.trim().to_lowercase();
+            let snippet = library.snippets.iter().find(|s| {
+                s.id.to_lowercase() == target_name || s.name.to_lowercase() == target_name
+            });
+
+            let Some(snippet) = snippet else {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("snippet '{name}' was not found in library"),
+                    "executing snippet show",
+                )
+                .likely_cause("the snippet name does not exist in built-ins or user library")
+                .next_action("run 'ignatius snippet list' to view available snippets"));
+            };
+
+            match format {
+                CliSnippetShowFormat::Sql => {
+                    writeln!(out, "{}", snippet.sql).map_err(io_diagnostic)?;
+                }
+                CliSnippetShowFormat::Json => {
+                    let json = serde_json::to_string_pretty(snippet).map_err(|e| {
+                        Diagnostic::new(
+                            DiagnosticKind::Usage,
+                            format!("failed to serialize snippet to JSON: {e}"),
+                            "formatting snippet show",
+                        )
+                    })?;
+                    writeln!(out, "{json}").map_err(io_diagnostic)?;
+                }
+            }
+        }
+        SnippetAction::Add {
+            name,
+            title,
+            description,
+            category,
+            file,
+            sql,
+        } => {
+            let content = if let Some(raw_sql) = sql {
+                raw_sql.clone()
+            } else if let Some(path) = file {
+                if path.as_os_str() == "-" {
+                    let mut buffer = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut buffer)
+                        .map_err(io_diagnostic)?;
+                    buffer
+                } else {
+                    std::fs::read_to_string(path).map_err(|e| {
+                        Diagnostic::new(
+                            DiagnosticKind::Usage,
+                            format!("failed to read snippet SQL file {}: {e}", path.display()),
+                            "reading snippet source file",
+                        )
+                        .likely_cause("file does not exist or permission denied")
+                    })?
+                }
+            } else {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "either --sql or --file must be specified",
+                    "adding user snippet",
+                )
+                .next_action(
+                    "provide SQL text via '--sql <SQL>' or '--file <PATH>' (or '--file -' for stdin)",
+                ));
+            };
+
+            if content.trim().is_empty() {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "snippet SQL content cannot be empty",
+                    "adding user snippet",
+                ));
+            }
+
+            let effective_title = title.as_deref().unwrap_or(name.as_str());
+            let effective_desc = description.as_deref().unwrap_or("User-defined snippet.");
+            let cat: crate::snippet::SnippetCategory = (*category).into();
+
+            let saved = library.add_user_snippet(
+                name,
+                effective_title,
+                effective_desc,
+                cat,
+                &content,
+                Some(&snippets_dir),
+            )?;
+
+            if let Some(ref path) = saved.path {
+                writeln!(err, "Saved snippet '{}' to {}", saved.id, path.display())
+                    .map_err(io_diagnostic)?;
+            } else {
+                writeln!(err, "Saved snippet '{}'", saved.id).map_err(io_diagnostic)?;
+            }
+        }
     }
 
     Ok(ExitCode::Success)

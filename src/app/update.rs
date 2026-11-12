@@ -1518,6 +1518,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.synthetic_seed.is_some() {
         return synthetic_seed_action(model, action);
     }
+    if model.snippet_library.is_some() {
+        return snippet_library_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1723,6 +1726,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.buffers.cycle_split_mode();
             Vec::new()
         }
+        Action::SnippetLibrary => snippet_library_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3734,6 +3738,108 @@ fn synthetic_seed_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         _ => {}
     }
+    Vec::new()
+}
+
+/// Opens the persistent scratchpad and snippet library overlay.
+fn snippet_library_open(model: &mut Model) -> Vec<Effect> {
+    if model.snippet_library.is_none() {
+        let config_dir = crate::config::Paths::resolve().config_dir;
+        let snippets_dir = config_dir.join("snippets");
+        model.snippet_library = Some(crate::app::model::SnippetLibraryState::with_directory(
+            snippets_dir,
+        ));
+    }
+    Vec::new()
+}
+
+/// Handles input while the snippet and scratchpad library overlay is on screen.
+fn snippet_library_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(mut state) = model.snippet_library.take() else {
+        return Vec::new();
+    };
+
+    match action {
+        Action::Dismiss | Action::SnippetLibrary => {
+            model.snippet_library = None;
+            return Vec::new();
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            state.library.move_selection(-1);
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            state.library.move_selection(1);
+        }
+        Action::Insert('\t') | Action::FocusNext => {
+            state.library.cycle_category();
+        }
+        Action::Activate | Action::Insert('\n') => {
+            if let Some(snippet) = state.library.selected_snippet() {
+                let sql = snippet.sql.clone();
+                edit_editor(model, |editor| {
+                    if editor.text().trim().is_empty() {
+                        editor.set_text(sql);
+                    } else {
+                        editor.insert_paste(&format!("\n\n{sql}"));
+                    }
+                });
+                model.snippet_library = None;
+                model.focus = Focus::Editor;
+                return Vec::new();
+            }
+        }
+        Action::Insert('n' | 'N') => {
+            if let Some(snippet) = state.library.selected_snippet() {
+                let sql = snippet.sql.clone();
+                let title = format!("{}.sql", snippet.name);
+                model.sync_active_buffer_from_editor();
+                model.buffers.new_buffer(Some(title), Some(sql));
+                model.sync_editor_from_active_buffer();
+                model.snippet_library = None;
+                model.focus = Focus::Editor;
+                return Vec::new();
+            }
+        }
+        Action::Insert('a' | 'A') => {
+            let text = model.editor.text().trim().to_string();
+            if !text.is_empty() {
+                let count = state.library.total_count() + 1;
+                let name = format!("user-snippet-{count}");
+                let _ = state.library.add_user_snippet(
+                    &name,
+                    &name,
+                    "Saved from active editor buffer.",
+                    crate::snippet::SnippetCategory::User,
+                    &text,
+                    state.directory.as_deref(),
+                );
+                state.status_message = Some(format!("Saved buffer as snippet '{name}'"));
+            } else {
+                state.status_message = Some("Active editor buffer is empty".into());
+            }
+        }
+        Action::Insert('d' | 'D') => {
+            if let Some(selected) = state.library.selected_snippet() {
+                if !selected.is_builtin {
+                    let id = selected.id.clone();
+                    if let Some(path) = &selected.path {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    state.library.snippets.retain(|s| s.id != id);
+                    state.status_message = Some(format!("Deleted user snippet '{id}'"));
+                } else {
+                    state.status_message = Some("Cannot delete built-in snippet".into());
+                }
+            }
+        }
+        _ => {}
+    }
+
+    model.snippet_library = Some(state);
     Vec::new()
 }
 

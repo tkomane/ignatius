@@ -419,7 +419,8 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::CloseEditorBuffer
         | Action::NextEditorBuffer
         | Action::PrevEditorBuffer
-        | Action::ToggleEditorSplit => true,
+        | Action::ToggleEditorSplit
+        | Action::SnippetLibrary => true,
         Action::BeginPrefix => false,
         Action::ToggleErrorDetail => model.error.is_some(),
         Action::Dismiss => {
@@ -640,7 +641,8 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::CloseEditorBuffer
         | Action::NextEditorBuffer
         | Action::PrevEditorBuffer
-        | Action::ToggleEditorSplit => "this surface to close first".to_owned(),
+        | Action::ToggleEditorSplit
+        | Action::SnippetLibrary => "this surface to close first".to_owned(),
         Action::Move(_) => "focus a pane with something to move through".to_owned(),
         Action::Activate => {
             if ctx.focus == Focus::Results {
@@ -709,7 +711,10 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ShowDefinition
         | Action::ShowDependencies
         | Action::SchemaDiagram => "Objects",
-        Action::OpenQuery | Action::OpenHistory | Action::ToggleHistoryRecording => "Files/History",
+        Action::OpenQuery
+        | Action::OpenHistory
+        | Action::ToggleHistoryRecording
+        | Action::SnippetLibrary => "Files/History",
         Action::OpenConnectionPicker
         | Action::SwitchTheme
         | Action::ServerActivity

@@ -132,6 +132,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `}` | Switch to next SQL editor buffer |
 | `{` | Switch to previous SQL editor buffer |
 | `\` | Toggle editor buffer split mode |
+| `;` | Open snippet and scratchpad library |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -325,6 +326,16 @@ With the workbench active, buffer chords manage the multi-tab and split SQL edit
 - `Ctrl+K }` (`next-buffer`) cycles to the next editor buffer.
 - `Ctrl+K {` (`prev-buffer`) cycles to the previous editor buffer.
 - `Ctrl+K \` (`split-buffer`) toggles dual split-buffer editing mode between `OFF`, `VERTICAL` (side-by-side), and `HORIZONTAL` (stacked).
+
+With the workbench active, `Ctrl+K ;` (`snippet-library`) opens the persistent scratchpad and snippet library cockpit:
+- `Enter` inserts the selected snippet directly into the active editor buffer at the cursor.
+- `n` or `Ctrl+O` opens the selected snippet into a new editor buffer tab.
+- `Tab` cycles the category filter (`ALL`, `ADMIN`, `PERFORMANCE`, `PATTERNS`, `USER`).
+- `a` captures the current editor buffer and saves it as a reusable user snippet.
+- `d` deletes the selected user snippet from disk with confirmation.
+- `j`, `k`, `Up`, `Down` navigate the snippet list.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius snippet` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -575,7 +586,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

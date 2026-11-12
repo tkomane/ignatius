@@ -45,6 +45,7 @@ pub mod queries;
 pub mod query;
 pub mod routine;
 pub mod seed;
+pub mod snippet;
 pub mod sync;
 pub mod telemetry;
 pub mod transfer;
