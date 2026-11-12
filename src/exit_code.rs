@@ -10,6 +10,8 @@
 pub enum ExitCode {
     /// The command completed and every statement succeeded.
     Success = 0,
+    /// A lint run found at least one issue at or above the requested threshold.
+    Findings = 1,
     /// The command line could not be parsed, or arguments conflict.
     Usage = 2,
     /// Configuration is missing, invalid, or could not be migrated.
@@ -42,6 +44,7 @@ impl ExitCode {
     pub const fn slug(self) -> &'static str {
         match self {
             Self::Success => "success",
+            Self::Findings => "findings",
             Self::Usage => "usage",
             Self::Config => "config",
             Self::Connection => "connection",
@@ -56,9 +59,10 @@ impl ExitCode {
 
     /// Every exit code, in numeric order. Used to document and test the contract.
     #[must_use]
-    pub const fn all() -> [Self; 10] {
+    pub const fn all() -> [Self; 11] {
         [
             Self::Success,
+            Self::Findings,
             Self::Usage,
             Self::Config,
             Self::Connection,

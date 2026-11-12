@@ -62,9 +62,10 @@ reviewing the plan. `--dry-run` remains available without the flag.
   `SAVEPOINT` or `RELEASE` is refused: the runner owns the transaction.
 - FR-4510: `ignatius migrate verify` checks checksums only and exits 1 on
   drift or missing files.
-- FR-4511: Interactive overlay (`Ctrl+K :`, bindable `migrations`) lists the
-  same statuses, `p` shows the plan, `a` applies after an explicit
-  confirmation, `r` rescans. No write occurs without the confirmation.
+- FR-4511: There is no interactive apply surface. The CLI is the reviewed
+  route: it can be scripted, its flags are visible in the pipeline, and the
+  full-screen client already has a separate reviewed schema-diff overlay for
+  ad-hoc DDL. A second write path would be harder to audit, not easier.
 - FR-4512: The ledger insert and migration run use the same session and the
   same transaction. Nothing is applied twice.
 

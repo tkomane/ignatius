@@ -39,7 +39,7 @@
   - `Status { dir, format }`
   - `Plan { dir, to, format }`
   - `Apply { dir, to, dry_run, allow_production, format }`
-  - `Verify { dir, format }`
+  - `Verify { dir }` (table output; exit 1 on drift or a missing file)
 - Shared `--dir` default `migrations`, `--format table|json` (`plan` adds
   `sql`), `--to`, `--dry-run`, `--allow-production`.
 - Exit 1 for drift/missing on verify, 7 for a failed migration, 2 for bad
@@ -47,13 +47,14 @@
 - Production guard inspects the resolved target environment before connecting;
   `--dry-run` bypasses only the write guard, not drift checks.
 
-## 4. TUI Integration
+## 4. Surface decision
 
-- `Action::Migrations`, `Model.migrations: Option<MigrationViewState>`.
-- `Ctrl+K :` (`migrations`) opens the overlay; `p` plan, `a` apply with a
-  confirmation layer, `r` rescan, `Esc` dismiss.
-- Loading is an effect; the reducer never reads files or the database.
-- Applying requires a second confirmation action and shows the pending count.
+- No TUI integration in this slice. Migration apply is a release-pipeline
+  action; the CLI keeps the directory, `--to`, dry-run and production flag in
+  the operator's visible command, and the existing `Ctrl+K k` schema diff
+  remains the reviewed ad-hoc DDL surface.
+- This is recorded in the specification (FR-4511) rather than left as an
+  unimplemented task.
 
 ## 5. Tests
 
@@ -65,7 +66,7 @@
   advisory-lock serialization where practical.
 - `tests/migration_contract.rs`: CLI status/plan/verify/apply, dry-run writes
   nothing, production guard, exit codes, JSON shapes.
-- Reducer and overlay tests for confirm/no-write paths.
+
 
 ## 6. Documentation
 

@@ -1939,6 +1939,42 @@ impl SessionRecoveryBanner {
     }
 }
 
+/// Interactive state of the offline SQL lint findings overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LintFindingsState {
+    /// Findings for the current buffer, deterministically ordered.
+    pub findings: Vec<crate::lint::Finding>,
+    /// Selected finding index.
+    pub selected: usize,
+}
+
+impl LintFindingsState {
+    /// Builds the overlay for one lint run.
+    #[must_use]
+    pub fn new(findings: Vec<crate::lint::Finding>) -> Self {
+        Self {
+            findings,
+            selected: 0,
+        }
+    }
+
+    /// Moves the selection within bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        if self.findings.is_empty() {
+            self.selected = 0;
+            return;
+        }
+        let last = self.findings.len() - 1;
+        self.selected = self.selected.saturating_add_signed(delta).min(last);
+    }
+
+    /// The selected finding, if any.
+    #[must_use]
+    pub fn selected_finding(&self) -> Option<&crate::lint::Finding> {
+        self.findings.get(self.selected)
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -3249,6 +3285,8 @@ pub struct Model {
     pub snippet_library: Option<SnippetLibraryState>,
     /// Active crash recovery notification banner, if unrecovered session found at startup.
     pub recovery_banner: Option<SessionRecoveryBanner>,
+    /// Active offline lint findings overlay, when one is open.
+    pub lint_findings: Option<LintFindingsState>,
 }
 
 impl Model {

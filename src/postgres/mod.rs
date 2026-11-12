@@ -3,6 +3,7 @@
 //! This is the only module that knows the driver exists. Everything above it
 //! works with the pure types in [`crate::query`] and [`crate::diagnostics`].
 
+mod dbdoc;
 pub mod error;
 pub mod metadata;
 mod notices;

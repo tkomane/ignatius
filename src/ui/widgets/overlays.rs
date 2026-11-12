@@ -6562,5 +6562,149 @@ pub(crate) fn render_snippet_library(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Draws the offline SQL lint findings overlay.
+pub(crate) fn render_lint_findings(
+    state: &crate::app::model::LintFindingsState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(84) / 100)
+        .max(60)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(70) / 100)
+        .max(12)
+        .min(area.height);
+    let modal_area = Rect::new(
+        area.x + (area.width.saturating_sub(modal_width)) / 2,
+        area.y + (area.height.saturating_sub(modal_height)) / 2,
+        modal_width,
+        modal_height,
+    );
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+    overlay_block(" SQL LINT - OFFLINE ".to_owned(), presentation).render(modal_area, buf);
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let errors = state
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == crate::lint::LintSeverity::Error)
+        .count();
+    let warnings = state
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == crate::lint::LintSeverity::Warning)
+        .count();
+    let header = format!(
+        "[FINDINGS: {}] [ERRORS: {errors}] [WARNINGS: {warnings}]",
+        state.findings.len()
+    );
+    Paragraph::new(Line::from(Span::styled(
+        header,
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+    )))
+    .render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+
+    let footer_area = Rect::new(
+        inner.x,
+        inner.y + inner.height.saturating_sub(1),
+        inner.width,
+        1,
+    );
+    let body_height = usize::from(inner.height.saturating_sub(3));
+    let body_area = Rect::new(
+        inner.x,
+        inner.y.saturating_add(2),
+        inner.width,
+        inner.height.saturating_sub(3),
+    );
+
+    if state.findings.is_empty() {
+        Paragraph::new(Line::from(Span::styled(
+            "No findings. The buffer is clean.",
+            theme.style(Token::Success),
+        )))
+        .render(body_area, buf);
+    } else {
+        let mut lines = Vec::new();
+        let start = state.selected.saturating_sub(body_height.saturating_sub(1));
+        for (index, finding) in state
+            .findings
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(body_height)
+        {
+            let selected = index == state.selected;
+            let severity_style = match finding.severity {
+                crate::lint::LintSeverity::Error => theme.style(Token::Danger),
+                crate::lint::LintSeverity::Warning => theme.style(Token::Warning),
+                crate::lint::LintSeverity::Info => theme.style(Token::Muted),
+            };
+            let marker = if selected { ">" } else { " " };
+            let mut spans = vec![
+                Span::styled(
+                    format!("{marker} "),
+                    theme.style(if selected {
+                        Token::Selection
+                    } else {
+                        Token::Muted
+                    }),
+                ),
+                Span::styled(
+                    format!("{:<7} ", finding.severity.label()),
+                    severity_style.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{}:{} ", finding.line, finding.column),
+                    theme.style(Token::Muted),
+                ),
+                Span::styled(format!("{} ", finding.code), theme.style(Token::Info)),
+                Span::styled(
+                    sanitize_for_display(&finding.message),
+                    if selected {
+                        theme.style(Token::Text).add_modifier(Modifier::BOLD)
+                    } else {
+                        theme.style(Token::Text)
+                    },
+                ),
+            ];
+            if !finding.excerpt.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {}", sanitize_for_display(&finding.excerpt)),
+                    theme.style(Token::Muted),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(body_area, buf);
+    }
+
+    Paragraph::new(Line::from(vec![
+        Span::styled("Enter ", theme.style(Token::Info)),
+        Span::styled("jump  ", theme.style(Token::Muted)),
+        Span::styled("r ", theme.style(Token::Info)),
+        Span::styled("re-lint  ", theme.style(Token::Muted)),
+        Span::styled("Esc ", theme.style(Token::Info)),
+        Span::styled("close", theme.style(Token::Muted)),
+    ]))
+    .render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

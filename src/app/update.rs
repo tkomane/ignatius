@@ -1521,6 +1521,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.snippet_library.is_some() {
         return snippet_library_action(model, action);
     }
+    if model.lint_findings.is_some() {
+        return lint_findings_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1729,6 +1732,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::SnippetLibrary => snippet_library_open(model),
         Action::RestoreSession => restore_session_action(model),
         Action::DiscardRecovery => discard_recovery_action(model),
+        Action::LintBuffer => lint_buffer_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3822,6 +3826,59 @@ fn discard_recovery_action(model: &mut Model) -> Vec<Effect> {
         model.error = Some(diagnostic);
     }
     Vec::new()
+}
+
+/// Lints the active buffer and opens the findings overlay.
+///
+/// The linter is pure and local: this reducer never connects, writes a file or
+/// executes SQL. An empty editor is a no-op because a clean run there says
+/// nothing useful.
+fn lint_buffer_open(model: &mut Model) -> Vec<Effect> {
+    if model.editor.text().trim().is_empty() {
+        return Vec::new();
+    }
+    let report = crate::lint::lint_source(None, model.editor.text());
+    model.lint_findings = Some(crate::app::model::LintFindingsState::new(report.findings));
+    Vec::new()
+}
+
+/// Handles input while the lint findings overlay is on screen.
+fn lint_findings_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let Some(mut state) = model.lint_findings.take() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Move(Direction::Up) => {
+            state.move_selection(-1);
+            model.lint_findings = Some(state);
+            Vec::new()
+        }
+        Action::Move(Direction::Down) => {
+            state.move_selection(1);
+            model.lint_findings = Some(state);
+            Vec::new()
+        }
+        Action::Activate => {
+            if let Some(finding) = state.selected_finding() {
+                model.editor.set_position(finding.line, finding.column);
+                model.sync_active_buffer_from_editor();
+            }
+            Vec::new()
+        }
+        Action::Insert('r') => lint_buffer_open(model),
+        Action::Dismiss => Vec::new(),
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        _ => {
+            // An unhandled key keeps the overlay open, like every other
+            // browser-style overlay. Closing it here would hide findings on a
+            // stray keystroke and then apply that key to the editor.
+            model.lint_findings = Some(state);
+            Vec::new()
+        }
+    }
 }
 
 /// Handles input while the snippet and scratchpad library overlay is on screen.

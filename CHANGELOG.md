@@ -8,6 +8,33 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `046-schema-documentation-generator` advances Milestone 10 with a
+  deterministic data dictionary generated from catalog metadata. The pure `src/dbdoc/`
+  model renders Markdown with a table of contents, stable JSON, or a Mermaid `erDiagram`;
+  it documents tables, views, materialized views, columns, types, nullability, defaults,
+  primary and foreign keys, indexes, constraints, comments, row estimates and RLS
+  policies. Reads are bounded to 500 relations and 5000 columns with truncation stated.
+  `ignatius docs <target> --schema public --format markdown|json|mermaid [--output PATH] [--force]`
+  is read-only and never includes table rows, credentials or connection strings.
+
+- New: Feature `045-migration-runner-and-ledger` advances Milestone 10 with a
+  forward-only migration runner. `ignatius migrate status|plan|apply|verify` discovers
+  `<version>_<name>.sql` files, checksums exact bytes with SHA-256, and records applied
+  versions in `ignatius_schema_migrations`. Drift and missing applied files refuse the
+  whole run; each migration and its ledger row commit in one transaction; a failure
+  rolls that migration back and stops. Concurrent runners serialize on an advisory lock.
+  Production targets require `--allow-production`; migration files may not contain
+  transaction control because the runner owns the transaction.
+
+- New: Feature `044-sql-linter-and-safety-analyzer` advances Milestone 10 with an
+  offline SQL linter. Thirteen deterministic rules cover missing `WHERE` clauses,
+  `TRUNCATE`, `DROP`, `GRANT ALL`, blocking index builds, `VACUUM FULL`, `SELECT *`,
+  leading-wildcard `LIKE`, non-sargable predicates, implicit cross joins and DDL
+  outside a transaction. Protected literals, identifiers, dollar bodies and comments
+  are masked before matching. `ignatius lint` supports table, JSON and SARIF reports,
+  `--min-severity`, `--fail-on` and exit code 1; `Ctrl+K !` opens an interactive
+  findings overlay that jumps the caret to a finding. It never connects or executes SQL.
+
 - New: Feature `043-session-state-and-crash-recovery` completes Milestone 9
   (Multi-Buffer Editor & Scratchpad Persistence) with an atomic session journal
   under `<data_dir>/recovery/session_journal.json`. Unsaved buffers are
