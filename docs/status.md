@@ -4,6 +4,36 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 31 (039-cross-database-copy-and-sync-pipelines) Delivery - 12 November 2026
+
+Resume on branch `feat/039-cross-database-copy-and-sync-pipelines`. Feature
+`039-cross-database-copy-and-sync-pipelines` (the second M8 Cross-Environment Synchronization & Masking slice)
+has completed implementation and verification:
+
+- **Wave 31 (`039-cross-database-copy-and-sync-pipelines`)**:
+  delivered the second M8 cross-environment synchronization slice:
+  - Pure `src/sync/` domain engine for topological DAG ordering via Kahn's algorithm over foreign key
+    dependencies (`TableKey`, `ForeignKeyEdge`, `DependencyNode`, `DependencyGraph`), calculating
+    deterministic parent-first insertion order and reverse child-first truncation order, detecting cycles
+    (`has_cycles`, `cyclic_tables`), and tracking transfer progress (`SyncTableStatus`, `SyncTableProgress`, `SyncReport`).
+  - Live PostgreSQL catalog extractor in `Session::discover_table_dependencies` and streaming binary COPY
+    executor in `Session::execute_sync_pipeline` and `Session::copy_table_to_target` (streaming 64 KiB chunks
+    directly between source socket and target socket with bounded memory overhead).
+  - Headless scriptable CLI subcommand `ignatius sync`:
+    - `-s, --source <SOURCE_TARGET>`: source database connection target.
+    - `-t, --target <TARGET_TARGET>`: target database connection target.
+    - `--schema <SCHEMA>`, `--table <TABLE>`: schema and table filtering.
+    - `--truncate`, `--cascade`: reverse-topological target table clearing before insertion.
+    - `--dry-run`: safe-by-default execution planning and row-count verification without writes.
+    - `-f, --format table|json|plain`, `-o, --output`, `--force`: report formatting and overwrite protection.
+  - Interactive Field Industrial TUI Cross-Database Sync Pipelines cockpit on `Ctrl+K |` (`data-sync`):
+    - Dieter Rams hardware capsules: `[TABLES]`, `[TOPOLOGY]`, `[MODE]`, `[TRUNCATE]`, `[PROTOCOL]`.
+    - Tabbed view: `[1] Dependency Graph & Sync Plan` (topological insertion order with in-degree and parent relationships),
+      `[2] Live Transfer Telemetry` (live rows copied, bytes transferred, elapsed time, status).
+    - Hotkeys: `[1]`/`[2]` quick tab switching, `[d]` toggle dry-run, `[t]` toggle truncate, `[r]` refresh, `Esc` close.
+  - Comprehensive contract integration test suite in `tests/sync_pipeline_contract.rs` verified against live PostgreSQL container.
+  - Full verification battery passed cleanly (`cargo xtask verify`).
+
 ## Wave 30 (038-data-masking-and-anonymization-rules) Delivery - 12 November 2026
 
 Resume on branch `feat/038-data-masking-and-anonymization-rules`. Feature

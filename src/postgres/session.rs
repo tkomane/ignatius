@@ -400,6 +400,172 @@ impl Session {
         crate::postgres::metadata::analyze_data_masking(&self.client, schema).await
     }
 
+    /// Discovers table dependencies (foreign keys) and constructs a topological graph.
+    pub async fn discover_table_dependencies(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::sync::DependencyGraph, Diagnostic> {
+        let _guard = self.user_sql_gate.lock().await;
+        crate::postgres::metadata::discover_table_dependencies(&self.client, schema).await
+    }
+
+    /// Copies an individual table from this session (source) to a target session using binary streaming COPY.
+    pub async fn copy_table_to_target(
+        &self,
+        target_session: &Session,
+        table: &crate::sync::TableKey,
+        truncate: bool,
+        cascade: bool,
+        dry_run: bool,
+    ) -> Result<crate::sync::SyncTableProgress, Diagnostic> {
+        use futures_util::{SinkExt, StreamExt};
+
+        let start = std::time::Instant::now();
+        if dry_run {
+            let count_sql = format!("SELECT count(*) FROM {}", table.qualified_sql());
+            let row = self
+                .client
+                .query_one(&count_sql, &[])
+                .await
+                .map_err(|e| from_query_error(&e, 0))?;
+            let count: i64 = row.get(0);
+            return Ok(crate::sync::SyncTableProgress {
+                key: table.clone(),
+                status: crate::sync::SyncTableStatus::Completed,
+                rows_copied: count as u64,
+                bytes_transferred: 0,
+                duration_ms: start.elapsed().as_millis() as u64,
+                message: Some("Dry-run verified".to_string()),
+            });
+        }
+
+        if truncate {
+            let cascade_clause = if cascade { " CASCADE" } else { "" };
+            let trunc_sql = format!("TRUNCATE TABLE {}{cascade_clause}", table.qualified_sql());
+            target_session
+                .client
+                .batch_execute(&trunc_sql)
+                .await
+                .map_err(|e| from_query_error(&e, 0))?;
+        }
+
+        let copy_out_sql = format!("COPY {} TO STDOUT (FORMAT BINARY)", table.qualified_sql());
+        let copy_in_sql = format!("COPY {} FROM STDIN (FORMAT BINARY)", table.qualified_sql());
+
+        let stream = self
+            .client
+            .copy_out(&copy_out_sql)
+            .await
+            .map_err(|e| from_query_error(&e, 0))?;
+        let sink = target_session
+            .client
+            .copy_in(&copy_in_sql)
+            .await
+            .map_err(|e| from_query_error(&e, 0))?;
+
+        let mut stream = std::pin::pin!(stream);
+        let mut sink = std::pin::pin!(sink);
+
+        let mut bytes_transferred: u64 = 0;
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(|e| from_query_error(&e, 0))?;
+            bytes_transferred += chunk.len() as u64;
+            sink.as_mut()
+                .send(chunk)
+                .await
+                .map_err(|e| from_query_error(&e, 0))?;
+        }
+        let rows_copied = sink.finish().await.map_err(|e| from_query_error(&e, 0))?;
+
+        Ok(crate::sync::SyncTableProgress {
+            key: table.clone(),
+            status: crate::sync::SyncTableStatus::Completed,
+            rows_copied,
+            bytes_transferred,
+            duration_ms: start.elapsed().as_millis() as u64,
+            message: None,
+        })
+    }
+
+    /// Executes an end-to-end topological cross-database copy and synchronization pipeline.
+    pub async fn execute_sync_pipeline(
+        &self,
+        target_session: &Session,
+        schema: Option<&str>,
+        filter_tables: &[String],
+        truncate: bool,
+        cascade: bool,
+        dry_run: bool,
+    ) -> Result<crate::sync::SyncReport, Diagnostic> {
+        let start = std::time::Instant::now();
+        let graph = self.discover_table_dependencies(schema).await?;
+
+        let filtered_graph = if filter_tables.is_empty() {
+            graph
+        } else {
+            let requested_tables: std::collections::HashSet<&str> =
+                filter_tables.iter().map(String::as_str).collect();
+            let matched_tables: Vec<crate::sync::TableKey> = graph
+                .nodes
+                .iter()
+                .filter(|n| requested_tables.contains(n.key.table.as_str()))
+                .map(|n| n.key.clone())
+                .collect();
+            let mut matched_edges = Vec::new();
+            for n in &graph.nodes {
+                if requested_tables.contains(n.key.table.as_str()) {
+                    for p in &n.parents {
+                        if requested_tables.contains(p.table.as_str()) {
+                            matched_edges.push(crate::sync::ForeignKeyEdge {
+                                from: n.key.clone(),
+                                to: p.clone(),
+                                constraint_name: String::new(),
+                            });
+                        }
+                    }
+                }
+            }
+            crate::sync::DependencyGraph::build(&matched_tables, &matched_edges)
+        };
+
+        let plan = filtered_graph.compute_sync_plan();
+
+        if truncate && !dry_run {
+            for table in &plan.truncate_order {
+                let cascade_clause = if cascade { " CASCADE" } else { "" };
+                let trunc_sql = format!("TRUNCATE TABLE {}{cascade_clause}", table.qualified_sql());
+                target_session
+                    .client
+                    .batch_execute(&trunc_sql)
+                    .await
+                    .map_err(|e| from_query_error(&e, 0))?;
+            }
+        }
+
+        let mut table_progress = Vec::with_capacity(plan.insert_order.len());
+        let mut total_rows = 0;
+        let mut total_bytes = 0;
+
+        for table in &plan.insert_order {
+            let res = self
+                .copy_table_to_target(target_session, table, false, false, dry_run)
+                .await?;
+            total_rows += res.rows_copied;
+            total_bytes += res.bytes_transferred;
+            table_progress.push(res);
+        }
+
+        Ok(crate::sync::SyncReport {
+            source_endpoint: self.info.target.clone(),
+            target_endpoint: target_session.info.target.clone(),
+            total_rows,
+            total_bytes,
+            total_duration_ms: start.elapsed().as_millis() as u64,
+            has_cycles: plan.has_cycles,
+            table_progress,
+        })
+    }
+
     /// Discovers routine signatures in the database with optional schema and name filtering.
     pub async fn discover_routines(
         &self,

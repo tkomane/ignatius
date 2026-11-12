@@ -43,6 +43,7 @@ pub mod postgres;
 pub mod queries;
 pub mod query;
 pub mod routine;
+pub mod sync;
 pub mod telemetry;
 pub mod transfer;
 pub mod ui;

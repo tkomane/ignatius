@@ -1075,6 +1075,29 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::DataSyncLoaded { request, result } => {
+            if model.data_sync_request != request {
+                return Vec::new();
+            }
+            if let Some(sync) = &mut model.data_sync {
+                sync.loading = false;
+                match *result {
+                    Ok(graph) => {
+                        let plan = graph.compute_sync_plan();
+                        sync.plan = Some(plan);
+                        sync.graph = Some(graph);
+                        sync.status_message = None;
+                    }
+                    Err(diag) => {
+                        sync.status_message = Some(format!(
+                            "Sync dependency discovery failed: {}",
+                            diag.headline
+                        ));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1466,6 +1489,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.data_masking.is_some() {
         return data_masking_action(model, action);
     }
+    if model.data_sync.is_some() {
+        return data_sync_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1640,6 +1666,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::WalObservability => wal_observability_open(model),
         Action::ConnectionPool => connection_pool_open(model),
         Action::DataMasking => data_masking_open(model),
+        Action::DataSync => data_sync_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3491,6 +3518,83 @@ fn data_masking_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.data_masking_request = model.data_masking_request.wrapping_add(1);
             let request = model.data_masking_request;
             return vec![Effect::LoadDataMasking {
+                request,
+                schema: None,
+            }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the Cross-Database Copy and Sync Pipelines overlay.
+fn data_sync_open(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::DataSyncState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.data_sync_request = model.data_sync_request.wrapping_add(1);
+    let request = model.data_sync_request;
+    model.data_sync = Some(state);
+
+    vec![Effect::LoadDataSync {
+        request,
+        schema: None,
+    }]
+}
+
+/// Handles input while the cross-database copy and sync overlay is on screen.
+fn data_sync_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::DataSync => {
+            model.data_sync = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.set_tab(1);
+            }
+        }
+        Action::Insert('d' | 'D') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.toggle_dry_run();
+            }
+        }
+        Action::Insert('t' | 'T') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.toggle_truncate();
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(sync) = &mut model.data_sync {
+                sync.loading = true;
+            }
+            model.data_sync_request = model.data_sync_request.wrapping_add(1);
+            let request = model.data_sync_request;
+            return vec![Effect::LoadDataSync {
                 request,
                 schema: None,
             }];

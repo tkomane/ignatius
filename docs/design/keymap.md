@@ -125,6 +125,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `&` | Open transaction, WAL, and checkpointer observability |
 | `*` | Open connection pool and pgbouncer telemetry |
 | `)` | Open data masking and anonymization rules |
+| `|` | Open cross-database copy and sync pipelines |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -286,6 +287,19 @@ safe anonymized view DDL. Inside the overlay:
 - `r` refreshes PII heuristics and table column candidates from the catalog.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius mask-rules` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K |` (`data-sync`) opens the Cross-Database
+Copy and Sync Pipelines cockpit, inspecting table foreign key dependency graphs,
+calculating Kahn topological insertion/truncation order, detecting dependency cycles,
+and monitoring live streaming binary COPY transfers between source and target databases.
+Inside the overlay:
+- `1`, `2` switch between tabs (`Dependency Graph & Sync Plan`, `Live Transfer Telemetry`).
+- `Up` / `Down` or `k` / `j` navigates discovered tables in topological order.
+- `s` initiates the topological cross-database streaming synchronization pipeline.
+- `d` toggles dry-run verification mode.
+- `r` refreshes foreign key dependencies and table catalogs.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius sync` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -536,7 +550,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

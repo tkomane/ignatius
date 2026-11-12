@@ -356,6 +356,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `&` | Open transaction, WAL, and checkpointer observability |
 | `*` | Open connection pool and pgbouncer telemetry |
 | `)` | Open data masking and anonymization rules |
+| `|` | Open cross-database copy and sync pipelines |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -585,13 +586,20 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - **Field Industrial TUI Overlay (`Ctrl+K )` / `data-masking`)**: Dieter Rams hardware capsules (`[CANDIDATES]`, `[POLICIES]`, `[VIEW PREFIX]`, `[ENGINE]`), tabbed navigation across `[1] Sensitive Columns & Rules` (with live in-place rule cycling via `Space`/`Enter`) and `[2] Generated Masked Views SQL`, and hotkey `[c]` to copy generated SQL via OSC 52.
   - **Non-Interactive CLI (`ignatius mask-rules`)**: Scriptable masking analysis with `-s, --schema`, `--view-prefix`, `-f, --format table|json|plain|sql`, `-o, --output`, and `--force`.
 
+- **`039-cross-database-copy-and-sync-pipelines` (Cross-Database Copy & Sync Pipelines) [Implemented]:**
+  - **Topological DAG Dependency Ordering**: Kahn's topological sorting algorithm over foreign key graphs (`pg_constraint`), calculating deterministic parent-first insertion order and reverse child-first truncation order with foreign key cycle detection.
+  - **Binary Streaming COPY Pipelines**: High-performance, constant-memory chunk streaming (64 KiB chunks) directly between source socket (`COPY ... TO STDOUT (FORMAT BINARY)`) and target socket (`COPY ... FROM STDIN (FORMAT BINARY)`) without full-table memory buffering.
+  - **Safety by Construction**: Safe-by-default dry-run verification, guarded reverse-topological truncation (`--truncate`, `--cascade`), and deferred constraint handling.
+  - **Field Industrial TUI Overlay (`Ctrl+K |` / `data-sync`)**: Dieter Rams hardware status capsules (`[TABLES]`, `[TOPOLOGY]`, `[MODE]`, `[TRUNCATE]`, `[PROTOCOL]`), tabbed navigation across `[1] Dependency Graph & Sync Plan` and `[2] Live Transfer Telemetry`, and keyboard toggles (`[d]` dry-run, `[t]` truncate, `[r]` refresh).
+  - **Non-Interactive CLI (`ignatius sync`)**: Scriptable streaming pipelines with `-s, --source`, `-t, --target`, `--schema`, `--table`, `--truncate`, `--cascade`, `--dry-run`, `-f, --format table|json|plain`, `-o, --output`, and `--force`.
+
 ---
 
 ## Roadmap: Beyond Milestone 8
 
 - **Milestone 8: Cross-Environment Data Sync & Masking (`038` - `040`)**:
   - `038-data-masking-and-anonymization-rules` [Implemented]: PII/GDPR redaction, deterministic pseudonymization, and virtual view overlays.
-  - `039-cross-database-copy-and-sync-pipelines`: Dual-connection streaming copy between staging and dev with foreign key dependency ordering.
+  - `039-cross-database-copy-and-sync-pipelines` [Implemented]: Dual-connection streaming copy between staging and dev with foreign key dependency ordering.
   - `040-synthetic-test-fixture-generator`: Catalog-grounded Faker generation with constraint preservation and deterministic seeds.
 - **Milestone 9: Multi-Buffer Editor & Scratchpad Persistence (`041` - `043`)**:
   - `041-multi-tab-and-split-editor-buffers`: Multi-tab SQL workspace with split editing and independent execution contexts.
