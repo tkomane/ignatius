@@ -2608,5 +2608,308 @@ fn extract_total_cost(json_str: &str) -> Option<f64> {
         .as_f64()
 }
 
+/// Queries PostgreSQL telemetry catalogs for checkpointer, WAL, database transaction,
+/// XID freeze, and replication standby operational metrics.
+pub async fn wal_and_transaction_telemetry(
+    client: &tokio_postgres::Client,
+) -> Result<crate::telemetry::TelemetryReport, Diagnostic> {
+    use crate::telemetry::{
+        CheckpointerStats, DatabaseXactStats, ReplicationStandby, TelemetryReport, WalStats,
+        XidFreezeMetric,
+    };
+
+    // 1. Detect if pg_stat_checkpointer exists (PostgreSQL 17+)
+    let checkpointer_exists_row = client
+        .query_opt(
+            "SELECT 1 FROM pg_catalog.pg_class c \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = 'pg_catalog' AND c.relname = 'pg_stat_checkpointer';",
+            &[],
+        )
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+    let has_stat_checkpointer = checkpointer_exists_row.is_some();
+
+    let checkpointer = if has_stat_checkpointer {
+        let ckpt_row = client
+            .query_opt(
+                "SELECT num_timed::bigint, num_requested::bigint, write_time::float8, \
+                 sync_time::float8, buffers_written::bigint \
+                 FROM pg_catalog.pg_stat_checkpointer;",
+                &[],
+            )
+            .await
+            .map_err(|e| from_query_error(&e, 1))?;
+
+        let bgw_row = client
+            .query_opt(
+                "SELECT buffers_clean::bigint, buffers_alloc::bigint \
+                 FROM pg_catalog.pg_stat_bgwriter;",
+                &[],
+            )
+            .await
+            .map_err(|e| from_query_error(&e, 1))?;
+
+        let (timed, req, w_time, s_time, ckpt_bufs) = if let Some(r) = ckpt_row {
+            (
+                r.get::<_, i64>(0).max(0) as u64,
+                r.get::<_, i64>(1).max(0) as u64,
+                r.get::<_, f64>(2).max(0.0),
+                r.get::<_, f64>(3).max(0.0),
+                r.get::<_, i64>(4).max(0) as u64,
+            )
+        } else {
+            (0, 0, 0.0, 0.0, 0)
+        };
+
+        let (clean_bufs, alloc_bufs) = if let Some(r) = bgw_row {
+            (
+                r.get::<_, i64>(0).max(0) as u64,
+                r.get::<_, i64>(1).max(0) as u64,
+            )
+        } else {
+            (0, 0)
+        };
+
+        CheckpointerStats {
+            timed_checkpoints: timed,
+            requested_checkpoints: req,
+            write_time_ms: w_time,
+            sync_time_ms: s_time,
+            buffers_checkpoint: ckpt_bufs,
+            buffers_clean: clean_bufs,
+            buffers_backend: 0,
+            buffers_backend_fsync: 0,
+            buffers_alloc: alloc_bufs,
+        }
+    } else {
+        let bgw_row = client
+            .query_opt(
+                "SELECT checkpoints_timed::bigint, checkpoints_req::bigint, \
+                 checkpoint_write_time::float8, checkpoint_sync_time::float8, \
+                 buffers_checkpoint::bigint, buffers_clean::bigint, \
+                 buffers_backend::bigint, buffers_backend_fsync::bigint, \
+                 buffers_alloc::bigint \
+                 FROM pg_catalog.pg_stat_bgwriter;",
+                &[],
+            )
+            .await
+            .map_err(|e| from_query_error(&e, 1))?;
+
+        if let Some(r) = bgw_row {
+            CheckpointerStats {
+                timed_checkpoints: r.get::<_, i64>(0).max(0) as u64,
+                requested_checkpoints: r.get::<_, i64>(1).max(0) as u64,
+                write_time_ms: r.get::<_, f64>(2).max(0.0),
+                sync_time_ms: r.get::<_, f64>(3).max(0.0),
+                buffers_checkpoint: r.get::<_, i64>(4).max(0) as u64,
+                buffers_clean: r.get::<_, i64>(5).max(0) as u64,
+                buffers_backend: r.get::<_, i64>(6).max(0) as u64,
+                buffers_backend_fsync: r.get::<_, i64>(7).max(0) as u64,
+                buffers_alloc: r.get::<_, i64>(8).max(0) as u64,
+            }
+        } else {
+            CheckpointerStats::default()
+        }
+    };
+
+    // 2. WAL and Archiver Metrics
+    let lsn_row = client
+        .query_opt(
+            "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn()::text \
+             ELSE pg_current_wal_lsn()::text END AS lsn;",
+            &[],
+        )
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+    let current_lsn = lsn_row
+        .and_then(|r| r.get::<_, Option<String>>(0))
+        .unwrap_or_else(|| "0/0".to_string());
+
+    let wal_row = client
+        .query_opt(
+            "SELECT wal_records::bigint, wal_fpi::bigint, wal_bytes::numeric::text, \
+             wal_buffers_full::bigint, \
+             COALESCE(wal_write_time::float8, 0.0), COALESCE(wal_sync_time::float8, 0.0) \
+             FROM pg_catalog.pg_stat_wal;",
+            &[],
+        )
+        .await
+        .ok()
+        .flatten();
+
+    let (records, fpi, bytes, buffers_full, write_ms, sync_ms) = if let Some(r) = wal_row {
+        let b_str: Option<String> = r.get(2);
+        let b_val = b_str.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        (
+            r.get::<_, i64>(0).max(0) as u64,
+            r.get::<_, i64>(1).max(0) as u64,
+            b_val,
+            r.get::<_, i64>(3).max(0) as u64,
+            r.get::<_, f64>(4).max(0.0),
+            r.get::<_, f64>(5).max(0.0),
+        )
+    } else {
+        (0, 0, 0, 0, 0.0, 0.0)
+    };
+
+    let arch_row = client
+        .query_opt(
+            "SELECT archived_count::bigint, failed_count::bigint, \
+             last_archived_wal::text, last_failed_wal::text \
+             FROM pg_catalog.pg_stat_archiver;",
+            &[],
+        )
+        .await
+        .ok()
+        .flatten();
+
+    let (arch_count, fail_count, last_arch, last_fail) = if let Some(r) = arch_row {
+        (
+            r.get::<_, i64>(0).max(0) as u64,
+            r.get::<_, i64>(1).max(0) as u64,
+            r.get::<_, Option<String>>(2),
+            r.get::<_, Option<String>>(3),
+        )
+    } else {
+        (0, 0, None, None)
+    };
+
+    let wal = WalStats {
+        current_lsn,
+        wal_records: records,
+        wal_fpi: fpi,
+        wal_bytes: bytes,
+        wal_buffers_full: buffers_full,
+        wal_write_time_ms: write_ms,
+        wal_sync_time_ms: sync_ms,
+        archived_count: arch_count,
+        failed_count: fail_count,
+        last_archived_wal: last_arch,
+        last_failed_wal: last_fail,
+    };
+
+    // 3. Database Transaction Telemetry
+    let db_rows = client
+        .query(
+            "SELECT datname::text, xact_commit::bigint, xact_rollback::bigint, \
+             deadlocks::bigint, conflicts::bigint, temp_files::bigint, \
+             temp_bytes::bigint \
+             FROM pg_catalog.pg_stat_database \
+             WHERE datname IS NOT NULL \
+             ORDER BY (xact_commit + xact_rollback) DESC LIMIT 50;",
+            &[],
+        )
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    let mut databases = Vec::with_capacity(db_rows.len());
+    for r in db_rows {
+        databases.push(DatabaseXactStats {
+            database_name: r.get::<_, String>(0),
+            xact_commit: r.get::<_, i64>(1).max(0) as u64,
+            xact_rollback: r.get::<_, i64>(2).max(0) as u64,
+            deadlocks: r.get::<_, i64>(3).max(0) as u64,
+            conflicts: r.get::<_, i64>(4).max(0) as u64,
+            temp_files: r.get::<_, i64>(5).max(0) as u64,
+            temp_bytes: r.get::<_, i64>(6).max(0) as u64,
+        });
+    }
+
+    // 4. Transaction ID (XID) Freeze Forensics
+    let freeze_rows = client
+        .query(
+            "SELECT d.datname::text, age(d.datfrozenxid)::bigint AS datfrozenxid_age, \
+             current_setting('autovacuum_freeze_max_age')::bigint AS autovacuum_freeze_max_age \
+             FROM pg_catalog.pg_database d \
+             WHERE d.datallowconn \
+             ORDER BY age(d.datfrozenxid) DESC;",
+            &[],
+        )
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    // Query the oldest table in the connected database
+    let oldest_table_row = client
+        .query_opt(
+            "SELECT c.relname::text, age(c.relfrozenxid)::bigint \
+             FROM pg_catalog.pg_class c \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE c.relkind IN ('r', 'm') \
+               AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
+             ORDER BY age(c.relfrozenxid) DESC LIMIT 1;",
+            &[],
+        )
+        .await
+        .ok()
+        .flatten();
+
+    let (oldest_tbl_name, oldest_tbl_age) = if let Some(r) = oldest_table_row {
+        (
+            Some(r.get::<_, String>(0)),
+            r.get::<_, i64>(1).max(0) as u64,
+        )
+    } else {
+        (None, 0)
+    };
+
+    const EMERGENCY_AUTOVAC_LIMIT: f64 = 2_000_000_000.0;
+    let mut xid_freeze = Vec::with_capacity(freeze_rows.len());
+    for r in freeze_rows {
+        let age_val = r.get::<_, i64>(1).max(0) as u64;
+        let freeze_max = r.get::<_, i64>(2).max(1) as u64;
+        let wraparound_pct = ((age_val as f64 / EMERGENCY_AUTOVAC_LIMIT) * 100.0).clamp(0.0, 100.0);
+        xid_freeze.push(XidFreezeMetric {
+            database_name: r.get::<_, String>(0),
+            datfrozenxid_age: age_val,
+            autovacuum_freeze_max_age: freeze_max,
+            wraparound_pct,
+            oldest_table_name: oldest_tbl_name.clone(),
+            oldest_table_age: oldest_tbl_age,
+        });
+    }
+
+    // 5. Streaming Replication Standbys
+    let rep_rows = client
+        .query(
+            "SELECT pid::int4, client_addr::text, COALESCE(application_name, '')::text, \
+             COALESCE(state, 'unknown')::text, COALESCE(sync_state, 'async')::text, \
+             sent_lsn::text, \
+             COALESCE(pg_wal_lsn_diff(sent_lsn, write_lsn)::bigint, 0), \
+             COALESCE(pg_wal_lsn_diff(sent_lsn, flush_lsn)::bigint, 0), \
+             COALESCE(pg_wal_lsn_diff(sent_lsn, replay_lsn)::bigint, 0), \
+             EXTRACT(EPOCH FROM (now() - reply_time))::float8 * 1000.0 \
+             FROM pg_catalog.pg_stat_replication;",
+            &[],
+        )
+        .await
+        .ok()
+        .unwrap_or_default();
+
+    let mut standbys = Vec::with_capacity(rep_rows.len());
+    for r in rep_rows {
+        standbys.push(ReplicationStandby {
+            pid: r.get::<_, i32>(0).max(0) as u32,
+            client_addr: r.get::<_, Option<String>>(1),
+            application_name: r.get::<_, String>(2),
+            state: r.get::<_, String>(3),
+            sync_state: r.get::<_, String>(4),
+            sent_lsn: r.get::<_, Option<String>>(5),
+            write_lag_bytes: r.get::<_, i64>(6).max(0) as u64,
+            flush_lag_bytes: r.get::<_, i64>(7).max(0) as u64,
+            replay_lag_bytes: r.get::<_, i64>(8).max(0) as u64,
+            replay_lag_ms: r.get::<_, Option<f64>>(9),
+        });
+    }
+
+    Ok(TelemetryReport {
+        checkpointer,
+        wal,
+        databases,
+        xid_freeze,
+        standbys,
+    })
+}
+
 #[cfg(test)]
 mod tests;

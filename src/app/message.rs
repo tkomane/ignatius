@@ -135,6 +135,8 @@ pub enum Action {
     QueryPerformance,
     /// Open the index advisor, bloat forensics, and hypothetical indexing overlay.
     IndexAdvisor,
+    /// Open the transaction, WAL, checkpointer, and replication telemetry overlay.
+    WalObservability,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -241,6 +243,7 @@ impl Action {
             Self::MaintenanceOps,
             Self::QueryPerformance,
             Self::IndexAdvisor,
+            Self::WalObservability,
         ]
     }
 }
@@ -648,6 +651,13 @@ pub enum Message {
         /// Advisor report or error.
         result: Box<Result<crate::advisor::AdvisorReport, Diagnostic>>,
     },
+    /// Transaction, WAL, checkpointer, and replication telemetry loaded from catalog.
+    WalObservabilityLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Telemetry report or error.
+        result: Box<Result<crate::telemetry::TelemetryReport, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -948,5 +958,10 @@ pub enum Effect {
         query: String,
         /// Proposed index definition SQL.
         create_index_sql: String,
+    },
+    /// Load transaction, WAL, checkpointer, and replication telemetry.
+    LoadWalObservability {
+        /// Identity used to reject a late response.
+        request: u64,
     },
 }

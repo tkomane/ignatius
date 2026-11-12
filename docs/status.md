@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 28 (036-transaction-and-wal-observability) Delivery - 12 November 2026
+
+Resume on branch `feat/036-transaction-and-wal-observability`. Feature
+`036-transaction-and-wal-observability` (the third M7 Enterprise Observability & Query Forensics slice)
+has completed implementation and verification:
+
+- **Wave 28 (`036-transaction-and-wal-observability`)**:
+  delivered the third M7 enterprise observability slice:
+  - Pure `src/telemetry/` domain engine for transaction throughput metrics, commit/rollback ratios,
+    checkpointer and background writer telemetry (`pg_stat_checkpointer` on PG 17+ and `pg_stat_bgwriter`
+    on PG 14-16), Write-Ahead Logging (WAL) write volumes, buffer full pressure events, archiver telemetry,
+    database-level deadlocks and temp file disk spills, transaction ID (XID) freeze horizons, and streaming
+    replication standby lag tracking with aligned tabular, JSON, and plain text formatters.
+  - Live PostgreSQL catalog query in `Session::wal_and_transaction_telemetry` probing checkpointer,
+    WAL, database statistics, database/table frozen XID horizons, and replication standbys.
+  - Headless scriptable CLI subcommand `ignatius wal-stats`:
+    - `-s, --section all|checkpointer|wal|transactions|freeze|replication`: diagnostic section filtering.
+    - `-f, --format table|json|plain`, `-o, --output`, `--force`: scriptable machine/terminal output.
+  - Interactive Field Industrial TUI Transaction & WAL Observability overlay on `Ctrl+K &` (`wal-observability`):
+    - Teenage Engineering / Dieter Rams status capsules: `[COMMITS]`, `[ROLLBACK]`, `[WAL WRITE]`, `[CHECKPOINTS]`, `[MAX XID AGE]`, `[STANDBYS]`.
+    - Tabbed view: `[1] Checkpoints & WAL` (dual-column engine & WAL metrics), `[2] Transactions & XID Freeze` (database commit/rollback ratios, deadlocks, and XID wraparound horizon bars), `[3] Replication & Standbys` (dual-pane standby list & node inspector).
+    - Hotkeys: `[1]`/`[2]`/`[3]` quick tab switching, `[r]` refresh, `Esc` close.
+  - Comprehensive contract integration test suite in `tests/wal_observability_contract.rs` verified against live PostgreSQL container.
+  - Full verification battery passed cleanly (`cargo xtask verify`: formatting, lints, API docs, 1393 unit tests, 18 documentation contract tests, and database-backed test suite).
+
 ## Wave 27 (035-index-advisor-and-bloat-forensics) Delivery - 12 November 2026
 
 Resume on branch `feat/035-index-advisor-and-bloat-forensics`. Feature

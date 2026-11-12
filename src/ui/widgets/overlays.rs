@@ -4035,5 +4035,739 @@ pub(crate) fn render_index_advisor(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Renders the interactive Transaction, WAL & Checkpointer Observability overlay.
+pub(crate) fn render_wal_observability(
+    state: &crate::app::model::WalObservabilityState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} TRANSACTION, WAL & CHECKPOINTER OBSERVABILITY ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Tab selectors
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let tab_area = chunks[1];
+    let body_area = chunks[3];
+    let status_area = chunks[4];
+    let footer_area = chunks[5];
+
+    let report_opt = state.report.as_ref();
+    let commits_cnt = report_opt.map_or(0, |r| r.total_commits());
+    let rollbacks_cnt = report_opt.map_or(0, |r| r.total_rollbacks());
+    let rollback_pct = report_opt.map_or(0.0, |r| r.aggregate_rollback_ratio());
+    let wal_bytes = report_opt.map_or(0, |r| r.wal.wal_bytes);
+    let wal_str = crate::telemetry::format_bytes(wal_bytes);
+    let timed_pct = report_opt.map_or(100.0, |r| r.checkpointer.timed_ratio());
+    let max_xid = report_opt.map_or(0, |r| r.max_xid_age());
+    let standby_cnt = report_opt.map_or(0, |r| r.standbys.len());
+
+    let rollback_token = if rollback_pct < 2.0 {
+        Token::Success
+    } else if rollback_pct < 10.0 {
+        Token::Focus
+    } else {
+        Token::Warning
+    };
+
+    let checkpoint_token = if timed_pct >= 85.0 {
+        Token::Success
+    } else if timed_pct >= 70.0 {
+        Token::Focus
+    } else {
+        Token::Warning
+    };
+
+    // Dieter Rams status capsules
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("COMMITS: ", theme.style(Token::Muted)),
+        Span::styled(format!("{commits_cnt}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ROLLBACK: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{rollbacks_cnt} ({rollback_pct:.2}%)"),
+            theme.style(rollback_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("WAL WRITE: ", theme.style(Token::Muted)),
+        Span::styled(wal_str, theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("CHECKPOINTS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{timed_pct:.1}% TIMED"),
+            theme.style(checkpoint_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("MAX XID AGE: ", theme.style(Token::Muted)),
+        Span::styled(format!("{max_xid}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("STANDBYS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{standby_cnt}"),
+            theme.style(if standby_cnt > 0 {
+                Token::Success
+            } else {
+                Token::Muted
+            }),
+        ),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Tab Selectors
+    let tab_spans = vec![
+        Span::styled(
+            " [1] Checkpoints & WAL ",
+            if state.active_tab == 0 {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            format!(
+                " [2] Transactions & XID Freeze ({}) ",
+                report_opt.map_or(0, |r| r.databases.len())
+            ),
+            if state.active_tab == 1 {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+        Span::styled(" │ ", theme.style(Token::Border)),
+        Span::styled(
+            format!(" [3] Replication & Standbys ({standby_cnt}) "),
+            if state.active_tab == 2 {
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+            } else {
+                theme.style(Token::Muted)
+            },
+        ),
+    ];
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    // Body Workspace
+    if state.loading {
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Gathering checkpointer, WAL, transaction, and replication telemetry from catalogs...",
+                theme.style(Token::Muted),
+            )),
+        ];
+        Paragraph::new(lines).render(body_area, buf);
+    } else if let Some(report) = report_opt {
+        match state.active_tab {
+            0 => {
+                // Tab 0: Checkpoints & WAL (Dual column layout)
+                let cols = Layout::default()
+                    .direction(ratatui::layout::Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(50),
+                        Constraint::Length(1), // Divider
+                        Constraint::Percentage(50),
+                    ])
+                    .split(body_area);
+
+                let left_area = cols[0];
+                let divider_area = cols[1];
+                let right_area = cols[2];
+
+                // Vertical separator line
+                for y in 0..divider_area.height {
+                    buf.set_string(
+                        divider_area.x,
+                        divider_area.y + y,
+                        "│",
+                        theme.style(Token::Border),
+                    );
+                }
+
+                // Left Column: Checkpointer & Background Writer
+                let chk = &report.checkpointer;
+                let mut left_lines = Vec::new();
+                left_lines.push(Line::from(Span::styled(
+                    "CHECKPOINTER & BACKGROUND WRITER",
+                    theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                )));
+                left_lines.push(Line::from(""));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Timed Checkpoints:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{}", chk.timed_checkpoints),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Requested Checkpoints:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{}", chk.requested_checkpoints),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<26}", "Timed Ratio:"), theme.style(Token::Muted)),
+                    Span::styled(
+                        format!("{:.1}%", chk.timed_ratio()),
+                        theme.style(if chk.timed_ratio() >= 85.0 {
+                            Token::Success
+                        } else {
+                            Token::Warning
+                        }),
+                    ),
+                    Span::styled(
+                        if chk.timed_ratio() < 80.0 {
+                            " (low: consider increasing max_wal_size)"
+                        } else {
+                            " (healthy)"
+                        },
+                        theme.style(Token::Muted),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<26}", "Write Time:"), theme.style(Token::Muted)),
+                    Span::styled(
+                        format!("{:.1} ms", chk.write_time_ms),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Sync / Fsync Time:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{:.1} ms", chk.sync_time_ms),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Buffers Checkpoint:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{}", chk.buffers_checkpoint),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Buffers Cleaned:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(format!("{}", chk.buffers_clean), theme.style(Token::Text)),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Buffers Backend Written:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{}", chk.buffers_backend),
+                        theme.style(if chk.buffers_backend > 0 {
+                            Token::Warning
+                        } else {
+                            Token::Text
+                        }),
+                    ),
+                ]));
+                left_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Backend Write Ratio:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{:.2}%", chk.backend_write_ratio()),
+                        theme.style(if chk.backend_write_ratio() > 5.0 {
+                            Token::Warning
+                        } else {
+                            Token::Success
+                        }),
+                    ),
+                ]));
+                Paragraph::new(left_lines).render(left_area, buf);
+
+                // Right Column: Write-Ahead Log & Archiver
+                let wal = &report.wal;
+                let mut right_lines = Vec::new();
+                right_lines.push(Line::from(Span::styled(
+                    "WRITE-AHEAD LOG (WAL) & ARCHIVER",
+                    theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                )));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<26}", "Current LSN:"), theme.style(Token::Muted)),
+                    Span::styled(
+                        if wal.current_lsn.is_empty() {
+                            "0/0"
+                        } else {
+                            &wal.current_lsn
+                        },
+                        theme.style(Token::Focus),
+                    ),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<26}", "WAL Records:"), theme.style(Token::Muted)),
+                    Span::styled(format!("{}", wal.wal_records), theme.style(Token::Text)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Full Page Images (FPI):"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(format!("{}", wal.wal_fpi), theme.style(Token::Text)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<26}", "WAL Volume:"), theme.style(Token::Muted)),
+                    Span::styled(
+                        crate::telemetry::format_bytes(wal.wal_bytes),
+                        theme.style(Token::Success),
+                    ),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "WAL Buffers Full:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{}", wal.wal_buffers_full),
+                        theme.style(if wal.wal_buffers_full > 0 {
+                            Token::Warning
+                        } else {
+                            Token::Success
+                        }),
+                    ),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "WAL Write Time:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{:.1} ms", wal.wal_write_time_ms),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "WAL Sync Time:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{:.1} ms", wal.wal_sync_time_ms),
+                        theme.style(Token::Text),
+                    ),
+                ]));
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(Span::styled(
+                    "WAL ARCHIVER",
+                    theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                )));
+                right_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Archived Segments:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(format!("{}", wal.archived_count), theme.style(Token::Text)),
+                ]));
+                right_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:<26}", "Failed Archives:"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{}", wal.failed_count),
+                        theme.style(if wal.failed_count > 0 {
+                            Token::Danger
+                        } else {
+                            Token::Success
+                        }),
+                    ),
+                ]));
+                Paragraph::new(right_lines).render(right_area, buf);
+            }
+            1 => {
+                // Tab 1: Transactions & XID Freeze (Split Top/Bottom)
+                let rows = Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(55),
+                        Constraint::Length(1), // Split rule
+                        Constraint::Percentage(45),
+                    ])
+                    .split(body_area);
+
+                let xact_area = rows[0];
+                let rule_area = rows[1];
+                let freeze_area = rows[2];
+
+                let sep = "─".repeat(rule_area.width as usize);
+                Paragraph::new(Line::from(Span::styled(sep, theme.style(Token::Border))))
+                    .render(rule_area, buf);
+
+                // Top: Database Transactions
+                let mut xact_lines = Vec::new();
+                xact_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<24}", "DATABASE"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>14}", "COMMITS"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>14}", "ROLLBACKS"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>14}", "ROLLBACK %"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>12}", "DEADLOCKS"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>14}", "TEMP BYTES"), theme.style(Token::Muted)),
+                ]));
+
+                let db_cursor = state.selected_idx;
+                for (idx, db) in report.databases.iter().enumerate() {
+                    let is_sel = idx == db_cursor;
+                    let rb_pct = db.rollback_ratio();
+                    let rb_tok = if rb_pct > 10.0 {
+                        Token::Warning
+                    } else if rb_pct > 0.0 {
+                        Token::Focus
+                    } else {
+                        Token::Text
+                    };
+
+                    let prefix = if is_sel { "> " } else { "  " };
+                    let row_token = if is_sel { Token::Focus } else { Token::Text };
+                    let db_name = format!("{prefix}{}", db.database_name);
+
+                    xact_lines.push(Line::from(vec![
+                        Span::styled(format!("{:<24}", db_name), theme.style(row_token)),
+                        Span::styled(format!("{:>14}", db.xact_commit), theme.style(Token::Text)),
+                        Span::styled(
+                            format!("{:>14}", db.xact_rollback),
+                            theme.style(Token::Text),
+                        ),
+                        Span::styled(format!("{:>13.2}%", rb_pct), theme.style(rb_tok)),
+                        Span::styled(
+                            format!("{:>12}", db.deadlocks),
+                            theme.style(if db.deadlocks > 0 {
+                                Token::Warning
+                            } else {
+                                Token::Text
+                            }),
+                        ),
+                        Span::styled(
+                            format!("{:>14}", crate::telemetry::format_bytes(db.temp_bytes)),
+                            theme.style(Token::Text),
+                        ),
+                    ]));
+                }
+                Paragraph::new(xact_lines).render(xact_area, buf);
+
+                // Bottom: XID Freeze & Wraparound Horizon
+                let mut freeze_lines = Vec::new();
+                freeze_lines.push(Line::from(vec![
+                    Span::styled(format!("{:<20}", "DATABASE"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>14}", "XID AGE"), theme.style(Token::Muted)),
+                    Span::styled(format!("{:>12}", "HORIZON %"), theme.style(Token::Muted)),
+                    Span::styled(format!(" {:<16}", "STATUS BAR"), theme.style(Token::Muted)),
+                    Span::styled(
+                        format!("{:<24}", " OLDEST TABLE"),
+                        theme.style(Token::Muted),
+                    ),
+                    Span::styled(
+                        format!("{:>14}", "TABLE XID AGE"),
+                        theme.style(Token::Muted),
+                    ),
+                ]));
+
+                for f in &report.xid_freeze {
+                    let pct = f.wraparound_pct;
+                    let bar_units = ((pct / 100.0) * 12.0).round() as usize;
+                    let filled = "=".repeat(bar_units.min(12));
+                    let empty = ".".repeat(12usize.saturating_sub(bar_units));
+                    let bar_str = format!("[{filled}{empty}]");
+                    let status_tok = if pct >= 80.0 {
+                        Token::Danger
+                    } else if pct >= 50.0 {
+                        Token::Warning
+                    } else {
+                        Token::Success
+                    };
+
+                    freeze_lines.push(Line::from(vec![
+                        Span::styled(format!("{:<20}", f.database_name), theme.style(Token::Text)),
+                        Span::styled(
+                            format!("{:>14}", f.datfrozenxid_age),
+                            theme.style(Token::Text),
+                        ),
+                        Span::styled(format!("{:>11.2}%", pct), theme.style(status_tok)),
+                        Span::styled(format!(" {:<16}", bar_str), theme.style(status_tok)),
+                        Span::styled(
+                            format!("{:<24}", f.oldest_table_name.as_deref().unwrap_or("-")),
+                            theme.style(Token::Text),
+                        ),
+                        Span::styled(
+                            format!("{:>14}", f.oldest_table_age),
+                            theme.style(Token::Text),
+                        ),
+                    ]));
+                }
+                Paragraph::new(freeze_lines).render(freeze_area, buf);
+            }
+            2 => {
+                // Tab 2: Replication & Standbys
+                if report.standbys.is_empty() {
+                    let lines = vec![
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            "No active streaming replication standbys connected (standalone database node).",
+                            theme.style(Token::Muted),
+                        )),
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            "Query `pg_stat_replication` returned zero rows. When read replicas or standby nodes connect, their LSN lag and sync states will appear here.",
+                            theme.style(Token::Muted),
+                        )),
+                    ];
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    let split = Layout::default()
+                        .direction(ratatui::layout::Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(55),
+                            Constraint::Length(1), // Divider
+                            Constraint::Percentage(45),
+                        ])
+                        .split(body_area);
+
+                    let list_area = split[0];
+                    let div_area = split[1];
+                    let detail_area = split[2];
+
+                    for y in 0..div_area.height {
+                        buf.set_string(div_area.x, div_area.y + y, "│", theme.style(Token::Border));
+                    }
+
+                    // Standbys Table
+                    let mut list_lines = Vec::new();
+                    list_lines.push(Line::from(vec![
+                        Span::styled(format!("{:<18}", "CLIENT"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<18}", "APPLICATION"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<10}", "SYNC"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:<12}", "STATE"), theme.style(Token::Muted)),
+                        Span::styled(format!("{:>14}", "REPLAY LAG"), theme.style(Token::Muted)),
+                    ]));
+
+                    let sel_idx = state
+                        .selected_idx
+                        .min(report.standbys.len().saturating_sub(1));
+                    for (i, s) in report.standbys.iter().enumerate() {
+                        let is_sel = i == sel_idx;
+                        let prefix = if is_sel { "> " } else { "  " };
+                        let client_str =
+                            format!("{prefix}{}", s.client_addr.as_deref().unwrap_or("local"));
+                        let row_tok = if is_sel { Token::Focus } else { Token::Text };
+
+                        list_lines.push(Line::from(vec![
+                            Span::styled(format!("{:<18}", client_str), theme.style(row_tok)),
+                            Span::styled(
+                                format!("{:<18}", s.application_name),
+                                theme.style(Token::Text),
+                            ),
+                            Span::styled(format!("{:<10}", s.sync_state), theme.style(Token::Text)),
+                            Span::styled(format!("{:<12}", s.state), theme.style(Token::Success)),
+                            Span::styled(
+                                format!(
+                                    "{:>14}",
+                                    crate::telemetry::format_bytes(s.replay_lag_bytes)
+                                ),
+                                theme.style(Token::Text),
+                            ),
+                        ]));
+                    }
+                    Paragraph::new(list_lines).render(list_area, buf);
+
+                    // Standby Detail Inspector
+                    if let Some(s) = report.standbys.get(sel_idx) {
+                        let mut det_lines = Vec::new();
+                        det_lines.push(Line::from(Span::styled(
+                            "STANDBY NODE INSPECTOR",
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )));
+                        det_lines.push(Line::from(""));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Process ID (PID):"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(format!("{}", s.pid), theme.style(Token::Text)),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Client Host:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(
+                                s.client_addr.as_deref().unwrap_or("local"),
+                                theme.style(Token::Focus),
+                            ),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Application Name:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(&s.application_name, theme.style(Token::Text)),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Replication State:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(&s.state, theme.style(Token::Success)),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Sync State:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(&s.sync_state, theme.style(Token::Text)),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(format!("{:<20}", "Sent LSN:"), theme.style(Token::Muted)),
+                            Span::styled(
+                                s.sent_lsn.as_deref().unwrap_or("-"),
+                                theme.style(Token::Text),
+                            ),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Write Lag:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(
+                                crate::telemetry::format_bytes(s.write_lag_bytes),
+                                theme.style(Token::Text),
+                            ),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Flush Lag:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(
+                                crate::telemetry::format_bytes(s.flush_lag_bytes),
+                                theme.style(Token::Text),
+                            ),
+                        ]));
+                        det_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20}", "Replay Lag:"),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(
+                                crate::telemetry::format_bytes(s.replay_lag_bytes),
+                                theme.style(Token::Text),
+                            ),
+                        ]));
+                        if let Some(ms) = s.replay_lag_ms {
+                            det_lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{:<20}", "Replay Latency:"),
+                                    theme.style(Token::Muted),
+                                ),
+                                Span::styled(format!("{:.1} ms", ms), theme.style(Token::Text)),
+                            ]));
+                        }
+                        Paragraph::new(det_lines).render(detail_area, buf);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Status Message Line
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(msg, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Bar
+    let footer_spans = vec![
+        Span::styled(
+            "[1/2/3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓/j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

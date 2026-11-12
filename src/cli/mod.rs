@@ -284,6 +284,10 @@ pub enum Command {
     /// Analyze redundant indexes, B-tree bloat forensics, and unindexed foreign keys.
     #[command(name = "index-advisor")]
     IndexAdvisor(IndexAdvisorArgs),
+
+    /// Observe transaction throughput, WAL write rates, checkpointer telemetry, and replication lag.
+    #[command(name = "wal-stats")]
+    WalStats(WalStatsArgs),
 }
 
 /// Arguments for the audit command.
@@ -878,6 +882,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Maintain(args)) => run_maintain(args, &paths, &presentation, out, err),
         Some(Command::ProfileQueries(args)) => run_profile_queries(args, &paths, out, err),
         Some(Command::IndexAdvisor(args)) => run_index_advisor(args, &paths, out, err),
+        Some(Command::WalStats(args)) => run_wal_stats(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -3738,6 +3743,136 @@ fn run_index_advisor(
         std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
         writeln!(err, "Index advisor report written to {}", dest.display())
             .map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output representation format for transaction and WAL telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliTelemetryFormat {
+    /// Aligned ASCII table with headers.
+    #[default]
+    Table,
+    /// Structured JSON payload.
+    Json,
+    /// Plain machine-readable text stream.
+    Plain,
+}
+
+/// Filter section for transaction and WAL telemetry reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliTelemetrySection {
+    /// Include all telemetry diagnostics.
+    #[default]
+    All,
+    /// Checkpointer and background writer operational metrics.
+    Checkpointer,
+    /// Write-Ahead Logging (WAL) and archiver telemetry.
+    Wal,
+    /// Database transaction throughput, rollbacks, and deadlocks.
+    Transactions,
+    /// Transaction ID (XID) freeze and wraparound horizon forensics.
+    Freeze,
+    /// Streaming replication standbys and replication lag.
+    Replication,
+}
+
+impl From<CliTelemetrySection> for crate::telemetry::TelemetrySection {
+    fn from(val: CliTelemetrySection) -> Self {
+        match val {
+            CliTelemetrySection::All => crate::telemetry::TelemetrySection::All,
+            CliTelemetrySection::Checkpointer => crate::telemetry::TelemetrySection::Checkpointer,
+            CliTelemetrySection::Wal => crate::telemetry::TelemetrySection::Wal,
+            CliTelemetrySection::Transactions => crate::telemetry::TelemetrySection::Transactions,
+            CliTelemetrySection::Freeze => crate::telemetry::TelemetrySection::Freeze,
+            CliTelemetrySection::Replication => crate::telemetry::TelemetrySection::Replication,
+        }
+    }
+}
+
+/// Arguments for the `wal-stats` command.
+#[derive(Debug, Args, Clone)]
+pub struct WalStatsArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, checkpointer, wal, transactions, freeze, replication).
+    #[arg(short = 's', long, value_enum, default_value_t = CliTelemetrySection::All)]
+    pub section: CliTelemetrySection,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_wal_stats(
+    args: &WalStatsArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing wal-stats command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let report = rt.block_on(session.wal_and_transaction_telemetry())?;
+
+    let section = crate::telemetry::TelemetrySection::from(args.section);
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(section),
+        CliTelemetryFormat::Json => report.render_json(),
+        CliTelemetryFormat::Plain => report.render_plain(section),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(
+            err,
+            "WAL and transaction report written to {}",
+            dest.display()
+        )
+        .map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
     }

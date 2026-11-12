@@ -8,6 +8,21 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `036-transaction-and-wal-observability` delivers the pure
+  `src/telemetry/` transaction throughput, WAL, checkpointer, and replication
+  telemetry engine; live PostgreSQL `Session::wal_and_transaction_telemetry`
+  (checkpointer metrics across PG 14-18, WAL write rates, buffer full events,
+  archiver stats, database commit/rollback ratios, XID wraparound horizons, and
+  streaming replication standby lag) primitives; the scriptable `ignatius wal-stats`
+  CLI subcommand (`--section all|checkpointer|wal|transactions|freeze|replication`,
+  `--format table|json|plain`, `--output`, `--force`); and the interactive
+  `Ctrl+K &` (`wal-observability`) TUI Transaction & WAL Observability overlay
+  featuring Teenage Engineering status capsules (`[COMMITS]`, `[ROLLBACK]`,
+  `[WAL WRITE]`, `[CHECKPOINTS]`, `[MAX XID AGE]`, `[STANDBYS]`), tabbed
+  diagnostics (`[1] Checkpoints & WAL`, `[2] Transactions & XID Freeze`,
+  `[3] Replication & Standbys`), visual XID wraparound horizon bars, and standby
+  node detail inspector.
+
 - New: Feature `035-index-advisor-and-bloat-forensics` delivers the pure
   `src/advisor/` index advisor, bloat forensics, and hypothetical indexing engine;
   live PostgreSQL `Session::analyze_indexes` (redundant, duplicate, prefix-covered,
