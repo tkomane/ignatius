@@ -4,6 +4,37 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 33 (041-multi-tab-and-split-editor-buffers) Delivery - 12 November 2026
+
+Resume on branch `feat/041-multi-tab-and-split-editor-buffers`. Feature
+`041-multi-tab-and-split-editor-buffers` (the first slice of Milestone 9 Multi-Buffer Editor & Scratchpad Persistence)
+has completed implementation and verification:
+
+- **Wave 33 (`041-multi-tab-and-split-editor-buffers`)**:
+  delivered the first M9 multi-tab and split-buffer editing slice:
+  - Pure `src/buffer/` domain engine for managing up to 16 concurrent SQL editor buffers
+    (`EditorBuffer`, `BufferManager`, `EditorSplitMode` with `None`, `Vertical`, and `Horizontal`),
+    independent undo/redo stacks, cursor coordinates, file path mappings, dirty status indicators,
+    and multi-file preloading (`load_files`).
+  - Integrated `BufferManager` into `Model` in `src/app/model.rs` with bidirectional synchronization
+    (`sync_active_buffer_from_editor`, `sync_editor_from_active_buffer`) ensuring backward compatibility
+    with existing completions, formatters, and query runners.
+  - Dedicated chords and configurable key bindings in `src/ui/keymap.rs`, `docs/design/keymap.md`, and `README.md`:
+    - `Ctrl+K =` (`new-buffer`): create new SQL editor buffer tab (up to 16).
+    - `Ctrl+K -` (`close-buffer`): close active buffer and refocus adjacent tab, or reset lone buffer.
+    - `Ctrl+K }` (`next-buffer`): cycle to next editor tab.
+    - `Ctrl+K {` (`prev-buffer`): cycle to previous editor tab.
+    - `Ctrl+K \` (`split-buffer`): toggle split-pane layout (`None` -> `Vertical` side-by-side -> `Horizontal` stacked).
+  - Tactile Dieter Rams Field Industrial Tab Bar & Split Layout in `src/ui/widgets/editor.rs`:
+    - Status capsules: `[BUFFERS: n/16]`, `[SPLIT: OFF | VERTICAL | HORIZONTAL]`.
+    - Active tab highlighted in warm phosphor amber (`#FBBF24` / `Token::Focus`) with modification asterisk `*`.
+    - Inactive tabs in calm slate grey; split secondary buffer highlighted with cool blue `[SPLIT: ...]`.
+    - Split-pane rendering with high-contrast vertical (`│`) and horizontal (`─`) delimiters.
+  - Non-interactive CLI multi-file preloading in `src/cli/mod.rs` and `src/cli/interactive.rs`:
+    - `ignatius --file <PATH>...` or `ignatius connect ... --file <PATH>...` pre-loads multiple files into distinct tabs on startup.
+  - Comprehensive acceptance contract integration test suite in `tests/multi_buffer_contract.rs` and unit tests in `src/buffer/tests.rs` and `src/ui/widgets/editor/tests.rs`.
+  - Full verification battery passed cleanly (`cargo xtask verify`).
+
 ## Wave 32 (040-synthetic-test-fixture-generator) Delivery - 12 November 2026
 
 Resume on branch `feat/040-synthetic-test-fixture-generator`. Feature

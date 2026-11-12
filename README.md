@@ -88,6 +88,14 @@ The primary interface splits into three intuitive, resizable surfaces:
 - **Results Grid (Bottom-Right)**: Elevated Harlequin-style data table with row numbers, sort indicators, grid view controls (`Ctrl+K g`), local filtering (`/`), expanded row view (`Ctrl+K x`), and full cell inspection (`Enter` or `Ctrl+K i`).
 - **Split Resizing & Zoom**: Drag split borders with the mouse or use chords (`Ctrl+K ,` / `Ctrl+K .` for pane splits, `Ctrl+K [` / `Ctrl+K ]` for result columns) to adjust layout ratios. Press `Ctrl+K z` to toggle full-screen zoom on any focused pane.
 
+### Multi-Tab Workspace & Split-Buffer Editing (Dieter Rams Field Industrial)
+
+Ignatius brings high-velocity IDE workflows into the terminal without the webview bloat of graphical clients:
+- **Up to 16 Concurrent SQL Buffers**: Create new tabs with `Ctrl+K =`, cycle through them with `Ctrl+K }` / `Ctrl+K {`, or close with `Ctrl+K -`. Each buffer maintains its own text, cursor position, undo/redo stack, and modification indicator (`*`).
+- **Tactile Hardware Tab Bar**: High-density hardware capsules (`[BUFFERS: 2/16]`, `[SPLIT: VERTICAL]`) frame the workspace. The active buffer is rendered with warm phosphor amber (`#FBBF24`), while inactive buffers rest in calm slate grey. Click tab pills directly or tap `[+]` with the mouse to manage tabs.
+- **Dual Split-Buffer Editing**: Press `Ctrl+K \` to toggle split layouts (`None` -> `Vertical` side-by-side -> `Horizontal` stacked). Compare baseline queries with optimized statements or write migrations while watching real-time query executions side-by-side.
+- **Multi-File CLI Preloading**: Launch Ignatius with pre-loaded files using `ignatius --file main.sql --file migration.sql` to immediately initialize separate editor tabs at startup.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -299,6 +307,10 @@ Ignatius is designed for fluid, full-keyboard operation with zero Vim-modal trap
 | `Ctrl+Z` / `Ctrl+Y` | Word-level Undo / Redo |
 | `Ctrl+Left` / `Ctrl+Right` | Move cursor word by word |
 | `Home` / `End` | Move cursor to start / end of line |
+| `Ctrl+K =` | Create new SQL editor buffer tab (up to 16) |
+| `Ctrl+K -` | Close active SQL editor buffer |
+| `Ctrl+K }` / `Ctrl+K {` | Cycle to next / previous SQL editor buffer |
+| `Ctrl+K \` | Toggle editor buffer split mode (`None` / `Vertical` / `Horizontal`) |
 
 ### Results Grid & Sidebar Keys
 | Key | Action |
@@ -358,6 +370,11 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `)` | Open data masking and anonymization rules |
 | `|` | Open cross-database copy and sync pipelines |
 | `+` | Open synthetic test fixture generator |
+| `=` | Create new SQL editor buffer |
+| `-` | Close current SQL editor buffer |
+| `}` | Switch to next SQL editor buffer |
+| `{` | Switch to previous SQL editor buffer |
+| `\` | Toggle editor buffer split mode |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:

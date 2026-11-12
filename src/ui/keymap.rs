@@ -125,6 +125,11 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("data-masking", Action::DataMasking),
     ("data-sync", Action::DataSync),
     ("synthetic-seed", Action::SyntheticSeed),
+    ("new-buffer", Action::NewEditorBuffer),
+    ("close-buffer", Action::CloseEditorBuffer),
+    ("next-buffer", Action::NextEditorBuffer),
+    ("prev-buffer", Action::PrevEditorBuffer),
+    ("split-buffer", Action::ToggleEditorSplit),
 ];
 
 /// The action a configuration name means.
@@ -834,6 +839,27 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::SyntheticSeed,
         "Open synthetic test fixture generator",
     ),
+    ('=', Action::NewEditorBuffer, "Create new SQL editor buffer"),
+    (
+        '-',
+        Action::CloseEditorBuffer,
+        "Close current SQL editor buffer",
+    ),
+    (
+        '}',
+        Action::NextEditorBuffer,
+        "Switch to next SQL editor buffer",
+    ),
+    (
+        '{',
+        Action::PrevEditorBuffer,
+        "Switch to previous SQL editor buffer",
+    ),
+    (
+        '\\',
+        Action::ToggleEditorSplit,
+        "Toggle editor buffer split mode",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -950,6 +976,11 @@ const fn short_label(action: &Action) -> &'static str {
         Action::DataMasking => "Data masking",
         Action::DataSync => "Data sync",
         Action::SyntheticSeed => "Synthetic seed",
+        Action::NewEditorBuffer => "New buffer",
+        Action::CloseEditorBuffer => "Close buffer",
+        Action::NextEditorBuffer => "Next buffer",
+        Action::PrevEditorBuffer => "Previous buffer",
+        Action::ToggleEditorSplit => "Toggle split",
     }
 }
 

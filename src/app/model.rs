@@ -2932,6 +2932,8 @@ pub struct Model {
     pub(crate) theme_catalog: crate::ui::theme::ValidatedThemes,
     /// The SQL buffer.
     pub editor: Editor,
+    /// Multi-tab SQL buffer manager coordinating multiple tabs and split views.
+    pub buffers: crate::buffer::BufferManager,
     /// Schema-aware completion state and its catalogue snapshot.
     pub completion: crate::app::completion::CompletionState,
     /// Connection state.
@@ -3192,6 +3194,16 @@ impl Model {
             sidebar_visible: true,
             ..Self::default()
         }
+    }
+
+    /// Synchronizes the active buffer in `buffers` from `editor`.
+    pub fn sync_active_buffer_from_editor(&mut self) {
+        self.buffers.active_buffer_mut().editor = self.editor.clone();
+    }
+
+    /// Synchronizes `editor` from the active buffer in `buffers`.
+    pub fn sync_editor_from_active_buffer(&mut self) {
+        self.editor = self.buffers.active_editor().clone();
     }
 
     /// Whether anything is currently worth animating.

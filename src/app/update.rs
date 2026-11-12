@@ -1239,6 +1239,7 @@ where
         model.format_notice = None;
         model.paste_notice = None;
     }
+    model.sync_active_buffer_from_editor();
 }
 
 /// Formats the editor as one local, undoable edit.
@@ -1693,6 +1694,35 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::DataMasking => data_masking_open(model),
         Action::DataSync => data_sync_open(model),
         Action::SyntheticSeed => synthetic_seed_open(model),
+        Action::NewEditorBuffer => {
+            model.sync_active_buffer_from_editor();
+            model.buffers.new_buffer(None, None);
+            model.sync_editor_from_active_buffer();
+            model.focus = Focus::Editor;
+            Vec::new()
+        }
+        Action::CloseEditorBuffer => {
+            model.buffers.close_active();
+            model.sync_editor_from_active_buffer();
+            Vec::new()
+        }
+        Action::NextEditorBuffer => {
+            model.sync_active_buffer_from_editor();
+            model.buffers.next_buffer();
+            model.sync_editor_from_active_buffer();
+            Vec::new()
+        }
+        Action::PrevEditorBuffer => {
+            model.sync_active_buffer_from_editor();
+            model.buffers.prev_buffer();
+            model.sync_editor_from_active_buffer();
+            Vec::new()
+        }
+        Action::ToggleEditorSplit => {
+            model.sync_active_buffer_from_editor();
+            model.buffers.cycle_split_mode();
+            Vec::new()
+        }
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,

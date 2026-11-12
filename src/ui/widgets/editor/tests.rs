@@ -326,3 +326,88 @@ fn empty_editor_placeholder_highlights_keycap_prefixes() {
     let palette_desc_x = palette_x + palette_key.len() as u16 + 1; // after "{palette_key} "
     assert_eq!(buf[(palette_desc_x, palette_y)].fg, muted_color);
 }
+
+#[test]
+fn multi_buffer_tab_bar_renders_status_capsule_and_tabs() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.editor.set_text("SELECT 1;");
+    model.sync_active_buffer_from_editor();
+
+    // Create a second buffer
+    model
+        .buffers
+        .new_buffer(Some("query-2.sql".into()), Some("SELECT 2;".into()));
+    model.sync_editor_from_active_buffer();
+
+    let keymap = Keymap::new();
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+
+    render_editor(&model, &keymap, &pres, area, &mut buf);
+
+    let rendered_text = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered_text.contains("[BUFFERS: 2/16]"),
+        "Must render [BUFFERS: 2/16] status capsule in tab bar:\n{rendered_text}"
+    );
+    assert!(
+        rendered_text.contains("[2: query-2.sql"),
+        "Must render active tab [2: query-2.sql] highlighted:\n{rendered_text}"
+    );
+    assert!(
+        rendered_text.contains("1: buffer-1.sql"),
+        "Must render inactive tab 1: buffer-1.sql:\n{rendered_text}"
+    );
+}
+
+#[test]
+fn split_mode_renders_separator_and_panes() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.editor.set_text("SELECT 'left';");
+    model.sync_active_buffer_from_editor();
+
+    model
+        .buffers
+        .new_buffer(Some("right.sql".into()), Some("SELECT 'right';".into()));
+    model.sync_editor_from_active_buffer();
+
+    // Turn on vertical split mode
+    model.buffers.split_mode = crate::buffer::EditorSplitMode::Vertical;
+    model.buffers.secondary_idx = Some(0);
+
+    let keymap = Keymap::new();
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+
+    render_editor(&model, &keymap, &pres, area, &mut buf);
+
+    let rendered_text = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered_text.contains("[SPLIT: VERTICAL]"),
+        "Must render split mode capsule in tab bar:\n{rendered_text}"
+    );
+    assert!(
+        rendered_text.contains("│") || rendered_text.contains("|"),
+        "Must render split vertical separator:\n{rendered_text}"
+    );
+}
