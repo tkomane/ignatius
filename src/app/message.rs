@@ -133,6 +133,8 @@ pub enum Action {
     MaintenanceOps,
     /// Open the query performance and pg_stat_statements forensics overlay.
     QueryPerformance,
+    /// Open the index advisor, bloat forensics, and hypothetical indexing overlay.
+    IndexAdvisor,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -238,6 +240,7 @@ impl Action {
             Self::RoutineRunner,
             Self::MaintenanceOps,
             Self::QueryPerformance,
+            Self::IndexAdvisor,
         ]
     }
 }
@@ -638,6 +641,20 @@ pub enum Message {
         /// Result or error.
         result: Box<Result<(), Diagnostic>>,
     },
+    /// Index advisor findings and bloat metrics loaded from catalog.
+    IndexAdvisorLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Advisor report or error.
+        result: Box<Result<crate::advisor::AdvisorReport, Diagnostic>>,
+    },
+    /// Hypothetical index test executed via HypoPG.
+    HypoIndexTested {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Test result or error.
+        result: Box<Result<crate::advisor::HypoIndexTestResult, Diagnostic>>,
+    },
     /// Pub/Sub notification dispatched.
     NotificationDispatched {
         /// Which request this answers, so a late answer is discarded.
@@ -915,5 +932,21 @@ pub enum Effect {
     ResetQueryPerformance {
         /// Identity used to reject a late response.
         request: u64,
+    },
+    /// Load index advisor, bloat metrics, and unindexed foreign keys.
+    LoadIndexAdvisor {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Minimum table or index size threshold in bytes.
+        min_size_bytes: u64,
+    },
+    /// Test a proposed index against a query using HypoPG.
+    TestHypoIndex {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Evaluated query statement.
+        query: String,
+        /// Proposed index definition SQL.
+        create_index_sql: String,
     },
 }

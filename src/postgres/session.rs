@@ -358,6 +358,28 @@ impl Session {
         crate::postgres::metadata::reset_performance_stats(&self.client).await
     }
 
+    /// Queries the database catalog for index redundancy, bloat metrics, and unindexed foreign keys.
+    pub async fn analyze_indexes(
+        &self,
+        min_size_bytes: u64,
+    ) -> Result<crate::advisor::AdvisorReport, Diagnostic> {
+        crate::postgres::metadata::analyze_indexes(&self.client, min_size_bytes).await
+    }
+
+    /// Tests a hypothetical index against a query using the HypoPG extension.
+    pub async fn test_hypothetical_index(
+        &self,
+        query_text: &str,
+        create_index_sql: &str,
+    ) -> Result<crate::advisor::HypoIndexTestResult, Diagnostic> {
+        crate::postgres::metadata::test_hypothetical_index(
+            &self.client,
+            query_text,
+            create_index_sql,
+        )
+        .await
+    }
+
     /// Discovers routine signatures in the database with optional schema and name filtering.
     pub async fn discover_routines(
         &self,

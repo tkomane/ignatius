@@ -20,6 +20,7 @@
 //! - [`platform`] - narrow macOS, Windows and Linux differences
 
 pub mod activity;
+pub mod advisor;
 pub mod app;
 pub mod audit;
 pub mod branding;

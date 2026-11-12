@@ -1338,6 +1338,88 @@ impl QueryPerformanceState {
     }
 }
 
+/// State for the Index Advisor and Bloat Forensics overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexAdvisorState {
+    /// Findings gathered from catalog analysis.
+    pub report: Option<crate::advisor::AdvisorReport>,
+    /// Active tab in the advisor overlay (0: Redundant/Unused, 1: B-Tree Bloat, 2: Unindexed FKs).
+    pub active_tab: usize,
+    /// Selected item index in the active tab.
+    pub selected_idx: usize,
+    /// Whether an asynchronous fetch is currently in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for IndexAdvisorState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl IndexAdvisorState {
+    /// Items count for the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        match self.active_tab {
+            0 => report.redundant_indexes.len(),
+            1 => report.bloated_indexes.len(),
+            2 => report.unindexed_foreign_keys.len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection up or down within the current tab.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_idx = new_idx as usize;
+    }
+
+    /// Switches the active tab (0: Redundant, 1: Bloat, 2: Unindexed).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+
+    /// Gets the suggested remediation SQL for the selected item in the active tab.
+    #[must_use]
+    pub fn selected_sql(&self) -> Option<String> {
+        let report = self.report.as_ref()?;
+        match self.active_tab {
+            0 => report
+                .redundant_indexes
+                .get(self.selected_idx)
+                .map(|r| r.suggested_drop_sql()),
+            1 => report
+                .bloated_indexes
+                .get(self.selected_idx)
+                .map(|b| b.suggested_reindex_sql()),
+            2 => report
+                .unindexed_foreign_keys
+                .get(self.selected_idx)
+                .map(|fk| fk.suggested_create_sql()),
+            _ => None,
+        }
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2618,6 +2700,10 @@ pub struct Model {
     pub query_performance: Option<QueryPerformanceState>,
     /// Request counter for in-flight query performance operations.
     pub query_performance_request: u64,
+    /// Interactive index advisor and bloat forensics overlay state.
+    pub index_advisor: Option<IndexAdvisorState>,
+    /// Request counter for in-flight index advisor queries.
+    pub index_advisor_request: u64,
 }
 
 impl Model {

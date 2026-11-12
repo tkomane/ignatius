@@ -8,6 +8,31 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `035-index-advisor-and-bloat-forensics` delivers the pure
+  `src/advisor/` index advisor, bloat forensics, and hypothetical indexing engine;
+  live PostgreSQL `Session::analyze_indexes` (redundant, duplicate, prefix-covered,
+  unused, bloat estimation, unindexed foreign keys) and `Session::test_hypothetical_index`
+  (HypoPG harness with automatic reset guarantees) primitives; the scriptable
+  `ignatius index-advisor` CLI subcommand (`--section all|redundant|bloat|unindexed|hypo`,
+  `--format table|json|plain`, `--output`, `--force`, `--min-size`); and the
+  interactive `Ctrl+K ^` (`index-advisor`) TUI Index Advisor and Bloat Forensics
+  overlay featuring Teenage Engineering status capsules (`[HEALTH]`, `[RECLAIMABLE]`,
+  `[REDUNDANT]`, `[BLOATED]`, `[UNINDEXED FK]`, `[HYPOPG]`), `[1] Redundant & Unused`,
+  `[2] B-Tree Bloat`, and `[3] Unindexed Foreign Keys` tabs, dual-pane list and detail
+  inspectors, and hotkeys `[e]` (load non-blocking cleanup/creation SQL into the editor)
+  and `[c]` (copy SQL to clipboard via OSC 52).
+
+- New: Feature `034-query-performance-and-stat-statements` delivers the pure
+  `src/perf/` query execution performance profiling engine; live PostgreSQL
+  `Session::query_performance` (from `pg_stat_statements` with buffer cache hit ratios,
+  mean/min/max/stddev execution latencies, and I/O reads/writes) and `Session::reset_performance_stats`
+  primitives; the scriptable `ignatius profile-queries` CLI subcommand (`--sort`,
+  `--limit`, `--min-calls`, `--format table|json|plain`, `--output`, `--force`, `--reset`);
+  and the interactive `Ctrl+K %` (`query-performance`) TUI Query Performance Forensics
+  overlay featuring Dieter Rams status capsules, dual-pane ranked queries and statement
+  inspectors, hotkey metric sorting (`[m]`, `[t]`, `[c]`, `[r]`, `[h]`), `[e]` editor loading,
+  and guarded stats reset prompts (`[!]` / `[Enter]`).
+
 - New: Feature `033-listen-notify-and-maintenance-ops` delivers the pure
   `src/ops/` maintenance planning, lock level estimation, pub/sub notification,
   and progress telemetry engine; live PostgreSQL `Session::notifications`,
