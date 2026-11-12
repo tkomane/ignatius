@@ -132,10 +132,12 @@ implemented, and each carries focused and full verification recorded in
 `docs/status.md`. Native hand use, screen-reader use and live terminal resize
 remain evidence gaps under M1/M2 rather than M9 source work.
 
-M10 is the active source milestone. It is deliberately CLI-first: the linter,
-migration runner and documentation generator are the jobs a team performs in a
-repository or release pipeline, not only inside a terminal session. M11 is
-defined but not started; it opens only after M10 verification is recorded.
+M10 is delivered in source as of 2026-11-12: the linter, migration runner and
+documentation generator are implemented and covered by focused and full gates.
+The milestone is deliberately CLI-first because those are jobs a team performs
+in a repository or release pipeline, not only inside a terminal session. M11 is
+defined and not started; its first slice should open from an observed
+operational job.
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
