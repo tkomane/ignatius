@@ -20,6 +20,10 @@ fn editor_content_area(model: &Model, presentation: &Presentation, area: Rect) -
     let editor = pane_geometry(model, area).editor.unwrap_or_default();
     let mut inner =
         pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor);
+    if model.recovery_banner.is_some() && inner.height > 0 {
+        inner.y = inner.y.saturating_add(1);
+        inner.height = inner.height.saturating_sub(1);
+    }
     if (model.buffers.count() > 1
         || model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
         && inner.height > 2
@@ -225,6 +229,88 @@ fn candidate_kind_token(kind: crate::query::completion::CandidateKind) -> Token 
         CandidateKind::Object(_) => Token::Info,
     }
 }
+/// Draws the one-row crash recovery capsule above the buffer tab bar.
+///
+/// The wording is chosen from the journal itself: unsaved buffers get the
+/// louder label, an untouched session keeps the quiet one. Either way the
+/// counts, the keys and the two words carry the meaning without colour.
+fn render_recovery_capsule(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let Some(banner) = &model.recovery_banner else {
+        return;
+    };
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let theme = &presentation.theme;
+    let journal = &banner.journal;
+    let unsaved = journal.unsaved_buffer_count();
+    let (count, noun) = if unsaved > 0 {
+        (unsaved, "UNSAVED BUFFER")
+    } else {
+        (journal.recoverable_buffer_count(), "OPEN BUFFER")
+    };
+    let plural = if count == 1 { "" } else { "S" };
+    let truncated = journal.truncated_buffer_count();
+    let truncated_suffix = if truncated > 0 {
+        format!(", {truncated} TRUNCATED")
+    } else {
+        String::new()
+    };
+    let capsule_style = theme.style(Token::Focus).add_modifier(Modifier::BOLD);
+    let wide_label = format!("[CRASH RECOVERY: {count} {noun}{plural}{truncated_suffix}] ");
+    let medium_label = format!("[CRASH RECOVERY: {count} {noun}{plural}{truncated_suffix}]");
+    let short_label = format!("[CRASH RECOVERY: {count}]");
+    let minimal_label = format!("[RECOVERY: {count}]");
+
+    // Degrade in steps that keep the label and the chord meaning. `^K` is the
+    // conventional ASCII spelling of Ctrl+K when the full hint does not fit.
+    let wide_width =
+        wide_label.chars().count() + "[Ctrl+K r] Restore   [Ctrl+K d] Discard".chars().count();
+    let medium_width = medium_label.chars().count() + " ^K r Restore  ^K d Discard".chars().count();
+    let words_width = short_label.chars().count() + " ^K r Restore  ^K d Discard".chars().count();
+    let letters_width = minimal_label.chars().count() + " ^K r/d".chars().count();
+    let width = area.width as usize;
+
+    let spans = if width >= wide_width {
+        vec![
+            Span::styled(wide_label, capsule_style),
+            Span::styled("[Ctrl+K r] ", theme.style(Token::Info)),
+            Span::styled("Restore   ", theme.style(Token::Muted)),
+            Span::styled("[Ctrl+K d] ", theme.style(Token::Info)),
+            Span::styled("Discard", theme.style(Token::Muted)),
+        ]
+    } else if width >= medium_width {
+        vec![
+            Span::styled(format!("{medium_label} "), capsule_style),
+            Span::styled("^K r ", theme.style(Token::Info)),
+            Span::styled("Restore  ", theme.style(Token::Muted)),
+            Span::styled("^K d ", theme.style(Token::Info)),
+            Span::styled("Discard", theme.style(Token::Muted)),
+        ]
+    } else if width >= words_width {
+        vec![
+            Span::styled(format!("{short_label} "), capsule_style),
+            Span::styled("^K r ", theme.style(Token::Info)),
+            Span::styled("Restore  ", theme.style(Token::Muted)),
+            Span::styled("^K d ", theme.style(Token::Info)),
+            Span::styled("Discard", theme.style(Token::Muted)),
+        ]
+    } else if width >= letters_width {
+        vec![
+            Span::styled(format!("{minimal_label} "), capsule_style),
+            Span::styled("^K r/d", theme.style(Token::Info)),
+        ]
+    } else {
+        vec![Span::styled(minimal_label, capsule_style)]
+    };
+    Line::from(spans).render(area, buf);
+}
+
 fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
     if area.width < 10 || area.height == 0 {
         return;
@@ -604,25 +690,41 @@ pub(crate) fn render_editor(
         return;
     }
 
-    let show_tab_bar = (model.buffers.count() > 1
-        || model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
-        && inner.height > 2;
-
-    let text_inner = if show_tab_bar {
-        render_tab_bar(
+    let mut text_inner = inner;
+    if model.recovery_banner.is_some() && text_inner.height > 0 {
+        render_recovery_capsule(
             model,
             presentation,
             Rect::new(inner.x, inner.y, inner.width, 1),
             buf,
         );
-        Rect::new(
+        text_inner = Rect::new(
             inner.x,
             inner.y.saturating_add(1),
             inner.width,
             inner.height.saturating_sub(1),
+        );
+    }
+
+    let show_tab_bar = (model.buffers.count() > 1
+        || model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
+        && text_inner.height > 2;
+
+    let text_inner = if show_tab_bar {
+        render_tab_bar(
+            model,
+            presentation,
+            Rect::new(text_inner.x, text_inner.y, text_inner.width, 1),
+            buf,
+        );
+        Rect::new(
+            text_inner.x,
+            text_inner.y.saturating_add(1),
+            text_inner.width,
+            text_inner.height.saturating_sub(1),
         )
     } else {
-        inner
+        text_inner
     };
 
     match model.buffers.split_mode {

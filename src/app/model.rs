@@ -1916,6 +1916,29 @@ impl SnippetLibraryState {
     }
 }
 
+/// Interactive state of the crash recovery notification banner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRecoveryBanner {
+    /// The loaded crash recovery journal.
+    pub journal: crate::recovery::RecoveryJournal,
+    /// Path to the recovery directory.
+    pub recovery_dir: std::path::PathBuf,
+}
+
+impl SessionRecoveryBanner {
+    /// Creates a new recovery banner from a journal and directory.
+    #[must_use]
+    pub fn new(
+        journal: crate::recovery::RecoveryJournal,
+        recovery_dir: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            journal,
+            recovery_dir,
+        }
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -3224,6 +3247,8 @@ pub struct Model {
     pub synthetic_seed_request: u64,
     /// Interactive snippet and scratchpad library overlay state.
     pub snippet_library: Option<SnippetLibraryState>,
+    /// Active crash recovery notification banner, if unrecovered session found at startup.
+    pub recovery_banner: Option<SessionRecoveryBanner>,
 }
 
 impl Model {

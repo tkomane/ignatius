@@ -157,6 +157,10 @@ pub enum Action {
     ToggleEditorSplit,
     /// Open the persistent scratchpad and snippet library overlay.
     SnippetLibrary,
+    /// Restore crash-recovered session buffers into the editor.
+    RestoreSession,
+    /// Discard and purge unrecovered crash session journal.
+    DiscardRecovery,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -274,6 +278,8 @@ impl Action {
             Self::PrevEditorBuffer,
             Self::ToggleEditorSplit,
             Self::SnippetLibrary,
+            Self::RestoreSession,
+            Self::DiscardRecovery,
         ]
     }
 }

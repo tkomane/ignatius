@@ -43,6 +43,7 @@ pub mod pool;
 pub mod postgres;
 pub mod queries;
 pub mod query;
+pub mod recovery;
 pub mod routine;
 pub mod seed;
 pub mod snippet;

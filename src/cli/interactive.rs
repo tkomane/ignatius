@@ -565,6 +565,7 @@ pub fn run(
     let history = crate::history::History::open(paths, &loaded.config.history, no_history);
     let library = crate::queries::Library::new(&paths.queries_dir);
     let mut exit_notice_counts = NoticeCounts::default();
+    let recovery_enabled = !no_history && loaded.config.history.enabled;
     let result = runtime.block_on(event_loop(
         resolved,
         loaded,
@@ -576,6 +577,8 @@ pub fn run(
         &mut exit_notice_counts,
         filter_late_osc11,
         preload_files,
+        paths,
+        recovery_enabled,
         #[cfg(unix)]
         termination,
     ));
@@ -629,6 +632,8 @@ async fn event_loop(
     exit_notice_counts: &mut NoticeCounts,
     filter_late_osc11: bool,
     preload_files: &[std::path::PathBuf],
+    paths: &Paths,
+    recovery_enabled: bool,
     #[cfg(unix)] termination: tokio::signal::unix::Signal,
 ) -> Result<ExitCode, Diagnostic> {
     let crate::config::Loaded { config, themes, .. } = loaded;
@@ -697,6 +702,20 @@ async fn event_loop(
     model.clipboard_osc52 = config.clipboard.osc52;
     model.history_disabled = !config.history.enabled;
     model.history_paused = history.is_paused();
+
+    // Crash recovery is a local convenience, never a silent second history
+    // file: a session that has history disabled does not persist buffers.
+    let mut recovery = crate::recovery::RecoverySession::from_paths(paths, recovery_enabled);
+    match recovery.take_startup() {
+        Ok(Some(journal)) => {
+            model.recovery_banner = Some(crate::app::model::SessionRecoveryBanner::new(
+                journal,
+                recovery.dir().to_path_buf(),
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => model.error = Some(error),
+    }
     if let Some(target) = target.as_ref() {
         model.credential_provider.clone_from(&target.auth);
     }
@@ -781,6 +800,7 @@ async fn event_loop(
     let result=async {
     draw(&mut terminal, &mut model, &keymap)?;
     let mut last_mouse_at = std::time::Instant::now();
+    let mut recovery_error_reported = false;
 
     loop {
         for (index,pending) in pending_installs.iter_mut().enumerate() {
@@ -802,6 +822,17 @@ async fn event_loop(
             },
             _=notice_tick.tick()=> {
                 if poll_notice_sources(&mut model,&session,&metadata).await {draw(&mut terminal,&mut model,&keymap)?;}
+                // A burst of typing followed by an idle terminal still needs a
+                // checkpoint; this tick is the only wakeup guaranteed to run.
+                if model.recovery_banner.is_none()
+                    && let Err(error) = recovery.checkpoint(&model.buffers, false)
+                    && !recovery_error_reported
+                {
+                    recovery_error_reported = true;
+                    if model.error.is_none() {
+                        model.error = Some(error);
+                    }
+                }
                 continue;
             },
             message=rx.recv()=>match message {Some(message)=>message,None=>break},
@@ -812,11 +843,32 @@ async fn event_loop(
             last_mouse_at = now;
         }
         poll_notice_sources(&mut model,&session,&metadata).await;
+        let had_recovery_banner = model.recovery_banner.is_some();
         let effects = reduce_terminal_input(&terminal, &mut model, message)?;
+        if had_recovery_banner && model.recovery_banner.is_none() {
+            // The operator restored or discarded; the journal is theirs to
+            // replace from the next checkpoint onwards.
+            recovery.decide();
+        }
+        if model.recovery_banner.is_none()
+            && let Err(error) = recovery.checkpoint(&model.buffers, false)
+            && !recovery_error_reported
+        {
+            recovery_error_reported = true;
+            if model.error.is_none() {
+                model.error = Some(error);
+            }
+        }
         for effect in effects {
             match effect {
                 Effect::Quit => {
                     input_stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                    if let Err(error) = recovery.finish(&model.buffers)
+                        && model.error.is_none()
+                    {
+                        model.error = Some(error);
+                        let _ = draw(&mut terminal, &mut model, &keymap);
+                    }
                     return Ok(ExitCode::Success);
                 }
                 Effect::Connect => {

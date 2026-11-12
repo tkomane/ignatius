@@ -421,6 +421,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::PrevEditorBuffer
         | Action::ToggleEditorSplit
         | Action::SnippetLibrary => true,
+        Action::RestoreSession | Action::DiscardRecovery => model.recovery_banner.is_some(),
         Action::BeginPrefix => false,
         Action::ToggleErrorDetail => model.error.is_some(),
         Action::Dismiss => {
@@ -643,6 +644,9 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::PrevEditorBuffer
         | Action::ToggleEditorSplit
         | Action::SnippetLibrary => "this surface to close first".to_owned(),
+        Action::RestoreSession | Action::DiscardRecovery => {
+            "an unrecovered crash session journal".to_owned()
+        }
         Action::Move(_) => "focus a pane with something to move through".to_owned(),
         Action::Activate => {
             if ctx.focus == Focus::Results {
@@ -714,7 +718,9 @@ pub const fn palette_group(action: &Action) -> &'static str {
         Action::OpenQuery
         | Action::OpenHistory
         | Action::ToggleHistoryRecording
-        | Action::SnippetLibrary => "Files/History",
+        | Action::SnippetLibrary
+        | Action::RestoreSession
+        | Action::DiscardRecovery => "Files/History",
         Action::OpenConnectionPicker
         | Action::SwitchTheme
         | Action::ServerActivity

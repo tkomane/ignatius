@@ -131,6 +131,8 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("prev-buffer", Action::PrevEditorBuffer),
     ("split-buffer", Action::ToggleEditorSplit),
     ("snippet-library", Action::SnippetLibrary),
+    ("restore-session", Action::RestoreSession),
+    ("discard-recovery", Action::DiscardRecovery),
 ];
 
 /// The action a configuration name means.
@@ -868,10 +870,42 @@ pub const CHORDS: &[(char, Action, &str)] = &[
     ),
 ];
 
+/// The contextual second keys offered while the crash recovery capsule is on
+/// screen.
+///
+/// These letters are ordinary chords everywhere else (`r` reloads the object
+/// tree, `d` shows a definition), so they are deliberately not part of
+/// [`CHORDS`]. The capsule is the only place they are advertised, and the
+/// reducer only consults them while `model.recovery_banner` is visible.
+pub const RECOVERY_CHORDS: &[(char, Action, &str)] = &[
+    (
+        'r',
+        Action::RestoreSession,
+        "Restore crash-recovered session buffers",
+    ),
+    (
+        'd',
+        Action::DiscardRecovery,
+        "Discard crash recovery journal",
+    ),
+];
+
 /// Resolves the second key of a chord.
 #[must_use]
 pub fn chord_action(key: char) -> Option<Action> {
     CHORDS
+        .iter()
+        .find(|(candidate, _, _)| *candidate == key.to_ascii_lowercase())
+        .map(|(_, action, _)| action.clone())
+}
+
+/// Resolves the second key while the crash recovery capsule is on screen.
+///
+/// The recovery letters shadow their ordinary chord meanings only for the
+/// lifetime of the banner; without it `r` and `d` keep their usual actions.
+#[must_use]
+pub fn recovery_chord_action(key: char) -> Option<Action> {
+    RECOVERY_CHORDS
         .iter()
         .find(|(candidate, _, _)| *candidate == key.to_ascii_lowercase())
         .map(|(_, action, _)| action.clone())
@@ -988,6 +1022,8 @@ const fn short_label(action: &Action) -> &'static str {
         Action::PrevEditorBuffer => "Previous buffer",
         Action::ToggleEditorSplit => "Toggle split",
         Action::SnippetLibrary => "Snippet library",
+        Action::RestoreSession => "Restore",
+        Action::DiscardRecovery => "Discard",
     }
 }
 
