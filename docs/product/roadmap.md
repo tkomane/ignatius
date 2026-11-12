@@ -125,6 +125,12 @@ below; broadening the feature list does not move a milestone forward.
 | M8 Cross-Environment Data Synchronization, Masking & Seeding | Privacy-compliant test data masking, deterministic synthetic seeding, and cross-environment sync | W16 (Features 038-040) | PII rule-based masking, deterministic synthetic relational data generation adhering to foreign-key DAGs, and reviewable transactional sync scripts |
 | M9 Multi-Buffer Editor Workspaces & Scratchpad Persistence | Multi-tab query editing and crash-resilient local scratchpad session persistence | W16 (Features 041-043) | Multi-tab editor workspaces (`Ctrl+N`/`Ctrl+W`), persistent named scratchpads under `IGNATIUS_DATA_DIR`, and automatic unsaved buffer crash recovery |
 
+M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
+implemented, and each carries focused and full verification recorded in
+`docs/status.md`. Native hand use, screen-reader use and live terminal resize
+remain evidence gaps under M1/M2 rather than M9 source work. No M10 feature set
+is defined; the next source slice follows an observed job under W16.
+
 ```mermaid
 flowchart LR
     %% Planning dependencies, not a runtime deployment.

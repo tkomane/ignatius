@@ -104,6 +104,15 @@ Never re-type diagnostic queries or boilerplate CTE patterns from memory again:
 - **Fluid Keyboard Workflow**: Press `Enter` to insert the selected template directly into the active editor buffer, `n` to instantiate it as an independent buffer tab, `Tab` to cycle categories, or `a` to instantly capture the active editor buffer into a persistent custom user snippet stored in `~/.config/ignatius/snippets/`.
 - **Scriptable Headless CLI**: Automate snippet workflows in CI/CD or terminal scripts via `ignatius snippet list`, `ignatius snippet show cache-hit-ratio`, and `ignatius snippet add my-query --file script.sql`.
 
+### Automatic Crash Recovery (`Ctrl+K r` / `Ctrl+K d`)
+
+An SSH drop, terminal crash, or `SIGKILL` no longer costs you unsaved SQL:
+- **Atomic Session Journal**: Unsaved tabs are checkpointed to `~/.local/share/ignatius/recovery/session_journal.json` through a fsynced temporary file and rename, so a power cut mid-write leaves the previous journal intact.
+- **Startup Capsule**: On the next launch a phosphor amber `[CRASH RECOVERY: 2 UNSAVED BUFFERS]` capsule appears above the editor tabs. Press `Ctrl+K r` to restore every tab with its title, file path, cursor, dirty marker, and split layout, or `Ctrl+K d` to discard the journal and start clean.
+- **Clean-Exit Safety**: A normal quit flags the journal as clean, so the next launch never reports a false crash. Quitting before deciding preserves the crashed journal rather than replacing it with the empty workspace.
+- **Headless Recovery**: `ignatius recovery status` summarises the journal, `ignatius recovery restore --format sql` prints the recovered buffers without deleting them, and `ignatius recovery discard` removes the journal.
+- **Bounded and Private**: Buffers are captured up to 1 MiB each and the journal is refused above 24 MiB. Sessions started with history disabled or `--no-history` never write recovery state.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -385,6 +394,11 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `\` | Toggle editor buffer split mode |
 | `;` | Open snippet and scratchpad library |
 
+While the crash-recovery capsule is on screen it adds two contextual chords:
+`Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the journal.
+Those letters keep their ordinary meanings (`r` reloads the object tree, `d`
+shows a definition) whenever the capsule is absent.
+
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
 | Target Region | Gesture | Action |
@@ -444,6 +458,11 @@ ignatius history clear --yes
 # Manage and run saved queries
 ignatius saved list
 ignatius saved run active_user_counts "$DATABASE_URL"
+
+# Inspect, recover, or discard unsaved buffers from an interrupted session
+ignatius recovery status
+ignatius recovery restore --format sql > recovered.sql
+ignatius recovery discard
 
 # Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
 ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
@@ -635,10 +654,10 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `038-data-masking-and-anonymization-rules` [Implemented]: PII/GDPR redaction, deterministic pseudonymization, and virtual view overlays.
   - `039-cross-database-copy-and-sync-pipelines` [Implemented]: Dual-connection streaming copy between staging and dev with foreign key dependency ordering.
   - `040-synthetic-test-fixture-generator` [Implemented]: Catalog-grounded mock generation with referential integrity and deterministic seeds.
-- **Milestone 9: Multi-Buffer Editor & Scratchpad Persistence (`041` - `043`)**:
-  - `041-multi-tab-and-split-editor-buffers`: Multi-tab SQL workspace with split editing and independent execution contexts.
-  - `042-persistent-scratchpad-and-snippet-library`: Parameterized snippet templates (`{{variable}}`) with tags and search.
-  - `043-query-runbook-and-markdown-scratchpad`: Markdown operational runbooks with executable SQL code blocks and inline result snapshots.
+- **Milestone 9: Multi-Buffer Editor & Scratchpad Persistence (`041` - `043`) [COMPLETED]**:
+  - `041-multi-tab-and-split-editor-buffers` [Implemented]: Multi-tab SQL workspace with split editing and independent execution contexts.
+  - `042-persistent-scratchpad-and-snippet-library` [Implemented]: Built-in and user SQL snippet library with search, categories, and headless CLI access.
+  - `043-session-state-and-crash-recovery` [Implemented]: Atomic unsaved-buffer journal, startup restore capsule, clean-exit safety, and headless `ignatius recovery` routes.
 
 ---
 

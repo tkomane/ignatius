@@ -8,6 +8,21 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `043-session-state-and-crash-recovery` completes Milestone 9
+  (Multi-Buffer Editor & Scratchpad Persistence) with an atomic session journal
+  under `<data_dir>/recovery/session_journal.json`. Unsaved buffers are
+  checkpointed every two seconds and immediately on structural changes, with a
+  1 MiB per-buffer and 24 MiB journal bound; writes go to an fsynced temporary
+  sibling and are published by rename. On startup an unrecovered journal raises
+  a phosphor amber `[CRASH RECOVERY: n UNSAVED BUFFERS]` capsule in the editor,
+  where `Ctrl+K r` restores every tab with its title, file path, cursor, dirty
+  marker, and split layout and `Ctrl+K d` discards it. A normal quit flags the
+  journal clean, and quitting before deciding preserves the crashed journal
+  rather than overwriting it. New headless routes `ignatius recovery status`,
+  `ignatius recovery restore --format sql|json` (non-destructive) and
+  `ignatius recovery discard` cover scripted recovery. Sessions started with
+  history disabled or `--no-history` never persist recovery state.
+
 - New: Feature `042-persistent-scratchpad-and-snippet-library` advances Milestone 9
   (Multi-Buffer Editor & Scratchpad Persistence) with the pure `src/snippet/` snippet
   and scratchpad library engine; 8 curated production built-in PostgreSQL templates
