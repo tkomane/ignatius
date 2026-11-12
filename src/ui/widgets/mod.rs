@@ -18,8 +18,8 @@ pub(crate) use overlays::{
     render_index_advisor, render_maintenance_ops, render_name_prompt, render_parameter_prompt,
     render_password_prompt, render_plan_confirmation, render_query_performance,
     render_routine_runner, render_schema_diagram, render_schema_diff, render_security_audit,
-    render_server_activity, render_update_review, render_update_value_prompt,
-    render_wal_observability,
+    render_server_activity, render_synthetic_seed, render_update_review,
+    render_update_value_prompt, render_wal_observability,
 };
 pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
@@ -213,6 +213,7 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         || model.connection_pool.is_some()
         || model.data_masking.is_some()
         || model.data_sync.is_some()
+        || model.synthetic_seed.is_some()
         || model.inspector.is_some()
         || model.help_open
     {
@@ -285,6 +286,7 @@ pub const fn overlay_blocks_panes(model: &Model) -> bool {
         || model.connection_pool.is_some()
         || model.data_masking.is_some()
         || model.data_sync.is_some()
+        || model.synthetic_seed.is_some()
         || model.inspector.is_some()
         || model.help_open
         || model.completion.menu.is_some()

@@ -4,6 +4,39 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 32 (040-synthetic-test-fixture-generator) Delivery - 12 November 2026
+
+Resume on branch `feat/040-synthetic-test-fixture-generator`. Feature
+`040-synthetic-test-fixture-generator` (completing Milestone 8 Cross-Environment Synchronization & Masking)
+has completed implementation and verification:
+
+- **Wave 32 (`040-synthetic-test-fixture-generator`)**:
+  delivered the final M8 synthetic data generation and seeding slice:
+  - Pure `src/seed/` domain engine for deterministic, reproducible pseudo-random number generation
+    (`DeterministicPrng` using Knuth 64-bit linear congruential constants), intelligent strategy inference
+    (`SeedStrategy`: `IntegerSequence`, `IntegerRange`, `NumericDecimal`, `UuidV4`, `PersonName`, `Email`,
+    `CompanyName`, `PhoneNumber`, `Address`, `City`, `Country`, `BooleanRatio`, `DateRange`, `TimestampRange`,
+    `EnumChoice`, `ForeignKeySample`, `ConstantText`), column generator mapping (`ColumnGenerator`),
+    referential integrity table orchestrator (`TableGenerator`, `generate_fixtures` with DAG parent PK pool sampling),
+    and serialization formatters (`render_sql`, `render_jsonl`, `render_csv`, `render_table`).
+  - Live PostgreSQL catalog analyzer in `Session::analyze_seed_plan` and transactional batch executor
+    in `Session::execute_synthetic_seed`, discovering base tables in topological insertion order, primary keys,
+    single-column foreign keys, and enum definitions from `pg_enum`.
+  - Headless scriptable CLI subcommand `ignatius seed`:
+    - `-s, --schema <SCHEMA>`, `-t, --table <TABLE>`: schema and table filtering.
+    - `-n, --rows <ROWS>`: number of synthetic rows to generate per table (default: 10).
+    - `--seed <SEED>`: 64-bit deterministic seed for reproducible mock fixture generation (default: 42).
+    - `--insert`: directly executes generated fixtures within an atomic database transaction.
+    - `-f, --format sql|jsonl|csv|table`: multiple machine-readable and human-readable output formats.
+    - `-o, --output <PATH>`, `--force`: destination file with overwrite protection.
+  - Interactive Field Industrial TUI Synthetic Seeding Cockpit on `Ctrl+K +` (`synthetic-seed`):
+    - Dieter Rams hardware capsules: `[TABLES]`, `[ROWS/TABLE]`, `[PRNG SEED]`, `[TOTAL ROWS]`, `[INTEGRITY]`.
+    - Tabbed cockpit: `[1] Table Generator Strategies` (split-pane showing topological table list and column-level inferred strategies),
+      `[2] Generated Fixture Preview` (previewing actual synthesized rows).
+    - Hotkeys: `[1]`/`[2]` tab switching, `[s]` cycle PRNG seed, `[n]` cycle row target (5, 10, 25, 50, 100), `[r]` refresh, `Esc` close.
+  - Comprehensive contract integration test suite in `tests/synthetic_seed_contract.rs` verified against live PostgreSQL container.
+  - Full verification battery passed cleanly (`cargo xtask verify`).
+
 ## Wave 31 (039-cross-database-copy-and-sync-pipelines) Delivery - 12 November 2026
 
 Resume on branch `feat/039-cross-database-copy-and-sync-pipelines`. Feature

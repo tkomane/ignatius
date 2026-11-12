@@ -8,6 +8,19 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `040-synthetic-test-fixture-generator` completes Milestone 8 (Cross-Environment
+  Data Synchronization, Masking & Seeding) with the pure `src/seed/` synthetic test fixture
+  generator; deterministic reproducible 64-bit pseudo-random number generator (`DeterministicPrng`);
+  inferred column generation strategies (`SeedStrategy`: integers, fixed-point decimals, UUIDs,
+  human names, emails, company names, phone numbers, addresses, booleans, dates, timestamps,
+  enums, and foreign key parent sampling); referential integrity table orchestrator (`TableGenerator`,
+  `generate_fixtures`); live catalog analyzer in `Session::analyze_seed_plan` and transactional batch
+  executor in `Session::execute_synthetic_seed`; scriptable `ignatius seed` CLI subcommand (`--schema`,
+  `--table`, `--rows`, `--seed`, `--insert`, `--format sql|jsonl|csv|table`, `--output`, `--force`);
+  and the interactive `Ctrl+K +` (`synthetic-seed`) TUI Synthetic Seeding Cockpit featuring
+  Dieter Rams hardware capsules (`[TABLES]`, `[ROWS/TABLE]`, `[PRNG SEED]`, `[TOTAL ROWS]`, `[INTEGRITY]`),
+  split-pane table and column strategy inspector, generated mock preview, and seed cycling.
+
 - New: Feature `039-cross-database-copy-and-sync-pipelines` delivers the pure
   `src/sync/` cross-database copy and synchronization engine with Kahn's topological
   sorting over foreign key constraint dependency DAGs (`DependencyGraph`, `SyncPlan`,

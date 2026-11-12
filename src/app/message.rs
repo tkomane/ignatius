@@ -143,6 +143,8 @@ pub enum Action {
     DataMasking,
     /// Open the cross-database copy and sync pipelines overlay.
     DataSync,
+    /// Open the synthetic test fixture generator overlay.
+    SyntheticSeed,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -253,6 +255,7 @@ impl Action {
             Self::ConnectionPool,
             Self::DataMasking,
             Self::DataSync,
+            Self::SyntheticSeed,
         ]
     }
 }
@@ -688,6 +691,13 @@ pub enum Message {
         /// Dependency graph or error.
         result: Box<Result<crate::sync::DependencyGraph, Diagnostic>>,
     },
+    /// Synthetic fixture seeding plan loaded from catalog.
+    SyntheticSeedLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Table generator plan or error.
+        result: Box<Result<Vec<crate::seed::TableGenerator>, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -1008,6 +1018,13 @@ pub enum Effect {
     },
     /// Load cross-database table dependencies and topological graph.
     LoadDataSync {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional schema name to inspect.
+        schema: Option<String>,
+    },
+    /// Load synthetic fixture seeding plan.
+    LoadSyntheticSeed {
         /// Identity used to reject a late response.
         request: u64,
         /// Optional schema name to inspect.

@@ -1098,6 +1098,28 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::SyntheticSeedLoaded { request, result } => {
+            if model.synthetic_seed_request != request {
+                return Vec::new();
+            }
+            if let Some(seed_state) = &mut model.synthetic_seed {
+                seed_state.loading = false;
+                match *result {
+                    Ok(tables) => {
+                        seed_state.tables = tables;
+                        seed_state.regenerate();
+                        seed_state.status_message = None;
+                    }
+                    Err(diag) => {
+                        seed_state.status_message = Some(format!(
+                            "Synthetic seed plan discovery failed: {}",
+                            diag.headline
+                        ));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1492,6 +1514,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.data_sync.is_some() {
         return data_sync_action(model, action);
     }
+    if model.synthetic_seed.is_some() {
+        return synthetic_seed_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1667,6 +1692,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ConnectionPool => connection_pool_open(model),
         Action::DataMasking => data_masking_open(model),
         Action::DataSync => data_sync_open(model),
+        Action::SyntheticSeed => synthetic_seed_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3595,6 +3621,83 @@ fn data_sync_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.data_sync_request = model.data_sync_request.wrapping_add(1);
             let request = model.data_sync_request;
             return vec![Effect::LoadDataSync {
+                request,
+                schema: None,
+            }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the Synthetic Test Fixture Generator overlay.
+fn synthetic_seed_open(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::SyntheticSeedState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.synthetic_seed_request = model.synthetic_seed_request.wrapping_add(1);
+    let request = model.synthetic_seed_request;
+    model.synthetic_seed = Some(state);
+
+    vec![Effect::LoadSyntheticSeed {
+        request,
+        schema: None,
+    }]
+}
+
+/// Handles input while the synthetic fixture generator overlay is on screen.
+fn synthetic_seed_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::SyntheticSeed => {
+            model.synthetic_seed = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.set_tab(1);
+            }
+        }
+        Action::Insert('s' | 'S') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.cycle_seed();
+            }
+        }
+        Action::Insert('n' | 'N') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.cycle_rows();
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(seed) = &mut model.synthetic_seed {
+                seed.loading = true;
+            }
+            model.synthetic_seed_request = model.synthetic_seed_request.wrapping_add(1);
+            let request = model.synthetic_seed_request;
+            return vec![Effect::LoadSyntheticSeed {
                 request,
                 schema: None,
             }];

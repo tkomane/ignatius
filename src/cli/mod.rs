@@ -300,6 +300,10 @@ pub enum Command {
     /// Execute cross-database copy and synchronization pipelines with topological DAG dependency ordering.
     #[command(name = "sync")]
     Sync(SyncArgs),
+
+    /// Synthesize deterministic mock test fixtures across database tables with referential integrity.
+    #[command(name = "seed")]
+    Seed(SeedArgs),
 }
 
 /// Arguments for the audit command.
@@ -898,6 +902,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::PoolStats(args)) => run_pool_stats(args, &paths, out, err),
         Some(Command::MaskRules(args)) => run_mask_rules(args, &paths, out, err),
         Some(Command::Sync(args)) => run_sync(args, &paths, out, err),
+        Some(Command::Seed(args)) => run_seed(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -4251,6 +4256,139 @@ fn run_sync(
     if let Some(ref dest) = args.output {
         std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
         writeln!(err, "Sync report written to {}", dest.display()).map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output formats for the synthetic seed CLI subcommand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum CliSeedFormat {
+    /// Standard executable PostgreSQL INSERT statements inside a transaction.
+    #[default]
+    Sql,
+    /// Newline-delimited JSON (NDJSON) records.
+    Jsonl,
+    /// CSV formatted records per table.
+    Csv,
+    /// Formatted human-readable summary table.
+    Table,
+}
+
+/// Arguments for the synthetic test fixture generator command.
+#[derive(Debug, Clone, Args)]
+pub struct SeedArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Filter table discovery to one schema.
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Filter to specific table name(s).
+    #[arg(short = 't', long = "table", value_name = "TABLE")]
+    pub tables: Vec<String>,
+    /// Number of synthetic rows to generate per table (default: 10).
+    #[arg(short = 'n', long = "rows", default_value_t = 10)]
+    pub rows: usize,
+    /// Deterministic 64-bit PRNG seed (default: 42).
+    #[arg(long = "seed", default_value_t = 42)]
+    pub seed: u64,
+    /// Directly execute and insert generated fixtures into the database.
+    #[arg(long)]
+    pub insert: bool,
+    /// Output serialization format (sql, jsonl, csv, table).
+    #[arg(short = 'f', long, value_enum, default_value_t = CliSeedFormat::Sql)]
+    pub format: CliSeedFormat,
+    /// Destination file for output; defaults to standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_seed(
+    args: &SeedArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing seed command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let all_tables = rt.block_on(session.analyze_seed_plan(args.schema.as_deref()))?;
+    let filtered_tables: Vec<crate::seed::TableGenerator> = if args.tables.is_empty() {
+        all_tables
+    } else {
+        all_tables
+            .into_iter()
+            .filter(|t| {
+                args.tables
+                    .iter()
+                    .any(|req| req.eq_ignore_ascii_case(&t.key.table))
+            })
+            .collect()
+    };
+
+    let report = crate::seed::generate_fixtures(&filtered_tables, args.rows, args.seed);
+
+    if args.insert {
+        rt.block_on(session.execute_synthetic_seed(&report))?;
+        writeln!(
+            err,
+            "Successfully inserted {} synthetic rows across {} tables into database",
+            report.total_rows,
+            report.tables.len()
+        )
+        .map_err(io_diagnostic)?;
+    }
+
+    let rendered = match args.format {
+        CliSeedFormat::Sql => report.render_sql(),
+        CliSeedFormat::Jsonl => report.render_jsonl(),
+        CliSeedFormat::Csv => report.render_csv(),
+        CliSeedFormat::Table => report.render_table(),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Synthetic fixtures written to {}", dest.display()).map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
     }

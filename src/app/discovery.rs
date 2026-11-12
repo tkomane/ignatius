@@ -492,7 +492,8 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::WalObservability
         | Action::ConnectionPool
         | Action::DataMasking
-        | Action::DataSync => model.connection.is_ready(),
+        | Action::DataSync
+        | Action::SyntheticSeed => model.connection.is_ready(),
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -650,7 +651,8 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::WalObservability
         | Action::ConnectionPool
         | Action::DataMasking
-        | Action::DataSync => "connect to a database first".to_owned(),
+        | Action::DataSync
+        | Action::SyntheticSeed => "connect to a database first".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
         | Action::Backspace
@@ -706,7 +708,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::WalObservability
         | Action::ConnectionPool
         | Action::DataMasking
-        | Action::DataSync => "Data",
+        | Action::DataSync
+        | Action::SyntheticSeed => "Data",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

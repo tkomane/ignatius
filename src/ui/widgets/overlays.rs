@@ -5939,5 +5939,353 @@ pub(crate) fn render_data_sync(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+pub(crate) fn render_synthetic_seed(
+    state: &crate::app::model::SyntheticSeedState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} SYNTHETIC TEST FIXTURE GENERATOR ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Tab selectors
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let tab_area = chunks[1];
+    let body_area = chunks[3];
+    let status_area = chunks[4];
+    let footer_area = chunks[5];
+
+    let tables_cnt = state.tables.len();
+    let total_rows = state.report.as_ref().map_or(0, |r| r.total_rows);
+
+    // Dieter Rams hardware status capsules
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("TABLES: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{tables_cnt}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ROWS/TABLE: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}", state.rows_per_table),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("PRNG SEED: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}", state.seed),
+            theme.style(Token::Success).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("TOTAL ROWS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{total_rows}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("INTEGRITY: ", theme.style(Token::Muted)),
+        Span::styled("DAG Parent Keys", theme.style(Token::Focus)),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Tab Bar
+    let preview_cnt = state.report.as_ref().map_or(0, |r| r.tables.len());
+    let tab_titles = [
+        format!(" [1] Table Generator Strategies ({tables_cnt}) "),
+        format!(" [2] Generated Fixture Preview ({preview_cnt}) "),
+    ];
+    let mut tab_spans = Vec::new();
+    for (i, t) in tab_titles.iter().enumerate() {
+        if i == state.active_tab {
+            tab_spans.push(Span::styled(
+                t,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
+        }
+        tab_spans.push(Span::raw(" "));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    if state.loading {
+        let loading_p = Paragraph::new(Line::from(vec![Span::styled(
+            "  Analyzing database catalog and inferring synthetic column strategies...",
+            theme.style(Token::Muted),
+        )]));
+        loading_p.render(body_area, buf);
+    } else {
+        match state.active_tab {
+            0 => {
+                // Tab 0: Table Generator Strategies & Column Inferences
+                if state.tables.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "  No tables discovered in analyzed catalog.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let split = Layout::default()
+                        .direction(ratatui::layout::Direction::Horizontal)
+                        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                        .split(body_area);
+
+                    // Left side: Tables in topological insertion order
+                    let table_header = Line::from(vec![
+                        Span::styled(
+                            format!("{:<4} ", "#"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<14} ", "SCHEMA"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<18} ", "TABLE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>6}", "COLS"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+                    let mut table_lines = vec![table_header];
+                    for (idx, tbl) in state.tables.iter().enumerate() {
+                        let is_selected = idx == state.selected_idx;
+                        let line_style = if is_selected {
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+                        table_lines.push(Line::from(vec![
+                            Span::styled(format!("{:<4} ", idx + 1), theme.style(Token::Muted)),
+                            Span::styled(
+                                format!("{:<14} ", crate::sync::truncate_str(&tbl.key.schema, 14)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<18} ", crate::sync::truncate_str(&tbl.key.table, 18)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:>6}", tbl.columns.len()),
+                                theme.style(Token::Muted),
+                            ),
+                        ]));
+                    }
+                    Paragraph::new(table_lines).render(split[0], buf);
+
+                    // Right side: Column strategy details for selected table
+                    if let Some(selected_table) = state.tables.get(state.selected_idx) {
+                        let col_header = Line::from(vec![
+                            Span::styled(
+                                format!("{:<16} ", "COLUMN"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<14} ", "TYPE"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<6} ", "PK"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<24}", "INFERRED STRATEGY"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                        ]);
+                        let mut col_lines = vec![col_header];
+                        for col in &selected_table.columns {
+                            let pk_label = if col.is_primary_key { "YES" } else { "-" };
+                            let pk_style = if col.is_primary_key {
+                                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                            } else {
+                                theme.style(Token::Muted)
+                            };
+                            col_lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{:<16} ", crate::sync::truncate_str(&col.name, 16)),
+                                    theme.style(Token::Text),
+                                ),
+                                Span::styled(
+                                    format!(
+                                        "{:<14} ",
+                                        crate::sync::truncate_str(&col.data_type, 14)
+                                    ),
+                                    theme.style(Token::Muted),
+                                ),
+                                Span::styled(format!("{:<6} ", pk_label), pk_style),
+                                Span::styled(
+                                    crate::sync::truncate_str(col.strategy.name(), 24),
+                                    theme.style(Token::Success),
+                                ),
+                            ]));
+                        }
+                        Paragraph::new(col_lines).render(split[1], buf);
+                    }
+                }
+            }
+            1 => {
+                // Tab 1: Generated Fixture Preview
+                if let Some(report) = &state.report {
+                    if let Some(table_data) = report.tables.get(state.selected_idx) {
+                        let col_headers: Vec<String> = table_data
+                            .columns
+                            .iter()
+                            .map(|c| crate::sync::truncate_str(c, 16))
+                            .collect();
+                        let header_str = col_headers
+                            .iter()
+                            .map(|c| format!("{:<16}", c))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let mut lines = vec![
+                            Line::from(Span::styled(
+                                format!(
+                                    "Table: {} ({} generated rows)",
+                                    table_data.key.display(),
+                                    table_data.rows.len()
+                                ),
+                                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                            )),
+                            Line::from(Span::styled(
+                                header_str,
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            )),
+                        ];
+
+                        for row in table_data.rows.iter().take(12) {
+                            let row_vals: Vec<String> = row
+                                .iter()
+                                .map(|v| crate::sync::truncate_str(v, 16))
+                                .collect();
+                            let row_str = row_vals
+                                .iter()
+                                .map(|v| format!("{:<16}", v))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            lines.push(Line::from(Span::styled(row_str, theme.style(Token::Text))));
+                        }
+                        if table_data.rows.len() > 12 {
+                            lines.push(Line::from(Span::styled(
+                                format!(
+                                    "... and {} more rows (export to view all)",
+                                    table_data.rows.len() - 12
+                                ),
+                                theme.style(Token::Muted),
+                            )));
+                        }
+                        Paragraph::new(lines).render(body_area, buf);
+                    } else {
+                        Paragraph::new(Line::from(Span::styled(
+                            "  Select a table in Tab 1 to inspect generated fixtures.",
+                            theme.style(Token::Muted),
+                        )))
+                        .render(body_area, buf);
+                    }
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "  Generating synthetic fixtures...",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Status Message Line
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(msg, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Bar
+    let footer_spans = vec![
+        Span::styled(
+            "[1/2] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓/j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[s] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Cycle Seed  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[n] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Cycle Rows  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

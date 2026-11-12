@@ -1772,6 +1772,109 @@ impl DataSyncState {
     }
 }
 
+/// State for the Synthetic Test Fixture Generator overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyntheticSeedState {
+    /// Inferred table generators from catalog.
+    pub tables: Vec<crate::seed::TableGenerator>,
+    /// Number of rows to generate per table.
+    pub rows_per_table: usize,
+    /// 64-bit seed used for reproducible PRNG.
+    pub seed: u64,
+    /// Active tab in the overlay (0: Table Generator Strategies, 1: Generated Fixture Preview).
+    pub active_tab: usize,
+    /// Selected item index in the active tab.
+    pub selected_idx: usize,
+    /// Whether an asynchronous operation is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+    /// Last generated fixture report.
+    pub report: Option<crate::seed::FixtureReport>,
+}
+
+impl Default for SyntheticSeedState {
+    fn default() -> Self {
+        Self {
+            tables: Vec::new(),
+            rows_per_table: 10,
+            seed: 42,
+            active_tab: 0,
+            selected_idx: 0,
+            loading: true,
+            status_message: None,
+            report: None,
+        }
+    }
+}
+
+impl SyntheticSeedState {
+    /// Generates fixture report using current tables, row count, and seed.
+    pub fn regenerate(&mut self) {
+        if !self.tables.is_empty() {
+            self.report = Some(crate::seed::generate_fixtures(
+                &self.tables,
+                self.rows_per_table,
+                self.seed,
+            ));
+        }
+    }
+
+    /// Items count for the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => self.tables.len(),
+            1 => self.report.as_ref().map_or(0, |r| r.tables.len()),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection up or down within the current tab.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let next = (current + delta).clamp(0, total.saturating_sub(1) as isize);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches the active tab and resets selected index.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab;
+        self.selected_idx = 0;
+    }
+
+    /// Cycles the seed and regenerates fixtures.
+    pub fn cycle_seed(&mut self) {
+        self.seed = self.seed.wrapping_add(1);
+        if self.seed == 0 {
+            self.seed = 1;
+        }
+        self.regenerate();
+        self.status_message = Some(format!("PRNG Seed updated to: {}", self.seed));
+    }
+
+    /// Cycles the target row count per table and regenerates.
+    pub fn cycle_rows(&mut self) {
+        self.rows_per_table = match self.rows_per_table {
+            5 => 10,
+            10 => 25,
+            25 => 50,
+            50 => 100,
+            _ => 5,
+        };
+        self.regenerate();
+        self.status_message = Some(format!(
+            "Row target updated to: {} rows/table",
+            self.rows_per_table
+        ));
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -3072,6 +3175,10 @@ pub struct Model {
     pub data_sync: Option<DataSyncState>,
     /// Request counter for in-flight cross-database sync queries.
     pub data_sync_request: u64,
+    /// Interactive synthetic fixture generator overlay state.
+    pub synthetic_seed: Option<SyntheticSeedState>,
+    /// Request counter for in-flight synthetic seed catalog queries.
+    pub synthetic_seed_request: u64,
 }
 
 impl Model {
