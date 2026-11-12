@@ -123,6 +123,7 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `%` | Open query performance and stat forensics |
 | `^` | Open index advisor and bloat forensics |
 | `&` | Open transaction, WAL, and checkpointer observability |
+| `*` | Open connection pool and pgbouncer telemetry |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -262,6 +263,16 @@ ID (XID) freeze horizons, and streaming replication standby telemetry. Inside th
 - `r` refreshes the live telemetry snapshot from the catalog.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius wal-stats` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K *` (`connection-pool`) opens the Connection
+Pool and PgBouncer Telemetry cockpit, presenting live pool allocations, client wait
+queues, server connection saturation, and blocked client forensics. Inside the overlay:
+- `1`, `2`, `3` switch between tabs (`Pool Allocations & Queues`, `Server Connections & Saturation`, `Client Wait Forensics`).
+- `Up` / `Down` or `k` / `j` navigates items in the active view.
+- `c` copies the SQL query of the selected waiting client via OSC 52.
+- `r` refreshes the live telemetry snapshot from the catalog or pooler.
+- `Esc` closes the overlay without side effects.
+The scriptable `ignatius pool-stats` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -512,7 +523,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

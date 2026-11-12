@@ -354,6 +354,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `%` | Open query performance and stat forensics |
 | `^` | Open index advisor and bloat forensics |
 | `&` | Open transaction, WAL, and checkpointer observability |
+| `*` | Open connection pool and pgbouncer telemetry |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -566,9 +567,13 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - **Streaming Replication Standby Lag**: Probes `pg_stat_replication` for connected standby nodes, application names, sync states, write/flush/replay LSN lag in bytes, and replay latency in milliseconds.
   - **Field Industrial TUI Overlay (`Ctrl+K &` / `wal-observability`)**: Hardware status capsules (`[COMMITS]`, `[ROLLBACK]`, `[WAL WRITE]`, `[CHECKPOINTS]`, `[MAX XID AGE]`, `[STANDBYS]`), tabbed navigation across `[1] Checkpoints & WAL`, `[2] Transactions & XID Freeze`, and `[3] Replication & Standbys`, and quick navigation hotkeys.
   - **Non-Interactive CLI (`ignatius wal-stats`)**: Scriptable telemetry snapshot with `-s, --section all|checkpointer|wal|transactions|freeze|replication`, `-f, --format table|json|plain`, `-o, --output`, and `--force`.
-
-### In-Flight Milestone 7 Roadmap
-- **`037-connection-pool-and-pgbouncer-telemetry`**: Integrated PgBouncer pool health, client wait queues, and server connection exhaustion alerts.
+- **`037-connection-pool-and-pgbouncer-telemetry` (Connection Pool & PgBouncer Telemetry) [Implemented]:**
+  - **PgBouncer & Native Pooler Probing**: Discovers active pools (`SHOW POOLS`, `SHOW STATS`), tracking client active (`cl_active`) and waiting (`cl_waiting`) counts, server active (`sv_active`) and idle (`sv_idle`) slots, max waiting queue age, and pooling modes (`session`, `transaction`, `statement`, `direct`).
+  - **Server Capacity & Headroom Determination**: Computes total established connections against `max_connections` and `superuser_reserved_connections` with dynamic application headroom calculations and critical exhaustion alerts (>= 85%).
+  - **State Breakdown**: Visual ASCII saturation progress bar and connection categorization (`active`, `idle`, `idle in transaction`, `idle in transaction (aborted)`, `fastpath`, `disabled`).
+  - **Blocked & Waiting Client Forensics**: Isolates non-idle client backends waiting on locks, I/O, IPC, and buffer pins with client address, application name, wait duration, and query text.
+  - **Field Industrial TUI Overlay (`Ctrl+K *` / `connection-pool`)**: Hardware status capsules (`[MODE]`, `[SATURATION]`, `[HEADROOM]`, `[ACTIVE]`, `[IDLE]`, `[WAIT QUEUE]`, `[POOLS]`), tabbed navigation (`[1] Pool Allocations & Queues`, `[2] Server Connections & Saturation`, `[3] Client Wait Forensics`), and hotkey `[c]` to copy waiting client SQL query via OSC 52.
+  - **Non-Interactive CLI (`ignatius pool-stats`)**: Scriptable telemetry snapshot with `-s, --section all|pools|server|wait`, `-f, --format table|json|plain`, `-o, --output`, and `--force`.
 
 ---
 

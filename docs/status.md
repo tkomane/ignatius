@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 29 (037-connection-pool-and-pgbouncer-telemetry) Delivery - 12 November 2026
+
+Resume on branch `feat/037-connection-pool-and-pgbouncer-telemetry`. Feature
+`037-connection-pool-and-pgbouncer-telemetry` (the fourth and final M7 Enterprise Observability & Query Forensics slice)
+has completed implementation and verification:
+
+- **Wave 29 (`037-connection-pool-and-pgbouncer-telemetry`)**:
+  delivered the fourth and concluding M7 enterprise observability slice:
+  - Pure `src/pool/` domain engine for PgBouncer pool metrics (`cl_active`, `cl_waiting`, `sv_active`,
+    `sv_idle`, `sv_used`, `maxwait`, pooling modes), PostgreSQL server connection exhaustion telemetry
+    (`max_connections`, `superuser_reserved_connections`, usable application limit, headroom,
+    and state breakdown), blocked and waiting client forensics, and aligned tabular, JSON, and plain text renderers.
+  - Live PostgreSQL and PgBouncer probe in `Session::connection_pool_telemetry` that detects PgBouncer administrative
+    consoles (`SHOW POOLS; SHOW STATS;`) and falls back smoothly to grouping `pg_stat_activity`
+    and analyzing wait events for direct PostgreSQL connections.
+  - Headless scriptable CLI subcommand `ignatius pool-stats`:
+    - `-s, --section all|pools|server|wait`: diagnostic section filtering.
+    - `-f, --format table|json|plain`, `-o, --output`, `--force`: scriptable machine/terminal output.
+  - Interactive Field Industrial TUI Connection Pool & PgBouncer Telemetry overlay on `Ctrl+K *` (`connection-pool`):
+    - Teenage Engineering / Dieter Rams status capsules: `[MODE]`, `[SATURATION]`, `[HEADROOM]`, `[ACTIVE]`, `[IDLE]`, `[WAIT QUEUE]`, `[POOLS]`.
+    - Tabbed navigation across `[1] Pool Allocations & Queues`, `[2] Server Connections & Saturation` (with visual ASCII saturation progress bar and state breakdown), and `[3] Client Wait Forensics` (dual-pane table and query detail inspector).
+    - Hotkeys: `[1]`/`[2]`/`[3]` quick tab switching, `[c]` copy waiting client SQL query to clipboard via OSC 52, `[r]` refresh, `Esc` close.
+  - Comprehensive contract integration test suite in `tests/pool_telemetry_contract.rs` verified against live PostgreSQL container.
+  - Full verification battery passed cleanly (`cargo xtask verify`: formatting, lints, API docs, 1397 unit tests, 18 documentation contract tests, and database-backed test suite).
+
 ## Wave 28 (036-transaction-and-wal-observability) Delivery - 12 November 2026
 
 Resume on branch `feat/036-transaction-and-wal-observability`. Feature

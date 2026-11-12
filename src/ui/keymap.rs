@@ -121,6 +121,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("query-performance", Action::QueryPerformance),
     ("index-advisor", Action::IndexAdvisor),
     ("wal-observability", Action::WalObservability),
+    ("connection-pool", Action::ConnectionPool),
 ];
 
 /// The action a configuration name means.
@@ -810,6 +811,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::WalObservability,
         "Open transaction, WAL, and checkpointer observability",
     ),
+    (
+        '*',
+        Action::ConnectionPool,
+        "Open connection pool and pgbouncer telemetry",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -922,6 +928,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::QueryPerformance => "Query performance",
         Action::IndexAdvisor => "Index advisor",
         Action::WalObservability => "WAL stats",
+        Action::ConnectionPool => "Connection pool",
     }
 }
 

@@ -4769,5 +4769,534 @@ pub(crate) fn render_wal_observability(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Renders the interactive Connection Pool & PgBouncer Telemetry overlay.
+pub(crate) fn render_connection_pool(
+    state: &crate::app::model::ConnectionPoolState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} CONNECTION POOL & PGBOUNCER TELEMETRY ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Tab selectors
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let tab_area = chunks[1];
+    let body_area = chunks[3];
+    let status_area = chunks[4];
+    let footer_area = chunks[5];
+
+    let report_opt = state.report.as_ref();
+    let is_pgbouncer = report_opt.is_some_and(|r| r.is_pgbouncer);
+    let total_conns = report_opt.map_or(0, |r| r.server_stats.total_connections);
+    let max_conns = report_opt.map_or(0, |r| r.server_stats.max_connections);
+    let headroom = report_opt.map_or(0, |r| r.server_stats.headroom());
+    let saturation = report_opt.map_or(0.0, |r| r.server_stats.saturation_ratio());
+    let active_conns = report_opt.map_or(0, |r| r.server_stats.active);
+    let idle_conns = report_opt.map_or(0, |r| r.server_stats.idle);
+    let wait_clients_cnt = report_opt.map_or(0, |r| r.waiting_clients.len());
+    let pools_cnt = report_opt.map_or(0, |r| r.pools.len());
+
+    let sat_token = if saturation < 70.0 {
+        Token::Success
+    } else if saturation < 85.0 {
+        Token::Focus
+    } else {
+        Token::Danger
+    };
+
+    let headroom_token = if headroom > 20 {
+        Token::Success
+    } else if headroom > 5 {
+        Token::Focus
+    } else {
+        Token::Danger
+    };
+
+    let queue_token = if wait_clients_cnt == 0 {
+        Token::Success
+    } else {
+        Token::Danger
+    };
+
+    // Dieter Rams hardware capsules
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("MODE: ", theme.style(Token::Muted)),
+        Span::styled(
+            if is_pgbouncer {
+                "PgBouncer"
+            } else {
+                "Direct PostgreSQL"
+            },
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("SATURATION: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{saturation:.1}% ({total_conns}/{max_conns})"),
+            theme.style(sat_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("HEADROOM: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{headroom}"),
+            theme.style(headroom_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ACTIVE: ", theme.style(Token::Muted)),
+        Span::styled(format!("{active_conns}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("IDLE: ", theme.style(Token::Muted)),
+        Span::styled(format!("{idle_conns}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("WAIT QUEUE: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{wait_clients_cnt}"),
+            theme.style(queue_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("POOLS: ", theme.style(Token::Muted)),
+        Span::styled(format!("{pools_cnt}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Tab Bar
+    let tab_titles = [
+        format!(" [1] Pool Allocations & Queues ({pools_cnt}) "),
+        " [2] Server Connections & Saturation ".to_string(),
+        format!(" [3] Client Wait Forensics ({wait_clients_cnt}) "),
+    ];
+    let mut tab_spans = Vec::new();
+    for (i, t) in tab_titles.iter().enumerate() {
+        if i == state.active_tab {
+            tab_spans.push(Span::styled(
+                t,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
+        }
+        tab_spans.push(Span::raw(" "));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    if state.loading {
+        let loading_p = Paragraph::new(Line::from(vec![Span::styled(
+            "  Polling connection pool and PostgreSQL telemetry...",
+            theme.style(Token::Muted),
+        )]));
+        loading_p.render(body_area, buf);
+    } else if let Some(report) = report_opt {
+        match state.active_tab {
+            0 => {
+                // Tab 0: Pool Allocations & Queues
+                if report.pools.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "  No pools detected.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let header_line = Line::from(vec![
+                        Span::styled(
+                            format!("{:<20} ", "DATABASE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<16} ", "USER"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>8} ", "CL_ACT"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>8} ", "CL_WAIT"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>8} ", "SV_ACT"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>8} ", "SV_IDLE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>8} ", "SV_USED"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>10} ", "MAXWAIT(S)"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<10}", "MODE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+                    let mut lines = vec![header_line];
+                    for (idx, p) in report.pools.iter().enumerate() {
+                        let is_selected = idx == state.selected_idx;
+                        let line_style = if is_selected {
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+                        let wait_style = if p.cl_waiting > 0 {
+                            theme.style(Token::Danger).add_modifier(Modifier::BOLD)
+                        } else {
+                            line_style
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<20} ", crate::pool::truncate_str(&p.database, 20)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<16} ", crate::pool::truncate_str(&p.user, 16)),
+                                line_style,
+                            ),
+                            Span::styled(format!("{:>8} ", p.cl_active), line_style),
+                            Span::styled(format!("{:>8} ", p.cl_waiting), wait_style),
+                            Span::styled(format!("{:>8} ", p.sv_active), line_style),
+                            Span::styled(format!("{:>8} ", p.sv_idle), line_style),
+                            Span::styled(format!("{:>8} ", p.sv_used), line_style),
+                            Span::styled(format!("{:>10.2} ", p.maxwait_seconds), line_style),
+                            Span::styled(format!("{:<10}", p.pool_mode), line_style),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            1 => {
+                // Tab 1: Server Connections & Saturation
+                let s = &report.server_stats;
+                let bar_width = 30;
+                let filled = ((s.saturation_ratio() / 100.0) * bar_width as f64).round() as usize;
+                let filled_clamped = filled.min(bar_width);
+                let empty = bar_width.saturating_sub(filled_clamped);
+                let progress_bar = format!("[{}{}]", "=".repeat(filled_clamped), ".".repeat(empty));
+
+                let lines = vec![
+                    Line::from(vec![
+                        Span::styled(
+                            "Connection Saturation Bar: ",
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            progress_bar,
+                            theme.style(sat_token).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  {:.1}% used", s.saturation_ratio()),
+                            theme.style(sat_token),
+                        ),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Total Established Connections: ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}", s.total_connections),
+                            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "  /  Configured Max Connections: ",
+                            theme.style(Token::Muted),
+                        ),
+                        Span::styled(
+                            format!("{}", s.max_connections),
+                            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Superuser Reserved Slots:      ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}", s.superuser_reserved_connections),
+                            theme.style(Token::Text),
+                        ),
+                        Span::styled(
+                            "  (Reserved for maintenance and dba recovery)",
+                            theme.style(Token::Muted),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Usable Application Limit:      ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}", s.usable_max_connections()),
+                            theme.style(Token::Text),
+                        ),
+                        Span::styled("  | Available Headroom: ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}", s.headroom()),
+                            theme.style(headroom_token).add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![Span::styled(
+                        "Connection States Breakdown:",
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                    )]),
+                    Line::from(vec![
+                        Span::styled("  • Active Query Executing:    ", theme.style(Token::Muted)),
+                        Span::styled(format!("{}", s.active), theme.style(Token::Text)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  • Idle (Outside Transaction):", theme.style(Token::Muted)),
+                        Span::styled(format!("{}", s.idle), theme.style(Token::Text)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  • Idle in Open Transaction:  ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}", s.idle_in_transaction),
+                            if s.idle_in_transaction > 0 {
+                                theme.style(Token::Warning)
+                            } else {
+                                theme.style(Token::Text)
+                            },
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  • Idle in Aborted Xact:      ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}", s.idle_in_transaction_aborted),
+                            if s.idle_in_transaction_aborted > 0 {
+                                theme.style(Token::Danger).add_modifier(Modifier::BOLD)
+                            } else {
+                                theme.style(Token::Text)
+                            },
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  • Fastpath / Disabled Slots: ", theme.style(Token::Muted)),
+                        Span::styled(
+                            format!("{}/{}", s.fastpath, s.disabled),
+                            theme.style(Token::Text),
+                        ),
+                    ]),
+                ];
+                Paragraph::new(lines).render(body_area, buf);
+            }
+            2 => {
+                // Tab 2: Client Wait Forensics (Dual Pane Table + Detail)
+                if report.waiting_clients.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "  No client connections currently blocked or waiting on pool resources.",
+                        theme.style(Token::Success),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let split_chunks = Layout::default()
+                        .direction(ratatui::layout::Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(55), // Table
+                            Constraint::Percentage(45), // Detail Inspector
+                        ])
+                        .split(body_area);
+
+                    let left_area = split_chunks[0];
+                    let right_area = split_chunks[1];
+
+                    // Left Table
+                    let header_line = Line::from(vec![
+                        Span::styled(
+                            format!("{:<7} ", "PID"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", "DATABASE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", "USER"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", "WAIT TYPE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>8}", "DUR(S)"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+                    let mut lines = vec![header_line];
+                    for (idx, w) in report.waiting_clients.iter().enumerate() {
+                        let is_selected = idx == state.selected_idx;
+                        let line_style = if is_selected {
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("{:<7} ", w.pid), line_style),
+                            Span::styled(
+                                format!("{:<12} ", crate::pool::truncate_str(&w.database, 12)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<12} ", crate::pool::truncate_str(&w.user, 12)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!(
+                                    "{:<12} ",
+                                    crate::pool::truncate_str(
+                                        w.wait_event_type.as_deref().unwrap_or("-"),
+                                        12
+                                    )
+                                ),
+                                line_style,
+                            ),
+                            Span::styled(format!("{:>8.1}", w.duration_seconds), line_style),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(left_area, buf);
+
+                    // Right Detail Inspector
+                    if let Some(selected) = report.waiting_clients.get(state.selected_idx) {
+                        let det_lines = vec![
+                            Line::from(vec![
+                                Span::styled("PID: ", theme.style(Token::Muted)),
+                                Span::styled(
+                                    format!("{}", selected.pid),
+                                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled("  Database: ", theme.style(Token::Muted)),
+                                Span::styled(&selected.database, theme.style(Token::Text)),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("User: ", theme.style(Token::Muted)),
+                                Span::styled(&selected.user, theme.style(Token::Text)),
+                                Span::styled("  App: ", theme.style(Token::Muted)),
+                                Span::styled(&selected.application_name, theme.style(Token::Text)),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Client Addr: ", theme.style(Token::Muted)),
+                                Span::styled(
+                                    selected.client_addr.as_deref().unwrap_or("local"),
+                                    theme.style(Token::Text),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Wait Event: ", theme.style(Token::Muted)),
+                                Span::styled(
+                                    format!(
+                                        "{} / {}",
+                                        selected.wait_event_type.as_deref().unwrap_or("-"),
+                                        selected.wait_event.as_deref().unwrap_or("-")
+                                    ),
+                                    theme.style(Token::Danger).add_modifier(Modifier::BOLD),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Wait Duration: ", theme.style(Token::Muted)),
+                                Span::styled(
+                                    format!("{:.2} seconds", selected.duration_seconds),
+                                    theme.style(Token::Focus),
+                                ),
+                            ]),
+                            Line::from(""),
+                            Line::from(Span::styled(
+                                "Current Query:",
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            )),
+                            Line::from(Span::styled(&selected.query, theme.style(Token::Text))),
+                        ];
+                        Paragraph::new(det_lines).render(right_area, buf);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Status Message Line
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(msg, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Bar
+    let footer_spans = vec![
+        Span::styled(
+            "[1/2/3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓/j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[c] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Copy SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

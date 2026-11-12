@@ -387,6 +387,11 @@ impl Session {
         crate::postgres::metadata::wal_and_transaction_telemetry(&self.client).await
     }
 
+    /// Queries connection pool metrics, server connection saturation, and waiting client forensics.
+    pub async fn connection_pool_telemetry(&self) -> Result<crate::pool::PoolReport, Diagnostic> {
+        crate::postgres::metadata::connection_pool_telemetry(&self.client).await
+    }
+
     /// Discovers routine signatures in the database with optional schema and name filtering.
     pub async fn discover_routines(
         &self,

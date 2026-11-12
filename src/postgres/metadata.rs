@@ -2911,5 +2911,194 @@ pub async fn wal_and_transaction_telemetry(
     })
 }
 
+/// Queries connection pool metrics, server connection capacity/headroom, and blocked client forensics.
+/// Supports both PgBouncer pooler environments and native PostgreSQL instances.
+pub async fn connection_pool_telemetry(
+    client: &tokio_postgres::Client,
+) -> Result<crate::pool::PoolReport, Diagnostic> {
+    use crate::pool::{ClientWaitMetric, PgBouncerPool, PoolReport, ServerConnectionStats};
+
+    // 1. Check if connected to a PgBouncer admin console or direct PostgreSQL.
+    // PgBouncer console responds to SHOW POOLS and SHOW STATS.
+    let pgbouncer_pools_res = client.query("SHOW POOLS;", &[]).await;
+
+    let (is_pgbouncer, pools) = match pgbouncer_pools_res {
+        Ok(rows) => {
+            let mut pools = Vec::with_capacity(rows.len());
+            for r in rows {
+                let db_name: String = r.try_get("database").unwrap_or_else(|_| "-".to_string());
+                let user_name: String = r.try_get("user").unwrap_or_else(|_| "-".to_string());
+                let cl_active: i64 = r.try_get("cl_active").unwrap_or(0);
+                let cl_waiting: i64 = r.try_get("cl_waiting").unwrap_or(0);
+                let sv_active: i64 = r.try_get("sv_active").unwrap_or(0);
+                let sv_idle: i64 = r.try_get("sv_idle").unwrap_or(0);
+                let sv_used: i64 = r.try_get("sv_used").unwrap_or(0);
+                let sv_tested: i64 = r.try_get("sv_tested").unwrap_or(0);
+                let sv_login: i64 = r.try_get("sv_login").unwrap_or(0);
+                let maxwait: i64 = r.try_get("maxwait").unwrap_or(0);
+                let pool_mode: String = r
+                    .try_get("pool_mode")
+                    .unwrap_or_else(|_| "transaction".to_string());
+
+                pools.push(PgBouncerPool {
+                    database: db_name,
+                    user: user_name,
+                    cl_active: cl_active.max(0) as u64,
+                    cl_waiting: cl_waiting.max(0) as u64,
+                    sv_active: sv_active.max(0) as u64,
+                    sv_idle: sv_idle.max(0) as u64,
+                    sv_used: sv_used.max(0) as u64,
+                    sv_tested: sv_tested.max(0) as u64,
+                    sv_login: sv_login.max(0) as u64,
+                    maxwait_seconds: maxwait.max(0) as f64,
+                    avg_query_time_ms: 0.0,
+                    pool_mode,
+                });
+            }
+            (true, pools)
+        }
+        Err(_) => {
+            // Native PostgreSQL fallback: group pg_stat_activity by datname, usename
+            let group_query = "SELECT \
+                COALESCE(datname::text, '[global]') AS database, \
+                COALESCE(usename::text, '[unknown]') AS username, \
+                COUNT(*) FILTER (WHERE state = 'active')::bigint AS cl_active, \
+                COUNT(*) FILTER (WHERE wait_event_type IS NOT NULL AND state = 'active')::bigint AS cl_waiting, \
+                COUNT(*) FILTER (WHERE state = 'active')::bigint AS sv_active, \
+                COUNT(*) FILTER (WHERE state = 'idle')::bigint AS sv_idle, \
+                COUNT(*) FILTER (WHERE state = 'idle in transaction')::bigint AS sv_used, \
+                0::bigint AS sv_tested, \
+                0::bigint AS sv_login, \
+                COALESCE(MAX(EXTRACT(EPOCH FROM (clock_timestamp() - state_change))) FILTER (WHERE state = 'active' AND wait_event_type IS NOT NULL), 0.0)::float8 AS maxwait, \
+                0.0::float8 AS avg_query, \
+                'direct'::text AS pool_mode \
+                FROM pg_catalog.pg_stat_activity \
+                WHERE backend_type = 'client backend' \
+                GROUP BY datname, usename \
+                ORDER BY cl_active DESC, sv_idle DESC LIMIT 50;";
+
+            let rows = client
+                .query(group_query, &[])
+                .await
+                .map_err(|e| from_query_error(&e, 1))?;
+
+            let mut pools = Vec::with_capacity(rows.len());
+            for r in rows {
+                pools.push(PgBouncerPool {
+                    database: r.get::<_, String>(0),
+                    user: r.get::<_, String>(1),
+                    cl_active: r.get::<_, i64>(2).max(0) as u64,
+                    cl_waiting: r.get::<_, i64>(3).max(0) as u64,
+                    sv_active: r.get::<_, i64>(4).max(0) as u64,
+                    sv_idle: r.get::<_, i64>(5).max(0) as u64,
+                    sv_used: r.get::<_, i64>(6).max(0) as u64,
+                    sv_tested: r.get::<_, i64>(7).max(0) as u64,
+                    sv_login: r.get::<_, i64>(8).max(0) as u64,
+                    maxwait_seconds: r.get::<_, f64>(9).max(0.0),
+                    avg_query_time_ms: r.get::<_, f64>(10).max(0.0),
+                    pool_mode: r.get::<_, String>(11),
+                });
+            }
+            (false, pools)
+        }
+    };
+
+    // 2. Server connection capacity, state breakdown, and headroom.
+    let server_stats = {
+        let stats_query = "SELECT \
+            COUNT(*)::bigint AS total_connections, \
+            COUNT(*) FILTER (WHERE state = 'active')::bigint AS active, \
+            COUNT(*) FILTER (WHERE state = 'idle')::bigint AS idle, \
+            COUNT(*) FILTER (WHERE state = 'idle in transaction')::bigint AS idle_in_transaction, \
+            COUNT(*) FILTER (WHERE state = 'idle in transaction (aborted)')::bigint AS idle_in_transaction_aborted, \
+            COUNT(*) FILTER (WHERE state = 'fastpath function call')::bigint AS fastpath, \
+            COUNT(*) FILTER (WHERE state = 'disabled')::bigint AS disabled, \
+            current_setting('max_connections')::bigint AS max_connections, \
+            current_setting('superuser_reserved_connections')::bigint AS superuser_reserved_connections \
+            FROM pg_catalog.pg_stat_activity \
+            WHERE backend_type = 'client backend';";
+
+        if let Ok(row) = client.query_one(stats_query, &[]).await {
+            ServerConnectionStats {
+                total_connections: row.get::<_, i64>(0).max(0) as u64,
+                active: row.get::<_, i64>(1).max(0) as u64,
+                idle: row.get::<_, i64>(2).max(0) as u64,
+                idle_in_transaction: row.get::<_, i64>(3).max(0) as u64,
+                idle_in_transaction_aborted: row.get::<_, i64>(4).max(0) as u64,
+                fastpath: row.get::<_, i64>(5).max(0) as u64,
+                disabled: row.get::<_, i64>(6).max(0) as u64,
+                max_connections: row.get::<_, i64>(7).max(0) as u64,
+                superuser_reserved_connections: row.get::<_, i64>(8).max(0) as u64,
+            }
+        } else {
+            let total = pools
+                .iter()
+                .map(|p| p.sv_active + p.sv_idle + p.sv_used)
+                .sum();
+            let active = pools.iter().map(|p| p.sv_active).sum();
+            let idle = pools.iter().map(|p| p.sv_idle).sum();
+            ServerConnectionStats {
+                total_connections: total,
+                active,
+                idle,
+                idle_in_transaction: 0,
+                idle_in_transaction_aborted: 0,
+                fastpath: 0,
+                disabled: 0,
+                max_connections: total.max(100),
+                superuser_reserved_connections: 3,
+            }
+        }
+    };
+
+    // 3. Waiting or lock-blocked client forensics
+    let waiting_clients = {
+        let wait_query = "SELECT \
+            pid::int4, \
+            COALESCE(datname::text, '-') AS database, \
+            COALESCE(usename::text, 'unknown') AS username, \
+            COALESCE(application_name::text, '') AS application_name, \
+            COALESCE(host(client_addr)::text, 'local') AS client_addr, \
+            wait_event_type::text AS wait_event_type, \
+            wait_event::text AS wait_event, \
+            COALESCE(query::text, '') AS query, \
+            COALESCE(state::text, 'unknown') AS state, \
+            GREATEST(0.0, EXTRACT(EPOCH FROM (clock_timestamp() - COALESCE(query_start, state_change)))::float8) AS duration_seconds \
+            FROM pg_catalog.pg_stat_activity \
+            WHERE backend_type = 'client backend' \
+              AND wait_event_type IS NOT NULL \
+              AND wait_event_type != 'Activity' \
+              AND wait_event_type != 'Client' \
+            ORDER BY duration_seconds DESC \
+            LIMIT 50;";
+
+        let rows = client.query(wait_query, &[]).await.ok().unwrap_or_default();
+
+        let mut metrics = Vec::with_capacity(rows.len());
+        for r in rows {
+            metrics.push(ClientWaitMetric {
+                pid: r.get::<_, i32>(0).max(0) as u32,
+                database: r.get::<_, String>(1),
+                user: r.get::<_, String>(2),
+                application_name: r.get::<_, String>(3),
+                client_addr: Some(r.get::<_, String>(4)),
+                wait_event_type: r.get::<_, Option<String>>(5),
+                wait_event: r.get::<_, Option<String>>(6),
+                query: r.get::<_, String>(7),
+                state: r.get::<_, String>(8),
+                duration_seconds: r.get::<_, f64>(9).max(0.0),
+            });
+        }
+        metrics
+    };
+
+    Ok(PoolReport {
+        is_pgbouncer,
+        server_stats,
+        pools,
+        waiting_clients,
+    })
+}
+
 #[cfg(test)]
 mod tests;

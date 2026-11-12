@@ -137,6 +137,8 @@ pub enum Action {
     IndexAdvisor,
     /// Open the transaction, WAL, checkpointer, and replication telemetry overlay.
     WalObservability,
+    /// Open the connection pool and PgBouncer telemetry overlay.
+    ConnectionPool,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -244,6 +246,7 @@ impl Action {
             Self::QueryPerformance,
             Self::IndexAdvisor,
             Self::WalObservability,
+            Self::ConnectionPool,
         ]
     }
 }
@@ -658,6 +661,13 @@ pub enum Message {
         /// Telemetry report or error.
         result: Box<Result<crate::telemetry::TelemetryReport, Diagnostic>>,
     },
+    /// Connection pool and PgBouncer telemetry loaded from catalog or pooler.
+    ConnectionPoolLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Pool telemetry report or error.
+        result: Box<Result<crate::pool::PoolReport, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -961,6 +971,11 @@ pub enum Effect {
     },
     /// Load transaction, WAL, checkpointer, and replication telemetry.
     LoadWalObservability {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Load connection pool and PgBouncer telemetry.
+    LoadConnectionPool {
         /// Identity used to reject a late response.
         request: u64,
     },
