@@ -1481,6 +1481,83 @@ impl WalObservabilityState {
     }
 }
 
+/// State for the Connection Pool & PgBouncer Telemetry overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectionPoolState {
+    /// Telemetry gathered from catalog or pooler.
+    pub report: Option<crate::pool::PoolReport>,
+    /// Active tab in the overlay (0: Pool Allocations & Queues, 1: Server Connections & Saturation, 2: Client Wait Forensics).
+    pub active_tab: usize,
+    /// Selected item index in the active tab.
+    pub selected_idx: usize,
+    /// Whether an asynchronous fetch is currently in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for ConnectionPoolState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl ConnectionPoolState {
+    /// Items count for the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        match self.active_tab {
+            0 => report.pools.len(),
+            1 => 1,
+            2 => report.waiting_clients.len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection up or down within the current tab.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_idx = new_idx as usize;
+    }
+
+    /// Switches the active tab (0: Pools & Queues, 1: Server Connections & Saturation, 2: Client Wait Forensics).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+
+    /// SQL query text of the currently selected waiting client, if any.
+    #[must_use]
+    pub fn selected_query(&self) -> Option<String> {
+        let Some(report) = &self.report else {
+            return None;
+        };
+        if self.active_tab == 2 {
+            report
+                .waiting_clients
+                .get(self.selected_idx)
+                .map(|w| w.query.clone())
+        } else {
+            None
+        }
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2769,6 +2846,10 @@ pub struct Model {
     pub wal_observability: Option<WalObservabilityState>,
     /// Request counter for in-flight WAL observability queries.
     pub wal_observability_request: u64,
+    /// Interactive connection pool and PgBouncer telemetry overlay state.
+    pub connection_pool: Option<ConnectionPoolState>,
+    /// Request counter for in-flight connection pool queries.
+    pub connection_pool_request: u64,
 }
 
 impl Model {

@@ -37,6 +37,7 @@ pub mod migration;
 pub mod ops;
 pub mod perf;
 pub mod platform;
+pub mod pool;
 pub mod postgres;
 pub mod queries;
 pub mod query;

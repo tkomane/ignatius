@@ -1037,6 +1037,25 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::ConnectionPoolLoaded { request, result } => {
+            if model.connection_pool_request != request {
+                return Vec::new();
+            }
+            if let Some(pool) = &mut model.connection_pool {
+                pool.loading = false;
+                match *result {
+                    Ok(report) => {
+                        pool.report = Some(report);
+                        pool.status_message = None;
+                    }
+                    Err(diag) => {
+                        pool.status_message =
+                            Some(format!("Pool telemetry fetch failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1422,6 +1441,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.wal_observability.is_some() {
         return wal_observability_action(model, action);
     }
+    if model.connection_pool.is_some() {
+        return connection_pool_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1594,6 +1616,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::QueryPerformance => query_performance_open(model),
         Action::IndexAdvisor => index_advisor_open(model),
         Action::WalObservability => wal_observability_open(model),
+        Action::ConnectionPool => connection_pool_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3286,6 +3309,84 @@ fn wal_observability_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.wal_observability_request = model.wal_observability_request.wrapping_add(1);
             let request = model.wal_observability_request;
             return vec![Effect::LoadWalObservability { request }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the connection pool and PgBouncer telemetry overlay.
+fn connection_pool_open(model: &mut Model) -> Vec<Effect> {
+    if model.connection_pool.is_some() {
+        model.connection_pool = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::ConnectionPoolState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.connection_pool_request = model.connection_pool_request.wrapping_add(1);
+    let request = model.connection_pool_request;
+    model.connection_pool = Some(state);
+
+    vec![Effect::LoadConnectionPool { request }]
+}
+
+/// Handles input while the connection pool and PgBouncer telemetry overlay is on screen.
+fn connection_pool_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ConnectionPool => {
+            model.connection_pool = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(pool) = &mut model.connection_pool {
+                pool.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(pool) = &mut model.connection_pool {
+                pool.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(pool) = &mut model.connection_pool {
+                pool.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(pool) = &mut model.connection_pool {
+                pool.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(pool) = &mut model.connection_pool {
+                pool.set_tab(2);
+            }
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(pool) = &model.connection_pool
+                && let Some(sql) = pool.selected_query()
+                && let Ok(payload) = crate::clipboard::ClipboardPayload::try_new(sql)
+            {
+                return vec![Effect::CopyValue { payload }];
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(pool) = &mut model.connection_pool {
+                pool.loading = true;
+            }
+            model.connection_pool_request = model.connection_pool_request.wrapping_add(1);
+            let request = model.connection_pool_request;
+            return vec![Effect::LoadConnectionPool { request }];
         }
         _ => {}
     }

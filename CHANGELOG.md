@@ -8,6 +8,21 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `037-connection-pool-and-pgbouncer-telemetry` delivers the pure
+  `src/pool/` connection pool, PgBouncer metrics, and server saturation telemetry
+  engine; live PostgreSQL and PgBouncer probe in `Session::connection_pool_telemetry`
+  (detecting PgBouncer administrative consoles via `SHOW POOLS` / `SHOW STATS`,
+  and falling back to grouping `pg_stat_activity` and blocked query events for
+  direct PostgreSQL connections); the scriptable `ignatius pool-stats` CLI subcommand
+  (`--section all|pools|server|wait`, `--format table|json|plain`, `--output`, `--force`);
+  and the interactive `Ctrl+K *` (`connection-pool`) TUI Connection Pool & PgBouncer
+  Telemetry overlay featuring Teenage Engineering status capsules (`[MODE]`,
+  `[SATURATION]`, `[HEADROOM]`, `[ACTIVE]`, `[IDLE]`, `[WAIT QUEUE]`, `[POOLS]`),
+  tabbed diagnostics (`[1] Pool Allocations & Queues`, `[2] Server Connections & Saturation`
+  with visual saturation progress bar and state breakdown, and `[3] Client Wait Forensics`
+  with dual-pane table and query detail inspector), and hotkeys `[c]` (copy waiting query
+  via OSC 52) and `[r]` (refresh).
+
 - New: Feature `036-transaction-and-wal-observability` delivers the pure
   `src/telemetry/` transaction throughput, WAL, checkpointer, and replication
   telemetry engine; live PostgreSQL `Session::wal_and_transaction_telemetry`

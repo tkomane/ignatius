@@ -22,8 +22,8 @@ use crate::ui::keymap::Keymap;
 use crate::ui::theme::Token;
 use crate::ui::widgets::{
     render_banner, render_chords, render_compact_header, render_completion, render_confirmation,
-    render_connection_details, render_copy_confirmation, render_definition, render_editor,
-    render_error, render_footer, render_header, render_help, render_import_wizard,
+    render_connection_details, render_connection_pool, render_copy_confirmation, render_definition,
+    render_editor, render_error, render_footer, render_header, render_help, render_import_wizard,
     render_index_advisor, render_inspector, render_maintenance_ops, render_name_prompt,
     render_objects, render_palette, render_parameter_prompt, render_password_prompt,
     render_plan_confirmation, render_query_performance, render_results, render_routine_runner,
@@ -143,6 +143,9 @@ fn render_with(
     }
     if let Some(wal) = &model.wal_observability {
         render_wal_observability(wal, presentation, area, buf);
+    }
+    if let Some(pool) = &model.connection_pool {
+        render_connection_pool(pool, presentation, area, buf);
     }
     if model.help_open {
         render_help(model, presentation, area, buf);

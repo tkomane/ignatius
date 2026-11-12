@@ -288,6 +288,10 @@ pub enum Command {
     /// Observe transaction throughput, WAL write rates, checkpointer telemetry, and replication lag.
     #[command(name = "wal-stats")]
     WalStats(WalStatsArgs),
+
+    /// Observe connection pool health, client wait queues, and server connection exhaustion.
+    #[command(name = "pool-stats")]
+    PoolStats(PoolStatsArgs),
 }
 
 /// Arguments for the audit command.
@@ -883,6 +887,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::ProfileQueries(args)) => run_profile_queries(args, &paths, out, err),
         Some(Command::IndexAdvisor(args)) => run_index_advisor(args, &paths, out, err),
         Some(Command::WalStats(args)) => run_wal_stats(args, &paths, out, err),
+        Some(Command::PoolStats(args)) => run_pool_stats(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -3873,6 +3878,114 @@ fn run_wal_stats(
             dest.display()
         )
         .map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Section filter for connection pool reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum CliPoolSection {
+    /// All sections (server saturation, pool allocations, and waiting clients).
+    #[default]
+    All,
+    /// Pool allocations and queue metrics.
+    Pools,
+    /// Server connection capacity, state breakdown, and headroom.
+    Server,
+    /// Waiting or lock-blocked client forensics.
+    Wait,
+}
+
+impl From<CliPoolSection> for crate::pool::PoolSection {
+    fn from(val: CliPoolSection) -> Self {
+        match val {
+            CliPoolSection::All => crate::pool::PoolSection::All,
+            CliPoolSection::Pools => crate::pool::PoolSection::Pools,
+            CliPoolSection::Server => crate::pool::PoolSection::Server,
+            CliPoolSection::Wait => crate::pool::PoolSection::Wait,
+        }
+    }
+}
+
+/// Arguments for the `pool-stats` command.
+#[derive(Debug, Args, Clone)]
+pub struct PoolStatsArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, pools, server, wait).
+    #[arg(short = 's', long, value_enum, default_value_t = CliPoolSection::All)]
+    pub section: CliPoolSection,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_pool_stats(
+    args: &PoolStatsArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing pool-stats command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let report = rt.block_on(session.connection_pool_telemetry())?;
+
+    let section = crate::pool::PoolSection::from(args.section);
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(section),
+        CliTelemetryFormat::Json => report.render_json(),
+        CliTelemetryFormat::Plain => report.render_plain(section),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Connection pool report written to {}", dest.display())
+            .map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
     }
