@@ -249,6 +249,10 @@ pub enum Command {
     #[command(name = "growth")]
     Growth(GrowthArgs),
 
+    /// Inspect partitions and generate reviewed range-partition DDL.
+    #[command(name = "partition")]
+    Partition(PartitionArgs),
+
     /// Print version and build identity.
     Version {
         /// Include build identity and source revision.
@@ -873,6 +877,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Migrate(args)) => run_migrate(args, &paths, out, err),
         Some(Command::Docs(args)) => run_docs(args, &paths, out, err),
         Some(Command::Growth(args)) => run_growth(args, &paths, out, err),
+        Some(Command::Partition(args)) => run_partition(args, &paths, out, err),
         Some(Command::Doctor { json, target }) => {
             doctor_command(*json, target.as_deref(), &paths, &facts, &presentation, out)
         }
@@ -4956,6 +4961,270 @@ fn run_growth(
         return Ok(ExitCode::Findings);
     }
     Ok(ExitCode::Success)
+}
+
+/// Arguments for `ignatius partition`.
+#[derive(Debug, Args, Clone)]
+pub struct PartitionArgs {
+    #[command(subcommand)]
+    pub action: PartitionAction,
+}
+
+/// Partition subcommands.
+#[derive(Debug, clap::Subcommand, Clone)]
+pub enum PartitionAction {
+    /// Show partitioned tables, their keys, bounds, sizes and row estimates.
+    Status(PartitionStatusArgs),
+    /// Generate reviewed DDL for future intervals and expired partitions.
+    Plan(PartitionPlanArgs),
+}
+
+/// Arguments for `ignatius partition status`.
+#[derive(Debug, Args, Clone)]
+pub struct PartitionStatusArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Filter to one schema.
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Output format: table or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliActivityFormat::Table)]
+    pub format: CliActivityFormat,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Arguments for `ignatius partition plan`.
+#[derive(Debug, Args, Clone)]
+pub struct PartitionPlanArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Partitioned table as schema.table, with quoting when needed.
+    #[arg(long, value_name = "SCHEMA.TABLE")]
+    pub table: String,
+    /// Interval length.
+    #[arg(long, value_enum)]
+    pub period: CliPartitionPeriod,
+    /// First interval start; must align to the period.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub start: String,
+    /// Number of intervals to generate, from 1 to 120.
+    #[arg(long, value_name = "N", default_value_t = 3)]
+    pub count: usize,
+    /// Append detach and drop statements for partitions ending on or before this date.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub expire_before: Option<String>,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Interval length for `ignatius partition plan`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliPartitionPeriod {
+    /// One day per interval.
+    Daily,
+    /// One ISO week per interval, starting Monday.
+    Weekly,
+    /// One calendar month per interval.
+    Monthly,
+    /// One calendar year per interval.
+    Yearly,
+}
+
+impl CliPartitionPeriod {
+    /// Maps the CLI period to the domain period.
+    #[must_use]
+    pub const fn into_domain(self) -> crate::partition::PlanPeriod {
+        match self {
+            Self::Daily => crate::partition::PlanPeriod::Daily,
+            Self::Weekly => crate::partition::PlanPeriod::Weekly,
+            Self::Monthly => crate::partition::PlanPeriod::Monthly,
+            Self::Yearly => crate::partition::PlanPeriod::Yearly,
+        }
+    }
+}
+
+fn run_partition(
+    args: &PartitionArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    match &args.action {
+        PartitionAction::Status(status) => run_partition_status(status, paths, out),
+        PartitionAction::Plan(plan) => run_partition_plan(plan, paths, out, err),
+    }
+}
+
+fn run_partition_status(
+    args: &PartitionStatusArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+
+    let snapshot = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let result = session.partition_snapshot(args.schema.as_deref()).await;
+        drop(session);
+        result
+    })?;
+
+    let rendered = match args.format {
+        CliActivityFormat::Json => snapshot.render_json(),
+        CliActivityFormat::Table => snapshot.render_table(),
+    };
+    out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+    Ok(ExitCode::Success)
+}
+
+fn run_partition_plan(
+    args: &PartitionPlanArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let (schema, table) = parse_qualified_name(&args.table)?;
+    let start = parse_plan_date(&args.start, "--start")?;
+    let expire_before = args
+        .expire_before
+        .as_deref()
+        .map(|value| parse_plan_date(value, "--expire-before"))
+        .transpose()?;
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+
+    let snapshot = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let result = session.partition_snapshot(Some(&schema)).await;
+        drop(session);
+        result
+    })?;
+    let parent = snapshot.find(&schema, &table).ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("no partitioned table matches {schema}.{table}"),
+            "planning partition changes",
+        )
+        .likely_cause("the table is not partitioned, is outside the schema, or the name is quoted incorrectly")
+        .next_action("run `ignatius partition status` for this schema and use its qualified name")
+    })?;
+
+    let plan = crate::partition::plan_partitions(
+        parent,
+        args.period.into_domain(),
+        start,
+        args.count,
+        expire_before,
+    )
+    .map_err(partition_plan_diagnostic)?;
+
+    let rendered = plan.render_sql();
+    out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+    writeln!(
+        err,
+        "Plan: {} create, {} expire statement(s); nothing was executed.",
+        plan.creates.len(),
+        plan.expires.len()
+    )
+    .map_err(io_diagnostic)?;
+    Ok(ExitCode::Success)
+}
+
+fn partition_plan_diagnostic(error: crate::partition::PlanError) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Usage,
+        error.to_string(),
+        "planning partition changes",
+    )
+    .likely_cause("the table shape or an existing partition does not match the requested plan")
+    .next_action("choose a supported table and interval, or create the partition through a reviewed migration")
+}
+
+fn parse_plan_date(value: &str, flag: &str) -> Result<chrono::NaiveDate, Diagnostic> {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{flag} must be a date in YYYY-MM-DD form: {value}"),
+            "planning partition changes",
+        )
+        .next_action("pass a valid calendar date, for example 2026-12-01")
+    })
+}
+
+/// Splits `schema.table`, accepting double-quoted parts with `""` escapes.
+fn parse_qualified_name(raw: &str) -> Result<(String, String), Diagnostic> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut characters = raw.chars().peekable();
+    while let Some(character) = characters.next() {
+        if quoted {
+            match character {
+                '"' if characters.peek() == Some(&'"') => {
+                    current.push('"');
+                    characters.next();
+                }
+                '"' => quoted = false,
+                other => current.push(other),
+            }
+        } else if character == '"' {
+            quoted = true;
+        } else if character == '.' {
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(character);
+        }
+    }
+    if quoted {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("unterminated quoted identifier in {raw}"),
+            "planning partition changes",
+        )
+        .next_action("close the quoted identifier"));
+    }
+    parts.push(current);
+    if parts.len() != 2 || parts.iter().any(String::is_empty) {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("--table must be schema.table: {raw}"),
+            "planning partition changes",
+        )
+        .next_action("qualify the table, for example billing.invoices"));
+    }
+    let table = parts.pop().unwrap_or_default();
+    let schema = parts.pop().unwrap_or_default();
+    Ok((schema, table))
 }
 
 /// Arguments for the migration runner (`045-migration-runner-and-ledger`).

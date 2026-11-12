@@ -41,6 +41,7 @@ pub mod mask;
 pub mod migrate;
 pub mod migration;
 pub mod ops;
+pub mod partition;
 pub mod perf;
 pub mod platform;
 pub mod pool;

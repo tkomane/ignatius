@@ -49,8 +49,8 @@ comment. Nothing runs until the reviewed file is applied.
   `pg_get_expr(relpartbound)`, bounded to 500 partitioned tables and 5000
   partitions.
 - FR-4802: Status includes schema, parent, child, strategy (`RANGE`, `LIST`,
-  `HASH`), key definition, bound expression, total bytes, estimated rows,
-  whether the partition is attached, and whether a default partition exists.
+  `HASH`), key definition, bound expression, total bytes, estimated rows and
+  whether a default partition exists.
 - FR-4803: `ignatius partition plan` generates DDL only for single-column
   `RANGE` partitioning on a `date`, `timestamp` or `timestamptz` key. It
   refuses list, hash, multi-column and expression keys with a diagnostic that

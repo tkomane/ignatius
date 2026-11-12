@@ -147,6 +147,15 @@ See storage and maintenance risk before a volume fills:
 - **Partitioning Candidates**: unpartitioned relations above `--large-table-bytes` (1 GiB by default) are named, without claiming a partition scheme.
 - **Read-Only And Bounded**: catalog statistics only, at most 200 relations and 200 sequences, and `--fail-on warning|critical` for automation.
 
+### Partition Lifecycle (`ignatius partition`)
+
+Keep range partitions ahead of the calendar without hand-copying DDL:
+- **Status**: every partitioned table with its strategy, key, child bounds, sizes and row estimates, including a clearly marked default partition.
+- **Reviewed Plans**: `ignatius partition plan --table billing.invoices --period monthly --start 2026-12-01 --count 3` prints `CREATE TABLE ... PARTITION OF` statements and refuses overlapping intervals.
+- **Deliberate Expiry**: `--expire-before` appends reviewed detach and drop statements only for partitions wholly before the cutoff; `MAXVALUE` and default partitions are never expired.
+- **No Hidden Writes**: the command never executes DDL. Apply the reviewed file through the migration runner so one ledger records the change.
+- **Bounded Reads**: at most 500 partitioned tables and 5000 partitions are read; unsupported keys and unparsable bounds are refused rather than guessed.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -516,6 +525,10 @@ ignatius docs "$DATABASE_URL" --schema public --format mermaid
 # Audit growth, vacuum debt, sequence headroom and partitioning candidates
 ignatius growth "$DATABASE_URL" --top 20
 ignatius growth "$DATABASE_URL" --schema orders --format json --fail-on critical
+
+# Inspect partitions and generate reviewed range-partition DDL
+ignatius partition status "$DATABASE_URL" --schema billing
+ignatius partition plan "$DATABASE_URL" --table billing.invoices --period monthly --start 2026-12-01 --count 3
 
 # Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
 ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd

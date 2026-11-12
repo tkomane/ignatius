@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `048-partition-lifecycle` advances Milestone 11 with
+  `ignatius partition status` and `ignatius partition plan`. Status reports
+  range, list and hash parents with keys, child bounds, sizes and row estimates,
+  bounded to 500 parents and 5000 partitions. Plan generates reviewed
+  `CREATE TABLE ... PARTITION OF` SQL for aligned daily, weekly, monthly or
+  yearly intervals, refuses overlaps and unsupported shapes, and can append
+  detach and drop statements for partitions fully before `--expire-before`.
+  It never executes DDL; the reviewed file belongs in the migration process.
+
 - New: Feature `049-retention-and-growth-audit` advances Milestone 11 with a
   read-only `ignatius growth` audit. It ranks relations by total, heap, index and
   TOAST bytes, reports dead tuples and vacuum debt, measures net growth since the

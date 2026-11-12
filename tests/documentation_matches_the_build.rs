@@ -38,6 +38,7 @@ const ICONS_AND_MOTION: &str = include_str!("../docs/design/icons-and-motion.md"
 const INFORMATION_ARCHITECTURE: &str = include_str!("../docs/design/information-architecture.md");
 const PGADMIN_PARITY_PLAN: &str = include_str!("../docs/architecture/pgadmin-parity-plan.md");
 const GROWTH_AUDIT: &str = include_str!("../docs/design/growth-audit.md");
+const PARTITION_LIFECYCLE: &str = include_str!("../docs/design/partition-lifecycle.md");
 const AGENT_DELIVERY_PLAN: &str = include_str!("../docs/product/agent-delivery-plan.md");
 const VISION: &str = include_str!("../docs/product/vision.md");
 const STATUS: &str = include_str!("../docs/status.md");
@@ -1239,5 +1240,20 @@ fn every_growth_finding_is_documented_with_its_severity() {
     assert!(
         README.contains("ignatius growth"),
         "the README must show the growth audit command"
+    );
+}
+
+#[test]
+fn every_partition_period_is_documented_and_the_command_is_advertised() {
+    for period in ignatius::partition::PlanPeriod::ALL {
+        assert!(
+            PARTITION_LIFECYCLE.contains(period.label()),
+            "partition period `{}` is missing from docs/design/partition-lifecycle.md",
+            period.label()
+        );
+    }
+    assert!(
+        README.contains("ignatius partition"),
+        "the README must show the partition lifecycle command"
     );
 }

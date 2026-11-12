@@ -8,6 +8,7 @@ pub mod error;
 pub mod growth;
 pub mod metadata;
 mod notices;
+pub mod partition;
 pub mod session;
 pub mod tls;
 

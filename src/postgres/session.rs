@@ -341,6 +341,14 @@ impl Session {
         crate::postgres::growth::growth_snapshot(&self.client, options).await
     }
 
+    /// Reads the bounded partition tree for a schema.
+    pub async fn partition_snapshot(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::partition::PartitionSnapshot, Diagnostic> {
+        crate::postgres::partition::partition_snapshot(&self.client, schema).await
+    }
+
     /// Reads a complete schema snapshot for schema diffing and migrations.
     pub async fn schema_snapshot(
         &self,
