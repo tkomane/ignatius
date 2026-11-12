@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `049-retention-and-growth-audit` advances Milestone 11 with a
+  read-only `ignatius growth` audit. It ranks relations by total, heap, index and
+  TOAST bytes, reports dead tuples and vacuum debt, measures net growth since the
+  statistics reset, and lists sequence headroom and unpartitioned partitioning
+  candidates. Reads are bounded to 200 relations and 200 sequences; findings are
+  `sequence-exhaustion` (critical), `vacuum-debt` and `partitioning-candidate`
+  (warning), with `--fail-on warning|critical` for automation. No table rows are
+  read and no statistics are changed.
+
 - New: Feature `046-schema-documentation-generator` advances Milestone 10 with a
   deterministic data dictionary generated from catalog metadata. The pure `src/dbdoc/`
   model renders Markdown with a table of contents, stable JSON, or a Mermaid `erDiagram`;

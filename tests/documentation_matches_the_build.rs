@@ -37,6 +37,7 @@ const TERMINAL_COMPATIBILITY: &str = include_str!("../docs/design/terminal-compa
 const ICONS_AND_MOTION: &str = include_str!("../docs/design/icons-and-motion.md");
 const INFORMATION_ARCHITECTURE: &str = include_str!("../docs/design/information-architecture.md");
 const PGADMIN_PARITY_PLAN: &str = include_str!("../docs/architecture/pgadmin-parity-plan.md");
+const GROWTH_AUDIT: &str = include_str!("../docs/design/growth-audit.md");
 const AGENT_DELIVERY_PLAN: &str = include_str!("../docs/product/agent-delivery-plan.md");
 const VISION: &str = include_str!("../docs/product/vision.md");
 const STATUS: &str = include_str!("../docs/status.md");
@@ -1214,4 +1215,29 @@ fn every_lint_rule_is_documented_with_its_severity() {
             code.severity().label()
         );
     }
+}
+
+#[test]
+fn every_growth_finding_is_documented_with_its_severity() {
+    for code in ignatius::growth::GrowthFindingCode::ALL {
+        assert!(
+            GROWTH_AUDIT.contains(&format!("`{}`", code.as_str())),
+            "growth finding `{}` is missing from docs/design/growth-audit.md",
+            code.as_str()
+        );
+        assert!(
+            GROWTH_AUDIT.contains(&format!(
+                "| `{}` | `{}` |",
+                code.as_str(),
+                code.severity().label()
+            )),
+            "growth finding `{}` must be documented with severity {}",
+            code.as_str(),
+            code.severity().label()
+        );
+    }
+    assert!(
+        README.contains("ignatius growth"),
+        "the README must show the growth audit command"
+    );
 }

@@ -138,6 +138,15 @@ Generate a reviewable data dictionary from catalog metadata:
 - **Bounded And Read-Only**: at most 500 relations and 5000 columns; truncation is stated. No table rows, credentials or connection strings enter the document.
 - **Atomic Workflow**: standard output by default, or `--output` with overwrite protection and `--force`.
 
+### Growth and Retention Audit (`ignatius growth`)
+
+See storage and maintenance risk before a volume fills:
+- **Size Ranking**: the top relations by heap, index and TOAST bytes, with dead tuple ratio, last maintenance and planner row estimates clearly marked as estimates.
+- **Growth Window**: inserts, updates, deletes and net rows per day since the statistics reset; a window shorter than an hour reports no rate.
+- **Sequence Headroom**: non-cycling sequences at 20 percent remaining warn and at 5 percent or 1000 values fail the optional gate, so integer keys do not break mid-insert.
+- **Partitioning Candidates**: unpartitioned relations above `--large-table-bytes` (1 GiB by default) are named, without claiming a partition scheme.
+- **Read-Only And Bounded**: catalog statistics only, at most 200 relations and 200 sequences, and `--fail-on warning|critical` for automation.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -504,6 +513,10 @@ ignatius migrate verify "$DATABASE_URL" --dir migrations
 ignatius docs "$DATABASE_URL" --schema public --format markdown --output docs/data-dictionary.md
 ignatius docs "$DATABASE_URL" --schema public --format mermaid
 
+# Audit growth, vacuum debt, sequence headroom and partitioning candidates
+ignatius growth "$DATABASE_URL" --top 20
+ignatius growth "$DATABASE_URL" --schema orders --format json --fail-on critical
+
 # Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
 ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
 ignatius diagram "$DATABASE_URL" --table orders --hops 1 --format unicode
@@ -704,9 +717,9 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `045-migration-runner-and-ledger` [Implemented]: Forward-only, checksummed migrations with a ledger, drift refusal, transactional apply, advisory locking, and a CLI-first reviewed route.
   - `046-schema-documentation-generator` [Implemented]: Deterministic Markdown, JSON and Mermaid data dictionaries generated from catalog metadata.
 - **Milestone 11: Operational Data Lifecycle (`047` - `049`)**:
-  - `047-backup-verification-and-restore-drills`: Restore a backup into a scratch target and prove row counts and key invariants.
-  - `048-partition-lifecycle-manager`: Reviewed create, attach, detach and drop operations for range-partitioned tables.
-  - `049-retention-and-growth-audit`: Surface unbounded tables, stale partitions, and retention-policy gaps without touching data.
+  - `047-restore-drills`: Inspect a dump table of contents, restore into a scratch database, compare relation counts, and remove the scratch database unless asked to keep it.
+  - `048-partition-lifecycle`: Report partition sets and generate reviewed create, detach and drop DDL for range-partitioned tables, without executing it.
+  - `049-retention-and-growth-audit`: Bounded catalog audit of relation growth, vacuum debt, sequence headroom and partitioning candidates, without reading rows.
 
 ---
 

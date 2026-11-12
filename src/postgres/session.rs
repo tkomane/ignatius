@@ -333,6 +333,14 @@ impl Session {
         crate::postgres::metadata::security_audit(&self.client, schema).await
     }
 
+    /// Reads the bounded retention and growth audit from catalog statistics.
+    pub async fn growth_snapshot(
+        &self,
+        options: &crate::growth::GrowthOptions,
+    ) -> Result<crate::growth::GrowthSnapshot, Diagnostic> {
+        crate::postgres::growth::growth_snapshot(&self.client, options).await
+    }
+
     /// Reads a complete schema snapshot for schema diffing and migrations.
     pub async fn schema_snapshot(
         &self,

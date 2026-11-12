@@ -245,6 +245,10 @@ pub enum Command {
     #[command(name = "docs")]
     Docs(DocsArgs),
 
+    /// Audit table growth, vacuum debt, sequence headroom and partitioning candidates.
+    #[command(name = "growth")]
+    Growth(GrowthArgs),
+
     /// Print version and build identity.
     Version {
         /// Include build identity and source revision.
@@ -868,6 +872,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Lint(args)) => run_lint(args, out),
         Some(Command::Migrate(args)) => run_migrate(args, &paths, out, err),
         Some(Command::Docs(args)) => run_docs(args, &paths, out, err),
+        Some(Command::Growth(args)) => run_growth(args, &paths, out, err),
         Some(Command::Doctor { json, target }) => {
             doctor_command(*json, target.as_deref(), &paths, &facts, &presentation, out)
         }
@@ -4822,6 +4827,133 @@ fn run_docs(
         .map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for the retention and growth audit (`049-retention-and-growth-audit`).
+#[derive(Debug, Args, Clone)]
+pub struct GrowthArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Restrict every section to one schema.
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Number of relations in the size ranking, from 1 to 200.
+    #[arg(long, value_name = "N", default_value_t = crate::growth::DEFAULT_TOP)]
+    pub top: usize,
+    /// Size at which an unpartitioned table becomes a partitioning candidate, in bytes.
+    #[arg(long, value_name = "BYTES", default_value_t = crate::growth::DEFAULT_LARGE_TABLE_BYTES)]
+    pub large_table_bytes: u64,
+    /// Output format: table or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliActivityFormat::Table)]
+    pub format: CliActivityFormat,
+    /// Exit 1 when findings meet this threshold.
+    #[arg(long, value_enum, default_value_t = CliGrowthFailOn::Never)]
+    pub fail_on: CliGrowthFailOn,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Finding threshold that fails `ignatius growth`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliGrowthFailOn {
+    /// Always exit 0 after a successful audit.
+    Never,
+    /// Exit 1 when a warning or critical finding is present.
+    Warning,
+    /// Exit 1 only when a critical finding is present.
+    Critical,
+}
+
+impl CliGrowthFailOn {
+    /// Maps the CLI threshold to the domain policy.
+    #[must_use]
+    pub const fn into_domain(self) -> crate::growth::GrowthFailOn {
+        match self {
+            Self::Never => crate::growth::GrowthFailOn::Never,
+            Self::Warning => crate::growth::GrowthFailOn::Warning,
+            Self::Critical => crate::growth::GrowthFailOn::Critical,
+        }
+    }
+}
+
+fn run_growth(
+    args: &GrowthArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args.top == 0 || args.top > crate::growth::MAX_RELATIONS {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "--top must be between 1 and {}",
+                crate::growth::MAX_RELATIONS
+            ),
+            "auditing growth",
+        )
+        .next_action("pass a smaller --top value"));
+    }
+    if args.large_table_bytes == 0 {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "--large-table-bytes must be at least 1",
+            "auditing growth",
+        )
+        .next_action("pass a byte count above zero"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+
+    let options = crate::growth::GrowthOptions {
+        schema: args.schema.clone(),
+        top: args.top,
+        large_table_bytes: args.large_table_bytes,
+        fail_on: args.fail_on.into_domain(),
+    }
+    .bounded();
+
+    let snapshot = runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        let result = session.growth_snapshot(&options).await;
+        drop(session);
+        result
+    })?;
+
+    let rendered = match args.format {
+        CliActivityFormat::Json => snapshot.render_json(&options),
+        CliActivityFormat::Table => snapshot.render_table(&options),
+    };
+    out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+
+    if let Some(threshold) = options.fail_on.threshold()
+        && snapshot.has_at_or_above(threshold)
+    {
+        writeln!(
+            err,
+            "Growth audit: {} critical and {} warning finding(s); the {} threshold was met.",
+            snapshot.count_at(crate::growth::GrowthSeverity::Critical),
+            snapshot.count_at(crate::growth::GrowthSeverity::Warning),
+            threshold.label().to_ascii_lowercase()
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Findings);
     }
     Ok(ExitCode::Success)
 }

@@ -5,6 +5,7 @@
 
 mod dbdoc;
 pub mod error;
+pub mod growth;
 pub mod metadata;
 mod notices;
 pub mod session;
