@@ -1558,6 +1558,125 @@ impl ConnectionPoolState {
     }
 }
 
+/// State for the Data Masking & Anonymization Rules overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataMaskingState {
+    /// Masking analysis gathered from catalog.
+    pub report: Option<crate::mask::MaskReport>,
+    /// Active tab in the overlay (0: Sensitive Columns & Rules, 1: Generated Masked Views SQL).
+    pub active_tab: usize,
+    /// Selected item index in the active tab.
+    pub selected_idx: usize,
+    /// View name prefix used for generated views (default "masked_").
+    pub view_prefix: String,
+    /// Whether an asynchronous fetch is currently in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for DataMaskingState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            view_prefix: "masked_".to_string(),
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl DataMaskingState {
+    /// Items count for the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        match self.active_tab {
+            0 => report.candidates.len(),
+            1 => report.policies.len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection up or down within the current tab.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let new_idx = (current + delta).clamp(0, total as isize - 1);
+        self.selected_idx = new_idx as usize;
+    }
+
+    /// Switches the active tab (0: Sensitive Columns & Rules, 1: Generated Masked Views SQL).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+        self.selected_idx = 0;
+    }
+
+    /// Cycles the masking rule for the currently selected candidate column.
+    pub fn cycle_rule(&mut self) {
+        let Some(report) = &mut self.report else {
+            return;
+        };
+        if report.candidates.is_empty() || self.selected_idx >= report.candidates.len() {
+            return;
+        }
+        let cand = &mut report.candidates[self.selected_idx];
+        cand.rule = match &cand.rule {
+            crate::mask::MaskRule::Email => crate::mask::MaskRule::Phone,
+            crate::mask::MaskRule::Phone => crate::mask::MaskRule::FullName,
+            crate::mask::MaskRule::FullName => crate::mask::MaskRule::HashHex {
+                salt: "ignatius_salt".to_string(),
+            },
+            crate::mask::MaskRule::HashHex { .. } => crate::mask::MaskRule::Redact {
+                text: "[REDACTED]".to_string(),
+            },
+            crate::mask::MaskRule::Redact { .. } => crate::mask::MaskRule::Nullify,
+            crate::mask::MaskRule::Nullify => crate::mask::MaskRule::RandomNumber {
+                min: 1000,
+                max: 9999,
+            },
+            crate::mask::MaskRule::RandomNumber { .. } => crate::mask::MaskRule::Email,
+            crate::mask::MaskRule::CustomSql(_) => crate::mask::MaskRule::Email,
+        };
+        let rule_name = cand.rule.name();
+        let col_name = cand.column.clone();
+        let schema_name = cand.schema.clone();
+        let table_name = cand.table.clone();
+        let new_rule = cand.rule.clone();
+
+        if let Some(policy) = report
+            .policies
+            .iter_mut()
+            .find(|p| p.schema == schema_name && p.table == table_name)
+        {
+            if let Some((_, r)) = policy.column_rules.iter_mut().find(|(c, _)| c == &col_name) {
+                *r = new_rule;
+            } else {
+                policy.column_rules.push((col_name.clone(), new_rule));
+            }
+        }
+
+        self.status_message = Some(format!(
+            "Assigned rule {rule_name} to {schema_name}.{table_name}.{col_name}"
+        ));
+    }
+
+    /// Generated SQL definition for all masked views.
+    #[must_use]
+    pub fn generated_sql(&self) -> Option<String> {
+        let report = self.report.as_ref()?;
+        Some(report.render_sql(&self.view_prefix))
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2850,6 +2969,10 @@ pub struct Model {
     pub connection_pool: Option<ConnectionPoolState>,
     /// Request counter for in-flight connection pool queries.
     pub connection_pool_request: u64,
+    /// Interactive data masking and anonymization rules overlay state.
+    pub data_masking: Option<DataMaskingState>,
+    /// Request counter for in-flight data masking analysis queries.
+    pub data_masking_request: u64,
 }
 
 impl Model {

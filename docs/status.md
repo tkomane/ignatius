@@ -4,6 +4,33 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 30 (038-data-masking-and-anonymization-rules) Delivery - 12 November 2026
+
+Resume on branch `feat/038-data-masking-and-anonymization-rules`. Feature
+`038-data-masking-and-anonymization-rules` (the first M8 Cross-Environment Synchronization & Masking slice)
+has completed implementation and verification:
+
+- **Wave 30 (`038-data-masking-and-anonymization-rules`)**:
+  delivered the first M8 cross-environment data protection slice:
+  - Pure `src/mask/` domain engine for heuristic PII discovery (`Email`, `Phone`, `PersonName`, `Financial`,
+    `NationalId`, `Address`, `Secret`, `GenericSensitive`), deterministic SQL transformation synthesis
+    (`Email`, `Phone`, `FullName`, `HashHex`, `Redact`, `Nullify`, `RandomNumber`, `CustomSql`),
+    virtual view generator (`CREATE OR REPLACE VIEW ... AS SELECT ...`), and aligned tabular, JSON,
+    plain text, and executable SQL formatters.
+  - Live PostgreSQL catalog analyzer in `Session::analyze_data_masking` scanning `information_schema.columns`
+    and `information_schema.tables` with configurable schema filtering and PII confidence scoring.
+  - Headless scriptable CLI subcommand `ignatius mask-rules`:
+    - `-s, --schema <SCHEMA>`: schema scoping.
+    - `--view-prefix <PREFIX>`: configurable view naming prefix (default `masked_`).
+    - `-f, --format table|json|plain|sql`, `-o, --output`, `--force`: scriptable machine, terminal, and DDL script output.
+  - Interactive Field Industrial TUI Data Masking & Anonymization overlay on `Ctrl+K )` (`data-masking`):
+    - Teenage Engineering / Dieter Rams status capsules: `[CANDIDATES]`, `[POLICIES]`, `[VIEW PREFIX]`, `[ENGINE]`.
+    - Tabbed view: `[1] Sensitive Columns & Rules` (with live in-place rule cycling via `Space`/`Enter`),
+      `[2] Generated Masked Views SQL` (full DDL preview).
+    - Hotkeys: `[1]`/`[2]` quick tab switching, `[Space]`/`[Enter]` cycle masking rule, `[c]` copy generated SQL to clipboard via OSC 52, `[r]` refresh, `Esc` close.
+  - Comprehensive contract integration test suite in `tests/mask_rules_contract.rs` verified against live PostgreSQL container.
+  - Full verification battery passed cleanly (`cargo xtask verify`: formatting, lints, API docs, 1402 unit tests, 18 documentation contract tests, and database-backed test suite).
+
 ## Wave 29 (037-connection-pool-and-pgbouncer-telemetry) Delivery - 12 November 2026
 
 Resume on branch `feat/037-connection-pool-and-pgbouncer-telemetry`. Feature

@@ -292,6 +292,10 @@ pub enum Command {
     /// Observe connection pool health, client wait queues, and server connection exhaustion.
     #[command(name = "pool-stats")]
     PoolStats(PoolStatsArgs),
+
+    /// Analyze sensitive PII columns, infer masking rules, and generate anonymized view DDL.
+    #[command(name = "mask-rules")]
+    MaskRules(MaskRulesArgs),
 }
 
 /// Arguments for the audit command.
@@ -888,6 +892,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::IndexAdvisor(args)) => run_index_advisor(args, &paths, out, err),
         Some(Command::WalStats(args)) => run_wal_stats(args, &paths, out, err),
         Some(Command::PoolStats(args)) => run_pool_stats(args, &paths, out, err),
+        Some(Command::MaskRules(args)) => run_mask_rules(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -3985,6 +3990,105 @@ fn run_pool_stats(
     if let Some(ref dest) = args.output {
         std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
         writeln!(err, "Connection pool report written to {}", dest.display())
+            .map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output format for the data masking CLI command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CliMaskFormat {
+    /// Formatted ASCII / Unicode tabular report.
+    Table,
+    /// Structured JSON payload.
+    Json,
+    /// Plain text tabular representation.
+    Plain,
+    /// Executable PostgreSQL view definitions DDL.
+    Sql,
+}
+
+/// Arguments for the `mask-rules` command.
+#[derive(Debug, Args, Clone)]
+pub struct MaskRulesArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Filter tables and columns to one schema.
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Prefix prepended to generated view names.
+    #[arg(long, default_value = "masked_")]
+    pub view_prefix: String,
+    /// Output representation format: table (default), json, plain, or sql.
+    #[arg(short = 'f', long, value_enum, default_value = "table")]
+    pub format: CliMaskFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_mask_rules(
+    args: &MaskRulesArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing mask-rules command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let session = rt.block_on(crate::postgres::session::connect(
+        &target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let report = rt.block_on(session.analyze_data_masking(args.schema.as_deref()))?;
+
+    let rendered = match args.format {
+        CliMaskFormat::Table => report.render_table(),
+        CliMaskFormat::Json => report.render_json(),
+        CliMaskFormat::Plain => report.render_plain(),
+        CliMaskFormat::Sql => report.render_sql(&args.view_prefix),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Data masking report written to {}", dest.display())
             .map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;

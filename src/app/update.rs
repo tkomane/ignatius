@@ -1056,6 +1056,25 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::DataMaskingLoaded { request, result } => {
+            if model.data_masking_request != request {
+                return Vec::new();
+            }
+            if let Some(mask) = &mut model.data_masking {
+                mask.loading = false;
+                match *result {
+                    Ok(report) => {
+                        mask.report = Some(report);
+                        mask.status_message = None;
+                    }
+                    Err(diag) => {
+                        mask.status_message =
+                            Some(format!("Mask analysis failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1444,6 +1463,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.connection_pool.is_some() {
         return connection_pool_action(model, action);
     }
+    if model.data_masking.is_some() {
+        return data_masking_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1617,6 +1639,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::IndexAdvisor => index_advisor_open(model),
         Action::WalObservability => wal_observability_open(model),
         Action::ConnectionPool => connection_pool_open(model),
+        Action::DataMasking => data_masking_open(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3387,6 +3410,90 @@ fn connection_pool_action(model: &mut Model, action: Action) -> Vec<Effect> {
             model.connection_pool_request = model.connection_pool_request.wrapping_add(1);
             let request = model.connection_pool_request;
             return vec![Effect::LoadConnectionPool { request }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the data masking and anonymization rules overlay.
+fn data_masking_open(model: &mut Model) -> Vec<Effect> {
+    if model.data_masking.is_some() {
+        model.data_masking = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::DataMaskingState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.data_masking_request = model.data_masking_request.wrapping_add(1);
+    let request = model.data_masking_request;
+    model.data_masking = Some(state);
+
+    vec![Effect::LoadDataMasking {
+        request,
+        schema: None,
+    }]
+}
+
+/// Handles input while the data masking and anonymization overlay is on screen.
+fn data_masking_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::DataMasking => {
+            model.data_masking = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(mask) = &mut model.data_masking {
+                mask.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(mask) = &mut model.data_masking {
+                mask.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(mask) = &mut model.data_masking {
+                mask.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(mask) = &mut model.data_masking {
+                mask.set_tab(1);
+            }
+        }
+        Action::Insert(' ' | '\n') | Action::Activate => {
+            if let Some(mask) = &mut model.data_masking {
+                mask.cycle_rule();
+            }
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(mask) = &model.data_masking
+                && let Some(sql) = mask.generated_sql()
+                && let Ok(payload) = crate::clipboard::ClipboardPayload::try_new(sql)
+            {
+                return vec![Effect::CopyValue { payload }];
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(mask) = &mut model.data_masking {
+                mask.loading = true;
+            }
+            model.data_masking_request = model.data_masking_request.wrapping_add(1);
+            let request = model.data_masking_request;
+            return vec![Effect::LoadDataMasking {
+                request,
+                schema: None,
+            }];
         }
         _ => {}
     }

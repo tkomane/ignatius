@@ -139,6 +139,8 @@ pub enum Action {
     WalObservability,
     /// Open the connection pool and PgBouncer telemetry overlay.
     ConnectionPool,
+    /// Open the data masking and anonymization rules overlay.
+    DataMasking,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -247,6 +249,7 @@ impl Action {
             Self::IndexAdvisor,
             Self::WalObservability,
             Self::ConnectionPool,
+            Self::DataMasking,
         ]
     }
 }
@@ -668,6 +671,13 @@ pub enum Message {
         /// Pool telemetry report or error.
         result: Box<Result<crate::pool::PoolReport, Diagnostic>>,
     },
+    /// Data masking analysis and candidate policies loaded from catalog.
+    DataMaskingLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Data masking report or error.
+        result: Box<Result<crate::mask::MaskReport, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -978,5 +988,12 @@ pub enum Effect {
     LoadConnectionPool {
         /// Identity used to reject a late response.
         request: u64,
+    },
+    /// Load data masking analysis and candidate policies.
+    LoadDataMasking {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional schema name to analyze.
+        schema: Option<String>,
     },
 }

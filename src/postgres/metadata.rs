@@ -3100,5 +3100,88 @@ pub async fn connection_pool_telemetry(
     })
 }
 
+/// Queries PostgreSQL catalog for tables and columns, scoring them with PII detection
+/// heuristics to generate automated masking rules and view policies.
+pub async fn analyze_data_masking(
+    client: &tokio_postgres::Client,
+    schema: Option<&str>,
+) -> Result<crate::mask::MaskReport, Diagnostic> {
+    use crate::mask::{MaskReport, MaskRule, PiiCandidate, PiiType, TableMaskPolicy};
+    use std::collections::HashMap;
+
+    let columns_query = "SELECT \
+        c.table_schema::text, \
+        c.table_name::text, \
+        c.column_name::text, \
+        c.data_type::text \
+        FROM information_schema.columns c \
+        JOIN information_schema.tables t \
+          ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
+        WHERE t.table_type = 'BASE TABLE' \
+          AND c.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
+          AND ($1::text IS NULL OR c.table_schema = $1::text) \
+        ORDER BY c.table_schema, c.table_name, c.ordinal_position;";
+
+    let rows = client
+        .query(columns_query, &[&schema])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    let mut candidates = Vec::new();
+    let mut table_rules: HashMap<(String, String), Vec<(String, MaskRule)>> = HashMap::new();
+    let mut table_cols: HashMap<(String, String), Vec<String>> = HashMap::new();
+
+    for r in rows {
+        let sch: String = r.get(0);
+        let tbl: String = r.get(1);
+        let col: String = r.get(2);
+        let dtype: String = r.get(3);
+
+        table_cols
+            .entry((sch.clone(), tbl.clone()))
+            .or_default()
+            .push(col.clone());
+
+        if let Some(pii) = PiiType::infer_from_name(&col) {
+            let rule = pii.default_rule();
+            let confidence = if col.eq_ignore_ascii_case(pii.label()) {
+                95
+            } else {
+                85
+            };
+            candidates.push(PiiCandidate {
+                schema: sch.clone(),
+                table: tbl.clone(),
+                column: col.clone(),
+                data_type: dtype,
+                pii_type: pii,
+                rule: rule.clone(),
+                confidence,
+            });
+            table_rules.entry((sch, tbl)).or_default().push((col, rule));
+        }
+    }
+
+    let mut policies = Vec::with_capacity(table_rules.len());
+    for ((sch, tbl), rules) in table_rules {
+        let all_columns = table_cols
+            .remove(&(sch.clone(), tbl.clone()))
+            .unwrap_or_default();
+        policies.push(TableMaskPolicy {
+            schema: sch,
+            table: tbl,
+            all_columns,
+            column_rules: rules,
+        });
+    }
+
+    policies.sort_by(|a, b| (&a.schema, &a.table).cmp(&(&b.schema, &b.table)));
+
+    Ok(MaskReport {
+        candidates,
+        policies,
+    })
+}
+
 #[cfg(test)]
 mod tests;
