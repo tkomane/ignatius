@@ -124,6 +124,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("connection-pool", Action::ConnectionPool),
     ("data-masking", Action::DataMasking),
     ("data-sync", Action::DataSync),
+    ("synthetic-seed", Action::SyntheticSeed),
 ];
 
 /// The action a configuration name means.
@@ -828,6 +829,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::DataSync,
         "Open cross-database copy and sync pipelines",
     ),
+    (
+        '+',
+        Action::SyntheticSeed,
+        "Open synthetic test fixture generator",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -943,6 +949,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::ConnectionPool => "Connection pool",
         Action::DataMasking => "Data masking",
         Action::DataSync => "Data sync",
+        Action::SyntheticSeed => "Synthetic seed",
     }
 }
 

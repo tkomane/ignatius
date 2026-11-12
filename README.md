@@ -357,6 +357,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `*` | Open connection pool and pgbouncer telemetry |
 | `)` | Open data masking and anonymization rules |
 | `|` | Open cross-database copy and sync pipelines |
+| `+` | Open synthetic test fixture generator |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -593,14 +594,21 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - **Field Industrial TUI Overlay (`Ctrl+K |` / `data-sync`)**: Dieter Rams hardware status capsules (`[TABLES]`, `[TOPOLOGY]`, `[MODE]`, `[TRUNCATE]`, `[PROTOCOL]`), tabbed navigation across `[1] Dependency Graph & Sync Plan` and `[2] Live Transfer Telemetry`, and keyboard toggles (`[d]` dry-run, `[t]` truncate, `[r]` refresh).
   - **Non-Interactive CLI (`ignatius sync`)**: Scriptable streaming pipelines with `-s, --source`, `-t, --target`, `--schema`, `--table`, `--truncate`, `--cascade`, `--dry-run`, `-f, --format table|json|plain`, `-o, --output`, and `--force`.
 
+- **`040-synthetic-test-fixture-generator` (Synthetic Test Fixture Generator) [Implemented]:**
+  - **Deterministic 64-Bit PRNG**: Fast, repeatable pseudo-random data generation (`DeterministicPrng`) using Knuth 64-bit linear congruential constants for bit-for-bit identical test fixture reproducibility across environments.
+  - **Intelligent Strategy Inference**: Automatically detects column data types and naming patterns to assign appropriate generators (`SeedStrategy`): monotonic integer sequences, bounded integer/decimal ranges, RFC 4122 v4 UUIDs, realistic human names, emails, company names, phone numbers, street addresses, cities, countries, boolean ratios, date/timestamp ranges, `pg_enum` choices, and foreign key parent sampling.
+  - **Referential Integrity DAG Orchestrator**: Traverses parent tables first, pools generated primary keys, and samples valid parent IDs for child foreign keys, guaranteeing zero foreign key constraint violations upon insertion.
+  - **Field Industrial TUI Overlay (`Ctrl+K +` / `synthetic-seed`)**: Dieter Rams hardware status capsules (`[TABLES]`, `[ROWS/TABLE]`, `[PRNG SEED]`, `[TOTAL ROWS]`, `[INTEGRITY]`), split-pane strategy inspector, live fixture preview, and interactive hotkeys (`[s]` cycle seed, `[n]` cycle row target 5/10/25/50/100, `[r]` refresh).
+  - **Non-Interactive CLI (`ignatius seed`)**: Scriptable generation with `-s, --schema`, `-t, --table`, `-n, --rows`, `--seed`, `--insert` (direct transactional database insertion), `-f, --format sql|jsonl|csv|table`, `-o, --output`, and `--force`.
+
 ---
 
 ## Roadmap: Beyond Milestone 8
 
-- **Milestone 8: Cross-Environment Data Sync & Masking (`038` - `040`)**:
+- **Milestone 8: Cross-Environment Data Sync & Masking (`038` - `040`) [COMPLETED]**:
   - `038-data-masking-and-anonymization-rules` [Implemented]: PII/GDPR redaction, deterministic pseudonymization, and virtual view overlays.
   - `039-cross-database-copy-and-sync-pipelines` [Implemented]: Dual-connection streaming copy between staging and dev with foreign key dependency ordering.
-  - `040-synthetic-test-fixture-generator`: Catalog-grounded Faker generation with constraint preservation and deterministic seeds.
+  - `040-synthetic-test-fixture-generator` [Implemented]: Catalog-grounded mock generation with referential integrity and deterministic seeds.
 - **Milestone 9: Multi-Buffer Editor & Scratchpad Persistence (`041` - `043`)**:
   - `041-multi-tab-and-split-editor-buffers`: Multi-tab SQL workspace with split editing and independent execution contexts.
   - `042-persistent-scratchpad-and-snippet-library`: Parameterized snippet templates (`{{variable}}`) with tags and search.

@@ -409,6 +409,29 @@ impl Session {
         crate::postgres::metadata::discover_table_dependencies(&self.client, schema).await
     }
 
+    /// Analyzes database catalog to build a synthetic seeding plan with inferred generators.
+    pub async fn analyze_seed_plan(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<Vec<crate::seed::TableGenerator>, Diagnostic> {
+        let _guard = self.user_sql_gate.lock().await;
+        crate::postgres::metadata::analyze_seed_plan(&self.client, schema).await
+    }
+
+    /// Executes synthetic seeding by inserting generated fixtures into the database within a transaction.
+    pub async fn execute_synthetic_seed(
+        &self,
+        report: &crate::seed::FixtureReport,
+    ) -> Result<u64, Diagnostic> {
+        let _guard = self.user_sql_gate.lock().await;
+        let sql = report.render_sql();
+        self.client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| from_query_error(&e, 1))?;
+        Ok(report.total_rows as u64)
+    }
+
     /// Copies an individual table from this session (source) to a target session using binary streaming COPY.
     pub async fn copy_table_to_target(
         &self,

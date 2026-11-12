@@ -28,8 +28,8 @@ use crate::ui::widgets::{
     render_inspector, render_maintenance_ops, render_name_prompt, render_objects, render_palette,
     render_parameter_prompt, render_password_prompt, render_plan_confirmation,
     render_query_performance, render_results, render_routine_runner, render_schema_diagram,
-    render_schema_diff, render_security_audit, render_server_activity, render_update_review,
-    render_update_value_prompt, render_wal_observability,
+    render_schema_diff, render_security_audit, render_server_activity, render_synthetic_seed,
+    render_update_review, render_update_value_prompt, render_wal_observability,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -153,6 +153,9 @@ fn render_with(
     }
     if let Some(sync) = &model.data_sync {
         render_data_sync(sync, presentation, area, buf);
+    }
+    if let Some(seed) = &model.synthetic_seed {
+        render_synthetic_seed(seed, presentation, area, buf);
     }
     if model.help_open {
         render_help(model, presentation, area, buf);

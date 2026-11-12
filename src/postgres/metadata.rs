@@ -3253,5 +3253,134 @@ pub async fn discover_table_dependencies(
     Ok(DependencyGraph::build(&tables, &edges))
 }
 
+/// Analyzes PostgreSQL tables, constraints, foreign keys, and column types to build
+/// an ordered synthetic fixture generation plan respecting referential integrity.
+pub async fn analyze_seed_plan(
+    client: &Client,
+    schema: Option<&str>,
+) -> Result<Vec<crate::seed::TableGenerator>, Diagnostic> {
+    use crate::seed::{ColumnGenerator, TableGenerator};
+    use crate::sync::TableKey;
+    use std::collections::HashMap;
+
+    let graph = discover_table_dependencies(client, schema).await?;
+    if graph.nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let plan = graph.compute_sync_plan();
+
+    // Discover enum choices from pg_enum
+    let enum_sql = r#"
+        SELECT
+            t.typname::text AS enum_name,
+            array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS choices
+        FROM pg_type t
+        JOIN pg_enum e ON t.oid = e.enumtypid
+        GROUP BY t.typname;
+    "#;
+    let mut enum_map: HashMap<String, Vec<String>> = HashMap::new();
+    if let Ok(enum_rows) = client.query(enum_sql, &[]).await {
+        for row in enum_rows {
+            let name: String = row.get("enum_name");
+            let choices: Vec<String> = row.get("choices");
+            enum_map.insert(name, choices);
+        }
+    }
+
+    // Discover columns, data types, nullability, primary keys, and foreign keys
+    let cols_sql = r#"
+        SELECT
+            ns.nspname::text AS schema_name,
+            c.relname::text AS table_name,
+            a.attname::text AS column_name,
+            format_type(a.atttypid, a.atttypmod)::text AS data_type,
+            NOT a.attnotnull AS is_nullable,
+            COALESCE(pk.is_pk, false) AS is_pk,
+            fk.parent_schema,
+            fk.parent_table,
+            fk.parent_column
+        FROM pg_class c
+        JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+        LEFT JOIN (
+            SELECT conrelid, unnest(conkey) AS attnum, true AS is_pk
+            FROM pg_constraint
+            WHERE contype = 'p'
+        ) pk ON pk.conrelid = c.oid AND pk.attnum = a.attnum
+        LEFT JOIN (
+            SELECT
+                con.conrelid,
+                con.conkey[1] AS attnum,
+                ns_dst.nspname::text AS parent_schema,
+                c_dst.relname::text AS parent_table,
+                a_dst.attname::text AS parent_column
+            FROM pg_constraint con
+            JOIN pg_class c_dst ON c_dst.oid = con.confrelid
+            JOIN pg_namespace ns_dst ON ns_dst.oid = c_dst.relnamespace
+            JOIN pg_attribute a_dst ON a_dst.attrelid = con.confrelid AND a_dst.attnum = con.confkey[1]
+            WHERE con.contype = 'f' AND array_length(con.conkey, 1) = 1
+        ) fk ON fk.conrelid = c.oid AND fk.attnum = a.attnum
+        WHERE c.relkind = 'r'
+          AND ($1::text IS NULL OR ns.nspname = $1)
+          AND ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+        ORDER BY ns.nspname, c.relname, a.attnum;
+    "#;
+    let col_rows = client
+        .query(cols_sql, &[&schema])
+        .await
+        .map_err(|e| from_query_error(&e, 0))?;
+
+    let mut table_cols: HashMap<TableKey, Vec<ColumnGenerator>> = HashMap::new();
+    for row in col_rows {
+        let schema_name: String = row.get("schema_name");
+        let table_name: String = row.get("table_name");
+        let col_name: String = row.get("column_name");
+        let data_type: String = row.get("data_type");
+        let is_nullable: bool = row.get("is_nullable");
+        let is_pk: bool = row.get("is_pk");
+
+        let parent_ref = match (
+            row.get::<_, Option<String>>("parent_schema"),
+            row.get::<_, Option<String>>("parent_table"),
+            row.get::<_, Option<String>>("parent_column"),
+        ) {
+            (Some(ps), Some(pt), Some(pc)) => Some((TableKey::new(ps, pt), pc)),
+            _ => None,
+        };
+
+        let enum_choices = enum_map.get(&data_type);
+
+        let col = ColumnGenerator::infer(
+            &col_name,
+            &data_type,
+            is_pk,
+            is_nullable,
+            parent_ref.as_ref().map(|(tk, c)| (tk, c.as_str())),
+            enum_choices.map(|v| v.as_slice()),
+        );
+
+        let key = TableKey::new(schema_name, table_name);
+        table_cols.entry(key).or_default().push(col);
+    }
+
+    // Assemble in topological insertion order (parents first)
+    let mut result = Vec::with_capacity(plan.insert_order.len());
+    for key in &plan.insert_order {
+        if let Some(cols) = table_cols.remove(key) {
+            result.push(TableGenerator {
+                key: key.clone(),
+                columns: cols,
+            });
+        }
+    }
+
+    // Append any remaining tables
+    for (key, cols) in table_cols {
+        result.push(TableGenerator { key, columns: cols });
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests;
