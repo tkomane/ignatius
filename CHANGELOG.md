@@ -8,6 +8,18 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `041-multi-tab-and-split-editor-buffers` begins Milestone 9 (Multi-Buffer
+  Editor & Scratchpad Persistence) with the pure `src/buffer/` multi-buffer engine;
+  support for up to 16 concurrent SQL editor buffers (`EditorBuffer`, `BufferManager`,
+  `EditorSplitMode`: `None`, `Vertical`, and `Horizontal`) with isolated undo/redo stacks,
+  independent cursor tracking, and file path bindings; Dieter Rams Field Industrial tactile
+  tab bar in `src/ui/widgets/editor.rs` with hardware status capsules (`[BUFFERS: n/16]`,
+  `[SPLIT: VERTICAL]`), phosphor amber active tab styling (`[1: query.sql *]`), and dual
+  split-pane rendering (side-by-side vertical and stacked horizontal); dedicated chords
+  and key bindings in `src/ui/keymap.rs` (`Ctrl+K =` new buffer, `Ctrl+K -` close buffer,
+  `Ctrl+K }` / `Ctrl+K {` cycle buffers, `Ctrl+K \` toggle split mode); and CLI multi-file
+  preloading via `ignatius --file <PATH>...`.
+
 - New: Feature `040-synthetic-test-fixture-generator` completes Milestone 8 (Cross-Environment
   Data Synchronization, Masking & Seeding) with the pure `src/seed/` synthetic test fixture
   generator; deterministic reproducible 64-bit pseudo-random number generator (`DeterministicPrng`);

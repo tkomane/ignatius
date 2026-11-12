@@ -127,6 +127,11 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `)` | Open data masking and anonymization rules |
 | `|` | Open cross-database copy and sync pipelines |
 | `+` | Open synthetic test fixture generator |
+| `=` | Create new SQL editor buffer |
+| `-` | Close current SQL editor buffer |
+| `}` | Switch to next SQL editor buffer |
+| `{` | Switch to previous SQL editor buffer |
+| `\` | Toggle editor buffer split mode |
 
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
@@ -313,6 +318,13 @@ mock test fixtures across tables. Inside the overlay:
 - `r` refreshes catalog metadata and re-infers strategies.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius seed` CLI subcommand provides non-interactive parity.
+
+With the workbench active, buffer chords manage the multi-tab and split SQL editor workspace:
+- `Ctrl+K =` (`new-buffer`) creates a new SQL editor tab (capped at 16).
+- `Ctrl+K -` (`close-buffer`) closes the current buffer, focusing the adjacent tab or resetting the lone buffer.
+- `Ctrl+K }` (`next-buffer`) cycles to the next editor buffer.
+- `Ctrl+K {` (`prev-buffer`) cycles to the previous editor buffer.
+- `Ctrl+K \` (`split-buffer`) toggles dual split-buffer editing mode between `OFF`, `VERTICAL` (side-by-side), and `HORIZONTAL` (stacked).
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -563,7 +575,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

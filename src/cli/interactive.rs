@@ -462,6 +462,7 @@ pub fn run(
     paths: &Paths,
     presentation: &Presentation,
     no_history: bool,
+    preload_files: &[std::path::PathBuf],
 ) -> Result<ExitCode, Diagnostic> {
     let mut loaded = crate::config::load(paths)?;
     // When named profiles exist and no route was typed, let the first frame ask
@@ -574,6 +575,7 @@ pub fn run(
         library,
         &mut exit_notice_counts,
         filter_late_osc11,
+        preload_files,
         #[cfg(unix)]
         termination,
     ));
@@ -626,6 +628,7 @@ async fn event_loop(
     library: crate::queries::Library,
     exit_notice_counts: &mut NoticeCounts,
     filter_late_osc11: bool,
+    preload_files: &[std::path::PathBuf],
     #[cfg(unix)] termination: tokio::signal::unix::Signal,
 ) -> Result<ExitCode, Diagnostic> {
     let crate::config::Loaded { config, themes, .. } = loaded;
@@ -683,7 +686,13 @@ async fn event_loop(
         }
         None => crate::app::ConnectionState::Disconnected,
     };
-    model.editor.set_text(starter_query());
+    if !preload_files.is_empty() {
+        model.buffers.load_files(preload_files);
+        model.sync_editor_from_active_buffer();
+    } else {
+        model.editor.set_text(starter_query());
+        model.sync_active_buffer_from_editor();
+    }
     model.completion.enabled = config.ui.completion;
     model.clipboard_osc52 = config.clipboard.osc52;
     model.history_disabled = !config.history.enabled;

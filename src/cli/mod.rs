@@ -35,6 +35,10 @@ pub struct Cli {
     #[command(flatten)]
     pub global: GlobalArgs,
 
+    /// SQL files to preload into editor buffers at startup.
+    #[arg(short = 'f', long = "file", value_name = "PATH")]
+    pub file: Vec<PathBuf>,
+
     /// The command to run. Without one, the interactive client opens.
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -141,6 +145,9 @@ pub enum Command {
         /// Test the connection and report each stage, without opening the client.
         #[arg(long)]
         check: bool,
+        /// SQL files to preload into editor buffers at startup.
+        #[arg(short = 'f', long = "file", value_name = "PATH")]
+        file: Vec<PathBuf>,
         #[command(flatten)]
         connection: ConnectionOptions,
     },
@@ -906,6 +913,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Connect {
             target,
             check,
+            file,
             connection,
         }) => {
             if *check {
@@ -920,12 +928,18 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
                     err,
                 )
             } else {
+                let preload = if !file.is_empty() {
+                    file.as_slice()
+                } else {
+                    cli.file.as_slice()
+                };
                 interactive::run(
                     target.as_deref(),
                     connection,
                     &paths,
                     &presentation,
                     cli.global.no_history,
+                    preload,
                 )
             }
         }
@@ -943,6 +957,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
             &paths,
             &presentation,
             cli.global.no_history,
+            cli.file.as_slice(),
         ),
     };
 

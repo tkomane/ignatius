@@ -588,14 +588,6 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         "README.md must not contain obsolete open-work wording"
     );
     assert!(
-        !README.contains("Ctrl+K {"),
-        "README.md must not promise unmapped Ctrl+K {{"
-    );
-    assert!(
-        !README.contains("Ctrl+K }"),
-        "README.md must not promise unmapped Ctrl+K }}"
-    );
-    assert!(
         !README.contains("`h` / `j` / `k` / `l`"),
         "README.md must not promise unmapped vim keys"
     );

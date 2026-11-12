@@ -24,6 +24,7 @@ pub mod advisor;
 pub mod app;
 pub mod audit;
 pub mod branding;
+pub mod buffer;
 pub mod cli;
 pub mod clipboard;
 pub mod config;

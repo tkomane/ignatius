@@ -11,13 +11,23 @@ use crate::ui::layout::{
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 /// The editor's content rectangle in the current layout.
 fn editor_content_area(model: &Model, presentation: &Presentation, area: Rect) -> Rect {
     let editor = pane_geometry(model, area).editor.unwrap_or_default();
-    pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor)
+    let mut inner =
+        pane_block(String::new(), model.focus == Focus::Editor, presentation).inner(editor);
+    if (model.buffers.count() > 1
+        || model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
+        && inner.height > 2
+    {
+        inner.y = inner.y.saturating_add(1);
+        inner.height = inner.height.saturating_sub(1);
+    }
+    inner
 }
 
 /// Text rows inside the pane border; zero means no text can be drawn.
@@ -215,175 +225,227 @@ fn candidate_kind_token(kind: crate::query::completion::CandidateKind) -> Token 
         CandidateKind::Object(_) => Token::Info,
     }
 }
-pub(crate) fn render_editor(
+fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+    if area.width < 10 || area.height == 0 {
+        return;
+    }
+    let theme = &presentation.theme;
+    let mut spans = Vec::new();
+
+    // Field Industrial status capsule: [BUFFERS: n/16]
+    spans.push(Span::styled(
+        format!(
+            "[BUFFERS: {}/{}] ",
+            model.buffers.count(),
+            crate::buffer::MAX_EDITOR_BUFFERS
+        ),
+        theme.style(Token::Muted),
+    ));
+
+    if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
+        spans.push(Span::styled(
+            format!("[SPLIT: {}] ", model.buffers.split_mode.label()),
+            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    // Render individual buffer tabs
+    for (idx, b) in model.buffers.buffers.iter().enumerate() {
+        let is_active = idx == model.buffers.active_idx;
+        let is_secondary = model.buffers.split_mode != crate::buffer::EditorSplitMode::None
+            && model.buffers.secondary_idx == Some(idx);
+
+        let label = format!("{}: {}", idx + 1, b.display_label());
+
+        if is_active {
+            spans.push(Span::styled("[", theme.style(Token::Focus)));
+            spans.push(Span::styled(
+                label,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled("] ", theme.style(Token::Focus)));
+        } else if is_secondary {
+            spans.push(Span::styled("[SPLIT: ", theme.style(Token::Info)));
+            spans.push(Span::styled(
+                label,
+                theme.style(Token::Info).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled("] ", theme.style(Token::Info)));
+        } else {
+            spans.push(Span::styled(format!("{label} "), theme.style(Token::Muted)));
+        }
+    }
+
+    spans.push(Span::styled("[+] ", theme.style(Token::Focus)));
+
+    Line::from(spans).render(area, buf);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_editor_buffer_pane(
+    editor: &crate::app::editor::Editor,
     model: &Model,
     keymap: &Keymap,
     presentation: &Presentation,
-    area: Rect,
+    inner: Rect,
     buf: &mut Buffer,
+    is_active: bool,
+    split_badge: Option<&str>,
 ) {
-    let theme = &presentation.theme;
-    let focused = model.focus == Focus::Editor;
-    let (line, column) = model.editor.position();
-    let mut title = format!(
-        " {}Editor  line {line}, column {column} ",
-        presentation.icon(Icon::Editor)
-    );
-    if model.splits.zoomed && focused {
-        title.insert_str(0, " (zoomed)");
-    }
-    if model.editor.is_modified() {
-        title.push_str("[modified] ");
-    }
-    if focused {
-        title.push_str("[focused] ");
-    }
-
-    let block = pane_block(title, focused, presentation);
-    let inner = block.inner(area);
-    block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
+    let theme = &presentation.theme;
+    let focused = model.focus == Focus::Editor && is_active;
+    let text = editor.text();
 
-    let text = model.editor.text();
     if text.is_empty() {
-        let ctx = crate::app::discovery::context(model);
-        let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
-        let help_key = action_key_label(keymap, &crate::app::Action::ToggleHelp);
-        let mut lines = Vec::new();
-        match ctx.connection {
-            crate::app::discovery::ConnectionPosture::Disconnected => {
-                lines.push(Line::from(Span::styled(
-                    "Connection required",
-                    theme.style(Token::Warning),
-                )));
-                lines.push(Line::from(Span::styled(
-                    "Connect before running SQL. Results appear after a query.",
-                    theme.style(Token::Muted),
-                )));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{palette_key} "),
-                        theme
-                            .style(Token::Focus)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Command palette shows available actions.",
-                        theme.style(Token::Info),
-                    ),
-                ]));
-            }
-            crate::app::discovery::ConnectionPosture::Connecting => {
-                lines.push(Line::from(Span::styled(
-                    "Connecting",
-                    theme.style(Token::Info),
-                )));
-                lines.push(Line::from(Span::styled(
-                    "The editor is ready. Wait for the connection before running SQL.",
-                    theme.style(Token::Muted),
-                )));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{help_key} "),
-                        theme
-                            .style(Token::Focus)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Help explains the keyboard while it connects.",
-                        theme.style(Token::Info),
-                    ),
-                ]));
-            }
-            crate::app::discovery::ConnectionPosture::Connected => {
-                let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
-                lines.push(Line::from(Span::styled(
-                    "Start here",
-                    theme.style(Token::Focus),
-                )));
-                lines.push(Line::from(Span::styled(
-                    "Type SQL in this editor.",
-                    theme.style(Token::Text),
-                )));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{run_key} "),
-                        theme
-                            .style(Token::Focus)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Run the buffer once SQL is ready.",
-                        theme.style(Token::Info),
-                    ),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{palette_key} "),
-                        theme
-                            .style(Token::Focus)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Command palette answers what else is possible.",
+        if is_active {
+            let ctx = crate::app::discovery::context(model);
+            let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
+            let help_key = action_key_label(keymap, &crate::app::Action::ToggleHelp);
+            let mut lines = Vec::new();
+            match ctx.connection {
+                crate::app::discovery::ConnectionPosture::Disconnected => {
+                    lines.push(Line::from(Span::styled(
+                        "Connection required",
+                        theme.style(Token::Warning),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "Connect before running SQL. Results appear after a query.",
                         theme.style(Token::Muted),
-                    ),
-                ]));
-            }
-            crate::app::discovery::ConnectionPosture::Lost
-            | crate::app::discovery::ConnectionPosture::Failed => {
-                lines.push(Line::from(Span::styled(
-                    ctx.connection.label(),
-                    theme.style(Token::Danger),
-                )));
-                lines.push(Line::from(Span::styled(
-                    "Reconnect before running SQL. Results remain from the last known query.",
-                    theme.style(Token::Muted),
-                )));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{palette_key} "),
-                        theme
-                            .style(Token::Focus)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Command palette shows safe actions.",
+                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{palette_key} "),
+                            theme
+                                .style(Token::Focus)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Command palette shows available actions.",
+                            theme.style(Token::Info),
+                        ),
+                    ]));
+                }
+                crate::app::discovery::ConnectionPosture::Connecting => {
+                    lines.push(Line::from(Span::styled(
+                        "Connecting",
                         theme.style(Token::Info),
-                    ),
-                ]));
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "The editor is ready. Wait for the connection before running SQL.",
+                        theme.style(Token::Muted),
+                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{help_key} "),
+                            theme
+                                .style(Token::Focus)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Help explains the keyboard while it connects.",
+                            theme.style(Token::Info),
+                        ),
+                    ]));
+                }
+                crate::app::discovery::ConnectionPosture::Connected => {
+                    let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
+                    lines.push(Line::from(Span::styled(
+                        "Start here",
+                        theme.style(Token::Focus),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "Type SQL in this editor.",
+                        theme.style(Token::Text),
+                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{run_key} "),
+                            theme
+                                .style(Token::Focus)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Run the buffer once SQL is ready.",
+                            theme.style(Token::Info),
+                        ),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{palette_key} "),
+                            theme
+                                .style(Token::Focus)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Command palette answers what else is possible.",
+                            theme.style(Token::Muted),
+                        ),
+                    ]));
+                }
+                crate::app::discovery::ConnectionPosture::Lost
+                | crate::app::discovery::ConnectionPosture::Failed => {
+                    lines.push(Line::from(Span::styled(
+                        ctx.connection.label(),
+                        theme.style(Token::Danger),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "Reconnect before running SQL. Results remain from the last known query.",
+                        theme.style(Token::Muted),
+                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{palette_key} "),
+                            theme
+                                .style(Token::Focus)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Command palette shows safe actions.",
+                            theme.style(Token::Info),
+                        ),
+                    ]));
+                }
             }
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .render(inner, buf);
+        } else {
+            let label = split_badge.unwrap_or("empty buffer");
+            let line = Line::from(vec![
+                Span::styled(format!("[SPLIT: {label}] "), theme.style(Token::Info)),
+                Span::styled("(empty buffer)", theme.style(Token::Muted)),
+            ]);
+            Paragraph::new(vec![line]).render(inner, buf);
         }
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .render(inner, buf);
         return;
     }
 
     let lines: Vec<&str> = text.split('\n').collect();
     let gutter = lines.len().to_string().len().max(2);
-    let (cursor_line, _) = model.editor.position();
+    let (cursor_line, _) = editor.position();
     let capacity = usize::from(inner.width).saturating_sub(gutter + 2);
-    let viewport = view::viewport(&model.editor, capacity);
-    let (_, cursor) = view::caret_line(&model.editor);
+    let viewport = view::viewport(editor, capacity);
+    let (_, cursor) = view::caret_line(editor);
 
-    // The window follows the cursor rather than being stored, exactly as the
-    // result grid's does. A scroll offset in the model would be a second source
-    // of truth for where the cursor is.
     let height = inner.height as usize;
     let offset = cursor_line
         .saturating_sub(1)
         .saturating_sub(height.saturating_sub(1));
 
-    // Colouring is decoration over the same bytes, so it is computed from the
-    // buffer here rather than stored anywhere.
     let syntax = crate::query::highlight::tokens(text);
-    let error_location = model.error_location.as_ref();
-    // The statement Ctrl+T would run, marked in the gutter. Knowing which one
-    // that is before pressing the key is the point.
-    let current = crate::query::statements::statement_at(text, model.editor.cursor());
+    let error_location = if is_active {
+        model.error_location.as_ref()
+    } else {
+        None
+    };
+    let current = if is_active {
+        crate::query::statements::statement_at(text, editor.cursor())
+    } else {
+        None
+    };
     let marker = if presentation.glyphs.is_ascii() {
         "|"
     } else {
@@ -396,8 +458,6 @@ pub(crate) fn render_editor(
     for (index, source) in lines.iter().enumerate() {
         let number = index + 1;
         let start = line_start;
-        // Every line advances the offset, including the ones scrolled past, so
-        // the highlighting stays aligned with the text.
         line_start += source.len() + 1;
         if number <= offset || number > offset + height {
             continue;
@@ -448,7 +508,7 @@ pub(crate) fn render_editor(
             source,
             viewport.offset,
             capacity,
-            (number == cursor_line).then_some(cursor),
+            (number == cursor_line && is_active).then_some(cursor),
         );
         for unit in &line.units {
             let is_cursor = focused && number == cursor_line && unit.source.contains(&cursor);
@@ -499,6 +559,180 @@ pub(crate) fn render_editor(
             if buf[(x, cy)].bg == surface_pane_bg {
                 buf[(x, cy)].set_bg(stripe_bg);
             }
+        }
+    }
+}
+
+pub(crate) fn render_editor(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let focused = model.focus == Focus::Editor;
+    let (line, column) = model.editor.position();
+    let mut title = format!(
+        " {}Editor  line {line}, column {column} ",
+        presentation.icon(Icon::Editor)
+    );
+    if model.splits.zoomed && focused {
+        title.insert_str(0, " (zoomed)");
+    }
+    if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
+        title.push_str(&format!("[SPLIT: {}] ", model.buffers.split_mode.label()));
+    }
+    if model.buffers.count() > 1 {
+        title.push_str(&format!(
+            "[BUFFERS: {}/{}] ",
+            model.buffers.count(),
+            crate::buffer::MAX_EDITOR_BUFFERS
+        ));
+    }
+    if model.editor.is_modified() {
+        title.push_str("[modified] ");
+    }
+    if focused {
+        title.push_str("[focused] ");
+    }
+
+    let block = pane_block(title, focused, presentation);
+    let inner = block.inner(area);
+    block.render(area, buf);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let show_tab_bar = (model.buffers.count() > 1
+        || model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
+        && inner.height > 2;
+
+    let text_inner = if show_tab_bar {
+        render_tab_bar(
+            model,
+            presentation,
+            Rect::new(inner.x, inner.y, inner.width, 1),
+            buf,
+        );
+        Rect::new(
+            inner.x,
+            inner.y.saturating_add(1),
+            inner.width,
+            inner.height.saturating_sub(1),
+        )
+    } else {
+        inner
+    };
+
+    match model.buffers.split_mode {
+        crate::buffer::EditorSplitMode::None => {
+            render_editor_buffer_pane(
+                &model.editor,
+                model,
+                keymap,
+                presentation,
+                text_inner,
+                buf,
+                true,
+                None,
+            );
+        }
+        crate::buffer::EditorSplitMode::Vertical if text_inner.width >= 40 => {
+            let left_width = text_inner.width / 2;
+            let sep_x = text_inner.x.saturating_add(left_width);
+            let right_x = sep_x.saturating_add(1);
+            let right_width = text_inner.width.saturating_sub(left_width + 1);
+
+            let left_rect = Rect::new(text_inner.x, text_inner.y, left_width, text_inner.height);
+            let right_rect = Rect::new(right_x, text_inner.y, right_width, text_inner.height);
+
+            let sep_char = if presentation.glyphs.is_ascii() {
+                "|"
+            } else {
+                "│"
+            };
+            for y in text_inner.y..text_inner.y.saturating_add(text_inner.height) {
+                buf.set_stringn(sep_x, y, sep_char, 1, theme.style(Token::Muted));
+            }
+
+            render_editor_buffer_pane(
+                &model.editor,
+                model,
+                keymap,
+                presentation,
+                left_rect,
+                buf,
+                true,
+                None,
+            );
+
+            if let Some(sec_buf) = model.buffers.secondary_buffer() {
+                render_editor_buffer_pane(
+                    &sec_buf.editor,
+                    model,
+                    keymap,
+                    presentation,
+                    right_rect,
+                    buf,
+                    false,
+                    Some(&sec_buf.title),
+                );
+            }
+        }
+        crate::buffer::EditorSplitMode::Horizontal if text_inner.height >= 6 => {
+            let top_height = text_inner.height / 2;
+            let sep_y = text_inner.y.saturating_add(top_height);
+            let bottom_y = sep_y.saturating_add(1);
+            let bottom_height = text_inner.height.saturating_sub(top_height + 1);
+
+            let top_rect = Rect::new(text_inner.x, text_inner.y, text_inner.width, top_height);
+            let bottom_rect = Rect::new(text_inner.x, bottom_y, text_inner.width, bottom_height);
+
+            let sep_char = if presentation.glyphs.is_ascii() {
+                "-"
+            } else {
+                "─"
+            };
+            for x in text_inner.x..text_inner.x.saturating_add(text_inner.width) {
+                buf.set_stringn(x, sep_y, sep_char, 1, theme.style(Token::Muted));
+            }
+
+            render_editor_buffer_pane(
+                &model.editor,
+                model,
+                keymap,
+                presentation,
+                top_rect,
+                buf,
+                true,
+                None,
+            );
+
+            if let Some(sec_buf) = model.buffers.secondary_buffer() {
+                render_editor_buffer_pane(
+                    &sec_buf.editor,
+                    model,
+                    keymap,
+                    presentation,
+                    bottom_rect,
+                    buf,
+                    false,
+                    Some(&sec_buf.title),
+                );
+            }
+        }
+        _ => {
+            render_editor_buffer_pane(
+                &model.editor,
+                model,
+                keymap,
+                presentation,
+                text_inner,
+                buf,
+                true,
+                None,
+            );
         }
     }
 }

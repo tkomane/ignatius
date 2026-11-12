@@ -145,6 +145,16 @@ pub enum Action {
     DataSync,
     /// Open the synthetic test fixture generator overlay.
     SyntheticSeed,
+    /// Create a new SQL editor buffer.
+    NewEditorBuffer,
+    /// Close the currently active SQL editor buffer.
+    CloseEditorBuffer,
+    /// Switch to the next SQL editor buffer.
+    NextEditorBuffer,
+    /// Switch to the previous SQL editor buffer.
+    PrevEditorBuffer,
+    /// Toggle editor split layout (None, Vertical, Horizontal).
+    ToggleEditorSplit,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -256,6 +266,11 @@ impl Action {
             Self::DataMasking,
             Self::DataSync,
             Self::SyntheticSeed,
+            Self::NewEditorBuffer,
+            Self::CloseEditorBuffer,
+            Self::NextEditorBuffer,
+            Self::PrevEditorBuffer,
+            Self::ToggleEditorSplit,
         ]
     }
 }
