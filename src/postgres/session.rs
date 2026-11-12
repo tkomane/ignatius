@@ -207,6 +207,12 @@ impl CancelHandle {
 }
 
 impl Session {
+    /// The driver client, for catalog readers in sibling modules.
+    #[must_use]
+    pub(super) const fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Facts about this session.
     #[must_use]
     pub const fn info(&self) -> &SessionInfo {
@@ -1599,6 +1605,202 @@ impl Session {
                 .map(|column| Some(column.type_().name().to_owned()))
                 .collect(),
         )
+    }
+    /// Reads every applied migration ledger row.
+    ///
+    /// A missing ledger table is an empty ledger, not an error: a database that
+    /// has never used this runner is a normal starting state.
+    pub async fn migration_records(
+        &self,
+    ) -> Result<Vec<crate::migrate::MigrationRecord>, Diagnostic> {
+        let rows = self
+            .client
+            .query(
+                "SELECT version, name, checksum, applied_at::text, execution_ms \
+                 FROM ignatius_schema_migrations ORDER BY version",
+                &[],
+            )
+            .await;
+        let rows = match rows {
+            Ok(rows) => rows,
+            Err(error)
+                if error.code().is_some_and(|code| {
+                    *code == tokio_postgres::error::SqlState::UNDEFINED_TABLE
+                }) =>
+            {
+                return Ok(Vec::new());
+            }
+            Err(error) => return Err(from_query_error(&error, 1)),
+        };
+        Ok(rows
+            .into_iter()
+            .map(|row| crate::migrate::MigrationRecord {
+                version: row.get(0),
+                name: row.get(1),
+                checksum: row.get(2),
+                applied_at: row.get(3),
+                execution_ms: row.get(4),
+            })
+            .collect())
+    }
+
+    /// Applies pending migrations in one transaction each.
+    ///
+    /// The ledger is read again after the advisory lock, so a second runner
+    /// cannot apply the same version between planning and writing. Drift or a
+    /// missing applied file refuses the whole run before the first write.
+    pub async fn apply_migrations(
+        &self,
+        files: Vec<crate::migrate::MigrationFile>,
+        up_to: Option<u64>,
+        allow_production: bool,
+    ) -> Result<crate::migrate::MigrationApplyReport, Diagnostic> {
+        if self.info.environment.is_production() && !allow_production {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "refusing to apply migrations to a production target",
+                "applying migrations",
+            )
+            .likely_cause("the target is classified as production")
+            .next_action("review `ignatius migrate plan` first, then pass --allow-production"));
+        }
+        let _gate = self.user_sql_gate.lock().await;
+        self.client
+            .execute(
+                "SELECT pg_advisory_lock($1)",
+                &[&crate::migrate::ADVISORY_LOCK_KEY],
+            )
+            .await
+            .map_err(|error| from_query_error(&error, 1))?;
+
+        let result = self.apply_migrations_locked(files, up_to).await;
+        let _ = self
+            .client
+            .execute(
+                "SELECT pg_advisory_unlock($1)",
+                &[&crate::migrate::ADVISORY_LOCK_KEY],
+            )
+            .await;
+        result
+    }
+
+    async fn apply_migrations_locked(
+        &self,
+        files: Vec<crate::migrate::MigrationFile>,
+        up_to: Option<u64>,
+    ) -> Result<crate::migrate::MigrationApplyReport, Diagnostic> {
+        let records = self.migration_records().await?;
+        let plan = crate::migrate::MigrationPlan::new(files, records)?;
+        let drifted = plan.drifted();
+        let missing = plan.missing();
+        if !drifted.is_empty() || !missing.is_empty() {
+            let versions: Vec<&str> = drifted
+                .iter()
+                .chain(missing.iter())
+                .map(|entry| entry.raw_version())
+                .collect();
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!(
+                    "migration ledger does not match the files: {}",
+                    versions.join(", ")
+                ),
+                "applying migrations",
+            )
+            .likely_cause("an applied migration was edited, or its file was removed")
+            .next_action("restore the exact applied bytes before applying anything"));
+        }
+
+        // Only after the ledger and files agree does anything write. The
+        // table is created here rather than before the check so a refused run
+        // leaves the schema untouched.
+        self.client
+            .batch_execute(
+                "CREATE TABLE IF NOT EXISTS ignatius_schema_migrations (
+                    version text PRIMARY KEY,
+                    name text NOT NULL,
+                    checksum text NOT NULL,
+                    applied_at timestamptz NOT NULL DEFAULT now(),
+                    execution_ms bigint NOT NULL
+                )",
+            )
+            .await
+            .map_err(|error| from_query_error(&error, 1))?;
+
+        let pending = plan.pending(up_to);
+        let skipped = plan.pending(None).len().saturating_sub(pending.len());
+        let mut applied = Vec::new();
+        for entry in pending {
+            let Some(file) = entry.file.as_ref() else {
+                continue;
+            };
+            if crate::migrate::transaction_control(&file.sql).is_some() {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!(
+                        "migration {} contains transaction control",
+                        file.raw_version
+                    ),
+                    "applying migrations",
+                )
+                .likely_cause("the runner owns the transaction around each migration")
+                .next_action(
+                    "remove BEGIN, COMMIT, ROLLBACK, SAVEPOINT or RELEASE from the file",
+                ));
+            }
+            let started = std::time::Instant::now();
+            if let Err(error) = self
+                .client
+                .batch_execute(&format!(
+                    "BEGIN; SET LOCAL lock_timeout = '5s'; {}",
+                    file.sql
+                ))
+                .await
+            {
+                let _ = self.client.batch_execute("ROLLBACK;").await;
+                let mut diagnostic = from_query_error(&error, 1);
+                diagnostic.headline = format!(
+                    "migration {} failed: {}",
+                    file.raw_version, diagnostic.headline
+                );
+                diagnostic.attempted = format!("applying migration {}", file.raw_version);
+                return Err(diagnostic);
+            }
+            let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+            let inserted = self
+                .client
+                .execute(
+                    "INSERT INTO ignatius_schema_migrations \
+                     (version, name, checksum, execution_ms) VALUES ($1, $2, $3, $4)",
+                    &[&file.raw_version, &file.name, &file.checksum, &elapsed],
+                )
+                .await;
+            let inserted = match inserted {
+                Ok(rows) => rows,
+                Err(error) => {
+                    let _ = self.client.batch_execute("ROLLBACK;").await;
+                    let mut diagnostic = from_query_error(&error, 1);
+                    diagnostic.headline = format!(
+                        "migration {} could not be recorded: {}",
+                        file.raw_version, diagnostic.headline
+                    );
+                    diagnostic.attempted = format!("recording migration {}", file.raw_version);
+                    return Err(diagnostic);
+                }
+            };
+            debug_assert_eq!(inserted, 1);
+            if let Err(error) = self.client.batch_execute("COMMIT;").await {
+                let _ = self.client.batch_execute("ROLLBACK;").await;
+                return Err(from_query_error(&error, 1));
+            }
+            applied.push(crate::migrate::AppliedMigration {
+                version: file.raw_version.clone(),
+                name: file.name.clone(),
+                checksum: file.checksum.clone(),
+                execution_ms: elapsed,
+            });
+        }
+        Ok(crate::migrate::MigrationApplyReport { applied, skipped })
     }
 }
 

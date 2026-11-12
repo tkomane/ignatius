@@ -113,6 +113,31 @@ An SSH drop, terminal crash, or `SIGKILL` no longer costs you unsaved SQL:
 - **Headless Recovery**: `ignatius recovery status` summarises the journal, `ignatius recovery restore --format sql` prints the recovered buffers without deleting them, and `ignatius recovery discard` removes the journal.
 - **Bounded and Private**: Buffers are captured up to 1 MiB each and the journal is refused above 24 MiB. Sessions started with history disabled or `--no-history` never write recovery state.
 
+### Offline SQL Linting (`Ctrl+K !`)
+
+Catch destructive or unreviewable SQL before it reaches a release pipeline:
+- **Deterministic Rules**: 13 lexical rules cover missing `WHERE` clauses, `TRUNCATE`, `DROP`, `GRANT ALL`, blocking index builds, `VACUUM FULL`, `SELECT *`, leading-wildcard `LIKE`, non-sargable predicates, implicit cross joins and DDL outside a transaction.
+- **Protected Text**: strings, quoted identifiers, dollar bodies and comments are masked, so a keyword inside them never triggers a finding.
+- **CI Ready**: `ignatius lint path/ --format table|json|sarif --fail-on error` exits 1 when the threshold is met; `--min-severity` filters the report and `--fail-on never` reports without failing.
+- **Interactive Findings**: `Ctrl+K !` lints the active buffer in place, lists severity, line and column, and `Enter` jumps the caret to the finding.
+- **Offline by Construction**: no connection, no query execution and no file write unless `--output` names one.
+
+### Versioned Migrations (`ignatius migrate`)
+
+Apply an ordered migration directory exactly once, with an audit trail:
+- **Forward-Only Ledger**: `ignatius migrate apply --dir migrations` records each version, name, SHA-256 and duration in `ignatius_schema_migrations`.
+- **Drift Refusal**: an applied file whose bytes changed is `drifted`; a ledger version whose file is gone is `missing`. Either refuses the whole run before the first write.
+- **Transactional Per Migration**: each migration and its ledger row commit together. A failure rolls back that migration and stops.
+- **Reviewed And Scriptable**: `status` and `apply` support table or JSON, `plan` adds reviewable SQL, and `verify` exits 1 on drift. Production targets need `--allow-production`; the runner owns the transaction, so migration files may not contain `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` or `RELEASE`.
+
+### Schema Data Dictionary (`ignatius docs`)
+
+Generate a reviewable data dictionary from catalog metadata:
+- **Complete Catalog Picture**: tables, views, materialized views, columns, types, nullability, defaults, primary and foreign keys, indexes, constraints, comments, row estimates and RLS policies.
+- **Three Artifacts**: Markdown with a table of contents, JSON with stable field names, or a Mermaid `erDiagram` for architecture documents.
+- **Bounded And Read-Only**: at most 500 relations and 5000 columns; truncation is stated. No table rows, credentials or connection strings enter the document.
+- **Atomic Workflow**: standard output by default, or `--output` with overwrite protection and `--force`.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -393,6 +418,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `{` | Switch to previous SQL editor buffer |
 | `\` | Toggle editor buffer split mode |
 | `;` | Open snippet and scratchpad library |
+| `!` | Lint the active SQL buffer |
 
 While the crash-recovery capsule is on screen it adds two contextual chords:
 `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the journal.
@@ -464,6 +490,20 @@ ignatius recovery status
 ignatius recovery restore --format sql > recovered.sql
 ignatius recovery discard
 
+# Lint SQL files offline and fail CI on errors (table, json or sarif)
+ignatius lint migrations/ --fail-on error --format sarif --output lint.sarif
+
+# Inspect and apply versioned migrations with a checksummed ledger
+ignatius migrate status "$DATABASE_URL" --dir migrations
+ignatius migrate plan "$DATABASE_URL" --dir migrations
+ignatius migrate apply "$DATABASE_URL" --dir migrations --dry-run
+ignatius migrate apply "$DATABASE_URL" --dir migrations
+ignatius migrate verify "$DATABASE_URL" --dir migrations
+
+# Generate a Markdown, JSON or Mermaid data dictionary
+ignatius docs "$DATABASE_URL" --schema public --format markdown --output docs/data-dictionary.md
+ignatius docs "$DATABASE_URL" --schema public --format mermaid
+
 # Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
 ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
 ignatius diagram "$DATABASE_URL" --table orders --hops 1 --format unicode
@@ -534,6 +574,7 @@ Scripts can reliably inspect exit codes to determine exact failure modes:
 | Code | Identifier | Meaning |
 | --- | --- | --- |
 | `0` | `success` | Command completed successfully; all statements succeeded |
+| `1` | `findings` | `ignatius lint` found an issue at or above `--fail-on` |
 | `2` | `usage` | Invalid CLI arguments, missing parameters, or conflicting flags |
 | `3` | `config` | Configuration file is invalid, missing, or unparseable |
 | `4` | `connection` | Network, socket, DNS, or TCP connection failure |
@@ -658,6 +699,14 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `041-multi-tab-and-split-editor-buffers` [Implemented]: Multi-tab SQL workspace with split editing and independent execution contexts.
   - `042-persistent-scratchpad-and-snippet-library` [Implemented]: Built-in and user SQL snippet library with search, categories, and headless CLI access.
   - `043-session-state-and-crash-recovery` [Implemented]: Atomic unsaved-buffer journal, startup restore capsule, clean-exit safety, and headless `ignatius recovery` routes.
+- **Milestone 10: Developer Workflow & CI Automation (`044` - `046`) [COMPLETED]**:
+  - `044-sql-linter-and-safety-analyzer` [Implemented]: Offline, deterministic SQL safety findings with table/JSON/SARIF reports, CI thresholds, and an interactive findings overlay.
+  - `045-migration-runner-and-ledger` [Implemented]: Forward-only, checksummed migrations with a ledger, drift refusal, transactional apply, advisory locking, and a CLI-first reviewed route.
+  - `046-schema-documentation-generator` [Implemented]: Deterministic Markdown, JSON and Mermaid data dictionaries generated from catalog metadata.
+- **Milestone 11: Operational Data Lifecycle (`047` - `049`)**:
+  - `047-backup-verification-and-restore-drills`: Restore a backup into a scratch target and prove row counts and key invariants.
+  - `048-partition-lifecycle-manager`: Reviewed create, attach, detach and drop operations for range-partitioned tables.
+  - `049-retention-and-growth-audit`: Surface unbounded tables, stale partitions, and retention-policy gaps without touching data.
 
 ---
 

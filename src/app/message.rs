@@ -161,6 +161,8 @@ pub enum Action {
     RestoreSession,
     /// Discard and purge unrecovered crash session journal.
     DiscardRecovery,
+    /// Lint the active editor buffer without contacting a server.
+    LintBuffer,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -280,6 +282,7 @@ impl Action {
             Self::SnippetLibrary,
             Self::RestoreSession,
             Self::DiscardRecovery,
+            Self::LintBuffer,
         ]
     }
 }

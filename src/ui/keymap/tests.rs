@@ -668,12 +668,12 @@ fn recovery_chords_are_contextual_and_do_not_shadow_global_letters() {
     assert_eq!(chord_action('d'), Some(Action::ShowDefinition));
     assert_eq!(chord_action('D'), Some(Action::ShowDefinition));
 
-    // The scaffolding chords must not ship.
+    // The recovery scaffolding chord must not ship; `!` now means lint.
     assert!(
-        CHORDS.iter().all(|(key, _, _)| *key != '!' && *key != '~'),
-        "'!' and '~' were temporary recovery scaffolding"
+        CHORDS.iter().all(|(key, _, _)| *key != '~'),
+        "'~' was temporary recovery scaffolding"
     );
-    assert!(chord_action('!').is_none());
+    assert_eq!(chord_action('!'), Some(Action::LintBuffer));
     assert!(chord_action('~').is_none());
 }
 

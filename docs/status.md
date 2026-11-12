@@ -4,6 +4,78 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 36 (044-046, Milestone 10) Delivery - 12 November 2026
+
+Resume on branch `feat/m10-developer-workflow`. Milestone 10 (Developer
+Workflow & CI Automation) is implemented and verified in this working tree:
+
+- **Feature `044-sql-linter-and-safety-analyzer`**:
+  - Pure `src/lint/` engine with 13 rules, stable codes and severities,
+    protected-region masking through `query::highlight::tokens`, statement
+    splitting through `query::statements::split`, a file bound of 1000 files
+    and 1 MiB per file, and deterministic ordering.
+  - `ignatius lint [PATH...|-]` with table, JSON and SARIF 2.1.0 output,
+    `--min-severity`, `--fail-on`, atomic-output protection and `--force`.
+    `ExitCode::Findings = 1` is now part of the documented exit-code contract.
+  - Interactive `Ctrl+K !` (`lint-sql`) findings overlay with severity, code,
+    line and column; `Enter` jumps the caret, `r` re-lints, `Esc` closes. It
+    never connects, writes a file or executes SQL.
+  - `docs/design/lint-rules.md` is compared with the build in both directions.
+- **Feature `045-migration-runner-and-ledger`**:
+  - Pure `src/migrate/` discovery, numeric ordering, SHA-256 checksums, drift
+    and missing detection, plan rendering and transaction-control refusal.
+  - `ignatius migrate status|plan|apply|verify` with `--dir`, `--to`,
+    `--dry-run`, `--allow-production`, table and JSON output, and reviewable
+    SQL plans.
+  - `ignatius_schema_migrations` ledger, advisory-lock serialization, one
+    transaction per migration plus ledger row, and rollback on failure.
+  - The reviewed route is the CLI by explicit design (FR-4511): applying schema
+    changes from a transient overlay would be a second, weaker audit path.
+- **Feature `046-schema-documentation-generator`**:
+  - Pure `src/dbdoc/` model with deterministic Markdown, JSON and Mermaid
+    renderers, escaping, ordering and truncation reporting.
+  - Bounded catalog read for relations, columns, types, defaults, primary and
+    foreign keys, indexes, constraints, comments, row estimates and RLS
+    policies, capped at 500 relations and 5000 columns.
+  - `ignatius docs <target> --schema public --format markdown|json|mermaid`
+    with `--output`/`--force`, read-only and free of table rows.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked --lib lint::` | 15 passed |
+| `cargo test --locked --lib migrate::` | 9 passed |
+| `cargo test --locked --lib dbdoc` | 8 passed |
+| `cargo test --locked --lib app::update` | 292 passed |
+| `cargo test --locked --lib ui::widgets` | 130 passed |
+| `cargo test --locked --test lint_contract` | 10 passed |
+| `cargo test --locked --test migration_contract` | 4 passed against live PostgreSQL |
+| `cargo test --locked --test dbdoc_contract` | 4 passed against live PostgreSQL |
+| `cargo test --locked --test documentation_matches_the_build` | 19 passed |
+| `cargo test --locked --lib` | 1507 passed |
+| `cargo xtask verify` | Pass, 1917 tests, one semantic skip |
+
+The authoritative `cargo xtask verify` exited successfully with the configured
+external build cache and the disposable `postgres:18.6-alpine` plain and TLS
+fixtures. Formatting, lints, API documentation, 1507 library tests, 66
+PostgreSQL integration tests, 19 documentation matches and every workspace
+suite passed. The PostgreSQL 18 socket gate remained a skip because
+`IGNATIUS_TEST_PG_SOCKET_URI` was not set; that skip is not live socket
+evidence. The disposable services were torn down with `cargo xtask db down`,
+and `cargo xtask db status` reported `Not running.`
+
+Live migration evidence covers ordered apply, two ledger rows, idempotent
+re-apply, drift refusal before any write (including under `--dry-run`), a
+failed migration rolling back its prefix with no ledger row, dry-run writing
+nothing, and transaction-control refusal. Live documentation evidence covers a probe schema with a foreign key,
+index, check constraint, table and column comments and an RLS policy, plus an
+empty schema and a missing schema.
+
+Milestone 11 (Operational Data Lifecycle, Features 047-049) is defined in the
+roadmap but not started. Native hand use, screen-reader use and release
+evidence remain separate from this source delivery.
+
 ## Wave 35 (043-session-state-and-crash-recovery) Delivery - 12 November 2026
 
 Resume on branch `feat/043-session-state-and-crash-recovery`. Feature
@@ -101,8 +173,11 @@ covered by their focused and full gates. Native hand use in Warp, Windows
 Terminal and Linux terminals, screen-reader use, live resize, and a real
 power-loss or kernel-panic test remain outside this evidence. The journal is per
 data directory, not per process, so concurrent clients sharing one data
-directory share one recovery slot. No M10 scope is defined yet; the next source
-work should start from an observed job under W16 rather than inventing one.
+directory share one recovery slot. Milestone 10 (Developer Workflow & CI
+Automation) is the active source milestone: Features 044, 045 and 046 are
+specified under `specs/`, with M11 defined as the following operational data
+lifecycle set. Implementation evidence for M10 is recorded in its own Wave
+section once the features are verified.
 
 ## Wave 34 (042-persistent-scratchpad-and-snippet-library) Delivery - 12 November 2026
 

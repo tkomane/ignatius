@@ -280,3 +280,45 @@ fn plan_summary_and_detail_render_multi_span_semantic_tokens_preserving_words() 
         .count() as u16;
     assert_eq!(update_buf[(repl_idx, repl_y)].fg, header_fg);
 }
+
+#[test]
+fn lint_findings_overlay_renders_counts_rules_and_keys() {
+    let state = crate::app::model::LintFindingsState::new(
+        crate::lint::lint_source(None, "DELETE FROM orders;\nSELECT * FROM orders;").findings,
+    );
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    render_lint_findings(&state, &presentation(ColorDepth::TrueColor), area, &mut buf);
+    let rendered = buffer_to_string(&buf);
+
+    assert!(rendered.contains("SQL LINT - OFFLINE"), "{rendered}");
+    assert!(rendered.contains("[FINDINGS: 2]"), "{rendered}");
+    assert!(rendered.contains("[ERRORS: 1]"), "{rendered}");
+    assert!(rendered.contains("delete-without-where"), "{rendered}");
+    assert!(rendered.contains("Enter"), "{rendered}");
+    assert!(rendered.contains("re-lint"), "{rendered}");
+}
+
+#[test]
+fn lint_findings_overlay_says_when_the_buffer_is_clean() {
+    let state = crate::app::model::LintFindingsState::new(Vec::new());
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    render_lint_findings(&state, &presentation(ColorDepth::TrueColor), area, &mut buf);
+    let rendered = buffer_to_string(&buf);
+    assert!(rendered.contains("[FINDINGS: 0]"), "{rendered}");
+    assert!(rendered.contains("The buffer is clean."), "{rendered}");
+}
+
+#[test]
+fn lint_findings_overlay_uses_ascii_words() {
+    let state = crate::app::model::LintFindingsState::new(
+        crate::lint::lint_source(None, "DROP TABLE orders;").findings,
+    );
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    render_lint_findings(&state, &presentation(ColorDepth::TrueColor), area, &mut buf);
+    let rendered = buffer_to_string(&buf);
+    assert!(rendered.contains("drop-object"));
+    assert!(rendered.contains("DROP removes an object permanently"));
+}

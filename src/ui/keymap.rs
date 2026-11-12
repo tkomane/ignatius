@@ -133,6 +133,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("snippet-library", Action::SnippetLibrary),
     ("restore-session", Action::RestoreSession),
     ("discard-recovery", Action::DiscardRecovery),
+    ("lint-sql", Action::LintBuffer),
 ];
 
 /// The action a configuration name means.
@@ -868,6 +869,7 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::SnippetLibrary,
         "Open snippet and scratchpad library",
     ),
+    ('!', Action::LintBuffer, "Lint the active SQL buffer"),
 ];
 
 /// The contextual second keys offered while the crash recovery capsule is on
@@ -1024,6 +1026,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::SnippetLibrary => "Snippet library",
         Action::RestoreSession => "Restore",
         Action::DiscardRecovery => "Discard",
+        Action::LintBuffer => "Lint",
     }
 }
 

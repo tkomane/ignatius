@@ -422,6 +422,7 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::ToggleEditorSplit
         | Action::SnippetLibrary => true,
         Action::RestoreSession | Action::DiscardRecovery => model.recovery_banner.is_some(),
+        Action::LintBuffer => !model.editor.text().trim().is_empty(),
         Action::BeginPrefix => false,
         Action::ToggleErrorDetail => model.error.is_some(),
         Action::Dismiss => {
@@ -647,6 +648,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         Action::RestoreSession | Action::DiscardRecovery => {
             "an unrecovered crash session journal".to_owned()
         }
+        Action::LintBuffer => "text in the editor".to_owned(),
         Action::Move(_) => "focus a pane with something to move through".to_owned(),
         Action::Activate => {
             if ctx.focus == Focus::Results {
@@ -720,7 +722,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ToggleHistoryRecording
         | Action::SnippetLibrary
         | Action::RestoreSession
-        | Action::DiscardRecovery => "Files/History",
+        | Action::DiscardRecovery
+        | Action::LintBuffer => "Files/History",
         Action::OpenConnectionPicker
         | Action::SwitchTheme
         | Action::ServerActivity

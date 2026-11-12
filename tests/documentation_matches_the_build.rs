@@ -1193,3 +1193,25 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         );
     }
 }
+
+#[test]
+fn every_lint_rule_is_documented_with_its_severity() {
+    const LINT_RULES: &str = include_str!("../docs/design/lint-rules.md");
+    for code in ignatius::lint::LintCode::ALL {
+        assert!(
+            LINT_RULES.contains(&format!("`{}`", code.as_str())),
+            "lint rule `{}` is missing from docs/design/lint-rules.md",
+            code.as_str()
+        );
+        assert!(
+            LINT_RULES.contains(&format!(
+                "| `{}` | {} |",
+                code.as_str(),
+                code.severity().label()
+            )),
+            "lint rule `{}` must be documented with severity {}",
+            code.as_str(),
+            code.severity().label()
+        );
+    }
+}

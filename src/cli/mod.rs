@@ -19,7 +19,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use output::{Format, OutputOptions};
 use secrecy::SecretString;
 use std::io::{IsTerminal, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A terminal-native PostgreSQL workbench.
 #[derive(Debug, Parser)]
@@ -232,6 +232,18 @@ pub enum Command {
         #[command(subcommand)]
         action: HistoryAction,
     },
+
+    /// Lint SQL files or standard input without connecting to a server.
+    #[command(name = "lint")]
+    Lint(LintArgs),
+
+    /// Inspect, plan, apply or verify versioned SQL migrations.
+    #[command(name = "migrate")]
+    Migrate(MigrateArgs),
+
+    /// Generate a Markdown, JSON or Mermaid data dictionary from the catalog.
+    #[command(name = "docs")]
+    Docs(DocsArgs),
 
     /// Print version and build identity.
     Version {
@@ -853,6 +865,9 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Version { verbose }) => version(*verbose || presentation.verbose, out),
         Some(Command::Config { action }) => config_command(action, &paths, out),
         Some(Command::History { action }) => history_command(action, &paths, out, err),
+        Some(Command::Lint(args)) => run_lint(args, out),
+        Some(Command::Migrate(args)) => run_migrate(args, &paths, out, err),
+        Some(Command::Docs(args)) => run_docs(args, &paths, out, err),
         Some(Command::Doctor { json, target }) => {
             doctor_command(*json, target.as_deref(), &paths, &facts, &presentation, out)
         }
@@ -3536,6 +3551,49 @@ fn io_diagnostic(err: std::io::Error) -> Diagnostic {
         .next_action("check the output stream and available space")
 }
 
+/// Writes a generated report through an exclusive sibling temp and a rename.
+fn write_report_atomic(path: &Path, contents: &str) -> Result<(), Diagnostic> {
+    use std::io::Write as _;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("report");
+    let temporary = path.with_file_name(format!(".{file_name}.tmp.{}.{nonce}", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    let mut file = options.open(&temporary).map_err(io_diagnostic)?;
+    if let Err(error) = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(io_diagnostic(error));
+    }
+    drop(file);
+    // Windows refuses a rename onto an existing file. The callers have
+    // already decided that replacement is allowed, so remove the destination
+    // there; on Unix the rename stays atomic.
+    #[cfg(windows)]
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(io_diagnostic(error));
+    }
+    #[cfg(unix)]
+    if let Some(parent) = path.parent()
+        && let Ok(directory) = std::fs::File::open(parent)
+    {
+        let _ = directory.sync_all();
+    }
+    Ok(())
+}
+
 /// Output representation format for query performance profiling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum CliPerformanceFormat {
@@ -4669,6 +4727,547 @@ fn run_snippet(
         }
     }
 
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for the schema documentation generator (`046-schema-documentation-generator`).
+#[derive(Debug, Args, Clone)]
+pub struct DocsArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Schema to document.
+    #[arg(long, value_name = "SCHEMA", default_value = "public")]
+    pub schema: String,
+    /// Output format: markdown, json or mermaid.
+    #[arg(short = 'f', long, value_enum, default_value = "markdown")]
+    pub format: CliDocsFormat,
+    /// Write the document to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Output format for `ignatius docs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliDocsFormat {
+    Markdown,
+    Json,
+    Mermaid,
+}
+
+fn run_docs(
+    args: &DocsArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+    let runtime = runtime()?;
+    let document = runtime.block_on(async {
+        let session = crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value?;
+        session.schema_documentation(&args.schema).await
+    })?;
+
+    let rendered = match args.format {
+        CliDocsFormat::Markdown => crate::dbdoc::render_markdown(&document),
+        CliDocsFormat::Mermaid => crate::dbdoc::render_mermaid(&document),
+        CliDocsFormat::Json => crate::dbdoc::render_json(&document).map_err(|error| {
+            Diagnostic::new(
+                DiagnosticKind::Internal,
+                format!("failed to serialize the data dictionary: {error}"),
+                "formatting schema documentation",
+            )
+        })?,
+    };
+    if let Some(destination) = args.output.as_ref() {
+        if destination.exists() && !args.force {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!(
+                    "refusing to overwrite existing file {}",
+                    destination.display()
+                ),
+                "writing schema documentation",
+            )
+            .likely_cause("the output file already exists")
+            .next_action("pass --force to replace it"));
+        }
+        write_report_atomic(destination, &rendered)?;
+        writeln!(
+            err,
+            "Wrote {} relation(s), {} column(s) to {}",
+            document.relations.len(),
+            document.column_count(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for the migration runner (`045-migration-runner-and-ledger`).
+#[derive(Debug, Args, Clone)]
+pub struct MigrateArgs {
+    #[command(subcommand)]
+    pub action: MigrateAction,
+}
+
+/// Migration subcommands.
+#[derive(Debug, Subcommand, Clone)]
+pub enum MigrateAction {
+    /// Show applied, pending, drifted and missing migrations.
+    Status {
+        #[command(flatten)]
+        target: MigrateTargetArgs,
+        /// Output format: table or json.
+        #[arg(short = 'f', long, value_enum, default_value = "table")]
+        format: CliMigrateApplyFormat,
+    },
+    /// Show the pending order, optionally capped at a version.
+    Plan {
+        #[command(flatten)]
+        target: MigrateTargetArgs,
+        /// Stop after this version (inclusive).
+        #[arg(long, value_name = "VERSION")]
+        to: Option<u64>,
+        /// Output format: table, json or sql.
+        #[arg(short = 'f', long, value_enum, default_value = "table")]
+        format: CliMigratePlanFormat,
+    },
+    /// Apply pending migrations transactionally.
+    Apply {
+        #[command(flatten)]
+        target: MigrateTargetArgs,
+        /// Stop after this version (inclusive).
+        #[arg(long, value_name = "VERSION")]
+        to: Option<u64>,
+        /// Print the plan without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Allow writes when the target is classified as production.
+        #[arg(long)]
+        allow_production: bool,
+        /// Output format: table or json.
+        #[arg(short = 'f', long, value_enum, default_value = "table")]
+        format: CliMigrateApplyFormat,
+    },
+    /// Check the ledger against the files without writing.
+    Verify(MigrateTargetArgs),
+}
+
+/// Target, directory and connection options shared by migration commands.
+#[derive(Debug, Args, Clone)]
+pub struct MigrateTargetArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Directory containing `<version>_<name>.sql` migrations.
+    #[arg(long, value_name = "DIR", default_value = "migrations")]
+    pub dir: PathBuf,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Output format for `migrate plan`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliMigratePlanFormat {
+    Table,
+    Json,
+    Sql,
+}
+
+/// Output format for `migrate apply`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliMigrateApplyFormat {
+    Table,
+    Json,
+}
+
+fn migrate_connect(
+    target: &MigrateTargetArgs,
+    paths: &Paths,
+) -> Result<(tokio::runtime::Runtime, crate::postgres::Session), Diagnostic> {
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(target.target.as_deref(), &target.connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+    let runtime = runtime()?;
+    let session = runtime.block_on(async {
+        crate::postgres::session::connect_reported(
+            &target,
+            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+        )
+        .await
+        .value
+    })?;
+    Ok((runtime, session))
+}
+
+fn migrate_ledger_mismatch(versions: &[&str]) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Usage,
+        format!(
+            "migration ledger does not match the files: {}",
+            versions.join(", ")
+        ),
+        "planning migrations",
+    )
+    .likely_cause("an applied migration was edited, or its file was removed")
+    .next_action("restore the exact applied bytes before applying anything")
+}
+
+fn run_migrate(
+    args: &MigrateArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    match &args.action {
+        MigrateAction::Status { target, format } => {
+            let (runtime, session) = migrate_connect(target, paths)?;
+            let files = crate::migrate::discover(&target.dir)?;
+            let records = runtime.block_on(session.migration_records())?;
+            let plan = crate::migrate::MigrationPlan::new(files, records)?;
+            match format {
+                CliMigrateApplyFormat::Table => {
+                    write!(out, "{}", crate::migrate::render_status_table(&plan))
+                        .map_err(io_diagnostic)?;
+                }
+                CliMigrateApplyFormat::Json => {
+                    writeln!(
+                        out,
+                        "{}",
+                        crate::migrate::render_status_json(&plan).map_err(|error| {
+                            Diagnostic::new(
+                                DiagnosticKind::Internal,
+                                format!("failed to serialize migration status: {error}"),
+                                "formatting migration status",
+                            )
+                        })?
+                    )
+                    .map_err(io_diagnostic)?;
+                }
+            }
+        }
+        MigrateAction::Plan { target, to, format } => {
+            let (runtime, session) = migrate_connect(target, paths)?;
+            let files = crate::migrate::discover(&target.dir)?;
+            let records = runtime.block_on(session.migration_records())?;
+            let plan = crate::migrate::MigrationPlan::new(files, records)?;
+            match format {
+                CliMigratePlanFormat::Table => {
+                    write!(out, "{}", crate::migrate::render_plan_table(&plan, *to))
+                        .map_err(io_diagnostic)?
+                }
+                CliMigratePlanFormat::Json => {
+                    writeln!(
+                        out,
+                        "{}",
+                        crate::migrate::render_status_json(&plan).map_err(|error| {
+                            Diagnostic::new(
+                                DiagnosticKind::Internal,
+                                format!("failed to serialize migration plan: {error}"),
+                                "formatting the migration plan",
+                            )
+                        })?
+                    )
+                    .map_err(io_diagnostic)?;
+                }
+                CliMigratePlanFormat::Sql => {
+                    write!(out, "{}", crate::migrate::render_plan_sql(&plan, *to))
+                        .map_err(io_diagnostic)?;
+                }
+            }
+        }
+        MigrateAction::Apply {
+            target,
+            to,
+            dry_run,
+            allow_production,
+            format,
+        } => {
+            let (runtime, session) = migrate_connect(target, paths)?;
+            let files = crate::migrate::discover(&target.dir)?;
+            if *dry_run {
+                let records = runtime.block_on(session.migration_records())?;
+                let plan = crate::migrate::MigrationPlan::new(files, records)?;
+                // A dry run bypasses the production write guard, not the
+                // ledger check: printing a plan that apply would refuse is a
+                // false assurance.
+                if !plan.is_clean() {
+                    let versions: Vec<&str> = plan
+                        .drifted()
+                        .iter()
+                        .chain(plan.missing().iter())
+                        .map(|entry| entry.raw_version())
+                        .collect();
+                    return Err(migrate_ledger_mismatch(&versions));
+                }
+                write!(out, "{}", crate::migrate::render_plan_sql(&plan, *to))
+                    .map_err(io_diagnostic)?;
+                writeln!(err, "Dry run: nothing was applied.").map_err(io_diagnostic)?;
+                return Ok(ExitCode::Success);
+            }
+            let report =
+                runtime.block_on(session.apply_migrations(files, *to, *allow_production))?;
+            match format {
+                CliMigrateApplyFormat::Table => {
+                    if report.applied.is_empty() {
+                        writeln!(out, "No pending migrations were applied.")
+                            .map_err(io_diagnostic)?;
+                    } else {
+                        writeln!(out, "APPLIED  VERSION  NAME  MS").map_err(io_diagnostic)?;
+                        for applied in &report.applied {
+                            writeln!(
+                                out,
+                                "{:<7} {:<8} {:<20} {}",
+                                "yes", applied.version, applied.name, applied.execution_ms
+                            )
+                            .map_err(io_diagnostic)?;
+                        }
+                    }
+                    if report.skipped > 0 {
+                        writeln!(
+                            err,
+                            "{} pending migration(s) after --to were skipped.",
+                            report.skipped
+                        )
+                        .map_err(io_diagnostic)?;
+                    }
+                }
+                CliMigrateApplyFormat::Json => {
+                    writeln!(
+                        out,
+                        "{}",
+                        serde_json::to_string_pretty(&report).map_err(|error| {
+                            Diagnostic::new(
+                                DiagnosticKind::Internal,
+                                format!("failed to serialize migration report: {error}"),
+                                "formatting the migration report",
+                            )
+                        })?
+                    )
+                    .map_err(io_diagnostic)?;
+                }
+            }
+        }
+        MigrateAction::Verify(target) => {
+            let (runtime, session) = migrate_connect(target, paths)?;
+            let files = crate::migrate::discover(&target.dir)?;
+            let records = runtime.block_on(session.migration_records())?;
+            let plan = crate::migrate::MigrationPlan::new(files, records)?;
+            if plan.is_clean() {
+                writeln!(
+                    out,
+                    "Migration ledger matches {} file(s).",
+                    plan.entries.len()
+                )
+                .map_err(io_diagnostic)?;
+                return Ok(ExitCode::Success);
+            }
+            for entry in plan.drifted() {
+                writeln!(err, "drifted: {} {}", entry.raw_version(), entry.name())
+                    .map_err(io_diagnostic)?;
+            }
+            for entry in plan.missing() {
+                writeln!(err, "missing: {} {}", entry.raw_version(), entry.name())
+                    .map_err(io_diagnostic)?;
+            }
+            return Ok(ExitCode::Findings);
+        }
+    }
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for the offline SQL linter (`044-sql-linter-and-safety-analyzer`).
+#[derive(Debug, Args, Clone)]
+pub struct LintArgs {
+    /// Files or directories to lint. Use `-` for standard input.
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
+    /// Output format: table, json or sarif.
+    #[arg(short = 'f', long, value_enum, default_value = "table")]
+    pub format: CliLintFormat,
+    /// Hide findings below this severity.
+    #[arg(long = "min-severity", value_enum, default_value = "info")]
+    pub min_severity: CliLintSeverity,
+    /// Exit 1 when any finding reaches this severity.
+    #[arg(long = "fail-on", value_enum, default_value = "error")]
+    pub fail_on: CliLintFailOn,
+    /// Write the report to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// Output format for `ignatius lint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliLintFormat {
+    Table,
+    Json,
+    Sarif,
+}
+
+/// Minimum displayed severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliLintSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+impl From<CliLintSeverity> for crate::lint::LintSeverity {
+    fn from(value: CliLintSeverity) -> Self {
+        match value {
+            CliLintSeverity::Info => Self::Info,
+            CliLintSeverity::Warning => Self::Warning,
+            CliLintSeverity::Error => Self::Error,
+        }
+    }
+}
+
+/// When `ignatius lint` should exit 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliLintFailOn {
+    Never,
+    Info,
+    Warning,
+    Error,
+}
+
+impl CliLintFailOn {
+    const fn threshold(self) -> Option<crate::lint::LintSeverity> {
+        match self {
+            Self::Never => None,
+            Self::Info => Some(crate::lint::LintSeverity::Info),
+            Self::Warning => Some(crate::lint::LintSeverity::Warning),
+            Self::Error => Some(crate::lint::LintSeverity::Error),
+        }
+    }
+}
+
+fn run_lint(args: &LintArgs, out: &mut impl Write) -> Result<ExitCode, Diagnostic> {
+    if args.paths.is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "no SQL path was provided",
+            "linting SQL",
+        )
+        .next_action("pass a file, a directory, or `-` for standard input"));
+    }
+
+    let mut report = crate::lint::LintReport::default();
+    let mut stdin_seen = false;
+    let mut files = Vec::new();
+    for path in &args.paths {
+        if path.as_os_str() == "-" {
+            if stdin_seen {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "standard input was requested more than once",
+                    "linting SQL",
+                ));
+            }
+            stdin_seen = true;
+            use std::io::Read as _;
+            let mut sql = String::new();
+            std::io::stdin()
+                .take(crate::lint::MAX_FILE_BYTES as u64 + 1)
+                .read_to_string(&mut sql)
+                .map_err(io_diagnostic)?;
+            if sql.len() > crate::lint::MAX_FILE_BYTES {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "standard input is over the 1 MiB lint bound",
+                    "linting SQL",
+                ));
+            }
+            report.extend(crate::lint::lint_source(None, &sql));
+        } else {
+            files.push(path.clone());
+        }
+    }
+    if !files.is_empty() {
+        report.extend(crate::lint::lint_paths(&files)?);
+    }
+
+    let failed = args
+        .fail_on
+        .threshold()
+        .is_some_and(|threshold| report.meets(threshold));
+    let display_threshold = crate::lint::LintSeverity::from(args.min_severity);
+    report.retain_at_or_above(display_threshold);
+    let rendered = match args.format {
+        CliLintFormat::Table => crate::lint::render_table(&report),
+        CliLintFormat::Json => crate::lint::render_json(&report).map_err(|error| {
+            Diagnostic::new(
+                DiagnosticKind::Internal,
+                format!("failed to serialize lint report: {error}"),
+                "formatting lint findings",
+            )
+        })?,
+        CliLintFormat::Sarif => crate::lint::render_sarif(&report).map_err(|error| {
+            Diagnostic::new(
+                DiagnosticKind::Internal,
+                format!("failed to serialize SARIF report: {error}"),
+                "formatting lint findings",
+            )
+        })?,
+    };
+    if let Some(destination) = args.output.as_ref() {
+        if destination.exists() && !args.force {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!(
+                    "refusing to overwrite existing file {}",
+                    destination.display()
+                ),
+                "writing the lint report",
+            )
+            .likely_cause("the output file already exists")
+            .next_action("pass --force to replace it"));
+        }
+        write_report_atomic(destination, &rendered)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    if failed {
+        return Ok(ExitCode::Findings);
+    }
     Ok(ExitCode::Success)
 }
 

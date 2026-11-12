@@ -226,6 +226,7 @@ guided discovery.
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
+| 1 | Findings: `ignatius lint` met its `--fail-on` threshold, or `ignatius migrate verify` found drift or a missing file |
 | 2 | Usage error: bad arguments |
 | 3 | Configuration error |
 | 4 | Connection failed: could not reach the server |

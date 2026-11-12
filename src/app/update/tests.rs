@@ -11139,3 +11139,94 @@ fn a_failed_discard_is_reported_instead_of_swallowed() {
         error.headline
     );
 }
+
+#[test]
+fn lint_findings_open_navigate_jump_and_never_execute() {
+    let mut model = Model::new(100);
+    model.editor.set_text(
+        "SELECT * FROM orders;\n\
+         DELETE FROM orders;\n\
+         UPDATE orders SET note = 'x';",
+    );
+    let effects = update(&mut model, Message::Action(Action::LintBuffer));
+    assert!(
+        effects.is_empty(),
+        "linting is local and produces no effect"
+    );
+    let state = model.lint_findings.as_ref().expect("overlay opens");
+    assert!(state.findings.len() >= 3, "{:?}", state.findings);
+    assert!(
+        state
+            .findings
+            .iter()
+            .any(|finding| finding.code == "delete-without-where")
+    );
+
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    assert_eq!(model.lint_findings.as_ref().unwrap().selected, 1);
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(model.lint_findings.as_ref().unwrap().selected, 0);
+
+    let selected = model
+        .lint_findings
+        .as_ref()
+        .unwrap()
+        .selected_finding()
+        .cloned()
+        .expect("a finding");
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(effects.is_empty());
+    assert!(model.lint_findings.is_none(), "jumping closes the overlay");
+    assert_eq!(model.editor.position(), (selected.line, selected.column));
+    assert_eq!(
+        model.buffers.active_editor().cursor(),
+        model.editor.cursor(),
+        "the active buffer follows the jumped caret"
+    );
+}
+
+#[test]
+fn lint_overlay_relints_on_r_and_closes_on_escape() {
+    let mut model = Model::new(100);
+    model.editor.set_text("DELETE FROM orders;");
+    update(&mut model, Message::Action(Action::LintBuffer));
+    assert!(model.lint_findings.is_some());
+
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(
+        model
+            .lint_findings
+            .as_ref()
+            .is_some_and(|state| state.findings.is_empty()),
+        "r lints the current text"
+    );
+
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.lint_findings.is_none());
+}
+
+#[test]
+fn an_unhandled_key_keeps_the_lint_overlay_open_and_out_of_the_editor() {
+    let mut model = Model::new(100);
+    model.editor.set_text("DELETE FROM orders;");
+    update(&mut model, Message::Action(Action::LintBuffer));
+    let before = model.editor.text().to_owned();
+
+    let effects = update(&mut model, Message::Action(Action::Insert('x')));
+    assert!(effects.is_empty());
+    assert!(model.lint_findings.is_some(), "the overlay stays open");
+    assert_eq!(
+        model.editor.text(),
+        before,
+        "the key does not reach the editor"
+    );
+}
+
+#[test]
+fn lint_on_an_empty_buffer_is_a_no_op() {
+    let mut model = Model::new(100);
+    let effects = update(&mut model, Message::Action(Action::LintBuffer));
+    assert!(effects.is_empty());
+    assert!(model.lint_findings.is_none());
+}
