@@ -5298,5 +5298,281 @@ pub(crate) fn render_connection_pool(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Renders the interactive Data Masking & Anonymization Rules overlay.
+pub(crate) fn render_data_masking(
+    state: &crate::app::model::DataMaskingState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} DATA MASKING & ANONYMIZATION RULES ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Tab selectors
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let tab_area = chunks[1];
+    let body_area = chunks[3];
+    let status_area = chunks[4];
+    let footer_area = chunks[5];
+
+    let report_opt = state.report.as_ref();
+    let candidates_cnt = report_opt.map_or(0, |r| r.candidates.len());
+    let policies_cnt = report_opt.map_or(0, |r| r.policies.len());
+
+    let cand_token = if candidates_cnt > 0 {
+        Token::Warning
+    } else {
+        Token::Success
+    };
+
+    // Dieter Rams hardware capsules
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("CANDIDATES: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{candidates_cnt}"),
+            theme.style(cand_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("POLICIES: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{policies_cnt} tables"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("VIEW PREFIX: ", theme.style(Token::Muted)),
+        Span::styled(
+            &state.view_prefix,
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ENGINE: ", theme.style(Token::Muted)),
+        Span::styled("Virtual Views Overlay", theme.style(Token::Success)),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Tab Bar
+    let tab_titles = [
+        format!(" [1] Sensitive Columns & Rules ({candidates_cnt}) "),
+        format!(" [2] Generated Masked Views SQL ({policies_cnt}) "),
+    ];
+    let mut tab_spans = Vec::new();
+    for (i, t) in tab_titles.iter().enumerate() {
+        if i == state.active_tab {
+            tab_spans.push(Span::styled(
+                t,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
+        }
+        tab_spans.push(Span::raw(" "));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    if state.loading {
+        let loading_p = Paragraph::new(Line::from(vec![Span::styled(
+            "  Scanning catalog for sensitive columns and analyzing masking policies...",
+            theme.style(Token::Muted),
+        )]));
+        loading_p.render(body_area, buf);
+    } else if let Some(report) = report_opt {
+        match state.active_tab {
+            0 => {
+                // Tab 0: Sensitive Columns & Rules
+                if report.candidates.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "  No sensitive PII columns detected in analyzed schema.",
+                        theme.style(Token::Success),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let header_line = Line::from(vec![
+                        Span::styled(
+                            format!("{:<14} ", "SCHEMA"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<18} ", "TABLE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<18} ", "COLUMN"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", "DATA TYPE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<14} ", "PII CATEGORY"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>6} ", "CONF"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<14}", "ASSIGNED RULE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+                    let mut lines = vec![header_line];
+                    for (idx, c) in report.candidates.iter().enumerate() {
+                        let is_selected = idx == state.selected_idx;
+                        let line_style = if is_selected {
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+                        let rule_style = if is_selected {
+                            theme.style(Token::Success).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Focus)
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<14} ", crate::mask::truncate_str(&c.schema, 14)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<18} ", crate::mask::truncate_str(&c.table, 18)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<18} ", crate::mask::truncate_str(&c.column, 18)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<12} ", crate::mask::truncate_str(&c.data_type, 12)),
+                                line_style,
+                            ),
+                            Span::styled(format!("{:<14} ", c.pii_type.label()), line_style),
+                            Span::styled(
+                                format!("{:>5}% ", c.confidence),
+                                theme.style(Token::Muted),
+                            ),
+                            Span::styled(format!("{:<14}", c.rule.name()), rule_style),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            1 => {
+                // Tab 1: Generated Masked Views SQL
+                let sql = report.render_sql(&state.view_prefix);
+                let sql_lines: Vec<Line> = sql
+                    .lines()
+                    .take(body_area.height as usize)
+                    .map(|l| {
+                        if l.starts_with("--") {
+                            Line::from(Span::styled(l, theme.style(Token::Muted)))
+                        } else if l.starts_with("CREATE")
+                            || l.starts_with("SELECT")
+                            || l.starts_with("FROM")
+                        {
+                            Line::from(Span::styled(
+                                l,
+                                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                            ))
+                        } else {
+                            Line::from(Span::styled(l, theme.style(Token::Text)))
+                        }
+                    })
+                    .collect();
+                Paragraph::new(sql_lines).render(body_area, buf);
+            }
+            _ => {}
+        }
+    }
+
+    // Status Message Line
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(msg, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Bar
+    let footer_spans = vec![
+        Span::styled(
+            "[1/2] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓/j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Space/Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Cycle Rule  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[c] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Copy SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

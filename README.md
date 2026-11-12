@@ -355,6 +355,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `^` | Open index advisor and bloat forensics |
 | `&` | Open transaction, WAL, and checkpointer observability |
 | `*` | Open connection pool and pgbouncer telemetry |
+| `)` | Open data masking and anonymization rules |
 
 ### Mouse Fluency
 Mouse events translate directly into the same actions as keyboard commands:
@@ -575,12 +576,21 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - **Field Industrial TUI Overlay (`Ctrl+K *` / `connection-pool`)**: Hardware status capsules (`[MODE]`, `[SATURATION]`, `[HEADROOM]`, `[ACTIVE]`, `[IDLE]`, `[WAIT QUEUE]`, `[POOLS]`), tabbed navigation (`[1] Pool Allocations & Queues`, `[2] Server Connections & Saturation`, `[3] Client Wait Forensics`), and hotkey `[c]` to copy waiting client SQL query via OSC 52.
   - **Non-Interactive CLI (`ignatius pool-stats`)**: Scriptable telemetry snapshot with `-s, --section all|pools|server|wait`, `-f, --format table|json|plain`, `-o, --output`, and `--force`.
 
+### Milestone 8: Cross-Environment Data Synchronization, Masking & Seeding
+
+- **`038-data-masking-and-anonymization-rules` (Data Masking & Anonymization Rules) [Implemented]:**
+  - **Heuristic PII & Sensitive Column Discovery**: Scans table columns across schemas, categorizing sensitive data into Email, Phone, PersonName, Financial, NationalId, Address, Secret, and GenericSensitive with heuristic confidence scoring.
+  - **Deterministic Anonymization Transformations**: Supports Email masking (`REGEXP_REPLACE`), Phone formatting (`+1-555-XXXX`), FullName pseudonymization (`User <hash>`), HashHex with salt, Redact (`[REDACTED]`), Nullify (`NULL`), and RandomNumber.
+  - **Virtual Views Overlay Engine**: Generates non-destructive `CREATE OR REPLACE VIEW ... AS SELECT ...` DDL scripts that mask sensitive columns while preserving foreign keys and non-sensitive attributes for downstream testing and analytics.
+  - **Field Industrial TUI Overlay (`Ctrl+K )` / `data-masking`)**: Dieter Rams hardware capsules (`[CANDIDATES]`, `[POLICIES]`, `[VIEW PREFIX]`, `[ENGINE]`), tabbed navigation across `[1] Sensitive Columns & Rules` (with live in-place rule cycling via `Space`/`Enter`) and `[2] Generated Masked Views SQL`, and hotkey `[c]` to copy generated SQL via OSC 52.
+  - **Non-Interactive CLI (`ignatius mask-rules`)**: Scriptable masking analysis with `-s, --schema`, `--view-prefix`, `-f, --format table|json|plain|sql`, `-o, --output`, and `--force`.
+
 ---
 
-## Roadmap: Beyond Milestone 7
+## Roadmap: Beyond Milestone 8
 
 - **Milestone 8: Cross-Environment Data Sync & Masking (`038` - `040`)**:
-  - `038-data-masking-and-anonymization-rules`: PII/GDPR redaction, deterministic pseudonymization, and tokenization dictionaries.
+  - `038-data-masking-and-anonymization-rules` [Implemented]: PII/GDPR redaction, deterministic pseudonymization, and virtual view overlays.
   - `039-cross-database-copy-and-sync-pipelines`: Dual-connection streaming copy between staging and dev with foreign key dependency ordering.
   - `040-synthetic-test-fixture-generator`: Catalog-grounded Faker generation with constraint preservation and deterministic seeds.
 - **Milestone 9: Multi-Buffer Editor & Scratchpad Persistence (`041` - `043`)**:

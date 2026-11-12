@@ -302,7 +302,7 @@ pub async fn objects(
     // Every name is bound, never interpolated. A schema called
     // `x'; DROP TABLE orders; --` is just a string that matches nothing.
     const RELATIONS: &str = "SELECT c.relname::text AS name, \
-         has_table_privilege(c.oid, 'SELECT') AS readable, \
+         COALESCE(has_table_privilege(c.oid, 'SELECT'), false) AS readable, \
          obj_description(c.oid, 'pg_class')::text AS comment \
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
@@ -311,7 +311,7 @@ pub async fn objects(
 
     const FUNCTIONS: &str = "SELECT p.proname::text AS name, \
          pg_get_function_result(p.oid)::text AS returns, \
-         has_function_privilege(p.oid, 'EXECUTE') AS readable \
+         COALESCE(has_function_privilege(p.oid, 'EXECUTE'), false) AS readable \
          FROM pg_catalog.pg_proc p \
          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
          WHERE n.nspname = $1 \
@@ -327,7 +327,7 @@ pub async fn objects(
                 kind,
                 schema: schema.to_owned(),
                 name: row.get::<_, String>("name"),
-                readable: row.get::<_, bool>("readable"),
+                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
                 detail: row.get::<_, Option<String>>("comment"),
             })
             .collect(),
@@ -340,7 +340,7 @@ pub async fn objects(
                 kind,
                 schema: schema.to_owned(),
                 name: row.get::<_, String>("name"),
-                readable: row.get::<_, bool>("readable"),
+                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
                 detail: row
                     .get::<_, Option<String>>("returns")
                     .map(|r| format!("returns {r}")),
@@ -406,8 +406,8 @@ pub async fn update_relation(
 ) -> Result<UpdateRelation, Diagnostic> {
     const RELATION: &str = "SELECT n.nspname::text AS schema, \
          c.relname::text AS relation, c.relkind::text AS relkind, \
-         has_table_privilege(c.oid, 'SELECT') AS readable, \
-         has_table_privilege(c.oid, 'UPDATE') AS writable \
+         COALESCE(has_table_privilege(c.oid, 'SELECT'), false) AS readable, \
+         COALESCE(has_table_privilege(c.oid, 'UPDATE'), false) AS writable \
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          WHERE c.relname = $1 \
@@ -461,8 +461,8 @@ pub async fn update_relation(
         schema: resolved_schema,
         relation: resolved_relation,
         kind,
-        readable: row.get("readable"),
-        writable: row.get("writable"),
+        readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
+        writable: row.get::<_, Option<bool>>("writable").unwrap_or(false),
         columns,
     })
 }
@@ -482,7 +482,7 @@ pub async fn completion_catalog(
 
     const RELATIONS: &str = "SELECT n.nspname::text AS schema, \
          c.relname::text AS name, c.relkind::text AS relkind, \
-         has_table_privilege(c.oid, 'SELECT') AS readable \
+         COALESCE(has_table_privilege(c.oid, 'SELECT'), false) AS readable \
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
@@ -490,7 +490,7 @@ pub async fn completion_catalog(
          ORDER BY n.nspname, c.relname, c.relkind";
     const FUNCTIONS: &str = "SELECT n.nspname::text AS schema, \
          p.proname::text AS name, pg_get_function_result(p.oid)::text AS returns, \
-         has_function_privilege(p.oid, 'EXECUTE') AS readable \
+         COALESCE(has_function_privilege(p.oid, 'EXECUTE'), false) AS readable \
          FROM pg_catalog.pg_proc p \
          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
          WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
@@ -532,7 +532,7 @@ pub async fn completion_catalog(
                 kind,
                 schema: row.get("schema"),
                 name: row.get("name"),
-                readable: row.get("readable"),
+                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
                 detail: None,
             })
         })
@@ -3097,6 +3097,89 @@ pub async fn connection_pool_telemetry(
         server_stats,
         pools,
         waiting_clients,
+    })
+}
+
+/// Queries PostgreSQL catalog for tables and columns, scoring them with PII detection
+/// heuristics to generate automated masking rules and view policies.
+pub async fn analyze_data_masking(
+    client: &tokio_postgres::Client,
+    schema: Option<&str>,
+) -> Result<crate::mask::MaskReport, Diagnostic> {
+    use crate::mask::{MaskReport, MaskRule, PiiCandidate, PiiType, TableMaskPolicy};
+    use std::collections::HashMap;
+
+    let columns_query = "SELECT \
+        c.table_schema::text, \
+        c.table_name::text, \
+        c.column_name::text, \
+        c.data_type::text \
+        FROM information_schema.columns c \
+        JOIN information_schema.tables t \
+          ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
+        WHERE t.table_type = 'BASE TABLE' \
+          AND c.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
+          AND ($1::text IS NULL OR c.table_schema = $1::text) \
+        ORDER BY c.table_schema, c.table_name, c.ordinal_position;";
+
+    let rows = client
+        .query(columns_query, &[&schema])
+        .await
+        .map_err(|e| from_query_error(&e, 1))?;
+
+    let mut candidates = Vec::new();
+    let mut table_rules: HashMap<(String, String), Vec<(String, MaskRule)>> = HashMap::new();
+    let mut table_cols: HashMap<(String, String), Vec<String>> = HashMap::new();
+
+    for r in rows {
+        let sch: String = r.get(0);
+        let tbl: String = r.get(1);
+        let col: String = r.get(2);
+        let dtype: String = r.get(3);
+
+        table_cols
+            .entry((sch.clone(), tbl.clone()))
+            .or_default()
+            .push(col.clone());
+
+        if let Some(pii) = PiiType::infer_from_name(&col) {
+            let rule = pii.default_rule();
+            let confidence = if col.eq_ignore_ascii_case(pii.label()) {
+                95
+            } else {
+                85
+            };
+            candidates.push(PiiCandidate {
+                schema: sch.clone(),
+                table: tbl.clone(),
+                column: col.clone(),
+                data_type: dtype,
+                pii_type: pii,
+                rule: rule.clone(),
+                confidence,
+            });
+            table_rules.entry((sch, tbl)).or_default().push((col, rule));
+        }
+    }
+
+    let mut policies = Vec::with_capacity(table_rules.len());
+    for ((sch, tbl), rules) in table_rules {
+        let all_columns = table_cols
+            .remove(&(sch.clone(), tbl.clone()))
+            .unwrap_or_default();
+        policies.push(TableMaskPolicy {
+            schema: sch,
+            table: tbl,
+            all_columns,
+            column_rules: rules,
+        });
+    }
+
+    policies.sort_by(|a, b| (&a.schema, &a.table).cmp(&(&b.schema, &b.table)));
+
+    Ok(MaskReport {
+        candidates,
+        policies,
     })
 }
 

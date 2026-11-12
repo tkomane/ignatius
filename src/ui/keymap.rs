@@ -122,6 +122,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("index-advisor", Action::IndexAdvisor),
     ("wal-observability", Action::WalObservability),
     ("connection-pool", Action::ConnectionPool),
+    ("data-masking", Action::DataMasking),
 ];
 
 /// The action a configuration name means.
@@ -816,6 +817,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::ConnectionPool,
         "Open connection pool and pgbouncer telemetry",
     ),
+    (
+        ')',
+        Action::DataMasking,
+        "Open data masking and anonymization rules",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -929,6 +935,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::IndexAdvisor => "Index advisor",
         Action::WalObservability => "WAL stats",
         Action::ConnectionPool => "Connection pool",
+        Action::DataMasking => "Data masking",
     }
 }
 

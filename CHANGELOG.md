@@ -8,6 +8,17 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `038-data-masking-and-anonymization-rules` delivers the pure
+  `src/mask/` data masking and PII anonymization engine; live PostgreSQL
+  catalog analyzer in `Session::analyze_data_masking` (scanning table schemas,
+  inferring sensitive categories, and calculating confidence scores); the scriptable
+  `ignatius mask-rules` CLI subcommand (`--schema`, `--view-prefix`, `--format table|json|plain|sql`,
+  `--output`, `--force`); and the interactive `Ctrl+K )` (`data-masking`) TUI Data Masking
+  & Anonymization Rules overlay featuring Teenage Engineering status capsules (`[CANDIDATES]`,
+  `[POLICIES]`, `[VIEW PREFIX]`, `[ENGINE]`), tabbed navigation (`[1] Sensitive Columns & Rules`,
+  `[2] Generated Masked Views SQL`), interactive rule cycling (`[Space]`/`[Enter]`), and
+  hotkeys `[c]` (copy SQL via OSC 52) and `[r]` (refresh).
+
 - New: Feature `037-connection-pool-and-pgbouncer-telemetry` delivers the pure
   `src/pool/` connection pool, PgBouncer metrics, and server saturation telemetry
   engine; live PostgreSQL and PgBouncer probe in `Session::connection_pool_telemetry`

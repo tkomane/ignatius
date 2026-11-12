@@ -392,6 +392,14 @@ impl Session {
         crate::postgres::metadata::connection_pool_telemetry(&self.client).await
     }
 
+    /// Analyzes schema columns for PII candidates and generates data masking recommendations.
+    pub async fn analyze_data_masking(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::mask::MaskReport, Diagnostic> {
+        crate::postgres::metadata::analyze_data_masking(&self.client, schema).await
+    }
+
     /// Discovers routine signatures in the database with optional schema and name filtering.
     pub async fn discover_routines(
         &self,

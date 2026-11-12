@@ -1236,6 +1236,16 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadDataMasking { request, schema } => {
+                    spawn_load_data_masking(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        schema,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::TestHypoIndex { request, query, create_index_sql } => {
                     spawn_test_hypo_index(
                         tx.clone(),
@@ -3137,6 +3147,36 @@ fn spawn_load_connection_pool(
         let _ = tx.send(connection_message(
             request_generation,
             Message::ConnectionPoolLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_data_masking(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    schema: Option<String>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.analyze_data_masking(schema.as_deref()).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::DataMaskingLoaded {
                 request,
                 result: Box::new(result),
             },
