@@ -44,7 +44,7 @@ Workflow & CI Automation) is implemented and verified in this working tree:
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass |
 | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
-| `cargo test --locked --lib lint::` | 14 passed |
+| `cargo test --locked --lib lint::` | 15 passed |
 | `cargo test --locked --lib migrate::` | 9 passed |
 | `cargo test --locked --lib dbdoc` | 8 passed |
 | `cargo test --locked --lib app::update` | 292 passed |
@@ -53,12 +53,12 @@ Workflow & CI Automation) is implemented and verified in this working tree:
 | `cargo test --locked --test migration_contract` | 4 passed against live PostgreSQL |
 | `cargo test --locked --test dbdoc_contract` | 4 passed against live PostgreSQL |
 | `cargo test --locked --test documentation_matches_the_build` | 19 passed |
-| `cargo test --locked --lib` | 1506 passed |
-| `cargo xtask verify` | Pass, 1916 tests, one semantic skip |
+| `cargo test --locked --lib` | 1507 passed |
+| `cargo xtask verify` | Pass, 1917 tests, one semantic skip |
 
 The authoritative `cargo xtask verify` exited successfully with the configured
 external build cache and the disposable `postgres:18.6-alpine` plain and TLS
-fixtures. Formatting, lints, API documentation, 1506 library tests, 66
+fixtures. Formatting, lints, API documentation, 1507 library tests, 66
 PostgreSQL integration tests, 19 documentation matches and every workspace
 suite passed. The PostgreSQL 18 socket gate remained a skip because
 `IGNATIUS_TEST_PG_SOCKET_URI` was not set; that skip is not live socket

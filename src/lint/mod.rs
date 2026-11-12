@@ -498,6 +498,14 @@ fn collect_directory(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), D
             && path.extension().and_then(|extension| extension.to_str()) == Some("sql")
         {
             files.push(path);
+            if files.len() > MAX_FILES {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("more than {MAX_FILES} SQL files were selected"),
+                    "collecting SQL files",
+                )
+                .next_action("lint a narrower directory"));
+            }
         }
     }
     Ok(())

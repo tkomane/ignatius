@@ -244,6 +244,16 @@ fn files_and_directories_are_linted_in_stable_order() {
 }
 
 #[test]
+fn a_directory_over_the_file_bound_is_refused_while_collecting() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for index in 0..=MAX_FILES {
+        std::fs::write(dir.path().join(format!("{index:04}.sql")), "SELECT 1;").expect("write");
+    }
+    let error = lint_paths(&[dir.path().to_path_buf()]).expect_err("must refuse");
+    assert!(error.headline.contains("more than 1000"));
+}
+
+#[test]
 fn an_oversized_file_is_refused_before_reading_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("large.sql");
