@@ -6,5 +6,5 @@
 - [x] T004: Add `ignatius restore-drill` CLI with safety checks, production guard and keep/drop policy.
 - [x] T005: Add `tests/drill_contract.rs` live acceptance tests for pass, failure, keep and dry-run.
 - [x] T006: Document the drill in README and `docs/design/restore-drills.md`.
-- [ ] T007: Run focused gates and the full `cargo xtask verify` battery.
-- [ ] T008: Update `docs/status.md`, `CHANGELOG.md` and roadmap with delivery evidence.
+- [x] T007: Run focused gates and the full `cargo xtask verify` battery.
+- [x] T008: Update `docs/status.md`, `CHANGELOG.md` and roadmap with delivery evidence.
