@@ -302,7 +302,7 @@ pub async fn objects(
     // Every name is bound, never interpolated. A schema called
     // `x'; DROP TABLE orders; --` is just a string that matches nothing.
     const RELATIONS: &str = "SELECT c.relname::text AS name, \
-         has_table_privilege(c.oid, 'SELECT') AS readable, \
+         COALESCE(has_table_privilege(c.oid, 'SELECT'), false) AS readable, \
          obj_description(c.oid, 'pg_class')::text AS comment \
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
@@ -311,7 +311,7 @@ pub async fn objects(
 
     const FUNCTIONS: &str = "SELECT p.proname::text AS name, \
          pg_get_function_result(p.oid)::text AS returns, \
-         has_function_privilege(p.oid, 'EXECUTE') AS readable \
+         COALESCE(has_function_privilege(p.oid, 'EXECUTE'), false) AS readable \
          FROM pg_catalog.pg_proc p \
          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
          WHERE n.nspname = $1 \
@@ -327,7 +327,7 @@ pub async fn objects(
                 kind,
                 schema: schema.to_owned(),
                 name: row.get::<_, String>("name"),
-                readable: row.get::<_, bool>("readable"),
+                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
                 detail: row.get::<_, Option<String>>("comment"),
             })
             .collect(),
@@ -340,7 +340,7 @@ pub async fn objects(
                 kind,
                 schema: schema.to_owned(),
                 name: row.get::<_, String>("name"),
-                readable: row.get::<_, bool>("readable"),
+                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
                 detail: row
                     .get::<_, Option<String>>("returns")
                     .map(|r| format!("returns {r}")),
@@ -406,8 +406,8 @@ pub async fn update_relation(
 ) -> Result<UpdateRelation, Diagnostic> {
     const RELATION: &str = "SELECT n.nspname::text AS schema, \
          c.relname::text AS relation, c.relkind::text AS relkind, \
-         has_table_privilege(c.oid, 'SELECT') AS readable, \
-         has_table_privilege(c.oid, 'UPDATE') AS writable \
+         COALESCE(has_table_privilege(c.oid, 'SELECT'), false) AS readable, \
+         COALESCE(has_table_privilege(c.oid, 'UPDATE'), false) AS writable \
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          WHERE c.relname = $1 \
@@ -461,8 +461,8 @@ pub async fn update_relation(
         schema: resolved_schema,
         relation: resolved_relation,
         kind,
-        readable: row.get("readable"),
-        writable: row.get("writable"),
+        readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
+        writable: row.get::<_, Option<bool>>("writable").unwrap_or(false),
         columns,
     })
 }
@@ -482,7 +482,7 @@ pub async fn completion_catalog(
 
     const RELATIONS: &str = "SELECT n.nspname::text AS schema, \
          c.relname::text AS name, c.relkind::text AS relkind, \
-         has_table_privilege(c.oid, 'SELECT') AS readable \
+         COALESCE(has_table_privilege(c.oid, 'SELECT'), false) AS readable \
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
@@ -490,7 +490,7 @@ pub async fn completion_catalog(
          ORDER BY n.nspname, c.relname, c.relkind";
     const FUNCTIONS: &str = "SELECT n.nspname::text AS schema, \
          p.proname::text AS name, pg_get_function_result(p.oid)::text AS returns, \
-         has_function_privilege(p.oid, 'EXECUTE') AS readable \
+         COALESCE(has_function_privilege(p.oid, 'EXECUTE'), false) AS readable \
          FROM pg_catalog.pg_proc p \
          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
          WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' \
@@ -532,7 +532,7 @@ pub async fn completion_catalog(
                 kind,
                 schema: row.get("schema"),
                 name: row.get("name"),
-                readable: row.get("readable"),
+                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
                 detail: None,
             })
         })
