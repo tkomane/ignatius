@@ -558,9 +558,16 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - **HypoPG Hypothetical Index Validation**: Evaluates proposed candidate index impact on `EXPLAIN` execution plans with cost reduction percentages and automatic reset guarantees.
   - **Field Industrial TUI Overlay (`Ctrl+K ^` / `index-advisor`)**: Status capsules (`[HEALTH]`, `[RECLAIMABLE]`, `[REDUNDANT]`, `[BLOATED]`, `[UNINDEXED FK]`, `[HYPOPG]`), dual-pane table/detail inspector across tabs `[1]`, `[2]`, `[3]`, and hotkeys `[e]` (load non-blocking cleanup SQL into editor) and `[c]` (copy SQL via OSC 52).
   - **Non-Interactive CLI (`ignatius index-advisor`)**: Scriptable index auditing with `-s, --section all|redundant|bloat|unindexed|hypo`, `-f, --format table|json|plain`, `-o, --output`, `--force`, and `--min-size <MB>`.
+- **`036-transaction-and-wal-observability` (Transaction, WAL & Checkpointer Observability) [Implemented]:**
+  - **Checkpointer & Background Writer Forensics**: Observes timed versus requested/forced checkpoints across PostgreSQL 14 through 18 (`pg_stat_checkpointer` on PG 17+ and `pg_stat_bgwriter` on PG 14-16), buffer write times, fsync sync times, and backend process write ratios.
+  - **Write-Ahead Log (WAL) & Archiver Telemetry**: Tracks current LSN progress, WAL generation volume and record counts, full-page images (FPI), buffer full stall events, and archiver segment success/failure rates.
+  - **Database Rollback & Conflict Rates**: Aggregates committed transactions, rolled-back transactions, rollback percentages, deadlock counts, and query disk spills to temporary files per database.
+  - **Transaction ID (XID) Freeze & Wraparound Horizon**: Calculates `datfrozenxid` and `relfrozenxid` ages against `autovacuum_freeze_max_age` and flags relations approaching the 2-billion emergency wraparound ceiling with visual percentage bars.
+  - **Streaming Replication Standby Lag**: Probes `pg_stat_replication` for connected standby nodes, application names, sync states, write/flush/replay LSN lag in bytes, and replay latency in milliseconds.
+  - **Field Industrial TUI Overlay (`Ctrl+K &` / `wal-observability`)**: Hardware status capsules (`[COMMITS]`, `[ROLLBACK]`, `[WAL WRITE]`, `[CHECKPOINTS]`, `[MAX XID AGE]`, `[STANDBYS]`), tabbed navigation across `[1] Checkpoints & WAL`, `[2] Transactions & XID Freeze`, and `[3] Replication & Standbys`, and quick navigation hotkeys.
+  - **Non-Interactive CLI (`ignatius wal-stats`)**: Scriptable telemetry snapshot with `-s, --section all|checkpointer|wal|transactions|freeze|replication`, `-f, --format table|json|plain`, `-o, --output`, and `--force`.
 
 ### In-Flight Milestone 7 Roadmap
-- **`036-transaction-and-wal-observability`**: Checkpointer telemetry, WAL write rates, commit/rollback ratios, and replication lag tracking.
 - **`037-connection-pool-and-pgbouncer-telemetry`**: Integrated PgBouncer pool health, client wait queues, and server connection exhaustion alerts.
 
 ---
