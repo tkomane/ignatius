@@ -352,6 +352,31 @@ fn filtered_empty_and_failed_transaction_are_distinct() {
 }
 
 #[test]
+fn recovery_actions_are_available_only_with_a_banner() {
+    let mut model = Model::new(100);
+    for action in [Action::RestoreSession, Action::DiscardRecovery] {
+        assert!(!action_is_available(&model, &action));
+        assert_eq!(
+            action_prerequisite(&model, &action),
+            Some("an unrecovered crash session journal".to_owned())
+        );
+        assert_eq!(palette_group(&action), "Files/History");
+    }
+
+    let journal =
+        crate::recovery::RecoveryJournal::from_buffers(&model.buffers, "test-session", false);
+    model.recovery_banner = Some(crate::app::model::SessionRecoveryBanner::new(
+        journal,
+        std::path::PathBuf::from("/tmp/ignatius-recovery"),
+    ));
+
+    for action in [Action::RestoreSession, Action::DiscardRecovery] {
+        assert!(action_is_available(&model, &action));
+        assert_eq!(action_prerequisite(&model, &action), None);
+    }
+}
+
+#[test]
 fn palette_note_names_prerequisites_without_doing_work() {
     let model = Model::new(100);
     let before = model.clone();

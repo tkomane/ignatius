@@ -1727,6 +1727,8 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::SnippetLibrary => snippet_library_open(model),
+        Action::RestoreSession => restore_session_action(model),
+        Action::DiscardRecovery => discard_recovery_action(model),
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -3749,6 +3751,75 @@ fn snippet_library_open(model: &mut Model) -> Vec<Effect> {
         model.snippet_library = Some(crate::app::model::SnippetLibraryState::with_directory(
             snippets_dir,
         ));
+    }
+    Vec::new()
+}
+
+/// Restores crash-recovered buffers into the workspace and clears the journal.
+///
+/// The banner is the only route in: without an unrecovered journal on screen
+/// there is nothing to restore, and the action is a no-op rather than a guess.
+fn restore_session_action(model: &mut Model) -> Vec<Effect> {
+    let Some(banner) = model.recovery_banner.take() else {
+        return Vec::new();
+    };
+    // Anything typed after the capsule appeared was never checkpointed. Refuse
+    // rather than exceed the tab bound and silently drop either side.
+    let in_flight = model.buffers.clone();
+    let dirty_in_flight = in_flight
+        .buffers
+        .iter()
+        .filter(|b| b.editor.is_modified() && !b.editor.text().trim().is_empty())
+        .count();
+    let restorable = banner
+        .journal
+        .buffers
+        .iter()
+        .filter(|b| !b.sql.trim().is_empty() || b.file_path.is_some())
+        .count();
+    if dirty_in_flight > 0 && dirty_in_flight + restorable > crate::buffer::MAX_EDITOR_BUFFERS {
+        model.recovery_banner = Some(banner);
+        model.error = Some(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Usage,
+                "restoring would exceed the 16-tab limit and lose an edit made after the crash prompt",
+                "restoring a crash session",
+            )
+            .likely_cause("the recovered session and the current workspace together hold more than 16 edited tabs")
+            .next_action("save or close the current edit, then press Ctrl+K r again"),
+        );
+        return Vec::new();
+    }
+    banner.journal.restore_into(&mut model.buffers);
+    for mut buffer in in_flight.buffers {
+        if model.buffers.buffers.len() >= crate::buffer::MAX_EDITOR_BUFFERS {
+            break;
+        }
+        if !buffer.editor.is_modified() || buffer.editor.text().trim().is_empty() {
+            continue;
+        }
+        buffer.id = model.buffers.next_id;
+        model.buffers.next_id = model.buffers.next_id.wrapping_add(1);
+        model.buffers.buffers.push(buffer);
+    }
+    // A journal can legitimately yield zero restorable buffers (every tab was
+    // empty). The editor still has to follow whatever the workspace holds now,
+    // or the screen would show text the buffers do not.
+    model.sync_editor_from_active_buffer();
+    // The buffers now live in the workspace; the journal has done its job.
+    if let Err(diagnostic) = crate::recovery::RecoveryJournal::discard(&banner.recovery_dir) {
+        model.error = Some(diagnostic);
+    }
+    Vec::new()
+}
+
+/// Discards the unrecovered crash journal without touching the workspace.
+fn discard_recovery_action(model: &mut Model) -> Vec<Effect> {
+    let Some(banner) = model.recovery_banner.take() else {
+        return Vec::new();
+    };
+    if let Err(diagnostic) = crate::recovery::RecoveryJournal::discard(&banner.recovery_dir) {
+        model.error = Some(diagnostic);
     }
     Vec::new()
 }
@@ -5865,10 +5936,21 @@ fn result_column_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry
 fn resolve_prefix(model: &mut Model, action: Action) -> Vec<Effect> {
     model.prefix_pending = false;
     match action {
-        Action::Insert(ch) => match crate::ui::keymap::chord_action(ch) {
-            Some(chord) => apply_action(model, chord),
-            None => Vec::new(),
-        },
+        Action::Insert(ch) => {
+            // The recovery capsule owns `r` and `d` only while it is on screen;
+            // every other chord keeps working. Without a banner those letters
+            // keep their ordinary chord meaning too.
+            let chord = model
+                .recovery_banner
+                .is_some()
+                .then(|| crate::ui::keymap::recovery_chord_action(ch))
+                .flatten()
+                .or_else(|| crate::ui::keymap::chord_action(ch));
+            match chord {
+                Some(chord) => apply_action(model, chord),
+                None => Vec::new(),
+            }
+        }
         _ => Vec::new(),
     }
 }

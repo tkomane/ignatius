@@ -208,9 +208,26 @@ through the terminal display sanitiser to strip escape sequences before renderin
 | Logs | `~/.local/share/ignatius/logs/ignatius.log` | `0600` on Unix | Rotated at 5 MB, one previous file kept |
 | Saved queries | `~/.config/ignatius/queries/*.sql` | `0600` for newly saved/replaced files on Unix; profile ACL on Windows | Until deleted. Written only when the user names one |
 | Statement history | `~/.local/share/ignatius/history.jsonl` | `0600` on Unix, set at creation and kept when the file is trimmed | Last 1000 entries by default; `ignatius history clear` removes it |
+| Session recovery journal | `~/.local/share/ignatius/recovery/session_journal.json` (Windows: `%LOCALAPPDATA%\ignatius\recovery\session_journal.json`) | `0600` on Unix; recovery directory `0700` | Flagged clean on a normal exit and deleted at the next launch; `ignatius recovery discard` removes it immediately. 1 MiB per buffer, 24 MiB total |
 
-Configuration writes, saved-query replacements and history trimming reserve
-new sibling temporary files exclusively, with Unix mode `0600` from creation.
+The session recovery journal holds the current text of open editor buffers, not
+what ran. It holds no result rows, no connection credentials, no prompted
+parameter values and no connection string. What the operator types literally
+into SQL is stored like any other buffer text, including a credential typed into
+a statement; the journal is a scratchpad, not a secret store, and
+`ignatius recovery discard` removes it. Capturing a buffer does not record an
+execution and does not add an entry to the statement history. A session started
+with `history.enabled = false` or `--no-history` writes no recovery state at
+all, so the mode that keeps less stays the mode that keeps less. `ignatius
+recovery restore` prints the journal and leaves it in place; only a clean exit,
+an explicit discard, or a restore through the interactive capsule removes it. The
+journal is per data directory, not per process, so two clients sharing one data
+directory share one recovery slot; run them with different `IGNATIUS_DATA_DIR`
+values if that matters.
+
+Configuration writes, saved-query replacements, history trimming and session
+recovery checkpoints reserve new sibling temporary files exclusively, with Unix
+mode `0600` from creation.
 Their contents are flushed and synced before rename; an existing temporary is
 never reopened, followed or removed. A failed replacement preserves the prior
 destination and removes only this attempt's temporary. Stale files from an

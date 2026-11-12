@@ -315,6 +315,10 @@ pub enum Command {
     /// Inspect, show, or persist reusable SQL snippets and scratchpads.
     #[command(name = "snippet")]
     Snippet(SnippetArgs),
+
+    /// Inspect, restore, or discard an unrecovered crash session journal.
+    #[command(name = "recovery")]
+    Recovery(RecoveryArgs),
 }
 
 /// Arguments for the audit command.
@@ -915,6 +919,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Sync(args)) => run_sync(args, &paths, out, err),
         Some(Command::Seed(args)) => run_seed(args, &paths, out, err),
         Some(Command::Snippet(args)) => run_snippet(args, &paths, out, err),
+        Some(Command::Recovery(args)) => run_recovery(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -4660,6 +4665,220 @@ fn run_snippet(
                     .map_err(io_diagnostic)?;
             } else {
                 writeln!(err, "Saved snippet '{}'", saved.id).map_err(io_diagnostic)?;
+            }
+        }
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for the crash recovery command (`043-session-state-and-crash-recovery`).
+#[derive(Debug, Args, Clone)]
+pub struct RecoveryArgs {
+    #[command(subcommand)]
+    pub action: RecoveryAction,
+}
+
+/// Actions available for the recovery command.
+#[derive(Debug, Subcommand, Clone)]
+pub enum RecoveryAction {
+    /// Report whether an unrecovered session journal exists.
+    Status {
+        /// Output format: table or json.
+        #[arg(short = 'f', long, value_enum, default_value = "table")]
+        format: CliRecoveryStatusFormat,
+    },
+    /// Print the recovered buffers without deleting the journal.
+    Restore {
+        /// Output format: sql or json.
+        #[arg(short = 'f', long, value_enum, default_value = "sql")]
+        format: CliRecoveryRestoreFormat,
+    },
+    /// Delete the recovery journal.
+    Discard,
+}
+
+/// Output representation for `recovery status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliRecoveryStatusFormat {
+    Table,
+    Json,
+}
+
+/// Output representation for `recovery restore`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliRecoveryRestoreFormat {
+    Sql,
+    Json,
+}
+
+#[derive(serde::Serialize)]
+struct RecoveryStatusReport<'a> {
+    present: bool,
+    clean_exit: bool,
+    session_id: &'a str,
+    started_at: &'a str,
+    saved_at: &'a str,
+    recoverable_buffers: usize,
+    unsaved_buffers: usize,
+    truncated_buffers: usize,
+}
+
+fn run_recovery(
+    args: &RecoveryArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let recovery_dir = paths.data_dir.join(crate::recovery::RECOVERY_DIR_NAME);
+
+    match &args.action {
+        RecoveryAction::Status { format } => {
+            let Some(journal) = crate::recovery::RecoveryJournal::load_from_disk(&recovery_dir)?
+            else {
+                match format {
+                    CliRecoveryStatusFormat::Json => {
+                        writeln!(out, r#"{{"present":false}}"#).map_err(io_diagnostic)?;
+                    }
+                    CliRecoveryStatusFormat::Table => {
+                        writeln!(out, "No session recovery journal.").map_err(io_diagnostic)?;
+                    }
+                }
+                return Ok(ExitCode::Success);
+            };
+
+            let report = RecoveryStatusReport {
+                present: true,
+                clean_exit: journal.clean_exit,
+                session_id: &journal.session_id,
+                started_at: &journal.started_at,
+                saved_at: &journal.saved_at,
+                recoverable_buffers: journal.recoverable_buffer_count(),
+                unsaved_buffers: journal.unsaved_buffer_count(),
+                truncated_buffers: journal.truncated_buffer_count(),
+            };
+
+            match format {
+                CliRecoveryStatusFormat::Json => {
+                    let json = serde_json::to_string_pretty(&report).map_err(|e| {
+                        Diagnostic::new(
+                            DiagnosticKind::Usage,
+                            format!("failed to serialize recovery status: {e}"),
+                            "formatting recovery status",
+                        )
+                    })?;
+                    writeln!(out, "{json}").map_err(io_diagnostic)?;
+                }
+                CliRecoveryStatusFormat::Table => {
+                    if journal.clean_exit {
+                        writeln!(out, "Last session exited cleanly; nothing to recover.")
+                            .map_err(io_diagnostic)?;
+                    } else if journal.has_recoverable_content() {
+                        writeln!(
+                            out,
+                            "Unrecovered session from {} ({}).",
+                            journal.started_at,
+                            journal.saved_when()
+                        )
+                        .map_err(io_diagnostic)?;
+                        writeln!(
+                            out,
+                            "{} buffer(s), {} unsaved, {} truncated.",
+                            journal.recoverable_buffer_count(),
+                            journal.unsaved_buffer_count(),
+                            journal.truncated_buffer_count()
+                        )
+                        .map_err(io_diagnostic)?;
+                    } else {
+                        writeln!(out, "A journal exists but holds nothing worth recovering.")
+                            .map_err(io_diagnostic)?;
+                    }
+                }
+            }
+        }
+        RecoveryAction::Restore { format } => {
+            let Some(journal) = crate::recovery::RecoveryJournal::load_from_disk(&recovery_dir)?
+            else {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "no session recovery journal exists",
+                    "restoring a crash session",
+                )
+                .likely_cause("the previous session exited cleanly or the journal was discarded")
+                .next_action("run `ignatius recovery status` to confirm"));
+            };
+            if !journal.has_recoverable_content() {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "the session recovery journal holds nothing worth restoring",
+                    "restoring a crash session",
+                )
+                .likely_cause("the last session exited cleanly or the buffers were empty")
+                .next_action("run `ignatius recovery discard` to remove the journal"));
+            }
+
+            match format {
+                CliRecoveryRestoreFormat::Json => {
+                    let json = serde_json::to_string_pretty(&journal).map_err(|e| {
+                        Diagnostic::new(
+                            DiagnosticKind::Usage,
+                            format!("failed to serialize recovered session: {e}"),
+                            "formatting recovered session",
+                        )
+                    })?;
+                    writeln!(out, "{json}").map_err(io_diagnostic)?;
+                }
+                CliRecoveryRestoreFormat::Sql => {
+                    for (index, buffer) in journal.buffers.iter().enumerate() {
+                        if buffer.sql.trim().is_empty() {
+                            continue;
+                        }
+                        let location = buffer
+                            .file_path
+                            .as_ref()
+                            .map_or_else(String::new, |path| format!(" ({})", path.display()));
+                        writeln!(
+                            out,
+                            "-- ---- buffer {}: {}{} ----",
+                            index + 1,
+                            buffer.title,
+                            location
+                        )
+                        .map_err(io_diagnostic)?;
+                        if buffer.truncated {
+                            writeln!(
+                                out,
+                                "-- truncated at {} bytes; the tail was not retained",
+                                crate::recovery::MAX_RECOVERED_BUFFER_BYTES
+                            )
+                            .map_err(io_diagnostic)?;
+                        }
+                        writeln!(out, "{}", buffer.sql).map_err(io_diagnostic)?;
+                    }
+                    writeln!(
+                        err,
+                        "Recovered SQL was written to standard output. The journal is still on disk;"
+                    )
+                    .map_err(io_diagnostic)?;
+                    writeln!(
+                        err,
+                        "run `ignatius recovery discard` after saving what you need."
+                    )
+                    .map_err(io_diagnostic)?;
+                }
+            }
+        }
+        RecoveryAction::Discard => {
+            let existed = recovery_dir
+                .join(crate::recovery::RECOVERY_FILE_NAME)
+                .exists();
+            crate::recovery::RecoveryJournal::discard(&recovery_dir)?;
+            if existed {
+                writeln!(out, "Discarded the session recovery journal.").map_err(io_diagnostic)?;
+            } else {
+                writeln!(out, "No session recovery journal to discard.").map_err(io_diagnostic)?;
             }
         }
     }

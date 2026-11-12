@@ -4,6 +4,106 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 35 (043-session-state-and-crash-recovery) Delivery - 12 November 2026
+
+Resume on branch `feat/043-session-state-and-crash-recovery`. Feature
+`043-session-state-and-crash-recovery` (the third and final slice of Milestone 9
+Multi-Buffer Editor & Scratchpad Persistence) has completed implementation and
+verification in this working tree:
+
+- **Wave 35 (`043-session-state-and-crash-recovery`)**:
+  delivered atomic unsaved-buffer persistence and crash recovery:
+  - Pure `src/recovery/` domain engine (`RecoveredBuffer`, `RecoveryJournal`,
+    `RecoverySession`) with a versioned JSON journal, RFC3339 timestamps, cursor
+    and split-layout capture, and a 1 MiB per-buffer bound.
+  - Atomic publication: bytes are written to a sibling temporary file with Unix
+    mode `0600` inside a `0700` directory, flushed with `sync_all`, renamed, and
+    the directory entry synced where the platform supports it. A journal above
+    24 MiB is refused before parsing, and a newer schema version is refused
+    without deleting the evidence.
+  - `RecoverySession` checkpoint policy: structural changes (tab count, order,
+    titles, file paths, split mode) write immediately; ordinary typing is
+    throttled to one write every two seconds; a burst followed by an idle
+    terminal is flushed by the 250 ms notice tick. A pending crash journal is
+    never overwritten, quitting without deciding preserves it, and a clean quit
+    writes `clean_exit: true` so the next launch raises no false alarm.
+  - Startup integration in `src/cli/interactive.rs`: an unrecovered journal
+    becomes `Model.recovery_banner`; a damaged journal is reported in the error
+    surface and blocks checkpoints rather than being clobbered. Sessions started
+    with history disabled or `--no-history` never persist recovery state.
+  - Dieter Rams Field Industrial capsule in `src/ui/widgets/editor.rs`:
+    `[CRASH RECOVERY: n UNSAVED BUFFERS] [Ctrl+K r] Restore [Ctrl+K d] Discard`,
+    a `, m TRUNCATED` suffix, `OPEN BUFFERS` wording when nothing was edited, and
+    stepwise degradation to `^K r/d` in panes too narrow for the full hint.
+  - Contextual chords only while the capsule is visible: `Ctrl+K r` restores and
+    `Ctrl+K d` discards. Every other chord keeps working while the capsule is on
+    screen. Outside the capsule `r` still reloads the object tree and `d` still
+    shows a definition. The bindable names `restore-session` and
+    `discard-recovery` remain available for explicit configuration.
+  - Reducer handling in `src/app/update.rs` restores exact text, cursors, file
+    paths, dirty markers, active tab and split layout; it syncs the editor even
+    when zero buffers are restorable and reports journal-discard failures
+    instead of swallowing them. Edits typed after the capsule appeared are kept
+    as additional tabs; restore refuses with an explanation rather than lose one
+    when the 16-tab bound would be exceeded.
+  - Headless `ignatius recovery` routes in `src/cli/mod.rs`:
+    `status [--format table|json]`, non-destructive
+    `restore [--format sql|json]`, and `discard`.
+  - `tests/session_recovery_contract.rs` (8 tests) covers absent, damaged and
+    clean journals, table/JSON status, SQL/JSON restore, non-destructive restore,
+    discard idempotence, documentation parity, and one real PTY journey.
+
+| Focused gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Pass |
+| `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Pass |
+| `cargo test --locked --lib recovery::` | 17 passed |
+| `cargo test --locked --lib ui::keymap` | 33 passed |
+| `cargo test --locked --lib ui::widgets::editor` | 21 passed |
+| `cargo test --locked --lib app::update` | 288 passed |
+| `cargo test --locked --lib app::discovery` | 15 passed |
+| `cargo test --locked --test session_recovery_contract` | 8 passed |
+| `cargo test --locked --test documentation_matches_the_build` | 18 passed |
+| `cargo test --locked --lib` | 1468 passed |
+| `cargo xtask verify` | Pass, 1859 tests, one semantic skip |
+
+The PTY contract is live evidence about the real binary, not a unit mock: the
+test types `SELECT 'survives a kill';` into the client under `script`, waits for
+the checkpoint, kills the whole process group with `SIGKILL`, then proves that
+`ignatius recovery status` reports an unrecovered session, `ignatius recovery
+restore` returns the typed SQL, a relaunch renders `CRASH RECOVERY` on screen,
+and pressing `Ctrl+Q` without choosing preserves the journal rather than
+replacing it with the empty workspace.
+
+The full gate also exposed a pre-existing shared-database race: the INSERT
+contract test left `insert_contract_probe` in `public`, and the identical-schema
+diff contract compared `public` with itself while that table existed. The diff
+contract now uses a dedicated `diff_identical` schema, so the two tests no longer
+depend on execution order. No product behaviour changed for that fix.
+
+The authoritative `cargo xtask verify` exited successfully with the
+disposable `postgres:18.6-alpine` plain and TLS fixtures running. Formatting,
+lints, API documentation, 1468 library tests, 80 CLI-contract tests, 66
+PostgreSQL integration tests, 18 documentation matches, 8 session recovery
+tests, 84 release-contract tests, 8 terminal-restoration tests and every other
+workspace suite passed. The workspace total was 1859 tests. Plain and TLS
+database gates passed. The run used the configured external build cache at
+`/Volumes/UtilityBuildCache/Storage/Build/cargo` with no override; the toolchain
+was Homebrew Rust/Cargo 1.99.1. The semantic
+Unix-socket gate remained a skip because `IGNATIUS_TEST_PG_SOCKET_URI` was not
+set, and that skip is not live socket evidence. The disposable services were
+torn down with `cargo xtask db down` after the run, and `cargo xtask db status`
+reported `Not running.` No tag, signing, release, push or publication operation
+was performed.
+
+Milestone 9 is complete in source: Features 041, 042 and 043 are implemented and
+covered by their focused and full gates. Native hand use in Warp, Windows
+Terminal and Linux terminals, screen-reader use, live resize, and a real
+power-loss or kernel-panic test remain outside this evidence. The journal is per
+data directory, not per process, so concurrent clients sharing one data
+directory share one recovery slot. No M10 scope is defined yet; the next source
+work should start from an observed job under W16 rather than inventing one.
+
 ## Wave 34 (042-persistent-scratchpad-and-snippet-library) Delivery - 12 November 2026
 
 Resume on branch `feat/042-persistent-scratchpad-and-snippet-library`. Feature
@@ -3241,6 +3341,11 @@ Controlled provider accounts and native/assistive-technology access are
 evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
+
+Milestone 9 source work is closed. No M10 feature set is specified, so the next
+source slice is a W16 decision from an observed job, not an invented feature.
+The open items below are correctness, native, accessibility and release
+evidence, plus owner decisions.
 
 1. **W07:** calibrate the Windows cursor sensor under the owned native contract,
    preserving `7d167a9`'s three control passes and failed capability. Admit the

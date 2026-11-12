@@ -1,5 +1,34 @@
 # Verification
 
+## Wave 35 (043-session-state-and-crash-recovery) Delivery - 12 November 2026
+
+Feature `043-session-state-and-crash-recovery` completed Milestone 9 with atomic
+unsaved-buffer persistence, a startup recovery capsule, clean-exit safety and a
+headless `ignatius recovery` route. The authoritative
+`cargo xtask verify` exited 0 against the configured external build cache and
+the disposable `postgres:18.6-alpine` plain and TLS fixtures with Homebrew
+Rust/Cargo 1.99.1. It reported 1859 tests: 1468 library, 80 CLI contract, 66
+PostgreSQL integration, 18 documentation, 8 session recovery, 84 release
+contract, 8 terminal restoration, and the remaining suites green. Formatting,
+lints, API documentation and documentation tests passed; plain and TLS database
+gates passed. The Unix-socket gate skipped because `IGNATIUS_TEST_PG_SOCKET_URI`
+was not set.
+
+The session recovery contract includes one real PTY journey: the binary was run
+under `script`, `SELECT 'survives a kill';` was typed into the editor, the whole
+process group was killed with `SIGKILL`, `ignatius recovery status` reported an
+unrecovered session, `ignatius recovery restore` emitted the typed SQL, a
+relaunch rendered `CRASH RECOVERY`, and `Ctrl+Q` without deciding preserved the
+journal. Focused counts were 17 recovery engine tests, 33 keymap, 21 editor
+widget, 288 reducer, 15 discovery and 7 headless CLI contract tests. The
+disposable fixtures were torn down with `cargo xtask db down`, and `cargo xtask
+db status` reported `Not running.` No tag, signing, release, push or publication
+operation was performed.
+
+Not verified here: native hand use on Windows/Linux/Warp, screen-reader use,
+live terminal resize, real power-loss or kernel-panic durability, and concurrent
+clients sharing one data directory.
+
 ## Wave 25 (033-listen-notify-and-maintenance-ops) Delivery - 11 November 2026
 
 Wave 25 Feature `033-listen-notify-and-maintenance-ops` delivered the eighth Milestone 6

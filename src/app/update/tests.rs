@@ -10767,3 +10767,375 @@ fn maintenance_ops_lifecycle_navigation_execution_and_editor_load() {
     update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.maintenance_ops.is_none());
 }
+
+fn seed_recovery_journal(recovery_dir: &std::path::Path) -> crate::recovery::RecoveryJournal {
+    use crate::buffer::{BufferManager, EditorSplitMode};
+    use crate::recovery::RecoveryJournal;
+
+    let mut source = BufferManager::new();
+    source
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT 'first';");
+    source.active_buffer_mut().editor.set_cursor(4);
+    source.active_buffer_mut().file_path = Some(std::path::PathBuf::from("/tmp/first.sql"));
+    source.new_buffer(Some("second.sql".into()), Some("SELECT 'second';".into()));
+    source.active_buffer_mut().editor.set_cursor(7);
+    source.split_mode = EditorSplitMode::Vertical;
+    source.secondary_idx = Some(0);
+    source.active_idx = 1;
+
+    let journal = RecoveryJournal::from_buffers(&source, "session-reducer", false);
+    journal.save_to_disk(recovery_dir).expect("seed journal");
+    journal
+}
+
+fn install_recovery_banner(
+    model: &mut Model,
+    recovery_dir: &std::path::Path,
+    journal: crate::recovery::RecoveryJournal,
+) {
+    use crate::app::model::SessionRecoveryBanner;
+
+    assert!(
+        recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists(),
+        "the test journal is on disk before the banner is installed"
+    );
+    model.recovery_banner = Some(SessionRecoveryBanner::new(
+        journal,
+        recovery_dir.to_path_buf(),
+    ));
+}
+
+#[test]
+fn restore_session_restores_exact_buffers_syncs_editor_and_removes_the_journal() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let journal = seed_recovery_journal(&recovery_dir);
+
+    let mut model = Model::new(100);
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    let effects = update(&mut model, Message::Action(Action::RestoreSession));
+    assert!(effects.is_empty());
+    assert!(model.recovery_banner.is_none(), "the capsule is dismissed");
+    assert_eq!(model.buffers.count(), 2, "both recovered tabs are open");
+    assert_eq!(
+        model.buffers.split_mode,
+        crate::buffer::EditorSplitMode::Vertical
+    );
+    assert_eq!(model.buffers.active_idx, 1);
+    assert_eq!(model.buffers.buffers[0].editor.text(), "SELECT 'first';");
+    assert_eq!(model.buffers.buffers[0].editor.cursor(), 4);
+    assert_eq!(
+        model.buffers.buffers[0].file_path,
+        Some(std::path::PathBuf::from("/tmp/first.sql"))
+    );
+    assert_eq!(model.buffers.buffers[1].editor.text(), "SELECT 'second';");
+    assert_eq!(model.buffers.buffers[1].editor.cursor(), 7);
+    assert_eq!(
+        model.editor.text(),
+        model.buffers.active_editor().text(),
+        "the editor pane follows the restored active buffer"
+    );
+    assert!(
+        !recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists(),
+        "the consumed journal is removed"
+    );
+}
+
+#[test]
+fn restore_keeps_edits_typed_after_the_capsule_appeared() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let journal = seed_recovery_journal(&recovery_dir);
+
+    let mut model = Model::new(100);
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+    model.editor.set_text("SELECT 'typed after the crash';");
+    model.editor.insert(' ');
+    model.sync_active_buffer_from_editor();
+    assert!(model.buffers.active_editor().is_modified());
+
+    let effects = update(&mut model, Message::Action(Action::RestoreSession));
+    assert!(effects.is_empty());
+    assert_eq!(
+        model.buffers.count(),
+        3,
+        "two recovered tabs plus the in-flight edit"
+    );
+    assert!(
+        model
+            .buffers
+            .buffers
+            .iter()
+            .any(|buffer| buffer.editor.text().contains("typed after the crash")),
+        "text typed after the capsule appeared is not destroyed by restore"
+    );
+    assert!(
+        model.buffers.buffers[2].editor.is_modified(),
+        "the preserved tab keeps its dirty marker"
+    );
+    assert_eq!(
+        model.buffers.next_id, 4,
+        "the preserved tab gets a fresh identity"
+    );
+}
+
+#[test]
+fn restore_refuses_when_preserving_in_flight_edits_would_exceed_the_tab_bound() {
+    use crate::buffer::BufferManager;
+    use crate::recovery::RecoveryJournal;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let mut source = BufferManager::new();
+    source
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT 'recovered';");
+    source.active_buffer_mut().editor.insert(' ');
+    let journal = RecoveryJournal::from_buffers(&source, "session-full", false);
+    journal.save_to_disk(&recovery_dir).expect("seed journal");
+
+    let mut model = Model::new(100);
+    while model.buffers.count() < crate::buffer::MAX_EDITOR_BUFFERS {
+        model.buffers.new_buffer(Some("filler.sql".into()), None);
+    }
+    for buffer in &mut model.buffers.buffers {
+        buffer.editor.set_text("SELECT 'in flight';");
+        buffer.editor.insert(' ');
+    }
+    model.sync_editor_from_active_buffer();
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+    let before = model.buffers.clone();
+
+    update(&mut model, Message::Action(Action::RestoreSession));
+    assert!(
+        model.error.is_some(),
+        "the refusal is explained rather than silently dropping a tab"
+    );
+    assert!(model.recovery_banner.is_some(), "the decision stays open");
+    assert_eq!(model.buffers, before, "nothing is destroyed");
+    assert!(
+        recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists(),
+        "the journal is preserved for a later restore"
+    );
+}
+
+#[test]
+fn restore_session_syncs_the_editor_even_when_nothing_could_be_restored() {
+    use crate::buffer::BufferManager;
+    use crate::recovery::RecoveryJournal;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+
+    let mut empty = BufferManager::new();
+    empty.active_buffer_mut().editor.set_text("");
+    let journal = RecoveryJournal::from_buffers(&empty, "session-empty", false);
+    journal.save_to_disk(&recovery_dir).expect("seed journal");
+
+    let mut model = Model::new(100);
+    model.editor.set_text("STALE EDITOR TEXT");
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    let effects = update(&mut model, Message::Action(Action::RestoreSession));
+    assert!(effects.is_empty());
+    assert!(model.recovery_banner.is_none());
+    assert_eq!(model.buffers.count(), 1);
+    assert_eq!(
+        model.editor.text(),
+        model.buffers.active_editor().text(),
+        "the editor is synchronized even when zero buffers were restored"
+    );
+    assert!(
+        !recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists(),
+        "an empty journal is still consumed"
+    );
+}
+
+#[test]
+fn discard_recovery_removes_the_journal_and_leaves_buffers_untouched() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let journal = seed_recovery_journal(&recovery_dir);
+
+    let mut model = Model::new(100);
+    model.editor.set_text("keep me");
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+    let buffers_before = model.buffers.clone();
+    let editor_before = model.editor.text().to_owned();
+
+    let effects = update(&mut model, Message::Action(Action::DiscardRecovery));
+    assert!(effects.is_empty());
+    assert!(model.recovery_banner.is_none(), "the capsule is dismissed");
+    assert_eq!(model.buffers, buffers_before, "buffers are untouched");
+    assert_eq!(model.editor.text(), editor_before);
+    assert!(
+        !recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists(),
+        "the discarded journal is removed"
+    );
+}
+
+#[test]
+fn recovery_actions_are_no_ops_without_a_banner() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    seed_recovery_journal(&recovery_dir);
+
+    for action in [Action::RestoreSession, Action::DiscardRecovery] {
+        let mut model = Model::new(100);
+        model.editor.set_text("unchanged");
+        let buffers_before = model.buffers.clone();
+        let effects = update(&mut model, Message::Action(action.clone()));
+        assert!(effects.is_empty(), "{action:?} produces no effects");
+        assert!(model.recovery_banner.is_none());
+        assert_eq!(model.buffers, buffers_before, "{action:?} is a no-op");
+        assert_eq!(model.editor.text(), "unchanged");
+        assert!(model.error.is_none(), "{action:?} reports nothing");
+        assert!(
+            recovery_dir
+                .join(crate::recovery::RECOVERY_FILE_NAME)
+                .exists(),
+            "{action:?} must not touch a journal it never surfaced"
+        );
+    }
+}
+
+#[test]
+fn a_pending_prefix_uses_recovery_letters_only_while_the_capsule_is_visible() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let journal = seed_recovery_journal(&recovery_dir);
+
+    // Without a banner, Ctrl+K r keeps reloading the object tree and never
+    // restores anything.
+    let mut model = Model::new(100);
+    update(&mut model, Message::Action(Action::BeginPrefix));
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(model.buffers.count() == 1);
+    assert_eq!(model.buffers.buffers[0].editor.text(), "");
+
+    // With the capsule on screen the same keys reach the recovery actions.
+    let mut model = Model::new(100);
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+    update(&mut model, Message::Action(Action::BeginPrefix));
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(model.recovery_banner.is_none(), "r restored the session");
+    assert_eq!(model.buffers.count(), 2);
+
+    // `d` takes the discard route while the capsule is visible and leaves the
+    // workspace alone.
+    let journal = seed_recovery_journal(&recovery_dir);
+    let mut model = Model::new(100);
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+    let buffers_before = model.buffers.clone();
+    update(&mut model, Message::Action(Action::BeginPrefix));
+    update(&mut model, Message::Action(Action::Insert('d')));
+    assert!(model.recovery_banner.is_none(), "d discarded the recovery");
+    assert_eq!(model.buffers, buffers_before);
+    assert!(
+        !recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists(),
+        "d removed the journal"
+    );
+}
+
+#[test]
+fn every_other_chord_still_works_while_the_capsule_is_visible() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let journal = seed_recovery_journal(&recovery_dir);
+
+    let mut model = Model::new(100);
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+    assert_eq!(model.buffers.count(), 1);
+
+    // `=` is the new-buffer chord. The capsule overrides only r and d, so this
+    // must still create a tab rather than silently doing nothing.
+    update(&mut model, Message::Action(Action::BeginPrefix));
+    update(&mut model, Message::Action(Action::Insert('=')));
+    assert_eq!(model.buffers.count(), 2, "other chords keep working");
+    assert!(
+        model.recovery_banner.is_some(),
+        "using another chord does not decide the recovery"
+    );
+}
+
+fn journal_path_blocked_by_a_directory(recovery_dir: &std::path::Path) {
+    std::fs::create_dir_all(recovery_dir.join(crate::recovery::RECOVERY_FILE_NAME))
+        .expect("block the journal path with a directory");
+}
+
+#[test]
+fn a_failed_restore_discard_is_reported_instead_of_swallowed() {
+    use crate::app::model::SessionRecoveryBanner;
+    use crate::buffer::BufferManager;
+    use crate::recovery::RecoveryJournal;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    journal_path_blocked_by_a_directory(&recovery_dir);
+
+    let mut source = BufferManager::new();
+    source
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT 'restored';");
+    let journal = RecoveryJournal::from_buffers(&source, "session-blocked", false);
+
+    let mut model = Model::new(100);
+    model.recovery_banner = Some(SessionRecoveryBanner::new(journal, recovery_dir));
+
+    let effects = update(&mut model, Message::Action(Action::RestoreSession));
+    assert!(effects.is_empty());
+    assert!(model.recovery_banner.is_none());
+    assert_eq!(model.buffers.buffers[0].editor.text(), "SELECT 'restored';");
+    let error = model
+        .error
+        .expect("a journal that could not be removed must be reported");
+    assert!(
+        error.headline.contains("failed to remove recovery journal"),
+        "{}",
+        error.headline
+    );
+}
+
+#[test]
+fn a_failed_discard_is_reported_instead_of_swallowed() {
+    use crate::app::model::SessionRecoveryBanner;
+    use crate::buffer::BufferManager;
+    use crate::recovery::RecoveryJournal;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    journal_path_blocked_by_a_directory(&recovery_dir);
+
+    let journal = RecoveryJournal::from_buffers(&BufferManager::new(), "session-blocked", false);
+    let mut model = Model::new(100);
+    model.recovery_banner = Some(SessionRecoveryBanner::new(journal, recovery_dir));
+
+    let effects = update(&mut model, Message::Action(Action::DiscardRecovery));
+    assert!(effects.is_empty());
+    assert!(model.recovery_banner.is_none());
+    let error = model
+        .error
+        .expect("a journal that could not be removed must be reported");
+    assert!(
+        error.headline.contains("failed to remove recovery journal"),
+        "{}",
+        error.headline
+    );
+}

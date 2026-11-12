@@ -1,6 +1,6 @@
 //! Focused tests for the editor completion popup and guidance placeholders.
 
-use super::{render_completion, render_editor};
+use super::{render_completion, render_editor, render_recovery_capsule};
 use crate::app::completion::CompletionMenu;
 use crate::app::model::{ConnectionState, Model};
 use crate::config::ThemeChoice;
@@ -409,5 +409,218 @@ fn split_mode_renders_separator_and_panes() {
     assert!(
         rendered_text.contains("│") || rendered_text.contains("|"),
         "Must render split vertical separator:\n{rendered_text}"
+    );
+}
+
+fn recovery_model(buffer_count: usize) -> Model {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.editor.set_text("SELECT 1;");
+    model.sync_active_buffer_from_editor();
+    for index in 2..=buffer_count {
+        model
+            .buffers
+            .new_buffer(Some(format!("query-{index}.sql")), Some("SELECT 2;".into()));
+    }
+    for buffer in &mut model.buffers.buffers {
+        buffer.file_path = None;
+        buffer.editor.set_cursor(1);
+        buffer.editor.insert(' ');
+    }
+    model.buffers.active_idx = 0;
+    model.sync_editor_from_active_buffer();
+    let journal =
+        crate::recovery::RecoveryJournal::from_buffers(&model.buffers, "render-session", false);
+    model.recovery_banner = Some(crate::app::model::SessionRecoveryBanner::new(
+        journal,
+        std::path::PathBuf::from("/tmp/ignatius-recovery"),
+    ));
+    model
+}
+
+fn rendered_rows(buf: &Buffer, area: Rect) -> Vec<String> {
+    (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+#[test]
+fn recovery_capsule_sits_above_the_tab_bar_with_ascii_wording_and_keys() {
+    let model = recovery_model(2);
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    render_editor(
+        &model,
+        &Keymap::new(),
+        &presentation(ColorDepth::TrueColor),
+        area,
+        &mut buf,
+    );
+
+    let rows = rendered_rows(&buf, area);
+    let capsule = rows
+        .iter()
+        .position(|row| row.contains("CRASH RECOVERY"))
+        .expect("recovery capsule is rendered");
+    assert!(
+        rows[capsule].contains("[CRASH RECOVERY: 2 UNSAVED BUFFERS]"),
+        "capsule names the buffer count: {}",
+        rows[capsule]
+    );
+    assert!(
+        rows[capsule].contains("Ctrl+K r") && rows[capsule].contains("Ctrl+K d"),
+        "capsule advertises both contextual chords: {}",
+        rows[capsule]
+    );
+    assert!(
+        rows[capsule].contains("Restore") && rows[capsule].contains("Discard"),
+        "capsule spells out both choices: {}",
+        rows[capsule]
+    );
+    let capsule_row = &rows[capsule];
+    let start = capsule_row
+        .find("[CRASH RECOVERY")
+        .expect("capsule opens with its label");
+    let end = capsule_row
+        .find("Discard")
+        .expect("capsule ends with the discard word")
+        + "Discard".len();
+    assert!(
+        capsule_row[start..end].is_ascii(),
+        "the capsule is ASCII only: {capsule_row}"
+    );
+    let tab_bar = rows
+        .iter()
+        .position(|row| row.contains("[+]"))
+        .expect("the tab bar is still rendered");
+    assert!(
+        capsule < tab_bar,
+        "the capsule sits above the buffer tab bar ({capsule} vs {tab_bar})"
+    );
+}
+
+#[test]
+fn recovery_capsule_reports_truncated_buffers_and_singular_counts() {
+    let mut model = recovery_model(1);
+    if let Some(banner) = model.recovery_banner.as_mut() {
+        banner.journal.buffers[0].truncated = true;
+    }
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    render_editor(
+        &model,
+        &Keymap::new(),
+        &presentation(ColorDepth::TrueColor),
+        area,
+        &mut buf,
+    );
+
+    let text = rendered_rows(&buf, area).join("\n");
+    assert!(
+        text.contains("[CRASH RECOVERY: 1 UNSAVED BUFFER, 1 TRUNCATED]"),
+        "single unsaved buffer and the truncation suffix: {text}"
+    );
+}
+
+#[test]
+fn recovery_capsule_uses_the_compact_form_in_a_narrow_pane() {
+    let model = recovery_model(2);
+    let area = Rect::new(0, 0, 24, 20);
+    let mut buf = Buffer::empty(area);
+    render_editor(
+        &model,
+        &Keymap::new(),
+        &presentation(ColorDepth::TrueColor),
+        area,
+        &mut buf,
+    );
+
+    let text = rendered_rows(&buf, area).join("\n");
+    assert!(
+        text.contains("[RECOVERY: 2]"),
+        "narrow panes get the compact capsule: {text}"
+    );
+    assert!(
+        text.contains("^K r/d"),
+        "the narrowest capsule keeps both letters without clipping a word: {text}"
+    );
+    assert!(
+        !text.contains("CRASH RECOVERY"),
+        "the wide capsule is not used below 24 columns: {text}"
+    );
+}
+
+#[test]
+fn recovery_capsule_keeps_both_words_at_a_typical_pane_width() {
+    let model = recovery_model(2);
+    let area = Rect::new(0, 0, 50, 1);
+    let mut buf = Buffer::empty(area);
+    render_recovery_capsule(&model, &presentation(ColorDepth::TrueColor), area, &mut buf);
+
+    let text = rendered_rows(&buf, area).join("\n");
+    assert!(
+        text.contains("Restore") && text.contains("Discard"),
+        "a 50-column pane keeps both choices readable: {text}"
+    );
+    assert!(
+        !text.contains("[Ctrl+K r]"),
+        "the full key hint is reserved for panes that can hold it: {text}"
+    );
+}
+
+#[test]
+fn recovery_capsule_calls_untouched_tabs_open_rather_than_unsaved() {
+    use crate::buffer::BufferManager;
+
+    let mut loaded = BufferManager::new();
+    loaded.active_buffer_mut().editor.set_text("SELECT 1;");
+    loaded.new_buffer(Some("query-2.sql".into()), Some("SELECT 2;".into()));
+    let journal = crate::recovery::RecoveryJournal::from_buffers(&loaded, "loaded", false);
+
+    let mut model = Model::new(100);
+    model.recovery_banner = Some(crate::app::model::SessionRecoveryBanner::new(
+        journal,
+        std::path::PathBuf::from("/tmp/ignatius-recovery"),
+    ));
+
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    render_editor(
+        &model,
+        &Keymap::new(),
+        &presentation(ColorDepth::TrueColor),
+        area,
+        &mut buf,
+    );
+
+    let text = rendered_rows(&buf, area).join("\n");
+    assert!(
+        text.contains("[CRASH RECOVERY: 2 OPEN BUFFERS]"),
+        "loaded tabs that were never edited are open, not unsaved: {text}"
+    );
+}
+
+#[test]
+fn no_recovery_capsule_is_rendered_without_a_banner() {
+    let mut model = recovery_model(2);
+    model.recovery_banner = None;
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    render_editor(
+        &model,
+        &Keymap::new(),
+        &presentation(ColorDepth::TrueColor),
+        area,
+        &mut buf,
+    );
+
+    let text = rendered_rows(&buf, area).join("\n");
+    assert!(
+        !text.contains("CRASH RECOVERY"),
+        "no banner means no capsule: {text}"
     );
 }

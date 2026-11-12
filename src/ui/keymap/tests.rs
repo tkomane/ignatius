@@ -194,6 +194,12 @@ fn palette_reaches(action: &Action) -> bool {
         .any(|entry| entry.command == crate::app::palette::PaletteCommand::Run(action.clone()))
 }
 
+/// Recovery actions are reachable from the capsule only while it is visible,
+/// so they are not global chords or permanent palette rows.
+fn capsule_reaches(action: &Action) -> bool {
+    RECOVERY_CHORDS.iter().any(|(_, chord, _)| chord == action)
+}
+
 #[test]
 fn every_action_this_build_has_can_be_reached() {
     // The test that would have caught five features shipping with no way in.
@@ -209,7 +215,7 @@ fn every_action_this_build_has_can_be_reached() {
         let chorded = CHORDS.iter().any(|(_, chord, _)| *chord == action);
         let typed = matches!(action, Action::Insert(_));
         assert!(
-            bound || chorded || typed || palette_reaches(&action),
+            bound || chorded || typed || capsule_reaches(&action) || palette_reaches(&action),
             "{action:?} has no key, no chord and no other way in"
         );
     }
@@ -245,6 +251,7 @@ fn every_action_worth_looking_up_is_in_the_palette_or_bound_to_a_key() {
             .iter()
             .any(|binding| binding.action == action)
             || CHORDS.iter().any(|(_, chord, _)| *chord == action)
+            || capsule_reaches(&action)
             || palette_reaches(&action);
         assert!(
             listed,
@@ -625,6 +632,49 @@ fn every_chord_is_listed_and_resolves_to_what_it_says() {
         );
     }
     assert!(chord_action('~').is_none(), "an unbound key ends the chord");
+}
+
+#[test]
+fn recovery_chords_are_contextual_and_do_not_shadow_global_letters() {
+    assert_eq!(
+        recovery_chord_action('r'),
+        Some(Action::RestoreSession),
+        "the capsule maps r to restore"
+    );
+    assert_eq!(
+        recovery_chord_action('R'),
+        Some(Action::RestoreSession),
+        "the capsule accepts the shifted key too"
+    );
+    assert_eq!(
+        recovery_chord_action('d'),
+        Some(Action::DiscardRecovery),
+        "the capsule maps d to discard"
+    );
+    assert_eq!(
+        recovery_chord_action('D'),
+        Some(Action::DiscardRecovery),
+        "the capsule accepts the shifted key too"
+    );
+    assert_eq!(
+        recovery_chord_action('x'),
+        None,
+        "an unbound key is not a recovery chord"
+    );
+
+    // Without the banner the ordinary meanings are untouched.
+    assert_eq!(chord_action('r'), Some(Action::ReloadObjects));
+    assert_eq!(chord_action('R'), Some(Action::ReloadObjects));
+    assert_eq!(chord_action('d'), Some(Action::ShowDefinition));
+    assert_eq!(chord_action('D'), Some(Action::ShowDefinition));
+
+    // The scaffolding chords must not ship.
+    assert!(
+        CHORDS.iter().all(|(key, _, _)| *key != '!' && *key != '~'),
+        "'!' and '~' were temporary recovery scaffolding"
+    );
+    assert!(chord_action('!').is_none());
+    assert!(chord_action('~').is_none());
 }
 
 #[test]

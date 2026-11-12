@@ -3055,14 +3055,28 @@ mod with_server {
     fn diff_subcommand_compares_schemas_generates_sql_and_protects_existing_files() {
         let uri = uri_or_skip!();
 
-        // 1. Run ignatius diff <uri> --source-schema public --target-schema public (identical schemas)
+        // The identical-schema check needs a schema nothing else mutates. Using
+        // `public` made this test race the INSERT contract probe, which lives in
+        // the same disposable database and runs in parallel.
+        let setup = binary()
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "CREATE SCHEMA IF NOT EXISTS diff_identical",
+            ])
+            .output()
+            .expect("create identical-diff schema");
+        assert_eq!(code(&setup), 0, "{}", stderr(&setup));
+
+        // 1. Run ignatius diff <uri> --source-schema diff_identical --target-schema diff_identical
         let output = binary()
             .arg("diff")
             .arg(&uri)
             .arg("--source-schema")
-            .arg("public")
+            .arg("diff_identical")
             .arg("--target-schema")
-            .arg("public")
+            .arg("diff_identical")
             .output()
             .expect("run ignatius diff identical");
 

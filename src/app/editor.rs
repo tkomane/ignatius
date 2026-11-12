@@ -127,6 +127,15 @@ impl Editor {
         self.modified = false;
     }
 
+    /// Restores the unsaved-edit marker without touching text or undo history.
+    ///
+    /// This exists for crash recovery: the journal recorded whether the buffer
+    /// had unsaved edits, and loading its text back through [`Self::set_text`]
+    /// would correctly report "matches disk" for content that never did.
+    pub const fn restore_modified(&mut self, modified: bool) {
+        self.modified = modified;
+    }
+
     /// Whether the buffer has unsaved edits.
     #[must_use]
     pub const fn is_modified(&self) -> bool {

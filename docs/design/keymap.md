@@ -134,6 +134,16 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `\` | Toggle editor buffer split mode |
 | `;` | Open snippet and scratchpad library |
 
+The crash-recovery capsule adds two contextual chords for as long as it is on
+screen: `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the
+journal. At every other time those letters keep their ordinary chord meanings,
+`r` reloads the object tree and `d` shows the selected object's definition. The
+capsule is the only surface that advertises the contextual pair, and the
+bindable names `restore-session` and `discard-recovery` remain available for an
+explicit configuration binding. In a pane too narrow for the full hint the
+capsule shortens `Ctrl+K` to `^K`, then to `r/d` in the narrowest panes; the
+count and the two choices stay visible until the pane cannot hold them at all.
+
 When Results has focus, `Ctrl+K c` asks before sending the selected text cell
 through the terminal. A NULL, disabled transport, stale selection, or value
 over the copy limit is explained without sending anything. The printable `c`
@@ -586,7 +596,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 
