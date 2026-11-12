@@ -5574,5 +5574,370 @@ pub(crate) fn render_data_masking(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+pub(crate) fn render_data_sync(
+    state: &crate::app::model::DataSyncState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+
+    let title = format!(
+        " {} CROSS-DATABASE COPY & SYNC PIPELINES ",
+        presentation.icon(Icon::Database),
+    );
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Hardware capsules bar
+            Constraint::Length(1), // Tab selectors
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // Main workspace
+            Constraint::Length(1), // Status line
+            Constraint::Length(1), // Footer hotkey hints
+        ])
+        .split(inner);
+
+    let capsule_area = chunks[0];
+    let tab_area = chunks[1];
+    let body_area = chunks[3];
+    let status_area = chunks[4];
+    let footer_area = chunks[5];
+
+    let plan_opt = state.plan.as_ref();
+    let tables_cnt = plan_opt.map_or(0, |p| p.insert_order.len());
+    let has_cycles = plan_opt.is_some_and(|p| p.has_cycles);
+    let cycle_token = if has_cycles {
+        Token::Warning
+    } else {
+        Token::Success
+    };
+    let cycle_label = if has_cycles {
+        "CYCLES DETECTED"
+    } else {
+        "STRICT DAG"
+    };
+
+    let mode_token = if state.dry_run {
+        Token::Success
+    } else {
+        Token::Warning
+    };
+    let mode_label = if state.dry_run {
+        "DRY-RUN (SAFE)"
+    } else {
+        "LIVE STREAM"
+    };
+
+    let trunc_label = if state.truncate { "ENABLED" } else { "OFF" };
+
+    // Dieter Rams hardware capsules
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("TABLES: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{tables_cnt}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("TOPOLOGY: ", theme.style(Token::Muted)),
+        Span::styled(
+            cycle_label,
+            theme.style(cycle_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("MODE: ", theme.style(Token::Muted)),
+        Span::styled(
+            mode_label,
+            theme.style(mode_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("TRUNCATE: ", theme.style(Token::Muted)),
+        Span::styled(
+            trunc_label,
+            theme.style(if state.truncate {
+                Token::Warning
+            } else {
+                Token::Muted
+            }),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("PROTOCOL: ", theme.style(Token::Muted)),
+        Span::styled("Binary COPY Stream", theme.style(Token::Focus)),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    // Tab Bar
+    let report_tables_cnt = state
+        .sync_report
+        .as_ref()
+        .map_or(0, |r| r.table_progress.len());
+    let tab_titles = [
+        format!(" [1] Dependency Graph & Sync Plan ({tables_cnt}) "),
+        format!(" [2] Live Transfer Telemetry ({report_tables_cnt}) "),
+    ];
+    let mut tab_spans = Vec::new();
+    for (i, t) in tab_titles.iter().enumerate() {
+        if i == state.active_tab {
+            tab_spans.push(Span::styled(
+                t,
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
+        }
+        tab_spans.push(Span::raw(" "));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    if state.loading {
+        let loading_p = Paragraph::new(Line::from(vec![Span::styled(
+            "  Discovering foreign key constraints and computing topological DAG order...",
+            theme.style(Token::Muted),
+        )]));
+        loading_p.render(body_area, buf);
+    } else {
+        match state.active_tab {
+            0 => {
+                // Tab 0: Dependency Graph & Sync Plan
+                if let (Some(plan), Some(graph)) = (plan_opt, state.graph.as_ref()) {
+                    if plan.insert_order.is_empty() {
+                        Paragraph::new(Line::from(Span::styled(
+                            "  No base tables discovered in analyzed catalog.",
+                            theme.style(Token::Muted),
+                        )))
+                        .render(body_area, buf);
+                    } else {
+                        let header_line = Line::from(vec![
+                            Span::styled(
+                                format!("{:<4} ", "#"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<16} ", "SCHEMA"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<24} ", "TABLE"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<10} ", "IN-DEGREE"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<32}", "FOREIGN KEY DEPENDENCIES (PARENTS)"),
+                                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                            ),
+                        ]);
+                        let mut lines = vec![header_line];
+                        for (idx, key) in plan.insert_order.iter().enumerate() {
+                            let is_selected = idx == state.selected_idx;
+                            let line_style = if is_selected {
+                                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                            } else {
+                                theme.style(Token::Text)
+                            };
+
+                            let node = graph.nodes.iter().find(|n| &n.key == key);
+                            let parents_str = node.map_or(String::new(), |n| {
+                                n.parents
+                                    .iter()
+                                    .map(|p| p.table.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            });
+                            let in_degree = node.map_or(0, |n| n.parents.len());
+
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{:<4} ", idx + 1), theme.style(Token::Muted)),
+                                Span::styled(
+                                    format!("{:<16} ", crate::sync::truncate_str(&key.schema, 16)),
+                                    line_style,
+                                ),
+                                Span::styled(
+                                    format!("{:<24} ", crate::sync::truncate_str(&key.table, 24)),
+                                    line_style,
+                                ),
+                                Span::styled(
+                                    format!("{:<10} ", in_degree),
+                                    if in_degree > 0 {
+                                        theme.style(Token::Focus)
+                                    } else {
+                                        theme.style(Token::Muted)
+                                    },
+                                ),
+                                Span::styled(
+                                    crate::sync::truncate_str(&parents_str, 32),
+                                    if in_degree > 0 {
+                                        line_style
+                                    } else {
+                                        theme.style(Token::Muted)
+                                    },
+                                ),
+                            ]));
+                        }
+                        Paragraph::new(lines).render(body_area, buf);
+                    }
+                }
+            }
+            1 => {
+                // Tab 1: Live Transfer Telemetry
+                if let Some(report) = &state.sync_report {
+                    let header_line = Line::from(vec![
+                        Span::styled(
+                            format!("{:<16} ", "SCHEMA"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<24} ", "TABLE"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", "STATUS"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>10} ", "ROWS"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>12} ", "BYTES"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:>10}", "TIME(MS)"),
+                            theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+                    let mut lines = vec![header_line];
+                    for (idx, p) in report.table_progress.iter().enumerate() {
+                        let is_selected = idx == state.selected_idx;
+                        let line_style = if is_selected {
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                        } else {
+                            theme.style(Token::Text)
+                        };
+                        let status_style = match p.status {
+                            crate::sync::SyncTableStatus::Completed => {
+                                theme.style(Token::Success).add_modifier(Modifier::BOLD)
+                            }
+                            crate::sync::SyncTableStatus::Streaming => {
+                                theme.style(Token::Warning).add_modifier(Modifier::BOLD)
+                            }
+                            crate::sync::SyncTableStatus::Failed => {
+                                theme.style(Token::Danger).add_modifier(Modifier::BOLD)
+                            }
+                            crate::sync::SyncTableStatus::Pending => theme.style(Token::Muted),
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{:<16} ", crate::sync::truncate_str(&p.key.schema, 16)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:<24} ", crate::sync::truncate_str(&p.key.table, 24)),
+                                line_style,
+                            ),
+                            Span::styled(format!("{:<12} ", p.status.label()), status_style),
+                            Span::styled(format!("{:>10} ", p.rows_copied), line_style),
+                            Span::styled(
+                                format!("{:>12} ", crate::sync::format_bytes(p.bytes_transferred)),
+                                line_style,
+                            ),
+                            Span::styled(
+                                format!("{:>10}", p.duration_ms),
+                                theme.style(Token::Muted),
+                            ),
+                        ]));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "  No sync pipeline execution has been triggered yet. Press [s] or pass to CLI.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Status Message Line
+    if let Some(msg) = &state.status_message {
+        Paragraph::new(Line::from(Span::styled(msg, theme.style(Token::Focus))))
+            .render(status_area, buf);
+    }
+
+    // Footer Hotkey Bar
+    let footer_spans = vec![
+        Span::styled(
+            "[1/2] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[↑/↓/j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Navigate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[d] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Toggle Dry-Run  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[t] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Toggle Truncate  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ];
+    Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

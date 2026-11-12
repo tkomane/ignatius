@@ -296,6 +296,10 @@ pub enum Command {
     /// Analyze sensitive PII columns, infer masking rules, and generate anonymized view DDL.
     #[command(name = "mask-rules")]
     MaskRules(MaskRulesArgs),
+
+    /// Execute cross-database copy and synchronization pipelines with topological DAG dependency ordering.
+    #[command(name = "sync")]
+    Sync(SyncArgs),
 }
 
 /// Arguments for the audit command.
@@ -893,6 +897,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::WalStats(args)) => run_wal_stats(args, &paths, out, err),
         Some(Command::PoolStats(args)) => run_pool_stats(args, &paths, out, err),
         Some(Command::MaskRules(args)) => run_mask_rules(args, &paths, out, err),
+        Some(Command::Sync(args)) => run_sync(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -4090,6 +4095,162 @@ fn run_mask_rules(
         std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
         writeln!(err, "Data masking report written to {}", dest.display())
             .map_err(io_diagnostic)?;
+    } else {
+        write!(out, "{rendered}").map_err(io_diagnostic)?;
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output format for cross-database synchronization telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CliSyncFormat {
+    /// Human-readable aligned tabular report.
+    Table,
+    /// Structured JSON telemetry payload.
+    Json,
+    /// Plain text tabular representation.
+    Plain,
+}
+
+/// Arguments for the cross-database copy and sync pipeline command.
+#[derive(Debug, Clone, Args)]
+pub struct SyncArgs {
+    /// Source connection target: a URI, a keyword string, @profile, or a database name.
+    #[arg(short = 's', long, value_name = "SOURCE_TARGET")]
+    pub source: Option<String>,
+    /// Target connection target: a URI, a keyword string, @profile, or a database name.
+    #[arg(short = 't', long, value_name = "TARGET_TARGET")]
+    pub target: Option<String>,
+    /// Optional positional connection target used as source if --source is omitted.
+    pub target_pos: Option<String>,
+    /// Filter synchronization to one schema.
+    #[arg(long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Specific tables to synchronize (can be repeated). If omitted, all base tables in the schema/database are synchronized.
+    #[arg(long = "table", value_name = "TABLE")]
+    pub tables: Vec<String>,
+    /// Truncate target tables in reverse topological order before streaming data.
+    #[arg(long)]
+    pub truncate: bool,
+    /// Use CASCADE when truncating tables.
+    #[arg(long)]
+    pub cascade: bool,
+    /// Run dry-run verification queries without writing or truncating.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value = "table")]
+    pub format: CliSyncFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn run_sync(
+    args: &SyncArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if args
+        .output
+        .as_ref()
+        .is_some_and(|destination| destination.exists())
+        && !args.force
+    {
+        let destination = args.output.as_ref().unwrap();
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "refusing to overwrite existing file {}",
+                destination.display()
+            ),
+            "executing sync command",
+        )
+        .likely_cause("the target output file already exists")
+        .next_action("pass --force to overwrite the file"));
+    }
+
+    if args.target.is_none() && !args.dry_run {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "a target database connection is required for data synchronization",
+            "executing sync command",
+        )
+        .likely_cause("neither --target nor --dry-run was provided")
+        .next_action("provide --target <URI> or pass --dry-run to verify without writing"));
+    }
+
+    let loaded = config::load(paths)?;
+    let src_str = args.source.as_deref().or(args.target_pos.as_deref());
+    let (src_requested, src_conn_args) =
+        resolve_target_and_profile(src_str, &args.connection, &loaded.config)?;
+    let src_target = crate::connection::resolve(
+        src_requested,
+        &src_conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let src_target = authenticate_target(src_target, &loaded.config)?;
+
+    let rt = runtime()?;
+    let src_session = rt.block_on(crate::postgres::session::connect(
+        &src_target,
+        std::time::Duration::from_secs(30),
+    ))?;
+
+    let report = if let Some(ref tgt_str) = args.target {
+        let (tgt_requested, tgt_conn_args) = resolve_target_and_profile(
+            Some(tgt_str.as_str()),
+            &ConnectionOptions::default(),
+            &loaded.config,
+        )?;
+        let tgt_target = crate::connection::resolve(
+            tgt_requested,
+            &tgt_conn_args,
+            &EnvSnapshot::from_process(),
+            &loaded.config.connection,
+        )?;
+        let tgt_target = authenticate_target(tgt_target, &loaded.config)?;
+        let tgt_session = rt.block_on(crate::postgres::session::connect(
+            &tgt_target,
+            std::time::Duration::from_secs(30),
+        ))?;
+        rt.block_on(src_session.execute_sync_pipeline(
+            &tgt_session,
+            args.schema.as_deref(),
+            &args.tables,
+            args.truncate,
+            args.cascade,
+            args.dry_run,
+        ))?
+    } else {
+        // Dry-run mode without target: verify source tables and topological ordering
+        rt.block_on(src_session.execute_sync_pipeline(
+            &src_session,
+            args.schema.as_deref(),
+            &args.tables,
+            false,
+            false,
+            true,
+        ))?
+    };
+
+    let rendered = match args.format {
+        CliSyncFormat::Table => report.render_table(),
+        CliSyncFormat::Json => report.render_json(),
+        CliSyncFormat::Plain => report.render_plain(),
+    };
+
+    if let Some(ref dest) = args.output {
+        std::fs::write(dest, &rendered).map_err(io_diagnostic)?;
+        writeln!(err, "Sync report written to {}", dest.display()).map_err(io_diagnostic)?;
     } else {
         write!(out, "{rendered}").map_err(io_diagnostic)?;
     }

@@ -123,6 +123,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("wal-observability", Action::WalObservability),
     ("connection-pool", Action::ConnectionPool),
     ("data-masking", Action::DataMasking),
+    ("data-sync", Action::DataSync),
 ];
 
 /// The action a configuration name means.
@@ -822,6 +823,11 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::DataMasking,
         "Open data masking and anonymization rules",
     ),
+    (
+        '|',
+        Action::DataSync,
+        "Open cross-database copy and sync pipelines",
+    ),
 ];
 
 /// Resolves the second key of a chord.
@@ -936,6 +942,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::WalObservability => "WAL stats",
         Action::ConnectionPool => "Connection pool",
         Action::DataMasking => "Data masking",
+        Action::DataSync => "Data sync",
     }
 }
 

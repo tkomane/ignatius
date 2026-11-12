@@ -8,6 +8,20 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `039-cross-database-copy-and-sync-pipelines` delivers the pure
+  `src/sync/` cross-database copy and synchronization engine with Kahn's topological
+  sorting over foreign key constraint dependency DAGs (`DependencyGraph`, `SyncPlan`,
+  `SyncReport`, `SyncTableProgress`); live PostgreSQL catalog extractor and streaming
+  binary COPY executor in `Session::discover_table_dependencies` and
+  `Session::execute_sync_pipeline` (streaming 64 KiB chunks directly between source
+  and target socket connections with bounded memory overhead); the scriptable
+  `ignatius sync` CLI subcommand (`--source`, `--target`, `--schema`, `--table`,
+  `--truncate`, `--cascade`, `--dry-run`, `--format table|json|plain`, `--output`, `--force`);
+  and the interactive `Ctrl+K |` (`data-sync`) TUI Cross-Database Sync Pipelines cockpit
+  featuring Dieter Rams hardware capsules (`[TABLES]`, `[TOPOLOGY]`, `[MODE]`, `[TRUNCATE]`,
+  `[PROTOCOL]`), tabbed views (`[1] Dependency Graph & Sync Plan`, `[2] Live Transfer Telemetry`),
+  in-place safety toggles (`[d]` dry-run, `[t]` truncate), and refresh (`[r]`).
+
 - New: Feature `038-data-masking-and-anonymization-rules` delivers the pure
   `src/mask/` data masking and PII anonymization engine; live PostgreSQL
   catalog analyzer in `Session::analyze_data_masking` (scanning table schemas,

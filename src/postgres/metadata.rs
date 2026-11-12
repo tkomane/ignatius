@@ -3183,5 +3183,75 @@ pub async fn analyze_data_masking(
     })
 }
 
+/// Discovers table dependencies (foreign keys) and constructs a topological graph.
+pub async fn discover_table_dependencies(
+    client: &Client,
+    schema: Option<&str>,
+) -> Result<crate::sync::DependencyGraph, Diagnostic> {
+    use crate::sync::{DependencyGraph, ForeignKeyEdge, TableKey};
+
+    let tables_sql = r#"
+        SELECT
+            ns.nspname::text AS schema_name,
+            c.relname::text AS table_name
+        FROM pg_class c
+        JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE c.relkind = 'r'
+          AND ($1::text IS NULL OR ns.nspname = $1)
+          AND ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+        ORDER BY ns.nspname, c.relname;
+    "#;
+    let table_rows = client
+        .query(tables_sql, &[&schema])
+        .await
+        .map_err(|e| from_query_error(&e, 0))?;
+
+    let mut tables = Vec::with_capacity(table_rows.len());
+    for row in table_rows {
+        let s: String = row.get("schema_name");
+        let t: String = row.get("table_name");
+        tables.push(TableKey::new(s, t));
+    }
+
+    let fks_sql = r#"
+        SELECT
+            con.conname::text AS constraint_name,
+            ns_src.nspname::text AS from_schema,
+            c_src.relname::text AS from_table,
+            ns_dst.nspname::text AS to_schema,
+            c_dst.relname::text AS to_table
+        FROM pg_constraint con
+        JOIN pg_class c_src ON c_src.oid = con.conrelid
+        JOIN pg_namespace ns_src ON ns_src.oid = c_src.relnamespace
+        JOIN pg_class c_dst ON c_dst.oid = con.confrelid
+        JOIN pg_namespace ns_dst ON ns_dst.oid = c_dst.relnamespace
+        WHERE con.contype = 'f'
+          AND ($1::text IS NULL OR ns_src.nspname = $1)
+          AND ns_src.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          AND ns_dst.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+        ORDER BY ns_src.nspname, c_src.relname, con.conname;
+    "#;
+    let fk_rows = client
+        .query(fks_sql, &[&schema])
+        .await
+        .map_err(|e| from_query_error(&e, 0))?;
+
+    let mut edges = Vec::with_capacity(fk_rows.len());
+    for row in fk_rows {
+        let constraint_name: String = row.get("constraint_name");
+        let from_schema: String = row.get("from_schema");
+        let from_table: String = row.get("from_table");
+        let to_schema: String = row.get("to_schema");
+        let to_table: String = row.get("to_table");
+        edges.push(ForeignKeyEdge {
+            from: TableKey::new(from_schema, from_table),
+            to: TableKey::new(to_schema, to_table),
+            constraint_name,
+        });
+    }
+
+    Ok(DependencyGraph::build(&tables, &edges))
+}
+
 #[cfg(test)]
 mod tests;

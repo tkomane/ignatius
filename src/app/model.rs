@@ -1677,6 +1677,101 @@ impl DataMaskingState {
     }
 }
 
+/// State for the Cross-Database Copy and Sync Pipelines overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataSyncState {
+    /// Dependency graph gathered from catalog.
+    pub graph: Option<crate::sync::DependencyGraph>,
+    /// Calculated sync plan (topological insertion order and truncation order).
+    pub plan: Option<crate::sync::SyncPlan>,
+    /// Active tab in the overlay (0: Dependency Graph & Sync Plan, 1: Live Transfer Telemetry).
+    pub active_tab: usize,
+    /// Selected item index in the active tab.
+    pub selected_idx: usize,
+    /// Target connection target or string.
+    pub target_endpoint: String,
+    /// Whether dry-run mode is enabled (default true for safety).
+    pub dry_run: bool,
+    /// Whether truncate target tables before insertion is requested.
+    pub truncate: bool,
+    /// Whether an asynchronous operation is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+    /// Live sync report or telemetry, if executed.
+    pub sync_report: Option<crate::sync::SyncReport>,
+}
+
+impl Default for DataSyncState {
+    fn default() -> Self {
+        Self {
+            graph: None,
+            plan: None,
+            active_tab: 0,
+            selected_idx: 0,
+            target_endpoint: String::new(),
+            dry_run: true,
+            truncate: false,
+            loading: true,
+            status_message: None,
+            sync_report: None,
+        }
+    }
+}
+
+impl DataSyncState {
+    /// Items count for the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => self.plan.as_ref().map_or(0, |p| p.insert_order.len()),
+            1 => self
+                .sync_report
+                .as_ref()
+                .map_or(0, |r| r.table_progress.len()),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection up or down within the current tab.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let current = self.selected_idx as isize;
+        let next = (current + delta).clamp(0, total.saturating_sub(1) as isize);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches the active tab and resets selected index.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab;
+        self.selected_idx = 0;
+    }
+
+    /// Toggles the dry-run safety flag.
+    pub fn toggle_dry_run(&mut self) {
+        self.dry_run = !self.dry_run;
+        self.status_message = Some(if self.dry_run {
+            "Dry-run mode ENABLED: verification queries only (no writes)".to_string()
+        } else {
+            "Dry-run mode DISABLED: live streaming writes enabled".to_string()
+        });
+    }
+
+    /// Toggles the truncate-before-insertion flag.
+    pub fn toggle_truncate(&mut self) {
+        self.truncate = !self.truncate;
+        self.status_message = Some(if self.truncate {
+            "Truncate target tables ENABLED (in reverse topological order)".to_string()
+        } else {
+            "Truncate target tables DISABLED".to_string()
+        });
+    }
+}
+
 /// What a typed name is for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NamePurpose {
@@ -2973,6 +3068,10 @@ pub struct Model {
     pub data_masking: Option<DataMaskingState>,
     /// Request counter for in-flight data masking analysis queries.
     pub data_masking_request: u64,
+    /// Interactive cross-database copy and sync pipelines overlay state.
+    pub data_sync: Option<DataSyncState>,
+    /// Request counter for in-flight cross-database sync queries.
+    pub data_sync_request: u64,
 }
 
 impl Model {

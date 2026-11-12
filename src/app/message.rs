@@ -141,6 +141,8 @@ pub enum Action {
     ConnectionPool,
     /// Open the data masking and anonymization rules overlay.
     DataMasking,
+    /// Open the cross-database copy and sync pipelines overlay.
+    DataSync,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -250,6 +252,7 @@ impl Action {
             Self::WalObservability,
             Self::ConnectionPool,
             Self::DataMasking,
+            Self::DataSync,
         ]
     }
 }
@@ -678,6 +681,13 @@ pub enum Message {
         /// Data masking report or error.
         result: Box<Result<crate::mask::MaskReport, Diagnostic>>,
     },
+    /// Cross-database table dependencies and topological graph loaded from catalog.
+    DataSyncLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Dependency graph or error.
+        result: Box<Result<crate::sync::DependencyGraph, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -994,6 +1004,13 @@ pub enum Effect {
         /// Identity used to reject a late response.
         request: u64,
         /// Optional schema name to analyze.
+        schema: Option<String>,
+    },
+    /// Load cross-database table dependencies and topological graph.
+    LoadDataSync {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional schema name to inspect.
         schema: Option<String>,
     },
 }
