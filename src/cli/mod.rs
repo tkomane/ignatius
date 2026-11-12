@@ -287,6 +287,10 @@ pub enum Command {
     /// Restore a database or schema from backup using pg_restore.
     Restore(RestoreArgs),
 
+    /// Prove an archive restores into a scratch database and matches the source.
+    #[command(name = "restore-drill")]
+    RestoreDrill(RestoreDrillArgs),
+
     /// Execute a stored procedure or function under a safe testing harness with rollback.
     #[command(name = "run-routine")]
     RunRoutine(RunRoutineArgs),
@@ -927,6 +931,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Export(args)) => run_export(args, &paths, &presentation, out, err),
         Some(Command::Backup(args)) => run_backup(args, &paths, &presentation, out, err),
         Some(Command::Restore(args)) => run_restore(args, &paths, &presentation, out, err),
+        Some(Command::RestoreDrill(args)) => run_restore_drill(args, &paths, out, err),
         Some(Command::RunRoutine(args)) => {
             run_routine_command(args, &paths, &presentation, out, err)
         }
@@ -2391,6 +2396,42 @@ pub struct RestoreArgs {
     pub connection: ConnectionOptions,
 }
 
+/// Arguments for `ignatius restore-drill` (`047-restore-drills`).
+#[derive(Debug, Args, Clone)]
+pub struct RestoreDrillArgs {
+    /// Connection target: the source database, as a URI, keyword string, @profile, or name.
+    pub target: Option<String>,
+    /// Archive to restore: a custom, directory or tar dump.
+    #[arg(short = 'b', long, value_name = "PATH")]
+    pub backup: PathBuf,
+    /// Override the generated scratch database name.
+    #[arg(long, value_name = "NAME")]
+    pub scratch_database: Option<String>,
+    /// Keep the scratch database after a passing drill.
+    #[arg(long)]
+    pub keep: bool,
+    /// Drop the scratch database even when the drill fails.
+    #[arg(long)]
+    pub drop_on_failure: bool,
+    /// Permit creating and dropping a scratch database on a production server.
+    #[arg(long)]
+    pub allow_production: bool,
+    /// Inspect the archive and print the exact steps without changing the server.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Report format: table or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliActivityFormat::Table)]
+    pub format: CliActivityFormat,
+    /// Write the report to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
 fn run_import(
     args: &ImportArgs,
     paths: &Paths,
@@ -2720,6 +2761,7 @@ fn run_restore(
         create: args.create,
         data_only: args.data_only,
         schema_only: args.schema_only,
+        exit_on_error: false,
         verbose: args.verbose,
     };
 
@@ -2767,6 +2809,331 @@ fn run_restore(
     )
     .map_err(io_diagnostic)?;
     Ok(ExitCode::Success)
+}
+
+/// Runs `pg_restore --list` and returns its bounded stdout.
+fn pg_restore_list(path: &std::path::Path) -> Result<String, Diagnostic> {
+    let output = std::process::Command::new("pg_restore")
+        .arg("--list")
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("could not execute pg_restore: {error}"),
+                "inspecting the backup archive",
+            )
+            .next_action(
+                "ensure PostgreSQL client utilities (pg_restore) are installed and on PATH",
+            )
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("text format dump") {
+            return Err(drill_usage(crate::drill::DrillError::PlainSql));
+        }
+        let reason = crate::drill::bounded(
+            &crate::diagnostics::redaction::redact_text(&stderr),
+            crate::drill::MAX_FAILURE_CHARS,
+        );
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            if reason.is_empty() {
+                "pg_restore could not read the archive table of contents".to_owned()
+            } else {
+                format!("pg_restore could not read the archive table of contents: {reason}")
+            },
+            "inspecting the backup archive",
+        )
+        .likely_cause(
+            "the file is not a pg_dump custom, directory or tar archive, or it is truncated",
+        )
+        .next_action("verify the archive with `pg_restore --list` and retry"));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn drill_usage(error: crate::drill::DrillError) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Usage,
+        error.to_string(),
+        "running the restore drill",
+    )
+    .likely_cause("the archive or the requested scratch database cannot be used")
+    .next_action("fix the input and retry; no server changes were made")
+}
+
+fn run_restore_drill(
+    args: &RestoreDrillArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let format = crate::drill::ArchiveFormat::detect(&args.backup).map_err(drill_usage)?;
+    let listing = pg_restore_list(&args.backup)?;
+    let summary = crate::drill::parse_toc(&listing).map_err(drill_usage)?;
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let target = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(target, &loaded.config)?;
+
+    if target.environment.is_production() && !args.allow_production {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "restore drills create and drop a database on the target server",
+            "running the restore drill",
+        )
+        .likely_cause("the connection target is classified as production")
+        .next_action("pass --allow-production when you intend to drill against this server"));
+    }
+
+    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let scratch = args
+        .scratch_database
+        .clone()
+        .unwrap_or_else(|| crate::drill::scratch_name(&target.database, &timestamp));
+    crate::drill::validate_scratch_name(&target.database, &scratch).map_err(drill_usage)?;
+
+    let request = crate::drill::DrillRequest {
+        source_database: target.database.clone(),
+        scratch_database: scratch.clone(),
+        archive_path: args.backup.display().to_string(),
+        format,
+        keep: args.keep,
+        drop_on_failure: args.drop_on_failure,
+    };
+
+    if args.dry_run {
+        writeln!(out, "Restore drill plan (no changes will be made)").map_err(io_diagnostic)?;
+        let _ = writeln!(
+            out,
+            "Archive: {} ({}, {})",
+            request.archive_path,
+            format.label(),
+            summary.summary()
+        );
+        for (index, step) in crate::drill::planned_steps(&request, &summary)
+            .iter()
+            .enumerate()
+        {
+            let _ = writeln!(out, "{}. {}: {}", index + 1, step.action, step.detail);
+        }
+        return Ok(ExitCode::Success);
+    }
+
+    let host_str = match &target.host {
+        crate::connection::Host::Tcp(host) => Some(host.clone()),
+        crate::connection::Host::Socket(socket) => Some(socket.display().to_string()),
+    };
+    let restore_options = crate::transfer::RestoreOptions {
+        database: scratch.clone(),
+        host: host_str,
+        port: Some(target.port),
+        user: Some(target.user.clone()),
+        input_path: args.backup.display().to_string(),
+        clean: false,
+        create: false,
+        data_only: false,
+        schema_only: false,
+        exit_on_error: true,
+        verbose: false,
+    };
+    use secrecy::ExposeSecret;
+    let password = target.password.as_ref().map(|value| value.expose_secret());
+    let (cmd, cmd_args, env) =
+        crate::transfer::build_pg_restore_command(&restore_options, password, false);
+
+    let started = std::time::Instant::now();
+    let runtime = runtime()?;
+    let timeout = std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds);
+    let source_relations = runtime.block_on(async {
+        let session = crate::postgres::session::connect_reported(&target, timeout)
+            .await
+            .value?;
+        if session.drill_database_exists(&scratch).await? {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("scratch database {scratch} already exists"),
+                "preparing the restore drill",
+            )
+            .likely_cause("a previous drill used the same name, or the name was chosen explicitly")
+            .next_action("pass --scratch-database with a new name or drop the existing database"));
+        }
+        if !session.drill_can_create_database().await? {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("role {} cannot create a database", target.user),
+                "preparing the restore drill",
+            )
+            .likely_cause("restore drills create and drop a scratch database on the source server")
+            .next_action("grant CREATEDB to this role or run the drill as a role that has it"));
+        }
+        let count = session.drill_user_relation_count().await?;
+        session.drill_create_database(&scratch).await?;
+        Ok(count)
+    })?;
+
+    let mut report = crate::drill::DrillReport {
+        source_database: target.database.clone(),
+        scratch_database: scratch.clone(),
+        archive: request.archive_path.clone(),
+        archive_format: format.label().to_owned(),
+        toc_entries: summary.entries,
+        outcome: crate::drill::DrillOutcome::Passed,
+        duration_ms: 0,
+        source_relations: Some(source_relations),
+        restored_relations: None,
+        restored_bytes: None,
+        scratch_kept: true,
+        failure: None,
+    };
+
+    let restore_failure = run_drill_restore(&cmd, &cmd_args, &env);
+    if let Some(reason) = restore_failure {
+        report.outcome = crate::drill::DrillOutcome::Failed;
+        report.failure = Some(reason);
+    } else {
+        let scratch_target = target.for_database(&scratch);
+        let verified = runtime.block_on(async {
+            let session = crate::postgres::session::connect_reported(&scratch_target, timeout)
+                .await
+                .value?;
+            let count = session.drill_user_relation_count().await?;
+            let bytes = session.drill_database_size().await?;
+            Ok::<(u64, u64), Diagnostic>((count, bytes))
+        });
+        match verified {
+            Ok((restored, bytes)) => {
+                report.restored_relations = Some(restored);
+                report.restored_bytes = Some(bytes);
+                if restored != source_relations {
+                    report.outcome = crate::drill::DrillOutcome::Failed;
+                    report.failure = Some(format!(
+                        "relation count mismatch: {source_relations} in the source, {restored} restored"
+                    ));
+                }
+            }
+            Err(error) => {
+                report.outcome = crate::drill::DrillOutcome::Failed;
+                report.failure = Some(crate::drill::bounded(
+                    &error.to_string(),
+                    crate::drill::MAX_FAILURE_CHARS,
+                ));
+            }
+        }
+    }
+
+    if crate::drill::should_drop(report.outcome, args.keep, args.drop_on_failure) {
+        let drop_result = runtime.block_on(async {
+            let session = crate::postgres::session::connect_reported(&target, timeout)
+                .await
+                .value?;
+            session.drill_drop_database(&scratch).await
+        });
+        match drop_result {
+            Ok(()) => report.scratch_kept = false,
+            Err(error) => {
+                report.outcome = crate::drill::DrillOutcome::Failed;
+                report.scratch_kept = true;
+                let reason = crate::drill::bounded(
+                    &format!("{error}; the scratch database was left in place"),
+                    crate::drill::MAX_FAILURE_CHARS,
+                );
+                report.failure = Some(match report.failure.take() {
+                    Some(existing) => format!("{existing}; {reason}"),
+                    None => reason,
+                });
+            }
+        }
+    } else {
+        report.scratch_kept = true;
+    }
+    report.duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+    let rendered = match args.format {
+        CliActivityFormat::Json => report.render_json(),
+        CliActivityFormat::Table => report.render_table(),
+    };
+    if let Some(destination) = &args.output {
+        let mut export = crate::query::export::Export::create(destination, args.force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+    } else {
+        out.write_all(rendered.as_bytes()).map_err(io_diagnostic)?;
+    }
+
+    let _ = writeln!(
+        err,
+        "Restore drill {} in {} ms; {} source and {} restored relation(s); scratch database {}.",
+        report.outcome.label().to_ascii_lowercase(),
+        report.duration_ms,
+        report
+            .source_relations
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "?".to_owned()),
+        report
+            .restored_relations
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "?".to_owned()),
+        if report.scratch_kept {
+            "kept"
+        } else {
+            "dropped"
+        }
+    );
+    Ok(if report.passed() {
+        ExitCode::Success
+    } else {
+        ExitCode::Findings
+    })
+}
+
+/// Runs `pg_restore` with bounded, redacted diagnostics.
+fn run_drill_restore(cmd: &str, cmd_args: &[String], env: &[(String, String)]) -> Option<String> {
+    let mut process = std::process::Command::new(cmd);
+    process.args(cmd_args).stdin(std::process::Stdio::null());
+    for (key, value) in env {
+        process.env(key, value);
+    }
+    let output = match process.output() {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(crate::drill::bounded(
+                &format!("could not execute {cmd}: {error}"),
+                crate::drill::MAX_FAILURE_CHARS,
+            ));
+        }
+    };
+    if output.status.success() {
+        return None;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = if stderr.trim().is_empty() {
+        stdout.as_ref()
+    } else {
+        stderr.as_ref()
+    };
+    let redacted = crate::diagnostics::redaction::redact_text(detail);
+    Some(crate::drill::bounded(
+        &format!(
+            "pg_restore exited with code {:?}: {}",
+            output.status.code(),
+            redacted
+        ),
+        crate::drill::MAX_FAILURE_CHARS,
+    ))
 }
 
 /// Reads SQL from the chosen source, refusing to hang on a terminal.

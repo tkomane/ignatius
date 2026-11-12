@@ -154,6 +154,7 @@ fn pg_dump_and_restore_command_builders_generate_redacted_env_and_flags() {
         create: false,
         data_only: false,
         schema_only: false,
+        exit_on_error: true,
         verbose: false,
     };
 
@@ -163,6 +164,7 @@ fn pg_dump_and_restore_command_builders_generate_redacted_env_and_flags() {
     assert!(restore_args.contains(&"-d".to_owned()));
     assert!(restore_args.contains(&"staging_db".to_owned()));
     assert!(restore_args.contains(&"--clean".to_owned()));
+    assert!(restore_args.contains(&"--exit-on-error".to_owned()));
     assert_eq!(
         restore_env,
         vec![("PGPASSWORD".to_owned(), "secretpass".to_owned())]

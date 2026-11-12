@@ -39,6 +39,7 @@ const INFORMATION_ARCHITECTURE: &str = include_str!("../docs/design/information-
 const PGADMIN_PARITY_PLAN: &str = include_str!("../docs/architecture/pgadmin-parity-plan.md");
 const GROWTH_AUDIT: &str = include_str!("../docs/design/growth-audit.md");
 const PARTITION_LIFECYCLE: &str = include_str!("../docs/design/partition-lifecycle.md");
+const RESTORE_DRILLS: &str = include_str!("../docs/design/restore-drills.md");
 const AGENT_DELIVERY_PLAN: &str = include_str!("../docs/product/agent-delivery-plan.md");
 const VISION: &str = include_str!("../docs/product/vision.md");
 const STATUS: &str = include_str!("../docs/status.md");
@@ -1255,5 +1256,39 @@ fn every_partition_period_is_documented_and_the_command_is_advertised() {
     assert!(
         README.contains("ignatius partition"),
         "the README must show the partition lifecycle command"
+    );
+}
+
+#[test]
+fn restore_drills_document_formats_flags_and_exit_codes() {
+    for format in ignatius::drill::ArchiveFormat::ALL {
+        assert!(
+            RESTORE_DRILLS.contains(&format!("| `{}` |", format.label())),
+            "archive format `{}` is missing from docs/design/restore-drills.md",
+            format.label()
+        );
+    }
+    for flag in [
+        "--backup",
+        "--scratch-database",
+        "--keep",
+        "--drop-on-failure",
+        "--allow-production",
+        "--dry-run",
+    ] {
+        assert!(
+            RESTORE_DRILLS.contains(flag),
+            "restore drill flag `{flag}` is missing from docs/design/restore-drills.md"
+        );
+    }
+    for code in ["| 0 |", "| 1 |", "| 2 |"] {
+        assert!(
+            RESTORE_DRILLS.contains(code),
+            "restore drill exit code row `{code}` is missing from docs/design/restore-drills.md"
+        );
+    }
+    assert!(
+        README.contains("ignatius restore-drill"),
+        "the README must show the restore drill command"
     );
 }

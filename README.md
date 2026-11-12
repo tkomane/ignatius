@@ -156,6 +156,15 @@ Keep range partitions ahead of the calendar without hand-copying DDL:
 - **No Hidden Writes**: the command never executes DDL. Apply the reviewed file through the migration runner so one ledger records the change.
 - **Bounded Reads**: at most 500 partitioned tables and 5000 partitions are read; unsupported keys and unparsable bounds are refused rather than guessed.
 
+### Restore Drills (`ignatius restore-drill`)
+
+A backup is only a recovery plan once it has been restored:
+- **Inspect First**: `pg_restore --list` reads the table of contents before any database is created; plain SQL dumps and unreadable archives are refused.
+- **Scratch Isolation**: the archive loads into a newly created `<source>_ignatius_drill_<UTC>` database from `TEMPLATE template0`, never into the source.
+- **Compared Evidence**: user relation counts in the source and the restored database must match; a mismatch fails the drill, and the restored size and duration are reported.
+- **Deliberate Retention**: a passing drill drops its scratch database unless `--keep`; a failed drill keeps it for inspection unless `--drop-on-failure`.
+- **Production Guard**: `--allow-production` is required before creating and dropping a database on a production server; `--dry-run` shows every step, with credentials redacted, and changes nothing.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -529,6 +538,11 @@ ignatius growth "$DATABASE_URL" --schema orders --format json --fail-on critical
 # Inspect partitions and generate reviewed range-partition DDL
 ignatius partition status "$DATABASE_URL" --schema billing
 ignatius partition plan "$DATABASE_URL" --table billing.invoices --period monthly --start 2026-12-01 --count 3
+
+# Prove a backup restores into a scratch database, then remove it
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump --keep --scratch-database orders_drill
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump --dry-run
 
 # Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
 ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd

@@ -365,6 +365,18 @@ impl ConnectionTarget {
         self.copy_with(Some(password))
     }
 
+    /// The same server and credentials, pointing at another database.
+    ///
+    /// Used by restore drills, which create and restore into a scratch database
+    /// on the same server. The caller is responsible for the scratch name; this
+    /// method only changes the database field.
+    #[must_use]
+    pub fn for_database(&self, database: &str) -> Self {
+        let mut copy = self.copy_with(self.password.clone_secret());
+        copy.database = database.to_owned();
+        copy
+    }
+
     /// The same target, for the connection the object tree reads on.
     ///
     /// The same server, the same credentials, the same protection. Two things

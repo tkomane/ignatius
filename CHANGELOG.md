@@ -8,6 +8,16 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `047-restore-drills` advances Milestone 11 with
+  `ignatius restore-drill`. It reads an archive table of contents with
+  `pg_restore --list`, restores into a newly created scratch database from
+  `TEMPLATE template0`, compares user relation counts with the source, and
+  reports the outcome, duration and restored size. A passing drill drops the
+  scratch database unless `--keep`; a failed drill keeps it for inspection
+  unless `--drop-on-failure`. The command never restores into the source,
+  requires `--allow-production` on a production target, and `--dry-run` shows
+  every step with credentials redacted.
+
 - New: Feature `048-partition-lifecycle` advances Milestone 11 with
   `ignatius partition status` and `ignatius partition plan`. Status reports
   range, list and hash parents with keys, child bounds, sizes and row estimates,
