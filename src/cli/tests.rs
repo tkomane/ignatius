@@ -1061,3 +1061,248 @@ fn unavailable_description_json_keeps_completed_prefix_and_single_notice_failure
         );
     }
 }
+
+#[test]
+fn replication_and_cluster_commands_parse_flags() {
+    Cli::command().debug_assert();
+
+    let rep = Cli::try_parse_from([
+        "ignatius",
+        "replication",
+        "postgres://localhost/db",
+        "--section",
+        "slots",
+        "--format",
+        "json",
+        "-o",
+        "rep.json",
+        "--force",
+    ])
+    .expect("parse replication");
+    let Some(Command::Replication(rep_args)) = rep.command else {
+        panic!("expected replication command");
+    };
+    assert_eq!(rep_args.target.as_deref(), Some("postgres://localhost/db"));
+    assert_eq!(rep_args.section, CliReplicationSection::Slots);
+    assert_eq!(rep_args.format, CliTelemetryFormat::Json);
+    assert_eq!(
+        rep_args.output.as_deref(),
+        Some(std::path::Path::new("rep.json"))
+    );
+    assert!(rep_args.force);
+
+    let cl = Cli::try_parse_from([
+        "ignatius",
+        "cluster",
+        "--section",
+        "settings",
+        "--modified-only",
+        "--filter",
+        "work_mem",
+        "--format",
+        "plain",
+    ])
+    .expect("parse cluster");
+    let Some(Command::Cluster(cl_args)) = cl.command else {
+        panic!("expected cluster command");
+    };
+    assert_eq!(cl_args.section, CliClusterSection::Settings);
+    assert!(cl_args.modified_only);
+    assert_eq!(cl_args.filter.as_deref(), Some("work_mem"));
+    assert_eq!(cl_args.format, CliTelemetryFormat::Plain);
+}
+
+#[test]
+fn query_command_handles_headless_metacommands_and_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted_at(dir.path());
+
+    // 1. \? outputs built-in help in table and json formats without requiring a DB.
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = query_command(
+        QueryRequest {
+            target: None,
+            command: Some("\\?"),
+            file: None,
+            options: output::OutputOptions {
+                format: Format::Json,
+                ..output::OutputOptions::default()
+            },
+            max_rows: None,
+            output: None,
+            force: false,
+            allow_write: false,
+            parameter_env: &[],
+            connection: &ConnectionOptions::default(),
+        },
+        &paths,
+        &mut out,
+        &mut err,
+    )
+    .expect("\\? json succeeds");
+    assert_eq!(code, ExitCode::Success);
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(!json[0]["rows"].as_array().unwrap().is_empty());
+
+    // 2. \? also supports --output streaming export and --force protection.
+    let export_path = dir.path().join("help.csv");
+    std::fs::write(&export_path, "existing").unwrap();
+    let refused = query_command(
+        QueryRequest {
+            target: None,
+            command: Some("\\?"),
+            file: None,
+            options: output::OutputOptions {
+                format: Format::Csv,
+                ..output::OutputOptions::default()
+            },
+            max_rows: None,
+            output: Some(&export_path),
+            force: false,
+            allow_write: false,
+            parameter_env: &[],
+            connection: &ConnectionOptions::default(),
+        },
+        &paths,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .expect_err("existing export path without --force must refuse");
+    assert_eq!(refused.kind, DiagnosticKind::Usage);
+
+    let code = query_command(
+        QueryRequest {
+            target: None,
+            command: Some("\\?"),
+            file: None,
+            options: output::OutputOptions {
+                format: Format::Csv,
+                ..output::OutputOptions::default()
+            },
+            max_rows: None,
+            output: Some(&export_path),
+            force: true,
+            allow_write: false,
+            parameter_env: &[],
+            connection: &ConnectionOptions::default(),
+        },
+        &paths,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .expect("\\? csv export with --force succeeds");
+    assert_eq!(code, ExitCode::Success);
+    let csv = std::fs::read_to_string(&export_path).unwrap();
+    assert!(csv.contains("\\watch"));
+
+    // 3. Interactive-only metacommands (\x, \timing, \watch) and \! refuse with Usage.
+    for cmd in [
+        "\\x",
+        "\\timing on",
+        "SELECT 1; \\watch 2",
+        "\\watch stop",
+        "\\! id",
+    ] {
+        let diag = query_command(
+            QueryRequest {
+                target: None,
+                command: Some(cmd),
+                file: None,
+                options: output::OutputOptions::default(),
+                max_rows: None,
+                output: None,
+                force: false,
+                allow_write: false,
+                parameter_env: &[],
+                connection: &ConnectionOptions::default(),
+            },
+            &paths,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect_err("interactive or shell metacommand must refuse headlessly");
+        assert_eq!(diag.kind, DiagnosticKind::Usage);
+        assert_eq!(diag.exit_code(), ExitCode::Usage);
+    }
+}
+
+#[test]
+fn filter_replication_and_cluster_reports_respect_sections_and_filters() {
+    let mut rep = crate::replication::ReplicationReport::default();
+    rep.publications
+        .push(crate::replication::PublicationSummary {
+            name: "pub_orders".into(),
+            owner: "postgres".into(),
+            all_tables: true,
+            ..Default::default()
+        });
+    rep.subscriptions
+        .push(crate::replication::SubscriptionSummary {
+            name: "sub_orders".into(),
+            owner: "postgres".into(),
+            enabled: true,
+            conninfo_redacted: "host=db password=[redacted]".into(),
+            ..Default::default()
+        });
+    rep.slots.push(crate::replication::ReplicationSlotSummary {
+        slot_name: "slot_a".into(),
+        slot_type: "logical".into(),
+        active: false,
+        wal_status: "reserved".into(),
+        retained_bytes: Some(crate::replication::INACTIVE_SLOT_CRITICAL_BYTES + 1),
+        ..Default::default()
+    });
+
+    let slots_only = filter_replication_report(&rep, crate::replication::ReplicationSection::Slots);
+    assert!(slots_only.publications.is_empty());
+    assert!(slots_only.subscriptions.is_empty());
+    assert_eq!(slots_only.slots.len(), 1);
+    let json =
+        filter_replication_report(&rep, crate::replication::ReplicationSection::Subscriptions)
+            .render_json();
+    assert!(json.contains("password=[redacted]"));
+
+    let mut cluster = crate::cluster::ClusterReport::empty();
+    cluster.settings.push(crate::cluster::SettingEntry {
+        name: "work_mem".into(),
+        setting: "64MB".into(),
+        unit: None,
+        category: "Resource Usage / Memory".into(),
+        context: "user".into(),
+        source: "configuration file".into(),
+        boot_val: Some("4MB".into()),
+        reset_val: Some("64MB".into()),
+        pending_restart: false,
+        is_non_default: true,
+    });
+    cluster.settings.push(crate::cluster::SettingEntry {
+        name: "shared_buffers".into(),
+        setting: "128MB".into(),
+        unit: None,
+        category: "Resource Usage / Memory".into(),
+        context: "postmaster".into(),
+        source: "default".into(),
+        boot_val: Some("128MB".into()),
+        reset_val: Some("128MB".into()),
+        pending_restart: false,
+        is_non_default: false,
+    });
+    cluster.extensions.push(crate::cluster::AvailableExtension {
+        name: "pg_stat_statements".into(),
+        default_version: Some("1.10".into()),
+        installed_version: None,
+        comment: None,
+        upgrade_available: false,
+    });
+
+    let filtered = filter_cluster_report(
+        &cluster,
+        crate::cluster::ClusterSection::Settings,
+        true,
+        Some("work"),
+    );
+    assert_eq!(filtered.settings.len(), 1);
+    assert_eq!(filtered.settings[0].name, "work_mem");
+    assert!(filtered.extensions.is_empty());
+}

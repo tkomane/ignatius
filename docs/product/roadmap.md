@@ -156,6 +156,24 @@ implemented and carry focused and full verification in `docs/status.md` Wave 37.
   read-only, catalog-statistics audit for sequence exhaustion, vacuum debt and
   partitioning candidates, bounded to 200 relations and 200 sequences.
 
+M12 is delivered in source as of 2026-11-18: Features 050, 051 and 052 are
+implemented and recorded in `docs/status.md` Wave 39.
+
+- **`050-psql-metacommands-and-watch-mode`** [Implemented]: Interactive TUI and
+  headless `-c` backslash meta-commands (`\d`, `\d+`, `\dt`, `\dt+`, `\dv`,
+  `\dm`, `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`,
+  `\conninfo`, `\x`, `\timing`, `\?`/`\h`) plus a bounded `[1..3600]s` / 1000
+  iteration `\watch` polling loop (`Ctrl+K :` / `stop-watch`) with explicit
+  `\!` shell-escape refusal.
+- **`051-logical-replication-and-slot-manager`** [Implemented]: Bounded
+  inspection of `pg_publication`, `pg_subscription` (redacted `conninfo`), and
+  `pg_replication_slots` WAL retention risks via `ignatius replication` and
+  `Ctrl+K #` (`logical-replication`) with reviewed SQL insertion.
+- **`052-server-config-hba-and-infra-catalog`** [Implemented]: Bounded
+  inspection of `pg_settings`, `pg_hba_file_rules` risk classification,
+  `pg_available_extensions`, `pg_tablespace`, and FDW/foreign servers (masked
+  options) via `ignatius cluster` and `Ctrl+K @` (`cluster-config`).
+
 No new feature is implied by milestone completion; the next source slice opens
 from an observed job under W16.
 

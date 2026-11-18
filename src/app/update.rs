@@ -188,6 +188,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.pending_update = None;
             model.running_refresh = false;
             model.refresh_pending = false;
+            model.watch = None;
             model.cell_update_notice = cell_update_in_flight
                 .then(|| "The connection was lost; no cell update was retried.".to_owned());
             if refresh_in_flight && !cell_update_in_flight {
@@ -240,6 +241,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.focus = Focus::Editor;
             }
             model.notices.clear();
+            if execution.status != ExecutionStatus::Succeeded {
+                model.watch = None;
+            }
             if execution.status == ExecutionStatus::ConnectionLost
                 && let Some(info) = model.connection.info()
             {
@@ -1120,6 +1124,47 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::LogicalReplicationLoaded { request, result } => {
+            if model.logical_replication_request != request {
+                return Vec::new();
+            }
+            if let Some(rep) = &mut model.logical_replication {
+                rep.loading = false;
+                match *result {
+                    Ok(report) => {
+                        rep.report = Some(report);
+                        rep.status_message = None;
+                    }
+                    Err(diag) => {
+                        rep.status_message = Some(format!(
+                            "Replication catalog fetch failed: {}",
+                            diag.headline
+                        ));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::ClusterConfigLoaded { request, result } => {
+            if model.cluster_config_request != request {
+                return Vec::new();
+            }
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.loading = false;
+                match *result {
+                    Ok(report) => {
+                        cfg.report = Some(report);
+                        cfg.status_message = None;
+                    }
+                    Err(diag) => {
+                        cfg.status_message =
+                            Some(format!("Cluster config fetch failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::WatchTick => watch_tick(model),
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1524,6 +1569,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.lint_findings.is_some() {
         return lint_findings_action(model, action);
     }
+    if model.logical_replication.is_some() {
+        return logical_replication_action(model, action);
+    }
+    if model.cluster_config.is_some() {
+        return cluster_config_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1554,6 +1605,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 model.help_open = false;
             } else if !model.tree.filter.is_empty() {
                 model.tree.filter.clear();
+            } else if model.error.is_some() {
+                model.error = None;
+                model.error_expanded = false;
+                clear_error_location(model);
+            } else if model.watch.is_some() {
+                model.watch = None;
             } else {
                 model.error = None;
                 model.error_expanded = false;
@@ -1733,6 +1790,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::RestoreSession => restore_session_action(model),
         Action::DiscardRecovery => discard_recovery_action(model),
         Action::LintBuffer => lint_buffer_open(model),
+        Action::LogicalReplication => logical_replication_open(model),
+        Action::ClusterConfig => cluster_config_open(model),
+        Action::StopWatch => {
+            model.watch = None;
+            Vec::new()
+        }
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -1936,6 +1999,7 @@ fn automatic_completion_should_open(result: &crate::query::completion::Completio
 
 /// The existing cancellation transition, also used by read-only notice recovery.
 fn cancel_query(model: &mut Model) -> Vec<Effect> {
+    model.watch = None;
     match model.phase {
         QueryPhase::Running { job, .. } => {
             model.phase = QueryPhase::CancellationRequested { job };
@@ -3451,6 +3515,235 @@ fn connection_pool_open(model: &mut Model) -> Vec<Effect> {
     model.connection_pool = Some(state);
 
     vec![Effect::LoadConnectionPool { request }]
+}
+
+/// Opens the logical replication, publications, subscriptions, and slots overlay.
+fn logical_replication_open(model: &mut Model) -> Vec<Effect> {
+    if model.logical_replication.is_some() {
+        model.logical_replication = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::LogicalReplicationState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.logical_replication_request = model.logical_replication_request.wrapping_add(1);
+    let request = model.logical_replication_request;
+    model.logical_replication = Some(state);
+
+    vec![Effect::LoadLogicalReplication { request }]
+}
+
+/// Handles input while the logical replication and slots overlay is on screen.
+fn logical_replication_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::LogicalReplication => {
+            model.logical_replication = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(1);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(-8);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(8);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.set_tab(2);
+            }
+        }
+        Action::Activate | Action::Insert('\n' | 'g' | 'G') => {
+            if let Some((_label, sql)) = model
+                .logical_replication
+                .as_ref()
+                .and_then(crate::app::model::LogicalReplicationState::selected_reviewed_sql)
+            {
+                load_reviewed_sql_into_editor(model, &sql);
+                model.logical_replication = None;
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.loading = true;
+            }
+            model.logical_replication_request = model.logical_replication_request.wrapping_add(1);
+            let request = model.logical_replication_request;
+            return vec![Effect::LoadLogicalReplication { request }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the server settings, HBA rules, extensions, tablespaces, and FDW overlay.
+fn cluster_config_open(model: &mut Model) -> Vec<Effect> {
+    if model.cluster_config.is_some() {
+        model.cluster_config = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::ClusterConfigState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.cluster_config_request = model.cluster_config_request.wrapping_add(1);
+    let request = model.cluster_config_request;
+    model.cluster_config = Some(state);
+
+    vec![Effect::LoadClusterConfig { request }]
+}
+
+/// Handles input while the cluster configuration overlay is on screen.
+fn cluster_config_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ClusterConfig => {
+            model.cluster_config = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(1);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(-8);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(8);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(2);
+            }
+        }
+        Action::Insert('4') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(3);
+            }
+        }
+        Action::Insert('5') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(4);
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.modified_only = !cfg.modified_only;
+                cfg.selected_idx = 0;
+            }
+        }
+        Action::Activate | Action::Insert('\n' | 'g' | 'G') => {
+            if let Some((_label, sql)) = model
+                .cluster_config
+                .as_ref()
+                .and_then(crate::app::model::ClusterConfigState::selected_reviewed_sql)
+            {
+                load_reviewed_sql_into_editor(model, &sql);
+                model.cluster_config = None;
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.loading = true;
+            }
+            model.cluster_config_request = model.cluster_config_request.wrapping_add(1);
+            let request = model.cluster_config_request;
+            return vec![Effect::LoadClusterConfig { request }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Inserts a reviewed SQL template into the active editor buffer without executing it.
+fn load_reviewed_sql_into_editor(model: &mut Model, sql: &str) {
+    edit_editor(model, |editor| {
+        if editor.text().trim().is_empty() {
+            editor.set_text(sql.to_owned());
+        } else {
+            editor.insert_paste(&format!("\n\n{sql}"));
+        }
+    });
+    model.focus = Focus::Editor;
+}
+
+/// Drives one periodic `\watch` execution when idle and connected.
+fn watch_tick(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_usable() {
+        model.watch = None;
+        return Vec::new();
+    }
+    if model.phase.is_busy() {
+        return Vec::new();
+    }
+    let Some(mut watch) = model.watch.take() else {
+        return Vec::new();
+    };
+    if watch.iteration >= crate::metacommand::MAX_WATCH_ITERATIONS {
+        return Vec::new();
+    }
+    watch.iteration += 1;
+    let sql = watch.sql.clone();
+    model.watch = Some(watch);
+    start(model, sql, None)
 }
 
 /// Handles input while the connection pool and PgBouncer telemetry overlay is on screen.
@@ -5543,9 +5836,160 @@ fn is_explain_statement(sql: &str) -> bool {
         .is_some_and(|word| word.eq_ignore_ascii_case("explain"))
 }
 
-/// Starts an execution, refusing when there is nothing to run or nowhere to run
-/// it, and holding it back when the target is production and it is not a read.
+/// Starts an execution, interpreting `psql`-style meta-commands first, refusing when
+/// there is nothing to run or nowhere to run it, and holding it back when the target is
+/// production and it is not a read.
 fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
+    if model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
+    if crate::metacommand::contains_metacommand(&sql) {
+        match crate::metacommand::parse_input(&sql) {
+            Some(Ok(cmd)) => return run_metacommand(model, cmd, source),
+            None => {}
+            Some(Err(diag)) => {
+                model.error = Some(diag);
+                clear_error_location(model);
+                return Vec::new();
+            }
+        }
+    }
+    run_sql_statement(model, sql, source)
+}
+
+/// Applies or dispatches a parsed `psql`-style meta-command.
+fn run_metacommand(
+    model: &mut Model,
+    command: crate::metacommand::MetaCommand,
+    source: Option<StatementSource>,
+) -> Vec<Effect> {
+    match command {
+        crate::metacommand::MetaCommand::ToggleExpanded(explicit) => {
+            model.expanded_row = explicit.unwrap_or(!model.expanded_row);
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::ToggleTiming(explicit) => {
+            model.timing_display = match explicit {
+                Some(true) => crate::app::model::TimingDisplay::Always,
+                Some(false) => crate::app::model::TimingDisplay::Off,
+                None => match model.timing_display {
+                    crate::app::model::TimingDisplay::Always => {
+                        crate::app::model::TimingDisplay::Off
+                    }
+                    crate::app::model::TimingDisplay::Threshold200ms
+                    | crate::app::model::TimingDisplay::Off => {
+                        crate::app::model::TimingDisplay::Always
+                    }
+                },
+            };
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::StopWatch => {
+            model.watch = None;
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::Help => {
+            let set = crate::metacommand::help_result();
+            let columns = set.columns.clone();
+            model.error = None;
+            model.error_expanded = false;
+            clear_error_location(model);
+            model.plan.clear();
+            model.selected_row = 0;
+            model.selected_column = 0;
+            model.result_filter.clear();
+            model.result_filtering = false;
+            model.inspector = None;
+            model.last_sql = None;
+            model.last_execution = Some(crate::query::result::Execution {
+                job: model.allocate_job(),
+                statements: vec![crate::query::result::StatementResult {
+                    result_set: Some(set),
+                    rows_affected: None,
+                    elapsed: std::time::Duration::ZERO,
+                    notices: Vec::new(),
+                }],
+                status: ExecutionStatus::Succeeded,
+                elapsed: std::time::Duration::ZERO,
+                error: None,
+                transaction: model.transaction,
+                notice_report: crate::query::result::NoticeReport::default(),
+            });
+            model.result_grid.reset_for_result(&columns);
+            model.focus = Focus::Results;
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::CatalogQuery { sql, .. } => {
+            run_sql_statement(model, sql, source)
+        }
+        crate::metacommand::MetaCommand::StartWatch {
+            interval_secs,
+            companion_sql,
+        } => {
+            if !model.connection.is_usable() {
+                return Vec::new();
+            }
+            let Some(mut target_sql) = companion_sql.or_else(|| model.last_sql.clone()) else {
+                model.error = Some(
+                    crate::diagnostics::Diagnostic::new(
+                        crate::diagnostics::DiagnosticKind::Usage,
+                        "No query available to watch",
+                        "starting \\watch",
+                    )
+                    .next_action("Run a query first or write `SELECT ...; \\watch 2`."),
+                );
+                clear_error_location(model);
+                return Vec::new();
+            };
+            if crate::metacommand::contains_metacommand(&target_sql) {
+                match crate::metacommand::parse_input(&target_sql) {
+                    Some(Ok(crate::metacommand::MetaCommand::CatalogQuery { sql, .. })) => {
+                        target_sql = sql;
+                    }
+                    Some(Ok(_)) => {
+                        model.error = Some(
+                            crate::diagnostics::Diagnostic::new(
+                                crate::diagnostics::DiagnosticKind::Usage,
+                                "Cannot watch a local client toggle or help command",
+                                "starting \\watch",
+                            )
+                            .next_action(
+                                "Provide a SQL query or catalog meta-command such as `\\dt`.",
+                            ),
+                        );
+                        clear_error_location(model);
+                        return Vec::new();
+                    }
+                    None => {}
+                    Some(Err(diag)) => {
+                        model.error = Some(diag);
+                        clear_error_location(model);
+                        return Vec::new();
+                    }
+                }
+            }
+            let effects = run_sql_statement(model, target_sql.clone(), source);
+            if model.pending_run.is_none()
+                && model.parameter_prompt.is_none()
+                && model.error.is_none()
+                && !effects.is_empty()
+            {
+                model.watch = Some(crate::app::model::WatchState {
+                    sql: target_sql,
+                    interval_secs,
+                    iteration: 1,
+                });
+            }
+            effects
+        }
+    }
+}
+
+fn run_sql_statement(
+    model: &mut Model,
+    sql: String,
+    source: Option<StatementSource>,
+) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
     }

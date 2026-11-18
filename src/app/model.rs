@@ -1939,6 +1939,258 @@ impl SessionRecoveryBanner {
     }
 }
 
+/// Controls how statement execution timing is displayed in the status chrome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimingDisplay {
+    /// Quiet-chrome default: show elapsed duration once a query reaches 200ms.
+    #[default]
+    Threshold200ms,
+    /// Always show completed query elapsed duration (`\timing on`).
+    Always,
+    /// Suppress idle completed elapsed duration (`\timing off`).
+    Off,
+}
+
+/// State for an active bounded `\watch` periodic execution loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchState {
+    /// SQL query executed at each interval tick.
+    pub sql: String,
+    /// Interval in seconds between ticks (`1..=3600`).
+    pub interval_secs: u64,
+    /// 1-based execution count for the active watch session.
+    pub iteration: u64,
+}
+
+/// State for the Logical Replication & Slots Manager overlay (`051`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalReplicationState {
+    /// Loaded replication snapshot from PostgreSQL catalog.
+    pub report: Option<crate::replication::ReplicationReport>,
+    /// Active tab (0: Slots, 1: Publications, 2: Subscriptions).
+    pub active_tab: usize,
+    /// Selected index within the active tab.
+    pub selected_idx: usize,
+    /// Whether an asynchronous catalog fetch is currently in flight.
+    pub loading: bool,
+    /// Status or feedback message shown in overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for LogicalReplicationState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl LogicalReplicationState {
+    /// Number of items visible in the current tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        match self.active_tab {
+            0 => report.slots.len(),
+            1 => report.publications.len(),
+            2 => report.subscriptions.len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+
+    /// Generates a reviewed SQL statement for the selected slot/publication/subscription.
+    #[must_use]
+    pub fn selected_reviewed_sql(&self) -> Option<(String, String)> {
+        let report = self.report.as_ref()?;
+        match self.active_tab {
+            0 => report.slots.get(self.selected_idx).map(|slot| {
+                (
+                    format!("Drop slot '{}'", slot.slot_name),
+                    crate::replication::drop_slot_sql(&slot.slot_name),
+                )
+            }),
+            1 => report.publications.get(self.selected_idx).map(|pub_| {
+                (
+                    format!("Publication '{}' template", pub_.name),
+                    crate::replication::create_publication_sql(&pub_.name, pub_.all_tables),
+                )
+            }),
+            2 => report.subscriptions.get(self.selected_idx).map(|sub| {
+                (
+                    format!(
+                        "{} subscription '{}'",
+                        if sub.enabled { "Disable" } else { "Enable" },
+                        sub.name
+                    ),
+                    crate::replication::alter_subscription_toggle_sql(&sub.name, !sub.enabled),
+                )
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// State for the Server Settings, HBA, Extensions, Tablespaces & FDW overlay (`052`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterConfigState {
+    /// Loaded cluster report from PostgreSQL catalog.
+    pub report: Option<crate::cluster::ClusterReport>,
+    /// Active tab (0: Settings, 1: HBA Auth, 2: Extensions, 3: Tablespaces, 4: FDWs).
+    pub active_tab: usize,
+    /// Selected index within the active filtered tab.
+    pub selected_idx: usize,
+    /// When true, narrows to non-default settings, HBA risks, or upgradable/installed extensions.
+    pub modified_only: bool,
+    /// Optional substring filter applied within the overlay.
+    pub filter_text: String,
+    /// Whether an asynchronous catalog fetch is currently in flight.
+    pub loading: bool,
+    /// Status or feedback message shown in overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for ClusterConfigState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            modified_only: false,
+            filter_text: String::new(),
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl ClusterConfigState {
+    /// Number of items visible in the current filtered tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        let f = (!self.filter_text.trim().is_empty()).then_some(self.filter_text.as_str());
+        match self.active_tab {
+            0 => report.filtered_settings(self.modified_only, f).len(),
+            1 => report.filtered_hba_rules(f).len(),
+            2 => report.filtered_extensions(f).len(),
+            3 => report.filtered_tablespaces(f).len(),
+            4 => report.filtered_fdws(f).len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current filtered tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(4);
+        self.selected_idx = 0;
+    }
+
+    /// Generates a reviewed SQL statement for the selected cluster configuration item.
+    #[must_use]
+    pub fn selected_reviewed_sql(&self) -> Option<(String, String)> {
+        let report = self.report.as_ref()?;
+        let f = (!self.filter_text.trim().is_empty()).then_some(self.filter_text.as_str());
+        match self.active_tab {
+            0 => report
+                .filtered_settings(self.modified_only, f)
+                .get(self.selected_idx)
+                .map(|s| {
+                    let reload = if s.context == "sighup" {
+                        format!("\n{}", crate::cluster::reload_conf_sql())
+                    } else {
+                        String::new()
+                    };
+                    (
+                        format!("Reviewed ALTER SYSTEM for '{}'", s.name),
+                        format!(
+                            "{}{reload}",
+                            crate::cluster::alter_system_sql(&s.name, &s.setting)
+                        ),
+                    )
+                }),
+            2 => report
+                .filtered_extensions(f)
+                .get(self.selected_idx)
+                .map(|ext| {
+                    if let (Some(_installed), Some(default_ver)) =
+                        (&ext.installed_version, &ext.default_version)
+                    {
+                        if ext.upgrade_available {
+                            (
+                                format!("Upgrade extension '{}'", ext.name),
+                                crate::cluster::alter_extension_update_sql(&ext.name, default_ver),
+                            )
+                        } else {
+                            (
+                                format!("Extension '{}' DDL", ext.name),
+                                crate::cluster::create_extension_sql(&ext.name),
+                            )
+                        }
+                    } else {
+                        (
+                            format!("Install extension '{}'", ext.name),
+                            crate::cluster::create_extension_sql(&ext.name),
+                        )
+                    }
+                }),
+            3 => report
+                .filtered_tablespaces(f)
+                .get(self.selected_idx)
+                .map(|ts| {
+                    (
+                        format!("Tablespace '{}' DDL", ts.name),
+                        crate::cluster::create_tablespace_sql(ts),
+                    )
+                }),
+            4 => report.filtered_fdws(f).get(self.selected_idx).map(|fdw| {
+                let mut sql = crate::cluster::create_fdw_sql(fdw);
+                for srv in &fdw.servers {
+                    sql.push('\n');
+                    sql.push_str(&crate::cluster::create_server_sql(srv, &fdw.name));
+                }
+                (format!("Foreign Data Wrapper '{}' DDL", fdw.name), sql)
+            }),
+            _ => None,
+        }
+    }
+}
+
 /// Interactive state of the offline SQL lint findings overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintFindingsState {
@@ -3287,6 +3539,18 @@ pub struct Model {
     pub recovery_banner: Option<SessionRecoveryBanner>,
     /// Active offline lint findings overlay, when one is open.
     pub lint_findings: Option<LintFindingsState>,
+    /// Active psql `\watch` periodic polling loop.
+    pub watch: Option<WatchState>,
+    /// Controls statement execution timing visibility (`\timing`).
+    pub timing_display: TimingDisplay,
+    /// Interactive logical replication and slots manager overlay state.
+    pub logical_replication: Option<LogicalReplicationState>,
+    /// Request counter for in-flight logical replication queries.
+    pub logical_replication_request: u64,
+    /// Interactive server config, HBA, extensions, tablespaces, and FDWs overlay state.
+    pub cluster_config: Option<ClusterConfigState>,
+    /// Request counter for in-flight cluster configuration queries.
+    pub cluster_config_request: u64,
 }
 
 impl Model {

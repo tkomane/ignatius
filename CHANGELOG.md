@@ -8,6 +8,25 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `050-psql-metacommands-and-watch-mode` advances Milestone 12 with
+  `psql`-style backslash meta-commands (`\d`, `\d+`, `\dt`, `\dt+`, `\dv`, `\dm`,
+  `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`, `\conninfo`, `\x`,
+  `\timing`, `\?`/`\h`) across the SQL editor and `ignatius query -c`, plus a
+  bounded `\watch [N]` polling loop (`Ctrl+K :` / `stop-watch` to cancel) and
+  explicit `\!` shell refusal.
+
+- New: Feature `051-logical-replication-and-slot-manager` advances Milestone 12
+  with `ignatius replication` and the `Ctrl+K #` (`logical-replication`) TUI
+  overlay inspecting publications, subscriptions (redacted connection strings),
+  and replication slot WAL retention risk (`ok`, `warning`, `critical`) with
+  reviewed DDL insertion.
+
+- New: Feature `052-server-config-hba-and-infra-catalog` advances Milestone 12
+  with `ignatius cluster` and the `Ctrl+K @` (`cluster-config`) TUI overlay
+  inspecting `pg_settings`, `pg_hba_file_rules`, extensions, tablespaces, and
+  foreign data wrappers / foreign servers with secret option masking and
+  reviewed DDL generation.
+
 - New: Built-in `field-industrial` palette (`[ui] theme = "field-industrial"` and
   `[theme] extends = "field-industrial"`) delivering the Dieter Rams / Teenage
   Engineering matte slate, warm bone, signal orange, phosphor amber, and alpine

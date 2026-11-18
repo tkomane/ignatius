@@ -14,8 +14,8 @@ the PostgreSQL client you can point at production
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
 [![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-dea584?logo=rust&logoColor=white)](Cargo.toml)
 [![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-336791?logo=postgresql&logoColor=white)](docs/support/compatibility.md)
-[![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-M6--M11%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
-[![Observability](https://img.shields.io/badge/observability-M7--M11%20perf%20%26%20ops-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
+[![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-M6--M12%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
+[![Observability](https://img.shields.io/badge/observability-M7--M12%20perf%20%26%20ops-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
 [![Design](https://img.shields.io/badge/design-field%20industrial%20%2F%20braun-fbbf24?logo=color&logoColor=black)](docs/design/theme-tokens.md)
 [![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-brightgreen)](docs/security/data-handling.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -27,7 +27,7 @@ the PostgreSQL client you can point at production
   <a href="#quickstart-try-ignatius-in-60-seconds"><strong>Quickstart</strong></a> &bull;
   <a href="#visual-tour"><strong>Visual Tour</strong></a> &bull;
   <a href="#field-industrial-theme--design-philosophy"><strong>Field Industrial Design</strong></a> &bull;
-  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M11)</strong></a> &bull;
+  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M12)</strong></a> &bull;
   <a href="#two-key-chord-menu-ctrlk"><strong>Keymap & Chords</strong></a> &bull;
   <a href="#non-interactive-cli-scripting--streaming-export"><strong>CLI Scripting</strong></a>
 </p>
@@ -445,6 +445,9 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `\` | Toggle editor buffer split mode |
 | `;` | Open snippet and scratchpad library |
 | `!` | Lint the active SQL buffer |
+| `#` | Open logical replication and slots manager |
+| `@` | Open server config, HBA, extensions, and FDWs |
+| `:` | Stop active psql watch loop |
 
 While the crash-recovery capsule is on screen it adds two contextual chords:
 `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the journal.
@@ -614,6 +617,12 @@ ignatius mask-rules "$DATABASE_URL" --schema public
 ignatius sync --source "$STAGING_URL" --target "$DEV_URL" --dry-run
 ignatius seed "$DATABASE_URL" --schema public --rows 25 --format sql
 
+# psql meta-commands, logical replication slots, and server configuration catalog
+ignatius query "$DATABASE_URL" -c '\dt' --format json
+ignatius query "$DATABASE_URL" -c '\d+ orders'
+ignatius replication "$DATABASE_URL" --section all --format table
+ignatius cluster "$DATABASE_URL" --section settings --modified-only --format json
+
 # Shell completion generator
 ignatius completion zsh > ~/.zfunc/_ignatius
 ```
@@ -756,10 +765,10 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `047-restore-drills` [Implemented]: Inspect a dump table of contents, restore into a scratch database, compare relation counts, and remove the scratch database unless asked to keep it.
   - `048-partition-lifecycle` [Implemented]: Report partition sets and generate reviewed create, detach and drop DDL for range-partitioned tables, without executing it.
   - `049-retention-and-growth-audit` [Implemented]: Bounded catalog audit of relation growth, vacuum debt, sequence headroom and partitioning candidates, without reading rows.
-- **Milestone 12: Complete `psql` & Cluster/Replication Parity (`050` - `052`) [PLANNED]**:
-  - `050-psql-metacommands-and-watch-mode`: Backslash meta-commands (`\d`, `\dt`, `\d+`, `\du`, `\dn`, `\df`, `\l`, `\x`, `\timing`, `\conninfo`), bounded `\watch` polling, and transaction quit/savepoint guards.
-  - `051-logical-replication-and-slot-manager`: Publications, subscriptions, logical worker lag, and replication slot WAL-retention safety (`ignatius replication` + TUI).
-  - `052-server-config-hba-and-infra-catalog`: `pg_settings`, `pg_hba_file_rules`, `pg_available_extensions`, `pg_tablespace`, and FDW inspection/DDL.
+- **Milestone 12: Complete `psql` & Cluster/Replication Parity (`050` - `052`) [COMPLETED]**:
+  - `050-psql-metacommands-and-watch-mode` [Implemented]: Backslash meta-commands (`\d`, `\d+`, `\dt`, `\dt+`, `\dv`, `\dm`, `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`, `\conninfo`, `\x`, `\timing`, `\?`/`\h`) and bounded `\watch [N]` polling (`Ctrl+K :` to stop) across TUI and `-c` CLI routes, with explicit `\!` shell refusal.
+  - `051-logical-replication-and-slot-manager` [Implemented]: Logical replication publications, subscriptions (redacted conninfo), and replication slot WAL-retention diagnostics (`ignatius replication` + `Ctrl+K #` TUI overlay with reviewed DDL loading).
+  - `052-server-config-hba-and-infra-catalog` [Implemented]: `pg_settings`, `pg_hba_file_rules`, `pg_available_extensions`, `pg_tablespace`, and FDW/foreign server catalog inspection and reviewed DDL (`ignatius cluster` + `Ctrl+K @` TUI overlay).
 - **Milestone 13: Live Data CRUD, Plan Diff & Analytics (`053` - `055`) [PLANNED]**:
   - `053-live-data-browser-and-batch-crud`: Keyset-paginated data browser with reviewed `INSERT`, multi-row `DELETE`, and transactional batch `UPDATE`.
   - `054-explain-buffers-wal-and-plan-diff`: `EXPLAIN (BUFFERS, WAL, SETTINGS)` telemetry and Plan A/B diffing (`ignatius plan-diff`).

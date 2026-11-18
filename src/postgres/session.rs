@@ -349,6 +349,18 @@ impl Session {
         crate::postgres::partition::partition_snapshot(&self.client, schema).await
     }
 
+    /// Reads the bounded logical replication and slot safety overview.
+    pub async fn replication_overview(
+        &self,
+    ) -> Result<crate::replication::ReplicationReport, Diagnostic> {
+        crate::postgres::replication::replication_report(&self.client).await
+    }
+
+    /// Reads the bounded cluster settings, HBA rules, extensions, tablespaces, and FDWs overview.
+    pub async fn cluster_overview(&self) -> Result<crate::cluster::ClusterReport, Diagnostic> {
+        crate::postgres::cluster::cluster_report(&self.client).await
+    }
+
     /// Whether a database with this exact name exists on the server.
     pub async fn drill_database_exists(&self, name: &str) -> Result<bool, Diagnostic> {
         crate::postgres::drill::database_exists(&self.client, name).await

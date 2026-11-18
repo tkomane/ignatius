@@ -163,6 +163,12 @@ pub enum Action {
     DiscardRecovery,
     /// Lint the active editor buffer without contacting a server.
     LintBuffer,
+    /// Open the logical replication and replication slots manager overlay.
+    LogicalReplication,
+    /// Open server configuration, HBA, extensions, tablespaces, and FDW catalog overlay.
+    ClusterConfig,
+    /// Stop an active psql `\watch` periodic polling loop.
+    StopWatch,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -283,6 +289,9 @@ impl Action {
             Self::RestoreSession,
             Self::DiscardRecovery,
             Self::LintBuffer,
+            Self::LogicalReplication,
+            Self::ClusterConfig,
+            Self::StopWatch,
         ]
     }
 }
@@ -725,6 +734,22 @@ pub enum Message {
         /// Table generator plan or error.
         result: Box<Result<Vec<crate::seed::TableGenerator>, Diagnostic>>,
     },
+    /// Logical replication and replication slot report loaded from catalog.
+    LogicalReplicationLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Replication report or error.
+        result: Box<Result<crate::replication::ReplicationReport, Diagnostic>>,
+    },
+    /// Server settings, HBA rules, extensions, tablespaces, and FDW report loaded.
+    ClusterConfigLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Cluster report or error.
+        result: Box<Result<crate::cluster::ClusterReport, Diagnostic>>,
+    },
+    /// Timer tick for an active `\watch` polling loop.
+    WatchTick,
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -1056,5 +1081,15 @@ pub enum Effect {
         request: u64,
         /// Optional schema name to inspect.
         schema: Option<String>,
+    },
+    /// Load logical replication publications, subscriptions, and slots report.
+    LoadLogicalReplication {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Load server settings, HBA, extensions, tablespaces, and FDWs report.
+    LoadClusterConfig {
+        /// Identity used to reject a late response.
+        request: u64,
     },
 }

@@ -343,6 +343,14 @@ pub enum Command {
     /// Inspect, restore, or discard an unrecovered crash session journal.
     #[command(name = "recovery")]
     Recovery(RecoveryArgs),
+
+    /// Inspect logical publications, subscriptions, and replication slot WAL retention.
+    #[command(name = "replication")]
+    Replication(ReplicationArgs),
+
+    /// Inspect server configuration, HBA rules, extensions, tablespaces, and FDWs.
+    #[command(name = "cluster")]
+    Cluster(ClusterArgs),
 }
 
 /// Arguments for the audit command.
@@ -950,6 +958,8 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Seed(args)) => run_seed(args, &paths, out, err),
         Some(Command::Snippet(args)) => run_snippet(args, &paths, out, err),
         Some(Command::Recovery(args)) => run_recovery(args, &paths, out, err),
+        Some(Command::Replication(args)) => run_replication(args, &paths, out, err),
+        Some(Command::Cluster(args)) => run_cluster(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -1440,6 +1450,40 @@ fn query_command(
     }
 
     output::validate_options(&request.options)?;
+
+    let sql = if request.command.is_some() && crate::metacommand::contains_metacommand(&sql) {
+        match crate::metacommand::parse_input(&sql) {
+            Some(Err(diag)) => return Err(diag),
+            Some(Ok(crate::metacommand::MetaCommand::CatalogQuery {
+                sql: catalog_sql, ..
+            })) => catalog_sql,
+            Some(Ok(crate::metacommand::MetaCommand::Help)) => {
+                return write_metacommand_help(&request, out, err);
+            }
+            Some(Ok(
+                crate::metacommand::MetaCommand::ToggleExpanded(_)
+                | crate::metacommand::MetaCommand::ToggleTiming(_)
+                | crate::metacommand::MetaCommand::StartWatch { .. }
+                | crate::metacommand::MetaCommand::StopWatch,
+            )) => {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "\\x, \\timing, and \\watch require the interactive TUI workbench",
+                    "parsing query meta-command",
+                )
+                .likely_cause(
+                    "display toggles and watch loops are interactive session controls",
+                )
+                .next_action(format!(
+                    "launch `{}` without -c for interactive \\x, \\timing, and \\watch, or pass --format with -c in headless mode",
+                    branding::BINARY_NAME
+                )));
+            }
+            None => sql,
+        }
+    } else {
+        sql
+    };
 
     let parameters = parameter_bindings_from_env(&sql, request.parameter_env)?;
 
@@ -6251,6 +6295,394 @@ fn run_recovery(
     }
 
     Ok(ExitCode::Success)
+}
+
+fn write_metacommand_help(
+    request: &QueryRequest<'_>,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let set = crate::metacommand::help_result();
+    if let Some(destination) = request.output {
+        let mut writer = output::StreamWriter::new(request.options.clone())?;
+        let mut export = crate::query::export::Export::create(destination, request.force)?;
+        writer
+            .columns(export.writer(), set.columns.clone())
+            .map_err(io_diagnostic)?;
+        for row in &set.rows {
+            writer.row(export.writer(), row).map_err(io_diagnostic)?;
+            export.count_row();
+        }
+        let finished = export.finish()?;
+        writeln!(
+            err,
+            "Exported {} row(s) to {}",
+            finished.rows,
+            finished.path.display()
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Success);
+    }
+    let execution = crate::query::result::Execution {
+        job: crate::query::result::JobId(0),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some(set),
+            rows_affected: None,
+            elapsed: std::time::Duration::ZERO,
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::ZERO,
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: crate::query::result::NoticeReport::default(),
+    };
+    write_query_execution(out, err, &execution, &request.options)
+}
+
+/// Section filter for logical replication and slot safety reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliReplicationSection {
+    /// Include publications, subscriptions, and replication slots.
+    #[default]
+    All,
+    /// Include logical publications only.
+    Publications,
+    /// Include logical subscriptions only.
+    Subscriptions,
+    /// Include replication slots and WAL retention risk only.
+    Slots,
+}
+
+impl From<CliReplicationSection> for crate::replication::ReplicationSection {
+    fn from(val: CliReplicationSection) -> Self {
+        match val {
+            CliReplicationSection::All => Self::All,
+            CliReplicationSection::Publications => Self::Publications,
+            CliReplicationSection::Subscriptions => Self::Subscriptions,
+            CliReplicationSection::Slots => Self::Slots,
+        }
+    }
+}
+
+/// Arguments for the `replication` command.
+#[derive(Debug, Args, Clone)]
+pub struct ReplicationArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, publications, subscriptions, slots).
+    #[arg(short = 's', long, value_enum, default_value_t = CliReplicationSection::All)]
+    pub section: CliReplicationSection,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Section filter for server configuration, HBA, and infrastructure reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliClusterSection {
+    /// Include all sections: settings, HBA rules, extensions, tablespaces, and FDWs.
+    #[default]
+    All,
+    /// Server configuration parameters (`pg_settings`).
+    Settings,
+    /// Host-based authentication rules (`pg_hba_file_rules`).
+    Hba,
+    /// Installed and available extensions (`pg_available_extensions`).
+    Extensions,
+    /// Cluster tablespaces (`pg_tablespace`).
+    Tablespaces,
+    /// Foreign data wrappers and foreign servers.
+    Fdw,
+}
+
+impl From<CliClusterSection> for crate::cluster::ClusterSection {
+    fn from(val: CliClusterSection) -> Self {
+        match val {
+            CliClusterSection::All => Self::All,
+            CliClusterSection::Settings => Self::Settings,
+            CliClusterSection::Hba => Self::Hba,
+            CliClusterSection::Extensions => Self::Extensions,
+            CliClusterSection::Tablespaces => Self::Tablespaces,
+            CliClusterSection::Fdw => Self::Fdw,
+        }
+    }
+}
+
+/// Arguments for the `cluster` command.
+#[derive(Debug, Args, Clone)]
+pub struct ClusterArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, settings, hba, extensions, tablespaces, fdw).
+    #[arg(short = 's', long, value_enum, default_value_t = CliClusterSection::All)]
+    pub section: CliClusterSection,
+    /// Show only settings modified from default or pending restart.
+    #[arg(long)]
+    pub modified_only: bool,
+    /// Case-insensitive substring filter applied across matching entries.
+    #[arg(long, value_name = "TEXT")]
+    pub filter: Option<String>,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn connect_and_run<T, F, Fut>(
+    target_arg: Option<&str>,
+    connection: &ConnectionOptions,
+    output: Option<&std::path::Path>,
+    force: bool,
+    paths: &Paths,
+    task: F,
+) -> Result<T, Diagnostic>
+where
+    F: FnOnce(crate::postgres::session::Session) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
+{
+    if let Some(destination) = output
+        && destination.exists()
+        && !force
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{} already exists", destination.display()),
+            "opening the export destination",
+        )
+        .likely_cause("an export never replaces a file that is already there")
+        .next_action("choose another path, or pass --force to replace it"));
+    }
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(target_arg, connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+    let timeout = std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds);
+
+    runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(&target, timeout)
+            .await
+            .value?;
+        task(session).await
+    })
+}
+
+fn write_report_output(
+    mut rendered: String,
+    output: Option<&std::path::Path>,
+    force: bool,
+    label: &str,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    if let Some(destination) = output {
+        let mut export = crate::query::export::Export::create(destination, force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(err, "{label} written to {}", destination.display()).map_err(io_diagnostic)?;
+    } else if let Err(error) = out.write_all(rendered.as_bytes()) {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(ExitCode::Success);
+        }
+        return Err(io_diagnostic(error));
+    }
+    Ok(ExitCode::Success)
+}
+
+fn filter_replication_report(
+    report: &crate::replication::ReplicationReport,
+    section: crate::replication::ReplicationSection,
+) -> crate::replication::ReplicationReport {
+    use crate::replication::ReplicationSection;
+    if section == ReplicationSection::All {
+        return report.clone();
+    }
+    crate::replication::ReplicationReport {
+        publications: if section == ReplicationSection::Publications {
+            report.publications.clone()
+        } else {
+            Vec::new()
+        },
+        subscriptions: if section == ReplicationSection::Subscriptions {
+            report.subscriptions.clone()
+        } else {
+            Vec::new()
+        },
+        slots: if section == ReplicationSection::Slots {
+            report.slots.clone()
+        } else {
+            Vec::new()
+        },
+        publications_truncated: section == ReplicationSection::Publications
+            && report.publications_truncated,
+        subscriptions_truncated: section == ReplicationSection::Subscriptions
+            && report.subscriptions_truncated,
+        slots_truncated: section == ReplicationSection::Slots && report.slots_truncated,
+        subscription_access_restricted: section == ReplicationSection::Subscriptions
+            && report.subscription_access_restricted,
+    }
+}
+
+fn run_replication(
+    args: &ReplicationArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let report = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session.replication_overview().await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let section = crate::replication::ReplicationSection::from(args.section);
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(section),
+        CliTelemetryFormat::Plain => report.render_plain(section),
+        CliTelemetryFormat::Json => filter_replication_report(&report, section).render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Replication report",
+        out,
+        err,
+    )
+}
+
+fn filter_cluster_report(
+    report: &crate::cluster::ClusterReport,
+    section: crate::cluster::ClusterSection,
+    modified_only: bool,
+    filter: Option<&str>,
+) -> crate::cluster::ClusterReport {
+    use crate::cluster::ClusterSection;
+    let include = |target: ClusterSection| section == ClusterSection::All || section == target;
+    crate::cluster::ClusterReport {
+        settings: if include(ClusterSection::Settings) {
+            report
+                .filtered_settings(modified_only, filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        hba_rules: if include(ClusterSection::Hba) {
+            report
+                .filtered_hba_rules(filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        extensions: if include(ClusterSection::Extensions) {
+            report
+                .filtered_extensions(filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        tablespaces: if include(ClusterSection::Tablespaces) {
+            report
+                .filtered_tablespaces(filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        fdws: if include(ClusterSection::Fdw) {
+            report.filtered_fdws(filter).into_iter().cloned().collect()
+        } else {
+            Vec::new()
+        },
+        truncated_settings: include(ClusterSection::Settings) && report.truncated_settings,
+        truncated_hba_rules: include(ClusterSection::Hba) && report.truncated_hba_rules,
+        truncated_extensions: include(ClusterSection::Extensions) && report.truncated_extensions,
+        truncated_tablespaces: include(ClusterSection::Tablespaces) && report.truncated_tablespaces,
+        truncated_fdws: include(ClusterSection::Fdw) && report.truncated_fdws,
+        hba_access_restricted: include(ClusterSection::Hba) && report.hba_access_restricted,
+    }
+}
+
+fn run_cluster(
+    args: &ClusterArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let report = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session.cluster_overview().await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let section = crate::cluster::ClusterSection::from(args.section);
+    let filter = args.filter.as_deref();
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(section, args.modified_only, filter),
+        CliTelemetryFormat::Plain => report.render_plain(section, args.modified_only, filter),
+        CliTelemetryFormat::Json => {
+            filter_cluster_report(&report, section, args.modified_only, filter).render_json()
+        }
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Cluster report",
+        out,
+        err,
+    )
 }
 
 #[cfg(test)]

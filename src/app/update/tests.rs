@@ -11232,3 +11232,256 @@ fn lint_on_an_empty_buffer_is_a_no_op() {
     assert!(effects.is_empty());
     assert!(model.lint_findings.is_none());
 }
+
+#[test]
+fn metacommand_local_toggles_and_help_work_without_execution_effects() {
+    let mut model = Model::new(100);
+    assert!(!model.expanded_row);
+    model.editor.set_text("\\x");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(effects.is_empty());
+    assert!(model.expanded_row, "\\x toggles expanded row mode");
+
+    model.editor.set_text("\\timing on");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(effects.is_empty());
+    assert_eq!(
+        model.timing_display,
+        crate::app::model::TimingDisplay::Always
+    );
+
+    model.editor.set_text("\\timing off");
+    let _ = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_eq!(model.timing_display, crate::app::model::TimingDisplay::Off);
+
+    model.editor.set_text("\\?");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(effects.is_empty());
+    assert!(model.last_execution.is_some());
+    assert_eq!(model.focus, Focus::Results);
+}
+
+#[test]
+fn metacommand_catalog_query_and_shell_refusal_behave_safely() {
+    let mut model = connected();
+    model.editor.set_text("\\dt public.*");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_eq!(effects.len(), 1);
+    let Effect::Execute { sql, .. } = &effects[0] else {
+        panic!("expected Execute effect for \\dt");
+    };
+    assert!(sql.contains("pg_catalog.pg_class"));
+    assert!(sql.contains("'r', 'p'"));
+
+    model.phase = QueryPhase::Idle;
+    model.editor.set_text("\\! id");
+    let refused = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(refused.is_empty());
+    assert!(
+        model
+            .error
+            .as_ref()
+            .is_some_and(|diag| diag.kind == DiagnosticKind::Usage),
+        "shell escape produces explicit Usage diagnostic"
+    );
+}
+
+#[test]
+fn watch_loop_starts_ticks_and_stops_on_stop_cancel_and_loss() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1; \\watch 5");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_eq!(effects.len(), 1);
+    let Effect::Execute { job, sql } = &effects[0] else {
+        panic!("expected initial Execute effect");
+    };
+    assert_eq!(sql.trim(), "SELECT 1;");
+    assert_eq!(
+        model.watch.as_ref().map(|w| (w.interval_secs, w.iteration)),
+        Some((5, 1))
+    );
+
+    // Simulate completion, then tick to iteration 2.
+    let _ = update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            job: *job,
+            statements: Vec::new(),
+            status: crate::query::result::ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(2),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+            notice_report: Default::default(),
+        })),
+    );
+    let tick_effects = update(&mut model, Message::WatchTick);
+    assert_eq!(tick_effects.len(), 1);
+    assert_eq!(model.watch.as_ref().map(|w| w.iteration), Some(2));
+
+    // StopWatch clears active watch cleanly.
+    let _ = update(&mut model, Message::Action(Action::StopWatch));
+    assert!(model.watch.is_none());
+
+    // Simulate execution failure stopping watch automatically.
+    model.phase = QueryPhase::Idle;
+    model.editor.set_text("SELECT bad; \\watch 2");
+    let effects2 = update(&mut model, Message::Action(Action::RunBuffer));
+    let Effect::Execute { job: job2, .. } = effects2[0] else {
+        panic!("expected Execute effect");
+    };
+    assert!(model.watch.is_some());
+    let _ = update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            job: job2,
+            statements: Vec::new(),
+            status: crate::query::result::ExecutionStatus::Failed,
+            elapsed: Duration::from_millis(1),
+            error: Some(Diagnostic::new(
+                DiagnosticKind::Query,
+                "syntax error",
+                "running query",
+            )),
+            transaction: crate::query::result::TransactionState::Failed,
+            notice_report: Default::default(),
+        })),
+    );
+    assert!(model.watch.is_none(), "failure stops active watch loop");
+
+    // Simulate ConnectionLost clearing active watch.
+    model.watch = Some(crate::app::model::WatchState {
+        sql: "SELECT 1".into(),
+        interval_secs: 2,
+        iteration: 1,
+    });
+    let _ = update(&mut model, Message::ConnectionLost);
+    assert!(model.watch.is_none());
+}
+
+#[test]
+fn logical_replication_overlay_loads_tabs_and_inserts_reviewed_sql() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::LogicalReplication));
+    assert_eq!(effects.len(), 1);
+    let Effect::LoadLogicalReplication { request } = effects[0] else {
+        panic!("expected LoadLogicalReplication effect");
+    };
+    let report = crate::replication::ReplicationReport {
+        publications: vec![crate::replication::PublicationSummary {
+            name: "orders_pub".into(),
+            owner: "postgres".into(),
+            all_tables: true,
+            insert: true,
+            update: true,
+            delete: true,
+            truncate: false,
+            tables: Vec::new(),
+            tables_truncated: false,
+        }],
+        subscriptions: Vec::new(),
+        slots: vec![crate::replication::ReplicationSlotSummary {
+            slot_name: "orders_sub".into(),
+            plugin: Some("pgoutput".into()),
+            slot_type: "logical".into(),
+            database: Some("ignatius_demo".into()),
+            temporary: false,
+            active: false,
+            active_pid: None,
+            wal_status: "extended".into(),
+            retained_bytes: Some(200 * 1024 * 1024),
+            safe_wal_size: None,
+            risk: crate::replication::SlotRiskSeverity::Warning,
+            finding: Some("inactive slot retains 200 MiB of WAL".into()),
+        }],
+        ..Default::default()
+    };
+    let _ = update(
+        &mut model,
+        Message::LogicalReplicationLoaded {
+            request,
+            result: Box::new(Ok(report)),
+        },
+    );
+    assert!(
+        model
+            .logical_replication
+            .as_ref()
+            .is_some_and(|r| !r.loading)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.logical_replication.as_ref().map(|r| r.active_tab),
+        Some(1)
+    );
+
+    let _ = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.logical_replication.is_none());
+    assert!(model.editor.text().contains("CREATE PUBLICATION"));
+}
+
+#[test]
+fn cluster_config_overlay_filters_tabs_and_inserts_reviewed_ddl() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::ClusterConfig));
+    assert_eq!(effects.len(), 1);
+    let Effect::LoadClusterConfig { request } = effects[0] else {
+        panic!("expected LoadClusterConfig effect");
+    };
+    let report = crate::cluster::ClusterReport {
+        settings: vec![crate::cluster::SettingEntry {
+            name: "work_mem".into(),
+            setting: "16MB".into(),
+            unit: Some("kB".into()),
+            category: "Resource Usage / Memory".into(),
+            context: "user".into(),
+            source: "configuration file".into(),
+            boot_val: Some("4096".into()),
+            reset_val: Some("16384".into()),
+            pending_restart: false,
+            is_non_default: true,
+        }],
+        hba_rules: vec![crate::cluster::HbaRule::new(
+            Some(1),
+            "host".into(),
+            vec!["all".into()],
+            vec!["all".into()],
+            Some("0.0.0.0/0".into()),
+            "trust".into(),
+            None,
+        )],
+        extensions: vec![crate::cluster::AvailableExtension {
+            name: "pg_stat_statements".into(),
+            installed_version: Some("1.10".into()),
+            default_version: Some("1.11".into()),
+            upgrade_available: true,
+            comment: Some("track planning and execution statistics".into()),
+        }],
+        tablespaces: Vec::new(),
+        fdws: Vec::new(),
+        truncated_settings: false,
+        truncated_hba_rules: false,
+        truncated_extensions: false,
+        truncated_tablespaces: false,
+        truncated_fdws: false,
+        hba_access_restricted: false,
+    };
+    let _ = update(
+        &mut model,
+        Message::ClusterConfigLoaded {
+            request,
+            result: Box::new(Ok(report)),
+        },
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('m')));
+    assert!(
+        model
+            .cluster_config
+            .as_ref()
+            .is_some_and(|c| c.modified_only)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('3')));
+    assert_eq!(model.cluster_config.as_ref().map(|c| c.active_tab), Some(2));
+    let _ = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.cluster_config.is_none());
+    assert!(model.editor.text().contains("ALTER EXTENSION"));
+}

@@ -801,6 +801,7 @@ async fn event_loop(
     draw(&mut terminal, &mut model, &keymap)?;
     let mut last_mouse_at = std::time::Instant::now();
     let mut recovery_error_reported = false;
+    let mut watch_next_at: Option<(u64, u64, tokio::time::Instant)> = None;
 
     loop {
         for (index,pending) in pending_installs.iter_mut().enumerate() {
@@ -809,6 +810,26 @@ async fn event_loop(
                 *pending=try_session_install(install,slot,&mut model,connection_generation.load(std::sync::atomic::Ordering::SeqCst));
             }
         }
+        match &model.watch {
+            Some(watch) if !model.phase.is_busy() => {
+                let needs_reset = !matches!(
+                    watch_next_at,
+                    Some((interval, iter, _))
+                        if interval == watch.interval_secs && iter == watch.iteration
+                );
+                if needs_reset {
+                    watch_next_at = Some((
+                        watch.interval_secs,
+                        watch.iteration,
+                        tokio::time::Instant::now() + Duration::from_secs(watch.interval_secs),
+                    ));
+                }
+            }
+            _ => {
+                watch_next_at = None;
+            }
+        }
+        let watch_deadline = watch_next_at.map(|(_, _, deadline)| deadline);
         let message=tokio::select! {
             install=install_rx.recv()=> {
                 if let Some(install)=install {
@@ -834,6 +855,16 @@ async fn event_loop(
                     }
                 }
                 continue;
+            },
+            _=async {
+                if let Some(deadline) = watch_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            }=> {
+                watch_next_at = None;
+                Message::WatchTick
             },
             message=rx.recv()=>match message {Some(message)=>message,None=>break},
         };
@@ -1323,6 +1354,24 @@ async fn event_loop(
                         reader(&session, &metadata),
                         request,
                         schema,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadLogicalReplication { request } => {
+                    spawn_load_logical_replication(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadClusterConfig { request } => {
+                    spawn_load_cluster_config(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
                         Arc::clone(&connection_generation),
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
@@ -3199,6 +3248,64 @@ fn spawn_load_wal_observability(
         let _ = tx.send(connection_message(
             request_generation,
             Message::WalObservabilityLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_logical_replication(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.replication_overview().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::LogicalReplicationLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_cluster_config(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.cluster_overview().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ClusterConfigLoaded {
                 request,
                 result: Box::new(result),
             },

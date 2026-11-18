@@ -134,6 +134,9 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `\` | Toggle editor buffer split mode |
 | `;` | Open snippet and scratchpad library |
 | `!` | Lint the active SQL buffer |
+| `#` | Open logical replication and slots manager |
+| `@` | Open server config, HBA, extensions, and FDWs |
+| `:` | Stop active psql watch loop |
 
 The crash-recovery capsule adds two contextual chords for as long as it is on
 screen: `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the
@@ -354,6 +357,28 @@ With the workbench active, `Ctrl+K !` (`lint-sql`) opens the offline SQL lint fi
 - `r` re-lints the current buffer in place.
 - `Esc` closes the overlay without modifying the buffer.
 The scriptable `ignatius lint` CLI subcommand provides non-interactive table, JSON, and SARIF 2.1.0 parity.
+
+Executing a `psql`-style backslash command in the SQL editor (`Ctrl+R` / `F5`) dispatches cleanly without spawning external shells (`\!` is refused explicitly):
+- `\d`, `\d+`, `\dt`, `\dt+`, `\dv`, `\dm`, `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`, `\conninfo` run bounded `pg_catalog` queries into the Results grid.
+- `\x [on|off]` toggles vertical expanded row display.
+- `\timing [on|off]` toggles per-statement elapsed display regardless of the 200ms quiet-chrome threshold.
+- `\?` / `\h` displays the offline built-in meta-command reference table in the Results pane.
+- `\watch [N]` (or `SELECT ...; \watch [N]`) starts a bounded polling loop (1-3600s, up to 1000 iterations) shown as `[WATCH: Ns #k]` in the status bar; `Ctrl+K :` (`stop-watch`), `\watch stop`, `Esc`, `Ctrl+C`, query failure, or connection loss stops the loop immediately.
+
+With the workbench active, `Ctrl+K #` (`logical-replication`) opens the Logical Replication & Slots Manager cockpit:
+- `1`, `2`, `3` switch between `Slots`, `Publications`, and `Subscriptions`.
+- `Up`, `Down`, `k`, `j`, `PageUp`, `PageDown` navigate entries.
+- `Enter` or `g` loads reviewed DDL (`pg_drop_replication_slot`, `CREATE PUBLICATION`, `ALTER SUBSCRIPTION ... ENABLE/DISABLE`) into the active SQL editor buffer without executing automatically.
+- `r` refreshes catalog state; `Esc` closes the overlay.
+The scriptable `ignatius replication` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K @` (`cluster-config`) opens the Server Config, HBA, Extensions, Tablespaces, & FDW Inspector cockpit:
+- `1`, `2`, `3`, `4`, `5` switch between `Settings`, `HBA Auth`, `Extensions`, `Tablespaces`, and `FDWs`.
+- `m` toggles non-default / flagged / upgradable filtering (`modified_only`).
+- `Up`, `Down`, `k`, `j`, `PageUp`, `PageDown` navigate entries.
+- `Enter` or `g` loads reviewed DDL (`ALTER SYSTEM`, `CREATE EXTENSION`, `ALTER EXTENSION ... UPDATE`, `CREATE TABLESPACE`, `CREATE FOREIGN DATA WRAPPER`) into the active SQL editor buffer without executing automatically.
+- `r` refreshes catalog state; `Esc` closes the overlay.
+The scriptable `ignatius cluster` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -604,7 +629,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

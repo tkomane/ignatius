@@ -1,4 +1,4 @@
-use crate::app::model::{ConnectingStep, ConnectionState, Model};
+use crate::app::model::{ConnectingStep, ConnectionState, Model, TimingDisplay};
 use crate::connection::Environment;
 use crate::query::result::TransactionState;
 use crate::query::value::{display_width, sanitize_for_display};
@@ -182,6 +182,19 @@ pub(crate) fn render_header(
         _ => {}
     }
 
+    // Active watch loop capsule
+    if let Some(watch) = &model.watch {
+        if !right_spans.is_empty() {
+            right_spans.push(Span::raw("  "));
+        }
+        right_spans.push(Span::styled(
+            format!("[WATCH: {}s #{}]", watch.interval_secs, watch.iteration),
+            capsule_style(presentation, Token::Focus),
+        ));
+        right_spans.push(Span::raw(" "));
+        right_spans.push(Span::styled("(\\watch stop)", theme.style(Token::Muted)));
+    }
+
     // Running / completed elapsed indicator
     if let Some(d) = model.running_for {
         let text = if !presentation.reduced_motion {
@@ -197,18 +210,25 @@ pub(crate) fn render_header(
             right_spans.push(Span::raw("  "));
         }
         right_spans.push(Span::styled(text, theme.style(Token::Info)));
-    } else if let Some(d) = model.last_elapsed
-        && d >= Duration::from_millis(200)
-    {
-        let text = if d >= Duration::from_secs(1) {
-            format!("{:.1}s", d.as_secs_f64())
-        } else {
-            format!("{}ms", d.as_millis())
+    } else if let Some(d) = model.last_elapsed {
+        let show = match model.timing_display {
+            TimingDisplay::Off => false,
+            TimingDisplay::Threshold200ms => d >= Duration::from_millis(200),
+            TimingDisplay::Always => true,
         };
-        if !right_spans.is_empty() {
-            right_spans.push(Span::raw("  "));
+        if show {
+            let text = if d >= Duration::from_secs(1) {
+                format!("{:.2}s", d.as_secs_f64())
+            } else if d.as_millis() == 0 {
+                "<1ms".to_owned()
+            } else {
+                format!("{}ms", d.as_millis())
+            };
+            if !right_spans.is_empty() {
+                right_spans.push(Span::raw("  "));
+            }
+            right_spans.push(Span::styled(text, theme.style(Token::Muted)));
         }
-        right_spans.push(Span::styled(text, theme.style(Token::Muted)));
     }
 
     // Motion badge

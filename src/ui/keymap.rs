@@ -134,6 +134,9 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("restore-session", Action::RestoreSession),
     ("discard-recovery", Action::DiscardRecovery),
     ("lint-sql", Action::LintBuffer),
+    ("logical-replication", Action::LogicalReplication),
+    ("cluster-config", Action::ClusterConfig),
+    ("stop-watch", Action::StopWatch),
 ];
 
 /// The action a configuration name means.
@@ -870,6 +873,17 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         "Open snippet and scratchpad library",
     ),
     ('!', Action::LintBuffer, "Lint the active SQL buffer"),
+    (
+        '#',
+        Action::LogicalReplication,
+        "Open logical replication and slots manager",
+    ),
+    (
+        '@',
+        Action::ClusterConfig,
+        "Open server config, HBA, extensions, and FDWs",
+    ),
+    (':', Action::StopWatch, "Stop active psql watch loop"),
 ];
 
 /// The contextual second keys offered while the crash recovery capsule is on
@@ -1027,6 +1041,9 @@ const fn short_label(action: &Action) -> &'static str {
         Action::RestoreSession => "Restore",
         Action::DiscardRecovery => "Discard",
         Action::LintBuffer => "Lint",
+        Action::LogicalReplication => "Replication",
+        Action::ClusterConfig => "Cluster",
+        Action::StopWatch => "Stop watch",
     }
 }
 

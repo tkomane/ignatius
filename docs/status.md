@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 39 (050-052, Milestone 12: Complete psql & Cluster/Replication Parity) Delivery - 18 November 2026
+
+Branch `feat/m12-psql-and-cluster-parity` delivers Milestone 12 (`050-052`) on top of Wave 38 (`b95a089`):
+
+- **Feature `050-psql-metacommands-and-watch-mode`**:
+  - Pure `src/metacommand/mod.rs` lexer & SQL translator supporting `\d`, `\d+`, `\dt`, `\dt+`, `\dv`, `\dm`, `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`, `\conninfo`, `\x [on|off]`, `\timing [on|off]`, `\watch [N]`, `\watch stop|off`, `\?`, and `\h` with safe `LIKE ... ESCAPE '!'` pattern quoting and explicit `Usage` refusal of shell escapes (`\!`) and unsupported file commands (`\i`, `\copy`, `\set`).
+  - Interactive TUI dispatch in `src/app/update.rs`, header `[WATCH: Ns #k]` pill & `TimingDisplay` telemetry in `src/ui/widgets/header.rs`, `Ctrl+K :` (`stop-watch`) abort chord, and deadline-driven `WatchTick` scheduling in `src/cli/interactive.rs` (`MAX_WATCH_INTERVAL_SECS = 3600`, `MAX_WATCH_ITERATIONS = 1000`), stopping automatically on `StopWatch`, `Cancel`, `Dismiss`, execution error/cancellation, or connection loss.
+  - Headless CLI `ignatius query -c` metacommand execution for catalog queries and `\?`, with explicit exit-code 2 refusal for TUI-only `\x`/`\timing`/`\watch` and shell escapes.
+- **Feature `051-logical-replication-and-slot-manager`**:
+  - Bounded `src/replication/mod.rs` model and PG 14-18 extractor (`src/postgres/replication.rs`) covering publications, subscriptions (`redact_conninfo` stripping keyword/URI credentials), and replication slots with WAL-retention risk thresholds (`warning` >= 100 MiB or inactive/unreserved, `critical` >= 1 GiB or `lost`) and SQLSTATE `42501` privilege fallback.
+  - Field Industrial 3-tab TUI overlay (`Ctrl+K #` / `logical-replication`) with `Enter`/`g` reviewed DDL loading and scriptable `ignatius replication` CLI subcommand (`table`, `plain`, `json`, `--section`, `-o`, `--force`).
+- **Feature `052-server-config-hba-and-infra-catalog`**:
+  - Bounded `src/cluster/mod.rs` model and PG 14-18 extractor (`src/postgres/cluster.rs`) covering `pg_settings`, `pg_hba_file_rules` (`HbaRisk` classification and `42501`/`42P01` fallback), `pg_available_extensions`, `pg_tablespace`, and FDWs/foreign servers with secret option masking (`mask_options`) and reviewed DDL generation.
+  - Field Industrial 5-tab TUI overlay (`Ctrl+K @` / `cluster-config`) with `m` modified-only filtering and scriptable `ignatius cluster` CLI subcommand (`--section`, `--modified-only`, `--filter`, `table`, `plain`, `json`, `-o`, `--force`).
+- **Verification**:
+  - `cargo xtask verify` exited `0` against live plain (`127.0.0.1:55432`) and TLS (`localhost:55433`) `postgres:18.6-alpine` containers: formatting, `clippy --all-targets -- -D warnings`, API documentation, 1593 lib unit tests, 22 `documentation_matches_the_build` tests, and all integration contracts (including `metacommand_contract`, `replication_contract`, and `cluster_contract`) passed. Unix-socket integration skipped (`IGNATIUS_TEST_PG_SOCKET_URI` unset).
+
 ## Wave 38 (Field Industrial Theme, M9/M10 TUI Polish & Documentation Reconciliation) Delivery - 18 November 2026
 
 Branch `feat/field-industrial-polish-and-docs` delivers built-in `field-industrial`
