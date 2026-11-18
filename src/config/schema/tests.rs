@@ -300,3 +300,30 @@ fn typed_alias_keeps_the_definition_for_the_shared_resolver() {
     assert!(normal.theme.is_none());
     assert_eq!(normal.ui.theme, ThemeSelection::Light);
 }
+
+#[test]
+fn field_industrial_theme_choice_round_trips_and_is_accepted() {
+    assert!(ThemeChoice::ACCEPTED.contains(&"field-industrial"));
+    assert_eq!(ThemeChoice::default(), ThemeChoice::Dark);
+    assert_eq!(Config::default().ui.theme, ThemeSelection::Dark);
+
+    let config: Config = toml::from_str("[ui]\ntheme = \"field-industrial\"\n").expect("parse");
+    assert_eq!(config.ui.theme, ThemeSelection::FieldIndustrial);
+    let serialized = toml::to_string(&config).expect("serialize");
+    assert!(
+        serialized.contains("theme = \"field-industrial\""),
+        "{serialized}"
+    );
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+    struct ChoiceBox {
+        choice: ThemeChoice,
+    }
+    let parsed: ChoiceBox = toml::from_str("choice = \"field-industrial\"").expect("parse choice");
+    assert_eq!(parsed.choice, ThemeChoice::FieldIndustrial);
+    assert!(
+        toml::to_string(&parsed)
+            .expect("serialize choice")
+            .contains("choice = \"field-industrial\"")
+    );
+}

@@ -1,8 +1,42 @@
 # Status
 
-**Updated: 2026-11-12.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-18.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 38 (Field Industrial Theme, M9/M10 TUI Polish & Documentation Reconciliation) Delivery - 18 November 2026
+
+Branch `feat/field-industrial-polish-and-docs` delivers built-in `field-industrial`
+theming, Field Industrial visual consistency across M9/M10 widgets, and full
+documentation alignment ahead of Milestone 12:
+
+- **Built-in `field-industrial` Theme (`ThemeChoice::FieldIndustrial`)**:
+  - Matte anodized slate surfaces (`#16181E`, `#1C1F27`, `#232732`, `#2A2F3D`),
+    warm bone typography (`#F4F3EF`), signal orange focus (`#FF6A00`), phosphor
+    amber warnings (`#FBBF24`), alpine sage success (`#24C992`), and graphite
+    borders (`#3E465B`).
+  - Verified in `src/ui/theme/tests.rs` against WCAG contrast matrices across
+    all 4 surfaces and all 4 color depths; included in `SwitchTheme` cycle and
+    `[theme] extends = "field-industrial"`.
+- **M9/M10 Field Industrial TUI Polish**:
+  - `render_lint_findings`: icon header, semantic `[FINDINGS: N] [ERRORS: E] [WARNINGS: W]`
+    capsules, full-width `Token::Selection` highlight bar across all color depths,
+    bracketed `[Enter]`/`[r]`/`[j/k]`/`[Esc]` hints, truncation-safe scrolling,
+    and `j`/`k`/`R`/`PageUp`/`PageDown` key bindings in `src/app/update.rs`.
+  - `render_snippet_library`: ASCII-aware preview rules & line-number gutters, plus
+    full-width selection bar in the snippet list pane.
+  - `render_recovery_capsule`, `render_tab_bar`, & split panes: `theme.capsule(Token::Warning)`
+    pill contrast for unsaved crash recovery, 16-tab windowing around the active tab
+    with `<`/`>` overflow markers, and secondary split buffer badges even when non-empty.
+- **Documentation & Guide Reconciliation**:
+  - Reconciled `README.md`, `docs/design/theme-tokens.md`, `docs/design/keymap.md`,
+    `docs/architecture/pgadmin-parity-plan.md`, `docs/product/roadmap.md`
+    (marking M11 complete and scheduling M12 `050-052` + M13 `053-055`), and the
+    interactive HTML guide.
+  - Authoritative `cargo xtask verify` passed completely against live plain and
+    TLS `postgres:18.6-alpine` containers (1559 lib unit tests, all integration
+    contracts and 22 documentation matches passing; Unix-socket gate skipped
+    without `IGNATIUS_TEST_PG_SOCKET_URI`).
 
 ## Wave 37 (047-049, Milestone 11) Delivery - 12 November 2026
 

@@ -416,6 +416,7 @@ impl Theme {
             ActivePalette::Builtin(ThemeChoice::Dark) => dark(token),
             ActivePalette::Builtin(ThemeChoice::Light) => light(token),
             ActivePalette::Builtin(ThemeChoice::HighContrast) => high_contrast(token),
+            ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => field_industrial(token),
             ActivePalette::Custom(palette) => palette.colors[token.index()],
         }
     }
@@ -568,6 +569,33 @@ const fn high_contrast(token: Token) -> Rgb {
     }
 }
 
+const fn field_industrial(token: Token) -> Rgb {
+    // Matte anodized charcoal/slate surfaces with Dieter Rams / Teenage
+    // Engineering signal orange, phosphor amber, alpine sage, and warm bone.
+    match token {
+        Token::Surface => Rgb(0x16, 0x18, 0x1e),
+        Token::SurfacePane => Rgb(0x1c, 0x1f, 0x27),
+        Token::SurfaceAlt => Rgb(0x23, 0x27, 0x32),
+        Token::SurfaceOverlay => Rgb(0x2a, 0x2f, 0x3d),
+        Token::Text => Rgb(0xf4, 0xf3, 0xef),
+        Token::Muted | Token::EnvironmentNonProduction => Rgb(0x9b, 0xa3, 0xb4),
+        Token::Border => Rgb(0x3e, 0x46, 0x5b),
+        Token::Focus => Rgb(0xff, 0x6a, 0x00),
+        Token::Success => Rgb(0x24, 0xc9, 0x92),
+        Token::Warning | Token::TransactionActive | Token::SyntaxNumber => Rgb(0xfb, 0xbf, 0x24),
+        Token::Danger | Token::TransactionFailed => Rgb(0xff, 0x75, 0x75),
+        Token::Info => Rgb(0x72, 0xc9, 0xee),
+        Token::EnvironmentProduction => Rgb(0xff, 0x82, 0x82),
+        Token::NullValue => Rgb(0x94, 0x9c, 0xae),
+        Token::Selection => Rgb(0x9a, 0xb8, 0xe8),
+        Token::Header => Rgb(0xfa, 0xf8, 0xf2),
+        Token::SyntaxKeyword => Rgb(0xff, 0x92, 0x48),
+        Token::SyntaxLiteral => Rgb(0x7a, 0xd9, 0xa8),
+        Token::SyntaxComment => Rgb(0x90, 0x99, 0xab),
+        Token::SyntaxIdentifier => Rgb(0x7a, 0xcd, 0xf0),
+    }
+}
+
 impl Theme {
     /// A filled capsule: the token as a background, the surface as the text.
     ///
@@ -647,6 +675,9 @@ impl Theme {
             }
             ActivePalette::Builtin(ThemeChoice::HighContrast) => {
                 (Rgb(0xB5, 0xD0, 0xFF), Rgb(0x7D, 0xF0, 0xFF))
+            }
+            ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => {
+                (Rgb(0xFF, 0x6A, 0x00), Rgb(0xFB, 0xBF, 0x24))
             }
             ActivePalette::Custom(_) => (self.rgb(Token::SyntaxKeyword), self.rgb(Token::Info)),
         }

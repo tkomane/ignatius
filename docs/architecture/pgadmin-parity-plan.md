@@ -1,7 +1,7 @@
 # Full pgAdmin Replacement Parity Architecture (M6: Features 026-033)
 
 **Author:** Ignatius Architecture & Product Team  
-**Status:** Planned Architecture (M6)  
+**Status:** Implemented on `main` (M6: Features 026-033); M7-M11 Delivered; M12 Planned  
 **Authority:** Product Roadmap (`docs/product/roadmap.md`), Experience Roadmap (`docs/product/experience-roadmap.md`), Agent Delivery Plan (`docs/product/agent-delivery-plan.md`)  
 **Target Milestone:** M6 (Features 026-033)  
 
@@ -45,7 +45,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 | --- | --- | --- | --- |
 | **Query Tool & SQL Editor** | `001-foundation-vertical-slice`<br>`012-schema-completion`<br>`013-errors-at-cursor`<br>`025-gui-grade-experience` | Merged (`M0-M5`) | Multi-line syntax-highlighted editor, active line numbers, word-level undo/redo, Blink.cmp-style schema-aware autocomplete popup (`Ctrl+Space`), Trouble.nvim-style error pinning, and bounded bracketed paste. |
 | **Visual Explain / Analyze** | `016-explain-analyze-plan-viewer` | Merged (`M0-M5`) | Interactive plan tree (`Ctrl+K l` / `Ctrl+K a`), estimated vs actual cost/timing breakdown, buffer hit tracking, and automatic expensive-node highlighting. |
-| **Object Explorer (Catalog Tree)** | `001-foundation-vertical-slice`<br>`025-gui-grade-experience`<br>`027-deep-catalog-and-ddl-generator` | Core Merged (`M0-M5`), Deep Catalog Planned (`M6`) | Neo-tree style hierarchical sidebar (`Ctrl+B`), instant fuzzy filtering (`/`), full `pg_catalog` entity inspection, and deterministic DDL generation (`Ctrl+K d`). |
+| **Object Explorer (Catalog Tree)** | `001-foundation-vertical-slice`<br>`025-gui-grade-experience`<br>`027-deep-catalog-and-ddl-generator` | Implemented (`M0-M6`) | Neo-tree style hierarchical sidebar (`Ctrl+B`), instant fuzzy filtering (`/`), full `pg_catalog` entity inspection, and deterministic DDL generation (`Ctrl+K d`). |
 | **Schema & ERD Visualizer** | `026-schema-er-diagrams` | Implemented (`M6`) | Interactive terminal ERD canvas (`Ctrl+K m`), orthogonal box-drawing/Braille connectors, neighbourhood focus (1-hop / 2-hop), pure `src/diagram/` engine, `Session::schema_graph`, and CLI exporter (`ignatius diagram --format mermaid|dot|svg|ascii|unicode`). |
 | **DDL Script Generator** | `027-deep-catalog-and-ddl-generator` | Implemented (`M6`) | Reconstructs complete, deterministic `CREATE` / `ALTER` / `DROP` DDL from `pg_catalog` for all object types; opens into interactive `Ctrl+K d` overlay (with Toggle DROP and Load in Editor) or CLI (`ignatius ddl`). |
 | **Import / Export Wizard** | `021-format-first-export`<br>`028-data-import-export-and-backup` | Implemented (`M6`) | Streaming `COPY ... TO STDOUT` / `FROM STDIN` for CSV, TSV, JSONL, and SQL; interactive TUI import column mapper (`Ctrl+K <` / `import-data`); transactional rollback on error; scriptable CLI (`ignatius import`, `ignatius export`). |
@@ -251,6 +251,8 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 ---
 
 ### Feature 032: PL/pgSQL Routine Runner and Profiler (`032-plpgsql-routine-runner-and-profiler`)
+
+**Status: Implemented on `main`.** The pure `src/routine/` engine, `Session::discover_routines`/`run_routine_harness` extractors, `ignatius run-routine` and `ignatius profile-routine` CLI subcommands, and `Ctrl+K (` TUI overlay are fully implemented.
 
 - **Objective:** Streamline the execution, testing, and performance profiling of PostgreSQL stored procedures, functions, and triggers.
 - **Signature Discovery & Typed Argument Prompt:**

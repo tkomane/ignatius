@@ -90,6 +90,7 @@ fn manual_theme_cycle_preserves_the_complete_model_including_busy_sessions() {
                 for choice in [
                     ThemeChoice::Light,
                     ThemeChoice::HighContrast,
+                    ThemeChoice::FieldIndustrial,
                     ThemeChoice::Dark,
                 ] {
                     let before = format!("{model:?}");
@@ -258,6 +259,7 @@ fn manual_theme_custom_cycle_preserves_state_and_discovery_during_queries() {
             ThemeSelection::Dark,
             ThemeSelection::Light,
             ThemeSelection::HighContrast,
+            ThemeSelection::FieldIndustrial,
             ThemeSelection::Custom,
         ] {
             let previous = model.presentation.theme.clone();

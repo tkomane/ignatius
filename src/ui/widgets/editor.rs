@@ -261,8 +261,12 @@ fn render_recovery_capsule(
     } else {
         String::new()
     };
-    let capsule_style = theme.style(Token::Focus).add_modifier(Modifier::BOLD);
-    let wide_label = format!("[CRASH RECOVERY: {count} {noun}{plural}{truncated_suffix}] ");
+    let capsule_style = if unsaved > 0 {
+        theme.capsule(Token::Warning)
+    } else {
+        theme.pill(Token::Focus)
+    };
+    let wide_label = format!("[CRASH RECOVERY: {count} {noun}{plural}{truncated_suffix}]");
     let medium_label = format!("[CRASH RECOVERY: {count} {noun}{plural}{truncated_suffix}]");
     let short_label = format!("[CRASH RECOVERY: {count}]");
     let minimal_label = format!("[RECOVERY: {count}]");
@@ -270,7 +274,7 @@ fn render_recovery_capsule(
     // Degrade in steps that keep the label and the chord meaning. `^K` is the
     // conventional ASCII spelling of Ctrl+K when the full hint does not fit.
     let wide_width =
-        wide_label.chars().count() + "[Ctrl+K r] Restore   [Ctrl+K d] Discard".chars().count();
+        wide_label.chars().count() + " [Ctrl+K r] Restore   [Ctrl+K d] Discard".chars().count();
     let medium_width = medium_label.chars().count() + " ^K r Restore  ^K d Discard".chars().count();
     let words_width = short_label.chars().count() + " ^K r Restore  ^K d Discard".chars().count();
     let letters_width = minimal_label.chars().count() + " ^K r/d".chars().count();
@@ -279,6 +283,7 @@ fn render_recovery_capsule(
     let spans = if width >= wide_width {
         vec![
             Span::styled(wide_label, capsule_style),
+            Span::raw(" "),
             Span::styled("[Ctrl+K r] ", theme.style(Token::Info)),
             Span::styled("Restore   ", theme.style(Token::Muted)),
             Span::styled("[Ctrl+K d] ", theme.style(Token::Info)),
@@ -286,7 +291,8 @@ fn render_recovery_capsule(
         ]
     } else if width >= medium_width {
         vec![
-            Span::styled(format!("{medium_label} "), capsule_style),
+            Span::styled(medium_label, capsule_style),
+            Span::raw(" "),
             Span::styled("^K r ", theme.style(Token::Info)),
             Span::styled("Restore  ", theme.style(Token::Muted)),
             Span::styled("^K d ", theme.style(Token::Info)),
@@ -294,7 +300,8 @@ fn render_recovery_capsule(
         ]
     } else if width >= words_width {
         vec![
-            Span::styled(format!("{short_label} "), capsule_style),
+            Span::styled(short_label, capsule_style),
+            Span::raw(" "),
             Span::styled("^K r ", theme.style(Token::Info)),
             Span::styled("Restore  ", theme.style(Token::Muted)),
             Span::styled("^K d ", theme.style(Token::Info)),
@@ -302,7 +309,8 @@ fn render_recovery_capsule(
         ]
     } else if width >= letters_width {
         vec![
-            Span::styled(format!("{minimal_label} "), capsule_style),
+            Span::styled(minimal_label, capsule_style),
+            Span::raw(" "),
             Span::styled("^K r/d", theme.style(Token::Info)),
         ]
     } else {
@@ -311,11 +319,29 @@ fn render_recovery_capsule(
     Line::from(spans).render(area, buf);
 }
 
+fn tab_item_width(label_width: usize, is_active: bool, is_secondary: bool) -> usize {
+    if is_active {
+        label_width + 3
+    } else if is_secondary {
+        label_width + 9
+    } else {
+        label_width + 1
+    }
+}
+
+fn tab_window_width(start: usize, end: usize, total: usize, widths: &[usize]) -> usize {
+    let left = if start > 0 { 2 } else { 0 };
+    let right = if end < total { 2 } else { 0 };
+    left + widths[start..end].iter().sum::<usize>() + right
+}
+
 fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
     if area.width < 10 || area.height == 0 {
         return;
     }
     let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let split_active = model.buffers.split_mode != crate::buffer::EditorSplitMode::None;
     let mut spans = Vec::new();
 
     // Field Industrial status capsule: [BUFFERS: n/16]
@@ -328,20 +354,74 @@ fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &
         theme.style(Token::Muted),
     ));
 
-    if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
+    if split_active {
         spans.push(Span::styled(
             format!("[SPLIT: {}] ", model.buffers.split_mode.label()),
             theme.style(Token::Info).add_modifier(Modifier::BOLD),
         ));
     }
 
-    // Render individual buffer tabs
-    for (idx, b) in model.buffers.buffers.iter().enumerate() {
-        let is_active = idx == model.buffers.active_idx;
-        let is_secondary = model.buffers.split_mode != crate::buffer::EditorSplitMode::None
-            && model.buffers.secondary_idx == Some(idx);
+    let total = model.buffers.buffers.len();
+    if total == 0 {
+        spans.push(Span::styled("[+]", theme.style(Token::Focus)));
+        Line::from(spans).render(area, buf);
+        return;
+    }
 
-        let label = format!("{}: {}", idx + 1, b.display_label());
+    let prefix_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+    let suffix = "[+]";
+    let tab_budget = usize::from(area.width).saturating_sub(prefix_width + display_width(suffix));
+    let active_idx = model.buffers.active_idx.min(total.saturating_sub(1));
+
+    let labels: Vec<String> = model
+        .buffers
+        .buffers
+        .iter()
+        .enumerate()
+        .map(|(idx, b)| format!("{}: {}", idx + 1, sanitize_for_display(&b.display_label())))
+        .collect();
+    let widths: Vec<usize> = labels
+        .iter()
+        .enumerate()
+        .map(|(idx, label)| {
+            let is_active = idx == active_idx;
+            let is_secondary = split_active && model.buffers.secondary_idx == Some(idx);
+            tab_item_width(display_width(label), is_active, is_secondary)
+        })
+        .collect();
+
+    let mut start = active_idx;
+    let mut end = active_idx + 1;
+    loop {
+        let mut expanded = false;
+        if end < total && tab_window_width(start, end + 1, total, &widths) <= tab_budget {
+            end += 1;
+            expanded = true;
+        }
+        if start > 0 && tab_window_width(start - 1, end, total, &widths) <= tab_budget {
+            start -= 1;
+            expanded = true;
+        }
+        if !expanded {
+            break;
+        }
+    }
+
+    if start > 0 {
+        spans.push(Span::styled("< ", theme.style(Token::Info)));
+    }
+
+    let overflow_overhead = if start > 0 { 2 } else { 0 } + if end < total { 2 } else { 0 };
+    for (idx, raw_label) in labels.iter().enumerate().take(end).skip(start) {
+        let is_active = idx == active_idx;
+        let is_secondary = split_active && model.buffers.secondary_idx == Some(idx);
+        let label = if start + 1 == end && tab_window_width(start, end, total, &widths) > tab_budget
+        {
+            let max_label = tab_budget.saturating_sub(overflow_overhead + 3).max(4);
+            truncate_to_width(raw_label, max_label, unicode)
+        } else {
+            raw_label.clone()
+        };
 
         if is_active {
             spans.push(Span::styled("[", theme.style(Token::Focus)));
@@ -362,7 +442,11 @@ fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &
         }
     }
 
-    spans.push(Span::styled("[+] ", theme.style(Token::Focus)));
+    if end < total {
+        spans.push(Span::styled("> ", theme.style(Token::Info)));
+    }
+
+    spans.push(Span::styled(suffix, theme.style(Token::Focus)));
 
     Line::from(spans).render(area, buf);
 }
@@ -376,7 +460,7 @@ fn render_editor_buffer_pane(
     inner: Rect,
     buf: &mut Buffer,
     is_active: bool,
-    split_badge: Option<&str>,
+    split_badge: Option<(usize, &str)>,
 ) {
     if inner.width == 0 || inner.height == 0 {
         return;
@@ -499,9 +583,12 @@ fn render_editor_buffer_pane(
                 .wrap(Wrap { trim: true })
                 .render(inner, buf);
         } else {
-            let label = split_badge.unwrap_or("empty buffer");
+            let badge = split_badge
+                .map(|(idx, title)| format!("[SPLIT {}: {}]", idx + 1, sanitize_for_display(title)))
+                .unwrap_or_else(|| "[SPLIT: empty buffer]".to_owned());
             let line = Line::from(vec![
-                Span::styled(format!("[SPLIT: {label}] "), theme.style(Token::Info)),
+                Span::styled(badge, theme.pill(Token::Info)),
+                Span::raw(" "),
                 Span::styled("(empty buffer)", theme.style(Token::Muted)),
             ]);
             Paragraph::new(vec![line]).render(inner, buf);
@@ -509,14 +596,40 @@ fn render_editor_buffer_pane(
         return;
     }
 
+    let (content_area, single_row_badge) = if let Some((idx, title)) = split_badge {
+        let badge = format!("[SPLIT {}: {}]", idx + 1, sanitize_for_display(title));
+        let badge = truncate_to_width(
+            &badge,
+            usize::from(inner.width),
+            !presentation.glyphs.is_ascii(),
+        );
+        if inner.height >= 2 {
+            Line::from(Span::styled(badge, theme.pill(Token::Info)))
+                .render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+            (
+                Rect::new(
+                    inner.x,
+                    inner.y.saturating_add(1),
+                    inner.width,
+                    inner.height.saturating_sub(1),
+                ),
+                None,
+            )
+        } else {
+            (inner, Some(badge))
+        }
+    } else {
+        (inner, None)
+    };
+
     let lines: Vec<&str> = text.split('\n').collect();
     let gutter = lines.len().to_string().len().max(2);
     let (cursor_line, _) = editor.position();
-    let capacity = usize::from(inner.width).saturating_sub(gutter + 2);
+    let capacity = usize::from(content_area.width).saturating_sub(gutter + 2);
     let viewport = view::viewport(editor, capacity);
     let (_, cursor) = view::caret_line(editor);
 
-    let height = inner.height as usize;
+    let height = content_area.height as usize;
     let offset = cursor_line
         .saturating_sub(1)
         .saturating_sub(height.saturating_sub(1));
@@ -550,7 +663,7 @@ fn render_editor_buffer_pane(
         }
 
         let on_cursor_line = number == cursor_line;
-        let y = inner.y + u16::try_from(number - offset - 1).unwrap_or(0);
+        let y = content_area.y + u16::try_from(number - offset - 1).unwrap_or(0);
         if focused && on_cursor_line {
             active_cursor_y = Some(y);
         }
@@ -585,11 +698,12 @@ fn render_editor_buffer_pane(
             Span::styled(line_marker, theme.style(line_marker_token)),
         ];
 
-        Line::from(std::mem::take(&mut spans)).render(Rect::new(inner.x, y, inner.width, 1), buf);
+        Line::from(std::mem::take(&mut spans))
+            .render(Rect::new(content_area.x, y, content_area.width, 1), buf);
         if capacity == 0 {
             continue;
         }
-        let text_x = inner.x + u16::try_from(gutter + 2).unwrap_or(0);
+        let text_x = content_area.x + u16::try_from(gutter + 2).unwrap_or(0);
         let line = view::LineView::project(
             source,
             viewport.offset,
@@ -634,6 +748,23 @@ fn render_editor_buffer_pane(
         }
     }
 
+    if let Some(badge) = single_row_badge {
+        let badge_w = display_width(&badge);
+        if usize::from(content_area.width) > badge_w + 4 {
+            let badge_x = content_area
+                .x
+                .saturating_add(content_area.width)
+                .saturating_sub(u16::try_from(badge_w).unwrap_or(0));
+            buf.set_stringn(
+                badge_x,
+                content_area.y,
+                &badge,
+                badge_w,
+                theme.pill(Token::Info),
+            );
+        }
+    }
+
     if let Some(cy) = active_cursor_y
         && let Some(stripe_bg) = theme.stripe().bg
     {
@@ -641,7 +772,7 @@ fn render_editor_buffer_pane(
             .surface(Token::SurfacePane)
             .bg
             .unwrap_or(ratatui::style::Color::Reset);
-        for x in inner.x..inner.x.saturating_add(inner.width) {
+        for x in content_area.x..content_area.x.saturating_add(content_area.width) {
             if buf[(x, cy)].bg == surface_pane_bg {
                 buf[(x, cy)].set_bg(stripe_bg);
             }
@@ -659,6 +790,17 @@ pub(crate) fn render_editor(
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Editor;
     let (line, column) = model.editor.position();
+    let has_tab_bar_state = model.buffers.count() > 1
+        || model.buffers.split_mode != crate::buffer::EditorSplitMode::None;
+    let inner_height_est = area.height.saturating_sub(2);
+    let after_recovery_est = if model.recovery_banner.is_some() && inner_height_est > 0 {
+        inner_height_est.saturating_sub(1)
+    } else {
+        inner_height_est
+    };
+    let tab_bar_visible =
+        has_tab_bar_state && after_recovery_est > 2 && area.width.saturating_sub(2) >= 10;
+
     let mut title = format!(
         " {}Editor  line {line}, column {column} ",
         presentation.icon(Icon::Editor)
@@ -666,15 +808,17 @@ pub(crate) fn render_editor(
     if model.splits.zoomed && focused {
         title.insert_str(0, " (zoomed)");
     }
-    if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
-        title.push_str(&format!("[SPLIT: {}] ", model.buffers.split_mode.label()));
-    }
-    if model.buffers.count() > 1 {
-        title.push_str(&format!(
-            "[BUFFERS: {}/{}] ",
-            model.buffers.count(),
-            crate::buffer::MAX_EDITOR_BUFFERS
-        ));
+    if !tab_bar_visible {
+        if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
+            title.push_str(&format!("[SPLIT: {}] ", model.buffers.split_mode.label()));
+        }
+        if model.buffers.count() > 1 {
+            title.push_str(&format!(
+                "[BUFFERS: {}/{}] ",
+                model.buffers.count(),
+                crate::buffer::MAX_EDITOR_BUFFERS
+            ));
+        }
     }
     if model.editor.is_modified() {
         title.push_str("[modified] ");
@@ -770,6 +914,10 @@ pub(crate) fn render_editor(
             );
 
             if let Some(sec_buf) = model.buffers.secondary_buffer() {
+                let sec_badge = model
+                    .buffers
+                    .secondary_idx
+                    .map(|idx| (idx, sec_buf.title.as_str()));
                 render_editor_buffer_pane(
                     &sec_buf.editor,
                     model,
@@ -778,7 +926,7 @@ pub(crate) fn render_editor(
                     right_rect,
                     buf,
                     false,
-                    Some(&sec_buf.title),
+                    sec_badge,
                 );
             }
         }
@@ -794,7 +942,7 @@ pub(crate) fn render_editor(
             let sep_char = if presentation.glyphs.is_ascii() {
                 "-"
             } else {
-                "─"
+                "\u{2500}"
             };
             for x in text_inner.x..text_inner.x.saturating_add(text_inner.width) {
                 buf.set_stringn(x, sep_y, sep_char, 1, theme.style(Token::Muted));
@@ -812,6 +960,10 @@ pub(crate) fn render_editor(
             );
 
             if let Some(sec_buf) = model.buffers.secondary_buffer() {
+                let sec_badge = model
+                    .buffers
+                    .secondary_idx
+                    .map(|idx| (idx, sec_buf.title.as_str()));
                 render_editor_buffer_pane(
                     &sec_buf.editor,
                     model,
@@ -820,7 +972,7 @@ pub(crate) fn render_editor(
                     bottom_rect,
                     buf,
                     false,
-                    Some(&sec_buf.title),
+                    sec_badge,
                 );
             }
         }

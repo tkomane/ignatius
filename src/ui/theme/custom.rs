@@ -16,6 +16,8 @@ pub enum ThemeSelection {
     Light,
     /// High-contrast palette.
     HighContrast,
+    /// Matte anodized slate with signal orange and phosphor amber accents.
+    FieldIndustrial,
     /// The validated custom definition.
     Custom,
     /// Automatic palette selection resolved from terminal background luminance.
@@ -23,13 +25,14 @@ pub enum ThemeSelection {
 }
 
 impl ThemeSelection {
-    /// Identity of one of the three built-in palettes.
+    /// Identity of one of the four built-in palettes.
     #[must_use]
     pub const fn from_builtin(choice: ThemeChoice) -> Self {
         match choice {
             ThemeChoice::Dark => Self::Dark,
             ThemeChoice::Light => Self::Light,
             ThemeChoice::HighContrast => Self::HighContrast,
+            ThemeChoice::FieldIndustrial => Self::FieldIndustrial,
         }
     }
 
@@ -38,6 +41,7 @@ impl ThemeSelection {
             Self::Dark | Self::Auto => Some(ThemeChoice::Dark),
             Self::Light => Some(ThemeChoice::Light),
             Self::HighContrast => Some(ThemeChoice::HighContrast),
+            Self::FieldIndustrial => Some(ThemeChoice::FieldIndustrial),
             Self::Custom => None,
         }
     }
@@ -184,6 +188,7 @@ fn lower_selection(value: Option<&toml::Value>) -> Result<ThemeSelection, ThemeR
         "dark" => Ok(ThemeSelection::Dark),
         "light" => Ok(ThemeSelection::Light),
         "high-contrast" => Ok(ThemeSelection::HighContrast),
+        "field-industrial" => Ok(ThemeSelection::FieldIndustrial),
         "custom" => Ok(ThemeSelection::Custom),
         "auto" => Ok(ThemeSelection::Auto),
         other => Err(ThemeRefusal::new(format!(
@@ -221,6 +226,7 @@ pub fn lower_theme_inputs(
                 "dark" => ThemeChoice::Dark,
                 "light" => ThemeChoice::Light,
                 "high-contrast" => ThemeChoice::HighContrast,
+                "field-industrial" => ThemeChoice::FieldIndustrial,
                 other => {
                     return Err(ThemeRefusal::new(format!(
                         "[theme] extends = \"{}\" is not a built-in theme. Use \"dark\", \"light\" or \"high-contrast\".",
@@ -376,7 +382,10 @@ impl ValidatedThemes {
             ActivePalette::Builtin(ThemeChoice::Light) => {
                 ActivePalette::Builtin(ThemeChoice::HighContrast)
             }
-            ActivePalette::Builtin(ThemeChoice::HighContrast) => match &self.custom {
+            ActivePalette::Builtin(ThemeChoice::HighContrast) => {
+                ActivePalette::Builtin(ThemeChoice::FieldIndustrial)
+            }
+            ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => match &self.custom {
                 Some(custom) => ActivePalette::Custom(custom.clone()),
                 None => ActivePalette::Builtin(ThemeChoice::Dark),
             },

@@ -281,22 +281,91 @@ fn plan_summary_and_detail_render_multi_span_semantic_tokens_preserving_words() 
     assert_eq!(update_buf[(repl_idx, repl_y)].fg, header_fg);
 }
 
+fn col_after(line: &str, needle: &str) -> u16 {
+    let byte = line.find(needle).unwrap() + needle.len();
+    line[..byte].chars().count() as u16
+}
+
 #[test]
 fn lint_findings_overlay_renders_counts_rules_and_keys() {
     let state = crate::app::model::LintFindingsState::new(
-        crate::lint::lint_source(None, "DELETE FROM orders;\nSELECT * FROM orders;").findings,
+        crate::lint::lint_source(None, "DELETE FROM orders;\nSELECT id FROM a, b;").findings,
     );
     let area = Rect::new(0, 0, 100, 30);
     let mut buf = Buffer::empty(area);
-    render_lint_findings(&state, &presentation(ColorDepth::TrueColor), area, &mut buf);
+    let pres = presentation(ColorDepth::TrueColor);
+    render_lint_findings(&state, &pres, area, &mut buf);
     let rendered = buffer_to_string(&buf);
 
     assert!(rendered.contains("SQL LINT - OFFLINE"), "{rendered}");
+    assert!(rendered.contains(&pres.icon(Icon::Warning)), "{rendered}");
     assert!(rendered.contains("[FINDINGS: 2]"), "{rendered}");
     assert!(rendered.contains("[ERRORS: 1]"), "{rendered}");
+    assert!(rendered.contains("[WARNINGS: 1]"), "{rendered}");
     assert!(rendered.contains("delete-without-where"), "{rendered}");
-    assert!(rendered.contains("Enter"), "{rendered}");
-    assert!(rendered.contains("re-lint"), "{rendered}");
+    assert!(rendered.contains("[Enter] Jump"), "{rendered}");
+    assert!(rendered.contains("[r] Re-lint"), "{rendered}");
+    assert!(rendered.contains("[j/k] Move"), "{rendered}");
+    assert!(rendered.contains("[Esc] Close"), "{rendered}");
+
+    // Capsule value colors: total = Focus, errors > 0 = Danger, warnings > 0 = Warning.
+    let capsule_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("[FINDINGS: 2]")
+        })
+        .unwrap();
+    let capsule_line: String = (0..area.width)
+        .map(|x| buf[(x, capsule_y)].symbol())
+        .collect();
+    let find_val_x = col_after(&capsule_line, "[FINDINGS: ");
+    let err_val_x = col_after(&capsule_line, "[ERRORS: ");
+    let warn_val_x = col_after(&capsule_line, "[WARNINGS: ");
+    assert_eq!(
+        buf[(find_val_x, capsule_y)].fg,
+        pres.theme.color(Token::Focus).unwrap()
+    );
+    assert_eq!(
+        buf[(err_val_x, capsule_y)].fg,
+        pres.theme.color(Token::Danger).unwrap()
+    );
+    assert_eq!(
+        buf[(warn_val_x, capsule_y)].fg,
+        pres.theme.color(Token::Warning).unwrap()
+    );
+
+    // Selected row carries full-width Token::Selection background across the modal body.
+    let sel_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("> error")
+        })
+        .unwrap();
+    let sel_bg = pres.theme.style(Token::Selection).bg.unwrap();
+    let modal_width = (area.width.saturating_mul(84) / 100)
+        .max(60)
+        .min(area.width);
+    let modal_left = (area.width - modal_width) / 2;
+    let body_left = modal_left + 1;
+    let body_right = modal_left + modal_width - 1;
+    for x in body_left..body_right {
+        assert_eq!(buf[(x, sel_y)].bg, sel_bg, "x={x} must carry selection bg");
+    }
+
+    // Basic16 uses REVERSED instead of a filled background.
+    let basic_pres = presentation(ColorDepth::Basic16);
+    let mut basic_buf = Buffer::empty(area);
+    render_lint_findings(&state, &basic_pres, area, &mut basic_buf);
+    for x in body_left..body_right {
+        assert!(
+            basic_buf[(x, sel_y)].modifier.contains(Modifier::REVERSED),
+            "x={x} in Basic16 must use REVERSED selection"
+        );
+    }
 }
 
 #[test]
@@ -304,10 +373,55 @@ fn lint_findings_overlay_says_when_the_buffer_is_clean() {
     let state = crate::app::model::LintFindingsState::new(Vec::new());
     let area = Rect::new(0, 0, 100, 30);
     let mut buf = Buffer::empty(area);
-    render_lint_findings(&state, &presentation(ColorDepth::TrueColor), area, &mut buf);
+    let pres = presentation(ColorDepth::TrueColor);
+    render_lint_findings(&state, &pres, area, &mut buf);
     let rendered = buffer_to_string(&buf);
     assert!(rendered.contains("[FINDINGS: 0]"), "{rendered}");
+    assert!(rendered.contains("[ERRORS: 0]"), "{rendered}");
+    assert!(rendered.contains("[WARNINGS: 0]"), "{rendered}");
     assert!(rendered.contains("The buffer is clean."), "{rendered}");
+
+    let capsule_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("[ERRORS: 0]")
+        })
+        .unwrap();
+    let capsule_line: String = (0..area.width)
+        .map(|x| buf[(x, capsule_y)].symbol())
+        .collect();
+    let err_val_x = col_after(&capsule_line, "[ERRORS: ");
+    let warn_val_x = col_after(&capsule_line, "[WARNINGS: ");
+    let success_fg = pres.theme.color(Token::Success).unwrap();
+    assert_eq!(buf[(err_val_x, capsule_y)].fg, success_fg);
+    assert_eq!(buf[(warn_val_x, capsule_y)].fg, success_fg);
+}
+
+#[test]
+fn lint_findings_overlay_truncates_long_messages_without_pushing_selected_row_out() {
+    let findings = (1..=6)
+        .map(|i| crate::lint::Finding {
+            file: None,
+            code: format!("rule-{i}"),
+            severity: crate::lint::LintSeverity::Warning,
+            statement_index: i - 1,
+            line: i,
+            column: 1,
+            message: format!("Finding {i} with a very long diagnostic message that would wrap across multiple terminal lines if wrapping were enabled"),
+            excerpt: "SELECT * FROM very_long_table_name_for_overflow_check".to_owned(),
+        })
+        .collect();
+    let mut state = crate::app::model::LintFindingsState::new(findings);
+    state.selected = 5;
+
+    let area = Rect::new(0, 0, 72, 12);
+    let mut buf = Buffer::empty(area);
+    render_lint_findings(&state, &presentation(ColorDepth::TrueColor), area, &mut buf);
+    let rendered = buffer_to_string(&buf);
+    assert!(rendered.contains("> warning"), "{rendered}");
+    assert!(rendered.contains("rule-6"), "{rendered}");
 }
 
 #[test]
@@ -321,4 +435,56 @@ fn lint_findings_overlay_uses_ascii_words() {
     let rendered = buffer_to_string(&buf);
     assert!(rendered.contains("drop-object"));
     assert!(rendered.contains("DROP removes an object permanently"));
+}
+
+#[test]
+fn snippet_library_renders_ascii_and_unicode_dividers_and_full_width_selection() {
+    let state = crate::app::model::SnippetLibraryState::new();
+    let area = Rect::new(0, 0, 100, 30);
+
+    // Unicode mode: uses box-drawing divider sized to preview width, Unicode line gutter, and Selection bar.
+    let unicode_pres = presentation(ColorDepth::TrueColor);
+    let mut unicode_buf = Buffer::empty(area);
+    render_snippet_library(&state, &unicode_pres, area, &mut unicode_buf);
+    let unicode_text = buffer_to_string(&unicode_buf);
+    assert!(unicode_text.contains("SQL SNIPPET & SCRATCHPAD LIBRARY"));
+    assert!(unicode_text.contains("\u{2500}\u{2500}\u{2500}"));
+    assert!(unicode_text.contains("  1 \u{2502} "));
+
+    let sel_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| unicode_buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("> [")
+        })
+        .unwrap();
+    let sel_row: String = (0..area.width)
+        .map(|x| unicode_buf[(x, sel_y)].symbol())
+        .collect();
+    let list_left = sel_row[..sel_row.find("> [").unwrap()].chars().count() as u16;
+    let sep_byte = sel_row.find('\u{2502}').unwrap();
+    let sep_x = sel_row[..sep_byte].chars().count() as u16;
+    let sel_bg = unicode_pres.theme.style(Token::Selection).bg.unwrap();
+    for x in list_left..sep_x {
+        assert_eq!(
+            unicode_buf[(x, sel_y)].bg,
+            sel_bg,
+            "x={x} in snippet list must carry full-width selection background"
+        );
+    }
+
+    // ASCII mode: uses '-' divider and '|' line gutter without box-drawing characters.
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(area);
+    render_snippet_library(&state, &ascii_pres, area, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(ascii_text.contains("---"), "{ascii_text}");
+    assert!(ascii_text.contains("  1 | "), "{ascii_text}");
+    assert!(!ascii_text.contains('\u{2500}'), "{ascii_text}");
+    assert!(!ascii_text.contains('\u{2502}'), "{ascii_text}");
 }

@@ -14,8 +14,8 @@ the PostgreSQL client you can point at production
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
 [![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-dea584?logo=rust&logoColor=white)](Cargo.toml)
 [![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-336791?logo=postgresql&logoColor=white)](docs/support/compatibility.md)
-[![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-100%25%20(M6)-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
-[![Observability](https://img.shields.io/badge/observability-pg__stat__statements-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
+[![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-M6--M11%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
+[![Observability](https://img.shields.io/badge/observability-M7--M11%20perf%20%26%20ops-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
 [![Design](https://img.shields.io/badge/design-field%20industrial%20%2F%20braun-fbbf24?logo=color&logoColor=black)](docs/design/theme-tokens.md)
 [![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-brightgreen)](docs/security/data-handling.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -27,8 +27,7 @@ the PostgreSQL client you can point at production
   <a href="#quickstart-try-ignatius-in-60-seconds"><strong>Quickstart</strong></a> &bull;
   <a href="#visual-tour"><strong>Visual Tour</strong></a> &bull;
   <a href="#field-industrial-theme--design-philosophy"><strong>Field Industrial Design</strong></a> &bull;
-  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6)</strong></a> &bull;
-  <a href="#milestone-7-enterprise-observability--query-performance-forensics"><strong>Observability (M7)</strong></a> &bull;
+  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M11)</strong></a> &bull;
   <a href="#two-key-chord-menu-ctrlk"><strong>Keymap & Chords</strong></a> &bull;
   <a href="#non-interactive-cli-scripting--streaming-export"><strong>CLI Scripting</strong></a>
 </p>
@@ -51,9 +50,9 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 
 | Pillar | How Ignatius Delivers It |
 | --- | --- |
-| **4-Tier Surface Architecture & Adaptive Themes** | Deep TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, `high-contrast`, user `[theme.tokens]` `custom` overrides, and automatic `OSC 11` terminal background luminance detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
+| **4-Tier Surface Architecture & Adaptive Themes** | Built-in TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, `high-contrast`, and Dieter Rams `field-industrial` palettes, plus `[theme]` `custom` overrides and `OSC 11` background detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
 | **Truthful Results Grid** | `NULL` (`[null]`), empty string (`""`), and literal `"NULL"` (`"NULL"`) are always visually and copy-distinct. JSON/JSONB values, arrays, numeric right-alignment, sort indicators, row numbers, and horizontal/vertical scrolling work out of the box. |
-| **Safety by Construction** | Production profiles (`environment = "prod"` or `read_only = true`) visibly change the header pill (`[PROD]` / `READ-ONLY`), guard destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) behind a confirmation modal, and require an explicit reviewed `UPDATE` modal (`Ctrl+K u` on a cell) with primary-key targeting and `Enter` to execute. |
+| **Safety by Construction** | Production profiles (`environment = "prod"` or `read_only = true`) visibly change the header pill (`[PROD]` / `[READ ONLY]`), guard destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) behind a confirmation modal, and require an explicit reviewed `UPDATE` modal (`Ctrl+K u` on a cell) with primary-key targeting and `Enter` to execute. |
 | **Schema-Aware Editor & Overlays** | Multi-line SQL editor with active `CursorLine` & `CursorLineNr`, 1 MiB bounded bracketed paste, schema-aware `Ctrl+Space` completion popup, 80%x75% Command Palette (`Ctrl+P`) with 40%/60% list-and-SQL preview split, interactive `EXPLAIN` / `EXPLAIN ANALYZE` Plan Explorer (`Ctrl+K l` / `Ctrl+K a`), and layered PostgreSQL diagnostics (`SQLSTATE`, statement line/column, token pinning, likely cause, and next step). |
 | **Non-Interactive CLI & Streaming Export** | Scriptable `ignatius query` with `--format table|csv|tsv|json|jsonl|sql`, `--file`, `--var key=value`, `--tx single|none`, and constant-memory streaming export via `--output <path>`. |
 
@@ -61,7 +60,7 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 
 ## Field Industrial Theme & Design Philosophy
 
-Ignatius is designed under the philosophy that developer tools should feel like precision electronic hardware rather than generic web dashboards. Inspired by the functional elegance of Dieter Rams ("Less, but better") and the tactile industrial aesthetic of Teenage Engineering, every screen element communicates functional state with zero fluff.
+Ignatius is designed under the philosophy that developer tools should feel like precision electronic hardware rather than generic web dashboards. Inspired by the functional elegance of Dieter Rams ("Less, but better") and the tactile industrial aesthetic of Teenage Engineering, the built-in `field-industrial` palette (`[ui] theme = "field-industrial"`) and startup banner apply focused chromatic signaling over a calm default dark/light workbench:
 
 ### Hardware-Inspired Visual Elements
 - **Monospace Status Capsules**: Telemetry is encapsulated in high-density visual pills (`[PROD]`, `[HIT RATIO: 99.4%]`, `[SORT: MEAN]`, `[ISOLATION: READ COMMITTED]`) modeled after laboratory instrumentation displays.
@@ -208,14 +207,14 @@ Ignatius makes quick data edits safe, transparent, and auditable:
 - **Explicit Modal Review**: The modal displays the proposed SQL, new value, and primary key `WHERE` predicates in full. Pressing `Enter` executes the single update, while `Esc` cancels without side-effects.
 - **Production Protection**: The write guard blocks ad-hoc cell updates in production profiles (`environment = "prod"`) and read-only sessions (`--read-only`), preventing accidental mutations.
 
-### Adaptive Light, Dark & High-Contrast Themes
+### Adaptive Dark, Light, High-Contrast & Field Industrial Themes
 
 ![Ignatius Light Theme](docs/assets/screenshots/workbench-light.png)
 
 Built on a 4-tier painted surface system (`Surface`, `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`):
-- **Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, and WCAG AAA `high-contrast`.
+- **Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, and Dieter Rams `field-industrial`.
 - **Runtime Theme Cycling**: Open the Command Palette (`Ctrl+P` -> "Switch theme") or configure `[keys] switch-theme = "..."` to instantly cycle themes without reconnecting or re-running SQL.
-- **Terminal Integration**: Supports automatic background luminance detection via `OSC 11` queries (`ui.theme = "auto"`), and user-defined color overrides in `[theme.tokens]`.
+- **Terminal Integration**: Supports automatic background luminance detection via `OSC 11` queries (`ui.theme = "auto"`), and user-defined color overrides in `[theme]`.
 
 ---
 
@@ -266,13 +265,13 @@ Stops the containers and discards all synthetic playground data.
 Connect directly with standard PostgreSQL connection strings or individual flags:
 ```bash
 # Standard connection URI
-ignatius "postgres://app_user:secret@db.internal:5432/analytics?sslmode=verify-full"
+ignatius connect "postgres://app_user:secret@db.internal:5432/analytics?sslmode=verify-full"
 
 # Individual connection flags
-ignatius --host db.internal --port 5432 --user app_user --dbname analytics --sslmode verify-full
+ignatius connect --host db.internal --port 5432 --username app_user --dbname analytics --sslmode verify-full
 
 # Open in read-only mode (server-enforced)
-ignatius --read-only "postgres://app_user@db.internal:5432/analytics"
+ignatius connect --read-only "postgres://app_user@db.internal:5432/analytics"
 
 # Connect using a named profile
 ignatius connect @production-orders
@@ -431,7 +430,7 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `k` | Open the schema diff and migration designer |
 | `<` | Open the data import wizard |
 | `(` | Open the routine runner and profiler |
-| `>` | Open the maintenance operations and pub-sub monitor |
+| `>` | Open maintenance operations and pub-sub monitor |
 | `%` | Open query performance and stat forensics |
 | `^` | Open index advisor and bloat forensics |
 | `&` | Open transaction, WAL, and checkpointer observability |
@@ -496,21 +495,21 @@ If an export is cancelled or interrupted, Ignatius writes partial progress to a 
 
 ### CLI Management Commands
 ```bash
-# Diagnostics and environment validation
+# Diagnostics and configuration validation
 ignatius doctor
+ignatius config check
 
-# List, inspect, and test named connection profiles
-ignatius profile list
-ignatius profile show production-orders
-ignatius profile test staging-analytics
+# Test a configured profile before opening the client
+ignatius connect --check @production-orders
 
 # Manage local interactive statement history
 ignatius history list
 ignatius history clear --yes
 
-# Manage and run saved queries
-ignatius saved list
-ignatius saved run active_user_counts "$DATABASE_URL"
+# Manage built-in and saved user SQL snippets
+ignatius snippet list
+ignatius snippet show cache-hit-ratio
+ignatius snippet add custom-check --file check.sql
 
 # Inspect, recover, or discard unsaved buffers from an interrupted session
 ignatius recovery status
@@ -604,6 +603,16 @@ ignatius maintain "$DATABASE_URL" progress --format table
 ignatius profile-queries "$DATABASE_URL" --sort mean --limit 20 --format table
 ignatius profile-queries "$DATABASE_URL" --format json -o perf_report.json
 ignatius profile-queries "$DATABASE_URL" --reset
+
+# Index advisor, bloat forensics, WAL stats, and connection pool telemetry
+ignatius index-advisor "$DATABASE_URL" --format table
+ignatius wal-stats "$DATABASE_URL" --format table
+ignatius pool-stats "$DATABASE_URL" --format table
+
+# Data masking rules, cross-database sync, and deterministic synthetic seeding
+ignatius mask-rules "$DATABASE_URL" --schema public
+ignatius sync --source "$STAGING_URL" --target "$DEV_URL" --dry-run
+ignatius seed "$DATABASE_URL" --schema public --rows 25 --format sql
 
 # Shell completion generator
 ignatius completion zsh > ~/.zfunc/_ignatius
@@ -743,10 +752,18 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `044-sql-linter-and-safety-analyzer` [Implemented]: Offline, deterministic SQL safety findings with table/JSON/SARIF reports, CI thresholds, and an interactive findings overlay.
   - `045-migration-runner-and-ledger` [Implemented]: Forward-only, checksummed migrations with a ledger, drift refusal, transactional apply, advisory locking, and a CLI-first reviewed route.
   - `046-schema-documentation-generator` [Implemented]: Deterministic Markdown, JSON and Mermaid data dictionaries generated from catalog metadata.
-- **Milestone 11: Operational Data Lifecycle (`047` - `049`)**:
-  - `047-restore-drills`: Inspect a dump table of contents, restore into a scratch database, compare relation counts, and remove the scratch database unless asked to keep it.
-  - `048-partition-lifecycle`: Report partition sets and generate reviewed create, detach and drop DDL for range-partitioned tables, without executing it.
-  - `049-retention-and-growth-audit`: Bounded catalog audit of relation growth, vacuum debt, sequence headroom and partitioning candidates, without reading rows.
+- **Milestone 11: Operational Data Lifecycle (`047` - `049`) [COMPLETED]**:
+  - `047-restore-drills` [Implemented]: Inspect a dump table of contents, restore into a scratch database, compare relation counts, and remove the scratch database unless asked to keep it.
+  - `048-partition-lifecycle` [Implemented]: Report partition sets and generate reviewed create, detach and drop DDL for range-partitioned tables, without executing it.
+  - `049-retention-and-growth-audit` [Implemented]: Bounded catalog audit of relation growth, vacuum debt, sequence headroom and partitioning candidates, without reading rows.
+- **Milestone 12: Complete `psql` & Cluster/Replication Parity (`050` - `052`) [PLANNED]**:
+  - `050-psql-metacommands-and-watch-mode`: Backslash meta-commands (`\d`, `\dt`, `\d+`, `\du`, `\dn`, `\df`, `\l`, `\x`, `\timing`, `\conninfo`), bounded `\watch` polling, and transaction quit/savepoint guards.
+  - `051-logical-replication-and-slot-manager`: Publications, subscriptions, logical worker lag, and replication slot WAL-retention safety (`ignatius replication` + TUI).
+  - `052-server-config-hba-and-infra-catalog`: `pg_settings`, `pg_hba_file_rules`, `pg_available_extensions`, `pg_tablespace`, and FDW inspection/DDL.
+- **Milestone 13: Live Data CRUD, Plan Diff & Analytics (`053` - `055`) [PLANNED]**:
+  - `053-live-data-browser-and-batch-crud`: Keyset-paginated data browser with reviewed `INSERT`, multi-row `DELETE`, and transactional batch `UPDATE`.
+  - `054-explain-buffers-wal-and-plan-diff`: `EXPLAIN (BUFFERS, WAL, SETTINGS)` telemetry and Plan A/B diffing (`ignatius plan-diff`).
+  - `055-result-analytics-and-rich-exports`: Zero-query column histograms/sparklines plus HTML and streaming Parquet export.
 
 ---
 

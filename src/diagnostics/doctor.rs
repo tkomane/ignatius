@@ -302,7 +302,9 @@ fn theme_auto_check(terminal: &TerminalFacts) -> Check {
         Some(rgb) => {
             let selected = match crate::ui::theme::theme_for_background(rgb) {
                 crate::config::ThemeChoice::Light => "light",
-                _ => "dark",
+                crate::config::ThemeChoice::Dark => "dark",
+                crate::config::ThemeChoice::HighContrast => "high-contrast",
+                crate::config::ThemeChoice::FieldIndustrial => "field-industrial",
             };
             Check::ok(
                 "theme",

@@ -624,3 +624,131 @@ fn no_recovery_capsule_is_rendered_without_a_banner() {
         "no banner means no capsule: {text}"
     );
 }
+
+#[test]
+fn recovery_capsule_uses_warning_capsule_for_unsaved_and_focus_pill_for_open() {
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 100, 1);
+
+    // Unsaved buffers use theme.capsule(Token::Warning) without trailing space bleed.
+    let unsaved_model = recovery_model(2);
+    let mut unsaved_buf = Buffer::empty(area);
+    render_recovery_capsule(&unsaved_model, &pres, area, &mut unsaved_buf);
+    let row = rendered_rows(&unsaved_buf, area).pop().unwrap();
+    let label = "[CRASH RECOVERY: 2 UNSAVED BUFFERS]";
+    let start = row.find(label).unwrap();
+    let after = start + label.len();
+    let warn_style = pres.theme.capsule(Token::Warning);
+    assert_eq!(unsaved_buf[(start as u16, 0)].fg, warn_style.fg.unwrap());
+    assert_eq!(unsaved_buf[(start as u16, 0)].bg, warn_style.bg.unwrap());
+    assert!(
+        unsaved_buf[(start as u16, 0)]
+            .modifier
+            .contains(Modifier::BOLD)
+    );
+    assert_eq!(
+        unsaved_buf[(after as u16, 0)].bg,
+        Color::Reset,
+        "trailing space after capsule must not carry capsule background"
+    );
+
+    // Untouched open buffers use theme.pill(Token::Focus).
+    let mut loaded = crate::buffer::BufferManager::new();
+    loaded.active_buffer_mut().editor.set_text("SELECT 1;");
+    let journal = crate::recovery::RecoveryJournal::from_buffers(&loaded, "loaded", false);
+    let mut open_model = Model::new(100);
+    open_model.recovery_banner = Some(crate::app::model::SessionRecoveryBanner::new(
+        journal,
+        std::path::PathBuf::from("/tmp/ignatius-recovery"),
+    ));
+    let mut open_buf = Buffer::empty(area);
+    render_recovery_capsule(&open_model, &pres, area, &mut open_buf);
+    let open_row = rendered_rows(&open_buf, area).pop().unwrap();
+    let open_start = open_row.find("[CRASH RECOVERY: 1 OPEN BUFFER]").unwrap();
+    let focus_pill = pres.theme.pill(Token::Focus);
+    assert_eq!(open_buf[(open_start as u16, 0)].fg, focus_pill.fg.unwrap());
+    assert_eq!(open_buf[(open_start as u16, 0)].bg, focus_pill.bg.unwrap());
+    assert!(
+        open_buf[(open_start as u16, 0)]
+            .modifier
+            .contains(Modifier::BOLD)
+    );
+}
+
+#[test]
+fn sixteen_tab_narrow_bar_keeps_active_tab_and_new_tab_button_visible() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.editor.set_text("SELECT 1;");
+    model.sync_active_buffer_from_editor();
+    for i in 2..=crate::buffer::MAX_EDITOR_BUFFERS {
+        model
+            .buffers
+            .new_buffer(Some(format!("q-{i}.sql")), Some(format!("SELECT {i};")));
+    }
+    model.buffers.active_idx = crate::buffer::MAX_EDITOR_BUFFERS - 1;
+    model.sync_editor_from_active_buffer();
+
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 56, 20);
+    let mut buf = Buffer::empty(area);
+    render_editor(&model, &Keymap::new(), &pres, area, &mut buf);
+
+    let rows = rendered_rows(&buf, area);
+    let border_row = &rows[0];
+    assert!(
+        !border_row.contains("[BUFFERS: 16/16]"),
+        "border title must not duplicate tab bar [BUFFERS: 16/16]: {border_row}"
+    );
+    let tab_row = rows
+        .iter()
+        .find(|r| r.contains("[BUFFERS: 16/16]"))
+        .expect("tab bar row present");
+    assert!(
+        tab_row.contains("< "),
+        "left overflow marker must appear when active_idx is near the end: {tab_row}"
+    );
+    assert!(
+        tab_row.contains("[16: q-16.sql]"),
+        "active tab near end must remain visible: {tab_row}"
+    );
+    assert!(
+        tab_row.contains("[+]"),
+        "new-tab [+] indicator must remain visible without clipping: {tab_row}"
+    );
+}
+
+#[test]
+fn split_secondary_pane_renders_badge_when_buffer_has_sql_text() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.editor.set_text("SELECT 'alpha';");
+    model.sync_active_buffer_from_editor();
+
+    model
+        .buffers
+        .new_buffer(Some("right.sql".into()), Some("SELECT 'beta';".into()));
+    model.sync_editor_from_active_buffer();
+    model.buffers.secondary_idx = Some(0);
+
+    let pres = presentation(ColorDepth::TrueColor);
+    for split_mode in [
+        crate::buffer::EditorSplitMode::Vertical,
+        crate::buffer::EditorSplitMode::Horizontal,
+    ] {
+        model.buffers.split_mode = split_mode;
+        let area = Rect::new(0, 0, 80, 20);
+        let mut buf = Buffer::empty(area);
+        render_editor(&model, &Keymap::new(), &pres, area, &mut buf);
+
+        let text = rendered_rows(&buf, area).join("\n");
+        assert!(
+            text.contains("[SPLIT 1: buffer-1.sql]"),
+            "non-empty secondary pane in {split_mode:?} split must show split badge:\n{text}"
+        );
+        assert!(
+            text.contains("SELECT 'alpha';"),
+            "non-empty secondary SQL text must remain visible:\n{text}"
+        );
+    }
+}
