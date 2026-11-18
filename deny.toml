@@ -2,6 +2,11 @@
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # chrono was marked unmaintained upstream (no vulnerability; pulled both directly and via tokio-postgres with-chrono-0_4).
+    # Review alongside a future migration to time/jiff once tokio-postgres/postgres-types upgrades cleanly.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained advisory with no safe upgrade path while postgres-types depends on chrono", expires = "2027-03-01" },
+]
 
 [licenses]
 # Permissive licences only. Anything copyleft needs a deliberate decision, not a
