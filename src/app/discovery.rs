@@ -504,6 +504,9 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::SyntheticSeed
         | Action::LogicalReplication
         | Action::ClusterConfig => model.connection.is_ready(),
+        Action::DataBrowser => model.connection.is_ready(),
+        Action::PlanDiff => model.connection.is_ready() && !model.editor.text().trim().is_empty(),
+        Action::ResultAnalytics => model.visible_result().is_some(),
         Action::StopWatch => model.watch.is_some(),
         Action::DeleteForward
         | Action::DeleteWordLeft
@@ -675,7 +678,16 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::DataSync
         | Action::SyntheticSeed
         | Action::LogicalReplication
-        | Action::ClusterConfig => "connect to a database first".to_owned(),
+        | Action::ClusterConfig
+        | Action::DataBrowser => "connect to a database first".to_owned(),
+        Action::PlanDiff => {
+            if !model.connection.is_ready() {
+                "connect to a database first".to_owned()
+            } else {
+                "write at least one SQL query in the editor first".to_owned()
+            }
+        }
+        Action::ResultAnalytics => "run a query that produces rows first".to_owned(),
         Action::StopWatch => "an active psql \\watch loop".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
@@ -746,8 +758,10 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::DataSync
         | Action::SyntheticSeed
         | Action::LogicalReplication
-        | Action::ClusterConfig => "Data",
-        Action::StopWatch => "Results",
+        | Action::ClusterConfig
+        | Action::DataBrowser
+        | Action::PlanDiff => "Data",
+        Action::StopWatch | Action::ResultAnalytics => "Results",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

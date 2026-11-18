@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 40 (053-055, Milestone 13: Live Data CRUD, Plan Diff & Analytics) Delivery - 18 November 2026
+
+Branch `feat/m13-crud-plandiff-analytics` (stacked on Wave 39 `c08230d`) delivers Milestone 13 (`053-055`):
+
+- **Feature `053-live-data-browser-and-batch-crud`**:
+  - Pure keyset-paginated query synthesis and batch transactional CRUD SQL generator in `src/crud/mod.rs`, paired with async `inspect_table_columns_and_pk` and `browse_table_page` in `src/postgres/crud.rs` (`DEFAULT_PAGE_SIZE = 50`, `MAX_PAGE_SIZE = 500`, `MAX_BATCH_MUTATIONS = 200`, `ctid` fallback, strict filter validation, and refusal of keyless/partial-PK `UPDATE`/`DELETE`).
+  - Field Industrial TUI overlay (`Ctrl+K _` / `data-browser`) with tuple cursor navigation (`n`/`p`/`s`/`Enter`/`g`/`d`) and scriptable `ignatius browse` CLI subcommand (`table`, `plain`, `json`, `-o`, `--force`).
+- **Feature `054-explain-buffers-wal-and-plan-diff`**:
+  - Rollback-safe extended `EXPLAIN` runner in `src/postgres/plandiff.rs` (`EXPLAIN (FORMAT JSON, VERBOSE, SETTINGS)` in estimate mode; `BEGIN; EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON); ROLLBACK;` in analyze mode) and leaf-accurate plan parser + A/B diff engine in `src/plandiff/mod.rs`.
+  - Field Industrial 3-tab TUI overlay (`Ctrl+K /` / `plan-diff`) supporting two-statement automatic Baseline/Candidate capture and `[m]` Analyze toggle, plus scriptable `ignatius plan-diff` CLI subcommand.
+- **Feature `055-result-analytics-and-rich-exports`**:
+  - Zero-dependency pure-Rust column profiler (`Welford` mean/stddev, `p50`/`p95`, 8-bucket histograms, ASCII/Unicode sparklines, top values), standalone XSS-escaped Field Industrial HTML5 report generator (`render_html_report`), and streaming Apache Parquet binary writer (`write_parquet` via internal `TCompactProtocol` + RLE framing) in `src/analytics/mod.rs`.
+  - Interactive TUI overlay (`Ctrl+K $` / `result-analytics`), expanded `Ctrl+K e` export formats (`ExportFormat::Html`, `ExportFormat::Parquet`), and scriptable `ignatius analytics` CLI subcommand.
+- **Verification**:
+  - `cargo xtask verify` exited `0` against live plain (`127.0.0.1:55432`) and TLS (`localhost:55433`) `postgres:18.6-alpine` containers: formatting, `clippy --all-targets -- -D warnings`, API documentation, 1632 lib unit tests, `documentation_matches_the_build`, and all integration contracts (including `crud_contract`, `plandiff_contract`, and `analytics_contract`) passed. Unix-socket integration skipped (`IGNATIUS_TEST_PG_SOCKET_URI` unset).
+
 ## Wave 39 (050-052, Milestone 12: Complete psql & Cluster/Replication Parity) Delivery - 18 November 2026
 
 Branch `feat/m12-psql-and-cluster-parity` delivers Milestone 12 (`050-052`) on top of Wave 38 (`b95a089`):

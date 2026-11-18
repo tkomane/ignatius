@@ -488,3 +488,155 @@ fn snippet_library_renders_ascii_and_unicode_dividers_and_full_width_selection()
     assert!(!ascii_text.contains('\u{2500}'), "{ascii_text}");
     assert!(!ascii_text.contains('\u{2502}'), "{ascii_text}");
 }
+
+#[test]
+fn data_browser_overlay_renders_capsules_null_empty_and_ascii_cleanly() {
+    let mut state = crate::app::model::DataBrowserState::new("public", "orders");
+    state.loading = false;
+    state.page = Some(crate::crud::BrowsePage {
+        schema: "public".to_owned(),
+        table: "orders".to_owned(),
+        columns: vec!["id".to_owned(), "note".to_owned(), "tag".to_owned()],
+        pk_columns: vec!["id".to_owned()],
+        rows: vec![
+            vec![Some("1".to_owned()), None, Some(String::new())],
+            vec![
+                Some("2".to_owned()),
+                Some("paid".to_owned()),
+                Some("vip".to_owned()),
+            ],
+        ],
+        page_size: 50,
+        has_more: true,
+        has_prev: false,
+        next_cursor: None,
+        prev_cursor: None,
+    });
+    state.selected_col = 1;
+
+    let area = Rect::new(0, 0, 120, 30);
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut buf = Buffer::empty(area);
+    render_data_browser(&state, &ascii_pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.is_ascii(), "data browser emitted non-ASCII:\n{text}");
+    for expected in [
+        "TABLE: public.orders",
+        "PK: id",
+        "ROWS: 2",
+        "SORT: id ASC",
+        "[MORE]",
+        "[note]",
+        "[null]",
+        "\"\"",
+        "Next/Prev Keyset Page",
+    ] {
+        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+    }
+}
+
+#[test]
+fn plan_diff_overlay_renders_verdict_tabs_and_ascii_cleanly() {
+    let baseline = crate::plandiff::parse_extended_explain_json(
+        "Baseline (A): SELECT * FROM orders",
+        PLAIN_PLAN,
+    )
+    .expect("baseline plan parses");
+    let candidate = crate::plandiff::parse_extended_explain_json(
+        "Candidate (B): SELECT * FROM orders WHERE id = 1",
+        PLAIN_PLAN,
+    )
+    .expect("candidate plan parses");
+
+    let mut state = crate::app::model::PlanDiffState {
+        baseline: Some(baseline),
+        candidate: Some(candidate),
+        ..Default::default()
+    };
+    state.recompute_diff();
+
+    let area = Rect::new(0, 0, 130, 32);
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut buf = Buffer::empty(area);
+    render_plan_diff(&state, &ascii_pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.is_ascii(), "plan diff emitted non-ASCII:\n{text}");
+    for expected in [
+        "[UNCHANGED]",
+        "[1] Summary & Diff",
+        "[2] Nodes",
+        "[3] Buffers / WAL / Settings",
+        "[MODE: ESTIMATE]",
+        "Toggle Analyze+Buffers+WAL",
+    ] {
+        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+    }
+}
+
+#[test]
+fn result_analytics_overlay_switches_sparkline_glyph_tier_and_tabs() {
+    use crate::query::result::ResultSet;
+    use crate::query::value::Cell;
+
+    let mut set = ResultSet::with_column_types(
+        vec!["id".to_owned(), "amount".to_owned()],
+        vec![Some("int4".to_owned()), Some("numeric".to_owned())],
+        100,
+    );
+    set.push(vec![
+        Cell::Text("1".to_owned()),
+        Cell::Text("10".to_owned()),
+    ]);
+    set.push(vec![Cell::Text("2".to_owned()), Cell::Null]);
+    set.push(vec![
+        Cell::Text("3".to_owned()),
+        Cell::Text("30".to_owned()),
+    ]);
+    let mut state = crate::app::model::ResultAnalyticsState::from_result(&set);
+    let area = Rect::new(0, 0, 130, 32);
+
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(area);
+    render_result_analytics(&state, &ascii_pres, area, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(
+        ascii_text.is_ascii(),
+        "result analytics emitted non-ASCII:\n{ascii_text}"
+    );
+    assert!(ascii_text.contains("ROWS: 3/3"), "{ascii_text}");
+    assert!(ascii_text.contains("COLUMNS: 2"), "{ascii_text}");
+    assert!(ascii_text.contains("PROFILE: ZERO-QUERY"), "{ascii_text}");
+    assert!(
+        ascii_text.contains(&state.analytics.columns[0].sparkline_ascii),
+        "{ascii_text}"
+    );
+
+    let unicode_pres = presentation(ColorDepth::TrueColor);
+    let mut unicode_buf = Buffer::empty(area);
+    render_result_analytics(&state, &unicode_pres, area, &mut unicode_buf);
+    let unicode_text = buffer_to_string(&unicode_buf);
+    assert!(
+        unicode_text.contains(&state.analytics.columns[0].sparkline_unicode),
+        "{unicode_text}"
+    );
+
+    state.set_tab(1);
+    let mut detail_buf = Buffer::empty(area);
+    render_result_analytics(&state, &ascii_pres, area, &mut detail_buf);
+    let detail_text = buffer_to_string(&detail_buf);
+    assert!(detail_text.is_ascii(), "{detail_text}");
+    assert!(detail_text.contains("TOP FREQUENT VALUES"), "{detail_text}");
+    assert!(detail_text.contains("HISTOGRAM BUCKETS"), "{detail_text}");
+}

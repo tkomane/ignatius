@@ -21,6 +21,7 @@
 
 pub mod activity;
 pub mod advisor;
+pub mod analytics;
 pub mod app;
 pub mod audit;
 pub mod branding;
@@ -30,6 +31,7 @@ pub mod clipboard;
 pub mod cluster;
 pub mod config;
 pub mod connection;
+pub mod crud;
 pub mod dbdoc;
 pub mod ddl;
 pub mod diagnostics;
@@ -46,6 +48,7 @@ pub mod migration;
 pub mod ops;
 pub mod partition;
 pub mod perf;
+pub mod plandiff;
 pub mod platform;
 pub mod pool;
 pub mod postgres;

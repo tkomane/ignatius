@@ -1306,3 +1306,348 @@ fn filter_replication_and_cluster_reports_respect_sections_and_filters() {
     assert_eq!(filtered.settings[0].name, "work_mem");
     assert!(filtered.extensions.is_empty());
 }
+
+#[test]
+fn browse_plan_diff_and_analytics_commands_parse_flags() {
+    Cli::command().debug_assert();
+
+    let browse = Cli::try_parse_from([
+        "ignatius",
+        "browse",
+        "postgres://localhost/app",
+        "--table",
+        "sales.orders",
+        "--page-size",
+        "25",
+        "--sort",
+        "created_at",
+        "--desc",
+        "--after",
+        "100,200",
+        "--prev",
+        "--filter",
+        "status = 'open'",
+        "--format",
+        "json",
+        "-o",
+        "page.json",
+        "--force",
+    ])
+    .expect("parse browse");
+    let Some(Command::Browse(browse_args)) = browse.command else {
+        panic!("expected browse command");
+    };
+    assert_eq!(
+        browse_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(browse_args.table, "sales.orders");
+    assert_eq!(browse_args.page_size, 25);
+    assert_eq!(browse_args.sort.as_deref(), Some("created_at"));
+    assert!(browse_args.desc);
+    assert_eq!(browse_args.after, vec!["100", "200"]);
+    assert!(browse_args.prev);
+    assert_eq!(browse_args.filter.as_deref(), Some("status = 'open'"));
+    assert_eq!(browse_args.format, CliTelemetryFormat::Json);
+    assert_eq!(
+        browse_args.output.as_deref(),
+        Some(std::path::Path::new("page.json"))
+    );
+    assert!(browse_args.force);
+
+    let browse_repeatable = Cli::try_parse_from([
+        "ignatius", "browse", "-t", "users", "--after", "1", "--after", "2",
+    ])
+    .expect("parse repeatable after");
+    let Some(Command::Browse(browse_rep_args)) = browse_repeatable.command else {
+        panic!("expected browse command");
+    };
+    assert_eq!(browse_rep_args.table, "users");
+    assert_eq!(browse_rep_args.page_size, crate::crud::DEFAULT_PAGE_SIZE);
+    assert_eq!(browse_rep_args.after, vec!["1", "2"]);
+    assert_eq!(browse_rep_args.format, CliTelemetryFormat::Table);
+
+    let plan_diff = Cli::try_parse_from([
+        "ignatius",
+        "plan-diff",
+        "postgres://localhost/app",
+        "-a",
+        "SELECT 1",
+        "-b",
+        "SELECT 2",
+        "--analyze",
+        "--format",
+        "plain",
+        "-o",
+        "diff.txt",
+        "--force",
+    ])
+    .expect("parse plan-diff");
+    let Some(Command::PlanDiff(diff_args)) = plan_diff.command else {
+        panic!("expected plan-diff command");
+    };
+    assert_eq!(
+        diff_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(diff_args.baseline.as_deref(), Some("SELECT 1"));
+    assert_eq!(diff_args.candidate.as_deref(), Some("SELECT 2"));
+    assert!(diff_args.analyze);
+    assert_eq!(diff_args.format, CliTelemetryFormat::Plain);
+    assert_eq!(
+        diff_args.output.as_deref(),
+        Some(std::path::Path::new("diff.txt"))
+    );
+    assert!(diff_args.force);
+
+    let analytics_html = Cli::try_parse_from([
+        "ignatius",
+        "analytics",
+        "postgres://localhost/app",
+        "-c",
+        "SELECT id, amount FROM orders",
+        "--format",
+        "html",
+        "--title",
+        "Orders Profile",
+        "-o",
+        "orders.html",
+        "--force",
+    ])
+    .expect("parse analytics html");
+    let Some(Command::Analytics(html_args)) = analytics_html.command else {
+        panic!("expected analytics command");
+    };
+    assert_eq!(
+        html_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(
+        html_args.command.as_deref(),
+        Some("SELECT id, amount FROM orders")
+    );
+    assert_eq!(html_args.format, CliAnalyticsFormat::Html);
+    assert_eq!(html_args.title, "Orders Profile");
+    assert_eq!(
+        html_args.output.as_deref(),
+        Some(std::path::Path::new("orders.html"))
+    );
+    assert!(html_args.force);
+
+    let analytics_parquet = Cli::try_parse_from([
+        "ignatius",
+        "analytics",
+        "-f",
+        "query.sql",
+        "--format",
+        "parquet",
+        "-o",
+        "orders.parquet",
+    ])
+    .expect("parse analytics parquet");
+    let Some(Command::Analytics(parquet_args)) = analytics_parquet.command else {
+        panic!("expected analytics command");
+    };
+    assert_eq!(
+        parquet_args.file.as_deref(),
+        Some(std::path::Path::new("query.sql"))
+    );
+    assert_eq!(parquet_args.format, CliAnalyticsFormat::Parquet);
+    assert_eq!(parquet_args.title, "Ignatius Result Analytics");
+}
+
+#[test]
+fn browse_table_name_and_m13_cli_helpers_validate_and_render() {
+    assert_eq!(
+        parse_browse_table_name("users").unwrap(),
+        ("public".to_owned(), "users".to_owned())
+    );
+    assert_eq!(
+        parse_browse_table_name("sales.orders").unwrap(),
+        ("sales".to_owned(), "orders".to_owned())
+    );
+    assert_eq!(
+        parse_browse_table_name("\"MySchema\".\"My.Table\"").unwrap(),
+        ("MySchema".to_owned(), "My.Table".to_owned())
+    );
+    assert_eq!(
+        parse_browse_table_name("\"my.table\"").unwrap(),
+        ("public".to_owned(), "my.table".to_owned())
+    );
+    for invalid in ["", "   ", "a.b.c", ".users", "public.", "\"unterminated"] {
+        let diag = parse_browse_table_name(invalid).expect_err("invalid table name");
+        assert_eq!(diag.kind, DiagnosticKind::Usage);
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.sql");
+    let cand_path = dir.path().join("cand.sql");
+    std::fs::write(&base_path, "SELECT 1").unwrap();
+    std::fs::write(&cand_path, "SELECT 2").unwrap();
+
+    let empty_diff = PlanDiffArgs {
+        target: None,
+        baseline: None,
+        baseline_file: None,
+        candidate: None,
+        candidate_file: None,
+        analyze: false,
+        format: CliTelemetryFormat::Table,
+        output: None,
+        force: false,
+        connection: ConnectionOptions::default(),
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&empty_diff).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_base = PlanDiffArgs {
+        baseline: Some("SELECT 1".to_owned()),
+        baseline_file: Some(base_path.clone()),
+        ..empty_diff.clone()
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&both_base).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_cand = PlanDiffArgs {
+        baseline: Some("SELECT 1".to_owned()),
+        candidate: Some("SELECT 2".to_owned()),
+        candidate_file: Some(cand_path.clone()),
+        ..empty_diff.clone()
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&both_cand).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let file_inputs = PlanDiffArgs {
+        baseline_file: Some(base_path.clone()),
+        candidate_file: Some(cand_path),
+        ..empty_diff
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&file_inputs).unwrap(),
+        ("SELECT 1".to_owned(), Some("SELECT 2".to_owned()))
+    );
+
+    let mut settings = std::collections::BTreeMap::new();
+    settings.insert("work_mem".to_owned(), "64MB".to_owned());
+    let snapshot = crate::plandiff::PlanSnapshot {
+        label: "Baseline (A)".to_owned(),
+        analyzed: true,
+        planning_time_ms: Some(0.25),
+        execution_time_ms: Some(1.5),
+        total_cost: 12.5,
+        startup_cost: 0.0,
+        plan_rows: 10,
+        actual_rows: Some(10),
+        shared_hit_blocks: 8,
+        shared_read_blocks: 2,
+        shared_dirtied_blocks: 0,
+        shared_written_blocks: 0,
+        local_hit_blocks: 0,
+        local_read_blocks: 0,
+        temp_read_blocks: 0,
+        temp_written_blocks: 0,
+        wal_records: 3,
+        wal_fpi: 1,
+        wal_bytes: 256,
+        settings,
+        nodes: vec![crate::plandiff::PlanNodeSummary {
+            path: "0".to_owned(),
+            depth: 0,
+            node_type: "Seq Scan".to_owned(),
+            relation_name: Some("orders".to_owned()),
+            index_name: None,
+            startup_cost: 0.0,
+            total_cost: 12.5,
+            plan_rows: 10,
+            actual_rows: Some(10),
+            actual_total_time_ms: Some(1.2),
+            shared_hit_blocks: 8,
+            shared_read_blocks: 2,
+            temp_written_blocks: 0,
+            wal_bytes: 256,
+        }],
+        buffer_hit_ratio_pct: Some(80.0),
+    };
+    let snap_table = render_plan_snapshot_table(&snapshot);
+    assert!(snap_table.contains("EXTENDED EXPLAIN SNAPSHOT: Baseline (A)"));
+    assert!(snap_table.contains("work_mem = 64MB"));
+    assert!(snap_table.contains("Seq Scan"));
+    let snap_plain = render_plan_snapshot_plain(&snapshot);
+    assert!(snap_plain.contains("wal: records=3 fpi=1 bytes=256"));
+    assert!(snap_plain.contains("setting: work_mem=64MB"));
+
+    assert_eq!(
+        resolve_analytics_sql(None, None).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+    assert_eq!(
+        resolve_analytics_sql(Some("SELECT 1"), Some(&base_path))
+            .unwrap_err()
+            .kind,
+        DiagnosticKind::Usage
+    );
+    assert_eq!(
+        resolve_analytics_sql(None, Some(&base_path)).unwrap(),
+        "SELECT 1"
+    );
+
+    let no_rows_exec = crate::query::result::Execution {
+        job: crate::query::result::JobId(1),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: None,
+            rows_affected: Some(1),
+            elapsed: std::time::Duration::from_millis(1),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::from_millis(1),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: crate::query::result::NoticeReport::default(),
+    };
+    assert_eq!(
+        extract_analytics_result_set(no_rows_exec).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let mut set = crate::query::result::ResultSet::new(vec!["id".to_owned()], 10);
+    set.push(vec![crate::query::value::Cell::Text("42".to_owned())]);
+    let parquet_bytes = crate::analytics::export_parquet_bytes(&set).unwrap();
+    let parquet_path = dir.path().join("out.parquet");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        write_binary_output(
+            &parquet_bytes,
+            Some(&parquet_path),
+            false,
+            "Parquet analytics export",
+            &mut out,
+            &mut err
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    assert!(out.is_empty());
+    assert_eq!(std::fs::read(&parquet_path).unwrap(), parquet_bytes);
+    let mut stdout_bin = Vec::new();
+    assert_eq!(
+        write_binary_output(
+            &parquet_bytes,
+            None,
+            false,
+            "Parquet analytics export",
+            &mut stdout_bin,
+            &mut err
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    assert_eq!(stdout_bin, parquet_bytes);
+}

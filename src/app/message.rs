@@ -169,6 +169,21 @@ pub enum Action {
     ClusterConfig,
     /// Stop an active psql `\watch` periodic polling loop.
     StopWatch,
+    /// Open the keyset-paginated live data browser and batch CRUD overlay.
+    DataBrowser,
+    /// Open extended EXPLAIN (BUFFERS, WAL, SETTINGS) and A/B plan diff overlay.
+    PlanDiff,
+    /// Open the zero-query result analytics profiler and HTML/Parquet export overlay.
+    ResultAnalytics,
+}
+
+/// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanDiffTarget {
+    /// Baseline query plan (Plan A).
+    Baseline,
+    /// Candidate query plan (Plan B).
+    Candidate,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -292,6 +307,9 @@ impl Action {
             Self::LogicalReplication,
             Self::ClusterConfig,
             Self::StopWatch,
+            Self::DataBrowser,
+            Self::PlanDiff,
+            Self::ResultAnalytics,
         ]
     }
 }
@@ -750,6 +768,22 @@ pub enum Message {
     },
     /// Timer tick for an active `\watch` polling loop.
     WatchTick,
+    /// Keyset-paginated data browser page loaded from PostgreSQL.
+    BrowsePageLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Browse result or error.
+        result: Box<Result<crate::postgres::crud::BrowsePageResult, Diagnostic>>,
+    },
+    /// Extended EXPLAIN snapshot loaded for Baseline (A) or Candidate (B).
+    ExtendedExplainLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Plan slot (`Baseline` or `Candidate`).
+        target: PlanDiffTarget,
+        /// Captured snapshot or error.
+        result: Box<Result<crate::plandiff::PlanSnapshot, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -1091,5 +1125,23 @@ pub enum Effect {
     LoadClusterConfig {
         /// Identity used to reject a late response.
         request: u64,
+    },
+    /// Load one keyset-paginated data browser page for a table.
+    LoadBrowsePage {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Keyset browse parameters.
+        browse: crate::crud::BrowseRequest,
+    },
+    /// Capture an extended `EXPLAIN (FORMAT JSON, ...)` plan snapshot.
+    LoadExtendedExplain {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Plan slot (`Baseline` or `Candidate`).
+        target: PlanDiffTarget,
+        /// SQL statement to explain.
+        sql: String,
+        /// Whether to execute `ANALYZE, BUFFERS, WAL` inside a rollback transaction.
+        analyze: bool,
     },
 }

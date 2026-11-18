@@ -1376,6 +1376,30 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::LoadBrowsePage { request, browse } => {
+                    spawn_load_browse_page(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        browse,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadExtendedExplain {
+                    request,
+                    target,
+                    sql,
+                    analyze,
+                } => {
+                    spawn_load_extended_explain(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        (request, target, sql, analyze),
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::TestHypoIndex { request, query, create_index_sql } => {
                     spawn_test_hypo_index(
                         tx.clone(),
@@ -2526,33 +2550,62 @@ fn export_visible_rows(
         false,
         "choose another name, or move the file that is there",
     )?;
-    let execution = crate::query::result::Execution {
-        notice_report: crate::query::result::NoticeReport::default(),
-        job: crate::query::result::JobId(0),
-        statements: vec![crate::query::result::StatementResult {
-            result_set: Some(visible),
-            rows_affected: None,
-            elapsed: Duration::ZERO,
-            notices: Vec::new(),
-        }],
-        status: crate::query::result::ExecutionStatus::Succeeded,
-        elapsed: Duration::ZERO,
-        error: None,
-        transaction: crate::query::result::TransactionState::Autocommit,
-    };
-    let options = crate::cli::output::OutputOptions {
-        format: match format {
-            crate::app::model::ExportFormat::Csv => crate::cli::output::Format::Csv,
-            crate::app::model::ExportFormat::Tsv => crate::cli::output::Format::Tsv,
-            crate::app::model::ExportFormat::Json => crate::cli::output::Format::Json,
-            crate::app::model::ExportFormat::Ndjson => crate::cli::output::Format::Ndjson,
-            crate::app::model::ExportFormat::Markdown => crate::cli::output::Format::Markdown,
-        },
-        unicode: false,
-        ..crate::cli::output::OutputOptions::default()
-    };
-    crate::cli::output::write_execution(export.writer(), &execution, &options)
-        .map_err(|err| write_failure(path, &err))?;
+    match format {
+        crate::app::model::ExportFormat::Html => {
+            let analytics = crate::analytics::profile_result_set(&visible);
+            let html = crate::analytics::render_html_report(
+                &visible,
+                "Ignatius Result Report",
+                &analytics,
+            );
+            use std::io::Write as _;
+            export
+                .writer()
+                .write_all(html.as_bytes())
+                .map_err(|err| write_failure(path, &err))?;
+        }
+        crate::app::model::ExportFormat::Parquet => {
+            crate::analytics::write_parquet(&visible, export.writer())
+                .map_err(|err| write_failure(path, &err))?;
+        }
+        crate::app::model::ExportFormat::Csv
+        | crate::app::model::ExportFormat::Tsv
+        | crate::app::model::ExportFormat::Json
+        | crate::app::model::ExportFormat::Ndjson
+        | crate::app::model::ExportFormat::Markdown => {
+            let execution = crate::query::result::Execution {
+                notice_report: crate::query::result::NoticeReport::default(),
+                job: crate::query::result::JobId(0),
+                statements: vec![crate::query::result::StatementResult {
+                    result_set: Some(visible),
+                    rows_affected: None,
+                    elapsed: Duration::ZERO,
+                    notices: Vec::new(),
+                }],
+                status: crate::query::result::ExecutionStatus::Succeeded,
+                elapsed: Duration::ZERO,
+                error: None,
+                transaction: crate::query::result::TransactionState::Autocommit,
+            };
+            let options = crate::cli::output::OutputOptions {
+                format: match format {
+                    crate::app::model::ExportFormat::Csv => crate::cli::output::Format::Csv,
+                    crate::app::model::ExportFormat::Tsv => crate::cli::output::Format::Tsv,
+                    crate::app::model::ExportFormat::Json => crate::cli::output::Format::Json,
+                    crate::app::model::ExportFormat::Ndjson => crate::cli::output::Format::Ndjson,
+                    crate::app::model::ExportFormat::Markdown => {
+                        crate::cli::output::Format::Markdown
+                    }
+                    crate::app::model::ExportFormat::Html
+                    | crate::app::model::ExportFormat::Parquet => unreachable!(),
+                },
+                unicode: false,
+                ..crate::cli::output::OutputOptions::default()
+            };
+            crate::cli::output::write_execution(export.writer(), &execution, &options)
+                .map_err(|err| write_failure(path, &err))?;
+        }
+    }
     for _ in 0..visible_row_count {
         export.count_row();
     }
@@ -3307,6 +3360,73 @@ fn spawn_load_cluster_config(
             request_generation,
             Message::ClusterConfigLoaded {
                 request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_browse_page(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    browse: crate::crud::BrowseRequest,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.browse_table_page(&browse).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::BrowsePageLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_extended_explain(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    spec: (u64, crate::app::message::PlanDiffTarget, String, bool),
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    let (request, target, sql, analyze) = spec;
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let prefix = match target {
+            crate::app::message::PlanDiffTarget::Baseline => "Baseline (A)",
+            crate::app::message::PlanDiffTarget::Candidate => "Candidate (B)",
+        };
+        let preview = crate::plandiff::bound_label(&sql);
+        let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
+        let result = session.explain_extended(&sql, analyze, &label).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ExtendedExplainLoaded {
+                request,
+                target,
                 result: Box::new(result),
             },
         ));

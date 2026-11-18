@@ -351,6 +351,18 @@ pub enum Command {
     /// Inspect server configuration, HBA rules, extensions, tablespaces, and FDWs.
     #[command(name = "cluster")]
     Cluster(ClusterArgs),
+
+    /// Browse table rows with bounded keyset pagination.
+    #[command(name = "browse")]
+    Browse(BrowseArgs),
+
+    /// Capture extended EXPLAIN (BUFFERS, WAL, SETTINGS) telemetry or diff two query plans.
+    #[command(name = "plan-diff")]
+    PlanDiff(PlanDiffArgs),
+
+    /// Profile a query result set or export it to HTML or Apache Parquet.
+    #[command(name = "analytics")]
+    Analytics(AnalyticsArgs),
 }
 
 /// Arguments for the audit command.
@@ -960,6 +972,9 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Recovery(args)) => run_recovery(args, &paths, out, err),
         Some(Command::Replication(args)) => run_replication(args, &paths, out, err),
         Some(Command::Cluster(args)) => run_cluster(args, &paths, out, err),
+        Some(Command::Browse(args)) => run_browse(args, &paths, out, err),
+        Some(Command::PlanDiff(args)) => run_plan_diff(args, &paths, out, err),
+        Some(Command::Analytics(args)) => run_analytics(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -6456,6 +6471,28 @@ where
     F: FnOnce(crate::postgres::session::Session) -> Fut,
     Fut: std::future::Future<Output = Result<T, Diagnostic>>,
 {
+    connect_and_run_with_config(
+        target_arg,
+        connection,
+        output,
+        force,
+        paths,
+        |session, _config| task(session),
+    )
+}
+
+fn connect_and_run_with_config<T, F, Fut>(
+    target_arg: Option<&str>,
+    connection: &ConnectionOptions,
+    output: Option<&std::path::Path>,
+    force: bool,
+    paths: &Paths,
+    task: F,
+) -> Result<T, Diagnostic>
+where
+    F: FnOnce(crate::postgres::session::Session, config::Config) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
+{
     if let Some(destination) = output
         && destination.exists()
         && !force
@@ -6485,7 +6522,7 @@ where
         let session = crate::postgres::session::connect_reported(&target, timeout)
             .await
             .value?;
-        task(session).await
+        task(session, loaded.config).await
     })
 }
 
@@ -6683,6 +6720,749 @@ fn run_cluster(
         out,
         err,
     )
+}
+
+/// Arguments for the `browse` command.
+#[derive(Debug, Args, Clone)]
+pub struct BrowseArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Target table name in `table` or `schema.table` form (defaults to `public`).
+    #[arg(short = 't', long, value_name = "SCHEMA.TABLE")]
+    pub table: String,
+    /// Maximum rows per page (clamped to 1..=500).
+    #[arg(long, value_name = "N", default_value_t = crate::crud::DEFAULT_PAGE_SIZE)]
+    pub page_size: usize,
+    /// Optional primary sort column applied ahead of primary-key tie-breakers.
+    #[arg(long, value_name = "COLUMN")]
+    pub sort: Option<String>,
+    /// Sort in descending order instead of ascending.
+    #[arg(long)]
+    pub desc: bool,
+    /// Keyset cursor primary-key value(s) to continue from (repeatable or comma-separated).
+    #[arg(long, value_name = "VALUE", value_delimiter = ',')]
+    pub after: Vec<String>,
+    /// Step backward from the keyset cursor (`PageDirection::Prev`).
+    #[arg(long)]
+    pub prev: bool,
+    /// Optional validated SQL `WHERE` filter predicate.
+    #[arg(long, value_name = "SQL_PREDICATE")]
+    pub filter: Option<String>,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn parse_browse_table_name(raw: &str) -> Result<(String, String), Diagnostic> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "table name cannot be empty",
+            "parsing browse table name",
+        )
+        .next_action("pass --table <table> or --table <schema>.<table>"));
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut characters = trimmed.chars().peekable();
+    while let Some(character) = characters.next() {
+        if quoted {
+            match character {
+                '"' if characters.peek() == Some(&'"') => {
+                    current.push('"');
+                    characters.next();
+                }
+                '"' => quoted = false,
+                other => current.push(other),
+            }
+        } else if character == '"' {
+            quoted = true;
+        } else if character == '.' {
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(character);
+        }
+    }
+    if quoted {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("unterminated quoted identifier in {raw}"),
+            "parsing browse table name",
+        )
+        .next_action("close the quoted identifier"));
+    }
+    parts.push(current);
+
+    match parts.as_slice() {
+        [table] if !table.is_empty() => Ok(("public".to_owned(), table.clone())),
+        [schema, table] if !schema.is_empty() && !table.is_empty() => {
+            Ok((schema.clone(), table.clone()))
+        }
+        _ => Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("--table must be <table> or <schema>.<table>: {raw}"),
+            "parsing browse table name",
+        )
+        .next_action("pass a table name such as users or public.users")),
+    }
+}
+
+fn run_browse(
+    args: &BrowseArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let (schema, table) = parse_browse_table_name(&args.table)?;
+    let sort_order = if args.desc {
+        crate::crud::SortOrder::Desc
+    } else {
+        crate::crud::SortOrder::Asc
+    };
+    let direction = if args.prev {
+        crate::crud::PageDirection::Prev
+    } else {
+        crate::crud::PageDirection::Next
+    };
+
+    let result = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let mut req = crate::crud::BrowseRequest::new(&schema, &table);
+            req.sort_column = args.sort.clone();
+            req.sort_order = sort_order;
+            req.page_size = args.page_size;
+            req.direction = direction;
+            req.filter_predicate = args.filter.clone();
+
+            if !args.after.is_empty() {
+                let mut probe = crate::crud::BrowseRequest::new(&schema, &table);
+                probe.page_size = 1;
+                let probe_res = session.browse_table_page(&probe).await?;
+                req.columns = probe_res.page.columns;
+                req.pk_columns = probe_res.page.pk_columns.clone();
+                req.cursor = Some(crate::crud::KeysetCursor {
+                    pk_columns: probe_res.page.pk_columns,
+                    pk_values: args.after.iter().cloned().map(Some).collect(),
+                });
+            }
+
+            let res = session.browse_table_page(&req).await;
+            drop(session);
+            res
+        },
+    )?;
+
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => result.page.render_table(),
+        CliTelemetryFormat::Plain => result.page.render_plain(),
+        CliTelemetryFormat::Json => result.page.render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Browse page",
+        out,
+        err,
+    )
+}
+
+/// Arguments for the `plan-diff` command.
+#[derive(Debug, Args, Clone)]
+pub struct PlanDiffArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Baseline SQL statement (A).
+    #[arg(short = 'a', long, value_name = "SQL")]
+    pub baseline: Option<String>,
+    /// Read baseline SQL statement (A) from a file. Use `-` for standard input.
+    #[arg(long, value_name = "PATH")]
+    pub baseline_file: Option<PathBuf>,
+    /// Optional candidate SQL statement (B) to compare against the baseline.
+    #[arg(short = 'b', long, value_name = "SQL")]
+    pub candidate: Option<String>,
+    /// Optional path to read candidate SQL statement (B) from. Use `-` for standard input.
+    #[arg(long, value_name = "PATH")]
+    pub candidate_file: Option<PathBuf>,
+    /// Run `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON)` inside `BEGIN ... ROLLBACK`.
+    #[arg(long)]
+    pub analyze: bool,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn read_non_empty_sql_input(
+    inline: Option<&str>,
+    file: Option<&Path>,
+    role: &str,
+    inline_flag: &str,
+    file_flag: &str,
+    required: bool,
+) -> Result<Option<String>, Diagnostic> {
+    let sql = match (inline, file) {
+        (Some(_), Some(_)) => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("cannot specify both {inline_flag} and {file_flag}"),
+                format!("reading {role} SQL"),
+            )
+            .next_action(format!(
+                "pass either {inline_flag} or {file_flag}, not both"
+            )));
+        }
+        (None, None) => {
+            if required {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("{role} SQL is required"),
+                    format!("reading {role} SQL"),
+                )
+                .next_action(format!("pass {inline_flag} <SQL> or {file_flag} <PATH>")));
+            }
+            return Ok(None);
+        }
+        (Some(sql), None) => sql.to_owned(),
+        (None, Some(path)) => read_sql(None, Some(path))?,
+    };
+
+    if sql.trim().is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{role} SQL cannot be empty"),
+            format!("reading {role} SQL"),
+        )
+        .next_action(format!(
+            "provide a non-empty SQL statement via {inline_flag} or {file_flag}"
+        )));
+    }
+
+    Ok(Some(sql))
+}
+
+fn resolve_plan_diff_inputs(args: &PlanDiffArgs) -> Result<(String, Option<String>), Diagnostic> {
+    let baseline = read_non_empty_sql_input(
+        args.baseline.as_deref(),
+        args.baseline_file.as_deref(),
+        "baseline",
+        "-a/--baseline",
+        "--baseline-file",
+        true,
+    )?
+    .ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            "baseline SQL is required",
+            "reading baseline SQL",
+        )
+    })?;
+
+    let candidate = read_non_empty_sql_input(
+        args.candidate.as_deref(),
+        args.candidate_file.as_deref(),
+        "candidate",
+        "-b/--candidate",
+        "--candidate-file",
+        false,
+    )?;
+
+    Ok((baseline, candidate))
+}
+
+enum PlanDiffOutput {
+    Single(Box<crate::plandiff::PlanSnapshot>),
+    Diff(Box<crate::plandiff::PlanDiffReport>),
+}
+
+fn format_opt_ms(value: Option<f64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |ms| format!("{ms:.3}"))
+}
+
+fn format_opt_pct(value: Option<f64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |pct| format!("{pct:.1}%"))
+}
+
+fn render_plan_snapshot_table(snapshot: &crate::plandiff::PlanSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "EXTENDED EXPLAIN SNAPSHOT: {}", snapshot.label);
+    let _ = writeln!(
+        out,
+        "Mode: {}",
+        if snapshot.analyzed {
+            "EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)"
+        } else {
+            "EXPLAIN (ESTIMATE, VERBOSE, SETTINGS)"
+        }
+    );
+    out.push('\n');
+
+    let _ = writeln!(out, "{:<24}  {:>18}", "METRIC", "VALUE");
+    let _ = writeln!(out, "{}", "-".repeat(44));
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Analyzed",
+        if snapshot.analyzed { "yes" } else { "no" }
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Planning Time (ms)",
+        format_opt_ms(snapshot.planning_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Execution Time (ms)",
+        format_opt_ms(snapshot.execution_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18.2}",
+        "Startup Cost", snapshot.startup_cost
+    );
+    let _ = writeln!(out, "{:<24}  {:>18.2}", "Total Cost", snapshot.total_cost);
+    let _ = writeln!(out, "{:<24}  {:>18}", "Plan Rows", snapshot.plan_rows);
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Actual Rows",
+        snapshot
+            .actual_rows
+            .map_or_else(|| "-".to_owned(), |v| v.to_string())
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Hit Blocks", snapshot.shared_hit_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Read Blocks", snapshot.shared_read_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Dirtied Blocks", snapshot.shared_dirtied_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Written Blocks", snapshot.shared_written_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Local Hit Blocks", snapshot.local_hit_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Local Read Blocks", snapshot.local_read_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Temp Read Blocks", snapshot.temp_read_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Temp Written Blocks", snapshot.temp_written_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Buffer Hit Ratio",
+        format_opt_pct(snapshot.buffer_hit_ratio_pct)
+    );
+    let _ = writeln!(out, "{:<24}  {:>18}", "WAL Records", snapshot.wal_records);
+    let _ = writeln!(out, "{:<24}  {:>18}", "WAL FPI", snapshot.wal_fpi);
+    let _ = writeln!(out, "{:<24}  {:>18}", "WAL Bytes", snapshot.wal_bytes);
+
+    if !snapshot.settings.is_empty() {
+        out.push_str("\nNON-DEFAULT PLANNER SETTINGS\n");
+        for (k, v) in &snapshot.settings {
+            let _ = writeln!(out, "  {k} = {v}");
+        }
+    }
+
+    if !snapshot.nodes.is_empty() {
+        out.push_str("\nPLAN NODES\n");
+        let _ = writeln!(
+            out,
+            "{:<8}  {:<24}  {:<18}  {:>10}  {:>10}  {:>10}  {:>10}",
+            "PATH", "NODE", "TARGET", "COST", "ROWS", "TIME(ms)", "WAL(B)"
+        );
+        let _ = writeln!(out, "{}", "-".repeat(100));
+        for node in &snapshot.nodes {
+            let target = node
+                .index_name
+                .as_deref()
+                .or(node.relation_name.as_deref())
+                .unwrap_or("-");
+            let rows = node
+                .actual_rows
+                .map_or_else(|| node.plan_rows.to_string(), |r| r.to_string());
+            let _ = writeln!(
+                out,
+                "{:<8}  {:<24}  {:<18}  {:>10.2}  {:>10}  {:>10}  {:>10}",
+                node.path,
+                node.node_type,
+                target,
+                node.total_cost,
+                rows,
+                format_opt_ms(node.actual_total_time_ms),
+                node.wal_bytes
+            );
+        }
+    }
+
+    out
+}
+
+fn render_plan_snapshot_plain(snapshot: &crate::plandiff::PlanSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "label={}", snapshot.label);
+    let _ = writeln!(out, "analyzed={}", snapshot.analyzed);
+    let _ = writeln!(
+        out,
+        "planning_time_ms={}",
+        format_opt_ms(snapshot.planning_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "execution_time_ms={}",
+        format_opt_ms(snapshot.execution_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "cost: startup={:.2} total={:.2} plan_rows={} actual_rows={}",
+        snapshot.startup_cost,
+        snapshot.total_cost,
+        snapshot.plan_rows,
+        snapshot
+            .actual_rows
+            .map_or_else(|| "-".to_owned(), |v| v.to_string())
+    );
+    let _ = writeln!(
+        out,
+        "buffers: shared_hit={} shared_read={} shared_dirtied={} shared_written={} local_hit={} local_read={} temp_read={} temp_written={} hit_ratio={}",
+        snapshot.shared_hit_blocks,
+        snapshot.shared_read_blocks,
+        snapshot.shared_dirtied_blocks,
+        snapshot.shared_written_blocks,
+        snapshot.local_hit_blocks,
+        snapshot.local_read_blocks,
+        snapshot.temp_read_blocks,
+        snapshot.temp_written_blocks,
+        format_opt_pct(snapshot.buffer_hit_ratio_pct)
+    );
+    let _ = writeln!(
+        out,
+        "wal: records={} fpi={} bytes={}",
+        snapshot.wal_records, snapshot.wal_fpi, snapshot.wal_bytes
+    );
+    for (k, v) in &snapshot.settings {
+        let _ = writeln!(out, "setting: {k}={v}");
+    }
+    for node in &snapshot.nodes {
+        let target = node
+            .index_name
+            .as_deref()
+            .or(node.relation_name.as_deref())
+            .unwrap_or("-");
+        let _ = writeln!(
+            out,
+            "node[{}]: type={} target={} cost={:.2} plan_rows={} actual_rows={} time_ms={} shared_hit={} shared_read={} temp_written={} wal_bytes={}",
+            node.path,
+            node.node_type,
+            target,
+            node.total_cost,
+            node.plan_rows,
+            node.actual_rows
+                .map_or_else(|| "-".to_owned(), |r| r.to_string()),
+            format_opt_ms(node.actual_total_time_ms),
+            node.shared_hit_blocks,
+            node.shared_read_blocks,
+            node.temp_written_blocks,
+            node.wal_bytes
+        );
+    }
+    out
+}
+
+fn run_plan_diff(
+    args: &PlanDiffArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let (base_sql, cand_sql) = resolve_plan_diff_inputs(args)?;
+    let analyze = args.analyze;
+
+    let outcome = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let base = session
+                .explain_extended(&base_sql, analyze, "Baseline (A)")
+                .await?;
+            let result = match cand_sql {
+                Some(cand_sql) => {
+                    let cand = session
+                        .explain_extended(&cand_sql, analyze, "Candidate (B)")
+                        .await?;
+                    PlanDiffOutput::Diff(Box::new(crate::plandiff::diff_plans(base, cand)))
+                }
+                None => PlanDiffOutput::Single(Box::new(base)),
+            };
+            drop(session);
+            Ok(result)
+        },
+    )?;
+
+    let rendered = match outcome {
+        PlanDiffOutput::Diff(report) => match args.format {
+            CliTelemetryFormat::Table => report.render_table(),
+            CliTelemetryFormat::Plain => report.render_plain(),
+            CliTelemetryFormat::Json => report.render_json(),
+        },
+        PlanDiffOutput::Single(snapshot) => match args.format {
+            CliTelemetryFormat::Table => render_plan_snapshot_table(&snapshot),
+            CliTelemetryFormat::Plain => render_plan_snapshot_plain(&snapshot),
+            CliTelemetryFormat::Json => {
+                serde_json::to_string_pretty(&snapshot).unwrap_or_else(|_| "{}".to_owned())
+            }
+        },
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Plan diff report",
+        out,
+        err,
+    )
+}
+
+/// Output representation format for result analytics and exports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliAnalyticsFormat {
+    /// Aligned plain-ASCII summary table (default).
+    #[default]
+    Table,
+    /// Plain machine-readable text summary.
+    Plain,
+    /// Structured JSON analytics profile.
+    Json,
+    /// Self-contained interactive HTML report.
+    Html,
+    /// Binary Apache Parquet file (`PAR1`).
+    Parquet,
+}
+
+/// Arguments for the `analytics` command.
+#[derive(Debug, Args, Clone)]
+pub struct AnalyticsArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// SQL query to execute and profile.
+    #[arg(short = 'c', long, value_name = "SQL")]
+    pub command: Option<String>,
+    /// Read SQL query from a file. Use `-` for standard input.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+    /// Output representation format: table (default), plain, json, html, or parquet.
+    #[arg(long, value_enum, default_value_t = CliAnalyticsFormat::Table)]
+    pub format: CliAnalyticsFormat,
+    /// Title shown when rendering an HTML analytics report.
+    #[arg(long, value_name = "TEXT", default_value = "Ignatius Result Analytics")]
+    pub title: String,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn resolve_analytics_sql(command: Option<&str>, file: Option<&Path>) -> Result<String, Diagnostic> {
+    read_non_empty_sql_input(command, file, "query", "-c/--command", "-f/--file", true)?.ok_or_else(
+        || {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                "SQL input is required",
+                "reading analytics SQL",
+            )
+        },
+    )
+}
+
+fn extract_analytics_result_set(
+    execution: crate::query::result::Execution,
+) -> Result<crate::query::result::ResultSet, Diagnostic> {
+    if let Some(error) = execution.error {
+        return Err(error);
+    }
+    if execution.status != crate::query::result::ExecutionStatus::Succeeded {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Query,
+            execution.status.label(),
+            "executing analytics query",
+        ));
+    }
+
+    execution
+        .statements
+        .into_iter()
+        .find_map(|stmt| stmt.result_set)
+        .ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                "query did not produce a result set",
+                "profiling query results",
+            )
+            .likely_cause("the statement returned a command tag without result rows")
+            .next_action("provide a SELECT query or a statement with a RETURNING clause")
+        })
+}
+
+fn write_binary_output(
+    bytes: &[u8],
+    output: Option<&Path>,
+    force: bool,
+    label: &str,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if let Some(destination) = output {
+        let mut export = crate::query::export::Export::create(destination, force)?;
+        export.writer().write_all(bytes).map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "{label} ({} bytes) written to {}",
+            bytes.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+    } else if let Err(error) = out.write_all(bytes) {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(ExitCode::Success);
+        }
+        return Err(io_diagnostic(error));
+    }
+    Ok(ExitCode::Success)
+}
+
+fn run_analytics(
+    args: &AnalyticsArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let sql = resolve_analytics_sql(args.command.as_deref(), args.file.as_deref())?;
+
+    let execution = connect_and_run_with_config(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session, cfg| async move {
+            let execution = session
+                .execute(
+                    &sql,
+                    cfg.query.max_buffered_rows,
+                    crate::query::result::JobId(1),
+                )
+                .await;
+            drop(session);
+            Ok(execution)
+        },
+    )?;
+
+    let result_set = extract_analytics_result_set(execution)?;
+
+    match args.format {
+        CliAnalyticsFormat::Parquet => {
+            let bytes = crate::analytics::export_parquet_bytes(&result_set).map_err(|error| {
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    error.to_string(),
+                    "encoding Apache Parquet output",
+                )
+            })?;
+            write_binary_output(
+                &bytes,
+                args.output.as_deref(),
+                args.force,
+                "Parquet analytics export",
+                out,
+                err,
+            )
+        }
+        CliAnalyticsFormat::Table
+        | CliAnalyticsFormat::Plain
+        | CliAnalyticsFormat::Json
+        | CliAnalyticsFormat::Html => {
+            let profile = crate::analytics::profile_result_set(&result_set);
+            let rendered = match args.format {
+                CliAnalyticsFormat::Table => profile.render_table(),
+                CliAnalyticsFormat::Plain => profile.render_plain(),
+                CliAnalyticsFormat::Json => profile.render_json(),
+                CliAnalyticsFormat::Html => {
+                    crate::analytics::render_html_report(&result_set, &args.title, &profile)
+                }
+                CliAnalyticsFormat::Parquet => unreachable!(),
+            };
+            write_report_output(
+                rendered,
+                args.output.as_deref(),
+                args.force,
+                "Analytics report",
+                out,
+                err,
+            )
+        }
+    }
 }
 
 #[cfg(test)]

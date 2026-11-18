@@ -137,6 +137,9 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `#` | Open logical replication and slots manager |
 | `@` | Open server config, HBA, extensions, and FDWs |
 | `:` | Stop active psql watch loop |
+| `_` | Open live data browser and batch CRUD |
+| `/` | Open extended EXPLAIN and A/B plan diff |
+| `$` | Open result profiler and HTML/Parquet export |
 
 The crash-recovery capsule adds two contextual chords for as long as it is on
 screen: `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the
@@ -379,6 +382,26 @@ With the workbench active, `Ctrl+K @` (`cluster-config`) opens the Server Config
 - `Enter` or `g` loads reviewed DDL (`ALTER SYSTEM`, `CREATE EXTENSION`, `ALTER EXTENSION ... UPDATE`, `CREATE TABLESPACE`, `CREATE FOREIGN DATA WRAPPER`) into the active SQL editor buffer without executing automatically.
 - `r` refreshes catalog state; `Esc` closes the overlay.
 The scriptable `ignatius cluster` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K _` (`data-browser`) opens the Keyset-Paginated Data Browser & Batch CRUD cockpit:
+- `j`, `k`, `Up`, `Down`, `h`, `l`, `Left`, `Right` navigate rows and columns on the current page.
+- `n` / `]` advances forward via the primary-key keyset cursor (`has_more`); `p` / `[` steps backward (`Prev`).
+- `s` toggles sort direction; `r` reloads the current page.
+- `Enter` / `g` loads a reviewed, primary-key-guarded `BEGIN; UPDATE ...; COMMIT;` (or `INSERT` on empty tables) into the SQL editor without executing automatically; `d` loads a primary-key-guarded `DELETE`. Keyless tables refuse batch `UPDATE`/`DELETE`.
+- `Esc` closes the overlay without modifying rows or the editor.
+The scriptable `ignatius browse` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K /` (`plan-diff`) opens Extended `EXPLAIN (BUFFERS, WAL, SETTINGS)` & A/B Plan Diff:
+- Opening on a single statement captures Plan A (Baseline); opening on a two-statement buffer captures Plan A and Plan B simultaneously and computes the A/B diff.
+- `a` / `b` capture the active statement or editor buffer as Baseline (A) / Candidate (B).
+- `m` toggles between estimate mode (`EXPLAIN (FORMAT JSON, VERBOSE, SETTINGS)`) and rollback-safe measured execution (`BEGIN; EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON); ROLLBACK;`).
+- `1`, `2`, `3` switch between `Summary & Diff`, `Nodes`, and `Buffers / WAL / Settings`; `Esc` closes cleanly.
+The scriptable `ignatius plan-diff` CLI subcommand provides non-interactive parity.
+
+With Results populated, `Ctrl+K $` (`result-analytics`) opens Zero-Query Result Analytics (column distributions, null rates, `p50`/`p95`, top values, and sparklines) computed completely client-side:
+- `1` / `2` switch between `Column Profiles & Sparklines` and `Top Values & Detail`.
+- `j` / `k` / `Up` / `Down` step through columns; `e` opens the row export palette supporting CSV, TSV, JSON, NDJSON, Markdown, standalone Field Industrial HTML reports (`.html`), and Apache Parquet (`.parquet`).
+The scriptable `ignatius analytics` CLI subcommand provides non-interactive parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
@@ -629,7 +652,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

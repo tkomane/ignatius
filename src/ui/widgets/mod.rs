@@ -14,13 +14,14 @@ pub(crate) use header::{render_compact_header, render_header};
 pub(crate) use objects::render_objects;
 pub(crate) use overlays::{
     render_chords, render_cluster_config, render_confirmation, render_connection_pool,
-    render_copy_confirmation, render_data_masking, render_data_sync, render_definition,
-    render_help, render_import_wizard, render_index_advisor, render_lint_findings,
-    render_logical_replication, render_maintenance_ops, render_name_prompt,
-    render_parameter_prompt, render_password_prompt, render_plan_confirmation,
-    render_query_performance, render_routine_runner, render_schema_diagram, render_schema_diff,
-    render_security_audit, render_server_activity, render_snippet_library, render_synthetic_seed,
-    render_update_review, render_update_value_prompt, render_wal_observability,
+    render_copy_confirmation, render_data_browser, render_data_masking, render_data_sync,
+    render_definition, render_help, render_import_wizard, render_index_advisor,
+    render_lint_findings, render_logical_replication, render_maintenance_ops, render_name_prompt,
+    render_parameter_prompt, render_password_prompt, render_plan_confirmation, render_plan_diff,
+    render_query_performance, render_result_analytics, render_routine_runner,
+    render_schema_diagram, render_schema_diff, render_security_audit, render_server_activity,
+    render_snippet_library, render_synthetic_seed, render_update_review,
+    render_update_value_prompt, render_wal_observability,
 };
 pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
@@ -218,6 +219,9 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         || model.lint_findings.is_some()
         || model.logical_replication.is_some()
         || model.cluster_config.is_some()
+        || model.data_browser.is_some()
+        || model.plan_diff.is_some()
+        || model.result_analytics.is_some()
         || model.inspector.is_some()
         || model.help_open
     {
@@ -294,6 +298,9 @@ pub const fn overlay_blocks_panes(model: &Model) -> bool {
         || model.lint_findings.is_some()
         || model.logical_replication.is_some()
         || model.cluster_config.is_some()
+        || model.data_browser.is_some()
+        || model.plan_diff.is_some()
+        || model.result_analytics.is_some()
         || model.inspector.is_some()
         || model.help_open
         || model.completion.menu.is_some()

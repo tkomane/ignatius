@@ -8,6 +8,20 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Feature `053-live-data-browser-and-batch-crud` advances Milestone 13 with
+  `ignatius browse` and the `Ctrl+K _` (`data-browser`) keyset-paginated table
+  browser + reviewed primary-key-guarded `INSERT`/`UPDATE`/`DELETE` SQL builder.
+
+- New: Feature `054-explain-buffers-wal-and-plan-diff` advances Milestone 13 with
+  `ignatius plan-diff` and `Ctrl+K /` (`plan-diff`), capturing `EXPLAIN
+  (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON)` safely inside rollback
+  transactions and computing A/B regressions/improvements and settings diffs.
+
+- New: Feature `055-result-analytics-and-rich-exports` advances Milestone 13 with
+  zero-query column profiling (`Ctrl+K $` / `result-analytics`), standalone
+  Field Industrial HTML reports, and a zero-dependency streaming Apache Parquet
+  exporter across `ignatius analytics --format html|parquet` and `Ctrl+K e`.
+
 - New: Feature `050-psql-metacommands-and-watch-mode` advances Milestone 12 with
   `psql`-style backslash meta-commands (`\d`, `\d+`, `\dt`, `\dt+`, `\dv`, `\dm`,
   `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`, `\conninfo`, `\x`,

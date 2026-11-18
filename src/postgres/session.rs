@@ -361,6 +361,24 @@ impl Session {
         crate::postgres::cluster::cluster_report(&self.client).await
     }
 
+    /// Reads one keyset-paginated data page and primary-key metadata for a table.
+    pub async fn browse_table_page(
+        &self,
+        request: &crate::crud::BrowseRequest,
+    ) -> Result<crate::postgres::crud::BrowsePageResult, Diagnostic> {
+        crate::postgres::crud::browse_table_page(&self.client, request).await
+    }
+
+    /// Captures an extended `EXPLAIN (BUFFERS, WAL, SETTINGS, FORMAT JSON)` snapshot.
+    pub async fn explain_extended(
+        &self,
+        sql: &str,
+        analyze: bool,
+        label: &str,
+    ) -> Result<crate::plandiff::PlanSnapshot, Diagnostic> {
+        crate::postgres::plandiff::explain_extended(&self.client, sql, analyze, label).await
+    }
+
     /// Whether a database with this exact name exists on the server.
     pub async fn drill_database_exists(&self, name: &str) -> Result<bool, Diagnostic> {
         crate::postgres::drill::database_exists(&self.client, name).await

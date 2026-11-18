@@ -2191,6 +2191,260 @@ impl ClusterConfigState {
     }
 }
 
+/// State for the Keyset-Paginated Data Browser & Batch CRUD overlay (`053`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataBrowserState {
+    /// Active target schema.
+    pub schema: String,
+    /// Active target relation.
+    pub table: String,
+    /// Current keyset browse request.
+    pub request: crate::crud::BrowseRequest,
+    /// Loaded browse page, if available.
+    pub page: Option<crate::crud::BrowsePage>,
+    /// Selected row index within the visible page.
+    pub selected_row: usize,
+    /// Selected column index within the visible page.
+    pub selected_col: usize,
+    /// Whether an asynchronous browse query is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl DataBrowserState {
+    /// Initializes a new loading state for `schema.table`.
+    #[must_use]
+    pub fn new(schema: impl Into<String>, table: impl Into<String>) -> Self {
+        let schema = schema.into();
+        let table = table.into();
+        let request = crate::crud::BrowseRequest {
+            schema: schema.clone(),
+            table: table.clone(),
+            columns: Vec::new(),
+            pk_columns: Vec::new(),
+            sort_column: None,
+            sort_order: crate::crud::SortOrder::Asc,
+            page_size: crate::crud::DEFAULT_PAGE_SIZE,
+            cursor: None,
+            direction: crate::crud::PageDirection::Next,
+            filter_predicate: None,
+        };
+        Self {
+            schema,
+            table,
+            request,
+            page: None,
+            selected_row: 0,
+            selected_col: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+
+    /// Moves selected row within bounds of the loaded page.
+    pub fn move_row(&mut self, delta: isize) {
+        let total = self.page.as_ref().map_or(0, |p| p.rows.len());
+        if total == 0 {
+            self.selected_row = 0;
+            return;
+        }
+        let next = (self.selected_row as isize + delta).clamp(0, total as isize - 1);
+        self.selected_row = next as usize;
+    }
+
+    /// Moves selected column within bounds of the loaded page.
+    pub fn move_col(&mut self, delta: isize) {
+        let total = self.page.as_ref().map_or(0, |p| p.columns.len());
+        if total == 0 {
+            self.selected_col = 0;
+            return;
+        }
+        let next = (self.selected_col as isize + delta).clamp(0, total as isize - 1);
+        self.selected_col = next as usize;
+    }
+
+    /// Synthesizes a reviewed transactional CRUD script for the selected row/cell.
+    pub fn reviewed_crud_sql(&self, delete_row: bool) -> Result<(String, String), String> {
+        let Some(page) = &self.page else {
+            return Err("No browse page loaded yet.".to_owned());
+        };
+        if page.rows.is_empty() {
+            if delete_row {
+                return Err("Cannot generate DELETE on an empty page.".to_owned());
+            }
+            let values: Vec<(String, Option<String>)> =
+                page.columns.iter().map(|c| (c.clone(), None)).collect();
+            let plan = crate::crud::BatchCrudPlan {
+                schema: page.schema.clone(),
+                table: page.table.clone(),
+                pk_columns: page.pk_columns.clone(),
+                mutations: vec![crate::crud::RowMutation::Insert { values }],
+                dry_run_rollback: false,
+            };
+            let sql = plan.build_reviewed_sql().map_err(|d| d.headline)?;
+            return Ok((
+                format!("Reviewed INSERT into {}.{}", page.schema, page.table),
+                sql,
+            ));
+        }
+        if page.pk_columns.is_empty() {
+            return Err(
+                "Table has no primary key; reviewed UPDATE/DELETE is disabled for safety."
+                    .to_owned(),
+            );
+        }
+        let row = &page.rows[self.selected_row.min(page.rows.len() - 1)];
+        let mut pk_match = Vec::with_capacity(page.pk_columns.len());
+        for pk in &page.pk_columns {
+            let Some(idx) = page.columns.iter().position(|c| c == pk) else {
+                return Err(format!(
+                    "Primary key column '{pk}' missing from page projection."
+                ));
+            };
+            let Some(Some(val)) = row.get(idx) else {
+                return Err(format!(
+                    "Primary key column '{pk}' is NULL on selected row."
+                ));
+            };
+            pk_match.push((pk.clone(), val.clone()));
+        }
+        let mutation = if delete_row {
+            crate::crud::RowMutation::Delete { pk_match }
+        } else {
+            let col_idx = self.selected_col.min(page.columns.len().saturating_sub(1));
+            let col_name = page.columns[col_idx].clone();
+            let current = row.get(col_idx).cloned().flatten();
+            crate::crud::RowMutation::Update {
+                pk_match,
+                changes: vec![(col_name, current)],
+            }
+        };
+        let plan = crate::crud::BatchCrudPlan {
+            schema: page.schema.clone(),
+            table: page.table.clone(),
+            pk_columns: page.pk_columns.clone(),
+            mutations: vec![mutation],
+            dry_run_rollback: false,
+        };
+        let sql = plan.build_reviewed_sql().map_err(|d| d.headline)?;
+        let op = if delete_row { "DELETE" } else { "UPDATE" };
+        Ok((
+            format!("Reviewed {op} on {}.{}", page.schema, page.table),
+            sql,
+        ))
+    }
+}
+
+/// State for Extended EXPLAIN (BUFFERS, WAL, SETTINGS) & Plan Diff overlay (`054`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PlanDiffState {
+    /// Baseline query SQL (Plan A).
+    pub baseline_sql: String,
+    /// Candidate query SQL (Plan B).
+    pub candidate_sql: String,
+    /// Captured baseline plan snapshot.
+    pub baseline: Option<crate::plandiff::PlanSnapshot>,
+    /// Captured candidate plan snapshot.
+    pub candidate: Option<crate::plandiff::PlanSnapshot>,
+    /// Computed A/B plan comparison report.
+    pub report: Option<crate::plandiff::PlanDiffReport>,
+    /// Active tab (`0`: Summary & Diff, `1`: Node Comparison, `2`: Buffers / WAL / Settings).
+    pub active_tab: usize,
+    /// Selected item row index within active tab.
+    pub selected_idx: usize,
+    /// Whether extended EXPLAIN uses `ANALYZE, BUFFERS, WAL` inside rollback transaction.
+    pub analyze_mode: bool,
+    /// Whether an async EXPLAIN capture is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl PlanDiffState {
+    /// Returns item count in the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => self.report.as_ref().map_or(0, |r| r.findings.len()),
+            1 => self.report.as_ref().map_or(0, |r| r.node_changes.len()),
+            2 => self.report.as_ref().map_or(
+                self.baseline.as_ref().map_or(0, |p| p.settings.len()),
+                |r| r.setting_changes.len(),
+            ),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+
+    /// Recomputes `report` whenever both `baseline` and `candidate` are loaded.
+    pub fn recompute_diff(&mut self) {
+        if let (Some(base), Some(cand)) = (&self.baseline, &self.candidate) {
+            self.report = Some(crate::plandiff::diff_plans(base.clone(), cand.clone()));
+        } else {
+            self.report = None;
+        }
+    }
+}
+
+/// State for the Zero-Query Result Analytics overlay (`055`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultAnalyticsState {
+    /// Computed column statistics, histograms, and sparklines.
+    pub analytics: crate::analytics::ResultAnalytics,
+    /// Active tab (`0`: Column Profiles & Sparklines, `1`: Top Values & Distributions).
+    pub active_tab: usize,
+    /// Selected column index.
+    pub selected_col: usize,
+    /// Status message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl ResultAnalyticsState {
+    /// Creates an analytics state directly from a visible [`crate::query::result::ResultSet`].
+    #[must_use]
+    pub fn from_result(set: &crate::query::result::ResultSet) -> Self {
+        Self {
+            analytics: crate::analytics::profile_result_set(set),
+            active_tab: 0,
+            selected_col: 0,
+            status_message: None,
+        }
+    }
+
+    /// Moves column selection within bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.analytics.columns.len();
+        if total == 0 {
+            self.selected_col = 0;
+            return;
+        }
+        let next = (self.selected_col as isize + delta).clamp(0, total as isize - 1);
+        self.selected_col = next as usize;
+    }
+
+    /// Switches active tab (`0` or `1`).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+    }
+}
+
 /// Interactive state of the offline SQL lint findings overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintFindingsState {
@@ -2251,6 +2505,10 @@ pub enum ExportFormat {
     Ndjson,
     /// A Markdown pipe table.
     Markdown,
+    /// Self-contained Field Industrial HTML report.
+    Html,
+    /// Streaming Apache Parquet binary column file.
+    Parquet,
 }
 
 impl ExportFormat {
@@ -2263,6 +2521,8 @@ impl ExportFormat {
             Self::Json => "JSON",
             Self::Ndjson => "NDJSON",
             Self::Markdown => "Markdown",
+            Self::Html => "HTML",
+            Self::Parquet => "Parquet",
         }
     }
 
@@ -2275,6 +2535,8 @@ impl ExportFormat {
             Self::Json => ".json",
             Self::Ndjson => ".ndjson",
             Self::Markdown => ".md",
+            Self::Html => ".html",
+            Self::Parquet => ".parquet",
         }
     }
 
@@ -2287,6 +2549,8 @@ impl ExportFormat {
             Self::Json => "one JSON document",
             Self::Ndjson => "one JSON object per row",
             Self::Markdown => "a Markdown table",
+            Self::Html => "self-contained Field Industrial HTML report",
+            Self::Parquet => "columnar binary Apache Parquet file",
         }
     }
 }
@@ -3551,6 +3815,16 @@ pub struct Model {
     pub cluster_config: Option<ClusterConfigState>,
     /// Request counter for in-flight cluster configuration queries.
     pub cluster_config_request: u64,
+    /// Interactive keyset-paginated live data browser and batch CRUD overlay state.
+    pub data_browser: Option<DataBrowserState>,
+    /// Request counter for in-flight keyset data browse queries.
+    pub data_browser_request: u64,
+    /// Interactive extended EXPLAIN and A/B plan diff overlay state.
+    pub plan_diff: Option<PlanDiffState>,
+    /// Request counter for in-flight extended EXPLAIN snapshots.
+    pub plan_diff_request: u64,
+    /// Interactive zero-query result analytics profiler overlay state.
+    pub result_analytics: Option<ResultAnalyticsState>,
 }
 
 impl Model {

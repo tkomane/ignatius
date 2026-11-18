@@ -4205,7 +4205,7 @@ fn writing_the_rows_on_screen_says_how_many_that_is_and_what_it_is_not() {
     update(&mut model, Message::Action(Action::ExportRows));
     let palette = model.palette.as_ref().expect("a format palette");
     assert_eq!(palette.purpose, crate::app::palette::Purpose::ExportFormats);
-    assert_eq!(palette.entries.len(), 5);
+    assert_eq!(palette.entries.len(), 7);
     assert!(
         palette
             .context_note
@@ -11484,4 +11484,156 @@ fn cluster_config_overlay_filters_tabs_and_inserts_reviewed_ddl() {
     let _ = update(&mut model, Message::Action(Action::Activate));
     assert!(model.cluster_config.is_none());
     assert!(model.editor.text().contains("ALTER EXTENSION"));
+}
+
+#[test]
+fn data_browser_overlay_paginates_and_generates_pk_guarded_crud_sql() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::DataBrowser));
+    assert_eq!(effects.len(), 1);
+    let Effect::LoadBrowsePage { request, browse } = &effects[0] else {
+        panic!("expected LoadBrowsePage effect");
+    };
+    assert_eq!(browse.schema, "public");
+    assert_eq!(browse.table, "orders");
+
+    let page = crate::crud::BrowsePage {
+        schema: "public".into(),
+        table: "orders".into(),
+        columns: vec!["id".into(), "status".into()],
+        pk_columns: vec!["id".into()],
+        rows: vec![vec![Some("101".into()), Some("paid".into())]],
+        page_size: 50,
+        has_more: true,
+        has_prev: false,
+        next_cursor: Some(crate::crud::KeysetCursor {
+            pk_columns: vec!["id".into()],
+            pk_values: vec![Some("101".into())],
+        }),
+        prev_cursor: None,
+    };
+    let mut browse_rs = crate::query::result::ResultSet::new(vec!["id".into()], 50);
+    browse_rs.push(vec![crate::query::value::Cell::Text("101".into())]);
+    let res = crate::postgres::crud::BrowsePageResult {
+        page,
+        result_set: browse_rs,
+        sql: "SELECT \"id\", \"status\" FROM \"public\".\"orders\" LIMIT 51".into(),
+        has_more: true,
+        next_cursor: Some(crate::crud::KeysetCursor {
+            pk_columns: vec!["id".into()],
+            pk_values: vec![Some("101".into())],
+        }),
+        prev_cursor: None,
+    };
+    let _ = update(
+        &mut model,
+        Message::BrowsePageLoaded {
+            request: *request,
+            result: Box::new(Ok(res)),
+        },
+    );
+    assert!(model.data_browser.as_ref().is_some_and(|b| !b.loading));
+
+    let next_effects = update(&mut model, Message::Action(Action::Insert('n')));
+    assert_eq!(next_effects.len(), 1);
+    assert!(matches!(next_effects[0], Effect::LoadBrowsePage { .. }));
+
+    // Select status col and generate reviewed UPDATE into active editor
+    let _ = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    let _ = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.data_browser.is_none());
+    assert!(model.editor.text().contains("UPDATE \"public\".\"orders\""));
+    assert!(model.editor.text().contains("WHERE \"id\" = '101'"));
+}
+
+#[test]
+fn plan_diff_overlay_captures_two_statements_and_computes_ab_verdict() {
+    let mut model = connected();
+    model
+        .editor
+        .set_text("SELECT * FROM orders; SELECT id FROM orders WHERE id = 1;");
+    let effects = update(&mut model, Message::Action(Action::PlanDiff));
+    assert_eq!(effects.len(), 2);
+    let Effect::LoadExtendedExplain { request, .. } = effects[0] else {
+        panic!("expected LoadExtendedExplain effect");
+    };
+    let snap_a = crate::plandiff::parse_extended_explain_json(
+        "Baseline (A)",
+        r#"[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Startup Cost":0.0,"Total Cost":250.0,"Plan Rows":5000,"Actual Total Time":12.5,"Actual Rows":5000,"Shared Hit Blocks":10,"Shared Read Blocks":40}}]"#,
+    )
+    .expect("parse A");
+    let snap_b = crate::plandiff::parse_extended_explain_json(
+        "Candidate (B)",
+        r#"[{"Plan":{"Node Type":"Index Scan","Relation Name":"orders","Index Name":"orders_pkey","Startup Cost":0.2,"Total Cost":8.2,"Plan Rows":1,"Actual Total Time":0.4,"Actual Rows":1,"Shared Hit Blocks":4,"Shared Read Blocks":0}}]"#,
+    )
+    .expect("parse B");
+    let _ = update(
+        &mut model,
+        Message::ExtendedExplainLoaded {
+            request,
+            target: crate::app::message::PlanDiffTarget::Baseline,
+            result: Box::new(Ok(snap_a)),
+        },
+    );
+    let _ = update(
+        &mut model,
+        Message::ExtendedExplainLoaded {
+            request,
+            target: crate::app::message::PlanDiffTarget::Candidate,
+            result: Box::new(Ok(snap_b)),
+        },
+    );
+    assert_eq!(
+        model
+            .plan_diff
+            .as_ref()
+            .and_then(|d| d.report.as_ref())
+            .map(|r| r.verdict),
+        Some(crate::plandiff::DiffVerdict::Improvement)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(model.plan_diff.as_ref().map(|d| d.active_tab), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.plan_diff.is_none());
+}
+
+#[test]
+fn result_analytics_overlay_profiles_visible_rows_and_opens_export_formats() {
+    let mut model = connected();
+    let mut set = crate::query::result::ResultSet::new(vec!["id".into(), "amount".into()], 100);
+    set.push(vec![
+        crate::query::value::Cell::Text("1".into()),
+        crate::query::value::Cell::Text("100".into()),
+    ]);
+    set.push(vec![
+        crate::query::value::Cell::Text("2".into()),
+        crate::query::value::Cell::Null,
+    ]);
+    model.last_execution = Some(Execution {
+        job: JobId(1),
+        statements: vec![StatementResult {
+            result_set: Some(set),
+            rows_affected: None,
+            elapsed: Duration::from_millis(2),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: Duration::from_millis(2),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: Default::default(),
+    });
+
+    let effects = update(&mut model, Message::Action(Action::ResultAnalytics));
+    assert!(effects.is_empty());
+    let analytics = model
+        .result_analytics
+        .as_ref()
+        .expect("analytics overlay opens on retained result");
+    assert_eq!(analytics.analytics.column_count, 2);
+    assert_eq!(analytics.analytics.columns[1].null_count, 1);
+
+    let _ = update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(model.result_analytics.is_none());
+    assert!(model.palette.is_some());
 }

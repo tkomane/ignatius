@@ -137,6 +137,9 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("logical-replication", Action::LogicalReplication),
     ("cluster-config", Action::ClusterConfig),
     ("stop-watch", Action::StopWatch),
+    ("data-browser", Action::DataBrowser),
+    ("plan-diff", Action::PlanDiff),
+    ("result-analytics", Action::ResultAnalytics),
 ];
 
 /// The action a configuration name means.
@@ -884,6 +887,21 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         "Open server config, HBA, extensions, and FDWs",
     ),
     (':', Action::StopWatch, "Stop active psql watch loop"),
+    (
+        '_',
+        Action::DataBrowser,
+        "Open live data browser and batch CRUD",
+    ),
+    (
+        '/',
+        Action::PlanDiff,
+        "Open extended EXPLAIN and A/B plan diff",
+    ),
+    (
+        '$',
+        Action::ResultAnalytics,
+        "Open result profiler and HTML/Parquet export",
+    ),
 ];
 
 /// The contextual second keys offered while the crash recovery capsule is on
@@ -1044,6 +1062,9 @@ const fn short_label(action: &Action) -> &'static str {
         Action::LogicalReplication => "Replication",
         Action::ClusterConfig => "Cluster",
         Action::StopWatch => "Stop watch",
+        Action::DataBrowser => "Data browser",
+        Action::PlanDiff => "Plan diff",
+        Action::ResultAnalytics => "Analytics",
     }
 }
 

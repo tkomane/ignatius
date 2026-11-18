@@ -174,6 +174,21 @@ implemented and recorded in `docs/status.md` Wave 39.
   `pg_available_extensions`, `pg_tablespace`, and FDW/foreign servers (masked
   options) via `ignatius cluster` and `Ctrl+K @` (`cluster-config`).
 
+M13 is delivered in source as of 2026-11-18: Features 053, 054 and 055 are
+implemented and recorded in `docs/status.md` Wave 40.
+
+- **`053-live-data-browser-and-batch-crud`** [Implemented]: Keyset-paginated
+  table browsing (`ignatius browse`, `Ctrl+K _` / `data-browser`) using tuple
+  cursors bounded at 500 rows/page, plus reviewed transactional `INSERT`,
+  `UPDATE`, and `DELETE` synthesis refusing keyless writes.
+- **`054-explain-buffers-wal-and-plan-diff`** [Implemented]: Rollback-safe
+  `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON)` telemetry extractor
+  and A/B plan comparison engine (`ignatius plan-diff`, `Ctrl+K /` / `plan-diff`).
+- **`055-result-analytics-and-rich-exports`** [Implemented]: Zero-query column
+  statistics, p50/p95, histograms, and sparklines (`Ctrl+K $` / `result-analytics`)
+  plus dependency-free HTML and streaming Apache Parquet exports (`ignatius analytics`,
+  `Ctrl+K e`).
+
 No new feature is implied by milestone completion; the next source slice opens
 from an observed job under W16.
 

@@ -8009,5 +8009,1632 @@ pub(crate) fn render_cluster_config(
     .render(footer_area, buf);
 }
 
+/// Renders the Live Data Browser & Batch CRUD overlay (`053`).
+pub(crate) fn render_data_browser(
+    state: &crate::app::model::DataBrowserState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} LIVE DATA BROWSER & CRUD ",
+        presentation.icon(Icon::Table)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let page_opt = state.page.as_ref();
+    let pk_vec = page_opt
+        .map(|p| &p.pk_columns)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(&state.request.pk_columns);
+    let pk_label = if pk_vec.is_empty() {
+        "ctid".to_owned()
+    } else {
+        sanitize_for_display(&pk_vec.join(","))
+    };
+    let rows_count = page_opt.map_or(0, |p| p.rows.len());
+    let sort_col = state
+        .request
+        .sort_column
+        .as_deref()
+        .or_else(|| pk_vec.first().map(String::as_str))
+        .unwrap_or("ctid");
+    let sort_label = format!(
+        "{} {}",
+        sanitize_for_display(sort_col),
+        state.request.sort_order.sql_keyword()
+    );
+    let (page_badge, page_token) = if page_opt.is_some_and(|p| p.has_more) {
+        ("MORE", Token::Info)
+    } else {
+        ("END", Token::Muted)
+    };
+    let table_label = sanitize_for_display(&format!("{}.{}", state.schema, state.table));
+
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("TABLE: ", theme.style(Token::Muted)),
+        Span::styled(
+            table_label,
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("PK: ", theme.style(Token::Muted)),
+        Span::styled(pk_label, theme.style(Token::Info)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ROWS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{rows_count}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("SORT: ", theme.style(Token::Muted)),
+        Span::styled(sort_label, theme.style(Token::Focus)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled(
+            page_badge,
+            theme.style(page_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let active_col_name = page_opt
+        .and_then(|p| p.columns.get(state.selected_col))
+        .map(|c| sanitize_for_display(c))
+        .unwrap_or_else(|| "-".to_owned());
+    let mut tab_spans = vec![
+        Span::styled(
+            format!(" [CELL: {active_col_name}] "),
+            super::header::capsule_style(presentation, Token::Focus),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("[PAGE SIZE: {}]", state.request.effective_page_size()),
+            theme.style(Token::Muted),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            if page_opt.is_some_and(|p| p.has_prev) {
+                "[PREV: YES]"
+            } else {
+                "[PREV: NO]"
+            },
+            theme.style(Token::Muted),
+        ),
+    ];
+    if let Some(filter) = &state.request.filter_predicate {
+        tab_spans.push(Span::raw("  "));
+        tab_spans.push(Span::styled(
+            format!("[FILTER: {}]", sanitize_for_display(filter)),
+            theme.style(Token::Info),
+        ));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let body_rows = usize::from(body_area.height).saturating_sub(1);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "Loading keyset-paginated data page from PostgreSQL...",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else if let Some(page) = page_opt {
+        if page.columns.is_empty() {
+            Paragraph::new(Line::from(Span::styled(
+                "Table has no visible columns.",
+                theme.style(Token::Muted),
+            )))
+            .render(body_area, buf);
+        } else {
+            let active_col = state.selected_col.min(page.columns.len() - 1);
+            let mut col_widths = Vec::with_capacity(page.columns.len());
+            for (col_idx, col_name) in page.columns.iter().enumerate() {
+                let header_label = if col_idx == active_col {
+                    format!("[{}]", sanitize_for_display(col_name))
+                } else {
+                    sanitize_for_display(col_name)
+                };
+                let mut width = display_width(&header_label);
+                for row in &page.rows {
+                    let cell_text =
+                        format_browser_cell(row.get(col_idx).and_then(|v| v.as_deref()));
+                    width = width.max(display_width(&cell_text));
+                }
+                col_widths.push(width.clamp(8, 24));
+            }
+
+            let (col_start, col_end) =
+                browser_column_window(&col_widths, active_col, body_width.saturating_sub(2));
+
+            let mut lines = Vec::new();
+            let mut header_segments = vec![(
+                "  ".to_owned(),
+                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+            )];
+            for col_idx in col_start..col_end {
+                let raw_name = sanitize_for_display(&page.columns[col_idx]);
+                let label = if col_idx == active_col {
+                    format!("[{raw_name}]")
+                } else {
+                    raw_name
+                };
+                let fitted = fit_cell(&label, col_widths[col_idx], unicode);
+                let style = if col_idx == active_col {
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                } else {
+                    theme.style(Token::Header).add_modifier(Modifier::BOLD)
+                };
+                header_segments.push((format!("{fitted} "), style));
+            }
+            lines.push(bounded_row(header_segments, body_width, unicode, None));
+
+            if page.rows.is_empty() {
+                lines.push(bounded_row(
+                    vec![(
+                        "  No rows on this page. Press [Enter/g] to load a reviewed INSERT template."
+                            .to_owned(),
+                        theme.style(Token::Muted),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+            } else {
+                let start = state
+                    .selected_row
+                    .saturating_sub(body_rows.saturating_sub(1));
+                for (row_idx, row) in page.rows.iter().enumerate().skip(start).take(body_rows) {
+                    let selected = row_idx == state.selected_row;
+                    let marker = if selected { "> " } else { "  " };
+                    let mut segments = Vec::with_capacity((col_end - col_start) + 1);
+                    if selected {
+                        segments.push((
+                            marker.to_owned(),
+                            selection_style.add_modifier(Modifier::BOLD),
+                        ));
+                    } else {
+                        segments.push((marker.to_owned(), theme.style(Token::Muted)));
+                    }
+
+                    for (col_idx, &width) in
+                        col_widths.iter().enumerate().take(col_end).skip(col_start)
+                    {
+                        let raw = row.get(col_idx).and_then(|v| v.as_deref());
+                        let cell_text = format_browser_cell(raw);
+                        let fitted = fit_cell(&cell_text, width, unicode);
+                        let style = if selected && col_idx == active_col {
+                            selection_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                        } else if selected {
+                            selection_style
+                        } else {
+                            let token = match raw {
+                                None => Token::NullValue,
+                                Some("") => Token::Muted,
+                                Some(_) => Token::Text,
+                            };
+                            if col_idx == active_col {
+                                theme.style(token).add_modifier(Modifier::BOLD)
+                            } else {
+                                theme.style(token)
+                            }
+                        };
+                        segments.push((format!("{fitted} "), style));
+                    }
+
+                    lines.push(bounded_row(
+                        segments,
+                        body_width,
+                        unicode,
+                        selected.then_some(selection_style),
+                    ));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+    } else {
+        Paragraph::new(Line::from(Span::styled(
+            "No browse page loaded. Press [r] to refresh.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(page) = page_opt
+        && let Some(row) = page.rows.get(state.selected_row)
+        && let Some(col_name) = page.columns.get(state.selected_col)
+    {
+        let raw = row.get(state.selected_col).and_then(|v| v.as_deref());
+        let preview = format_browser_cell(raw);
+        (
+            format!(
+                "Cell [{}] = {}  |  Reviewed CRUD loads SQL into editor (never auto-executed).",
+                sanitize_for_display(col_name),
+                preview
+            ),
+            Token::Muted,
+        )
+    } else {
+        (
+            "Press [Enter/g] to load reviewed CRUD SQL or [d] for DELETE SQL (never auto-executed)."
+                .to_owned(),
+            Token::Muted,
+        )
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[j/k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Row  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[h/l] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Col  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[n/p] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Next/Prev Keyset Page  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[s] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Sort  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Enter/g] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Load CRUD SQL  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[d] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Load DELETE SQL  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[r] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Refresh  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+}
+
+fn format_browser_cell(raw: Option<&str>) -> String {
+    match raw {
+        None => "[null]".to_owned(),
+        Some("") => "\"\"".to_owned(),
+        Some(text) => sanitize_for_display(text),
+    }
+}
+
+fn browser_column_window(
+    widths: &[usize],
+    selected_col: usize,
+    max_width: usize,
+) -> (usize, usize) {
+    if widths.is_empty() {
+        return (0, 0);
+    }
+    let selected = selected_col.min(widths.len() - 1);
+    let mut start = selected;
+    let mut end = selected + 1;
+    let mut used = widths[selected] + 1;
+
+    while end < widths.len() && used + widths[end] < max_width {
+        used += widths[end] + 1;
+        end += 1;
+    }
+    while start > 0 && used + widths[start - 1] < max_width {
+        start -= 1;
+        used += widths[start] + 1;
+    }
+    (start, end)
+}
+
+/// Renders the Extended EXPLAIN (BUFFERS, WAL, SETTINGS) & Plan Diff overlay (`054`).
+pub(crate) fn render_plan_diff(
+    state: &crate::app::model::PlanDiffState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} EXTENDED EXPLAIN & PLAN DIFF ",
+        presentation.icon(Icon::Database)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let report_opt = state.report.as_ref();
+    let single_opt = state.baseline.as_ref().or(state.candidate.as_ref());
+
+    let capsules = if let Some(report) = report_opt {
+        let (verdict_label, verdict_token) = match report.verdict {
+            crate::plandiff::DiffVerdict::Improvement => ("IMPROVEMENT", Token::Success),
+            crate::plandiff::DiffVerdict::Regression => ("REGRESSION", Token::Danger),
+            crate::plandiff::DiffVerdict::Mixed => ("MIXED", Token::Warning),
+            crate::plandiff::DiffVerdict::Unchanged => ("UNCHANGED", Token::Muted),
+        };
+        let cost_delta = match report.total_cost_pct {
+            Some(pct) => format!("{:+.2} ({:+.1}%)", report.total_cost_delta, pct),
+            None => format!("{:+.2}", report.total_cost_delta),
+        };
+        let time_delta = match (report.execution_time_delta_ms, report.execution_time_pct) {
+            (Some(ms), Some(pct)) => format!("{ms:+.2}ms ({pct:+.1}%)"),
+            (Some(ms), None) => format!("{ms:+.2}ms"),
+            _ => "n/a".to_owned(),
+        };
+        let buf_delta = format!(
+            "{:+} / {:+}",
+            report.shared_hit_delta, report.shared_read_delta
+        );
+        let wal_delta = format_signed_bytes(report.wal_bytes_delta);
+        vec![
+            Span::styled(" [", theme.style(Token::Border)),
+            Span::styled(
+                verdict_label,
+                theme.style(verdict_token).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("COST: ", theme.style(Token::Muted)),
+            Span::styled(cost_delta, theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("TIME: ", theme.style(Token::Muted)),
+            Span::styled(time_delta, theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("HIT/READ: ", theme.style(Token::Muted)),
+            Span::styled(buf_delta, theme.style(Token::Info)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("WAL: ", theme.style(Token::Muted)),
+            Span::styled(wal_delta, theme.style(Token::Text)),
+            Span::styled("]", theme.style(Token::Border)),
+        ]
+    } else if let Some(snap) = single_opt {
+        let time_str = snap
+            .execution_time_ms
+            .map_or_else(|| "n/a".to_owned(), |ms| format!("{ms:.2}ms"));
+        let wal_str = crate::telemetry::format_bytes(snap.wal_bytes);
+        vec![
+            Span::styled(" [", theme.style(Token::Border)),
+            Span::styled(
+                "SINGLE PLAN",
+                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("COST: ", theme.style(Token::Muted)),
+            Span::styled(format!("{:.2}", snap.total_cost), theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("TIME: ", theme.style(Token::Muted)),
+            Span::styled(time_str, theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("HIT/READ: ", theme.style(Token::Muted)),
+            Span::styled(
+                format!("{}/{}", snap.shared_hit_blocks, snap.shared_read_blocks),
+                theme.style(Token::Info),
+            ),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("WAL: ", theme.style(Token::Muted)),
+            Span::styled(wal_str, theme.style(Token::Text)),
+            Span::styled("]", theme.style(Token::Border)),
+        ]
+    } else {
+        vec![
+            Span::styled(" [", theme.style(Token::Border)),
+            Span::styled("UNCHANGED", theme.style(Token::Muted)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[NO PLANS CAPTURED]", theme.style(Token::Muted)),
+        ]
+    };
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let tab_labels = [
+        " [1] Summary & Diff ",
+        " [2] Nodes ",
+        " [3] Buffers / WAL / Settings ",
+    ];
+    let mut tab_spans = Vec::new();
+    for (idx, label) in tab_labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let style = if idx == state.active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled(*label, style));
+    }
+    tab_spans.push(Span::raw("  "));
+    let (mode_label, mode_token) = if state.analyze_mode {
+        ("[MODE: ANALYZE+BUFFERS+WAL]", Token::Warning)
+    } else {
+        ("[MODE: ESTIMATE]", Token::Info)
+    };
+    tab_spans.push(Span::styled(
+        mode_label,
+        super::header::capsule_style(presentation, mode_token),
+    ));
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "Capturing extended EXPLAIN (FORMAT JSON, VERBOSE, SETTINGS)...",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else {
+        match state.active_tab {
+            0 => {
+                if let Some(report) = report_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![
+                            ("  A (Baseline): ".to_owned(), theme.style(Token::Muted)),
+                            (
+                                sanitize_for_display(&report.baseline.label),
+                                theme.style(Token::Text),
+                            ),
+                            ("  |  B (Candidate): ".to_owned(), theme.style(Token::Muted)),
+                            (
+                                sanitize_for_display(&report.candidate.label),
+                                theme.style(Token::Text),
+                            ),
+                        ],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Cost: {:.2} -> {:.2} ({:+.2})  |  Exec Time: {} -> {} ({})",
+                                report.baseline.total_cost,
+                                report.candidate.total_cost,
+                                report.total_cost_delta,
+                                fmt_opt_ms_short(report.baseline.execution_time_ms),
+                                fmt_opt_ms_short(report.candidate.execution_time_ms),
+                                fmt_opt_ms_delta_short(report.execution_time_delta_ms),
+                            ),
+                            theme.style(Token::Info),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Buffers Hit/Read: {}/{} -> {}/{} (Delta {:+}/{:+})  |  Temp Write: {} -> {} ({:+})  |  WAL: {} -> {} ({})",
+                                report.baseline.shared_hit_blocks,
+                                report.baseline.shared_read_blocks,
+                                report.candidate.shared_hit_blocks,
+                                report.candidate.shared_read_blocks,
+                                report.shared_hit_delta,
+                                report.shared_read_delta,
+                                report.baseline.temp_written_blocks,
+                                report.candidate.temp_written_blocks,
+                                report.temp_written_delta,
+                                crate::telemetry::format_bytes(report.baseline.wal_bytes),
+                                crate::telemetry::format_bytes(report.candidate.wal_bytes),
+                                format_signed_bytes(report.wal_bytes_delta),
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  FINDINGS ({})  |  NODE CHANGES ({})  |  SETTING CHANGES ({})",
+                                report.findings.len(),
+                                report.node_changes.len(),
+                                report.setting_changes.len()
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
+                    if report.findings.is_empty() {
+                        lines.push(bounded_row(
+                            vec![(
+                                "  No findings reported.".to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    } else {
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(list_rows.saturating_sub(1));
+                        for (idx, finding) in report
+                            .findings
+                            .iter()
+                            .enumerate()
+                            .skip(start)
+                            .take(list_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let text = sanitize_for_display(finding);
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (text, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (text, theme.style(Token::Text)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else if let Some(snap) = single_opt {
+                    let slot_name = if state.baseline.is_some() {
+                        "Baseline (A)"
+                    } else {
+                        "Candidate (B)"
+                    };
+                    let lines = vec![
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  {slot_name}: {}  [analyzed={}]",
+                                    sanitize_for_display(&snap.label),
+                                    if snap.analyzed { "yes" } else { "no" }
+                                ),
+                                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  Cost: {:.2} (startup {:.2})  |  Plan Rows: {}  |  Actual Rows: {}",
+                                    snap.total_cost,
+                                    snap.startup_cost,
+                                    snap.plan_rows,
+                                    snap.actual_rows
+                                        .map_or_else(|| "-".to_owned(), |r| r.to_string())
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  Planning: {}  |  Execution: {}  |  Buffer Hit Ratio: {}",
+                                    fmt_opt_ms_short(snap.planning_time_ms),
+                                    fmt_opt_ms_short(snap.execution_time_ms),
+                                    snap.buffer_hit_ratio_pct
+                                        .map_or_else(|| "-".to_owned(), |p| format!("{p:.1}%"))
+                                ),
+                                theme.style(Token::Info),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  Shared Hit/Read/Dirtied/Written: {}/{}/{}/{}  |  Temp R/W: {}/{}",
+                                    snap.shared_hit_blocks,
+                                    snap.shared_read_blocks,
+                                    snap.shared_dirtied_blocks,
+                                    snap.shared_written_blocks,
+                                    snap.temp_read_blocks,
+                                    snap.temp_written_blocks,
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  WAL Records: {}  |  WAL FPI: {}  |  WAL Bytes: {}  |  Settings: {}",
+                                    snap.wal_records,
+                                    snap.wal_fpi,
+                                    crate::telemetry::format_bytes(snap.wal_bytes),
+                                    snap.settings.len()
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                "  Capture the second plan with [a] or [b] to compute A/B Plan Diff."
+                                    .to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                    ];
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No EXPLAIN snapshot captured yet. Press [a] for Baseline A or [b] for Candidate B.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            1 => {
+                let body_rows = usize::from(body_area.height).saturating_sub(1);
+                if let Some(report) = report_opt {
+                    if report.node_changes.is_empty() {
+                        Paragraph::new(Line::from(Span::styled(
+                            "No material node changes detected between Baseline A and Candidate B.",
+                            theme.style(Token::Muted),
+                        )))
+                        .render(body_area, buf);
+                    } else {
+                        let mut lines = Vec::new();
+                        lines.push(bounded_row(
+                            vec![(
+                                format!(
+                                    "  {:<8} {:>10} {:>10} {}",
+                                    "VERDICT", "COST_D", "TIME_D", "NODE CHANGE"
+                                ),
+                                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(body_rows.saturating_sub(1));
+                        for (idx, change) in report
+                            .node_changes
+                            .iter()
+                            .enumerate()
+                            .skip(start)
+                            .take(body_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let (sev_label, sev_token) = match change.severity {
+                                crate::plandiff::DiffVerdict::Improvement => {
+                                    ("IMPR", Token::Success)
+                                }
+                                crate::plandiff::DiffVerdict::Regression => ("REGR", Token::Danger),
+                                crate::plandiff::DiffVerdict::Mixed => ("MIXED", Token::Warning),
+                                crate::plandiff::DiffVerdict::Unchanged => ("SAME", Token::Muted),
+                            };
+                            let cost_d = format!("{:+.2}", change.cost_delta);
+                            let time_d = change
+                                .time_delta_ms
+                                .map_or_else(|| "-".to_owned(), |t| format!("{t:+.2}ms"));
+                            let desc = sanitize_for_display(&change.description);
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (
+                                        format!("{sev_label:<8} "),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{cost_d:>10} "), selection_style),
+                                    (format!("{time_d:>10} "), selection_style),
+                                    (desc, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (
+                                        format!("{sev_label:<8} "),
+                                        theme.style(sev_token).add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{cost_d:>10} "), theme.style(Token::Text)),
+                                    (format!("{time_d:>10} "), theme.style(Token::Info)),
+                                    (desc, theme.style(Token::Text)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                        Paragraph::new(lines).render(body_area, buf);
+                    }
+                } else if let Some(snap) = single_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<8} {:<20} {:<20} {:>10} {:>10} {:>11}",
+                                "PATH", "NODE", "TARGET", "COST", "ROWS", "HIT/READ"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    for node in snap.nodes.iter().take(body_rows) {
+                        let target = node
+                            .relation_name
+                            .as_deref()
+                            .or(node.index_name.as_deref())
+                            .unwrap_or("-");
+                        let rows_text = node.actual_rows.unwrap_or(node.plan_rows).to_string();
+                        let hr = format!("{}/{}", node.shared_hit_blocks, node.shared_read_blocks);
+                        lines.push(bounded_row(
+                            vec![(
+                                format!(
+                                    "  {:<8} {} {} {:>10.2} {:>10} {:>11}",
+                                    fit_cell(&node.path, 8, unicode),
+                                    fit_cell(&node.node_type, 20, unicode),
+                                    fit_cell(target, 20, unicode),
+                                    node.total_cost,
+                                    rows_text,
+                                    hr
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No plan nodes available yet. Press [a] or [b] to capture an EXPLAIN snapshot.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            2 => {
+                if let Some(report) = report_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Shared Hit/Read: A {}/{} -> B {}/{} (Delta {:+} / {:+})",
+                                report.baseline.shared_hit_blocks,
+                                report.baseline.shared_read_blocks,
+                                report.candidate.shared_hit_blocks,
+                                report.candidate.shared_read_blocks,
+                                report.shared_hit_delta,
+                                report.shared_read_delta
+                            ),
+                            theme.style(Token::Info),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Dirtied/Written: A {}/{} -> B {}/{}  |  Temp R/W: A {}/{} -> B {}/{}",
+                                report.baseline.shared_dirtied_blocks,
+                                report.baseline.shared_written_blocks,
+                                report.candidate.shared_dirtied_blocks,
+                                report.candidate.shared_written_blocks,
+                                report.baseline.temp_read_blocks,
+                                report.baseline.temp_written_blocks,
+                                report.candidate.temp_read_blocks,
+                                report.candidate.temp_written_blocks,
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  WAL (Rec/FPI/Bytes): A {}/{}/{} -> B {}/{}/{} (Delta {})",
+                                report.baseline.wal_records,
+                                report.baseline.wal_fpi,
+                                crate::telemetry::format_bytes(report.baseline.wal_bytes),
+                                report.candidate.wal_records,
+                                report.candidate.wal_fpi,
+                                crate::telemetry::format_bytes(report.candidate.wal_bytes),
+                                format_signed_bytes(report.wal_bytes_delta),
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<32} {:<20} {}",
+                                "SETTING", "BASELINE (A)", "CANDIDATE (B)"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
+                    if report.setting_changes.is_empty() {
+                        lines.push(bounded_row(
+                            vec![(
+                                "  No planner setting differences between Baseline A and Candidate B."
+                                    .to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    } else {
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(list_rows.saturating_sub(1));
+                        for (idx, sc) in report
+                            .setting_changes
+                            .iter()
+                            .enumerate()
+                            .skip(start)
+                            .take(list_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let name = fit_cell(&sc.name, 32, unicode);
+                            let base_val = fit_cell(
+                                sc.baseline.as_deref().unwrap_or("(default)"),
+                                20,
+                                unicode,
+                            );
+                            let cand_val = sanitize_for_display(
+                                sc.candidate.as_deref().unwrap_or("(default)"),
+                            );
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{name} "), selection_style),
+                                    (format!("{base_val} "), selection_style),
+                                    (cand_val, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (format!("{name} "), theme.style(Token::Text)),
+                                    (format!("{base_val} "), theme.style(Token::Muted)),
+                                    (cand_val, theme.style(Token::Info)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else if let Some(snap) = single_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Single-Plan Buffers: Shared Hit={} Read={} Dirtied={} Written={}  |  Local Hit/Read={}/{}",
+                                snap.shared_hit_blocks,
+                                snap.shared_read_blocks,
+                                snap.shared_dirtied_blocks,
+                                snap.shared_written_blocks,
+                                snap.local_hit_blocks,
+                                snap.local_read_blocks,
+                            ),
+                            theme.style(Token::Info),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Temp Read/Written={}/{}  |  WAL Records={} FPI={} Bytes={}",
+                                snap.temp_read_blocks,
+                                snap.temp_written_blocks,
+                                snap.wal_records,
+                                snap.wal_fpi,
+                                crate::telemetry::format_bytes(snap.wal_bytes),
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!("  {:<36} {}", "NON-DEFAULT PLANNER SETTING", "VALUE"),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
+                    if snap.settings.is_empty() {
+                        lines.push(bounded_row(
+                            vec![(
+                                "  No non-default planner settings reported by EXPLAIN (SETTINGS)."
+                                    .to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    } else {
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(list_rows.saturating_sub(1));
+                        for (idx, (name, value)) in
+                            snap.settings.iter().enumerate().skip(start).take(list_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let col_name = fit_cell(name, 36, unicode);
+                            let col_val = sanitize_for_display(value);
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{col_name} "), selection_style),
+                                    (col_val, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (format!("{col_name} "), theme.style(Token::Text)),
+                                    (col_val, theme.style(Token::Info)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No Buffers / WAL / Settings data yet. Press [a] or [b] to capture a plan.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(report) = report_opt {
+        (
+            format!(
+                "Diff Verdict: {}  |  A: {}  vs  B: {}",
+                report.verdict.label(),
+                sanitize_for_display(&report.baseline.label),
+                sanitize_for_display(&report.candidate.label)
+            ),
+            Token::Muted,
+        )
+    } else {
+        (
+            "Press [a] to capture Baseline A, [b] to capture Candidate B, [m] for ANALYZE+BUFFERS+WAL."
+                .to_owned(),
+            Token::Muted,
+        )
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[1-3] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Tabs  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[a] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Capture Baseline A  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[b] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Capture Candidate B  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[m] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Toggle Analyze+Buffers+WAL  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[j/k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Select  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[r] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Refresh  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+}
+
+fn format_signed_bytes(delta: i64) -> String {
+    if delta == 0 {
+        return "0 B".to_owned();
+    }
+    let sign = if delta > 0 { "+" } else { "-" };
+    format!(
+        "{sign}{}",
+        crate::telemetry::format_bytes(delta.unsigned_abs())
+    )
+}
+
+fn fmt_opt_ms_short(value: Option<f64>) -> String {
+    value.map_or_else(|| "n/a".to_owned(), |v| format!("{v:.2}ms"))
+}
+
+fn fmt_opt_ms_delta_short(value: Option<f64>) -> String {
+    value.map_or_else(|| "n/a".to_owned(), |v| format!("{v:+.2}ms"))
+}
+
+/// Renders the Zero-Query Result Analytics overlay (`055`).
+pub(crate) fn render_result_analytics(
+    state: &crate::app::model::ResultAnalyticsState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} RESULT ANALYTICS (ZERO-QUERY) ",
+        presentation.icon(Icon::Rows)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let analytics = &state.analytics;
+    let mut capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("ROWS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}/{}", analytics.row_count, analytics.rows_seen),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("COLUMNS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}", analytics.column_count),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+    if analytics.truncated {
+        capsules.push(Span::styled("[", theme.style(Token::Border)));
+        capsules.push(Span::styled(
+            "TRUNCATED",
+            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+        ));
+        capsules.push(Span::styled("] ", theme.style(Token::Border)));
+    }
+    capsules.push(Span::styled("[", theme.style(Token::Border)));
+    capsules.push(Span::styled("PROFILE: ", theme.style(Token::Muted)));
+    capsules.push(Span::styled(
+        "ZERO-QUERY",
+        theme.style(Token::Success).add_modifier(Modifier::BOLD),
+    ));
+    capsules.push(Span::styled("]", theme.style(Token::Border)));
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let tab_labels = [
+        " [1] Column Profiles & Sparklines ",
+        " [2] Top Values & Detail ",
+    ];
+    let mut tab_spans = Vec::new();
+    for (idx, label) in tab_labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let style = if idx == state.active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled(*label, style));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let body_rows = usize::from(body_area.height).saturating_sub(1);
+    let selection_style = theme.style(Token::Selection);
+
+    match state.active_tab {
+        0 => {
+            if analytics.columns.is_empty() {
+                Paragraph::new(Line::from(Span::styled(
+                    "No columns available to profile.",
+                    theme.style(Token::Muted),
+                )))
+                .render(body_area, buf);
+            } else {
+                let mut lines = Vec::new();
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  {:<18} {:<11} {:>6} {:>8} {:<11} {:<11} {:>9} {:>9} {:>9} {}",
+                            "COLUMN",
+                            "TYPE",
+                            "NULL%",
+                            "DIST",
+                            "MIN",
+                            "MAX",
+                            "MEAN",
+                            "P50",
+                            "P95",
+                            "SPARK"
+                        ),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                let start = state
+                    .selected_col
+                    .saturating_sub(body_rows.saturating_sub(1));
+                for (idx, col) in analytics
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .skip(start)
+                    .take(body_rows)
+                {
+                    let selected = idx == state.selected_col;
+                    let marker = if selected { "> " } else { "  " };
+                    let name = fit_cell(&col.name, 18, unicode);
+                    let typ = fit_cell(&col.type_name, 11, unicode);
+                    let null_pct = format!("{:.1}%", col.null_pct);
+                    let distinct = if col.distinct_capped {
+                        format!("{}+", col.distinct_count)
+                    } else {
+                        col.distinct_count.to_string()
+                    };
+                    let min_str = fit_cell(
+                        &format_analytics_opt_str(col.min_value.as_deref()),
+                        11,
+                        unicode,
+                    );
+                    let max_str = fit_cell(
+                        &format_analytics_opt_str(col.max_value.as_deref()),
+                        11,
+                        unicode,
+                    );
+                    let mean_str = format_analytics_opt_f64(col.mean);
+                    let p50_str = format_analytics_opt_f64(col.p50);
+                    let p95_str = format_analytics_opt_f64(col.p95);
+                    let spark = if presentation.glyphs.is_ascii() {
+                        col.sparkline_ascii.clone()
+                    } else {
+                        col.sparkline_unicode.clone()
+                    };
+                    let segments = if selected {
+                        vec![
+                            (
+                                marker.to_owned(),
+                                selection_style.add_modifier(Modifier::BOLD),
+                            ),
+                            (format!("{name} "), selection_style),
+                            (format!("{typ} "), selection_style),
+                            (format!("{null_pct:>6} "), selection_style),
+                            (format!("{distinct:>8} "), selection_style),
+                            (format!("{min_str} "), selection_style),
+                            (format!("{max_str} "), selection_style),
+                            (format!("{mean_str:>9} "), selection_style),
+                            (format!("{p50_str:>9} "), selection_style),
+                            (format!("{p95_str:>9} "), selection_style),
+                            (spark, selection_style),
+                        ]
+                    } else {
+                        vec![
+                            (marker.to_owned(), theme.style(Token::Muted)),
+                            (format!("{name} "), theme.style(Token::Text)),
+                            (format!("{typ} "), theme.style(Token::Info)),
+                            (
+                                format!("{null_pct:>6} "),
+                                theme.style(if col.null_count > 0 {
+                                    Token::Warning
+                                } else {
+                                    Token::Muted
+                                }),
+                            ),
+                            (format!("{distinct:>8} "), theme.style(Token::Text)),
+                            (format!("{min_str} "), theme.style(Token::Muted)),
+                            (format!("{max_str} "), theme.style(Token::Muted)),
+                            (format!("{mean_str:>9} "), theme.style(Token::Text)),
+                            (format!("{p50_str:>9} "), theme.style(Token::Text)),
+                            (format!("{p95_str:>9} "), theme.style(Token::Text)),
+                            (spark, theme.style(Token::Focus)),
+                        ]
+                    };
+                    lines.push(bounded_row(
+                        segments,
+                        body_width,
+                        unicode,
+                        selected.then_some(selection_style),
+                    ));
+                }
+                Paragraph::new(lines).render(body_area, buf);
+            }
+        }
+        1 => {
+            if let Some(col) = analytics.columns.get(state.selected_col) {
+                let mut lines = Vec::new();
+                let distinct_label = if col.distinct_capped {
+                    format!("{}+", col.distinct_count)
+                } else {
+                    col.distinct_count.to_string()
+                };
+                let spark = if presentation.glyphs.is_ascii() {
+                    col.sparkline_ascii.as_str()
+                } else {
+                    col.sparkline_unicode.as_str()
+                };
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  Column: {} ({})  |  Rows: {}  Non-Null: {}  Nulls: {} ({:.1}%)  Empty: {}",
+                            sanitize_for_display(&col.name),
+                            sanitize_for_display(&col.type_name),
+                            col.total_rows,
+                            col.non_null_count,
+                            col.null_count,
+                            col.null_pct,
+                            col.empty_count
+                        ),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  Distinct: {}  |  Min: {}  Max: {}  |  Sparkline: [{}]",
+                            distinct_label,
+                            format_analytics_opt_str(col.min_value.as_deref()),
+                            format_analytics_opt_str(col.max_value.as_deref()),
+                            spark
+                        ),
+                        theme.style(Token::Info),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  Numeric ({}): Mean={}  StdDev={}  p50={}  p95={}",
+                            col.numeric_count,
+                            format_analytics_opt_f64(col.mean),
+                            format_analytics_opt_f64(col.stddev),
+                            format_analytics_opt_f64(col.p50),
+                            format_analytics_opt_f64(col.p95),
+                        ),
+                        theme.style(Token::Text),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                lines.push(bounded_row(
+                    vec![(
+                        "  TOP FREQUENT VALUES".to_owned(),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                if col.top_values.is_empty() {
+                    lines.push(bounded_row(
+                        vec![(
+                            "    (no non-null values observed)".to_owned(),
+                            theme.style(Token::Muted),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                } else {
+                    for (rank, (val, count)) in col.top_values.iter().enumerate() {
+                        let pct = if col.non_null_count > 0 {
+                            (*count as f64) * 100.0 / (col.non_null_count as f64)
+                        } else {
+                            0.0
+                        };
+                        let display_val = if val.is_empty() {
+                            "\"\"".to_owned()
+                        } else {
+                            sanitize_for_display(val)
+                        };
+                        lines.push(bounded_row(
+                            vec![
+                                (format!("    #{:<2} ", rank + 1), theme.style(Token::Muted)),
+                                (
+                                    format!("{:<28} ", fit_cell(&display_val, 28, unicode)),
+                                    theme.style(Token::Text),
+                                ),
+                                (
+                                    format!("{count:>6} ({pct:>5.1}%)",),
+                                    theme.style(Token::Info),
+                                ),
+                            ],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    }
+                }
+                lines.push(bounded_row(
+                    vec![(
+                        "  HISTOGRAM BUCKETS".to_owned(),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                let max_bucket = col.histogram_counts.iter().copied().max().unwrap_or(0);
+                let bar_char = if presentation.glyphs.is_ascii() {
+                    '#'
+                } else {
+                    '\u{2588}'
+                };
+                for (bucket_idx, count) in col.histogram_counts.iter().enumerate() {
+                    let bar_len = if max_bucket > 0 && *count > 0 {
+                        ((*count * 20) / max_bucket).max(1)
+                    } else {
+                        0
+                    };
+                    let bar: String = std::iter::repeat_n(bar_char, bar_len).collect();
+                    lines.push(bounded_row(
+                        vec![
+                            (
+                                format!("    B{}: ", bucket_idx + 1),
+                                theme.style(Token::Muted),
+                            ),
+                            (format!("{count:>6}  "), theme.style(Token::Text)),
+                            (bar, theme.style(Token::Focus)),
+                        ],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                }
+                Paragraph::new(lines).render(body_area, buf);
+            } else {
+                Paragraph::new(Line::from(Span::styled(
+                    "No column selected.",
+                    theme.style(Token::Muted),
+                )))
+                .render(body_area, buf);
+            }
+        }
+        _ => {}
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if analytics.truncated {
+        (
+            format!(
+                "Notice: zero-query profile covers {} retained row(s) of {} seen.",
+                analytics.row_count, analytics.rows_seen
+            ),
+            Token::Warning,
+        )
+    } else if let Some(col) = analytics.columns.get(state.selected_col) {
+        (
+            format!(
+                "Selected: {} ({})  |  nulls={}  empty=\"\"={}  distinct={}",
+                sanitize_for_display(&col.name),
+                sanitize_for_display(&col.type_name),
+                col.null_count,
+                col.empty_count,
+                col.distinct_count
+            ),
+            Token::Muted,
+        )
+    } else {
+        (String::new(), Token::Muted)
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[1-2] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Tabs  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[j/k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Column  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[e] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Export CSV/HTML/Parquet  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+}
+
+fn format_analytics_opt_str(value: Option<&str>) -> String {
+    match value {
+        None => "-".to_owned(),
+        Some("") => "\"\"".to_owned(),
+        Some(text) => sanitize_for_display(text),
+    }
+}
+
+fn format_analytics_opt_f64(value: Option<f64>) -> String {
+    match value {
+        Some(v) if v.is_finite() => format!("{v:.2}"),
+        _ => "-".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests;
