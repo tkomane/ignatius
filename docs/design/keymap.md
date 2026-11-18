@@ -340,13 +340,20 @@ With the workbench active, buffer chords manage the multi-tab and split SQL edit
 
 With the workbench active, `Ctrl+K ;` (`snippet-library`) opens the persistent scratchpad and snippet library cockpit:
 - `Enter` inserts the selected snippet directly into the active editor buffer at the cursor.
-- `n` or `Ctrl+O` opens the selected snippet into a new editor buffer tab.
+- `n` opens the selected snippet into a new editor buffer tab.
 - `Tab` cycles the category filter (`ALL`, `ADMIN`, `PERFORMANCE`, `PATTERNS`, `USER`).
 - `a` captures the current editor buffer and saves it as a reusable user snippet.
 - `d` deletes the selected user snippet from disk with confirmation.
 - `j`, `k`, `Up`, `Down` navigate the snippet list.
 - `Esc` closes the overlay without side effects.
 The scriptable `ignatius snippet` CLI subcommand provides non-interactive parity.
+
+With the workbench active, `Ctrl+K !` (`lint-sql`) opens the offline SQL lint findings overlay without opening a network connection or executing SQL:
+- `Up`, `Down`, `k`, `j`, `PageUp`, and `PageDown` move across findings.
+- `Enter` jumps the editor caret directly to the finding's line and column and closes the overlay.
+- `r` re-lints the current buffer in place.
+- `Esc` closes the overlay without modifying the buffer.
+The scriptable `ignatius lint` CLI subcommand provides non-interactive table, JSON, and SARIF 2.1.0 parity.
 
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in

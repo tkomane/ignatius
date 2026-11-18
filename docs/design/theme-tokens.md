@@ -26,7 +26,7 @@ flatter. With colour off, keywords keep a bold weight and comments a dim one and
 the rest is plain text: a buffer where every second word is emphasised is harder
 to read, not easier. Nothing about the meaning of the SQL depends on any of it.
 
-## The three palettes
+## The four built-in palettes
 
 - **Dark**, tuned for a dark terminal, low-saturation, no pure black background.
 - **Light**, designed for a light terminal by darkening and desaturating hues, not
@@ -34,6 +34,9 @@ to read, not easier. Nothing about the meaning of the SQL depends on any of it.
   are unpleasant.
 - **High contrast**, on pure black, where every token clears 7:1 against the
   background.
+- **Field Industrial**, inspired by Teenage Engineering and Dieter Rams (Braun ET66):
+  matte anodized slate surfaces, warm bone foreground text, signal orange focus,
+  phosphor amber warnings, alpine sage success, and graphite framing.
 
 ## Contrast is tested, not asserted
 
@@ -66,16 +69,24 @@ extends = "dark"
 syntax-keyword = "#C99CF0"
 ```
 
-### The Field Industrial Preset (Teenage Engineering & Dieter Rams aesthetic)
+### The Field Industrial Preset (Built-in & Custom Override)
 
-For an artisan hardware aesthetic inspired by Teenage Engineering and Dieter Rams (Braun ET66), use this tactile, high-contrast palette with industrial safety orange accents, phosphor amber indicators, and warm bone typography:
+Enable the built-in Teenage Engineering / Dieter Rams palette directly via
+`ui.theme = "field-industrial"`, or customize individual tokens in `[theme]`:
+
+```toml
+[ui]
+theme = "field-industrial"
+```
+
+Or extend any built-in with `[theme]`:
 
 ```toml
 [ui]
 theme = "custom"
 
 [theme]
-extends = "dark"
+extends = "field-industrial"
 focus = "#FF6A00"                  # Tactile industrial safety orange
 warning = "#F59E0B"                # Vintage phosphor amber indicator
 success = "#10B981"                # Alpine sage green
@@ -84,14 +95,14 @@ header = "#F4F3EF"                 # Warm bone / cream paper text
 syntax-keyword = "#82AAFF"         # Technical drafting cobalt
 ```
 
-`ui.theme` accepts `dark`, `light`, `high-contrast`, `custom` and `auto`. When
+`ui.theme` accepts `dark`, `light`, `high-contrast`, `field-industrial`, `custom` and `auto`. When
 `ui.theme = "auto"`, startup probes the terminal background luminance over OSC 11
 within a 100 ms deadline before entering the alternate screen, selecting `light`
 when WCAG relative luminance is at least 0.5 and falling back to `dark` without
 hanging when unanswered. An absent
 definition adds no custom palette to the session cycle. An empty `[theme]`
 inherits dark and still has Custom identity. `extends` defaults to dark and
-accepts only the three built-ins. Partial definitions inherit every omitted
+accepts any of the built-in palettes (`dark`, `light`, `high-contrast`, `field-industrial`). Partial definitions inherit every omitted
 token. An inactive definition is validated too.
 
 Keys are exact and case-sensitive. Colours are `#` followed by six ASCII hex

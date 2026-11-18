@@ -187,6 +187,7 @@ fn catalog_cycles_three_or_four_and_rejects_mismatched_custom_without_mutation()
     for expected in [
         ThemeSelection::Light,
         ThemeSelection::HighContrast,
+        ThemeSelection::FieldIndustrial,
         ThemeSelection::Dark,
     ] {
         active = base.cycle(&active).unwrap();
@@ -196,7 +197,7 @@ fn catalog_cycles_three_or_four_and_rejects_mismatched_custom_without_mutation()
     }
     let definition = ThemeDefinition::new(ThemeChoice::Dark);
     let catalog =
-        ValidatedThemes::resolve(ThemeSelection::HighContrast, Some(&definition)).unwrap();
+        ValidatedThemes::resolve(ThemeSelection::FieldIndustrial, Some(&definition)).unwrap();
     let before = catalog.selected_theme(true, ColorDepth::Indexed256);
     let custom = catalog.cycle(&before).unwrap();
     assert_eq!(custom.selection(), ThemeSelection::Custom);
@@ -279,6 +280,7 @@ fn every_override_lowers_in_canonical_slot_and_every_matrix_role_is_validated() 
         ThemeChoice::Dark,
         ThemeChoice::Light,
         ThemeChoice::HighContrast,
+        ThemeChoice::FieldIndustrial,
     ] {
         let theme = Theme::new(base, true);
         for token in Token::ALL {
@@ -600,4 +602,33 @@ fn field_industrial_preset_validates_and_clears_all_contrast_matrix_roles() {
     assert_eq!(theme.rgb(Token::Border), Rgb(0x2E, 0x35, 0x47));
     assert_eq!(theme.rgb(Token::Header), Rgb(0xF4, 0xF3, 0xEF));
     assert_eq!(theme.rgb(Token::SyntaxKeyword), Rgb(0x82, 0xAA, 0xFF));
+}
+
+#[test]
+fn field_industrial_builtin_selection_and_extends_resolve_cleanly() {
+    let (selection, definition) = lower("[ui]\ntheme = \"field-industrial\"\n").unwrap();
+    assert_eq!(selection, ThemeSelection::FieldIndustrial);
+    assert!(definition.is_none());
+    let catalog = ValidatedThemes::resolve(selection, definition.as_ref()).unwrap();
+    let active = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(active.selection(), ThemeSelection::FieldIndustrial);
+    assert_eq!(
+        active.rgb(Token::Focus),
+        Theme::new(ThemeChoice::FieldIndustrial, true).rgb(Token::Focus)
+    );
+
+    let (selection, definition) =
+        lower("[ui]\ntheme = \"custom\"\n[theme]\nextends = \"field-industrial\"\n").unwrap();
+    assert_eq!(selection, ThemeSelection::Custom);
+    let definition = definition.expect("definition present");
+    assert_eq!(definition.base(), ThemeChoice::FieldIndustrial);
+    let catalog = ValidatedThemes::resolve(selection, Some(&definition)).unwrap();
+    let custom = catalog.selected_theme(true, ColorDepth::TrueColor);
+    assert_eq!(custom.selection(), ThemeSelection::Custom);
+    for token in Token::ALL {
+        assert_eq!(
+            custom.rgb(*token),
+            Theme::new(ThemeChoice::FieldIndustrial, true).rgb(*token)
+        );
+    }
 }

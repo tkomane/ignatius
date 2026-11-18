@@ -4,11 +4,12 @@ const READABLE: f64 = 4.5;
 const LARGE_OR_SECONDARY: f64 = 3.0;
 const HIGH_CONTRAST_MINIMUM: f64 = 7.0;
 
-fn themes() -> [Theme; 3] {
+fn themes() -> [Theme; 4] {
     [
         Theme::new(ThemeChoice::Dark, true),
         Theme::new(ThemeChoice::Light, true),
         Theme::new(ThemeChoice::HighContrast, true),
+        Theme::new(ThemeChoice::FieldIndustrial, true),
     ]
 }
 
@@ -387,6 +388,7 @@ fn basic_16_emits_family_foregrounds_and_paints_no_surface() {
         ThemeChoice::Dark,
         ThemeChoice::Light,
         ThemeChoice::HighContrast,
+        ThemeChoice::FieldIndustrial,
     ] {
         let theme = Theme::new(choice, true).with_depth(ColorDepth::Basic16);
         for token in Token::ALL {
@@ -829,4 +831,46 @@ fn surface_tiers_and_theme_pill_helper() {
     let pill_no_color = no_color.pill(Token::Focus);
     assert!(pill_no_color.bg.is_none());
     assert!(pill_no_color.fg.is_none());
+}
+
+#[test]
+fn field_industrial_surfaces_capsules_and_quantization_preserve_distinction() {
+    let field = Theme::new(ThemeChoice::FieldIndustrial, true);
+    let field_surfaces = surfaces(&field);
+    for (i, left) in field_surfaces.iter().enumerate() {
+        for (j, right) in field_surfaces.iter().enumerate() {
+            if i != j {
+                assert_ne!(left, right, "surface tiers {i} and {j} must be distinct");
+            }
+        }
+        assert_ne!(
+            field.rgb(Token::Border),
+            *left,
+            "border must remain distinct from surface tier {i}"
+        );
+    }
+
+    for token in [Token::Focus, Token::EnvironmentProduction] {
+        let capsule = field.capsule(token);
+        assert!(capsule.bg.is_some(), "{token:?} capsule must paint a fill");
+        assert!(
+            capsule.fg.is_some(),
+            "{token:?} capsule must paint foreground"
+        );
+        let ratio = field.rgb(token).contrast(field.rgb(Token::Surface));
+        assert!(
+            ratio >= READABLE,
+            "{token:?} capsule contrast {ratio:.2} is below {READABLE}"
+        );
+    }
+
+    for token in Token::ALL {
+        let idx = quantize_256(field.rgb(*token));
+        assert!((16..=255).contains(&idx), "{token:?} quantized to {idx}");
+    }
+
+    let indexed = field.clone().with_depth(ColorDepth::Indexed256);
+    assert_eq!(indexed.banner_ramp(59).len(), 59);
+    let basic = field.with_depth(ColorDepth::Basic16);
+    assert_eq!(basic.banner_ramp(59).len(), 59);
 }

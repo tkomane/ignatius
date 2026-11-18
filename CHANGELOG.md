@@ -8,6 +8,18 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Built-in `field-industrial` palette (`[ui] theme = "field-industrial"` and
+  `[theme] extends = "field-industrial"`) delivering the Dieter Rams / Teenage
+  Engineering matte slate, warm bone, signal orange, phosphor amber, and alpine
+  sage palette directly out of the box and in the `SwitchTheme` cycle.
+
+- Improved: Polished M9 and M10 TUI surfaces to uniform Field Industrial craft,
+  including discrete semantic `[FINDINGS]` / `[ERRORS]` / `[WARNINGS]` capsules
+  and full-width selection bars in `Ctrl+K !`, ASCII-safe dividers/gutters in
+  `Ctrl+K ;`, filled warning capsules on crash recovery, 16-tab overflow windowing,
+  and non-empty secondary split badges. Reconciled `README.md`, keymap/theme/parity
+  docs, and planned Milestones 12-13 (`050-055`).
+
 - New: Feature `047-restore-drills` advances Milestone 11 with
   `ignatius restore-drill`. It reads an archive table of contents with
   `pg_restore --list`, restores into a newly created scratch database from

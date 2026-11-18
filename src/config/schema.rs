@@ -491,11 +491,14 @@ pub enum ThemeChoice {
     Light,
     /// Maximum contrast.
     HighContrast,
+    /// Matte anodized slate with signal orange and phosphor amber accents.
+    FieldIndustrial,
 }
 
 impl ThemeChoice {
     /// Accepted values, for help text and error messages.
-    pub const ACCEPTED: &'static [&'static str] = &["dark", "light", "high-contrast"];
+    pub const ACCEPTED: &'static [&'static str] =
+        &["dark", "light", "high-contrast", "field-industrial"];
 }
 
 /// Whether to draw with Unicode or ASCII.

@@ -6411,6 +6411,8 @@ pub(crate) fn render_snippet_library(
     }
 
     // Left pane: snippet list
+    let unicode = !presentation.glyphs.is_ascii();
+    let selection_style = theme.style(Token::Selection);
     let selected_idx = state
         .library
         .selected_idx
@@ -6424,6 +6426,7 @@ pub(crate) fn render_snippet_library(
         )));
     } else {
         let max_visible = list_area.height as usize;
+        let list_width = usize::from(list_area.width);
         let scroll = if selected_idx >= max_visible {
             selected_idx.saturating_sub(max_visible - 1)
         } else {
@@ -6440,23 +6443,34 @@ pub(crate) fn render_snippet_library(
                 crate::snippet::SnippetCategory::All => ("[ALL] ", Token::Muted),
             };
 
-            let line_spans = if is_sel {
-                vec![
-                    Span::styled("> ", theme.style(Token::Focus).add_modifier(Modifier::BOLD)),
-                    Span::styled(badge, theme.style(badge_token).add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        &snippet.name,
-                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-                    ),
-                ]
+            let name = sanitize_for_display(&snippet.name);
+            let row = if is_sel {
+                bounded_row(
+                    vec![
+                        (
+                            "> ".to_owned(),
+                            selection_style.add_modifier(Modifier::BOLD),
+                        ),
+                        (badge.to_owned(), selection_style),
+                        (name, selection_style.add_modifier(Modifier::BOLD)),
+                    ],
+                    list_width,
+                    unicode,
+                    Some(selection_style),
+                )
             } else {
-                vec![
-                    Span::styled("  ", theme.style(Token::Muted)),
-                    Span::styled(badge, theme.style(badge_token)),
-                    Span::styled(&snippet.name, theme.style(Token::Text)),
-                ]
+                bounded_row(
+                    vec![
+                        ("  ".to_owned(), theme.style(Token::Muted)),
+                        (badge.to_owned(), theme.style(badge_token)),
+                        (name, theme.style(Token::Text)),
+                    ],
+                    list_width,
+                    unicode,
+                    None,
+                )
             };
-            list_lines.push(Line::from(line_spans));
+            list_lines.push(row);
         }
     }
     Paragraph::new(list_lines).render(list_area, buf);
@@ -6477,8 +6491,10 @@ pub(crate) fn render_snippet_library(
             Span::styled("ABOUT: ", theme.style(Token::Muted)),
             Span::styled(&snippet.description, theme.style(Token::Info)),
         ]));
+        let divider =
+            if unicode { "\u{2500}" } else { "-" }.repeat(usize::from(preview_area.width));
         preview_lines.push(Line::from(Span::styled(
-            "──────────────────────────────────────────────",
+            divider,
             theme.style(Token::Border),
         )));
 
@@ -6490,7 +6506,7 @@ pub(crate) fn render_snippet_library(
         for (line_idx, source) in snippet.sql.lines().enumerate().take(available_sql_height) {
             let line_start = start;
             start += source.len() + 1;
-            let line_nr = format!("{:>3} │ ", line_idx + 1);
+            let line_nr = format!("{:>3} {sep_char} ", line_idx + 1);
             let mut spans = vec![Span::styled(line_nr, theme.style(Token::Muted))];
 
             let mut run = String::new();
@@ -6562,6 +6578,41 @@ pub(crate) fn render_snippet_library(
     Paragraph::new(Line::from(footer_spans)).render(footer_area, buf);
 }
 
+/// Builds a single-line row bounded to `max_width`, optionally padded with a full-width selection bar.
+fn bounded_row(
+    segments: Vec<(String, Style)>,
+    max_width: usize,
+    unicode: bool,
+    selection_style: Option<Style>,
+) -> Line<'static> {
+    let mut spans = Vec::with_capacity(segments.len() + 1);
+    let mut used = 0usize;
+    for (text, style) in segments {
+        if used >= max_width {
+            break;
+        }
+        let avail = max_width - used;
+        let width = display_width(&text);
+        if width <= avail {
+            spans.push(Span::styled(text, style));
+            used += width;
+        } else {
+            let clipped = truncate_to_width(&text, avail, unicode);
+            used += display_width(&clipped);
+            spans.push(Span::styled(clipped, style));
+            break;
+        }
+    }
+    if let Some(sel) = selection_style {
+        if used < max_width {
+            spans.push(Span::styled(" ".repeat(max_width - used), sel));
+        }
+        Line::from(spans).style(sel)
+    } else {
+        Line::from(spans)
+    }
+}
+
 /// Draws the offline SQL lint findings overlay.
 pub(crate) fn render_lint_findings(
     state: &crate::app::model::LintFindingsState,
@@ -6570,6 +6621,7 @@ pub(crate) fn render_lint_findings(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
     let modal_width = (area.width.saturating_mul(84) / 100)
         .max(60)
         .min(area.width);
@@ -6587,7 +6639,8 @@ pub(crate) fn render_lint_findings(
     }
 
     ratatui::widgets::Clear.render(modal_area, buf);
-    overlay_block(" SQL LINT - OFFLINE ".to_owned(), presentation).render(modal_area, buf);
+    let title = format!(" {} SQL LINT - OFFLINE ", presentation.icon(Icon::Warning));
+    overlay_block(title, presentation).render(modal_area, buf);
     let inner = Rect::new(
         modal_area.x.saturating_add(1),
         modal_area.y.saturating_add(1),
@@ -6608,15 +6661,40 @@ pub(crate) fn render_lint_findings(
         .iter()
         .filter(|finding| finding.severity == crate::lint::LintSeverity::Warning)
         .count();
-    let header = format!(
-        "[FINDINGS: {}] [ERRORS: {errors}] [WARNINGS: {warnings}]",
-        state.findings.len()
-    );
-    Paragraph::new(Line::from(Span::styled(
-        header,
-        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-    )))
-    .render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+    let error_token = if errors > 0 {
+        Token::Danger
+    } else {
+        Token::Success
+    };
+    let warning_token = if warnings > 0 {
+        Token::Warning
+    } else {
+        Token::Success
+    };
+    let capsules = vec![
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("FINDINGS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}", state.findings.len()),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ERRORS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{errors}"),
+            theme.style(error_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("WARNINGS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{warnings}"),
+            theme.style(warning_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
 
     let footer_area = Rect::new(
         inner.x,
@@ -6640,6 +6718,8 @@ pub(crate) fn render_lint_findings(
         .render(body_area, buf);
     } else {
         let mut lines = Vec::new();
+        let body_width = usize::from(body_area.width);
+        let selection_style = theme.style(Token::Selection);
         let start = state.selected.saturating_sub(body_height.saturating_sub(1));
         for (index, finding) in state
             .findings
@@ -6654,54 +6734,86 @@ pub(crate) fn render_lint_findings(
                 crate::lint::LintSeverity::Warning => theme.style(Token::Warning),
                 crate::lint::LintSeverity::Info => theme.style(Token::Muted),
             };
-            let marker = if selected { ">" } else { " " };
-            let mut spans = vec![
-                Span::styled(
-                    format!("{marker} "),
-                    theme.style(if selected {
-                        Token::Selection
-                    } else {
-                        Token::Muted
-                    }),
-                ),
-                Span::styled(
-                    format!("{:<7} ", finding.severity.label()),
-                    severity_style.add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{}:{} ", finding.line, finding.column),
-                    theme.style(Token::Muted),
-                ),
-                Span::styled(format!("{} ", finding.code), theme.style(Token::Info)),
-                Span::styled(
-                    sanitize_for_display(&finding.message),
-                    if selected {
-                        theme.style(Token::Text).add_modifier(Modifier::BOLD)
-                    } else {
-                        theme.style(Token::Text)
-                    },
-                ),
-            ];
+            let marker = if selected { "> " } else { "  " };
+            let mut segments = if selected {
+                vec![
+                    (
+                        marker.to_owned(),
+                        selection_style.add_modifier(Modifier::BOLD),
+                    ),
+                    (
+                        format!("{:<7} ", finding.severity.label()),
+                        selection_style.add_modifier(Modifier::BOLD),
+                    ),
+                    (
+                        format!("{}:{} ", finding.line, finding.column),
+                        selection_style,
+                    ),
+                    (format!("{} ", finding.code), selection_style),
+                    (
+                        sanitize_for_display(&finding.message),
+                        selection_style.add_modifier(Modifier::BOLD),
+                    ),
+                ]
+            } else {
+                vec![
+                    (marker.to_owned(), theme.style(Token::Muted)),
+                    (
+                        format!("{:<7} ", finding.severity.label()),
+                        severity_style.add_modifier(Modifier::BOLD),
+                    ),
+                    (
+                        format!("{}:{} ", finding.line, finding.column),
+                        theme.style(Token::Muted),
+                    ),
+                    (format!("{} ", finding.code), theme.style(Token::Info)),
+                    (
+                        sanitize_for_display(&finding.message),
+                        theme.style(Token::Text),
+                    ),
+                ]
+            };
             if !finding.excerpt.is_empty() {
-                spans.push(Span::styled(
+                segments.push((
                     format!("  {}", sanitize_for_display(&finding.excerpt)),
-                    theme.style(Token::Muted),
+                    if selected {
+                        selection_style
+                    } else {
+                        theme.style(Token::Muted)
+                    },
                 ));
             }
-            lines.push(Line::from(spans));
+            lines.push(bounded_row(
+                segments,
+                body_width,
+                unicode,
+                selected.then_some(selection_style),
+            ));
         }
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .render(body_area, buf);
+        Paragraph::new(lines).render(body_area, buf);
     }
 
     Paragraph::new(Line::from(vec![
-        Span::styled("Enter ", theme.style(Token::Info)),
-        Span::styled("jump  ", theme.style(Token::Muted)),
-        Span::styled("r ", theme.style(Token::Info)),
-        Span::styled("re-lint  ", theme.style(Token::Muted)),
-        Span::styled("Esc ", theme.style(Token::Info)),
-        Span::styled("close", theme.style(Token::Muted)),
+        Span::styled(
+            "[Enter] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Jump  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Re-lint  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Move  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
     ]))
     .render(footer_area, buf);
 }

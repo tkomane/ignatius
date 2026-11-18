@@ -3848,13 +3848,23 @@ fn lint_findings_action(model: &mut Model, action: Action) -> Vec<Effect> {
         return Vec::new();
     };
     match action {
-        Action::Move(Direction::Up) => {
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
             state.move_selection(-1);
             model.lint_findings = Some(state);
             Vec::new()
         }
-        Action::Move(Direction::Down) => {
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
             state.move_selection(1);
+            model.lint_findings = Some(state);
+            Vec::new()
+        }
+        Action::MovePage(Direction::Up) => {
+            state.move_selection(-8);
+            model.lint_findings = Some(state);
+            Vec::new()
+        }
+        Action::MovePage(Direction::Down) => {
+            state.move_selection(8);
             model.lint_findings = Some(state);
             Vec::new()
         }
@@ -3865,7 +3875,7 @@ fn lint_findings_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
             Vec::new()
         }
-        Action::Insert('r') => lint_buffer_open(model),
+        Action::Insert('r' | 'R') => lint_buffer_open(model),
         Action::Dismiss => Vec::new(),
         Action::Quit => {
             model.should_quit = true;
