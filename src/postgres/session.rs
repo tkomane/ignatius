@@ -333,6 +333,52 @@ impl Session {
         crate::postgres::metadata::security_audit(&self.client, schema).await
     }
 
+    /// Reads the bounded retention and growth audit from catalog statistics.
+    pub async fn growth_snapshot(
+        &self,
+        options: &crate::growth::GrowthOptions,
+    ) -> Result<crate::growth::GrowthSnapshot, Diagnostic> {
+        crate::postgres::growth::growth_snapshot(&self.client, options).await
+    }
+
+    /// Reads the bounded partition tree for a schema.
+    pub async fn partition_snapshot(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::partition::PartitionSnapshot, Diagnostic> {
+        crate::postgres::partition::partition_snapshot(&self.client, schema).await
+    }
+
+    /// Whether a database with this exact name exists on the server.
+    pub async fn drill_database_exists(&self, name: &str) -> Result<bool, Diagnostic> {
+        crate::postgres::drill::database_exists(&self.client, name).await
+    }
+
+    /// Whether the connected role may create a scratch database.
+    pub async fn drill_can_create_database(&self) -> Result<bool, Diagnostic> {
+        crate::postgres::drill::can_create_database(&self.client).await
+    }
+
+    /// Creates an empty scratch database from `template0`.
+    pub async fn drill_create_database(&self, name: &str) -> Result<(), Diagnostic> {
+        crate::postgres::drill::create_database(&self.client, name).await
+    }
+
+    /// Terminates connections to a scratch database and drops it.
+    pub async fn drill_drop_database(&self, name: &str) -> Result<(), Diagnostic> {
+        crate::postgres::drill::drop_database(&self.client, name).await
+    }
+
+    /// Counts user relations in the connected database.
+    pub async fn drill_user_relation_count(&self) -> Result<u64, Diagnostic> {
+        crate::postgres::drill::user_relation_count(&self.client).await
+    }
+
+    /// Measures the connected database in bytes.
+    pub async fn drill_database_size(&self) -> Result<u64, Diagnostic> {
+        crate::postgres::drill::database_size(&self.client).await
+    }
+
     /// Reads a complete schema snapshot for schema diffing and migrations.
     pub async fn schema_snapshot(
         &self,

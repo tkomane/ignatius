@@ -281,6 +281,8 @@ pub struct RestoreOptions {
     pub data_only: bool,
     /// Restore only schema.
     pub schema_only: bool,
+    /// Stop at the first restore error.
+    pub exit_on_error: bool,
     /// Verbose output mode.
     pub verbose: bool,
 }
@@ -672,6 +674,10 @@ pub fn build_pg_restore_command(
 
     if options.schema_only {
         args.push("--schema-only".to_owned());
+    }
+
+    if options.exit_on_error {
+        args.push("--exit-on-error".to_owned());
     }
 
     if options.verbose {

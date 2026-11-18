@@ -4,9 +4,12 @@
 //! works with the pure types in [`crate::query`] and [`crate::diagnostics`].
 
 mod dbdoc;
+pub mod drill;
 pub mod error;
+pub mod growth;
 pub mod metadata;
 mod notices;
+pub mod partition;
 pub mod session;
 pub mod tls;
 

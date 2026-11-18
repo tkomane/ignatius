@@ -138,6 +138,33 @@ Generate a reviewable data dictionary from catalog metadata:
 - **Bounded And Read-Only**: at most 500 relations and 5000 columns; truncation is stated. No table rows, credentials or connection strings enter the document.
 - **Atomic Workflow**: standard output by default, or `--output` with overwrite protection and `--force`.
 
+### Growth and Retention Audit (`ignatius growth`)
+
+See storage and maintenance risk before a volume fills:
+- **Size Ranking**: the top relations by heap, index and TOAST bytes, with dead tuple ratio, last maintenance and planner row estimates clearly marked as estimates.
+- **Growth Window**: inserts, updates, deletes and net rows per day since the statistics reset; a window shorter than an hour reports no rate.
+- **Sequence Headroom**: non-cycling sequences at 20 percent remaining warn and at 5 percent or 1000 values fail the optional gate, so integer keys do not break mid-insert.
+- **Partitioning Candidates**: unpartitioned relations above `--large-table-bytes` (1 GiB by default) are named, without claiming a partition scheme.
+- **Read-Only And Bounded**: catalog statistics only, at most 200 relations and 200 sequences, and `--fail-on warning|critical` for automation.
+
+### Partition Lifecycle (`ignatius partition`)
+
+Keep range partitions ahead of the calendar without hand-copying DDL:
+- **Status**: every partitioned table with its strategy, key, child bounds, sizes and row estimates, including a clearly marked default partition.
+- **Reviewed Plans**: `ignatius partition plan --table billing.invoices --period monthly --start 2026-12-01 --count 3` prints `CREATE TABLE ... PARTITION OF` statements and refuses overlapping intervals.
+- **Deliberate Expiry**: `--expire-before` appends reviewed detach and drop statements only for partitions wholly before the cutoff; `MAXVALUE` and default partitions are never expired.
+- **No Hidden Writes**: the command never executes DDL. Apply the reviewed file through the migration runner so one ledger records the change.
+- **Bounded Reads**: at most 500 partitioned tables and 5000 partitions are read; unsupported keys and unparsable bounds are refused rather than guessed.
+
+### Restore Drills (`ignatius restore-drill`)
+
+A backup is only a recovery plan once it has been restored:
+- **Inspect First**: `pg_restore --list` reads the table of contents before any database is created; plain SQL dumps and unreadable archives are refused.
+- **Scratch Isolation**: the archive loads into a newly created `<source>_ignatius_drill_<UTC>` database from `TEMPLATE template0`, never into the source.
+- **Compared Evidence**: user relation counts in the source and the restored database must match; a mismatch fails the drill, and the restored size and duration are reported.
+- **Deliberate Retention**: a passing drill drops its scratch database unless `--keep`; a failed drill keeps it for inspection unless `--drop-on-failure`.
+- **Production Guard**: `--allow-production` is required before creating and dropping a database on a production server; `--dry-run` shows every step, with credentials redacted, and changes nothing.
+
 ### Schema-Aware SQL Completion (Blink.cmp Style)
 
 ![Schema-Aware SQL Completion](docs/assets/screenshots/completion-menu.png)
@@ -504,6 +531,19 @@ ignatius migrate verify "$DATABASE_URL" --dir migrations
 ignatius docs "$DATABASE_URL" --schema public --format markdown --output docs/data-dictionary.md
 ignatius docs "$DATABASE_URL" --schema public --format mermaid
 
+# Audit growth, vacuum debt, sequence headroom and partitioning candidates
+ignatius growth "$DATABASE_URL" --top 20
+ignatius growth "$DATABASE_URL" --schema orders --format json --fail-on critical
+
+# Inspect partitions and generate reviewed range-partition DDL
+ignatius partition status "$DATABASE_URL" --schema billing
+ignatius partition plan "$DATABASE_URL" --table billing.invoices --period monthly --start 2026-12-01 --count 3
+
+# Prove a backup restores into a scratch database, then remove it
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump --keep --scratch-database orders_drill
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump --dry-run
+
 # Generate schema ER diagrams (formats: mermaid, dot, svg, ascii, unicode)
 ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
 ignatius diagram "$DATABASE_URL" --table orders --hops 1 --format unicode
@@ -704,9 +744,9 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `045-migration-runner-and-ledger` [Implemented]: Forward-only, checksummed migrations with a ledger, drift refusal, transactional apply, advisory locking, and a CLI-first reviewed route.
   - `046-schema-documentation-generator` [Implemented]: Deterministic Markdown, JSON and Mermaid data dictionaries generated from catalog metadata.
 - **Milestone 11: Operational Data Lifecycle (`047` - `049`)**:
-  - `047-backup-verification-and-restore-drills`: Restore a backup into a scratch target and prove row counts and key invariants.
-  - `048-partition-lifecycle-manager`: Reviewed create, attach, detach and drop operations for range-partitioned tables.
-  - `049-retention-and-growth-audit`: Surface unbounded tables, stale partitions, and retention-policy gaps without touching data.
+  - `047-restore-drills`: Inspect a dump table of contents, restore into a scratch database, compare relation counts, and remove the scratch database unless asked to keep it.
+  - `048-partition-lifecycle`: Report partition sets and generate reviewed create, detach and drop DDL for range-partitioned tables, without executing it.
+  - `049-retention-and-growth-audit`: Bounded catalog audit of relation growth, vacuum debt, sequence headroom and partitioning candidates, without reading rows.
 
 ---
 
