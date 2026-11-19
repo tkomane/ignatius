@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 44: Hosted Milestone 15 and Windows packaging - 19 November 2026
+
+- [PR 94](https://github.com/tkomane/ignatius/pull/94) merged Milestone 15
+  to `33487f0` after 17 runnable hosted checks passed. This includes Rust
+  1.90, Linux, macOS, Windows, CodeQL, PostgreSQL 14 and 18, and the
+  PostgreSQL 18 Unix-socket job. The exact merge runs are
+  [CI 44602705603](https://github.com/tkomane/ignatius/actions/runs/44602705603)
+  and [CodeQL 44602705618](https://github.com/tkomane/ignatius/actions/runs/44602705618).
+- [PR 93](https://github.com/tkomane/ignatius/pull/93) pins MSVC 14.44.35207
+  and Windows SDK 10.0.26100.0 for Windows candidate and repeat builds.
+  [Rehearsal 44601135904](https://github.com/tkomane/ignatius/actions/runs/44601135904)
+  at `353431a` passed the pinned input assertions in all three Windows
+  jobs. The run retains the status of the exact archive comparison and
+  runtime receipts. This is the package evidence for its frozen source.
+- Native terminal acceptance and the signature, provenance and owner
+  authorization gates in [ADR-0008](architecture/decisions/0008-packaging-and-release.md)
+  remain open.
+
 ## Wave 43: Milestone 15 and readiness checks - 19 November 2026
 
 - [PR 92](https://github.com/tkomane/ignatius/pull/92) refreshed the README
