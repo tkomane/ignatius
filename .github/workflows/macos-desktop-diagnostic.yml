@@ -2,6 +2,8 @@ name: Native macOS desktop preflight
 
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/macos-desktop-preflight]
 
 permissions:
   contents: read
@@ -19,7 +21,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch ]]; then
+            test "$GITHUB_EVENT_NAME:$GITHUB_REF" = push:refs/heads/codex/macos-desktop-preflight
+          fi
           test "$RUNNER_OS" = macOS
           test "$RUNNER_ARCH" = ARM64
           test "$(uname -m)" = arm64
