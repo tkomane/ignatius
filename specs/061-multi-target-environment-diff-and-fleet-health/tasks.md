@@ -31,4 +31,7 @@ on separate plain and verify-full TLS endpoints:
   path. `documentation_matches_the_build` passed 22 tests.
 - Formatting, workspace Clippy with warnings denied, and whitespace passed.
 
-Hosted PostgreSQL and cross-platform checks are tracked with T061-07.
+The integrated full verifier passed with PostgreSQL 18.7 plain and verify-full
+TLS. The equality and partial-result contract also passed locally against
+PostgreSQL 14.25, 15.20, 16.16 and 17.12. Hosted PostgreSQL and cross-platform
+acceptance evidence are tracked with T061-07.

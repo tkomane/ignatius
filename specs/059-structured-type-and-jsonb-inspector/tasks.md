@@ -7,6 +7,9 @@
   (FR-5902, FR-5903, FR-5904).
 - [x] T004 Connect the tree and replacement prompt to Cell Detail and the
   guarded reviewed update (FR-5902 through FR-5906).
-- [ ] T005 Verify parser, reducer, ASCII rendering and synthetic live UPDATE
+- [x] T005 Verify parser, reducer, ASCII rendering and synthetic live UPDATE
   behavior, including stale state and optional extension behavior (FR-5907).
-- [ ] T006 Update the user guide and release/status records alongside source.
+- [x] T006 Update the user guide and release/status records alongside source.
+
+Evidence from the integrated source is recorded in
+[Wave 43](../../docs/status.md#wave-43-milestone-15-and-readiness-checks---19-november-2026).
