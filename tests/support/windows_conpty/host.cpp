@@ -57,17 +57,28 @@ bool same_path(const std::wstring& a, const std::wstring& b) { return CompareStr
 std::wstring self() { std::wstring value(32768, L'\0'); const auto n = GetModuleFileNameW(nullptr, value.data(), static_cast<DWORD>(value.size())); require(n > 0 && n < value.size(), "GetModuleFileNameW"); value.resize(n); return value; }
 void exact_job(HANDLE process, HANDLE job) { BOOL inside = FALSE; require(IsProcessInJob(process, job, &inside) && inside, "exact owned Job membership"); }
 FILETIME birth(HANDLE process) { FILETIME c{}, e{}, k{}, u{}; require(GetProcessTimes(process, &c, &e, &k, &u) != 0, "GetProcessTimes"); return c; }
-std::vector<wchar_t> environment(const std::wstring& work) {
+std::vector<wchar_t> environment(const std::wstring& work, const std::vector<std::wstring>& additional) {
     wchar_t windows[32768]{}; const auto n = GetWindowsDirectoryW(windows, 32768); require(n > 0 && n < 32768, "GetWindowsDirectoryW");
     // No inherited environment block, HOME assignment, provider, log or PG route.
     std::vector<std::wstring> vars{L"IGNATIUS_CONFIG_DIR=" + work + L"\\config", L"IGNATIUS_DATA_DIR=" + work + L"\\data", L"PGPASSFILE=" + work + L"\\absent-passfile", L"SystemRoot=" + std::wstring(windows), L"TEMP=" + work, L"TMP=" + work, L"WINDIR=" + std::wstring(windows)};
+    if (!additional.empty()) {
+        vars.push_back(L"SystemDrive=" + std::filesystem::path(windows).root_name().wstring());
+        vars.insert(vars.end(), additional.begin(), additional.end());
+        std::sort(vars.begin(), vars.end(), [](const std::wstring& a, const std::wstring& b) {
+            return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+        });
+    }
     std::vector<wchar_t> out; for (const auto& var : vars) { out.insert(out.end(), var.begin(), var.end()); out.push_back(0); } out.push_back(0); return out;
 }
 struct Child { Handle process, thread; DWORD pid{}; };
-Child create(const std::wstring& executable, std::vector<std::wstring> args, const std::wstring& work, STARTUPINFOW* startup, DWORD flags) {
+Child create(const std::wstring& executable, std::vector<std::wstring> args, const std::wstring& work,
+             STARTUPINFOW* startup, DWORD flags, const std::vector<std::wstring>& additional_environment = {}) {
     require(std::filesystem::path(executable).is_absolute() && std::filesystem::is_regular_file(executable), "absolute executable");
     require((flags & CREATE_BREAKAWAY_FROM_JOB) == 0 && (flags & CREATE_NEW_CONSOLE) == 0, "no breakaway or fresh/unowned console flags");
-    args.insert(args.begin(), executable); auto line = command(args); auto env = environment(work); PROCESS_INFORMATION pi{};
+    args.insert(args.begin(), executable);
+    auto line = command(args);
+    auto env = environment(work, additional_environment);
+    PROCESS_INFORMATION pi{};
     require(CreateProcessW(executable.c_str(), line.data(), nullptr, nullptr, FALSE, flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED, env.data(), work.c_str(), startup, &pi) != 0, "CreateProcessW suspended");
     return {Handle(pi.hProcess), Handle(pi.hThread), pi.dwProcessId};
 }

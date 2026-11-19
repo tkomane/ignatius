@@ -13,6 +13,21 @@ std::wstring renderer_pipe_name(const std::wstring& nonce) {
     return L"\\\\.\\pipe\\ignatius-w07-renderer-" + nonce;
 }
 
+std::vector<std::wstring> renderer_environment(const std::filesystem::path& work) {
+    // Terminal's portable mode still resolves Windows known folders for
+    // application settings fragments. Supply empty task-owned locations.
+    const auto profile = work / L"portable-profile";
+    const auto local = profile / L"AppData" / L"Local";
+    const auto roaming = profile / L"AppData" / L"Roaming";
+    const auto shared = work / L"portable-program-data";
+    require(std::filesystem::create_directory(profile) && std::filesystem::create_directories(local)
+            && std::filesystem::create_directories(roaming) && std::filesystem::create_directory(shared),
+            "create fresh portable renderer known folders");
+    return {L"ALLUSERSPROFILE=" + shared.wstring(), L"APPDATA=" + roaming.wstring(),
+            L"LOCALAPPDATA=" + local.wstring(), L"ProgramData=" + shared.wstring(),
+            L"USERPROFILE=" + profile.wstring()};
+}
+
 void require_renderer_nonce(const std::wstring& nonce) {
     require(nonce.size() == 32
             && nonce.find_first_not_of(L"0123456789abcdef") == std::wstring::npos,
@@ -589,7 +604,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
         launcher = create(terminal, {L"-w", L"new", L"new-tab", L"--profile", profile, L"--title", title,
                                     L"--suppressApplicationTitle", L"--inheritEnvironment",
                                     L"--", executable_self, L"--renderer-actor", pipe, nonce, profile},
-                          work, &startup, 0);
+                          work, &startup, 0, renderer_environment(folder));
         receipt.launcher_pid = launcher.pid;
         require(AssignProcessToJobObject(job.value, launcher.process.value),
                 "assign suspended Terminal to the exact owned Job");
