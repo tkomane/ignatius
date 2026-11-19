@@ -18,6 +18,8 @@ pub enum ThemeSelection {
     HighContrast,
     /// Matte anodized slate with signal orange and phosphor amber accents.
     FieldIndustrial,
+    /// Google Material Design 3 tonal dark surfaces with blue, cyan, and sage accents.
+    Material,
     /// The validated custom definition.
     Custom,
     /// Automatic palette selection resolved from terminal background luminance.
@@ -25,7 +27,7 @@ pub enum ThemeSelection {
 }
 
 impl ThemeSelection {
-    /// Identity of one of the four built-in palettes.
+    /// Identity of one of the five built-in palettes.
     #[must_use]
     pub const fn from_builtin(choice: ThemeChoice) -> Self {
         match choice {
@@ -33,6 +35,7 @@ impl ThemeSelection {
             ThemeChoice::Light => Self::Light,
             ThemeChoice::HighContrast => Self::HighContrast,
             ThemeChoice::FieldIndustrial => Self::FieldIndustrial,
+            ThemeChoice::Material => Self::Material,
         }
     }
 
@@ -42,6 +45,7 @@ impl ThemeSelection {
             Self::Light => Some(ThemeChoice::Light),
             Self::HighContrast => Some(ThemeChoice::HighContrast),
             Self::FieldIndustrial => Some(ThemeChoice::FieldIndustrial),
+            Self::Material => Some(ThemeChoice::Material),
             Self::Custom => None,
         }
     }
@@ -189,6 +193,7 @@ fn lower_selection(value: Option<&toml::Value>) -> Result<ThemeSelection, ThemeR
         "light" => Ok(ThemeSelection::Light),
         "high-contrast" => Ok(ThemeSelection::HighContrast),
         "field-industrial" => Ok(ThemeSelection::FieldIndustrial),
+        "material" => Ok(ThemeSelection::Material),
         "custom" => Ok(ThemeSelection::Custom),
         "auto" => Ok(ThemeSelection::Auto),
         other => Err(ThemeRefusal::new(format!(
@@ -222,18 +227,13 @@ pub fn lower_theme_inputs(
                     "[theme] extends must be a string. Use \"dark\", \"light\" or \"high-contrast\".",
                 ));
             };
-            match value {
-                "dark" => ThemeChoice::Dark,
-                "light" => ThemeChoice::Light,
-                "high-contrast" => ThemeChoice::HighContrast,
-                "field-industrial" => ThemeChoice::FieldIndustrial,
-                other => {
-                    return Err(ThemeRefusal::new(format!(
-                        "[theme] extends = \"{}\" is not a built-in theme. Use \"dark\", \"light\" or \"high-contrast\".",
-                        reflected(other)
-                    )));
-                }
-            }
+            let Some(choice) = ThemeChoice::parse(value) else {
+                return Err(ThemeRefusal::new(format!(
+                    "[theme] extends = \"{}\" is not a built-in theme. Use \"dark\", \"light\" or \"high-contrast\".",
+                    reflected(value)
+                )));
+            };
+            choice
         }
     };
     if let Some(key) = table
@@ -385,7 +385,10 @@ impl ValidatedThemes {
             ActivePalette::Builtin(ThemeChoice::HighContrast) => {
                 ActivePalette::Builtin(ThemeChoice::FieldIndustrial)
             }
-            ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => match &self.custom {
+            ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => {
+                ActivePalette::Builtin(ThemeChoice::Material)
+            }
+            ActivePalette::Builtin(ThemeChoice::Material) => match &self.custom {
                 Some(custom) => ActivePalette::Custom(custom.clone()),
                 None => ActivePalette::Builtin(ThemeChoice::Dark),
             },

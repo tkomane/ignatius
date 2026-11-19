@@ -379,6 +379,24 @@ impl Session {
         crate::postgres::plandiff::explain_extended(&self.client, sql, analyze, label).await
     }
 
+    /// Executes warmup and measured iterations of one SQL statement and returns benchmark statistics.
+    pub async fn run_benchmark(
+        &self,
+        sql: &str,
+        config: &crate::bench::BenchConfig,
+        label: &str,
+    ) -> Result<crate::bench::BenchStats, Diagnostic> {
+        crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await
+    }
+
+    /// Captures a bounded canonical PostgreSQL schema snapshot for drift detection.
+    pub async fn capture_schema_snapshot(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::snapshot::SchemaSnapshot, Diagnostic> {
+        crate::postgres::snapshot::capture_schema_snapshot(&self.client, schema).await
+    }
+
     /// Whether a database with this exact name exists on the server.
     pub async fn drill_database_exists(&self, name: &str) -> Result<bool, Diagnostic> {
         crate::postgres::drill::database_exists(&self.client, name).await

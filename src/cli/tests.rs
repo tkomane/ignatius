@@ -1651,3 +1651,478 @@ fn browse_table_name_and_m13_cli_helpers_validate_and_render() {
     );
     assert_eq!(stdout_bin, parquet_bytes);
 }
+
+#[test]
+fn bench_snapshot_and_runbook_commands_parse_flags() {
+    Cli::command().debug_assert();
+
+    let bench = Cli::try_parse_from([
+        "ignatius",
+        "bench",
+        "postgres://localhost/app",
+        "-c",
+        "SELECT 1",
+        "--candidate",
+        "SELECT 2",
+        "--warmup",
+        "3",
+        "--runs",
+        "25",
+        "--no-rollback",
+        "--fail-on-regression-pct",
+        "12.5",
+        "--format",
+        "json",
+        "-o",
+        "bench.json",
+        "--force",
+    ])
+    .expect("parse bench");
+    let Some(Command::Bench(bench_args)) = bench.command else {
+        panic!("expected bench command");
+    };
+    assert_eq!(
+        bench_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(bench_args.command.as_deref(), Some("SELECT 1"));
+    assert_eq!(bench_args.candidate.as_deref(), Some("SELECT 2"));
+    assert_eq!(bench_args.warmup, 3);
+    assert_eq!(bench_args.runs, 25);
+    assert!(bench_args.no_rollback);
+    assert_eq!(bench_args.fail_on_regression_pct, Some(12.5));
+    assert_eq!(bench_args.format, CliTelemetryFormat::Json);
+    assert_eq!(
+        bench_args.output.as_deref(),
+        Some(std::path::Path::new("bench.json"))
+    );
+    assert!(bench_args.force);
+
+    let bench_defaults = Cli::try_parse_from([
+        "ignatius",
+        "bench",
+        "-f",
+        "base.sql",
+        "--candidate-file",
+        "cand.sql",
+    ])
+    .expect("parse bench defaults");
+    let Some(Command::Bench(bench_def_args)) = bench_defaults.command else {
+        panic!("expected bench command");
+    };
+    assert_eq!(
+        bench_def_args.file.as_deref(),
+        Some(std::path::Path::new("base.sql"))
+    );
+    assert_eq!(
+        bench_def_args.candidate_file.as_deref(),
+        Some(std::path::Path::new("cand.sql"))
+    );
+    assert_eq!(bench_def_args.warmup, crate::bench::DEFAULT_WARMUP_RUNS);
+    assert_eq!(bench_def_args.runs, crate::bench::DEFAULT_MEASURED_RUNS);
+    assert!(!bench_def_args.no_rollback);
+    assert_eq!(bench_def_args.fail_on_regression_pct, None);
+    assert_eq!(bench_def_args.format, CliTelemetryFormat::Table);
+
+    let snap_capture = Cli::try_parse_from([
+        "ignatius",
+        "snapshot",
+        "capture",
+        "postgres://localhost/app",
+        "-s",
+        "public",
+        "-f",
+        "table",
+        "-o",
+        "snap.txt",
+        "--force",
+    ])
+    .expect("parse snapshot capture");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Capture(cap_args),
+    })) = snap_capture.command
+    else {
+        panic!("expected snapshot capture command");
+    };
+    assert_eq!(cap_args.target.as_deref(), Some("postgres://localhost/app"));
+    assert_eq!(cap_args.schema.as_deref(), Some("public"));
+    assert_eq!(cap_args.format, CliTelemetryFormat::Table);
+    assert_eq!(
+        cap_args.output.as_deref(),
+        Some(std::path::Path::new("snap.txt"))
+    );
+    assert!(cap_args.force);
+
+    let snap_capture_default =
+        Cli::try_parse_from(["ignatius", "snapshot", "capture"]).expect("capture defaults");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Capture(cap_def),
+    })) = snap_capture_default.command
+    else {
+        panic!("expected snapshot capture command");
+    };
+    assert_eq!(cap_def.format, CliTelemetryFormat::Json);
+
+    let snap_check = Cli::try_parse_from([
+        "ignatius",
+        "snapshot",
+        "check",
+        "postgres://localhost/app",
+        "--against",
+        "baseline.json",
+        "-s",
+        "public",
+        "--fail-on",
+        "warning",
+        "-f",
+        "json",
+        "-o",
+        "drift.json",
+        "--force",
+    ])
+    .expect("parse snapshot check");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Check(check_args),
+    })) = snap_check.command
+    else {
+        panic!("expected snapshot check command");
+    };
+    assert_eq!(
+        check_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(
+        check_args.against.as_path(),
+        std::path::Path::new("baseline.json")
+    );
+    assert_eq!(check_args.schema.as_deref(), Some("public"));
+    assert_eq!(check_args.fail_on, CliDriftFailOn::Warning);
+    assert_eq!(check_args.format, CliTelemetryFormat::Json);
+    assert!(check_args.force);
+
+    let snap_check_default =
+        Cli::try_parse_from(["ignatius", "snapshot", "check", "--against", "b.json"])
+            .expect("check defaults");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Check(check_def),
+    })) = snap_check_default.command
+    else {
+        panic!("expected snapshot check command");
+    };
+    assert_eq!(check_def.fail_on, CliDriftFailOn::Breaking);
+    assert_eq!(check_def.format, CliTelemetryFormat::Table);
+
+    let runbook = Cli::try_parse_from([
+        "ignatius",
+        "runbook",
+        "postgres://localhost/app",
+        "-f",
+        "ops.md",
+        "--cell",
+        "smoke",
+        "--dry-run",
+        "--allow-writes",
+        "--stop-on-error",
+        "--format",
+        "markdown",
+        "-o",
+        "report.md",
+        "--force",
+    ])
+    .expect("parse runbook");
+    let Some(Command::Runbook(rb_args)) = runbook.command else {
+        panic!("expected runbook command");
+    };
+    assert_eq!(rb_args.target.as_deref(), Some("postgres://localhost/app"));
+    assert_eq!(rb_args.file.as_path(), std::path::Path::new("ops.md"));
+    assert_eq!(rb_args.cell.as_deref(), Some("smoke"));
+    assert!(rb_args.dry_run);
+    assert!(rb_args.allow_writes);
+    assert!(rb_args.stop_on_error);
+    assert_eq!(rb_args.format, CliRunbookFormat::Markdown);
+    assert_eq!(
+        rb_args.output.as_deref(),
+        Some(std::path::Path::new("report.md"))
+    );
+    assert!(rb_args.force);
+
+    let runbook_offline = Cli::try_parse_from(["ignatius", "runbook", "-f", "ops.md", "--dry-run"])
+        .expect("parse offline dry-run runbook");
+    let Some(Command::Runbook(rb_off_args)) = runbook_offline.command else {
+        panic!("expected runbook command");
+    };
+    assert_eq!(rb_off_args.target, None);
+    assert!(rb_off_args.dry_run);
+    assert_eq!(rb_off_args.format, CliRunbookFormat::Table);
+}
+
+#[test]
+fn bench_snapshot_and_runbook_cli_helpers_validate_and_render() {
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.sql");
+    let cand_path = dir.path().join("cand.sql");
+    std::fs::write(&base_path, "SELECT 1").unwrap();
+    std::fs::write(&cand_path, "SELECT 2").unwrap();
+
+    assert_eq!(validate_regression_pct(None).unwrap(), None);
+    assert_eq!(validate_regression_pct(Some(10.0)).unwrap(), Some(10.0));
+    for bad in [-0.1, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            validate_regression_pct(Some(bad)).unwrap_err().kind,
+            DiagnosticKind::Usage
+        );
+    }
+
+    let empty_bench = BenchArgs {
+        target: None,
+        command: None,
+        file: None,
+        candidate: None,
+        candidate_file: None,
+        warmup: 2,
+        runs: 10,
+        no_rollback: false,
+        fail_on_regression_pct: None,
+        format: CliTelemetryFormat::Table,
+        output: None,
+        force: false,
+        connection: ConnectionOptions::default(),
+    };
+    assert_eq!(
+        resolve_bench_inputs(&empty_bench).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_base = BenchArgs {
+        command: Some("SELECT 1".to_owned()),
+        file: Some(base_path.clone()),
+        ..empty_bench.clone()
+    };
+    assert_eq!(
+        resolve_bench_inputs(&both_base).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_cand = BenchArgs {
+        command: Some("SELECT 1".to_owned()),
+        candidate: Some("SELECT 2".to_owned()),
+        candidate_file: Some(cand_path.clone()),
+        ..empty_bench.clone()
+    };
+    assert_eq!(
+        resolve_bench_inputs(&both_cand).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_stdin = BenchArgs {
+        file: Some(PathBuf::from("-")),
+        candidate_file: Some(PathBuf::from("-")),
+        ..empty_bench.clone()
+    };
+    assert_eq!(
+        resolve_bench_inputs(&both_stdin).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let file_bench = BenchArgs {
+        file: Some(base_path),
+        candidate_file: Some(cand_path),
+        ..empty_bench
+    };
+    assert_eq!(
+        resolve_bench_inputs(&file_bench).unwrap(),
+        ("SELECT 1".to_owned(), Some("SELECT 2".to_owned()))
+    );
+
+    // Snapshot render & JSON reader validation
+    let mut snapshot = crate::snapshot::SchemaSnapshot::new(Some("public".to_owned()));
+    snapshot.tables.push(crate::snapshot::TableSnapshot {
+        schema: "public".to_owned(),
+        name: "orders".to_owned(),
+        columns: vec![crate::snapshot::ColumnSnapshot {
+            name: "order_id".to_owned(),
+            data_type: "bigint".to_owned(),
+            nullable: false,
+            default_expr: None,
+            ordinal: 1,
+        }],
+        constraints: Vec::new(),
+        indexes: Vec::new(),
+        rls_enabled: true,
+        rls_forced: false,
+        policies: Vec::new(),
+    });
+    snapshot.views.push(crate::snapshot::ViewSnapshot {
+        schema: "public".to_owned(),
+        name: "recent_orders".to_owned(),
+        materialized: false,
+        definition_sha256: "abc123".to_owned(),
+    });
+    snapshot.sequences.push(crate::snapshot::SequenceSnapshot {
+        schema: "public".to_owned(),
+        name: "orders_order_id_seq".to_owned(),
+        data_type: "bigint".to_owned(),
+        start_value: 1,
+        increment_by: 1,
+        cycle: false,
+    });
+    snapshot.enums.push(crate::snapshot::EnumSnapshot {
+        schema: "public".to_owned(),
+        name: "order_tier".to_owned(),
+        labels: vec!["standard".to_owned(), "priority".to_owned()],
+    });
+    let snapshot = snapshot.finalize();
+
+    let table_view = render_snapshot_table(&snapshot);
+    assert!(table_view.is_ascii());
+    assert!(table_view.contains("public.orders"));
+    assert!(table_view.contains("public.recent_orders"));
+    assert!(table_view.contains("public.orders_order_id_seq"));
+    assert!(table_view.contains("public.order_tier"));
+
+    let plain_view = render_snapshot_plain(&snapshot);
+    assert!(plain_view.is_ascii());
+    assert!(plain_view.contains("table=public.orders cols=1"));
+    assert!(plain_view.contains("view=public.recent_orders"));
+
+    let snap_path = dir.path().join("snapshot.json");
+    std::fs::write(&snap_path, snapshot.render_json()).unwrap();
+    let loaded_snap = read_expected_snapshot(&snap_path).unwrap();
+    assert_eq!(loaded_snap, snapshot);
+    assert_eq!(
+        read_expected_snapshot(&dir.path().join("missing.json"))
+            .unwrap_err()
+            .kind,
+        DiagnosticKind::Usage
+    );
+
+    // Runbook offline dry-run & cell execution evaluator
+    let md_path = dir.path().join("ops.md");
+    std::fs::write(
+        &md_path,
+        "# Ops Runbook\n\n## Inspect\n```sql\n-- @name: read-orders\n-- @expect-rows: 3\nSELECT order_id FROM public.orders;\n```\n\n## Mutate\n```sql\n-- @name: purge\nDELETE FROM public.orders;\n```\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        load_markdown_runbook(&md_path, Some("missing-cell"))
+            .unwrap_err()
+            .kind,
+        DiagnosticKind::Usage
+    );
+
+    let report_md_path = dir.path().join("dry_run.md");
+    let cfg_dir = dir.path().join("cfg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    let dry_cli = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "runbook",
+        "-f",
+        md_path.to_str().unwrap(),
+        "--dry-run",
+        "--format",
+        "markdown",
+        "-o",
+        report_md_path.to_str().unwrap(),
+    ])
+    .unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(run(&dry_cli, &mut out, &mut err), ExitCode::Success);
+    assert!(out.is_empty());
+    let written_md = std::fs::read_to_string(&report_md_path).unwrap();
+    assert!(written_md.contains("# Runbook Report:"));
+    assert!(written_md.contains("read-orders"));
+    assert!(written_md.contains("blocked-by-write-guard"));
+
+    // Refuses overwrite without --force in dry-run too
+    let dry_overwrite = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "runbook",
+        "-f",
+        md_path.to_str().unwrap(),
+        "--dry-run",
+        "-o",
+        report_md_path.to_str().unwrap(),
+    ])
+    .unwrap();
+    let mut err_overwrite = Vec::new();
+    assert_eq!(
+        run(&dry_overwrite, &mut Vec::new(), &mut err_overwrite),
+        ExitCode::Usage
+    );
+
+    // Cell execution evaluator checks expect_rows and SQL errors
+    let rb = load_markdown_runbook(&md_path, None).unwrap();
+    let read_cell = &rb.cells[0];
+    let mut three_rows = crate::query::result::ResultSet::new(vec!["order_id".to_owned()], 100);
+    for id in ["1", "2", "3"] {
+        three_rows.push(vec![crate::query::value::Cell::Text(id.to_owned())]);
+    }
+    let ok_exec = crate::query::result::Execution {
+        job: crate::query::result::JobId(1),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some(three_rows),
+            rows_affected: Some(3),
+            elapsed: std::time::Duration::from_millis(2),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::from_millis(2),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: crate::query::result::NoticeReport::default(),
+    };
+    let passed = evaluate_runbook_cell_execution(read_cell, &ok_exec, 2);
+    assert_eq!(passed.status, crate::runbook::CellStatus::Passed);
+    assert_eq!(passed.rows_returned, Some(3));
+    assert_eq!(passed.rows_affected, None);
+
+    let one_row_exec = crate::query::result::Execution {
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some({
+                let mut set = crate::query::result::ResultSet::new(vec!["order_id".to_owned()], 10);
+                set.push(vec![crate::query::value::Cell::Text("1".to_owned())]);
+                set
+            }),
+            rows_affected: Some(1),
+            elapsed: std::time::Duration::from_millis(1),
+            notices: Vec::new(),
+        }],
+        ..ok_exec.clone()
+    };
+    let mismatch = evaluate_runbook_cell_execution(read_cell, &one_row_exec, 1);
+    assert_eq!(mismatch.status, crate::runbook::CellStatus::Failed);
+    assert!(
+        mismatch
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("expected 3 row(s), got 1"))
+    );
+
+    let err_exec = crate::query::result::Execution {
+        statements: Vec::new(),
+        status: crate::query::result::ExecutionStatus::Failed,
+        error: Some(
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "relation \"nope\" does not exist",
+                "running query",
+            )
+            .technical("SQLSTATE", "42P01"),
+        ),
+        ..ok_exec
+    };
+    let failed = evaluate_runbook_cell_execution(read_cell, &err_exec, 1);
+    assert_eq!(failed.status, crate::runbook::CellStatus::Failed);
+    assert!(
+        failed
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("[42P01]"))
+    );
+}

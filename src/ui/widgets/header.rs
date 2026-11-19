@@ -242,20 +242,35 @@ pub(crate) fn render_header(
     let left_width: usize = left_spans.iter().map(|s| display_width(&s.content)).sum();
     let right_width: usize = right_spans.iter().map(|s| display_width(&s.content)).sum();
     let total_width = usize::from(area.width);
+    let separator = presentation.glyphs.separator();
+    let separator_width = display_width(separator);
 
     if !right_spans.is_empty() && left_width + 2 + right_width <= total_width {
-        let left_area = Rect::new(area.x, area.y, area.width - (right_width as u16), 1);
-        let right_x = area.x + area.width - (right_width as u16);
-        let right_area = Rect::new(right_x, area.y, right_width as u16, 1);
+        let use_separator = left_width + separator_width + right_width <= total_width;
+        let (final_right, right_total_width) = if use_separator {
+            let mut with_sep = Vec::with_capacity(right_spans.len() + 1);
+            with_sep.push(Span::styled(separator, theme.style(Token::Border)));
+            with_sep.extend(right_spans);
+            (with_sep, (separator_width + right_width) as u16)
+        } else {
+            (right_spans, right_width as u16)
+        };
+        let left_area = Rect::new(area.x, area.y, area.width - right_total_width, 1);
+        let right_x = area.x + area.width - right_total_width;
+        let right_area = Rect::new(right_x, area.y, right_total_width, 1);
         Paragraph::new(Line::from(left_spans))
             .style(theme.surface(Token::SurfaceAlt))
             .render(left_area, buf);
-        Paragraph::new(Line::from(right_spans))
+        Paragraph::new(Line::from(final_right))
             .style(theme.surface(Token::SurfaceAlt))
             .render(right_area, buf);
     } else if !right_spans.is_empty() && left_width + 2 < total_width {
         let mut combined = left_spans;
-        combined.push(Span::raw("  "));
+        if left_width + separator_width < total_width {
+            combined.push(Span::styled(separator, theme.style(Token::Border)));
+        } else {
+            combined.push(Span::raw("  "));
+        }
         combined.extend(right_spans);
         Paragraph::new(Line::from(combined))
             .style(theme.surface(Token::SurfaceAlt))

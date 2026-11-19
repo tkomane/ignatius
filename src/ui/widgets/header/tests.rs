@@ -494,3 +494,43 @@ fn header_renders_surface_alt_statusbar_and_semantic_connection_spans() {
     let expected_header_fg = pres.theme.color(Token::Header).unwrap();
     assert_eq!(buf[(orders_col, 0)].fg, expected_header_fg);
 }
+
+#[test]
+fn header_separates_left_posture_and_right_telemetry_when_width_permits() {
+    let mut model = connected_model(crate::connection::Environment::Production);
+    model.transaction = crate::query::result::TransactionState::Open;
+
+    let text_unicode = header_text(
+        &model,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        text_unicode.contains("\u{2502} [TX ACTIVE]"),
+        "Unicode header should separate telemetry with vertical bar: {text_unicode}"
+    );
+    assert!(text_unicode.contains("[PROD]"), "{text_unicode}");
+
+    let text_ascii = header_text(
+        &model,
+        &presentation(GlyphTier::Ascii, ColorDepth::None),
+        120,
+    );
+    assert!(text_ascii.is_ascii(), "{text_ascii:?}");
+    assert!(
+        text_ascii.contains("| [TX ACTIVE]"),
+        "ASCII header should separate telemetry with pipe: {text_ascii}"
+    );
+
+    // When there is no right telemetry group, no stray separator is shown.
+    let quiet = connected_model(crate::connection::Environment::Local);
+    let text_quiet = header_text(
+        &quiet,
+        &presentation(GlyphTier::Unicode, ColorDepth::TrueColor),
+        120,
+    );
+    assert!(
+        !text_quiet.contains('\u{2502}') && !text_quiet.contains('|'),
+        "empty right telemetry should omit separator: {text_quiet}"
+    );
+}

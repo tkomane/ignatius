@@ -72,7 +72,7 @@ No new mandatory binding or configuration name is introduced.
 
 The palette's **Session / Switch theme** entry is always available, including
 without a direct key and while a query is running or cancellation is pending.
-It cycles dark, light, high-contrast, custom when a validated `[theme]` exists,
+It cycles dark, light, high-contrast, field-industrial, material, custom when a validated `[theme]` exists,
 then dark. The choice lasts for the session; it does not write configuration,
 reconnect or repeat SQL. Configure the optional `switch-theme` action under
 `[keys]`; the single palette row lists the active aliases. Direct keys preserve
@@ -140,6 +140,9 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `_` | Open live data browser and batch CRUD |
 | `/` | Open extended EXPLAIN and A/B plan diff |
 | `$` | Open result profiler and HTML/Parquet export |
+| `'` | Run query latency benchmark and A/B suite |
+| `"` | Inspect schema snapshot and drift guard |
+| `?` | Open interactive SQL Markdown runbook |
 
 The crash-recovery capsule adds two contextual chords for as long as it is on
 screen: `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the
@@ -403,6 +406,24 @@ With Results populated, `Ctrl+K $` (`result-analytics`) opens Zero-Query Result 
 - `j` / `k` / `Up` / `Down` step through columns; `e` opens the row export palette supporting CSV, TSV, JSON, NDJSON, Markdown, standalone Field Industrial HTML reports (`.html`), and Apache Parquet (`.parquet`).
 The scriptable `ignatius analytics` CLI subcommand provides non-interactive parity.
 
+With the editor focused and a statement present, `Ctrl+K '` (`query-bench`) opens the Query Latency Benchmark & A/B Regression Suite overlay:
+- Opening on a single statement benchmarks Baseline (A); opening on a two-statement buffer splits them into Baseline (A) and Candidate (B) for A/B comparison (default `2` warmup and `10` measured iterations).
+- `1` / `2` switch between `Summary & A/B Compare` and `Latency Samples` (with per-iteration timings and a 12-bucket latency sparkline).
+- `j` / `k` / `Up` / `Down` step through rows; `m` toggles rollback protection (`BEGIN` / unconditional `ROLLBACK` per iteration) and re-runs; `r` re-runs the benchmark; `Esc` closes cleanly.
+The scriptable `ignatius bench` CLI subcommand provides non-interactive parity (including `--fail-on-regression-pct` CI gating).
+
+With the workbench connected, `Ctrl+K "` (`schema-snapshot`) opens the Canonical Schema Snapshot & Drift Guard overlay:
+- Captures a zero-row-read `pg_catalog` snapshot across tables, columns, constraints, indexes, RLS posture/policies, views, sequences, and enums with a deterministic lowercase SHA-256 `fingerprint_sha256`.
+- `1` / `2` switch between `Overview & Drift` and `Catalog Tables`.
+- `j` / `k` / `Up` / `Down` navigate drift findings or catalog tables; `b` pins the current capture as the baseline; `r` captures a fresh snapshot and diffs against the baseline; `c` copies the SHA-256 fingerprint via OSC 52; `Esc` closes cleanly.
+The scriptable `ignatius snapshot` CLI subcommand (`capture` and `check`) provides non-interactive parity.
+
+With SQL in the editor, `Ctrl+K ?` (`sql-runbook`) opens the Interactive SQL Markdown Runbook overlay completely locally without opening a network connection or executing SQL:
+- Splits the active editor buffer on `-- @cell <name>` markers (or statements when no markers exist) and classifies write/destructive risk via `classify_all`.
+- `1` / `2` switch between `Notebook Cells` and `Safety Dry-Run Plan`.
+- `j` / `k` / `Up` / `Down` select a cell; `w` toggles `allow_writes` in the dry-run safety preview; `Enter` jumps the editor caret directly to the cell's `start_line` and closes the overlay; `Esc` closes without modifying the buffer.
+The scriptable `ignatius runbook` CLI subcommand provides non-interactive Markdown runbook execution, `--dry-run` planning, write guards, and Markdown/JSON/table reports.
+
 When Results has focus, `Ctrl+K u` starts the guarded cell-to-`UPDATE` flow. The
 first slice accepts only a direct single-table `SELECT` with a primary key in
 the projection. It resolves the relation in the session's search path, refuses
@@ -652,7 +673,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

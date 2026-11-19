@@ -26,7 +26,7 @@ flatter. With colour off, keywords keep a bold weight and comments a dim one and
 the rest is plain text: a buffer where every second word is emphasised is harder
 to read, not easier. Nothing about the meaning of the SQL depends on any of it.
 
-## The four built-in palettes
+## The five built-in palettes
 
 - **Dark**, tuned for a dark terminal, low-saturation, no pure black background.
 - **Light**, designed for a light terminal by darkening and desaturating hues, not
@@ -37,6 +37,11 @@ to read, not easier. Nothing about the meaning of the SQL depends on any of it.
 - **Field Industrial**, inspired by Teenage Engineering and Dieter Rams (Braun ET66):
   matte anodized slate surfaces, warm bone foreground text, signal orange focus,
   phosphor amber warnings, alpine sage success, and graphite framing.
+- **Material**, inspired by Google Material Design 3 Tonal Dark: deep neutral tonal
+  surfaces (`#111318`, `#191C22`, `#22262E`, `#2B303A`), cool slate-white typography
+  (`#E3E8F0` / `#F1F5FB`), Material blue focus and selection (`#8AB4F8`), cyan
+  informational accents (`#78D9EC`), sage success (`#81C995`), soft amber warnings
+  (`#FDD663`), and coral alerts (`#F28B82`).
 
 ## Contrast is tested, not asserted
 
@@ -95,14 +100,39 @@ header = "#F4F3EF"                 # Warm bone / cream paper text
 syntax-keyword = "#82AAFF"         # Technical drafting cobalt
 ```
 
-`ui.theme` accepts `dark`, `light`, `high-contrast`, `field-industrial`, `custom` and `auto`. When
+### The Material Tonal Dark Preset (Built-in & Custom Override)
+
+Enable the built-in Google Material Design 3 Tonal Dark palette directly via
+`ui.theme = "material"`, or extend and customize individual tokens in `[theme]`:
+
+```toml
+[ui]
+theme = "material"
+```
+
+Or customize it with `[theme]`:
+
+```toml
+[ui]
+theme = "custom"
+
+[theme]
+extends = "material"
+focus = "#8AB4F8"                  # Material blue focus and selection
+info = "#78D9EC"                   # Material cyan telemetry accent
+success = "#81C995"                # Material sage success
+warning = "#FDD663"                # Material warm amber warning
+danger = "#F28B82"                 # Material coral alert
+```
+
+`ui.theme` accepts `dark`, `light`, `high-contrast`, `field-industrial`, `material`, `custom` and `auto`. When
 `ui.theme = "auto"`, startup probes the terminal background luminance over OSC 11
 within a 100 ms deadline before entering the alternate screen, selecting `light`
 when WCAG relative luminance is at least 0.5 and falling back to `dark` without
 hanging when unanswered. An absent
 definition adds no custom palette to the session cycle. An empty `[theme]`
 inherits dark and still has Custom identity. `extends` defaults to dark and
-accepts any of the built-in palettes (`dark`, `light`, `high-contrast`, `field-industrial`). Partial definitions inherit every omitted
+accepts any of the built-in palettes (`dark`, `light`, `high-contrast`, `field-industrial`, `material`). Partial definitions inherit every omitted
 token. An inactive definition is validated too.
 
 Keys are exact and case-sensitive. Colours are `#` followed by six ASCII hex
@@ -127,10 +157,10 @@ an optional `[keys] switch-theme = "alt+f12"` binding uses the same action.
 
 The interface organizes visual hierarchy into four painted elevation levels:
 
-- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light).
-- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light).
-- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light).
-- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, and confirmation prompts (`#292e42` on Dark, `#dce0e8` on Light).
+- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light, `#111318` on Material).
+- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light, `#191c22` on Material).
+- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light, `#22262e` on Material).
+- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, and confirmation prompts (`#292e42` on Dark, `#dce0e8` on Light, `#2b303a` on Material).
 
 Overlays employ Clear-then-block painting: every overlay paints a `Clear` widget
 over its bounding rectangle before rendering its block surface and contents. This

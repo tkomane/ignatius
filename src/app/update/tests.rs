@@ -91,6 +91,7 @@ fn manual_theme_cycle_preserves_the_complete_model_including_busy_sessions() {
                     ThemeChoice::Light,
                     ThemeChoice::HighContrast,
                     ThemeChoice::FieldIndustrial,
+                    ThemeChoice::Material,
                     ThemeChoice::Dark,
                 ] {
                     let before = format!("{model:?}");
@@ -260,6 +261,7 @@ fn manual_theme_custom_cycle_preserves_state_and_discovery_during_queries() {
             ThemeSelection::Light,
             ThemeSelection::HighContrast,
             ThemeSelection::FieldIndustrial,
+            ThemeSelection::Material,
             ThemeSelection::Custom,
         ] {
             let previous = model.presentation.theme.clone();
@@ -11636,4 +11638,292 @@ fn result_analytics_overlay_profiles_visible_rows_and_opens_export_formats() {
     let _ = update(&mut model, Message::Action(Action::Insert('e')));
     assert!(model.result_analytics.is_none());
     assert!(model.palette.is_some());
+}
+
+#[test]
+fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict() {
+    let mut model = connected();
+    model
+        .editor
+        .set_text("SELECT * FROM orders; SELECT id FROM orders WHERE id = 1;");
+
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    assert_eq!(effects.len(), 2);
+    let Effect::RunQueryBench {
+        request,
+        target: crate::app::message::BenchTarget::Baseline,
+        sql: base_sql,
+        config,
+    } = &effects[0]
+    else {
+        panic!("expected Baseline RunQueryBench effect");
+    };
+    assert_eq!(base_sql, "SELECT * FROM orders");
+    assert!(config.rollback);
+    assert!(matches!(
+        &effects[1],
+        Effect::RunQueryBench {
+            target: crate::app::message::BenchTarget::Candidate,
+            ..
+        }
+    ));
+
+    let req = *request;
+    let base_stats = crate::bench::compute_bench_stats(
+        "Baseline (A)",
+        "SELECT * FROM orders",
+        config,
+        &[
+            crate::bench::BenchSample {
+                iteration: 1,
+                duration_ms: 12.0,
+                rows_returned: 100,
+            },
+            crate::bench::BenchSample {
+                iteration: 2,
+                duration_ms: 14.0,
+                rows_returned: 100,
+            },
+        ],
+    );
+    let cand_stats = crate::bench::compute_bench_stats(
+        "Candidate (B)",
+        "SELECT id FROM orders WHERE id = 1",
+        config,
+        &[
+            crate::bench::BenchSample {
+                iteration: 1,
+                duration_ms: 2.0,
+                rows_returned: 1,
+            },
+            crate::bench::BenchSample {
+                iteration: 2,
+                duration_ms: 3.0,
+                rows_returned: 1,
+            },
+        ],
+    );
+
+    // Stale request is ignored.
+    let _ = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: req.wrapping_add(99),
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(base_stats.clone())),
+        },
+    );
+    assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
+
+    let _ = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(base_stats)),
+        },
+    );
+    let _ = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: crate::app::message::BenchTarget::Candidate,
+            result: Box::new(Ok(cand_stats)),
+        },
+    );
+
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(!bench.loading);
+    assert_eq!(
+        bench
+            .report
+            .as_ref()
+            .and_then(|r| r.comparison.as_ref())
+            .map(|c| c.verdict),
+        Some(crate::bench::BenchVerdict::Faster)
+    );
+
+    // Tab switching & selection movement.
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.active_tab), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Insert('j')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.selected_idx), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Insert('k')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.selected_idx), Some(0));
+    let _ = update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.active_tab), Some(0));
+
+    // Toggle rollback safety and re-run.
+    let toggle_effects = update(&mut model, Message::Action(Action::Insert('m')));
+    assert_eq!(toggle_effects.len(), 2);
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| !b.config.rollback && b.loading)
+    );
+    assert!(matches!(
+        &toggle_effects[0],
+        Effect::RunQueryBench { config, .. } if !config.rollback
+    ));
+
+    // Explicit rerun increments request and re-emits effects.
+    let rerun_effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert_eq!(rerun_effects.len(), 2);
+
+    // Escape closes overlay.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.query_bench.is_none());
+}
+
+#[test]
+fn schema_snapshot_overlay_pins_baseline_detects_drift_and_copies_fingerprint() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::SchemaSnapshot));
+    assert_eq!(effects.len(), 1);
+    let Effect::CaptureSchemaSnapshot { request, schema } = &effects[0] else {
+        panic!("expected CaptureSchemaSnapshot effect");
+    };
+    assert_eq!(*schema, None);
+
+    let make_snapshot = |nullable: bool| {
+        let mut snap = crate::snapshot::SchemaSnapshot::new(None);
+        snap.tables.push(crate::snapshot::TableSnapshot {
+            schema: "public".into(),
+            name: "orders".into(),
+            columns: vec![crate::snapshot::ColumnSnapshot {
+                name: "id".into(),
+                data_type: "bigint".into(),
+                nullable,
+                default_expr: None,
+                ordinal: 1,
+            }],
+            constraints: Vec::new(),
+            indexes: Vec::new(),
+            rls_enabled: false,
+            rls_forced: false,
+            policies: Vec::new(),
+        });
+        snap.finalize()
+    };
+
+    let v1 = make_snapshot(false);
+    let req1 = *request;
+    let _ = update(
+        &mut model,
+        Message::SchemaSnapshotLoaded {
+            request: req1,
+            result: Box::new(Ok(v1.clone())),
+        },
+    );
+    let state = model.schema_snapshot.as_ref().expect("snapshot open");
+    assert!(!state.loading);
+    assert_eq!(
+        state.current.as_ref().map(|s| &s.fingerprint_sha256),
+        Some(&v1.fingerprint_sha256)
+    );
+
+    // Pin current as baseline.
+    let _ = update(&mut model, Message::Action(Action::Insert('b')));
+    assert!(
+        model.schema_snapshot.as_ref().is_some_and(
+            |s| s.baseline.is_some() && s.diff.as_ref().is_some_and(|d| !d.has_drift())
+        )
+    );
+
+    // Refresh via 'r' and deliver drifted snapshot.
+    let refresh_effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let [Effect::CaptureSchemaSnapshot { request: req2, .. }] = refresh_effects.as_slice() else {
+        panic!("expected CaptureSchemaSnapshot on refresh");
+    };
+    let v2 = make_snapshot(true);
+    let _ = update(
+        &mut model,
+        Message::SchemaSnapshotLoaded {
+            request: *req2,
+            result: Box::new(Ok(v2.clone())),
+        },
+    );
+    let state = model.schema_snapshot.as_ref().expect("snapshot open");
+    let diff = state.diff.as_ref().expect("diff recomputed");
+    assert!(diff.has_drift());
+    assert_eq!(diff.breaking_count, 1);
+
+    // Tab switching & selection movement.
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.schema_snapshot.as_ref().map(|s| s.active_tab),
+        Some(1)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(
+        model.schema_snapshot.as_ref().map(|s| s.active_tab),
+        Some(0)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('j')));
+    let _ = update(&mut model, Message::Action(Action::Insert('k')));
+
+    // Copy SHA-256 fingerprint via OSC 52.
+    let copy_effects = update(&mut model, Message::Action(Action::Insert('c')));
+    let [Effect::CopyValue { payload }] = copy_effects.as_slice() else {
+        panic!("expected Effect::CopyValue");
+    };
+    assert_eq!(payload.clone().into_inner(), v2.fingerprint_sha256);
+
+    // Escape closes overlay.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.schema_snapshot.is_none());
+}
+
+#[test]
+fn sql_runbook_overlay_parses_locally_previews_write_guard_and_jumps_to_cell() {
+    let mut model = Model::new(100);
+    model.editor.set_text(
+        "-- @cell read-check\n\
+         SELECT 1;\n\
+         -- @cell write-step\n\
+         DELETE FROM orders WHERE id = 1;",
+    );
+
+    let effects = update(&mut model, Message::Action(Action::SqlRunbook));
+    assert!(effects.is_empty(), "runbook parsing is purely local");
+    let rb = model.sql_runbook.as_ref().expect("runbook overlay opens");
+    assert_eq!(rb.runbook.cells.len(), 2);
+    assert!(!rb.allow_writes);
+    let guarded_report = rb.dry_run_report();
+    assert_eq!(guarded_report.blocked_count, 1);
+    assert_eq!(guarded_report.planned_count(), 1);
+
+    // Switch to Safety Dry-Run tab and toggle allow_writes with 'w'.
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(model.sql_runbook.as_ref().map(|r| r.active_tab), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Insert('w')));
+    let rb = model.sql_runbook.as_ref().expect("runbook still open");
+    assert!(rb.allow_writes);
+    let allowed_report = rb.dry_run_report();
+    assert_eq!(allowed_report.blocked_count, 0);
+    assert_eq!(allowed_report.planned_count(), 2);
+
+    // Navigate to second cell and jump to start_line with Enter.
+    let _ = update(&mut model, Message::Action(Action::Insert('1')));
+    let _ = update(&mut model, Message::Action(Action::Insert('j')));
+    let target_line = model
+        .sql_runbook
+        .as_ref()
+        .and_then(|r| r.selected_cell())
+        .expect("second cell selected")
+        .start_line;
+    assert_eq!(target_line, 4);
+
+    let jump_effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(jump_effects.is_empty());
+    assert!(model.sql_runbook.is_none(), "jumping closes overlay");
+    assert_eq!(model.editor.position(), (4, 1));
+    assert_eq!(model.focus, Focus::Editor);
+
+    // Reopen and close with Esc.
+    let _ = update(&mut model, Message::Action(Action::SqlRunbook));
+    assert!(model.sql_runbook.is_some());
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.sql_runbook.is_none());
 }

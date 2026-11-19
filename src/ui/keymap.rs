@@ -140,6 +140,9 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("data-browser", Action::DataBrowser),
     ("plan-diff", Action::PlanDiff),
     ("result-analytics", Action::ResultAnalytics),
+    ("query-bench", Action::QueryBench),
+    ("schema-snapshot", Action::SchemaSnapshot),
+    ("sql-runbook", Action::SqlRunbook),
 ];
 
 /// The action a configuration name means.
@@ -902,6 +905,21 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::ResultAnalytics,
         "Open result profiler and HTML/Parquet export",
     ),
+    (
+        '\'',
+        Action::QueryBench,
+        "Run query latency benchmark and A/B suite",
+    ),
+    (
+        '"',
+        Action::SchemaSnapshot,
+        "Inspect schema snapshot and drift guard",
+    ),
+    (
+        '?',
+        Action::SqlRunbook,
+        "Open interactive SQL Markdown runbook",
+    ),
 ];
 
 /// The contextual second keys offered while the crash recovery capsule is on
@@ -1065,6 +1083,9 @@ const fn short_label(action: &Action) -> &'static str {
         Action::DataBrowser => "Data browser",
         Action::PlanDiff => "Plan diff",
         Action::ResultAnalytics => "Analytics",
+        Action::QueryBench => "Bench",
+        Action::SchemaSnapshot => "Snapshot",
+        Action::SqlRunbook => "Runbook",
     }
 }
 

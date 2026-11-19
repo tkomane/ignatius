@@ -363,6 +363,18 @@ pub enum Command {
     /// Profile a query result set or export it to HTML or Apache Parquet.
     #[command(name = "analytics")]
     Analytics(AnalyticsArgs),
+
+    /// Benchmark one SQL query or compare baseline vs candidate latency with rollback isolation.
+    #[command(name = "bench")]
+    Bench(BenchArgs),
+
+    /// Capture canonical schema snapshots or check a live database for schema drift.
+    #[command(name = "snapshot")]
+    Snapshot(SnapshotArgs),
+
+    /// Parse, dry-run, or execute a Markdown SQL runbook with write-guard safety.
+    #[command(name = "runbook")]
+    Runbook(RunbookArgs),
 }
 
 /// Arguments for the audit command.
@@ -975,6 +987,9 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Browse(args)) => run_browse(args, &paths, out, err),
         Some(Command::PlanDiff(args)) => run_plan_diff(args, &paths, out, err),
         Some(Command::Analytics(args)) => run_analytics(args, &paths, out, err),
+        Some(Command::Bench(args)) => run_bench(args, &paths, out, err),
+        Some(Command::Snapshot(args)) => run_snapshot(args, &paths, out, err),
+        Some(Command::Runbook(args)) => run_runbook(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -6481,18 +6496,7 @@ where
     )
 }
 
-fn connect_and_run_with_config<T, F, Fut>(
-    target_arg: Option<&str>,
-    connection: &ConnectionOptions,
-    output: Option<&std::path::Path>,
-    force: bool,
-    paths: &Paths,
-    task: F,
-) -> Result<T, Diagnostic>
-where
-    F: FnOnce(crate::postgres::session::Session, config::Config) -> Fut,
-    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
-{
+fn ensure_output_writable(output: Option<&Path>, force: bool) -> Result<(), Diagnostic> {
     if let Some(destination) = output
         && destination.exists()
         && !force
@@ -6505,6 +6509,22 @@ where
         .likely_cause("an export never replaces a file that is already there")
         .next_action("choose another path, or pass --force to replace it"));
     }
+    Ok(())
+}
+
+fn connect_and_run_with_config<T, F, Fut>(
+    target_arg: Option<&str>,
+    connection: &ConnectionOptions,
+    output: Option<&std::path::Path>,
+    force: bool,
+    paths: &Paths,
+    task: F,
+) -> Result<T, Diagnostic>
+where
+    F: FnOnce(crate::postgres::session::Session, config::Config) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
+{
+    ensure_output_writable(output, force)?;
 
     let loaded = config::load(paths)?;
     let (requested, conn_args) =
@@ -7463,6 +7483,929 @@ fn run_analytics(
             )
         }
     }
+}
+
+/// Arguments for the `bench` command (`056-query-benchmarks-and-regression-suite`).
+#[derive(Debug, Args, Clone)]
+pub struct BenchArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Baseline SQL statement to benchmark.
+    #[arg(short = 'c', long, value_name = "SQL")]
+    pub command: Option<String>,
+    /// Read baseline SQL statement from a file. Use `-` for standard input.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+    /// Optional candidate SQL statement to compare against the baseline.
+    #[arg(long, value_name = "SQL")]
+    pub candidate: Option<String>,
+    /// Optional path to read candidate SQL statement from. Use `-` for standard input.
+    #[arg(long, value_name = "PATH")]
+    pub candidate_file: Option<PathBuf>,
+    /// Number of unmeasured warmup iterations (clamped to 0..=20).
+    #[arg(long, value_name = "N", default_value_t = crate::bench::DEFAULT_WARMUP_RUNS)]
+    pub warmup: usize,
+    /// Number of measured iterations (clamped to 1..=200).
+    #[arg(long, value_name = "N", default_value_t = crate::bench::DEFAULT_MEASURED_RUNS)]
+    pub runs: usize,
+    /// Disable per-iteration BEGIN / ROLLBACK isolation (writes will persist).
+    #[arg(long)]
+    pub no_rollback: bool,
+    /// Exit 1 when candidate p50 or p95 regresses beyond this percentage.
+    #[arg(long = "fail-on-regression-pct", value_name = "PCT")]
+    pub fail_on_regression_pct: Option<f64>,
+    /// Output representation format: table (default), plain, or json.
+    #[arg(long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn validate_regression_pct(pct: Option<f64>) -> Result<Option<f64>, Diagnostic> {
+    if let Some(value) = pct
+        && (!value.is_finite() || value < 0.0)
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("invalid --fail-on-regression-pct value: {value}"),
+            "validating benchmark regression threshold",
+        )
+        .next_action("pass a non-negative finite percentage such as 10 or 5.5"));
+    }
+    Ok(pct)
+}
+
+fn resolve_bench_inputs(args: &BenchArgs) -> Result<(String, Option<String>), Diagnostic> {
+    if args.file.as_deref() == Some(Path::new("-"))
+        && args.candidate_file.as_deref() == Some(Path::new("-"))
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "cannot read both baseline and candidate SQL from standard input",
+            "reading benchmark SQL inputs",
+        )
+        .next_action("read at least one query from -c/--command, --candidate, or a file path"));
+    }
+
+    let baseline = read_non_empty_sql_input(
+        args.command.as_deref(),
+        args.file.as_deref(),
+        "baseline",
+        "-c/--command",
+        "-f/--file",
+        true,
+    )?
+    .ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            "baseline SQL is required",
+            "reading baseline SQL",
+        )
+    })?;
+
+    let candidate = read_non_empty_sql_input(
+        args.candidate.as_deref(),
+        args.candidate_file.as_deref(),
+        "candidate",
+        "--candidate",
+        "--candidate-file",
+        false,
+    )?;
+
+    Ok((baseline, candidate))
+}
+
+fn run_bench(
+    args: &BenchArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let threshold_pct = validate_regression_pct(args.fail_on_regression_pct)?;
+    let (base_sql, cand_sql) = resolve_bench_inputs(args)?;
+    let config = crate::bench::BenchConfig::new(args.warmup, args.runs, !args.no_rollback);
+
+    let report = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let baseline = session
+                .run_benchmark(&base_sql, &config, "Baseline (A)")
+                .await?;
+            let candidate = match cand_sql {
+                Some(ref sql) => Some(session.run_benchmark(sql, &config, "Candidate (B)").await?),
+                None => None,
+            };
+            drop(session);
+            Ok(crate::bench::compare_benchmarks(
+                baseline,
+                candidate,
+                threshold_pct,
+            ))
+        },
+    )?;
+
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(),
+        CliTelemetryFormat::Plain => report.render_plain(),
+        CliTelemetryFormat::Json => report.render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Benchmark report",
+        out,
+        err,
+    )?;
+
+    if report.failed_gate {
+        if let (Some(cmp), Some(limit)) = (&report.comparison, report.threshold_pct) {
+            writeln!(
+                err,
+                "Benchmark regression gate failed: p50 {:+.1}%, p95 {:+.1}% (limit {:.1}%).",
+                cmp.p50_delta_pct, cmp.p95_delta_pct, limit
+            )
+            .map_err(io_diagnostic)?;
+        }
+        return Ok(ExitCode::Findings);
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for `ignatius snapshot` (`057-schema-snapshots-and-drift-guard`).
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotArgs {
+    #[command(subcommand)]
+    pub action: SnapshotAction,
+}
+
+/// Subcommands for `ignatius snapshot`.
+#[derive(Debug, Subcommand, Clone)]
+pub enum SnapshotAction {
+    /// Capture a canonical schema snapshot from a live database.
+    Capture(SnapshotCaptureArgs),
+    /// Compare a live database against a saved baseline snapshot JSON file.
+    Check(SnapshotCheckArgs),
+}
+
+/// Arguments for `ignatius snapshot capture`.
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotCaptureArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Restrict the snapshot to a single schema (defaults to all non-system schemas).
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Output representation format: json (default), table, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Json)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Failure threshold for `ignatius snapshot check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliDriftFailOn {
+    /// Exit 1 when any breaking schema change is detected (default).
+    #[default]
+    Breaking,
+    /// Exit 1 when any breaking or warning change is detected.
+    Warning,
+    /// Exit 1 when any drift finding (breaking, warning, or info) is detected.
+    Any,
+    /// Always exit 0 after producing the drift report.
+    Never,
+}
+
+impl CliDriftFailOn {
+    /// Maps the CLI drift fail threshold to the domain policy.
+    #[must_use]
+    pub const fn into_domain(self) -> crate::snapshot::DriftFailThreshold {
+        match self {
+            Self::Breaking => crate::snapshot::DriftFailThreshold::Breaking,
+            Self::Warning => crate::snapshot::DriftFailThreshold::Warning,
+            Self::Any => crate::snapshot::DriftFailThreshold::Any,
+            Self::Never => crate::snapshot::DriftFailThreshold::Never,
+        }
+    }
+}
+
+/// Arguments for `ignatius snapshot check`.
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotCheckArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Path to the expected baseline schema snapshot JSON file.
+    #[arg(long, value_name = "PATH")]
+    pub against: PathBuf,
+    /// Restrict the live capture to a single schema (defaults to baseline filter or all user schemas).
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Exit 1 when drift findings reach this severity threshold.
+    #[arg(long = "fail-on", value_enum, default_value_t = CliDriftFailOn::Breaking)]
+    pub fail_on: CliDriftFailOn,
+    /// Output representation format: table (default), plain, or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn sanitize_cli_ascii(input: &str) -> String {
+    use std::fmt::Write as _;
+
+    let safe = crate::query::value::sanitize_for_display(input);
+    let mut out = String::with_capacity(safe.len());
+    for ch in safe.chars() {
+        if ch.is_ascii() && !ch.is_ascii_control() {
+            out.push(ch);
+        } else {
+            let _ = write!(out, "\\u{{{:04X}}}", ch as u32);
+        }
+    }
+    out
+}
+
+fn render_snapshot_table(snapshot: &crate::snapshot::SchemaSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = snapshot.render_summary();
+    if !snapshot.tables.is_empty() {
+        out.push_str("\n-- Tables --\n");
+        let name_width = snapshot
+            .tables
+            .iter()
+            .map(|t| sanitize_cli_ascii(&t.qualified_name()).len())
+            .max()
+            .unwrap_or(5)
+            .clamp(5, 48);
+        let _ = writeln!(
+            out,
+            "{:<name_width$}  {:>5}  {:>6}  {:>5}  {:<5}  {:>8}",
+            "TABLE", "COLS", "CONST", "IDX", "RLS", "POLICIES"
+        );
+        let _ = writeln!(out, "{}", "-".repeat(name_width + 39));
+        for table in &snapshot.tables {
+            let rls = match (table.rls_enabled, table.rls_forced) {
+                (true, true) => "force",
+                (true, false) => "on",
+                (false, _) => "off",
+            };
+            let _ = writeln!(
+                out,
+                "{:<name_width$}  {:>5}  {:>6}  {:>5}  {:<5}  {:>8}",
+                sanitize_cli_ascii(&table.qualified_name()),
+                table.columns.len(),
+                table.constraints.len(),
+                table.indexes.len(),
+                rls,
+                table.policies.len(),
+            );
+        }
+    }
+    if !snapshot.views.is_empty() {
+        out.push_str("\n-- Views --\n");
+        for view in &snapshot.views {
+            let kind = if view.materialized {
+                "materialized"
+            } else {
+                "view"
+            };
+            let _ = writeln!(
+                out,
+                "  {} ({})",
+                sanitize_cli_ascii(&view.qualified_name()),
+                kind
+            );
+        }
+    }
+    if !snapshot.sequences.is_empty() {
+        out.push_str("\n-- Sequences --\n");
+        for seq in &snapshot.sequences {
+            let _ = writeln!(
+                out,
+                "  {} ({} start={} inc={})",
+                sanitize_cli_ascii(&seq.qualified_name()),
+                sanitize_cli_ascii(&seq.data_type),
+                seq.start_value,
+                seq.increment_by
+            );
+        }
+    }
+    if !snapshot.enums.is_empty() {
+        out.push_str("\n-- Enums --\n");
+        for item in &snapshot.enums {
+            let labels: Vec<String> = item.labels.iter().map(|l| sanitize_cli_ascii(l)).collect();
+            let _ = writeln!(
+                out,
+                "  {} [{}]",
+                sanitize_cli_ascii(&item.qualified_name()),
+                labels.join(", ")
+            );
+        }
+    }
+    out
+}
+
+fn render_snapshot_plain(snapshot: &crate::snapshot::SchemaSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = snapshot.render_summary();
+    for table in &snapshot.tables {
+        let _ = writeln!(
+            out,
+            "table={} cols={} constraints={} indexes={} rls={} forced={} policies={}",
+            sanitize_cli_ascii(&table.qualified_name()),
+            table.columns.len(),
+            table.constraints.len(),
+            table.indexes.len(),
+            table.rls_enabled,
+            table.rls_forced,
+            table.policies.len(),
+        );
+    }
+    for view in &snapshot.views {
+        let _ = writeln!(
+            out,
+            "view={} materialized={} sha256={}",
+            sanitize_cli_ascii(&view.qualified_name()),
+            view.materialized,
+            sanitize_cli_ascii(&view.definition_sha256),
+        );
+    }
+    for seq in &snapshot.sequences {
+        let _ = writeln!(
+            out,
+            "sequence={} type={} start={} increment={} cycle={}",
+            sanitize_cli_ascii(&seq.qualified_name()),
+            sanitize_cli_ascii(&seq.data_type),
+            seq.start_value,
+            seq.increment_by,
+            seq.cycle,
+        );
+    }
+    for item in &snapshot.enums {
+        let labels: Vec<String> = item.labels.iter().map(|l| sanitize_cli_ascii(l)).collect();
+        let _ = writeln!(
+            out,
+            "enum={} labels={}",
+            sanitize_cli_ascii(&item.qualified_name()),
+            labels.join(","),
+        );
+    }
+    out
+}
+
+fn read_bounded_utf8_file(
+    path: &Path,
+    max_bytes: usize,
+    context: &str,
+) -> Result<String, Diagnostic> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("could not read {}: {error}", path.display()),
+            context,
+        )
+        .next_action("verify that the file exists and is readable")
+    })?;
+    let mut raw = Vec::new();
+    file.take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut raw)
+        .map_err(io_diagnostic)?;
+    if raw.len() > max_bytes {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "{} exceeds the {max_bytes}-byte safety bound",
+                path.display()
+            ),
+            context,
+        )
+        .next_action("provide a smaller file within the documented safety limit"));
+    }
+    String::from_utf8(raw).map_err(|_| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{} is not valid UTF-8 text", path.display()),
+            context,
+        )
+        .next_action("ensure the file is UTF-8 encoded")
+    })
+}
+
+fn read_expected_snapshot(path: &Path) -> Result<crate::snapshot::SchemaSnapshot, Diagnostic> {
+    let json = read_bounded_utf8_file(
+        path,
+        crate::snapshot::MAX_SNAPSHOT_JSON_BYTES,
+        "reading expected schema snapshot",
+    )?;
+    crate::snapshot::SchemaSnapshot::from_json(&json)
+}
+
+fn run_snapshot(
+    args: &SnapshotArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    match &args.action {
+        SnapshotAction::Capture(capture) => run_snapshot_capture(capture, paths, out, err),
+        SnapshotAction::Check(check) => run_snapshot_check(check, paths, out, err),
+    }
+}
+
+fn run_snapshot_capture(
+    args: &SnapshotCaptureArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let schema = args.schema.clone();
+    let snapshot = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session.capture_schema_snapshot(schema.as_deref()).await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let rendered = match args.format {
+        CliTelemetryFormat::Json => snapshot.render_json(),
+        CliTelemetryFormat::Table => render_snapshot_table(&snapshot),
+        CliTelemetryFormat::Plain => render_snapshot_plain(&snapshot),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Schema snapshot",
+        out,
+        err,
+    )
+}
+
+fn run_snapshot_check(
+    args: &SnapshotCheckArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let expected = read_expected_snapshot(&args.against)?;
+    let effective_schema = args
+        .schema
+        .clone()
+        .or_else(|| expected.schema_filter.clone());
+
+    let actual = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session
+                .capture_schema_snapshot(effective_schema.as_deref())
+                .await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let report = crate::snapshot::diff_snapshots(&expected, &actual);
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(),
+        CliTelemetryFormat::Plain => report.render_plain(),
+        CliTelemetryFormat::Json => report.render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Schema drift report",
+        out,
+        err,
+    )?;
+
+    let threshold = args.fail_on.into_domain();
+    if report.exceeds_threshold(threshold) {
+        writeln!(
+            err,
+            "Schema drift check failed: {} breaking, {} warning, {} info finding(s); threshold '{}' exceeded.",
+            report.breaking_count,
+            report.warning_count,
+            report.info_count,
+            threshold.label(),
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Findings);
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output representation format for `ignatius runbook`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliRunbookFormat {
+    /// Aligned plain-ASCII summary table (default).
+    #[default]
+    Table,
+    /// Line-oriented plain-ASCII summary.
+    Plain,
+    /// Structured JSON runbook report.
+    Json,
+    /// Plain-ASCII Markdown report.
+    Markdown,
+}
+
+/// Arguments for `ignatius runbook` (`058-interactive-sql-notebook-runner`).
+#[derive(Debug, Args, Clone)]
+pub struct RunbookArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name (optional with `--dry-run`).
+    pub target: Option<String>,
+    /// Markdown SQL runbook file to parse and execute. Use `-` for standard input.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    pub file: PathBuf,
+    /// Execute or plan only the cell matching this `--name` slug.
+    #[arg(long, value_name = "NAME")]
+    pub cell: Option<String>,
+    /// Parse and print the safety execution plan without opening a database connection.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Authorize write, DDL, or destructive cells to run (blocked by default).
+    #[arg(long)]
+    pub allow_writes: bool,
+    /// Stop executing further cells after the first cell error or expectation failure.
+    #[arg(long)]
+    pub stop_on_error: bool,
+    /// Output representation format: table (default), plain, json, or markdown.
+    #[arg(long, value_enum, default_value_t = CliRunbookFormat::Table)]
+    pub format: CliRunbookFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn load_markdown_runbook(
+    path: &Path,
+    selected_cell: Option<&str>,
+) -> Result<crate::runbook::SqlRunbook, Diagnostic> {
+    let (markdown, title) = if path == Path::new("-") {
+        (read_stdin()?, "stdin".to_owned())
+    } else {
+        let text = read_bounded_utf8_file(
+            path,
+            crate::runbook::MAX_RUNBOOK_BYTES,
+            "reading markdown SQL runbook",
+        )?;
+        let title = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map_or_else(|| path.display().to_string(), ToOwned::to_owned);
+        (text, title)
+    };
+
+    let runbook = crate::runbook::parse_markdown_runbook(&markdown, &title)?;
+    if let Some(cell_name) = selected_cell
+        && runbook.find_cell(cell_name).is_none()
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("runbook cell '{cell_name}' not found"),
+            "selecting runbook cell",
+        )
+        .likely_cause("no SQL cell in the runbook carries that -- @name slug or default cell-N")
+        .next_action(
+            "check `-- @name:` directives in the runbook or omit --cell to run all cells",
+        ));
+    }
+    Ok(runbook)
+}
+
+fn runbook_write_guard_message(cell: &crate::runbook::RunbookCell) -> String {
+    let reason = if cell.is_destructive {
+        "blocked by write guard: destructive SQL requires --allow-writes"
+    } else {
+        "blocked by write guard: write or structural SQL requires --allow-writes"
+    };
+    if cell.readonly_hint {
+        format!("{reason} (cell also declares @readonly)")
+    } else {
+        reason.to_owned()
+    }
+}
+
+fn evaluate_runbook_cell_execution(
+    cell: &crate::runbook::RunbookCell,
+    execution: &crate::query::result::Execution,
+    duration_ms: u64,
+) -> crate::runbook::CellExecutionRecord {
+    use crate::query::result::ExecutionStatus;
+    use crate::runbook::{CellExecutionRecord, CellStatus};
+
+    let mut rows_returned: Option<u64> = None;
+    let mut rows_affected: Option<u64> = None;
+    for stmt in &execution.statements {
+        if let Some(set) = &stmt.result_set {
+            rows_returned = Some(rows_returned.unwrap_or(0).saturating_add(set.rows_seen));
+        } else if let Some(affected) = stmt.rows_affected {
+            rows_affected = Some(rows_affected.unwrap_or(0).saturating_add(affected));
+        }
+    }
+
+    if let Some(diag) = &execution.error {
+        let sqlstate = diag
+            .technical
+            .iter()
+            .find(|field| field.label == "SQLSTATE")
+            .map(|field| field.value.as_str());
+        let message = match sqlstate {
+            Some(code) => format!("[{code}] {}", diag.headline),
+            None => diag.headline.clone(),
+        };
+        return CellExecutionRecord {
+            index: cell.index,
+            name: cell.name.clone(),
+            heading: cell.heading.clone(),
+            is_write: cell.is_write,
+            status: CellStatus::Failed,
+            rows_returned,
+            rows_affected,
+            duration_ms,
+            message: Some(message),
+        };
+    }
+
+    if execution.status != ExecutionStatus::Succeeded {
+        return CellExecutionRecord {
+            index: cell.index,
+            name: cell.name.clone(),
+            heading: cell.heading.clone(),
+            is_write: cell.is_write,
+            status: CellStatus::Failed,
+            rows_returned,
+            rows_affected,
+            duration_ms,
+            message: Some(execution.status.label().to_owned()),
+        };
+    }
+
+    if let Some(expected) = cell.expect_rows {
+        let observed = rows_returned.or(rows_affected);
+        match observed {
+            Some(actual) if actual == expected => {}
+            Some(actual) => {
+                return CellExecutionRecord {
+                    index: cell.index,
+                    name: cell.name.clone(),
+                    heading: cell.heading.clone(),
+                    is_write: cell.is_write,
+                    status: CellStatus::Failed,
+                    rows_returned,
+                    rows_affected,
+                    duration_ms,
+                    message: Some(format!("expected {expected} row(s), got {actual}")),
+                };
+            }
+            None => {
+                return CellExecutionRecord {
+                    index: cell.index,
+                    name: cell.name.clone(),
+                    heading: cell.heading.clone(),
+                    is_write: cell.is_write,
+                    status: CellStatus::Failed,
+                    rows_returned,
+                    rows_affected,
+                    duration_ms,
+                    message: Some(format!(
+                        "expected {expected} row(s), but statement produced no row count"
+                    )),
+                };
+            }
+        }
+    }
+
+    let message = if cell.readonly_hint && cell.is_write {
+        Some("warning: cell marked @readonly executed write SQL".to_owned())
+    } else {
+        None
+    };
+
+    CellExecutionRecord {
+        index: cell.index,
+        name: cell.name.clone(),
+        heading: cell.heading.clone(),
+        is_write: cell.is_write,
+        status: CellStatus::Passed,
+        rows_returned,
+        rows_affected,
+        duration_ms,
+        message,
+    }
+}
+
+async fn execute_runbook_live(
+    session: &crate::postgres::Session,
+    runbook: &crate::runbook::SqlRunbook,
+    row_cap: usize,
+    allow_writes: bool,
+    stop_on_error: bool,
+    selected_cell: Option<&str>,
+) -> crate::runbook::RunbookReport {
+    use crate::query::result::{ExecutionStatus, JobId};
+    use crate::runbook::{CellExecutionRecord, CellStatus, summarize_report};
+
+    let mut records = Vec::with_capacity(runbook.cells.len());
+    let mut aborted_reason: Option<&'static str> = None;
+
+    for cell in &runbook.cells {
+        if let Some(target) = selected_cell
+            && cell.name != target
+        {
+            records.push(CellExecutionRecord {
+                index: cell.index,
+                name: cell.name.clone(),
+                heading: cell.heading.clone(),
+                is_write: cell.is_write,
+                status: CellStatus::Skipped,
+                rows_returned: None,
+                rows_affected: None,
+                duration_ms: 0,
+                message: Some(format!(
+                    "skipped (selected cell: {})",
+                    sanitize_cli_ascii(target)
+                )),
+            });
+            continue;
+        }
+
+        if let Some(reason) = aborted_reason {
+            records.push(CellExecutionRecord {
+                index: cell.index,
+                name: cell.name.clone(),
+                heading: cell.heading.clone(),
+                is_write: cell.is_write,
+                status: CellStatus::Skipped,
+                rows_returned: None,
+                rows_affected: None,
+                duration_ms: 0,
+                message: Some(reason.to_owned()),
+            });
+            continue;
+        }
+
+        if cell.is_write && !allow_writes {
+            records.push(CellExecutionRecord {
+                index: cell.index,
+                name: cell.name.clone(),
+                heading: cell.heading.clone(),
+                is_write: cell.is_write,
+                status: CellStatus::BlockedByWriteGuard,
+                rows_returned: None,
+                rows_affected: None,
+                duration_ms: 0,
+                message: Some(runbook_write_guard_message(cell)),
+            });
+            continue;
+        }
+
+        let job = JobId((cell.index + 1) as u64);
+        let execution = session.execute(&cell.sql, row_cap, job).await;
+        let duration_ms = u64::try_from(execution.elapsed.as_millis()).unwrap_or(u64::MAX);
+        let record = evaluate_runbook_cell_execution(cell, &execution, duration_ms);
+
+        if execution.status == ExecutionStatus::ConnectionLost {
+            aborted_reason = Some("skipped (connection lost)");
+        } else if stop_on_error && record.status == CellStatus::Failed {
+            aborted_reason = Some("skipped (--stop-on-error)");
+        }
+
+        records.push(record);
+    }
+
+    summarize_report(runbook.title.clone(), false, allow_writes, records)
+}
+
+fn render_runbook_report(
+    report: &crate::runbook::RunbookReport,
+    format: CliRunbookFormat,
+) -> String {
+    match format {
+        CliRunbookFormat::Table => report.render_table(),
+        CliRunbookFormat::Plain => report.render_plain(),
+        CliRunbookFormat::Json => report.render_json(),
+        CliRunbookFormat::Markdown => report.render_markdown(),
+    }
+}
+
+fn run_runbook(
+    args: &RunbookArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let runbook = load_markdown_runbook(&args.file, args.cell.as_deref())?;
+
+    if args.dry_run {
+        ensure_output_writable(args.output.as_deref(), args.force)?;
+
+        let report =
+            crate::runbook::plan_dry_run(&runbook, args.allow_writes, args.cell.as_deref());
+        let rendered = render_runbook_report(&report, args.format);
+        return write_report_output(
+            rendered,
+            args.output.as_deref(),
+            args.force,
+            "Runbook dry-run plan",
+            out,
+            err,
+        );
+    }
+
+    let allow_writes = args.allow_writes;
+    let stop_on_error = args.stop_on_error;
+    let selected_cell = args.cell.clone();
+
+    let report = connect_and_run_with_config(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session, cfg| async move {
+            let report = execute_runbook_live(
+                &session,
+                &runbook,
+                cfg.query.max_buffered_rows,
+                allow_writes,
+                stop_on_error,
+                selected_cell.as_deref(),
+            )
+            .await;
+            drop(session);
+            Ok(report)
+        },
+    )?;
+
+    let rendered = render_runbook_report(&report, args.format);
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Runbook report",
+        out,
+        err,
+    )?;
+
+    if report.has_failures() {
+        writeln!(
+            err,
+            "Runbook '{}': {} failed, {} blocked by write guard.",
+            report.title, report.failed_count, report.blocked_count
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Findings);
+    }
+
+    Ok(ExitCode::Success)
 }
 
 #[cfg(test)]

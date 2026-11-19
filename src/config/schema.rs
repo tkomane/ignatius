@@ -493,12 +493,44 @@ pub enum ThemeChoice {
     HighContrast,
     /// Matte anodized slate with signal orange and phosphor amber accents.
     FieldIndustrial,
+    /// Google Material Design 3 tonal dark surfaces with blue, cyan, and sage accents.
+    Material,
 }
 
 impl ThemeChoice {
     /// Accepted values, for help text and error messages.
-    pub const ACCEPTED: &'static [&'static str] =
-        &["dark", "light", "high-contrast", "field-industrial"];
+    pub const ACCEPTED: &'static [&'static str] = &[
+        "dark",
+        "light",
+        "high-contrast",
+        "field-industrial",
+        "material",
+    ];
+
+    /// Canonical kebab-case configuration name for this built-in palette.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::HighContrast => "high-contrast",
+            Self::FieldIndustrial => "field-industrial",
+            Self::Material => "material",
+        }
+    }
+
+    /// Parses an exact canonical built-in theme name without trimming or aliases.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "dark" => Some(Self::Dark),
+            "light" => Some(Self::Light),
+            "high-contrast" => Some(Self::HighContrast),
+            "field-industrial" => Some(Self::FieldIndustrial),
+            "material" => Some(Self::Material),
+            _ => None,
+        }
+    }
 }
 
 /// Whether to draw with Unicode or ASCII.

@@ -586,10 +586,13 @@ fn render_results_placeholder(
         crate::app::discovery::ConnectionPosture::Disconnected => {
             lines.push(Line::from(vec![
                 Span::styled(
-                    presentation.icon(Icon::Warning),
-                    theme.style(Token::Warning),
+                    presentation.glyphs.prefix(Icon::Warning),
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" Connection required.", theme.style(Token::Warning)),
+                Span::styled(
+                    "Connection required.",
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                ),
             ]));
             lines.push(Line::from(Span::styled(
                 "Connect before running SQL. Results appear here after a query.",
@@ -598,8 +601,11 @@ fn render_results_placeholder(
         }
         crate::app::discovery::ConnectionPosture::Connecting => {
             lines.push(Line::from(vec![
-                Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
-                Span::styled(" Waiting for the connection.", theme.style(Token::Text)),
+                Span::styled(
+                    presentation.glyphs.prefix(Icon::Info),
+                    theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Waiting for the connection.", theme.style(Token::Header)),
             ]));
             lines.push(Line::from(Span::styled(
                 "Results will appear here after a query finishes.",
@@ -609,24 +615,37 @@ fn render_results_placeholder(
         crate::app::discovery::ConnectionPosture::Connected => {
             let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
             lines.push(Line::from(vec![
-                Span::styled(presentation.icon(Icon::Info), theme.style(Token::Muted)),
-                Span::styled(" No query has run yet.", theme.style(Token::Text)),
+                Span::styled(
+                    presentation.glyphs.prefix(Icon::Info),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("No query has run yet.", theme.style(Token::Header)),
             ]));
+            lines.push(Line::from(Span::styled(
+                "Write SQL in the editor to inspect rows, types, and query plans.",
+                theme.style(Token::Muted),
+            )));
+            if inner.height >= 6 {
+                lines.push(Line::raw(""));
+            }
             lines.push(Line::from(vec![
-                Span::styled(run_key, theme.style(Token::Focus)),
+                Span::styled(run_key, theme.pill(Token::Focus)),
                 Span::styled(
                     " Run the buffer after entering SQL.",
-                    theme.style(Token::Info),
+                    theme.style(Token::Text),
                 ),
             ]));
         }
         crate::app::discovery::ConnectionPosture::Lost
         | crate::app::discovery::ConnectionPosture::Failed => {
             lines.push(Line::from(vec![
-                Span::styled(presentation.icon(Icon::Warning), theme.style(Token::Danger)),
                 Span::styled(
-                    format!(" {}.", ctx.connection.label()),
-                    theme.style(Token::Danger),
+                    presentation.glyphs.prefix(Icon::Warning),
+                    theme.style(Token::Danger).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{}.", ctx.connection.label()),
+                    theme.style(Token::Danger).add_modifier(Modifier::BOLD),
                 ),
             ]));
             lines.push(Line::from(Span::styled(
@@ -653,8 +672,11 @@ fn render_results_placeholder(
             theme.style(Token::Info),
         )));
     }
+    if inner.height >= 6 && ctx.connection != crate::app::discovery::ConnectionPosture::Connected {
+        lines.push(Line::raw(""));
+    }
     lines.push(Line::from(vec![
-        Span::styled(palette_key, theme.style(Token::Focus)),
+        Span::styled(palette_key, theme.pill(Token::Focus)),
         Span::styled(
             " Command palette shows safe next actions.",
             theme.style(Token::Muted),

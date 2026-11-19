@@ -14,20 +14,20 @@ the PostgreSQL client you can point at production
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
 [![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-dea584?logo=rust&logoColor=white)](Cargo.toml)
 [![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-336791?logo=postgresql&logoColor=white)](docs/support/compatibility.md)
-[![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-M6--M13%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
-[![Observability](https://img.shields.io/badge/observability-M7--M13%20perf%20%26%20ops-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
-[![Design](https://img.shields.io/badge/design-field%20industrial%20%2F%20braun-fbbf24?logo=color&logoColor=black)](docs/design/theme-tokens.md)
+[![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-M6--M14%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
+[![Observability](https://img.shields.io/badge/observability-M7--M14%20perf%20%26%20ops-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
+[![Design](https://img.shields.io/badge/design-field%20industrial%20%2F%20material%203-fbbf24?logo=color&logoColor=black)](docs/design/theme-tokens.md)
 [![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-brightgreen)](docs/security/data-handling.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-*Engineered with a Field Industrial aesthetic inspired by Teenage Engineering and Dieter Rams.*<br>
+*Engineered with Field Industrial (Teenage Engineering & Dieter Rams) and Google Material 3 Tonal aesthetics.*<br>
 *Fast, tactile, deterministic, and built strictly in Rust (`ratatui` + `tokio-postgres`). Zero telemetry.*
 
 <p align="center">
   <a href="#quickstart-try-ignatius-in-60-seconds"><strong>Quickstart</strong></a> &bull;
   <a href="#visual-tour"><strong>Visual Tour</strong></a> &bull;
-  <a href="#field-industrial-theme--design-philosophy"><strong>Field Industrial Design</strong></a> &bull;
-  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M13)</strong></a> &bull;
+  <a href="#field-industrial-theme--design-philosophy"><strong>Field Industrial &amp; Material 3 Design</strong></a> &bull;
+  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M14)</strong></a> &bull;
   <a href="#two-key-chord-menu-ctrlk"><strong>Keymap & Chords</strong></a> &bull;
   <a href="#non-interactive-cli-scripting--streaming-export"><strong>CLI Scripting</strong></a>
 </p>
@@ -50,7 +50,7 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 
 | Pillar | How Ignatius Delivers It |
 | --- | --- |
-| **4-Tier Surface Architecture & Adaptive Themes** | Built-in TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, `high-contrast`, and Dieter Rams `field-industrial` palettes, plus `[theme]` `custom` overrides and `OSC 11` background detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
+| **4-Tier Surface Architecture & Adaptive Themes** | Five built-in palettes: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, and Google Material 3 Tonal `material`, plus `[theme]` `custom` overrides and `OSC 11` background detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
 | **Truthful Results Grid** | `NULL` (`[null]`), empty string (`""`), and literal `"NULL"` (`"NULL"`) are always visually and copy-distinct. JSON/JSONB values, arrays, numeric right-alignment, sort indicators, row numbers, and horizontal/vertical scrolling work out of the box. |
 | **Safety by Construction** | Production profiles (`environment = "prod"` or `read_only = true`) visibly change the header pill (`[PROD]` / `[READ ONLY]`), guard destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) behind a confirmation modal, and require an explicit reviewed `UPDATE` modal (`Ctrl+K u` on a cell) with primary-key targeting and `Enter` to execute. |
 | **Schema-Aware Editor & Overlays** | Multi-line SQL editor with active `CursorLine` & `CursorLineNr`, 1 MiB bounded bracketed paste, schema-aware `Ctrl+Space` completion popup, 80%x75% Command Palette (`Ctrl+P`) with 40%/60% list-and-SQL preview split, interactive `EXPLAIN` / `EXPLAIN ANALYZE` Plan Explorer (`Ctrl+K l` / `Ctrl+K a`), and layered PostgreSQL diagnostics (`SQLSTATE`, statement line/column, token pinning, likely cause, and next step). |
@@ -72,6 +72,14 @@ Ignatius is designed under the philosophy that developer tools should feel like 
   - **Warm Bone (`#F4F3EF`)**: High-contrast, non-fatiguing foreground typography mathematically verified for WCAG AA/AAA compliance.
 - **4-Tier Surface Architecture**: Four discrete surface depths (`Surface`, `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`) ensure modal dialogues and inspection drawers remain visually distinct from background data grids without jarring contrast jumps.
 - **Quiet Chrome**: Clean gutters, subtle row delimiters, and zero decorative animations guarantee sub-millisecond redraws and uninterrupted focus during production incidents.
+
+### Google Material 3 Tonal Theme (`material`) & Quiet-Precision Polish
+- **Material 3 Tonal Dark Palette (`[ui] theme = "material"`)**: Deep neutral tonal surfaces (`#111318`, `#191C22`, `#22262E`, `#2B303A`) paired with cool slate-white typography (`#E3E8F0` / `#F1F5FB`), Material blue focus and selection (`#8AB4F8`), cyan telemetry accents (`#78D9EC`), sage success (`#81C995`), warm amber warnings (`#FDD663`), and coral alerts (`#F28B82`), WCAG-verified across all four surface elevations.
+- **Quiet-Precision Chrome**:
+  - **Header Group Delimiter**: A crisp border-toned separator (`|` in ASCII mode, vertical bar in Unicode mode) divides connection posture capsules on the left from active transaction, watch, and elapsed timing telemetry on the right.
+  - **Footer Hint Pills**: Contextual keybindings render inside `Theme::pill(Token::Focus)` capsules with subtle separators, preserving complete key/label pairs and dropping whole hints cleanly at narrow terminal widths.
+  - **Structured Empty States**: Disconnected, waiting, empty-result, and empty-filter panes in Objects and Results present bold icon/headline anchors, muted guidance, and `Theme::pill(Token::Focus)` starter key capsules.
+  - **Aligned `ignatius doctor` Output**: Plain health diagnostics align under `STATUS  CHECK  DETAIL` rules and report the resolved configuration theme (`dark`, `light`, `high-contrast`, `field-industrial`, `material`, `custom`, or `auto`).
 
 ---
 
@@ -207,13 +215,13 @@ Ignatius makes quick data edits safe, transparent, and auditable:
 - **Explicit Modal Review**: The modal displays the proposed SQL, new value, and primary key `WHERE` predicates in full. Pressing `Enter` executes the single update, while `Esc` cancels without side-effects.
 - **Production Protection**: The write guard blocks ad-hoc cell updates in production profiles (`environment = "prod"`) and read-only sessions (`--read-only`), preventing accidental mutations.
 
-### Adaptive Dark, Light, High-Contrast & Field Industrial Themes
+### Adaptive Dark, Light, High-Contrast, Field Industrial & Material Tonal Themes
 
 ![Ignatius Light Theme](docs/assets/screenshots/workbench-light.png)
 
 Built on a 4-tier painted surface system (`Surface`, `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`):
-- **Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, and Dieter Rams `field-industrial`.
-- **Runtime Theme Cycling**: Open the Command Palette (`Ctrl+P` -> "Switch theme") or configure `[keys] switch-theme = "..."` to instantly cycle themes without reconnecting or re-running SQL.
+- **Five Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, and Google Material 3 Tonal Dark `material`.
+- **Runtime Theme Cycling**: Open the Command Palette (`Ctrl+P` -> "Switch theme") or configure `[keys] switch-theme = "..."` to instantly cycle `dark -> light -> high-contrast -> field-industrial -> material -> custom?` without reconnecting or re-running SQL.
 - **Terminal Integration**: Supports automatic background luminance detection via `OSC 11` queries (`ui.theme = "auto"`), and user-defined color overrides in `[theme]`.
 
 ---
@@ -248,7 +256,7 @@ ignatius "postgres://ignatius_test:ignatius_test_pw@127.0.0.1:55432/ignatius_dem
 - Navigate cells with the arrow keys (`Up`, `Down`, `Left`, `Right`). Press `Enter` (or `Ctrl+K i`) to inspect any value in the Cell Detail viewer.
 - On a single-table result row with a primary key, press `Ctrl+K u` to preview a reviewed `UPDATE` statement.
 - Press `Ctrl+P` to open the Command Palette with live 60% SQL preview.
-- In the Command Palette (`Ctrl+P`), select **Switch theme** to cycle between dark, light, and high-contrast themes.
+- In the Command Palette (`Ctrl+P`), select **Switch theme** to cycle between `dark`, `light`, `high-contrast`, `field-industrial`, and `material` themes.
 - Press `Ctrl+K l` to inspect the visual EXPLAIN query plan.
 
 ### 4. Tear Down
@@ -282,7 +290,7 @@ Connection profiles and client preferences live in `~/.config/ignatius/config.to
 
 ```toml
 [ui]
-theme = "auto"              # "dark", "light", "high-contrast", or "auto" (OSC 11)
+theme = "auto"              # "dark", "light", "high-contrast", "field-industrial", "material", "custom", or "auto" (OSC 11)
 mouse = true                # enable mouse clicks, drags, and scrolling
 density = "comfortable"     # "comfortable" or "compact"
 reduced_motion = false      # disable animations for accessibility
@@ -451,6 +459,9 @@ Pressing `Ctrl+K` displays a persistent on-screen chord guide. Press the second 
 | `_` | Open live data browser and batch CRUD |
 | `/` | Open extended EXPLAIN and A/B plan diff |
 | `$` | Open result profiler and HTML/Parquet export |
+| `'` | Run query latency benchmark and A/B suite |
+| `"` | Inspect schema snapshot and drift guard |
+| `?` | Open interactive SQL Markdown runbook |
 
 While the crash-recovery capsule is on screen it adds two contextual chords:
 `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the journal.
@@ -632,6 +643,14 @@ ignatius plan-diff "$DATABASE_URL" --baseline "SELECT * FROM orders" --candidate
 ignatius analytics "$DATABASE_URL" -c "SELECT status, amount_cents FROM orders" --format html -o report.html
 ignatius analytics "$DATABASE_URL" -c "SELECT * FROM orders" --format parquet -o orders.parquet
 
+# Query benchmarks, schema snapshots & drift gates, and SQL Markdown runbooks (M14)
+ignatius bench "$DATABASE_URL" -c "SELECT * FROM public.orders" --warmup 2 --runs 10 --format table
+ignatius bench "$DATABASE_URL" -c "SELECT * FROM public.orders WHERE status = 'paid'" --candidate "SELECT id, amount_cents FROM public.orders WHERE status = 'paid'" --fail-on-regression-pct 15 --format json -o bench.json
+ignatius snapshot capture "$DATABASE_URL" --schema public -o schema.snapshot.json
+ignatius snapshot check "$DATABASE_URL" --against schema.snapshot.json --schema public --fail-on breaking --format table
+ignatius runbook --file incident.md --dry-run --format table
+ignatius runbook "$DATABASE_URL" --file incident.md --format markdown -o runbook-report.md
+
 # Shell completion generator
 ignatius completion zsh > ~/.zfunc/_ignatius
 ```
@@ -782,6 +801,10 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `053-live-data-browser-and-batch-crud` [Implemented]: Keyset-paginated data browser (`ignatius browse` + `Ctrl+K _`) with primary-key-guarded reviewed `INSERT`, `UPDATE`, and `DELETE` transactional SQL synthesis.
   - `054-explain-buffers-wal-and-plan-diff` [Implemented]: Extended `EXPLAIN (FORMAT JSON, BUFFERS, WAL, SETTINGS)` capture inside rollback transactions and A/B plan diffing (`ignatius plan-diff` + `Ctrl+K /`).
   - `055-result-analytics-and-rich-exports` [Implemented]: Zero-query column histograms/sparklines (`Ctrl+K $`) plus standalone Field Industrial HTML and streaming Apache Parquet export (`ignatius analytics --format html|parquet` and `Ctrl+K e`).
+- **Milestone 14: Query Benchmarking, Schema Snapshots & SQL Runbooks (`056` - `058`) [COMPLETED]**:
+  - `056-query-benchmarks-and-regression-suite` [Implemented]: Warmup-separated multi-iteration query latency benchmarking (`ignatius bench` + `Ctrl+K '`) with `p50`/`p95`/`p99`/QPS statistics, 12-bucket latency sparklines, rollback-safe `BEGIN`/`ROLLBACK` isolation, and A/B regression CI gates.
+  - `057-schema-snapshots-and-drift-guard` [Implemented]: Bounded zero-row-read `pg_catalog` schema snapshot capture (`ignatius snapshot capture|check` + `Ctrl+K "`) with deterministic lowercase SHA-256 fingerprints (`fingerprint_sha256`) across PostgreSQL 14-18 and `Breaking`/`Warning`/`Info` drift gates.
+  - `058-interactive-sql-notebook-runner` [Implemented]: Markdown fenced SQL runbooks (`-- @name:`, `-- @readonly`, `-- @expect-rows:`) and local `-- @cell` buffer notebooks (`ignatius runbook` + `Ctrl+K ?`) with `classify_all` write guards, offline `--dry-run` planning, and Markdown/JSON/table reports.
 
 ---
 

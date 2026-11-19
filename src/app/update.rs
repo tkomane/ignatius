@@ -1221,6 +1221,74 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::QueryBenchLoaded {
+            request,
+            target,
+            result,
+        } => {
+            if model.query_bench_request != request {
+                return Vec::new();
+            }
+            if let Some(bench) = &mut model.query_bench {
+                bench.loading = false;
+                match *result {
+                    Ok(stats) => {
+                        match target {
+                            crate::app::message::BenchTarget::Baseline => {
+                                bench.baseline = Some(stats);
+                                bench.status_message =
+                                    Some("Captured Baseline (A) benchmark".to_owned());
+                            }
+                            crate::app::message::BenchTarget::Candidate => {
+                                bench.candidate = Some(stats);
+                                bench.status_message =
+                                    Some("Captured Candidate (B) benchmark".to_owned());
+                            }
+                        }
+                        bench.recompute_report();
+                    }
+                    Err(diag) => {
+                        bench.status_message =
+                            Some(format!("Query benchmark failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::SchemaSnapshotLoaded { request, result } => {
+            if model.schema_snapshot_request != request {
+                return Vec::new();
+            }
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.loading = false;
+                match *result {
+                    Ok(snapshot) => {
+                        let table_count = snapshot.tables.len();
+                        snap.current = Some(snapshot);
+                        snap.recompute_diff();
+                        snap.status_message = Some(if let Some(diff) = &snap.diff {
+                            if diff.has_drift() {
+                                format!(
+                                    "Captured {table_count} table(s); drift: {} breaking, {} warning, {} info",
+                                    diff.breaking_count, diff.warning_count, diff.info_count
+                                )
+                            } else {
+                                format!(
+                                    "Captured {table_count} table(s); no drift vs pinned baseline"
+                                )
+                            }
+                        } else {
+                            format!("Captured snapshot of {table_count} table(s)")
+                        });
+                    }
+                    Err(diag) => {
+                        snap.status_message =
+                            Some(format!("Schema snapshot failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
         Message::WatchTick => watch_tick(model),
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
@@ -1493,6 +1561,9 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.import_wizard.is_some()
         || model.routine_runner.is_some()
         || model.maintenance_ops.is_some()
+        || model.query_bench.is_some()
+        || model.schema_snapshot.is_some()
+        || model.sql_runbook.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1640,6 +1711,15 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.result_analytics.is_some() {
         return result_analytics_action(model, action);
+    }
+    if model.query_bench.is_some() {
+        return query_bench_action(model, action);
+    }
+    if model.schema_snapshot.is_some() {
+        return schema_snapshot_action(model, action);
+    }
+    if model.sql_runbook.is_some() {
+        return sql_runbook_action(model, action);
     }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
@@ -1861,6 +1941,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::DataBrowser => data_browser_open(model),
         Action::PlanDiff => plan_diff_open(model),
         Action::ResultAnalytics => result_analytics_open(model),
+        Action::QueryBench => query_bench_open(model),
+        Action::SchemaSnapshot => schema_snapshot_open(model),
+        Action::SqlRunbook => sql_runbook_open(model),
         Action::StopWatch => {
             model.watch = None;
             Vec::new()
@@ -4243,6 +4326,285 @@ fn result_analytics_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Insert('e' | 'E') => {
             model.result_analytics = None;
             return update(model, Message::Action(Action::ExportRows));
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the query latency benchmark and A/B regression suite overlay (`056`).
+fn query_bench_open(model: &mut Model) -> Vec<Effect> {
+    if model.query_bench.is_some() {
+        model.query_bench = None;
+        return Vec::new();
+    }
+    let buffer_sql = model.editor.text().to_owned();
+    if !model.connection.is_ready() || buffer_sql.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let parsed = statements::split(&buffer_sql);
+    let baseline_sql = parsed.first().map_or_else(
+        || buffer_sql.clone(),
+        |s| buffer_sql[s.start..s.end].to_owned(),
+    );
+    let candidate_sql = parsed
+        .get(1)
+        .map(|s| buffer_sql[s.start..s.end].to_owned())
+        .unwrap_or_default();
+
+    model.query_bench = Some(crate::app::model::QueryBenchState {
+        baseline_sql,
+        candidate_sql,
+        ..Default::default()
+    });
+    query_bench_dispatch_runs(model)
+}
+
+fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
+    let Some(bench) = &mut model.query_bench else {
+        return Vec::new();
+    };
+    let config = bench.config;
+    let base_sql = bench.baseline_sql.clone();
+    let cand_sql = bench.candidate_sql.clone();
+    bench.loading = true;
+    bench.status_message = Some(format!(
+        "Running benchmark ({} warmup, {} measured, rollback={})...",
+        config.warmup_runs,
+        config.measured_runs,
+        if config.rollback { "on" } else { "off" }
+    ));
+
+    model.query_bench_request = model.query_bench_request.wrapping_add(1);
+    let request = model.query_bench_request;
+    let mut effects = Vec::new();
+    if !base_sql.trim().is_empty() {
+        effects.push(Effect::RunQueryBench {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            sql: base_sql,
+            config,
+        });
+    }
+    if !cand_sql.trim().is_empty() {
+        effects.push(Effect::RunQueryBench {
+            request,
+            target: crate::app::message::BenchTarget::Candidate,
+            sql: cand_sql,
+            config,
+        });
+    }
+    if effects.is_empty()
+        && let Some(bench) = &mut model.query_bench
+    {
+        bench.loading = false;
+    }
+    effects
+}
+
+/// Handles input while the query latency benchmark overlay is open.
+fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::QueryBench => {
+            model.query_bench = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.set_tab(1);
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.config.rollback = !bench.config.rollback;
+            }
+            return query_bench_dispatch_runs(model);
+        }
+        Action::Insert('r' | 'R') => {
+            return query_bench_dispatch_runs(model);
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the canonical schema snapshot and drift guard overlay (`057`).
+fn schema_snapshot_open(model: &mut Model) -> Vec<Effect> {
+    if model.schema_snapshot.is_some() {
+        model.schema_snapshot = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    model.schema_snapshot = Some(crate::app::model::SchemaSnapshotState::default());
+    schema_snapshot_dispatch(model)
+}
+
+fn schema_snapshot_dispatch(model: &mut Model) -> Vec<Effect> {
+    let schema = model
+        .schema_snapshot
+        .as_ref()
+        .and_then(|s| s.schema_filter.clone());
+    if let Some(snap) = &mut model.schema_snapshot {
+        snap.loading = true;
+        snap.status_message = Some("Capturing PostgreSQL schema snapshot...".to_owned());
+    }
+    model.schema_snapshot_request = model.schema_snapshot_request.wrapping_add(1);
+    vec![Effect::CaptureSchemaSnapshot {
+        request: model.schema_snapshot_request,
+        schema,
+    }]
+}
+
+/// Handles input while the schema snapshot and drift guard overlay is open.
+fn schema_snapshot_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::SchemaSnapshot => {
+            model.schema_snapshot = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.set_tab(1);
+            }
+        }
+        Action::Insert('b' | 'B') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                if snap.current.is_some() {
+                    snap.capture_as_baseline();
+                    snap.status_message = Some(
+                        "Pinned current snapshot as baseline; press [r] to check live drift."
+                            .to_owned(),
+                    );
+                } else {
+                    snap.status_message =
+                        Some("No captured snapshot available to pin as baseline.".to_owned());
+                }
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            return schema_snapshot_dispatch(model);
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(snap) = &mut model.schema_snapshot
+                && let Some(fp) = snap
+                    .current
+                    .as_ref()
+                    .or(snap.baseline.as_ref())
+                    .map(|s| s.fingerprint_sha256.clone())
+                    .filter(|fp| !fp.is_empty())
+                && let Ok(payload) = crate::clipboard::ClipboardPayload::try_new(fp)
+            {
+                snap.status_message = Some("Copied SHA-256 fingerprint via OSC 52.".to_owned());
+                return vec![Effect::CopyValue { payload }];
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the interactive SQL Markdown runbook overlay (`058`).
+fn sql_runbook_open(model: &mut Model) -> Vec<Effect> {
+    if model.sql_runbook.is_some() {
+        model.sql_runbook = None;
+        return Vec::new();
+    }
+    if model.editor.text().trim().is_empty() {
+        return Vec::new();
+    }
+    model.sql_runbook = Some(crate::app::model::SqlRunbookState::from_buffer(
+        model.editor.text(),
+    ));
+    Vec::new()
+}
+
+/// Handles input while the SQL Markdown runbook overlay is open.
+fn sql_runbook_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::SqlRunbook => {
+            model.sql_runbook = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.set_tab(1);
+            }
+        }
+        Action::Insert('w' | 'W') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.allow_writes = !rb.allow_writes;
+                rb.status_message = Some(if rb.allow_writes {
+                    "Write-guard preview: writes ALLOWED in dry-run plan.".to_owned()
+                } else {
+                    "Write-guard preview: writes GUARDED in dry-run plan.".to_owned()
+                });
+            }
+        }
+        Action::Activate => {
+            if let Some(cell) = model.sql_runbook.as_ref().and_then(|rb| rb.selected_cell()) {
+                let start_line = cell.start_line;
+                model.editor.set_position(start_line, 1);
+                model.sync_active_buffer_from_editor();
+                model.focus = Focus::Editor;
+            }
+            model.sql_runbook = None;
         }
         _ => {}
     }

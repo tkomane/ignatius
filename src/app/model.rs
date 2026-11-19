@@ -2445,6 +2445,201 @@ impl ResultAnalyticsState {
     }
 }
 
+/// State for the Query Latency Benchmark & A/B Regression Suite overlay (`056`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct QueryBenchState {
+    /// Warmup, measured iteration, and rollback safety parameters.
+    pub config: crate::bench::BenchConfig,
+    /// Baseline SQL query (Query A).
+    pub baseline_sql: String,
+    /// Candidate SQL query (Query B), when two statements are benchmarked.
+    pub candidate_sql: String,
+    /// Captured baseline benchmark statistics.
+    pub baseline: Option<crate::bench::BenchStats>,
+    /// Captured candidate benchmark statistics.
+    pub candidate: Option<crate::bench::BenchStats>,
+    /// Computed single-query or A/B comparison benchmark report.
+    pub report: Option<crate::bench::BenchReport>,
+    /// Active tab (`0`: Summary & Latency, `1`: Iteration Samples & Sparkline).
+    pub active_tab: usize,
+    /// Selected item row index within the active tab.
+    pub selected_idx: usize,
+    /// Whether an async benchmark run is currently in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl QueryBenchState {
+    /// Returns item count in the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => usize::from(self.report.is_some()) * 9,
+            1 => self
+                .baseline
+                .as_ref()
+                .map_or(0, |b| b.samples.len())
+                .max(self.candidate.as_ref().map_or(0, |c| c.samples.len())),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab (`0` or `1`) and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+        self.selected_idx = 0;
+    }
+
+    /// Recomputes `report` from `baseline` and optional `candidate` statistics.
+    pub fn recompute_report(&mut self) {
+        if let Some(base) = &self.baseline {
+            self.report = Some(crate::bench::compare_benchmarks(
+                base.clone(),
+                self.candidate.clone(),
+                None,
+            ));
+        } else {
+            self.report = None;
+        }
+    }
+}
+
+/// State for the Schema Snapshot & Drift Guard overlay (`057`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SchemaSnapshotState {
+    /// Optional single-schema filter (`None` captures all user schemas).
+    pub schema_filter: Option<String>,
+    /// Pinned baseline snapshot used for local live drift checks.
+    pub baseline: Option<crate::snapshot::SchemaSnapshot>,
+    /// Most recently captured live schema snapshot.
+    pub current: Option<crate::snapshot::SchemaSnapshot>,
+    /// Computed drift diff report between `baseline` and `current`.
+    pub diff: Option<crate::snapshot::SnapshotDiffReport>,
+    /// Active tab (`0`: Overview & Drift, `1`: Tables).
+    pub active_tab: usize,
+    /// Selected item row index within the active tab.
+    pub selected_idx: usize,
+    /// Whether an async catalog snapshot capture is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl SchemaSnapshotState {
+    /// Returns item count in the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => self.diff.as_ref().map_or(0, |d| d.findings.len()),
+            1 => self.current.as_ref().map_or(0, |s| s.tables.len()),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab (`0` or `1`) and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+        self.selected_idx = 0;
+    }
+
+    /// Pins the currently captured snapshot as the baseline and recomputes the drift report.
+    pub fn capture_as_baseline(&mut self) {
+        if let Some(current) = self.current.clone() {
+            self.baseline = Some(current);
+            self.recompute_diff();
+        }
+    }
+
+    /// Recomputes `diff` whenever both `baseline` and `current` snapshots exist.
+    pub fn recompute_diff(&mut self) {
+        if let (Some(base), Some(curr)) = (&self.baseline, &self.current) {
+            self.diff = Some(crate::snapshot::diff_snapshots(base, curr));
+        } else {
+            self.diff = None;
+        }
+    }
+}
+
+/// State for the Interactive SQL Markdown Runbook overlay (`058`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqlRunbookState {
+    /// Parsed SQL runbook from the active editor buffer.
+    pub runbook: crate::runbook::SqlRunbook,
+    /// Active tab (`0`: Cells, `1`: Safety Dry-Run).
+    pub active_tab: usize,
+    /// Selected cell index within `runbook.cells`.
+    pub selected_idx: usize,
+    /// Whether write/DDL cells are permitted in the dry-run preview.
+    pub allow_writes: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl SqlRunbookState {
+    /// Parses `sql` into a bounded [`crate::runbook::SqlRunbook`] for overlay inspection.
+    #[must_use]
+    pub fn from_buffer(sql: &str) -> Self {
+        Self {
+            runbook: crate::runbook::parse_buffer_runbook(sql, "active-buffer"),
+            active_tab: 0,
+            selected_idx: 0,
+            allow_writes: false,
+            status_message: None,
+        }
+    }
+
+    /// Moves cell selection within bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.runbook.cells.len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab (`0`: Cells, `1`: Safety Dry-Run).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+    }
+
+    /// Returns the currently highlighted runbook cell, if any.
+    #[must_use]
+    pub fn selected_cell(&self) -> Option<&crate::runbook::RunbookCell> {
+        self.runbook.cells.get(self.selected_idx)
+    }
+
+    /// Computes a pure dry-run execution preview reflecting `allow_writes`.
+    #[must_use]
+    pub fn dry_run_report(&self) -> crate::runbook::RunbookReport {
+        crate::runbook::plan_dry_run(&self.runbook, self.allow_writes, None)
+    }
+}
+
 /// Interactive state of the offline SQL lint findings overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintFindingsState {
@@ -3825,6 +4020,16 @@ pub struct Model {
     pub plan_diff_request: u64,
     /// Interactive zero-query result analytics profiler overlay state.
     pub result_analytics: Option<ResultAnalyticsState>,
+    /// Interactive query latency benchmark and A/B regression suite overlay state.
+    pub query_bench: Option<QueryBenchState>,
+    /// Request counter for in-flight query benchmark executions.
+    pub query_bench_request: u64,
+    /// Interactive canonical schema snapshot and drift guard overlay state.
+    pub schema_snapshot: Option<SchemaSnapshotState>,
+    /// Request counter for in-flight schema snapshot catalog captures.
+    pub schema_snapshot_request: u64,
+    /// Interactive SQL Markdown runbook overlay state.
+    pub sql_runbook: Option<SqlRunbookState>,
 }
 
 impl Model {

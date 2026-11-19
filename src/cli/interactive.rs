@@ -1400,6 +1400,35 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::RunQueryBench {
+                    request,
+                    target,
+                    sql,
+                    config,
+                } => {
+                    spawn_run_query_bench(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        BenchRunSpec {
+                            request,
+                            target,
+                            sql,
+                            config,
+                        },
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::CaptureSchemaSnapshot { request, schema } => {
+                    spawn_capture_schema_snapshot(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        schema,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
                 Effect::TestHypoIndex { request, query, create_index_sql } => {
                     spawn_test_hypo_index(
                         tx.clone(),
@@ -3427,6 +3456,79 @@ fn spawn_load_extended_explain(
             Message::ExtendedExplainLoaded {
                 request,
                 target,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+struct BenchRunSpec {
+    request: u64,
+    target: crate::app::message::BenchTarget,
+    sql: String,
+    config: crate::bench::BenchConfig,
+}
+
+fn spawn_run_query_bench(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    spec: BenchRunSpec,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let prefix = match spec.target {
+            crate::app::message::BenchTarget::Baseline => "Baseline (A)",
+            crate::app::message::BenchTarget::Candidate => "Candidate (B)",
+        };
+        let preview = crate::plandiff::bound_label(&spec.sql);
+        let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
+        let result = session.run_benchmark(&spec.sql, &spec.config, &label).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::QueryBenchLoaded {
+                request: spec.request,
+                target: spec.target,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_capture_schema_snapshot(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    schema: Option<String>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.capture_schema_snapshot(schema.as_deref()).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::SchemaSnapshotLoaded {
+                request,
                 result: Box::new(result),
             },
         ));

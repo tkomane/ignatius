@@ -1,8 +1,34 @@
 # Status
 
-**Updated: 2026-11-18.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-19.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 41 (056-058, Milestone 14: Benchmarks, Snapshots & Runbooks, Material 3 Theme & CI Fixes) Delivery - 19 November 2026
+
+Branch `feat/m14-bench-snapshot-runbook-polish` (stacked on Wave 40 `0346210`) delivers Milestone 14 (`056-058`), built-in Google Material Design 3 Tonal Dark theming and TUI/CLI polish, and DevOps CI fixes:
+
+- **DevOps CI & Secret-Scan Fixes**:
+  - Refreshed PostgreSQL fixture digests in `docker/postgres-images.env` (`2026-11-19`) for PostgreSQL 14.25, 15.20, 16.16, 17.12, and 18.7 on Alpine 3.24 (`workflow_contract` 15/15 passing; `docker/compose.yaml` default fallback remains `18.6` when `IGNATIUS_POSTGRES_IMAGE` is unset).
+  - Added a narrowly scoped `[[allowlists]]` entry in `.gitleaks.toml` for the synthetic `tok_live_abc123xyz` test token in `src/cluster/tests.rs` (matching the `179e0f3` precedent).
+  - Noted open Dependabot PRs `#87` and `#88` without altering `Cargo.toml` or `Cargo.lock`.
+- **Google Material Design 3 Tonal Dark Theme & Quiet-Precision Polish**:
+  - Added built-in `ThemeChoice::Material` (`"material"`) and `ThemeSelection::Material` across `src/config/schema.rs`, `src/ui/theme.rs`, `src/ui/theme/custom.rs`, and `docs/design/theme-tokens.md`, including `SwitchTheme` cycle ordering and WCAG contrast verification across all 4 surface tiers (`#111318`, `#191C22`, `#22262E`, `#2B303A`).
+  - Refined `src/ui/widgets/footer.rs` (`Theme::pill(Token::Focus)` hints with ASCII/Unicode delimiters), `src/ui/widgets/header.rs` (group separator between connection posture and telemetry), `src/ui/widgets/results.rs` and `src/ui/widgets/objects.rs` (structured empty-state typography and starter key pills), and `src/diagnostics/doctor.rs` (aligned `STATUS  CHECK  DETAIL` layout and resolved theme reporting).
+- **Feature `056-query-benchmarks-and-regression-suite`**:
+  - Pure statistics and A/B comparison engine in `src/bench/mod.rs` (`DEFAULT_WARMUP_RUNS = 2`, `MAX_WARMUP_RUNS = 20`, `DEFAULT_MEASURED_RUNS = 10`, `MAX_MEASURED_RUNS = 200`, `BENCH_SPARKLINE_BUCKETS = 12`, Welford mean/stddev, linear-interpolated `p50`/`p95`/`p99`, QPS, 12-bucket ASCII/Unicode sparklines, plain-ASCII `table`/`plain`/`json` renderers) paired with rollback-safe `BEGIN`/`ROLLBACK` runner in `src/postgres/bench.rs` and `Session::run_benchmark`.
+  - Interactive TUI overlay (`Ctrl+K '` / `query-bench`) and scriptable `ignatius bench` CLI subcommand (`tests/bench_contract.rs`).
+- **Feature `057-schema-snapshots-and-drift-guard`**:
+  - Pure canonical snapshot model, SHA-256 fingerprint finalizer, and `Breaking`/`Warning`/`Info` drift diff engine in `src/snapshot/mod.rs` (`MAX_SNAPSHOT_TABLES = 500`, `MAX_SNAPSHOT_COLUMNS = 5000`, `MAX_SNAPSHOT_INDEXES = 2000`, `MAX_SNAPSHOT_POLICIES = 1000`, `DriftFailThreshold`, plain-ASCII `table`/`plain`/`json` renderers) paired with zero-row-read PG 14-18 `pg_catalog` extractor in `src/postgres/snapshot.rs` and `Session::capture_schema_snapshot`.
+  - Interactive TUI overlay (`Ctrl+K "` / `schema-snapshot`) and scriptable `ignatius snapshot capture|check` CLI subcommands (`tests/snapshot_contract.rs`).
+- **Feature `058-interactive-sql-notebook-runner`**:
+  - Pure Markdown and `-- @cell` buffer parser, `classify_all` write-guard dry-run planner, and plain-ASCII `table`/`plain`/`json`/`markdown` report renderer in `src/runbook/mod.rs` (`MAX_RUNBOOK_CELLS = 200`, `MAX_RUNBOOK_BYTES = 1048576`, `-- @name:`, `-- @readonly`, `-- @expect-rows:` directives).
+  - Local TUI overlay (`Ctrl+K ?` / `sql-runbook`) with cell jump and write-guard toggle, plus scriptable `ignatius runbook` CLI subcommand (`tests/runbook_contract.rs`).
+- **Docs & Interactive Guide**:
+  - Reconciled `README.md`, `docs/design/keymap.md`, `docs/design/theme-tokens.md`, `docs/product/roadmap.md`, `CHANGELOG.md`, and the external HTML interactive guide (`node --check` passed on both `<script>` blocks).
+- **Verification**:
+  - `cargo xtask verify` exited `0` (on macOS arm64 with Homebrew `rustc 1.100.0`) against live plain (`127.0.0.1:55432`) and TLS (`localhost:55433`) PostgreSQL `18.7` containers started via `IGNATIUS_POSTGRES_IMAGE="$(./docker/postgres-image.sh 18)"` (`docker.io/library/postgres@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff`, `SELECT version()`: `PostgreSQL 18.7 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit`): formatting, `clippy --locked --workspace --all-targets --all-features -- -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps`, 1675 lib unit tests, 11 xtask unit tests, 22 `documentation_matches_the_build`, 15 `workflow_contract`, 80 `cli_contract`, 4 `theme_contract`, 66 `postgres_integration`, 4 `cloud_identity_integration`, 8 `terminal_restore`, `bench_contract` (1), `snapshot_contract` (1), `runbook_contract` (1), and all remaining workspace suites (2107 executed test cases passing across 51 test binaries; 0 doc tests) passed. Unix-socket integration (`tests/postgres_socket_integration.rs`, 1 test) skipped (`IGNATIUS_TEST_PG_SOCKET_URI` unset).
+  - Local `actionlint` passed (exit 0); pinned Gitleaks (`ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9`) passed on full Git history (286 commits, 12.42 MB, 0 leaks) and source directories (`src`, `tests`, `docs`, `specs`, `xtask`, `.github`, 0 leaks; gitignored `docker/tls/generated/*.key` throwaway keys excluded). Direct Rust 1.90 MSRV compilation remains unverified locally (`rustc 1.100.0` installed, no `rustup`; static audit found no post-1.90 stdlib APIs).
 
 ## Wave 40 (053-055, Milestone 13: Live Data CRUD, Plan Diff & Analytics) Delivery - 18 November 2026
 

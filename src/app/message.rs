@@ -175,6 +175,12 @@ pub enum Action {
     PlanDiff,
     /// Open the zero-query result analytics profiler and HTML/Parquet export overlay.
     ResultAnalytics,
+    /// Open the query latency benchmark and A/B regression suite overlay.
+    QueryBench,
+    /// Open the canonical schema snapshot and drift guard overlay.
+    SchemaSnapshot,
+    /// Open the interactive SQL Markdown runbook overlay.
+    SqlRunbook,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -183,6 +189,15 @@ pub enum PlanDiffTarget {
     /// Baseline query plan (Plan A).
     Baseline,
     /// Candidate query plan (Plan B).
+    Candidate,
+}
+
+/// Slot targeted by a query benchmark execution for A/B comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BenchTarget {
+    /// Baseline query benchmark (Query A).
+    Baseline,
+    /// Candidate query benchmark (Query B).
     Candidate,
 }
 
@@ -310,6 +325,9 @@ impl Action {
             Self::DataBrowser,
             Self::PlanDiff,
             Self::ResultAnalytics,
+            Self::QueryBench,
+            Self::SchemaSnapshot,
+            Self::SqlRunbook,
         ]
     }
 }
@@ -807,6 +825,22 @@ pub enum Message {
         /// Newly received notifications.
         notifications: Vec<crate::ops::PubSubNotification>,
     },
+    /// Query benchmark statistics loaded for Baseline (A) or Candidate (B).
+    QueryBenchLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Benchmark slot (`Baseline` or `Candidate`).
+        target: BenchTarget,
+        /// Measured benchmark statistics or error.
+        result: Box<Result<crate::bench::BenchStats, Diagnostic>>,
+    },
+    /// Canonical schema snapshot captured from PostgreSQL catalog.
+    SchemaSnapshotLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Captured schema snapshot or error.
+        result: Box<Result<crate::snapshot::SchemaSnapshot, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -1143,5 +1177,23 @@ pub enum Effect {
         sql: String,
         /// Whether to execute `ANALYZE, BUFFERS, WAL` inside a rollback transaction.
         analyze: bool,
+    },
+    /// Execute warmup and measured benchmark iterations for one SQL statement.
+    RunQueryBench {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Benchmark slot (`Baseline` or `Candidate`).
+        target: BenchTarget,
+        /// SQL statement to benchmark.
+        sql: String,
+        /// Warmup, measured iteration, and rollback isolation configuration.
+        config: crate::bench::BenchConfig,
+    },
+    /// Capture a bounded canonical schema snapshot from PostgreSQL catalog.
+    CaptureSchemaSnapshot {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional single schema filter.
+        schema: Option<String>,
     },
 }

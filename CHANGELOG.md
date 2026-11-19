@@ -8,6 +8,38 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Built-in `material` palette (`[ui] theme = "material"` and
+  `[theme] extends = "material"`) inspired by Google Material Design 3 Tonal Dark
+  surfaces (`#111318`, `#191C22`, `#22262E`, `#2B303A`) with Material blue,
+  cyan, sage, warm amber, and coral accents, WCAG-verified across all 4 surface
+  depths and added to the `SwitchTheme` cycle.
+
+- Improved: Material 3 quiet-precision polish across TUI chrome and CLI health
+  diagnostics, including `Theme::pill(Token::Focus)` key hints with subtle
+  delimiters in the footer, left-vs-right group separator in the header,
+  structured bold headlines and starter key pills in empty Objects and Results
+  states, and aligned `STATUS  CHECK  DETAIL` output with active theme reporting
+  in `ignatius doctor`.
+
+- New: Feature `056-query-benchmarks-and-regression-suite` advances Milestone 14
+  with `ignatius bench` and the `Ctrl+K '` (`query-bench`) overlay, executing
+  warmup-separated multi-iteration benchmarks inside rollback-safe `BEGIN`/`ROLLBACK`
+  transactions by default (`--no-rollback` opt-out), computing `p50`/`p95`/`p99`/QPS
+  and 12-bucket latency sparklines, and evaluating A/B `--fail-on-regression-pct`
+  gates.
+
+- New: Feature `057-schema-snapshots-and-drift-guard` advances Milestone 14 with
+  `ignatius snapshot capture|check` and `Ctrl+K "` (`schema-snapshot`), producing
+  canonical, zero-row-read `pg_catalog` snapshots with deterministic SHA-256
+  fingerprints (`fingerprint_sha256`) across PostgreSQL 14-18 and gating schema
+  drift by `Breaking`, `Warning`, and `Info` thresholds.
+
+- New: Feature `058-interactive-sql-notebook-runner` advances Milestone 14 with
+  `ignatius runbook` and the local `Ctrl+K ?` (`sql-runbook`) overlay, parsing
+  Markdown fenced SQL cells (`-- @name:`, `-- @readonly`, `-- @expect-rows:`) and
+  editor `-- @cell` blocks with `classify_all` write guards, offline `--dry-run`
+  planning, and plain-ASCII table/plain/JSON/Markdown reports.
+
 - New: Feature `053-live-data-browser-and-batch-crud` advances Milestone 13 with
   `ignatius browse` and the `Ctrl+K _` (`data-browser`) keyset-paginated table
   browser + reviewed primary-key-guarded `INSERT`/`UPDATE`/`DELETE` SQL builder.

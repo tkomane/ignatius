@@ -4,12 +4,13 @@ const READABLE: f64 = 4.5;
 const LARGE_OR_SECONDARY: f64 = 3.0;
 const HIGH_CONTRAST_MINIMUM: f64 = 7.0;
 
-fn themes() -> [Theme; 4] {
+fn themes() -> [Theme; 5] {
     [
         Theme::new(ThemeChoice::Dark, true),
         Theme::new(ThemeChoice::Light, true),
         Theme::new(ThemeChoice::HighContrast, true),
         Theme::new(ThemeChoice::FieldIndustrial, true),
+        Theme::new(ThemeChoice::Material, true),
     ]
 }
 
@@ -389,6 +390,7 @@ fn basic_16_emits_family_foregrounds_and_paints_no_surface() {
         ThemeChoice::Light,
         ThemeChoice::HighContrast,
         ThemeChoice::FieldIndustrial,
+        ThemeChoice::Material,
     ] {
         let theme = Theme::new(choice, true).with_depth(ColorDepth::Basic16);
         for token in Token::ALL {
@@ -872,5 +874,72 @@ fn field_industrial_surfaces_capsules_and_quantization_preserve_distinction() {
     let indexed = field.clone().with_depth(ColorDepth::Indexed256);
     assert_eq!(indexed.banner_ramp(59).len(), 59);
     let basic = field.with_depth(ColorDepth::Basic16);
+    assert_eq!(basic.banner_ramp(59).len(), 59);
+}
+
+#[test]
+fn material_surfaces_capsules_and_quantization_preserve_distinction() {
+    let material = Theme::new(ThemeChoice::Material, true);
+    assert_eq!(material.rgb(Token::Surface), Rgb(0x11, 0x13, 0x18));
+    assert_eq!(material.rgb(Token::SurfacePane), Rgb(0x19, 0x1c, 0x22));
+    assert_eq!(material.rgb(Token::SurfaceAlt), Rgb(0x22, 0x26, 0x2e));
+    assert_eq!(material.rgb(Token::SurfaceOverlay), Rgb(0x2b, 0x30, 0x3a));
+    assert_eq!(material.rgb(Token::Focus), Rgb(0x8a, 0xb4, 0xf8));
+    assert_eq!(material.rgb(Token::Info), Rgb(0x78, 0xd9, 0xec));
+    assert_eq!(material.rgb(Token::Success), Rgb(0x81, 0xc9, 0x95));
+    assert_eq!(material.rgb(Token::Warning), Rgb(0xfd, 0xd6, 0x63));
+    assert_eq!(material.rgb(Token::Danger), Rgb(0xf2, 0x8b, 0x82));
+    assert_eq!(
+        material.banner_anchors(),
+        (Rgb(0x8a, 0xb4, 0xf8), Rgb(0x78, 0xd9, 0xec))
+    );
+
+    let material_surfaces = surfaces(&material);
+    for (i, left) in material_surfaces.iter().enumerate() {
+        for (j, right) in material_surfaces.iter().enumerate() {
+            if i != j {
+                assert_ne!(left, right, "surface tiers {i} and {j} must be distinct");
+            }
+        }
+        assert_ne!(
+            material.rgb(Token::Border),
+            *left,
+            "border must remain distinct from surface tier {i}"
+        );
+    }
+
+    for token in [
+        Token::Focus,
+        Token::EnvironmentProduction,
+        Token::Info,
+        Token::TransactionActive,
+        Token::TransactionFailed,
+    ] {
+        let capsule = material.capsule(token);
+        assert!(capsule.bg.is_some(), "{token:?} capsule must paint a fill");
+        assert!(
+            capsule.fg.is_some(),
+            "{token:?} capsule must paint foreground"
+        );
+        let ratio = material.rgb(token).contrast(material.rgb(Token::Surface));
+        assert!(
+            ratio >= READABLE,
+            "{token:?} capsule contrast {ratio:.2} is below {READABLE}"
+        );
+    }
+
+    let pill = material.pill(Token::Focus);
+    assert_eq!(pill.bg, Some(material.foreground(Token::SurfaceAlt)));
+    assert_eq!(pill.fg, Some(material.foreground(Token::Focus)));
+    assert!(pill.add_modifier.contains(Modifier::BOLD));
+
+    for token in Token::ALL {
+        let idx = quantize_256(material.rgb(*token));
+        assert!((16..=255).contains(&idx), "{token:?} quantized to {idx}");
+    }
+
+    let indexed = material.clone().with_depth(ColorDepth::Indexed256);
+    assert_eq!(indexed.banner_ramp(59).len(), 59);
+    let basic = material.with_depth(ColorDepth::Basic16);
     assert_eq!(basic.banner_ramp(59).len(), 59);
 }

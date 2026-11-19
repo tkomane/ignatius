@@ -327,3 +327,37 @@ fn field_industrial_theme_choice_round_trips_and_is_accepted() {
             .contains("choice = \"field-industrial\"")
     );
 }
+
+#[test]
+fn material_theme_choice_round_trips_labels_and_parses() {
+    assert!(ThemeChoice::ACCEPTED.contains(&"material"));
+    assert_eq!(ThemeChoice::Material.label(), "material");
+    assert_eq!(ThemeChoice::parse("material"), Some(ThemeChoice::Material));
+    assert_eq!(
+        ThemeChoice::parse("field-industrial"),
+        Some(ThemeChoice::FieldIndustrial)
+    );
+    assert_eq!(ThemeChoice::parse("Material"), None);
+    assert_eq!(ThemeChoice::parse(" material "), None);
+    for accepted in ThemeChoice::ACCEPTED {
+        let parsed = ThemeChoice::parse(accepted).expect("every accepted choice parses");
+        assert_eq!(parsed.label(), *accepted);
+    }
+
+    let config: Config = toml::from_str("[ui]\ntheme = \"material\"\n").expect("parse");
+    assert_eq!(config.ui.theme, ThemeSelection::Material);
+    let serialized = toml::to_string(&config).expect("serialize");
+    assert!(serialized.contains("theme = \"material\""), "{serialized}");
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+    struct ChoiceBox {
+        choice: ThemeChoice,
+    }
+    let parsed: ChoiceBox = toml::from_str("choice = \"material\"").expect("parse choice");
+    assert_eq!(parsed.choice, ThemeChoice::Material);
+    assert!(
+        toml::to_string(&parsed)
+            .expect("serialize choice")
+            .contains("choice = \"material\"")
+    );
+}
