@@ -315,6 +315,7 @@ std::string renderer_json_message(std::string_view message) {
 }
 
 void emit_renderer_receipt(const RendererReceipt& receipt) {
+    const auto truth = [](bool value) { return value ? "true" : "false"; };
     std::cout << "{\"schema\":1,\"case\":\"renderer-calibration\",\"native_windows\":true"
               << ",\"calibration_complete\":" << truth(receipt.passed)
               << ",\"product_acceptance\":false,\"cursor_capability_accepted\":false"
