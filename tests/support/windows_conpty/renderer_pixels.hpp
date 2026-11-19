@@ -218,24 +218,36 @@ inline bool coverage(std::size_t matches_count, std::size_t area, std::size_t pe
     return matches_count * 100 >= area * percent;
 }
 
-inline std::optional<Measurement> measure(const Frame& frame, std::size_t phase,
-                                          bool visible, bool main_expected, const char*& reason) {
-    Box anchor{frame.width, frame.height, 0, 0};
-    std::size_t anchor_pixels = 0;
+struct AnchorMatch {
+    Box bounds;
+    std::size_t count{};
+};
+
+inline AnchorMatch find_anchor(const Frame& frame) {
+    AnchorMatch anchor{{frame.width, frame.height, 0, 0}};
     for (int y = 0; y < frame.height; ++y) {
         const Pixel* row = frame.row(y);
         for (int x = 0; x < frame.width; ++x) {
             if (!matches(row[x], anchor_color)) continue;
-            ++anchor_pixels;
-            anchor.left = (std::min)(anchor.left, x);
-            anchor.top = (std::min)(anchor.top, y);
-            anchor.right = (std::max)(anchor.right, x + 1);
-            anchor.bottom = (std::max)(anchor.bottom, y + 1);
+            ++anchor.count;
+            anchor.bounds.left = (std::min)(anchor.bounds.left, x);
+            anchor.bounds.top = (std::min)(anchor.bounds.top, y);
+            anchor.bounds.right = (std::max)(anchor.bounds.right, x + 1);
+            anchor.bounds.bottom = (std::max)(anchor.bounds.bottom, y + 1);
         }
     }
-    reason = "anchor_missing_or_nonrectangular";
-    if (anchor_pixels == 0 || anchor.width() % 4 != 0 ||
-        !coverage(anchor_pixels, anchor.area()))
+    return anchor;
+}
+
+inline std::optional<Measurement> measure(const Frame& frame, std::size_t phase,
+                                          bool visible, bool main_expected, const char*& reason) {
+    const auto anchor_match = find_anchor(frame);
+    const Box& anchor = anchor_match.bounds;
+    const auto anchor_pixels = anchor_match.count;
+    reason = "anchor_missing";
+    if (anchor_pixels == 0) return std::nullopt;
+    reason = "anchor_nonrectangular";
+    if (anchor.width() % 4 != 0 || !coverage(anchor_pixels, anchor.area()))
         return std::nullopt;
 
     const int cell_width = anchor.width() / 4;
@@ -287,6 +299,59 @@ inline std::optional<Measurement> measure(const Frame& frame, std::size_t phase,
     return Measurement{{frame.width, frame.height, cell_width, cell_height,
         crop.width(), crop.height(), anchor_pixels, phase_pixels, sentinel_pixels,
         cursor_pixels, cursor_box.area(), 0}, crop};
+}
+
+// Report aggregate color counts about the last owned client buffer only.
+inline std::string capture_diagnostics(const Frame& frame, std::size_t phase) {
+    if (frame.pixels.empty()) return " capture=unavailable";
+    const auto [anchor, anchor_pixels] = find_anchor(frame);
+    std::size_t phase_pixels = 0, sentinel_pixels = 0, magenta_pixels = 0;
+    std::size_t black = 0, neutral = 0, background = 0;
+    std::array<std::size_t, 64> chromatic_bins{};
+    for (const auto& pixel : frame.pixels) {
+        if (matches(pixel, renderer_phase_colors[phase])) ++phase_pixels;
+        if (matches(pixel, sentinel_color)) ++sentinel_pixels;
+        if (matches(pixel, cursor_color)) ++magenta_pixels;
+        if (matches(pixel, background_color)) ++background;
+
+        const int high = (std::max)({pixel.r, pixel.g, pixel.b});
+        const int low = (std::min)({pixel.r, pixel.g, pixel.b});
+        if (high <= 3) ++black;
+        if (high - low <= 6) {
+            ++neutral;
+        } else {
+            const auto bin = static_cast<std::size_t>(pixel.r >> 6) * 16
+                + static_cast<std::size_t>(pixel.g >> 6) * 4
+                + static_cast<std::size_t>(pixel.b >> 6);
+            ++chromatic_bins[bin];
+        }
+    }
+
+    std::ostringstream facts;
+    facts << " capture=" << frame.width << 'x' << frame.height
+          << " pixels=" << frame.pixels.size() << " anchor_near=" << anchor_pixels;
+    if (anchor_pixels != 0) {
+        facts << " anchor_bbox_ltrb=" << anchor.left << ',' << anchor.top
+              << ',' << anchor.right << ',' << anchor.bottom;
+    }
+    facts << " phase_near=" << phase_pixels << " sentinel_near=" << sentinel_pixels
+          << " magenta_near=" << magenta_pixels << " black=" << black
+          << " neutral=" << neutral << " background_near=" << background
+          << " chromatic=" << (frame.pixels.size() - neutral)
+          << " top_chromatic_rgb_bin_lo_count=[";
+    // Report at most three coarse bins. The R:G:B tuple is the lower
+    // endpoint of each 64-value channel range, followed by the pixel count.
+    for (int i = 0; i < 3; ++i) {
+        auto largest = (std::max_element)(chromatic_bins.begin(), chromatic_bins.end());
+        if (*largest == 0) break;
+        const auto bin = static_cast<std::size_t>(largest - chromatic_bins.begin());
+        if (i != 0) facts << ',';
+        facts << ((bin >> 4) * 64) << ':' << (((bin >> 2) & 3) * 64)
+              << ':' << ((bin & 3) * 64) << ':' << *largest;
+        *largest = 0;
+    }
+    facts << ']';
+    return facts.str();
 }
 
 inline std::vector<Pixel> cropped_pixels(const Frame& frame, const Box& crop) {
@@ -359,12 +424,14 @@ inline RendererPixelObservation observe_renderer_frame(
 
     PixelCoordinates coordinates;
     std::optional<StableSample> previous;
+    // Keep the last owned client capture in memory for the deadline summary.
+    Frame frame{};
     const char* reason = "no_sample";
     constexpr std::chrono::milliseconds delay{45};
 
     while (Clock::now() < deadline) {
         const RECT before = visible_client(window);
-        const Frame frame = capture(before);
+        frame = capture(before);
         if (!same_rectangle(before, visible_client(window)))
             throw std::runtime_error("renderer client moved or resized during capture");
         auto verified = measure(frame, phase, visible, main_expected, reason);
@@ -386,5 +453,6 @@ inline RendererPixelObservation observe_renderer_frame(
         }
         std::this_thread::sleep_until((std::min)(deadline, Clock::now() + delay));
     }
-    throw std::runtime_error("renderer phase " + std::to_string(phase) + " deadline: " + reason);
+    throw std::runtime_error("renderer phase " + std::to_string(phase) + " deadline: "
+                             + reason + capture_diagnostics(frame, phase));
 }

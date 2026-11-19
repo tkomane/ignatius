@@ -539,11 +539,11 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
 int wmain(int argc, wchar_t** argv) {
     try {
 #ifdef IGNATIUS_RENDERER_CALIBRATION
-        if (argc == 5 && std::wstring_view(argv[1]) == L"--renderer-supervise") {
-            return renderer_supervise(argv[2], argv[3], argv[4]);
+        if (argc == 6 && std::wstring_view(argv[1]) == L"--renderer-supervise") {
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5]);
         }
-        if (argc == 4 && std::wstring_view(argv[1]) == L"--renderer-actor") {
-            return renderer_actor(argv[2], argv[3]);
+        if (argc == 5 && std::wstring_view(argv[1]) == L"--renderer-actor") {
+            return renderer_actor(argv[2], argv[3], argv[4]);
         }
 #endif
         if (argc == 8 && std::wstring_view(argv[1]) == L"--worker") return worker(argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);

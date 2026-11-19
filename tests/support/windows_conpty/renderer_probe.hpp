@@ -87,7 +87,7 @@ SMALL_RECT renderer_console_viewport(HANDLE output) {
     return screen.srWindow;
 }
 
-int renderer_actor(const std::wstring& pipe, const std::wstring& nonce) {
+int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const std::wstring& profile) {
     require_renderer_nonce(nonce);
     require(pipe == renderer_pipe_name(nonce), "exact renderer pipe name");
 
@@ -105,6 +105,11 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce) {
     require(GetConsoleMode(input.value, &baseline_input) && GetConsoleMode(output.value, &baseline_output),
             "renderer actor console preflight");
     const auto initial_viewport = renderer_console_viewport(output.value);
+    wchar_t selected_profile[64]{};
+    const auto profile_size = GetEnvironmentVariableW(L"WT_PROFILE_ID", selected_profile,
+                                                      static_cast<DWORD>(std::size(selected_profile)));
+    const bool profile_confirmed = profile_size < std::size(selected_profile) && profile_size != 0
+        && CompareStringOrdinal(selected_profile, -1, profile.c_str(), -1, TRUE) == CSTR_EQUAL;
 
     const auto nonce_text = ascii(nonce);
     std::ostringstream registered;
@@ -112,6 +117,7 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce) {
                << ' ' << static_cast<unsigned>(initial_viewport.Right + 1)
                << ' ' << static_cast<unsigned>(initial_viewport.Bottom + 1);
     renderer_stamp(registered, ticks());
+    registered << ' ' << profile_confirmed;
     // No console mutation is attempted before the outside supervisor
     // authenticates this stable client and acknowledges owned Job membership.
     send(pipe, registered.str());
@@ -514,7 +520,8 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
     std::cout << "]}\n";
 }
 
-int renderer_supervise(const std::wstring& terminal, const std::wstring& work, const std::wstring& nonce) {
+int renderer_supervise(const std::wstring& terminal, const std::wstring& work, const std::wstring& nonce,
+                       const std::wstring& profile) {
     RendererReceipt receipt;
     receipt.start = ticks();
     const auto start = Clock::now();
@@ -551,9 +558,11 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
 
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
-        launcher = create(terminal, {L"-w", L"new", L"new-tab", L"--title", title,
+        require(profile.size() == 38 && profile.front() == L'{' && profile.back() == L'}',
+                "owned renderer profile identity");
+        launcher = create(terminal, {L"-w", L"new", L"new-tab", L"--profile", profile, L"--title", title,
                                     L"--suppressApplicationTitle", L"--inheritEnvironment",
-                                    L"--", executable_self, L"--renderer-actor", pipe, nonce},
+                                    L"--", executable_self, L"--renderer-actor", pipe, nonce, profile},
                           work, &startup, 0);
         receipt.launcher_pid = launcher.pid;
         require(AssignProcessToJobObject(job.value, launcher.process.value),
@@ -584,7 +593,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
 
             if (parts[0] == "R") {
                 require(!actor && receipt.phases.empty(), "single persistent renderer actor");
-                const auto data = renderer_numbers<7>(parts);
+                const auto data = renderer_numbers<8>(parts);
                 receipt.associated_consoles = data[0];
                 receipt.initial_input = data[1];
                 receipt.initial_output = data[2];
@@ -598,6 +607,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         "renderer actor registration and viewport bounds");
                 receipt.actor_pid = pid;
                 actor = std::move(sender);
+                require(data[7] == 1, "renderer actor selected the owned portable profile");
                 renderer = find_renderer_window(job.value, terminal, title, work_deadline);
                 receipt.renderer_pid = renderer.pid;
                 fit_renderer_window(renderer, job.value, terminal, title, work_deadline, receipt.fit);

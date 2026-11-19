@@ -97,7 +97,8 @@ $configuration = [ordered] @{
         })
     }
 }
-[IO.File]::WriteAllText((Join-Path $settings 'settings.json'), (ConvertTo-Json $configuration -Depth 8))
+$settingsFile = Join-Path $settings 'settings.json'
+[IO.File]::WriteAllText($settingsFile, (ConvertTo-Json $configuration -Depth 8))
 
 $sourceHashes = [ordered] @{}
 foreach ($source in @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp',
@@ -112,6 +113,8 @@ $build = [ordered] @{
     terminal_version = $version
     terminal_sha256 = FileDigest $terminal.FullName
     package_sha256 = $expectedSha256
+    settings_sha256 = FileDigest $settingsFile
+    profile_id = $profile
     msvc_sha256 = FileDigest $compiler.Source
     windows_version = [Environment]::OSVersion.Version.ToString()
     image_os = $env:ImageOS
@@ -124,7 +127,7 @@ $nonce = [Guid]::NewGuid().ToString('N')
 $stdout = Join-Path $root 'renderer.stdout'
 $stderr = Join-Path $root 'renderer.stderr'
 $controller = Start-Process -FilePath $probe -WorkingDirectory $work -NoNewWindow -PassThru `
-    -ArgumentList @('--renderer-supervise', ('"' + $terminal.FullName + '"'), ('"' + $work + '"'), $nonce) `
+    -ArgumentList @('--renderer-supervise', ('"' + $terminal.FullName + '"'), ('"' + $work + '"'), $nonce, $profile) `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 try {
     if (-not $controller.WaitForExit(40000)) {
