@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 45: Playground onboarding and terminal evidence - 19 November 2026
+
+- The merged packaging fix is `4cdfa5c`. Its exact push checks are
+  [CI 44605084297](https://github.com/tkomane/ignatius/actions/runs/44605084297)
+  and [CodeQL 44605084165](https://github.com/tkomane/ignatius/actions/runs/44605084165).
+  The immutable-source non-publishing rehearsal is
+  [44605153852](https://github.com/tkomane/ignatius/actions/runs/44605153852).
+- The README now uses the credential from `docker/dev.env`, the playground CA
+  for verified TLS, and a query that returns three rows on the fresh PostgreSQL
+  18.7 fixture. Both connection examples and the query ran locally. The
+  documentation contract validates the pasted profile config.
+- A clean local arm64 build at `4cdfa5c` exited 0 on SIGTERM from a native
+  Warp `v0.2026.11.11.08.17.stable_01` session on macOS 27.2.1. The wrapper
+  verified identical POSIX terminal settings before launch and after exit.
+  Native cursor appearance, OSC 11 response and visual hand use remain open.
+- The same clean build ran in a separate owned macOS PTY against PostgreSQL
+  18.7 with `verify-full`. Three rows returned, JSONB Cell Detail opened,
+  and a live resize from 116x30 to 30x6 and back preserved the result. Ctrl+Q
+  restored the POSIX modes and emitted cursor, mouse, paste and alternate
+  screen restoration. The PTY supplied a synthetic OSC 11 reply.
+- The two existing 100-action release-mode latency contracts at the
+  tree-identical `ce0ee8d` verification head measured p95 of 0.223 ms for
+  input/palette/completion and 0.388 ms for the 1,000-row grid on macOS arm64.
+  These measurements cover the synthetic reducer and renderer actions.
+
 ## Wave 44: Hosted Milestone 15 and Windows packaging - 19 November 2026
 
 - [PR 94](https://github.com/tkomane/ignatius/pull/94) merged Milestone 15
@@ -15,9 +40,10 @@ before trusting anything else.
 - [PR 93](https://github.com/tkomane/ignatius/pull/93) pins MSVC 14.44.35207
   and Windows SDK 10.0.26100.0 for Windows candidate and repeat builds.
   [Rehearsal 44601135904](https://github.com/tkomane/ignatius/actions/runs/44601135904)
-  at `353431a` passed the pinned input assertions in all three Windows
-  jobs. The run retains the status of the exact archive comparison and
-  runtime receipts. This is the package evidence for its frozen source.
+  at `353431a` passed all 16 jobs. The three Windows builds recorded matching
+  tool hashes on one runner image. The Linux, macOS and Windows repeat
+  archives matched byte for byte, and installation and rollback passed on
+  all three. The downloaded aggregate verified all three checksums.
 - Native terminal acceptance and the signature, provenance and owner
   authorization gates in [ADR-0008](architecture/decisions/0008-packaging-and-release.md)
   remain open.
