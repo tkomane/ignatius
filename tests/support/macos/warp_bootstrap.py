@@ -160,11 +160,12 @@ def extract_ignatius(aggregate, output):
 
 
 def stage_warp(root):
-    url = f"https://app.warp.dev/download/brew?version={WARP_VERSION}&package=dmg"
+    url = f"https://releases.warp.dev/stable/{WARP_VERSION}/Warp.dmg"
     dmg = root / "Warp.dmg"
     run("vendor_dmg_download", ["/usr/bin/curl", "--fail", "--silent", "--show-error", "--location",
-                               "--max-redirs", "5", "--proto", "=https", "--proto-redir", "=https",
-                               "--connect-timeout", "10", "--max-time", "90", "--output", dmg, url], 95)
+                               "--http1.1", "--max-redirs", "3", "--proto", "=https", "--proto-redir", "=https",
+                               "--retry", "2", "--retry-all-errors", "--retry-max-time", "60",
+                               "--connect-timeout", "10", "--max-time", "80", "--output", dmg, url], 110)
     require(digest(dmg) == WARP_DMG_SHA, "Warp DMG hash mismatch")
     mount = root / "mount"
     mount.mkdir()
