@@ -1047,6 +1047,9 @@ ensure compromised identities cannot publish or validate releases:
      and `--plain` against an unreachable local endpoint with test statement stdin,
      confirming passwords, cell payloads, query tokens, and driver internal targets
      are never logged or displayed.
+   The hosted archive smoke captures these checks in the target runtime JSON.
+   It keeps stdout, stderr, history, and the debug log inside the disposable
+   runtime directory. Live database privacy checks are recorded separately.
 9. Publish checksums alongside the artefacts only after every remaining gate
    and the exact publication authorization are recorded.
 10. Only then update any package manifest.

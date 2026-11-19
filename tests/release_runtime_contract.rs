@@ -20,7 +20,16 @@ fn runtime_smoke_script_keeps_the_target_boundary_fail_closed() {
         "IGNATIUS_CONFIG_DIR",
         "IGNATIUS_DATA_DIR",
         "controlled invalid configuration",
+        "malformed configuration doctor refusal",
+        "verify_doctor(json.loads(doctor.stdout), product_version)",
+        "verify_privacy(\"doctor --json\", doctor)",
+        "history_file = data_dir / \"history.jsonl\"",
         "known-good rollback validation",
+        "endpoint.bind((\"127.0.0.1\", 0))",
+        "[\"--plain\", \"connect\", address]",
+        "\"plain loopback refusal and privacy\", result, 4",
+        "input_text=f\"SELECT",
+        "verify_privacy(\"plain loopback refusal\", result, logs, data_dir / \"history.jsonl\")",
         "no database or publication action",
     ] {
         assert!(
@@ -32,6 +41,10 @@ fn runtime_smoke_script_keeps_the_target_boundary_fail_closed() {
     assert!(
         !script.contains("shell=True"),
         "runtime checks must not invoke a shell"
+    );
+    assert!(
+        !script.contains(".listen("),
+        "the owned loopback port must refuse connections"
     );
 }
 
