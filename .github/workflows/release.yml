@@ -211,7 +211,65 @@ jobs:
           toolchain: "1.97.1"
           targets: ${{ matrix.target }}
 
+      # The default Visual Studio toolset can vary across hosted image revisions.
+      - &windows-release-toolchain
+        name: Select the pinned Windows release toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msvc = '14.44.35207'
+          $sdk = '10.0.26100.0'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $instance = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $instance) {
+            throw 'The side-by-side MSVC 14.44 toolset is unavailable on this runner.'
+          }
+
+          $vcvars = Join-Path $instance 'VC\Auxiliary\Build\vcvarsall.bat'
+          $selector = Join-Path $env:RUNNER_TEMP 'ignatius-release-vcvars.cmd'
+          $names = @('VCToolsVersion', 'VCToolsInstallDir', 'VCINSTALLDIR', 'WindowsSdkDir', 'WindowsSDKVersion', 'INCLUDE', 'LIB', 'LIBPATH')
+          $cmd = @('@echo off', "call `"$vcvars`" x64 $sdk -vcvars_ver=$msvc", 'if errorlevel 1 exit /b 1')
+          $cmd += $names | ForEach-Object { "echo $_=%$_%" }
+          $cmd | Set-Content -LiteralPath $selector -Encoding ascii
+          $output = & $env:ComSpec /d /c $selector
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not load MSVC $msvc with Windows SDK $sdk."
+          }
+
+          $settings = @{}
+          foreach ($line in $output) {
+            $name, $value = $line -split '=', 2
+            if ($name -in $names) {
+              $settings[$name] = $value
+            }
+          }
+          foreach ($name in $names) {
+            if (-not $settings[$name]) { throw "MSVC setup did not return $name." }
+          }
+          if ($settings.VCToolsVersion -ne $msvc -or $settings.WindowsSDKVersion.TrimEnd('\') -ne $sdk) {
+            throw 'The effective MSVC or Windows SDK version does not match the release pin.'
+          }
+
+          $tools = Join-Path $settings.VCToolsInstallDir 'bin\Hostx64\x64'
+          $sdkTools = Join-Path $settings.WindowsSdkDir "bin\$sdk\x64"
+          $compiler = Join-Path $tools 'cl.exe'
+          $linker = Join-Path $tools 'link.exe'
+          $librarian = Join-Path $tools 'lib.exe'
+          $runtime = Join-Path $settings.VCToolsInstallDir 'lib\x64\libvcruntime.lib'
+          Write-Host "MSVC $msvc and Windows SDK $sdk"
+          foreach ($inputPath in @($compiler, $linker, $librarian, $runtime)) {
+            $digest = Get-FileHash -LiteralPath $inputPath -Algorithm SHA256 -ErrorAction Stop
+            Write-Host "$([IO.Path]::GetFileName($inputPath)) $($digest.Hash)"
+          }
+
+          $names | ForEach-Object { "$_=$($settings[$_])" } | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          @("CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker", "CC_x86_64_pc_windows_msvc=$compiler", "AR_x86_64_pc_windows_msvc=$librarian") |
+            Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          @($sdkTools, $tools) | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
+
       - name: Cache Rust build inputs
+        # Keep Windows target state independent of older native toolsets.
+        if: runner.os != 'Windows'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build the target binary
@@ -783,7 +841,11 @@ jobs:
           toolchain: "1.97.1"
           targets: ${{ matrix.target }}
 
+      - *windows-release-toolchain
+
       - name: Cache Rust build inputs
+        # Keep Windows target state independent of older native toolsets.
+        if: runner.os != 'Windows'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build a fixed-identity reproducibility candidate

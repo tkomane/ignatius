@@ -16,7 +16,7 @@
   PostgreSQL equality and TLS, bounded snapshots, and display privacy with
   sidecar and subprocess tests (FR-061-01 through FR-061-06, SC-061-01
   through SC-061-04).
-- [ ] T061-07 Integrate documentation, hosted fixtures and acceptance evidence
+- [x] T061-07 Integrate documentation, hosted fixtures and acceptance evidence
   (FR-061-05, FR-061-06, SC-061-02, SC-061-04).
 
 Local evidence on 19 November 2026 from the feature working tree based on
@@ -33,5 +33,7 @@ on separate plain and verify-full TLS endpoints:
 
 The integrated full verifier passed with PostgreSQL 18.7 plain and verify-full
 TLS. The equality and partial-result contract also passed locally against
-PostgreSQL 14.25, 15.20, 16.16 and 17.12. Hosted PostgreSQL and cross-platform
-acceptance evidence are tracked with T061-07.
+PostgreSQL 14.25, 15.20, 16.16 and 17.12.
+[PR 94 CI](https://github.com/tkomane/ignatius/actions/runs/44601644317)
+passed the PostgreSQL 14 and 18 feature contracts and the Linux, macOS and
+Windows verification jobs. The merged source was `33487f0`.
