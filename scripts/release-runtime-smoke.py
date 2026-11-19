@@ -2,9 +2,9 @@
 """Exercise one hosted release archive without connecting to a database.
 
 The script is intentionally provider-neutral and non-publishing.  It verifies
-the bounded candidate bundle, runs identity and configuration checks from the
-extracted target binary, and performs a side-by-side configuration rollback
-rehearsal.  Only sanitised, machine-readable outcomes are retained.
+the bounded candidate bundle, runs identity, diagnostics and loopback refusal
+checks from the extracted binary, and rehearses side-by-side state preservation
+and rollback. Only sanitised, machine-readable outcomes are retained.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -22,6 +23,12 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+
+PASSWORD_MARKER = "ignatius-fixture-only-credential-marker"
+CELL_MARKER = "ignatius_fixture_only_cell_marker"
+QUERY_MARKER = "ignatius_fixture_only_query_marker"
+PRIVATE_MARKERS = (PASSWORD_MARKER, CELL_MARKER, QUERY_MARKER, "tokio_postgres")
 
 
 def parse_args() -> argparse.Namespace:
@@ -146,13 +153,20 @@ def extract_archive(archive: Path, expected_binary: str, destination: Path) -> P
     return output
 
 
-def run(binary: Path, args: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    binary: Path,
+    args: list[str],
+    env: dict[str, str],
+    cwd: Path,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(binary), *args],
         cwd=cwd,
         env=env,
         capture_output=True,
-        text=True,
+        input=input_text,
+        encoding="utf-8",
         timeout=30,
         check=False,
     )
@@ -187,6 +201,59 @@ def expect_exit(checks: list[dict[str, Any]], name: str, result: subprocess.Comp
         fail(f"{name} returned {result.returncode}, expected {expected}")
 
 
+def verify_doctor(report: Any, version: str) -> None:
+    if not isinstance(report, dict) or report.get("version") != version:
+        fail("doctor --json did not identify the expected product version")
+    entries = report.get("checks")
+    summary = report.get("summary")
+    status_counts = {"OK": 0, "WARN": 0, "FAIL": 0, "SKIPPED": 0}
+    if not isinstance(entries, list) or not entries:
+        fail("doctor --json did not report any checks")
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+            fail("doctor --json returned an invalid check")
+        status = entry.get("status")
+        if not isinstance(status, str) or status not in status_counts:
+            fail("doctor --json returned an invalid check status")
+        status_counts[status] += 1
+    if status_counts["FAIL"] or summary != {status.lower(): count for status, count in status_counts.items()}:
+        fail("doctor --json reported failed checks or an inconsistent summary")
+
+
+def verify_privacy(
+    name: str, result: subprocess.CompletedProcess[str], *files: Path
+) -> None:
+    markers = tuple(marker.encode("utf-8") for marker in PRIVATE_MARKERS)
+    streams = [result.stdout.encode("utf-8"), result.stderr.encode("utf-8")]
+    for path in files:
+        ordinary_file(path, "isolated runtime state")
+        streams.append(path.read_bytes())
+    if any(marker in stream for stream in streams for marker in markers):
+        fail(f"{name} disclosed a synthetic sentinel or an internal driver target")
+
+
+def probe_plain_refusal(
+    checks: list[dict[str, Any]], binary: Path, env: dict[str, str], root: Path, data_dir: Path
+) -> None:
+    # A bound socket without a listener keeps the port task-owned and closed.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as endpoint:
+        endpoint.bind(("127.0.0.1", 0))
+        port = endpoint.getsockname()[1]
+        address = f"postgres://rehearsal@127.0.0.1:{port}/rehearsal?sslmode=disable&connect_timeout=2"
+        result = run(
+            binary,
+            ["--plain", "connect", address],
+            dict(env, IGNATIUS_LOG="debug"),
+            root,
+            input_text=f"SELECT '{CELL_MARKER}' WHERE '{QUERY_MARKER}' = '1';\n",
+        )
+    expect_exit(checks, "plain loopback refusal and privacy", result, 4)
+    if result.stdout:
+        fail("plain loopback refusal produced data output")
+    logs = data_dir / "logs" / "ignatius.log"
+    verify_privacy("plain loopback refusal", result, logs, data_dir / "history.jsonl")
+
+
 def main() -> int:
     options = parse_args()
     bundle = options.bundle.resolve()
@@ -203,28 +270,43 @@ def main() -> int:
         shutil.copy2(candidate_binary, known_good)
         config_dir = root / "config"
         data_dir = root / "data"
-        env = os.environ.copy()
+        env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PG")}
         env.update(
             {
                 "IGNATIUS_CONFIG_DIR": str(config_dir),
                 "IGNATIUS_DATA_DIR": str(data_dir),
                 "IGNATIUS_LOG": "off",
+                "PGPASSWORD": PASSWORD_MARKER,
+                "PGPASSFILE": str(root / "absent-passfile"),
             }
         )
 
         version = run(candidate_binary, ["version", "--verbose"], env, root)
         expect_ok(checks, "version --verbose", version)
-        version_text = version.stdout
+        version_lines = version.stdout.splitlines()
+        product_version = record.get("product_version")
+        if not isinstance(product_version, str) or not version_lines or not version_lines[0].endswith(f" {product_version}"):
+            fail("version --verbose did not report the expected product version")
+        identity = {}
+        for line in version_lines[1:]:
+            label, separator, value = line.partition(":")
+            if separator:
+                identity[label.strip()] = value.strip()
         for label, expected in (
-            ("product version", record.get("product_version")),
             ("source revision", record.get("source_revision")),
             ("build identity", record.get("build_identity")),
             ("target", options.target),
         ):
-            if not isinstance(expected, str) or expected not in version_text:
+            if not isinstance(expected, str):
+                fail(f"candidate record did not specify {label}")
+            expected_label = f"{expected} (clean)" if label == "source revision" else expected
+            if identity.get(label) != expected_label:
                 fail(f"version --verbose did not report the expected {label}")
 
-        expect_ok(checks, "doctor --json", run(candidate_binary, ["doctor", "--json"], env, root))
+        doctor = run(candidate_binary, ["doctor", "--json"], env, root)
+        expect_ok(checks, "doctor --json", doctor)
+        verify_doctor(json.loads(doctor.stdout), product_version)
+        verify_privacy("doctor --json", doctor)
         expect_ok(checks, "config paths", run(candidate_binary, ["config", "paths"], env, root))
         expect_ok(checks, "config init", run(candidate_binary, ["config", "init"], env, root))
         expect_ok(checks, "config validate", run(candidate_binary, ["config", "validate"], env, root))
@@ -239,7 +321,22 @@ def main() -> int:
         query_dir.mkdir(parents=True, exist_ok=True)
         (query_dir / "rehearsal.txt").write_text("retained runtime rehearsal\n", encoding="utf-8")
         data_dir.mkdir(parents=True, exist_ok=True)
-        (data_dir / "rehearsal.txt").write_text("retained runtime rehearsal\n", encoding="utf-8")
+        history_file = data_dir / "history.jsonl"
+        history = json.dumps(
+            {
+                "at": "2026-11-19T00:00:00+00:00",
+                "target": "rehearsal@127.0.0.1:5432/rehearsal",
+                "database": "rehearsal",
+                "environment": "development",
+                "sql": "SELECT 42",
+                "outcome": "succeeded",
+                "elapsed_ms": 1,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        history_file.write_bytes(history)
+        if os.name != "nt":
+            history_file.chmod(0o600)
         before = tree_digest(config_dir), tree_digest(data_dir)
         expect_ok(checks, "side-by-side candidate validation", run(candidate_binary, ["config", "validate"], env, root))
         if (tree_digest(config_dir), tree_digest(data_dir)) != before:
@@ -248,18 +345,27 @@ def main() -> int:
         # Keep the backup outside the state tree so the preservation digest
         # describes only user-owned configuration and data.
         backup = root / "config.toml.known-good"
-        shutil.copy2(config_dir / "config.toml", backup)
-        (config_dir / "config.toml").write_text("schema_version = 999\n", encoding="utf-8")
+        config_file = config_dir / "config.toml"
+        shutil.copy2(config_file, backup)
+        config_file.write_text("schema_version = [\n", encoding="utf-8")
+        malformed_doctor = run(candidate_binary, ["doctor"], env, root)
+        expect_exit(checks, "malformed configuration doctor refusal", malformed_doctor, 3)
+        verify_privacy("malformed configuration doctor refusal", malformed_doctor)
+        config_file.write_text("schema_version = 999\n", encoding="utf-8")
         expect_exit(
             checks,
             "controlled invalid configuration",
             run(candidate_binary, ["config", "validate"], env, root),
             3,
         )
-        shutil.copy2(backup, config_dir / "config.toml")
+        shutil.copy2(backup, config_file)
         expect_ok(checks, "known-good rollback validation", run(known_good, ["config", "validate"], env, root))
         if (tree_digest(config_dir), tree_digest(data_dir)) != before:
             fail("rollback changed retained configuration or data")
+
+        probe_plain_refusal(checks, candidate_binary, env, root, data_dir)
+        if history_file.read_bytes() != history:
+            fail("plain loopback refusal changed retained history")
 
     result = {
         "schema_version": 1,

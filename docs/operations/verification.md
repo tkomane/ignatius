@@ -24,6 +24,18 @@ Windows repeat comparison failed. The two Windows Server 2025 images were
 Windows SDK `10.0.26100.0`. Their `cl.exe`, `link.exe` and `lib.exe` hashes
 differed. The aggregate was retained and the candidate record remains blocked.
 
+[Corrected rehearsal 44627234677](https://github.com/tkomane/ignatius/actions/runs/44627234677)
+built clean source `d4642d0` as `ci/44627234677-1` and passed all 15 jobs.
+The archive jobs reproduced their inventories and the aggregate verified all
+three after transport. All 27 archive runtime checks passed. An independent
+readback checked the exact 12-file scope and the three CycloneDX 1.5 schemas,
+along with each archive digest and its extracted executable digest.
+The [byte comparison](https://github.com/tkomane/ignatius/actions/runs/44627234677/job/135935628394)
+passed for all three targets. Linux and macOS used separate runner jobs for
+each repeat. Windows used the same runner and build paths, with clean build
+outputs and seven native tool and library hashes checked before and after each
+build. A repeat across different Windows images remains unverified.
+
 ## Exact archive runtime checks - 19 November 2026
 
 [Rehearsal 44605153852](https://github.com/tkomane/ignatius/actions/runs/44605153852)
@@ -85,6 +97,14 @@ Desktop on Apple silicon. The synthetic PostgreSQL 18.7 fixture used
 
 This evidence covers automated xterm rendering and restoration. Human desktop
 use and the remaining terminal and accessibility journeys are open under W08.
+
+On 20 November, the Linux archive from rehearsal `44627234677` also passed
+the full-screen Unix-socket journey in xterm 390 on Ubuntu 24.04.5 x86-64.
+The PostgreSQL 18.7 fixture had no TCP listeners. The actual grid showed
+three rows, `inet_client_addr() IS NULL` and read-only mode. Cell Detail
+opened the JSONB tree, and a shrink to 30x6 and back recovered all three
+rows. Ctrl+Q restored the POSIX modes, all seven queried xterm modes and
+the visible main-screen pixels under NorthWest resize gravity.
 
 ## Wave 35 (043-session-state-and-crash-recovery) Delivery - 12 November 2026
 

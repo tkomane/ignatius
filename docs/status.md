@@ -17,6 +17,18 @@ before trusting anything else.
   Windows repeats now share a disposable VM with clean build outputs and
   checked native inputs. Reproducibility across separate Windows images
   remains open.
+- [Rehearsal 44627234677](https://github.com/tkomane/ignatius/actions/runs/44627234677)
+  at `d4642d0` passed all 15 jobs. The two clean Windows builds on the same VM
+  produced identical ZIPs. The independent macOS and Linux repeat builds
+  matched byte for byte on each target. A separate download reverified all
+  three inventories and their exact archive and executable checksums.
+- A local run of the weekly PostgreSQL fixture comparison found that the
+  public Alpine tags for all five supported majors still match the reviewed
+  digests on 20 November 2026.
+- The exact Linux archive from `44627234677` opened PostgreSQL 18.7 over a
+  Unix socket in isolated xterm, executed a read-only JSONB query and
+  restored the main-screen pixels and terminal modes after resizing and
+  quitting. [Linux renderer evidence](operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026)
 
 ## Wave 47: Windows live archive verification - 19 November 2026
 
