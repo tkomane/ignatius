@@ -12,8 +12,8 @@ on:
     branches: [codex/macos-desktop-preflight]
 
 permissions:
-  contents: read
   actions: read
+  contents: read
 
 jobs:
   desktop-preflight:
