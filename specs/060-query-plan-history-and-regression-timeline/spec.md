@@ -30,11 +30,13 @@
 - FR-6003. Keep at most 32 named local series and 64 observations per series
   under the resolved Ignatius data directory. Show the count of evicted
   observations. Bind each series to the configured route, connected role,
-  search path, schema scope and exact parsed statement using a digest. A
+  search path, observed TLS posture, schema scope and exact parsed statement
+  using a digest. A
   mismatch asks for another name. Keep schema, plan and settings digests and
   numeric measurements. Store no SQL text, connection string, result rows,
   plan literals, object names or setting values.
-- FR-6004. `plan-history show` and `forget` run offline. Reports offer plain
+- FR-6004. `plan-history show` and `forget` run offline. Order observations
+  by the recorded UTC capture time. Reports offer plain
   ASCII and JSON. Each consecutive pair shows schema, plan and settings
   changes. Compare costs and p95 only across the same PostgreSQL version
   and capture mode. The first observation and undefined deltas are explicit.

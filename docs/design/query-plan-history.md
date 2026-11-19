@@ -26,7 +26,8 @@ deadline after connecting. Incomplete catalog captures are refused.
 
 History is explicit and local. It keeps 32 series of up to 64 observations
 each under the Ignatius data directory. Only labels, numeric telemetry and
-digests are retained. The schema fingerprint covers the objects supported by
+digests are retained. The timeline orders captures by observed UTC time.
+The schema fingerprint covers the objects supported by
 [schema snapshots](../../specs/057-schema-snapshots-and-drift-guard/spec.md).
 The first observation and capture-mode or version changes have unavailable
 numeric deltas. Reads and deletion work offline.

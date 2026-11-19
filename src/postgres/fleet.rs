@@ -129,7 +129,7 @@ async fn capture_schema(client: &Client, schema: Option<&str>) -> Result<SchemaS
             return Err(Issue::SchemaMissing);
         }
     }
-    crate::postgres::snapshot::capture_fleet_schema_snapshot(client, schema)
+    crate::postgres::snapshot::capture_bounded_schema_snapshot(client, schema)
         .await
         .map_err(|error| Issue::from_diagnostic(&error))
 }

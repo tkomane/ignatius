@@ -11,13 +11,16 @@ before connecting. The per-series binding is checked before instrumentation
 and checked again when saving to reject changes made by a concurrent process.
 The adapter consumes a dedicated session, so the transaction has one owner.
 
-`src/postgres/plan_history.rs` opens a repeatable-read, read-only transaction
-and uses the extended protocol to validate a single statement on the server.
-It calls the existing schema extraction, EXPLAIN helpers and benchmark
-collector inside the transaction. Any error unwinds through ROLLBACK, with
-the connection dropped on deadline. Benchmarks use no inner transaction
-because the outer transaction owns isolation. The catalog read precedes
-measurement. The store sees only a digest-bound observation.
+`src/postgres/plan_history.rs` opens a repeatable-read, read-only transaction.
+It validates one read with extended Parse and streams every warmup and sample
+through that prepared statement. The exact EXPLAIN wrapper uses its own
+single-statement extended request and accepts one bounded JSON row. Plan
+history reuses the schema extractor, EXPLAIN parser and benchmark sample
+collector, with a client deadline for each user SQL operation. Errors unwind
+through ROLLBACK. On cancellation or deadline the owning connection closes.
+Benchmarks use no inner transaction because the outer transaction owns
+isolation. The catalog read precedes measurement. The store sees only a
+digest-bound observation.
 
 ## Model and persistence
 

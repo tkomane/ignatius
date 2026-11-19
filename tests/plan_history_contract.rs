@@ -190,3 +190,45 @@ fn captures_index_revision_and_read_only_measurement_then_forgets_offline() {
     );
     run_setup(&format!("DROP SCHEMA {schema} CASCADE"));
 }
+
+#[test]
+fn measures_prepared_read_over_verified_tls() {
+    let Ok(uri) = std::env::var("IGNATIUS_TEST_PG_TLS_URI") else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_TLS_URI is not set");
+        return;
+    };
+    let root = tempfile::tempdir().expect("temp root");
+    let output = binary(root.path())
+        .env(
+            "PGSSLROOTCERT",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("docker/tls/generated/ca.crt"),
+        )
+        .args([
+            "plan-history",
+            "capture",
+            &uri,
+            "--sslmode",
+            "verify-full",
+            "--series",
+            "verified",
+            "--schema",
+            "public",
+            "-c",
+            "SELECT 'synthetic ; marker', \
+             1 / pg_catalog.current_setting('transaction_read_only')::bool::int \
+             FROM pg_catalog.generate_series(1, 3)",
+            "--measure",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("TLS capture");
+    let report = json(&output);
+    let observations = report["observations"].as_array().expect("observations");
+    assert_eq!(observations.len(), 1);
+    assert!(observations[0]["measurement"]["p95_ms"].is_number());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic ; marker"));
+    let catalog = std::fs::read_to_string(root.path().join("data/plan-history/timeline.json"))
+        .expect("stored catalog");
+    assert!(!catalog.contains("synthetic ; marker"));
+}

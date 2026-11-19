@@ -716,6 +716,23 @@ read/write safety contract:
   refusal or `@expect-rows` mismatch) return exit code `1` (`ExitCode::Findings`)
   alongside structured `table`, `plain`, `json`, or `markdown` output.
 
+## Structured values, plan history and fleet health
+
+- [Structured Cell Detail](../design/structured-type-inspector.md) reads
+  retained PostgreSQL text with described type metadata. JSONB, ARRAY and
+  RANGE are built-in types. Spatial and vector support uses types owned by
+  the installed PostGIS and pgvector extensions. The raw view remains available
+  when a structured preview or edit is unavailable. Edits require a current
+  direct result, a usable primary key and a writable non-production session.
+- [Query plan history](../design/query-plan-history.md) captures planner
+  estimates and optional read-only benchmark and EXPLAIN metrics. The local
+  catalog retains 32 series of 64 observations. Machine-readable JSON and
+  offline inspect and forget operations use the same catalog.
+- `ignatius fleet` compares one baseline profile and up to three candidate
+  profiles. PostgreSQL catalog snapshots, extension versions and a fixed
+  settings allowlist use read-only sessions. A partial or unavailable target
+  stays visible in the report. Drift and incomplete evidence return exit 1.
+
 ## Platforms
 
 | Platform | Status |

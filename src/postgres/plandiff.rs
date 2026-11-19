@@ -9,6 +9,7 @@
 //! targets never persist mutations.
 
 use futures_util::StreamExt;
+use tokio_postgres::types::{FromSql, Type};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
@@ -63,14 +64,77 @@ pub(super) async fn explain_in_transaction(
     analyze: bool,
     label: &str,
 ) -> Result<PlanSnapshot, Diagnostic> {
+    let explain_sql = explain_sql(stmt_text, analyze);
+    let json_text = run_explain_raw(client, &explain_sql).await?;
+    parse_extended_explain_json(label, &json_text)
+}
+
+/// Plan one extended-protocol statement and require one JSON column in one row.
+pub(super) async fn explain_single(
+    client: &Client,
+    stmt_text: &str,
+    analyze: bool,
+    label: &str,
+) -> Result<PlanSnapshot, Diagnostic> {
+    let row = client
+        .query_one(&explain_sql(stmt_text, analyze), &[])
+        .await
+        .map_err(|error| from_query_error(&error, 1))?;
+    if row.len() != 1 {
+        return Err(invalid_plan_response());
+    }
+    let JsonPlan(bytes) = row.try_get(0).map_err(|_| invalid_plan_response())?;
+    if bytes.len() > MAX_PLAN_JSON_BYTES {
+        return Err(plan_too_large());
+    }
+    let json = std::str::from_utf8(bytes).map_err(|_| invalid_plan_response())?;
+    parse_extended_explain_json(label, json)
+}
+
+/// PostgreSQL's binary JSON format is UTF-8 text. Borrow it until size admission.
+struct JsonPlan<'a>(&'a [u8]);
+
+impl<'a> FromSql<'a> for JsonPlan<'a> {
+    fn from_sql(
+        _: &Type,
+        bytes: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Self(bytes))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        *ty == Type::JSON
+    }
+}
+
+fn explain_sql(statement: &str, analyze: bool) -> String {
     let options = if analyze {
         ANALYZE_OPTIONS
     } else {
         ESTIMATE_OPTIONS
     };
-    let explain_sql = format!("EXPLAIN ({options}) {stmt_text}");
-    let json_text = run_explain_raw(client, &explain_sql).await?;
-    parse_extended_explain_json(label, &json_text)
+    format!("EXPLAIN ({options}) {statement}")
+}
+
+fn invalid_plan_response() -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        "PostgreSQL returned an invalid JSON plan row",
+        "reading an extended structured query plan",
+    )
+}
+
+fn plan_too_large() -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        "the query plan exceeded the client display bound",
+        "reading an extended structured query plan",
+    )
+    .likely_cause(format!(
+        "the JSON response is larger than {MAX_PLAN_JSON_BYTES} bytes"
+    ))
+    .next_action("simplify the statement or inspect its plan with PostgreSQL tools")
+    .technical("PlanParseError", "ResponseTooLarge")
 }
 
 fn validate_single_statement(sql: &str) -> Result<String, Diagnostic> {
@@ -126,16 +190,7 @@ async fn run_explain_raw(client: &Client, explain_sql: &str) -> Result<String, D
                 .next_action("check the PostgreSQL version and EXPLAIN permissions"));
             };
             if value.len() > MAX_PLAN_JSON_BYTES {
-                return Err(Diagnostic::new(
-                    DiagnosticKind::Query,
-                    "the query plan exceeded the client display bound",
-                    "reading an extended structured query plan",
-                )
-                .likely_cause(format!(
-                    "the JSON response is larger than {MAX_PLAN_JSON_BYTES} bytes"
-                ))
-                .next_action("simplify the statement or inspect its plan with PostgreSQL tools")
-                .technical("PlanParseError", "ResponseTooLarge"));
+                return Err(plan_too_large());
             }
             payload = Some(value.to_owned());
         }

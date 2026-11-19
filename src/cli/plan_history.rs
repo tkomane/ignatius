@@ -143,6 +143,7 @@ fn capture(args: &CaptureArgs, paths: &Paths, store: &Store) -> Result<Catalog, 
                 &info.database,
                 &info.user,
                 &info.search_path,
+                info.tls.label(),
                 schema,
                 &sql,
             ))?;

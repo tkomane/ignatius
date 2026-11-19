@@ -113,11 +113,14 @@ impl Store {
                 forgotten_observations: 0,
                 observations: Vec::new(),
             });
-        if series.observations.len() == MAX_OBSERVATIONS {
+        let position = series
+            .observations
+            .partition_point(|entry| entry.unix_millis <= observation.unix_millis);
+        series.observations.insert(position, observation);
+        if series.observations.len() > MAX_OBSERVATIONS {
             series.observations.remove(0);
             series.forgotten_observations = series.forgotten_observations.saturating_add(1);
         }
-        series.observations.push(observation);
         self.write(&catalog)?;
         Ok(catalog)
     }

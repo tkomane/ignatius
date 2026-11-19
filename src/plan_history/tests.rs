@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 
 fn measured(p95_ms: f64) -> Observation {
     Observation {
-        unix_seconds: 1_800_000_000,
+        unix_millis: 1_800_000_000_000,
         server_version_num: 180007,
         schema_sha256: "a".repeat(64),
         plan_sha256: "b".repeat(64),
@@ -52,7 +52,7 @@ fn store_bounds_observations_and_clears_only_the_named_series() {
     let binding = "f".repeat(64);
     for entry in 0..=MAX_OBSERVATIONS {
         let mut observation = measured(4.0);
-        observation.unix_seconds += i64::try_from(entry).expect("bounded offset");
+        observation.unix_millis += i64::try_from(entry).expect("bounded offset");
         store
             .append("read", binding.clone(), observation)
             .expect("append");
@@ -64,8 +64,8 @@ fn store_bounds_observations_and_clears_only_the_named_series() {
     let series = catalog.get("read").expect("series");
     assert_eq!(series.observations.len(), MAX_OBSERVATIONS);
     assert_eq!(
-        series.observations[0].unix_seconds,
-        measured(4.0).unix_seconds + 1
+        series.observations[0].unix_millis,
+        measured(4.0).unix_millis + 1
     );
     assert_eq!(series.forgotten_observations, 1);
     assert!(store.forget("read").expect("forget"));
@@ -109,4 +109,22 @@ fn store_refuses_corruption_binding_change_and_a_concurrent_writer() {
         );
         assert_eq!(fs::read(&data).expect("unchanged"), bytes);
     }
+}
+
+#[test]
+fn store_keeps_capture_order_when_a_later_observation_saves_first() {
+    let root = tempfile::tempdir().expect("temporary data directory");
+    let store = Store::new(root.path());
+    let binding = "f".repeat(64);
+    let mut later = measured(13.0);
+    later.unix_millis += 5;
+    store
+        .append("read", binding.clone(), later)
+        .expect("save later capture");
+    let catalog = store
+        .append("read", binding, measured(10.0))
+        .expect("save earlier capture");
+    let timeline = Timeline::new("read", catalog.get("read"));
+    assert_eq!(timeline.observations[0].changes.p95_regression, None);
+    assert_eq!(timeline.observations[1].changes.p95_regression, Some(true));
 }

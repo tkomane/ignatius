@@ -29,7 +29,7 @@ pub(crate) struct Measurement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Observation {
-    pub unix_seconds: i64,
+    pub unix_millis: i64,
     pub server_version_num: i32,
     pub schema_sha256: String,
     pub plan_sha256: String,
@@ -44,7 +44,7 @@ impl Observation {
         schema_sha256: String,
         plan: &PlanSnapshot,
         bench: Option<&BenchStats>,
-        unix_seconds: i64,
+        unix_millis: i64,
     ) -> Result<Self, Diagnostic> {
         let shape: Vec<_> = plan
             .nodes
@@ -78,7 +78,7 @@ impl Observation {
             None
         };
         Ok(Self {
-            unix_seconds,
+            unix_millis,
             server_version_num,
             schema_sha256,
             plan_sha256: digest(&shape)?,
@@ -90,7 +90,7 @@ impl Observation {
 
     fn valid(&self) -> bool {
         self.server_version_num > 0
-            && DateTime::<Utc>::from_timestamp(self.unix_seconds, 0).is_some()
+            && DateTime::<Utc>::from_timestamp_millis(self.unix_millis).is_some()
             && [
                 &self.schema_sha256,
                 &self.plan_sha256,
@@ -121,6 +121,10 @@ impl Series {
         valid_digest(&self.binding)
             && (1..=MAX_OBSERVATIONS).contains(&self.observations.len())
             && self.observations.iter().all(Observation::valid)
+            && self
+                .observations
+                .windows(2)
+                .all(|pair| pair[0].unix_millis <= pair[1].unix_millis)
     }
 }
 
@@ -206,7 +210,7 @@ impl<'a> Timeline<'a> {
         for row in &self.observations {
             let entry = row.observation;
             let change = &row.changes;
-            let time = DateTime::<Utc>::from_timestamp(entry.unix_seconds, 0)
+            let time = DateTime::<Utc>::from_timestamp_millis(entry.unix_millis)
                 .map_or_else(|| "unknown time".to_owned(), |date| date.to_rfc3339());
             let _ = writeln!(
                 output,

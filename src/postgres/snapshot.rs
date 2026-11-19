@@ -284,8 +284,8 @@ pub async fn capture_schema_snapshot(
     capture(client, schema, i32::MAX, i64::MAX - 1).await
 }
 
-/// Adds wire bounds for raw definitions and nested arrays before fleet comparison.
-pub(super) async fn capture_fleet_schema_snapshot(
+/// Adds wire bounds for definitions and nested arrays before comparison.
+pub(super) async fn capture_bounded_schema_snapshot(
     client: &Client,
     schema: Option<&str>,
 ) -> Result<SchemaSnapshot, Diagnostic> {
