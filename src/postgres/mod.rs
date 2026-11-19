@@ -13,6 +13,7 @@ pub mod growth;
 pub mod metadata;
 mod notices;
 pub mod partition;
+pub(crate) mod plan_history;
 pub mod plandiff;
 pub mod replication;
 pub mod session;

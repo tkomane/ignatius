@@ -33,42 +33,43 @@ pub async fn explain_extended(
     label: &str,
 ) -> Result<PlanSnapshot, Diagnostic> {
     let stmt_text = validate_single_statement(sql)?;
+    if analyze {
+        client
+            .simple_query("BEGIN")
+            .await
+            .map_err(|err| from_query_error(&err, 1))?;
+
+        let explain_res = explain_in_transaction(client, &stmt_text, analyze, label).await;
+        let rollback_res = client.simple_query("ROLLBACK").await;
+
+        match (explain_res, rollback_res) {
+            (Ok(plan), Ok(_)) => Ok(plan),
+            (Ok(_), Err(error)) => Err(from_query_error(&error, 1)
+                .likely_cause("EXPLAIN ANALYZE finished, but the cleanup ROLLBACK failed")),
+            (Err(error), Ok(_)) => Err(error),
+            (Err(error), Err(rollback)) => {
+                Err(error.technical("RollbackError", rollback.to_string()))
+            }
+        }
+    } else {
+        explain_in_transaction(client, &stmt_text, analyze, label).await
+    }
+}
+
+/// Explain a validated statement. The caller owns any surrounding transaction.
+pub(super) async fn explain_in_transaction(
+    client: &Client,
+    stmt_text: &str,
+    analyze: bool,
+    label: &str,
+) -> Result<PlanSnapshot, Diagnostic> {
     let options = if analyze {
         ANALYZE_OPTIONS
     } else {
         ESTIMATE_OPTIONS
     };
     let explain_sql = format!("EXPLAIN ({options}) {stmt_text}");
-
-    let json_text = if analyze {
-        client
-            .simple_query("BEGIN")
-            .await
-            .map_err(|err| from_query_error(&err, 1))?;
-
-        let explain_res = run_explain_raw(client, &explain_sql).await;
-        let rollback_res = client.simple_query("ROLLBACK").await;
-
-        match explain_res {
-            Ok(payload) => {
-                if let Err(rb_err) = rollback_res {
-                    return Err(from_query_error(&rb_err, 1).likely_cause(
-                        "EXPLAIN ANALYZE finished, but the cleanup ROLLBACK failed",
-                    ));
-                }
-                payload
-            }
-            Err(mut diag) => {
-                if let Err(rb_err) = rollback_res {
-                    diag = diag.technical("RollbackError", rb_err.to_string());
-                }
-                return Err(diag);
-            }
-        }
-    } else {
-        run_explain_raw(client, &explain_sql).await?
-    };
-
+    let json_text = run_explain_raw(client, &explain_sql).await?;
     parse_extended_explain_json(label, &json_text)
 }
 

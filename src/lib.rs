@@ -49,6 +49,7 @@ pub mod migration;
 pub mod ops;
 pub mod partition;
 pub mod perf;
+mod plan_history;
 pub mod plandiff;
 pub mod platform;
 pub mod pool;

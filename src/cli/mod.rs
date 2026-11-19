@@ -7,6 +7,7 @@
 pub mod interactive;
 pub mod output;
 pub mod plain;
+pub mod plan_history;
 pub mod prompt;
 
 use crate::ExitCode;
@@ -359,6 +360,9 @@ pub enum Command {
     /// Capture extended EXPLAIN (BUFFERS, WAL, SETTINGS) telemetry or diff two query plans.
     #[command(name = "plan-diff")]
     PlanDiff(PlanDiffArgs),
+
+    /// Capture or inspect a local query plan and latency timeline.
+    PlanHistory(plan_history::PlanHistoryArgs),
 
     /// Profile a query result set or export it to HTML or Apache Parquet.
     #[command(name = "analytics")]
@@ -986,6 +990,9 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Cluster(args)) => run_cluster(args, &paths, out, err),
         Some(Command::Browse(args)) => run_browse(args, &paths, out, err),
         Some(Command::PlanDiff(args)) => run_plan_diff(args, &paths, out, err),
+        Some(Command::PlanHistory(args)) => {
+            plan_history::run(args, &paths, cli.global.no_history, out)
+        }
         Some(Command::Analytics(args)) => run_analytics(args, &paths, out, err),
         Some(Command::Bench(args)) => run_bench(args, &paths, out, err),
         Some(Command::Snapshot(args)) => run_snapshot(args, &paths, out, err),
