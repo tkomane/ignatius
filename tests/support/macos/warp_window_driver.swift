@@ -272,7 +272,7 @@ private struct OwnedWarp {
         }
     }
 
-    func regularWindow(title: String, expectedID: CGWindowID? = nil, uniqueOnly: Bool = false) async throws -> (SCWindow, String)? {
+    func regularWindow(title: String, expectedID: CGWindowID? = nil, startupDiagnostic: Bool = false) async throws -> (SCWindow, String)? {
         try verify()
         let listing = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         try verify()
@@ -285,11 +285,25 @@ private struct OwnedWarp {
         let matching = candidates.filter { $0.title == title }
         let selected: SCWindow
         let method: String
-        if candidates.count == 1, let single = candidates.first {
+        if startupDiagnostic {
+            try verify(requireForeground: true)
+            let ordered = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                     kCGNullWindowID) as? [[String: Any]] ?? []
+            let front = ordered.first { window in
+                (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == inputs.pid
+                    && (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
+            }
+            guard let id = (front?[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let focused = candidates.first(where: { $0.windowID == id }) else {
+                throw DriverFailure("startup_frontmost_warp_window_unavailable")
+            }
+            selected = focused
+            method = "frontmost_owned_regular_window"
+        } else if candidates.count == 1, let single = candidates.first {
             selected = single
             method = single.title == title ? "exact_fixture_title" : "one_owned_regular_window"
         } else {
-            guard !uniqueOnly, matching.count == 1, let exact = matching.first else {
+            guard matching.count == 1, let exact = matching.first else {
                 throw DriverFailure("ambiguous_owned_warp_window")
             }
             try focusedWindowMatches(title)
@@ -321,7 +335,7 @@ private struct OwnedWarp {
         config.capturesAudio = false
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         if let startupTitle {
-            guard try await regularWindow(title: startupTitle, expectedID: window.windowID, uniqueOnly: true) != nil else {
+            guard try await regularWindow(title: startupTitle, expectedID: window.windowID, startupDiagnostic: true) != nil else {
                 throw DriverFailure("startup_warp_window_disappeared")
             }
             try requireStartupReceiptsAbsent(in: inputs.readiness)
@@ -448,7 +462,7 @@ private struct WarpDriver {
         do {
             try app.verify(requireForeground: true)
             let title = "W07Warp-" + inputs.nonce
-            guard let (window, _) = try await app.regularWindow(title: title, uniqueOnly: true) else {
+            guard let (window, _) = try await app.regularWindow(title: title, startupDiagnostic: true) else {
                 throw DriverFailure("startup_warp_window_missing")
             }
             try requireStartupReceiptsAbsent(in: inputs.readiness)

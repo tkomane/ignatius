@@ -64,7 +64,7 @@ enum OwnedWarp {
             exit(4)
         }
         guard mode == "launch", live.isEmpty, let uri = URL(string: args[4]),
-              uri.scheme == "warp", uri.host == "launch" else { exit(3) }
+              uri.scheme == "warp", uri.host == "tab_config" else { exit(3) }
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
         config.allowsRunningApplicationSubstitution = false
@@ -91,19 +91,14 @@ enum OwnedWarp {
             guard windowReady else { exit(6) }
 
             config.createsNewApplicationInstance = false
-            var deliveries = 0
-            for _ in 0..<2 {
-                let accepted = try await NSWorkspace.shared.open([uri], withApplicationAt: target, configuration: config)
-                guard matches(accepted), accepted.processIdentifier == app.processIdentifier,
-                      accepted.launchDate == birth else { exit(3) }
-                deliveries += 1
-                for _ in 0..<35 {
-                    if FileManager.default.fileExists(atPath: claim.path) { break }
-                    try? await Task.sleep(for: .milliseconds(100))
-                }
+            let accepted = try await NSWorkspace.shared.open([uri], withApplicationAt: target, configuration: config)
+            guard matches(accepted), accepted.processIdentifier == app.processIdentifier,
+                  accepted.launchDate == birth else { exit(3) }
+            for _ in 0..<35 {
                 if FileManager.default.fileExists(atPath: claim.path) { break }
+                try? await Task.sleep(for: .milliseconds(100))
             }
-            print("\(app.processIdentifier) \(deliveries)")
+            print("\(app.processIdentifier) 1")
         } catch {
             exit(5)
         }
@@ -226,7 +221,7 @@ def make_config(root, state, actor, binary, nonce):
     settings = Path.home() / ".warp"
     require(not settings.exists() and not settings.is_symlink(), "Warp settings root is not fresh")
     settings.mkdir(mode=0o700)
-    configs = settings / "launch_configurations"
+    configs = settings / "tab_configs"
     configs.mkdir(mode=0o700)
     wrapper = root / "fixture.sh"
     command = shlex.join([sys.executable, str(actor), str(state), str(binary), nonce])
@@ -237,14 +232,13 @@ def make_config(root, state, actor, binary, nonce):
     wrapper.chmod(0o700)
     title = f"W07Warp-{nonce}"
     configuration = (
-        f"name: {title}\nwindows:\n  - tabs:\n      - title: {title}\n"
-        f"        layout:\n          cwd: {json.dumps(str(root))}\n"
-        f"          commands:\n            - exec: {json.dumps(shlex.join(['/bin/bash', str(wrapper)]))}\n"
+        f'name = "{title}"\ntitle = "{title}"\n\n[[panes]]\n'
+        'id = "main"\ntype = "terminal"\nshell = "bash"\nis_focused = true\n'
+        f'directory = {json.dumps(str(root))}\n'
+        f'commands = [{json.dumps(shlex.join(["/bin/bash", str(wrapper)]))}]\n'
     )
-    (configs / f"{title}.yaml").write_text(configuration, encoding="utf-8")
-    # The legacy route matches the YAML name. Using the same file stem also
-    # works when the loader supports matching the stem.
-    return f"warp://launch/{title}"
+    (configs / f"{title}.toml").write_text(configuration, encoding="utf-8")
+    return f"warp://tab_config/{title}"
 
 
 def launch(temp, root, binary):
