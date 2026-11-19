@@ -2,16 +2,23 @@ name: Native macOS desktop preflight
 
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        description: Select desktop prerequisites or the pinned Warp fixture
+        type: choice
+        default: desktop-preflight
+        options: [desktop-preflight, warp-renderer]
   push:
     branches: [codex/macos-desktop-preflight]
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   desktop-preflight:
     runs-on: macos-26
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,11 +76,65 @@ jobs:
           if not receipt.get("probe", {}).get("externalWindowCapturePreflight"):
               sys.exit("Hosted macOS external window capture prerequisites are unavailable.")
           PY
+      - name: Acquire the exact retained Ignatius archive
+        id: warp-archive
+        if: inputs.probe == 'warp-renderer' || github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive_root="$(mktemp -d "$RUNNER_TEMP/ignatius-warp-archive.XXXXXXXX")"
+          gh run download 44627234677 --repo "$GITHUB_REPOSITORY" \
+            --name release-candidate-aggregate-44627234677-1 --dir "$archive_root"
+          python3 tests/support/macos/warp_bootstrap.py extract "$archive_root"
+      - name: Launch the verified owned Warp fixture
+        id: warp
+        if: steps.warp-archive.outcome == 'success'
+        shell: bash
+        env:
+          IGNATIUS_FIXTURE_BINARY: ${{ steps.warp-archive.outputs.ignatius }}
+        run: python3 tests/support/macos/warp_bootstrap.py launch "$IGNATIUS_FIXTURE_BINARY"
+      - name: Capture and quit the exact owned Ignatius session
+        if: steps.warp.outcome == 'success'
+        shell: bash
+        env:
+          WARP_APP: ${{ steps.warp.outputs.app }}
+          WARP_PID: ${{ steps.warp.outputs.pid }}
+          WARP_NONCE: ${{ steps.warp.outputs.nonce }}
+          WARP_READY: ${{ steps.warp.outputs.readiness }}
+          WARP_CAPTURE: ${{ steps.warp.outputs.capture }}
+        run: |
+          set -euo pipefail
+          driver="$RUNNER_TEMP/ignatius-warp-window-driver"
+          xcrun --sdk macosx swiftc -swift-version 6 -parse-as-library -warnings-as-errors \
+            -target arm64-apple-macos15.0 tests/support/macos/warp_window_driver.swift -o "$driver"
+          "$driver" --app "$WARP_APP" --pid "$WARP_PID" --nonce "$WARP_NONCE" \
+            --readiness "$WARP_READY" --output "$WARP_CAPTURE"
+      - name: Close the exact owned Warp copy
+        if: always() && steps.warp.outcome != 'skipped'
+        shell: bash
+        run: python3 tests/support/macos/warp_bootstrap.py terminate
       - name: Retain the preflight receipt
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ignatius-macos-desktop-preflight
-          path: ${{ runner.temp }}/ignatius-macos-desktop-preflight.json
+          path: |
+            ${{ runner.temp }}/ignatius-macos-desktop-preflight.json
+            ${{ runner.temp }}/ignatius-warp-bootstrap.json
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Retain just the owned Warp observations
+        if: always() && steps.warp.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ignatius-warp-renderer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/driver.json
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/ignatius-active.png
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/ignatius-restored.png
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/state/active.json
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/state/runtime.json
           retention-days: 7
           if-no-files-found: warn
