@@ -1,0 +1,122 @@
+name: Windows live archive diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Completed non-publishing release run ID on main
+        required: true
+        type: string
+      candidate_attempt:
+        description: Successful run attempt that retained the aggregate
+        required: true
+        default: "1"
+        type: string
+      source_revision:
+        description: Full source revision recorded in the candidate manifest
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  runtime:
+    name: Verify the retained Windows archive over live TLS
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      CANDIDATE_RUN: ${{ inputs.candidate_run }}
+      CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
+      SOURCE_REVISION: ${{ inputs.source_revision }}
+    steps:
+      - name: Resolve the completed release run and attempt
+        id: candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:CANDIDATE_RUN -cnotmatch '\A[1-9][0-9]{0,18}\z' -or
+              $env:CANDIDATE_ATTEMPT -cnotmatch '\A[1-9][0-9]{0,3}\z' -or
+              $env:SOURCE_REVISION -cnotmatch '\A[0-9a-f]{40}\z') {
+            throw "Expected a numeric run and attempt with a full lowercase source revision"
+          }
+          $runJson = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN/attempts/$env:CANDIDATE_ATTEMPT"
+          if ($LASTEXITCODE -ne 0) { throw "Could not resolve the candidate run attempt" }
+          $run = $runJson | ConvertFrom-Json
+          if ($run.repository.full_name -cne $env:GITHUB_REPOSITORY -or
+              $run.path -cne '.github/workflows/release.yml' -or
+              $run.head_branch -cne 'main' -or
+              $run.event -cne 'workflow_dispatch' -or
+              $run.status -cne 'completed' -or
+              $run.conclusion -cne 'success' -or
+              $run.id.ToString() -cne $env:CANDIDATE_RUN -or
+              $run.run_attempt.ToString() -cne $env:CANDIDATE_ATTEMPT) {
+            throw "Expected a successful non-publishing release attempt in this repository"
+          }
+          "aggregate=release-candidate-aggregate-$env:CANDIDATE_RUN-$env:CANDIDATE_ATTEMPT" >> $env:GITHUB_OUTPUT
+
+      - name: Check out the diagnostic source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.1"
+      - name: Download the exact retained aggregate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.CANDIDATE_RUN }}
+          name: ${{ steps.candidate.outputs.aggregate }}
+          path: ${{ runner.temp }}/ignatius-windows-candidate
+          digest-mismatch: error
+
+      - name: Verify candidate bytes, source and build identity
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'ignatius-windows-candidate'
+          $manifestPath = Join-Path $candidate 'evidence/release-manifest.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $expectedBuild = "ci/$env:CANDIDATE_RUN-$env:CANDIDATE_ATTEMPT"
+          if ($manifest.source_revision -cne $env:SOURCE_REVISION -or
+              $manifest.build_identity -cne $expectedBuild) {
+            throw "The retained manifest has a different source revision or build identity"
+          }
+          cargo --locked xtask release manifest verify `
+            --record (Join-Path $candidate 'record/release-record.json') `
+            --artefact-dir (Join-Path $candidate 'artefacts') `
+            --manifest $manifestPath `
+            --checksums (Join-Path $candidate 'evidence/SHA256SUMS')
+          if ($LASTEXITCODE -ne 0) { throw "Candidate bytes did not match the retained manifest" }
+          $windowsArchive = @($manifest.artefacts | Where-Object { $_.target -ceq 'x86_64-pc-windows-msvc' })
+          if ($windowsArchive.Count -ne 1 -or $windowsArchive[0].format -cne 'zip') {
+            throw "Expected one verified Windows ZIP in the manifest"
+          }
+          $archivePath = Join-Path $candidate "artefacts/$($windowsArchive[0].name)"
+          $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
+          try {
+            if ($archive.Entries.Count -ne 1 -or $archive.Entries[0].FullName -cne 'ignatius.exe') {
+              throw "Expected the verified Windows ZIP to contain only ignatius.exe"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'ignatius-windows-unpacked'
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $unpacked
+          "IGNATIUS_ARCHIVED_EXE=$(Join-Path $unpacked 'ignatius.exe')" >> $env:GITHUB_ENV
+          "IGNATIUS_EXPECTED_BUILD=$expectedBuild" >> $env:GITHUB_ENV
+
+      - name: Run native Windows archive TLS and privacy checks
+        shell: pwsh
+        run: |
+          $receipt = Join-Path $env:RUNNER_TEMP 'ignatius-windows-archive-runtime.json'
+          try {
+            ./scripts/release-runtime-windows.ps1 -BinaryPath $env:IGNATIUS_ARCHIVED_EXE `
+              -ExpectedSourceRevision $env:SOURCE_REVISION -ExpectedBuildIdentity $env:IGNATIUS_EXPECTED_BUILD `
+              -EvidencePath $receipt
+          } finally {
+            if (Test-Path -LiteralPath $receipt -PathType Leaf) { Get-Content -LiteralPath $receipt }
+          }

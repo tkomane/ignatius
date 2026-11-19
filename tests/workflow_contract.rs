@@ -293,14 +293,13 @@ fn workflows_are_read_only_bounded_and_do_not_use_privileged_pr_code() {
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .collect();
-        // CodeQL uploads SARIF, which requires the security-events scope. Every
-        // other workflow stays read-only.
-        let expected_permissions: &[&str] =
-            if path.file_name().and_then(|name| name.to_str()) == Some("codeql.yml") {
-                &["contents: read", "security-events: write"]
-            } else {
-                &["contents: read"]
-            };
+        // CodeQL uploads SARIF. The archive diagnostic reads artifacts from an
+        // earlier run in this repository. All other workflows read source only.
+        let expected_permissions: &[&str] = match path.file_name().and_then(|name| name.to_str()) {
+            Some("codeql.yml") => &["contents: read", "security-events: write"],
+            Some("windows-archive-runtime-diagnostic.yml") => &["actions: read", "contents: read"],
+            _ => &["contents: read"],
+        };
         assert_eq!(
             permission_entries.as_slice(),
             expected_permissions,
@@ -441,6 +440,31 @@ fn shared_ci_runs_the_complete_declared_coverage() {
             "the socket integration job is missing its live-endpoint wiring: {expected}"
         );
     }
+}
+
+#[test]
+fn windows_archive_diagnostic_verifies_retained_bytes_before_execution() {
+    let workflow = include_str!("../.github/workflows/windows-archive-runtime-diagnostic.yml");
+    let events: Vec<_> = workflow
+        .lines()
+        .skip_while(|line| *line != "on:")
+        .skip(1)
+        .take_while(|line| line.is_empty() || line.starts_with(' '))
+        .filter(|line| line.starts_with("  ") && !line.starts_with("    "))
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(events, ["workflow_dispatch:"]);
+
+    let job = job_block(workflow, "runtime");
+    let archive_verification = job
+        .find("cargo --locked xtask release manifest verify")
+        .expect("retained manifest and archive verification");
+    let extraction = job.find("Expand-Archive").expect("verified extraction");
+    let runtime = job
+        .find("./scripts/release-runtime-windows.ps1")
+        .expect("Windows runtime probe");
+    assert!(archive_verification < extraction && extraction < runtime);
 }
 
 #[test]

@@ -256,6 +256,26 @@ creates the completed archive in the destination directory and installs it
 with a same-directory hard link, so a concurrent destination cannot be
 silently replaced or redirected through a directory symlink.
 
+### Windows live archive diagnostic
+
+Use the run ID and attempt of a successful non-publishing rehearsal dispatched
+on `main`, and the full source revision in its retained manifest.
+
+~~~sh
+gh workflow run windows-archive-runtime-diagnostic.yml --ref main \
+  -f candidate_run=RUN_ID -f candidate_attempt=ATTEMPT \
+  -f source_revision=FULL_SOURCE_REVISION
+~~~
+
+The diagnostic verifies the retained aggregate's archive bytes and then
+extracts its Windows ZIP. The packaged client connects to a disposable native
+PostgreSQL cluster over loopback using `verify-full` and a read-only session.
+The check also requires a typed TLS refusal for the numeric address and
+value-free client debug logging. The job logs a metadata receipt with the
+binary hash, runner image, database version, result and fixture cleanup.
+Windows Terminal interaction, signing and provenance verification have their
+own acceptance evidence.
+
 ### Inventory and trust sidecars
 
 The owner trust choices are Sigstore keyless signing, a CycloneDX SBOM, and
