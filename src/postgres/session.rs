@@ -402,6 +402,15 @@ impl Session {
         crate::postgres::snapshot::capture_schema_snapshot(&self.client, schema).await
     }
 
+    /// Reads the bounded read-only fleet observation through a fresh session.
+    pub(crate) async fn fleet_probe(
+        self,
+        sslmode: &'static str,
+        schema: Option<&str>,
+    ) -> Result<crate::fleet::Observation, crate::fleet::Issue> {
+        crate::postgres::fleet::inspect(&self.client, &self.info, sslmode, schema).await
+    }
+
     /// Whether a database with this exact name exists on the server.
     pub async fn drill_database_exists(&self, name: &str) -> Result<bool, Diagnostic> {
         crate::postgres::drill::database_exists(&self.client, name).await

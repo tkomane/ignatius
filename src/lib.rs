@@ -39,6 +39,7 @@ pub mod diagnostics;
 pub mod diagram;
 pub mod drill;
 pub mod exit_code;
+mod fleet;
 pub mod growth;
 pub mod history;
 pub mod lint;

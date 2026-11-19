@@ -9,6 +9,7 @@ pub mod crud;
 mod dbdoc;
 pub mod drill;
 pub mod error;
+mod fleet;
 pub mod growth;
 pub mod metadata;
 mod notices;
