@@ -1,8 +1,22 @@
 # Status
 
-**Updated: 2026-11-19.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-20.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 48: Per-target release inventories - 20 November 2026
+
+- [Rehearsal 44623448688](https://github.com/tkomane/ignatius/actions/runs/44623448688)
+  at `739b1c4` retained three CycloneDX inventories, one for each archive.
+  An independent download verified the 12-file scope, the three official
+  schema checks and the archive and executable checksums. All 27 hosted
+  runtime checks passed. [Inventory evidence](operations/verification.md#release-inventory-rehearsal---20-november-2026)
+- The rehearsal's Windows repeat archives differed. The jobs used image
+  revisions `20261103.298.1` and `20261116.315.1`, which supplied different
+  compiler, linker and librarian hashes under the same version labels.
+  Windows repeats now share a disposable VM with clean build outputs and
+  checked native inputs. Reproducibility across separate Windows images
+  remains open.
 
 ## Wave 47: Windows live archive verification - 19 November 2026
 

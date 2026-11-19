@@ -15,6 +15,8 @@ fn runtime_smoke_script_keeps_the_target_boundary_fail_closed() {
         "release archive checksum does not match release-record.json",
         "tar archive does not contain exactly one expected root binary",
         "zip archive does not contain exactly one expected root binary",
+        "hashlib.sha256(candidate_binary.read_bytes()).hexdigest()",
+        "\"binary_sha256\": binary_sha256",
         "IGNATIUS_CONFIG_DIR",
         "IGNATIUS_DATA_DIR",
         "controlled invalid configuration",

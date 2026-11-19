@@ -198,8 +198,8 @@ direct logging privacy audit.
 
 The `evidence_reference.path` in a release record is the semantic retained
 location for that record and must remain under `release-evidence/runs/<run>/<target>/`.
-The current non-publishing workflow places each checked four-file target bundle
-inside an `upload/` transport envelope, then retains a nine-file aggregate with
+The current non-publishing workflow places each checked five-file target bundle
+inside an `upload/` transport envelope, then retains a twelve-file aggregate with
 separate `artefacts/`, `record/`, `evidence/` and `runtime/` directories. That
 envelope is not itself the record's canonical evidence path.
 

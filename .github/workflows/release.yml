@@ -64,6 +64,8 @@ jobs:
     needs: source
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      sbom_policy: ${{ steps.supply_chain.outputs.sbom_policy }}
     steps:
       - name: Check out the immutable candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,6 +83,7 @@ jobs:
       # A tag can bypass the ordinary branch workflow. Run the same immutable
       # dependency policy before any candidate bytes are retained.
       - name: Run the source supply-chain policy
+        id: supply_chain
         shell: bash
         run: |
           set -euo pipefail
@@ -96,6 +99,7 @@ jobs:
             exit 1
           fi
           "$install_root/bin/cargo-deny" check advisories licenses bans sources
+          printf 'sbom_policy=pass\n' >> "$GITHUB_OUTPUT"
       - name: Scan immutable candidate history for secrets
         shell: bash
         run: |
@@ -273,10 +277,22 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build the target binary
+        shell: bash
         env:
+          TARGET: ${{ matrix.target }}
           IGNATIUS_BUILD_IDENTITY: ci/${{ github.run_id }}-${{ github.run_attempt }}
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --locked --release --target "${{ matrix.target }}"
+        run: |
+          set -euo pipefail
+          runner_scratch="$RUNNER_TEMP"
+          if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+            runner_scratch="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          build_inputs="$runner_scratch/ignatius-release/$TARGET/build-inputs"
+          (umask 077 && mkdir -p "$build_inputs")
+          # Cargo JSON can include build-script environment values and runner paths.
+          cargo build --locked --release --target "$TARGET" --message-format=json \
+            > "$build_inputs/product-build.jsonl"
 
       - name: Package and verify the candidate
         shell: bash
@@ -284,6 +300,8 @@ jobs:
           TARGET: ${{ matrix.target }}
           FORMAT: ${{ matrix.format }}
           BINARY: ${{ matrix.binary }}
+          PRODUCT_RUSTFLAGS: ${{ matrix.rustflags }}
+          SBOM_POLICY: ${{ needs.preflight.outputs.sbom_policy }}
         run: |
           set -euo pipefail
 
@@ -302,7 +320,27 @@ jobs:
           artefacts="$release_root/artefacts"
           record_dir="$release_root/record"
           evidence="$release_root/evidence"
+          build_inputs="$release_root/build-inputs"
+          product_build="$build_inputs/product-build.jsonl"
+          packaging_build="$build_inputs/packaging-build.jsonl"
+          metadata="$build_inputs/cargo-metadata.json"
+          if [[ ! -f "$product_build" || ! -s "$product_build" || -L "$product_build" ]]; then
+            echo "candidate build has no ordinary, nonempty Cargo trace for $TARGET" >&2
+            exit 1
+          fi
+          trap 'rm -f -- "$product_build" "$packaging_build" "$metadata"' EXIT
           mkdir -p "$bundle" "$artefacts" "$record_dir"
+
+          if [[ "$SBOM_POLICY" != pass ]]; then
+            echo "the frozen source supply-chain policy produced no pass for $TARGET" >&2
+            exit 1
+          fi
+          (
+            umask 077
+            cargo metadata --locked --format-version 1 --filter-platform "$TARGET" > "$metadata"
+            # Match the profile and inherited flags of the cargo xtask calls below.
+            cargo build --locked -p xtask --message-format=json > "$packaging_build"
+          )
 
           if command -v python3 >/dev/null 2>&1; then
             python_bin=python3
@@ -385,6 +423,32 @@ jobs:
             --manifest "$evidence/release-manifest.json" \
             --checksums "$evidence/SHA256SUMS"
 
+          # Native Rust CLIs expect drive-qualified paths on Git Bash.
+          native_path() {
+            if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+              cygpath -am "$1"
+            else
+              printf '%s\n' "$1"
+            fi
+          }
+          sbom="$evidence/$TARGET.cdx.json"
+          sbom_args=(
+            "--target=$TARGET"
+            "--manifest=$(native_path "$evidence/release-manifest.json")"
+            "--metadata=$(native_path "$metadata")"
+            "--product-build=$(native_path "$product_build")"
+            "--packaging-build=$(native_path "$packaging_build")"
+            "--binary=$(native_path "$PWD/$binary_path")"
+            "--rustflags=$PRODUCT_RUSTFLAGS"
+            "--policy=$SBOM_POLICY"
+          )
+          # Prevent Git Bash from treating the /Brepro linker flag as a path.
+          export MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}--rustflags="
+          cargo --locked xtask release sbom candidate generate \
+            "${sbom_args[@]}" "--out=$(native_path "$sbom")"
+          cargo --locked xtask release sbom candidate verify-build \
+            "${sbom_args[@]}" "--sbom=$(native_path "$sbom")"
+
           # A candidate archive is useful only when the workflow also proves
           # that the readiness gate still refuses it until the remaining
           # source, evidence and owner gates are satisfied.
@@ -408,9 +472,8 @@ jobs:
             fi
           done
 
-          # Upload only the four files this candidate contract produces. Keep
-          # the allowlist outside the upload root so the scope file itself is
-          # not mistaken for release evidence.
+          # Upload only the checked archive, record, manifest, checksums and SBOM.
+          # Keep private Cargo input streams and allowlists outside the upload root.
           upload="$release_root/upload"
           scope="$release_root/upload-scope.json"
           mkdir -p "$upload/artefacts" "$upload/record" "$upload/evidence"
@@ -418,8 +481,9 @@ jobs:
           cp "$record_dir/release-record.json" "$upload/record/release-record.json"
           cp "$evidence/release-manifest.json" "$upload/evidence/release-manifest.json"
           cp "$evidence/SHA256SUMS" "$upload/evidence/SHA256SUMS"
-          printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS"]}\n' \
-            "$archive_name" > "$scope"
+          cp "$sbom" "$upload/evidence/$TARGET.cdx.json"
+          printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS","evidence/%s.cdx.json"]}\n' \
+            "$archive_name" "$TARGET" > "$scope"
           cargo --locked xtask release evidence-scope --root "$upload" --allowlist "$scope"
 
           echo "Prepared non-publishing candidate: $archive_name"
@@ -564,7 +628,8 @@ jobs:
           record_dir="$release_root/record"
           evidence="$release_root/evidence"
           runtime="$release_root/runtime"
-          mkdir -p "$artefacts" "$record_dir" "$runtime"
+          inventory="$release_root/inventory"
+          mkdir -p "$artefacts" "$record_dir" "$runtime" "$inventory"
 
           targets=(
             aarch64-apple-darwin
@@ -619,10 +684,15 @@ jobs:
             record="$bundle/record/release-record.json"
             manifest="$bundle/evidence/release-manifest.json"
             checksums="$bundle/evidence/SHA256SUMS"
+            sbom="$bundle/evidence/$target.cdx.json"
             archive="$bundle/artefacts/$archive_name"
             input_scope="$release_root/input-scope-${target}.json"
             if [[ ! -d "$bundle" || -L "$bundle" || ! -f "$record" || -L "$record" || ! -f "$manifest" || -L "$manifest" || ! -f "$checksums" || -L "$checksums" || ! -f "$archive" || -L "$archive" ]]; then
               echo "candidate bundle is incomplete or unsafe for $target" >&2
+              exit 1
+            fi
+            if [[ ! -f "$sbom" || ! -s "$sbom" || -L "$sbom" ]]; then
+              echo "candidate bundle has no ordinary, nonempty SBOM for $target" >&2
               exit 1
             fi
             mapfile -t artefact_entries < <(find "$bundle/artefacts" -mindepth 1 -maxdepth 1 -printf '%f\n')
@@ -630,8 +700,8 @@ jobs:
               echo "candidate bundle for $target must contain exactly its expected archive" >&2
               exit 1
             fi
-            printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS"]}\n' \
-              "$archive_name" > "$input_scope"
+            printf '{"schema_version":1,"files":["artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS","evidence/%s.cdx.json"]}\n' \
+              "$archive_name" "$target" > "$input_scope"
             cargo --locked xtask release evidence-scope \
               --root "$bundle" \
               --allowlist "$input_scope"
@@ -663,6 +733,10 @@ jobs:
               exit 1
             fi
 
+            cargo --locked xtask release sbom candidate bind \
+              "--target=$target" "--manifest=$manifest" "--sbom=$sbom"
+            cp "$sbom" "$inventory/$target.cdx.json"
+
             runtime_bundle="$runtime_inputs_root/release-runtime-${target}-${run_key}"
             runtime_evidence="$runtime_bundle/runtime-evidence.json"
             test -d "$runtime_bundle"
@@ -673,10 +747,16 @@ jobs:
             runtime_source="$(jq -r '.source_revision // empty' "$runtime_evidence")"
             runtime_build="$(jq -r '.build_identity // empty' "$runtime_evidence")"
             runtime_status="$(jq -r '.status // empty' "$runtime_evidence")"
+            runtime_binary="$(jq -er '.binary_sha256' "$runtime_evidence")"
+            inventory_binary="$(jq -er '.metadata.properties[] | select(.name == "ignatius:release:binary-sha256").value' "$sbom")"
             test "$runtime_target" = "$target"
             test "$runtime_source" = "$(jq -r '.records[0].source_revision' "$record")"
             test "$runtime_build" = "$(jq -r '.records[0].build_identity' "$record")"
             test "$runtime_status" = pass
+            if [[ "$runtime_binary" != "$inventory_binary" ]]; then
+              echo "The archive executable differs from the inventoried binary for $target" >&2
+              exit 1
+            fi
             runtime_scope="$release_root/runtime-scope-${target}.json"
             printf '{"schema_version":1,"files":["runtime-evidence.json"]}\n' > "$runtime_scope"
             cargo --locked xtask release evidence-scope \
@@ -744,11 +824,11 @@ jobs:
           cp "$evidence/release-manifest.json" "$upload/evidence/release-manifest.json"
           cp "$evidence/SHA256SUMS" "$upload/evidence/SHA256SUMS"
           for target in "${targets[@]}"; do
+            cp "$inventory/$target.cdx.json" "$upload/evidence/$target.cdx.json"
             cp "$runtime/$target.json" "$upload/runtime/$target.json"
           done
-          printf '{"schema_version":1,"files":["artefacts/%s","artefacts/%s","artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS","runtime/%s.json","runtime/%s.json","runtime/%s.json"]}\n' \
-            "${archive_names[0]}" "${archive_names[1]}" "${archive_names[2]}" \
-            "${targets[0]}" "${targets[1]}" "${targets[2]}" > "$scope"
+          printf '{"schema_version":1,"files":["artefacts/%s","artefacts/%s","artefacts/%s","record/release-record.json","evidence/release-manifest.json","evidence/SHA256SUMS","evidence/%s.cdx.json","evidence/%s.cdx.json","evidence/%s.cdx.json","runtime/%s.json","runtime/%s.json","runtime/%s.json"]}\n' \
+            "${archive_names[@]}" "${targets[@]}" "${targets[@]}" > "$scope"
           cargo --locked xtask release evidence-scope --root "$upload" --allowlist "$scope"
 
           # Scan the exact retained target bundles and the final aggregate after
@@ -782,7 +862,7 @@ jobs:
           path: ${{ runner.temp }}/ignatius-release/aggregate/upload
 
   reproducibility:
-    name: Reproducibility ${{ matrix.target }} repeat ${{ matrix.repeat }}
+    name: Reproducibility ${{ matrix.target }} repeat ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'one and two' || matrix.repeat }}
     needs: [source, preflight]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -820,12 +900,6 @@ jobs:
             binary: ignatius.exe
             rustflags: "-D warnings -C link-arg=/Brepro"
             repeat: one
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            format: zip
-            binary: ignatius.exe
-            rustflags: "-D warnings -C link-arg=/Brepro"
-            repeat: two
 
     steps:
       - name: Check out the requested source
@@ -865,24 +939,66 @@ jobs:
             exit 1
           fi
           export IGNATIUS_BUILD_IDENTITY="ci/repro-${source_revision}"
-          cargo build --locked --release --target "$TARGET"
 
+          repeat_labels=("$REPEAT")
+          repro_root="$RUNNER_TEMP/ignatius-repro/$TARGET"
           if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
             if ! command -v cygpath >/dev/null 2>&1; then
               echo "cygpath is required on Windows for reproducibility packaging" >&2
               exit 1
             fi
-            repro_root="$(cygpath -u "$RUNNER_TEMP")/ignatius-repro/$TARGET/$REPEAT"
-          else
-            repro_root="$RUNNER_TEMP/ignatius-repro/$TARGET/$REPEAT"
+            # Keep both cold builds on one image and installed native toolset.
+            repeat_labels=(one two)
+            repro_root="$(cygpath -u "$RUNNER_TEMP")/ignatius-repro/$TARGET"
+            compile_root="$repro_root/compile-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            compile_target="$compile_root/target"
+            compile_build="$compile_root/build"
+            mkdir -p "$repro_root"
+            mkdir -- "$compile_root"
+            CARGO_TARGET_DIR="$(cygpath -am "$compile_target")"
+            CARGO_BUILD_BUILD_DIR="$(cygpath -am "$compile_build")"
+            export CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR
+
+            vc_tools="$(cygpath -u "$VCToolsInstallDir")"
+            sdk_root="$(cygpath -u "$WindowsSdkDir")"
+            sdk_version="${WindowsSDKVersion%\\}"
+            native_inputs=(
+              "$(cygpath -u "$CC_x86_64_pc_windows_msvc")"
+              "$(cygpath -u "$CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER")"
+              "$(cygpath -u "$AR_x86_64_pc_windows_msvc")"
+              "$vc_tools/lib/x64/libvcruntime.lib"
+              "$sdk_root/bin/$sdk_version/x64/rc.exe"
+              "$sdk_root/Lib/$sdk_version/um/x64/kernel32.lib"
+              "$sdk_root/Lib/$sdk_version/ucrt/x64/ucrt.lib"
+            )
+            hash_windows_inputs() {
+              local input checksum digest
+              for input in "${native_inputs[@]}"; do
+                if [[ ! -f "$input" ]] || ! checksum="$(sha256sum -b < "$input")"; then
+                  printf 'Could not hash selected Windows input: %s\n' "${input##*/}" >&2
+                  return 1
+                fi
+                digest="${checksum%% *}"
+                [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+                printf '%s %s\n' "${input##*/}" "$digest"
+              done
+            }
+            selected_input_hashes="$(hash_windows_inputs)"
+            printf 'Selected Windows inputs on image %s (SHA-256):\n%s\n' \
+              "${ImageVersion:-unreported}" "$selected_input_hashes"
+            check_windows_inputs() {
+              local observed
+              observed="$(hash_windows_inputs)"
+              if [[ "$observed" != "$selected_input_hashes" ]]; then
+                printf 'Windows repeat %s changed selected input hashes %s the build:\n%s\n' \
+                  "$1" "$2" "$observed" >&2
+                return 1
+              fi
+              printf 'Windows repeat %s selected input hashes matched %s the build\n' "$1" "$2"
+            }
           fi
-          bundle="$repro_root/bundle"
-          artefacts="$repro_root/artefacts"
-          mkdir -p "$bundle" "$artefacts"
-          binary_path="target/$TARGET/release/$BINARY"
-          test -f "$binary_path" && test ! -L "$binary_path"
-          cp "$binary_path" "$bundle/$BINARY"
-          version="$(sed -n 's/^version = "\([^\"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+
+          version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
           test -n "$version"
           archive_stem="ignatius-${version}-${TARGET}"
           case "$FORMAT" in
@@ -898,12 +1014,37 @@ jobs:
             echo "a Python 3 interpreter is required for reproducibility packaging" >&2
             exit 1
           fi
-          "$python_bin" scripts/create-release-archive.py \
-            --format "$FORMAT" \
-            --source-dir "$bundle" \
-            --binary "$BINARY" \
-            --output "$artefacts/$archive_name"
-          test -s "$artefacts/$archive_name"
+
+          for repeat in "${repeat_labels[@]}"; do
+            bundle="$repro_root/$repeat/bundle"
+            artefacts="$repro_root/$repeat/artefacts"
+            mkdir -p "$bundle" "$artefacts"
+            binary_path="target/$TARGET/release/$BINARY"
+            if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+              # Each mkdir is create-only. Reuse the path spelling across the
+              # builds while keeping their compiler outputs independent.
+              mkdir -- "$compile_target" "$compile_build"
+              check_windows_inputs "$repeat" before
+              binary_path="$compile_target/$TARGET/release/$BINARY"
+            fi
+            cargo build --locked --release --target "$TARGET"
+            if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+              check_windows_inputs "$repeat" after
+            fi
+            test -f "$binary_path" && test ! -L "$binary_path"
+            cp "$binary_path" "$bundle/$BINARY"
+            "$python_bin" scripts/create-release-archive.py \
+              --format "$FORMAT" \
+              --source-dir "$bundle" \
+              --binary "$BINARY" \
+              --output "$artefacts/$archive_name"
+            test -s "$artefacts/$archive_name"
+
+            if [[ "${RUNNER_OS:-}" == "Windows" && "$repeat" == "one" ]]; then
+              mv -- "$compile_target" "$compile_root/first-target"
+              mv -- "$compile_build" "$compile_root/first-build"
+            fi
+          done
 
       - name: Store reproducibility candidate
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -912,6 +1053,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/ignatius-repro/${{ matrix.target }}/${{ matrix.repeat }}/artefacts
+
+      - name: Store second Windows reproducibility candidate
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-repro-${{ matrix.target }}-two-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/ignatius-repro/${{ matrix.target }}/two/artefacts
 
   compare-reproducibility:
     name: Compare reproducibility candidates
@@ -986,7 +1136,7 @@ jobs:
               digest="${hashes[$index]#*:}"
               printf '{"target":"%s","checksum":"%s"}' "$target" "$digest"
             done
-            printf '],\n  "scope": "two fixed-identity hosted builds per target; no publication action"\n}\n'
+            printf '],\n  "scope": "two fixed-identity hosted builds per target; separate Linux and macOS jobs; clean Windows builds on one runner; Windows cross-image reproducibility unverified; no publication action"\n}\n'
           } > "$evidence_root/reproducibility-evidence.json"
 
       - name: Store reproducibility comparison

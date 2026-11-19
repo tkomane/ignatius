@@ -147,6 +147,19 @@ match the same source revision, product version and target.
 
 ## Retention and review
 
+The non-publishing workflow retains one CycloneDX 1.5 sidecar per target at
+`evidence/<target>.cdx.json`. Locked Cargo metadata identifies packages.
+Compiler records identify which packages, Cargo target kinds and features the
+release and `xtask` packaging builds used. The sidecar accounts for locked
+packages outside those builds. Its dependency relations describe Cargo's
+locked resolution. Platform-specific checks cover native build inputs.
+
+The workflow regenerates the sidecar from the private build inputs before
+transport. The aggregate validates the retained sidecar against the exact
+archive manifest and the checked-out source inputs before scanning the scoped
+bundle. The workflow run records when generation happened. The release record
+remains blocked pending the other acceptance and owner gates.
+
 For a rehearsal, retain the sanitised inventory with the local evidence bundle
 long enough to reproduce the review and label it `rehearsal`, never `published`.
 For an authorised candidate, retain the inventory beside the immutable release
@@ -161,12 +174,11 @@ The reviewer must be able to answer from the inventory and its linked record:
 - what is missing or unverifiable; and
 - where to find the next blocked action.
 
-The semantic readiness gate now rejects mismatched or incomplete records through
-`cargo xtask release check PATH`. This contract still does not claim that
-inventory generation or provider-backed evidence generation exist yet. Archive
-checksum generation and exact-byte verification are implemented separately by
-the non-publishing T014 sidecar commands; they do not provide an inventory or
-provider-backed evidence result.
+The semantic readiness gate rejects mismatched or incomplete records through
+`cargo xtask release check PATH`. For a candidate, inventory verification and
+archive manifest verification both use the frozen source and exact archive
+identity. [The release guide](../docs/operations/release.md#candidate-dependency-inventories)
+describes the checks a reviewer can repeat.
 
 ## Privacy boundary
 
@@ -183,8 +195,6 @@ If a tool emits any of these values, the generator must stop, discard the
 unretained output, report a blocked evidence state and require a sanitised rerun.
 Redaction is not a substitute for narrowing the generator's inputs.
 
-This document defines T017. Executable inventory generation, provider-backed
-evidence, fixtures beyond the current contract cases and CI enforcement remain
-the later Feature 008 tasks listed in `specs/008-release-experience/tasks.md`.
-Archive checksum production and exact-byte verification belong to T014 and are
-implemented separately from inventory generation.
+T017 defines this contract, T014 implements the archive checksum checks, and
+T033b adds the candidate inventory rehearsal. Provider-backed evidence remains
+part of Feature 008's completion gates.

@@ -13,6 +13,8 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod candidate_inventory;
+
 const RELEASE_EVIDENCE_PREFIX: &str = "release-evidence/";
 const RELEASE_TARGETS: [&str; 3] = [
     "aarch64-apple-darwin",
@@ -3701,12 +3703,13 @@ fn days_in_month(year: u16, month: u8) -> u8 {
 pub fn sbom(args: &[&str]) -> Result<(), String> {
     let (command, rest) = args
         .split_first()
-        .ok_or_else(|| "release sbom needs generate or verify".to_owned())?;
+        .ok_or_else(|| "release sbom needs generate, verify or candidate".to_owned())?;
     match *command {
         "generate" => sbom_generate(rest),
         "verify" => sbom_verify(rest),
+        "candidate" => candidate_inventory::run(rest),
         other => Err(format!(
-            "release sbom needs generate or verify, not {other}"
+            "release sbom needs generate, verify or candidate, not {other}"
         )),
     }
 }
@@ -3740,20 +3743,41 @@ fn sbom_options(args: &[&str], out_flag: &str) -> Result<(PathBuf, PathBuf), Str
 struct LockedCrate {
     name: String,
     version: String,
+    source: Option<String>,
+    checksum: Option<String>,
+}
+
+#[derive(Default)]
+struct LockfilePackageFields {
+    name: Option<String>,
+    version: Option<String>,
+    source: Option<String>,
+    checksum: Option<String>,
 }
 
 /// Parses the narrow `Cargo.lock` subset the SBOM covers.
 ///
-/// Only `[[package]]` sections with `name` and `version` string entries (plus
-/// the top-level `version` marker and skippable `dependencies` arrays) are
-/// understood. Anything else is an error rather than a silent omission: an
-/// inventory that quietly drops crates is worse than one that refuses.
+/// Understands package identity, source and checksum strings, the top-level
+/// version marker and dependency arrays. Unknown sections or entries fail the
+/// inventory rather than silently dropping packages.
 fn parse_lockfile(text: &str, path: &Path) -> Result<Vec<LockedCrate>, String> {
     let fail = |detail: &str| -> String {
         format!("{} is not a supported Cargo.lock: {detail}", path.display())
     };
+    let package = |fields: LockfilePackageFields, number| -> Result<LockedCrate, String> {
+        Ok(LockedCrate {
+            name: fields
+                .name
+                .ok_or_else(|| fail(&format!("package {number} has no name")))?,
+            version: fields
+                .version
+                .ok_or_else(|| fail(&format!("package {number} has no version")))?,
+            source: fields.source,
+            checksum: fields.checksum,
+        })
+    };
     let mut crates: Vec<LockedCrate> = Vec::new();
-    let mut current: Option<(Option<String>, Option<String>)> = None;
+    let mut current: Option<LockfilePackageFields> = None;
     let mut in_dependencies = false;
     let mut packages_seen = 0usize;
 
@@ -3771,22 +3795,15 @@ fn parse_lockfile(text: &str, path: &Path) -> Result<Vec<LockedCrate>, String> {
         }
         if line.starts_with('[') {
             if line == "[[package]]" {
-                if let Some((name, version)) = current.take() {
-                    crates.push(LockedCrate {
-                        name: name
-                            .ok_or_else(|| fail(&format!("package {packages_seen} has no name")))?,
-                        version: version.ok_or_else(|| {
-                            fail(&format!("package {packages_seen} has no version"))
-                        })?,
-                    });
+                if let Some(fields) = current.replace(LockfilePackageFields::default()) {
+                    crates.push(package(fields, packages_seen)?);
                 }
                 packages_seen += 1;
-                current = Some((None, None));
                 continue;
             }
             return Err(fail(&format!("line {location} has an unknown section")));
         }
-        let Some((name, version)) = current.as_mut() else {
+        let Some(fields) = current.as_mut() else {
             if line.starts_with("version") {
                 continue;
             }
@@ -3795,16 +3812,11 @@ fn parse_lockfile(text: &str, path: &Path) -> Result<Vec<LockedCrate>, String> {
         let Some((key, value)) = line.split_once('=') else {
             return Err(fail(&format!("line {location} is not a key/value pair")));
         };
-        match key.trim() {
-            "name" => {
-                *name = Some(quoted_string(value.trim(), &fail, location)?);
-            }
-            "version" => {
-                *version = Some(quoted_string(value.trim(), &fail, location)?);
-            }
-            "source" | "checksum" => {
-                quoted_string(value.trim(), &fail, location)?;
-            }
+        let field = match key.trim() {
+            "name" => &mut fields.name,
+            "version" => &mut fields.version,
+            "source" => &mut fields.source,
+            "checksum" => &mut fields.checksum,
             "dependencies" => {
                 if !value.trim().starts_with('[') {
                     return Err(fail(&format!(
@@ -3814,30 +3826,34 @@ fn parse_lockfile(text: &str, path: &Path) -> Result<Vec<LockedCrate>, String> {
                 if !value.trim().ends_with(']') {
                     in_dependencies = true;
                 }
+                continue;
             }
             other => {
                 return Err(fail(&format!(
                     "line {location} has an unsupported key {other}"
                 )));
             }
+        };
+        if field.is_some() {
+            return Err(fail(&format!("line {location} repeats a package field")));
         }
+        *field = Some(quoted_string(value.trim(), &fail, location)?);
     }
     if in_dependencies {
         return Err(fail("the dependencies list never closes"));
     }
-    if let Some((name, version)) = current.take() {
-        crates.push(LockedCrate {
-            name: name.ok_or_else(|| fail("the last package has no name"))?,
-            version: version.ok_or_else(|| fail("the last package has no version"))?,
-        });
+    if let Some(fields) = current {
+        crates.push(package(fields, packages_seen)?);
     }
     if crates.is_empty() {
         return Err(fail("it names no packages"));
     }
     let mut sorted = crates;
     sorted.sort();
-    sorted.dedup();
-    if sorted.len() != packages_seen {
+    if sorted
+        .windows(2)
+        .any(|pair| pair[0].name == pair[1].name && pair[0].version == pair[1].version)
+    {
         return Err(fail("it names a duplicate package"));
     }
     Ok(sorted)

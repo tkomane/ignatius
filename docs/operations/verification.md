@@ -1,5 +1,29 @@
 # Verification
 
+## Release inventory rehearsal - 20 November 2026
+
+[Rehearsal 44623448688](https://github.com/tkomane/ignatius/actions/runs/44623448688)
+built source `739b1c4` with `ci/44623448688-1`. Each native archive job
+reproduced its CycloneDX 1.5 inventory from the captured Cargo product and
+packaging builds. All three runtime jobs passed nine checks. The aggregate
+verified the transported inventories and matched the compiled and extracted
+executable digests. An independent download rechecked all 12 file paths,
+archive digests, archive members, extracted executable digests and CycloneDX
+schemas. The local macOS run used pinned Rust 1.97.1 and also refused a changed
+manifest digest in the inventory and a build capture without successful finish.
+
+| Target | Crates compiled for the product | Crates compiled for packaging | Lockfile entries outside both builds |
+| --- | ---: | ---: | ---: |
+| macOS arm64 | 189 | 17 | 138 |
+| Windows x64 | 181 | 16 | 146 |
+| Linux x86-64 GNU | 186 | 16 | 141 |
+
+The product and packaging counts share some crate versions. The hosted
+Windows repeat comparison failed. The two Windows Server 2025 images were
+`20261103.298.1` and `20261116.315.1`. Both selected MSVC `14.44.35207` and
+Windows SDK `10.0.26100.0`. Their `cl.exe`, `link.exe` and `lib.exe` hashes
+differed. The aggregate was retained and the candidate record remains blocked.
+
 ## Exact archive runtime checks - 19 November 2026
 
 [Rehearsal 44605153852](https://github.com/tkomane/ignatius/actions/runs/44605153852)
