@@ -477,7 +477,13 @@ fn windows_conpty_diagnostic_preserves_native_assertions_and_evidence_scope() {
     assert!(!workflow.contains("continue-on-error:"));
     let ci = workflow_text(&root.join(".github/workflows/ci.yml"));
     assert!(!ci.contains("RunReviewedCapabilityControls"));
+    assert!(triggers.contains("default: native-controls"));
+    let desktop = job_block(&workflow, "renderer-desktop");
+    assert!(desktop.contains("if: inputs.probe == 'renderer-desktop'"));
+    assert!(desktop.contains("tests/support/windows_conpty/Test-Desktop.ps1"));
+    assert!(desktop.contains("$facts.status -cne 'available'"));
     let platform = job_block(&workflow, "diagnostic");
+    assert!(platform.contains("if: inputs.probe != 'renderer-desktop'"));
     assert!(platform.contains("runs-on: windows-latest"));
     let native = platform
         .split("- name: Windows ConPTY capability and ownership controls")

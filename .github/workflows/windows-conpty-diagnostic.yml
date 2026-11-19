@@ -4,6 +4,15 @@ name: Windows ConPTY diagnostic
 # Failure remains failure. This is not product acceptance or a release gate pass.
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        description: Select the existing native controls or check desktop availability
+        required: true
+        default: native-controls
+        type: choice
+        options:
+          - native-controls
+          - renderer-desktop
 
 permissions:
   contents: read
@@ -20,7 +29,28 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  renderer-desktop:
+    name: Check the hosted Windows input desktop
+    if: inputs.probe == 'renderer-desktop'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Observe the current Windows session and desktop
+        shell: pwsh
+        run: |
+          Write-Output "Runner image $env:ImageOS $env:ImageVersion, Windows $([Environment]::OSVersion.Version)"
+          $result = & ./tests/support/windows_conpty/Test-Desktop.ps1
+          $result
+          $facts = $result | ConvertFrom-Json
+          if ($facts.status -cne 'available') {
+            throw 'The runner did not expose a visible, active input desktop.'
+          }
+
   diagnostic:
+    if: inputs.probe != 'renderer-desktop'
     name: Native Windows ConPTY capability experiment
     runs-on: windows-latest
     timeout-minutes: 20

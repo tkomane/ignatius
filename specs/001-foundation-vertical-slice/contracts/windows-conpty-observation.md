@@ -116,6 +116,14 @@ Moving its execution out of routine CI does not close W07-064, T055a or T051,
 change any native assertion, admit the full matrix or establish release
 readiness. A future sensor change still needs its scoped native evidence.
 
+The `renderer-desktop` dispatch option observes whether the hosted job runs
+on the active input desktop. It requires a positive Windows session ID, an
+active session, a visible `WinSta0` window station and a current input desktop
+matching the job thread's `Default` desktop. The classifier reads only its
+own job context and reports an unavailable condition with a bounded receipt.
+An available result admits a separate renderer experiment. The default
+dispatch continues to run the native controls and capability assertions.
+
 ## Cases and ordering
 
 After capability admission, use one fresh process/console per normal return,
