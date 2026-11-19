@@ -367,7 +367,8 @@ pub async fn columns(
          JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          LEFT JOIN pg_catalog.pg_index i \
-              ON i.indrelid = c.oid AND i.indisprimary AND a.attnum = ANY(i.indkey) \
+              ON i.indrelid = c.oid AND i.indisprimary \
+              AND a.attnum = ANY(i.indkey[0: i.indnkeyatts - 1]) \
          LEFT JOIN pg_catalog.pg_attrdef d \
               ON d.adrelid = c.oid AND d.adnum = a.attnum \
          WHERE n.nspname = $1 AND c.relname = $2 \

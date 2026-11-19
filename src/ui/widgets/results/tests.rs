@@ -683,3 +683,43 @@ fn error_view_renders_multi_span_diagnostic_labels_and_preserves_words() {
         "Likely cause: must have Warning fg"
     );
 }
+
+#[test]
+fn structured_cell_detail_renders_selection_and_path_in_ascii() {
+    let mut model = model_with(
+        &["payload"],
+        &[vec![Cell::Text(r#"{"x":[null,2]}"#.to_owned())]],
+    );
+    let set = model.last_execution.as_mut().unwrap().statements[0]
+        .result_set
+        .as_mut()
+        .unwrap();
+    set.set_structured_columns(vec![Some(crate::structured::Column {
+        kind: crate::structured::Kind::Jsonb,
+        partial_edit: true,
+        origin: None,
+    })]);
+    let mut inspector = crate::app::inspect::Inspector::new();
+    inspector.move_node(true, 2, 4);
+    let area = Rect::new(0, 0, 60, 16);
+    let presentation = Presentation::new(
+        Theme::new(ThemeChoice::Material, true).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut buf = Buffer::empty(area);
+    super::render_inspector(&model, inspector, &presentation, area, &mut buf);
+    let actual = buffer_to_string(&buf);
+    assert!(actual.is_ascii(), "{actual}");
+    assert!(actual.contains("Cell Detail"), "{actual}");
+    assert!(actual.contains("[0]  null"), "{actual}");
+    assert!(actual.contains(r#"Path $ / "x" / [0]"#), "{actual}");
+    assert!(!actual.contains("e Edit"), "{actual}");
+
+    inspector.toggle_raw();
+    let mut buf = Buffer::empty(area);
+    super::render_inspector(&model, inspector, &presentation, area, &mut buf);
+    let actual = buffer_to_string(&buf);
+    assert!(actual.contains("Server text"), "{actual}");
+    assert!(actual.contains(r#"{"x":[null,2]}"#), "{actual}");
+}

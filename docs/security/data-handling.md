@@ -61,6 +61,20 @@ What this program stores, where, for how long, and what it never stores.
   exact bound statement to the person who is about to confirm it. This is a
   visible decision surface, not persistence or telemetry.
 
+## Local query plan history
+
+`ignatius plan-history capture` explicitly saves a local telemetry series.
+The catalog holds series names, timestamps, numeric measurements and SHA-256
+digests for the capture route, schema, plan structure and settings. Raw SQL,
+plan text, connection details, setting values and database rows stay out of
+the catalog. Keep series names free of sensitive data. The file is private on
+Unix and inherits the data directory's ACL on Windows.
+
+Use `ignatius plan-history forget --series NAME` to delete one series. The
+catalog retains up to 32 series and 64 observations per series, and reports
+how many observations have aged out. Passing `--no-history` refuses capture.
+The feature runs only on explicit request and stores no background samples.
+
 ## Interactive connection picker
 
 The picker keeps only a safe presentation summary of each configured profile.

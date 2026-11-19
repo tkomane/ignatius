@@ -65,6 +65,8 @@ pub struct UpdatePlan {
     pub sql_template: String,
     /// Replacement and key values, hidden by Debug.
     pub parameters: ParameterBindings,
+    /// Whether execution also checks the observed value and column origin.
+    pub(crate) guarded: bool,
 }
 
 impl fmt::Debug for UpdatePlan {
@@ -114,6 +116,8 @@ pub enum UpdateRefusal {
     TargetColumnUnavailable(String),
     /// A value cannot cross the existing text-query boundary.
     NulValue,
+    /// The retained value for a structured update no longer exists.
+    MissingObservedValue,
     /// The generated statement exceeded the client bound.
     TooLarge { bytes: usize, limit: usize },
     /// The planner's own generated template failed its parameter contract.
@@ -156,6 +160,9 @@ impl fmt::Display for UpdateRefusal {
             Self::NulValue => f.write_str(
                 "cell update is unavailable: the replacement or key value contains NUL",
             ),
+            Self::MissingObservedValue => {
+                f.write_str("structured edit is unavailable: the observed value is missing")
+            }
             Self::TooLarge { bytes, limit } => write!(
                 f,
                 "cell update is unavailable: the generated statement is {bytes} bytes, over the {limit}-byte limit"
@@ -174,37 +181,7 @@ pub fn parse_source(
     result_columns: &[String],
     selected_result_column: usize,
 ) -> Result<UpdateSource, UpdateRefusal> {
-    let mut tokens = lex(sql);
-    if let Some(index) = tokens
-        .iter()
-        .position(|token| matches!(token, Token::Symbol(';')))
-    {
-        if index + 1 != tokens.len() {
-            return Err(UpdateRefusal::UnsupportedSource(
-                "multiple statements are not editable through a result cell",
-            ));
-        }
-        tokens.pop();
-    }
-    if !word_at(&tokens, 0).is_some_and(|word| word.eq_ignore_ascii_case("select")) {
-        return Err(UpdateRefusal::UnsupportedSource(
-            "the retained statement is not a SELECT",
-        ));
-    }
-
-    let from = top_level_word(&tokens, "from").ok_or(UpdateRefusal::UnsupportedSource(
-        "the SELECT has no direct FROM relation",
-    ))?;
-    if ["union", "intersect", "except"]
-        .iter()
-        .any(|word| top_level_word(&tokens, word).is_some())
-    {
-        return Err(UpdateRefusal::UnsupportedSource(
-            "set operations are not editable through a result cell",
-        ));
-    }
-    let parsed_relation = parse_relation(&tokens, from)?;
-    let projections = parse_projections(&tokens[1..from], &parsed_relation)?;
+    let (parsed_relation, projections) = source_shape(sql)?;
 
     let projected_columns = if projections.len() == 1 && projections[0].is_star {
         if result_columns.is_empty() {
@@ -246,6 +223,47 @@ pub fn parse_source(
     })
 }
 
+/// Whether an edit could use this statement's result if PostgreSQL reports
+/// matching direct columns and a complete key. Probe only these statements.
+pub(crate) fn may_update_source(sql: &str) -> bool {
+    source_shape(sql).is_ok()
+}
+
+fn source_shape(sql: &str) -> Result<(ParsedRelation, Vec<Projection>), UpdateRefusal> {
+    let mut tokens = lex(sql);
+    if let Some(index) = tokens
+        .iter()
+        .position(|token| matches!(token, Token::Symbol(';')))
+    {
+        if index + 1 != tokens.len() {
+            return Err(UpdateRefusal::UnsupportedSource(
+                "multiple statements are not editable through a result cell",
+            ));
+        }
+        tokens.pop();
+    }
+    if !word_at(&tokens, 0).is_some_and(|word| word.eq_ignore_ascii_case("select")) {
+        return Err(UpdateRefusal::UnsupportedSource(
+            "the retained statement is not a SELECT",
+        ));
+    }
+
+    let from = top_level_word(&tokens, "from").ok_or(UpdateRefusal::UnsupportedSource(
+        "the SELECT has no direct FROM relation",
+    ))?;
+    if ["union", "intersect", "except"]
+        .iter()
+        .any(|word| top_level_word(&tokens, word).is_some())
+    {
+        return Err(UpdateRefusal::UnsupportedSource(
+            "set operations are not editable through a result cell",
+        ));
+    }
+    let parsed_relation = parse_relation(&tokens, from)?;
+    let projections = parse_projections(&tokens[1..from], &parsed_relation)?;
+    Ok((parsed_relation, projections))
+}
+
 /// Plans one update after live relation metadata has been read.
 pub fn plan_update(
     source: &UpdateSource,
@@ -255,6 +273,63 @@ pub fn plan_update(
     selected_row: &[Cell],
     relation_columns: &[UpdateColumn],
     replacement: &str,
+) -> Result<UpdatePlan, UpdateRefusal> {
+    build_update(
+        source,
+        resolved_schema,
+        resolved_relation,
+        result_columns,
+        selected_row,
+        relation_columns,
+        Replacement {
+            text: replacement,
+            guard: None,
+        },
+    )
+}
+
+pub(crate) struct GuardedValue<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) origin: crate::structured::Origin,
+    pub(crate) kind: crate::structured::Kind,
+}
+
+pub(crate) fn plan_guarded_update(
+    source: &UpdateSource,
+    resolved_schema: &str,
+    resolved_relation: &str,
+    result_columns: &[String],
+    selected_row: &[Cell],
+    relation_columns: &[UpdateColumn],
+    replacement: GuardedValue<'_>,
+) -> Result<UpdatePlan, UpdateRefusal> {
+    build_update(
+        source,
+        resolved_schema,
+        resolved_relation,
+        result_columns,
+        selected_row,
+        relation_columns,
+        Replacement {
+            text: replacement.text,
+            guard: Some((replacement.origin, replacement.kind)),
+        },
+    )
+}
+
+struct Replacement<'a> {
+    text: &'a str,
+    guard: Option<(crate::structured::Origin, crate::structured::Kind)>,
+}
+
+fn build_update(
+    source: &UpdateSource,
+    resolved_schema: &str,
+    resolved_relation: &str,
+    result_columns: &[String],
+    selected_row: &[Cell],
+    relation_columns: &[UpdateColumn],
+    replacement: Replacement<'_>,
 ) -> Result<UpdatePlan, UpdateRefusal> {
     if source.selected_result_column >= result_columns.len()
         || source.selected_result_column >= selected_row.len()
@@ -298,7 +373,7 @@ pub fn plan_update(
     }
 
     let mut parameter_names = vec![NEW_VALUE_PARAMETER.to_owned()];
-    let mut parameter_values = vec![SecretString::from(replacement.to_owned())];
+    let mut parameter_values = vec![SecretString::from(replacement.text.to_owned())];
     let mut predicate = Vec::with_capacity(key_values.len());
     for (index, (name, value)) in key_values.iter().enumerate() {
         let parameter = format!("__ignatius_key_{index}");
@@ -307,13 +382,74 @@ pub fn plan_update(
         predicate.push(format!("{} = :{parameter}", quote_identifier(name)));
     }
 
-    let sql_template = format!(
-        "UPDATE {}.{} SET {} = :{} WHERE {}",
+    let relation = format!(
+        "{}.{}",
         quote_identifier(resolved_schema),
         quote_identifier(resolved_relation),
-        quote_identifier(&target.name),
-        NEW_VALUE_PARAMETER,
-        predicate.join(" AND ")
+    );
+    let column = quote_identifier(&target.name);
+    if let Some((origin, kind)) = replacement.guard {
+        let old = selected_row[source.selected_result_column]
+            .raw()
+            .ok_or(UpdateRefusal::MissingObservedValue)?;
+        parameter_names.extend(
+            [
+                "__ignatius_old_value",
+                "__ignatius_relation",
+                "__ignatius_attribute",
+            ]
+            .map(str::to_owned),
+        );
+        parameter_values
+            .extend([old, &relation, &target.name].map(|v| SecretString::from(v.to_owned())));
+        // Use the type's own output text and a bytewise comparison. The update
+        // checks the result's origin even if a same-named table or column was
+        // recreated after the metadata lookup. A concurrent modification of
+        // the selected value invalidates this predicate in the same UPDATE.
+        predicate.push(format!(
+            "{column} IS NOT NULL AND pg_catalog.format('%s', {column}) COLLATE pg_catalog.\"C\" \
+             OPERATOR(pg_catalog.=) :__ignatius_old_value"
+        ));
+        predicate.push(format!(
+            "EXISTS (SELECT 1 FROM pg_catalog.pg_attribute AS a \
+             WHERE a.attrelid = pg_catalog.to_regclass(:__ignatius_relation)::pg_catalog.oid \
+             AND a.attrelid = '{}'::pg_catalog.oid AND a.attnum = {} \
+             AND a.atttypid = '{}'::pg_catalog.oid AND a.atttypmod = {} \
+             AND a.attname = :__ignatius_attribute AND NOT a.attisdropped)",
+            origin.table, origin.attribute, origin.type_oid, origin.typmod,
+        ));
+        // Confirm that the live key still guarantees at most one matching row.
+        // Declarative partitions have a relation-wide key. Traditional table
+        // inheritance and deferrable keys can instead expose duplicate keys.
+        parameter_names.push("__ignatius_key_columns".to_owned());
+        let keys = key_values.iter().map(|(name, _)| name).collect::<Vec<_>>();
+        parameter_values.push(SecretString::from(
+            serde_json::to_string(&keys).map_err(|_| UpdateRefusal::InvalidTemplate)?,
+        ));
+        predicate.push(format!(
+            "EXISTS (SELECT 1 FROM pg_catalog.pg_index AS i \
+               JOIN pg_catalog.pg_class AS c ON c.oid = i.indrelid \
+               WHERE i.indrelid = '{}'::pg_catalog.oid \
+               AND i.indisprimary AND i.indisvalid AND i.indimmediate \
+               AND (c.relkind = 'p' OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits AS h \
+                    WHERE h.inhparent = c.oid)) \
+               AND (SELECT pg_catalog.jsonb_agg(k.attname::pg_catalog.text ORDER BY k.attnum) \
+                    FROM pg_catalog.pg_attribute AS k WHERE k.attrelid = i.indrelid \
+                    AND k.attnum = ANY(i.indkey[0: i.indnkeyatts - 1])) \
+                 = :__ignatius_key_columns::pg_catalog.jsonb)",
+            origin.table,
+        ));
+        // A non-round-trippable float rendering can make an unchanged textual
+        // PK or nested value ambiguous. Array input also needs array NULLs.
+        predicate
+            .push("pg_catalog.current_setting('extra_float_digits')::pg_catalog.int4 > 0".into());
+        if matches!(kind, crate::structured::Kind::Array { .. }) {
+            predicate.push("pg_catalog.current_setting('array_nulls') = 'on'".into());
+        }
+    }
+    let sql_template = format!(
+        "UPDATE {relation} SET {column} = :{NEW_VALUE_PARAMETER} WHERE {}",
+        predicate.join(" AND "),
     );
     let parameters = ParameterBindings::from_secrets(parameter_names, parameter_values)
         .map_err(|_| UpdateRefusal::InvalidTemplate)?;
@@ -335,6 +471,7 @@ pub fn plan_update(
         key_columns: key_values.into_iter().map(|(name, _)| name).collect(),
         sql_template,
         parameters,
+        guarded: replacement.guard.is_some(),
     })
 }
 

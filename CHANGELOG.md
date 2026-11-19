@@ -8,6 +8,14 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Cell Detail opens a bounded structured tree for JSONB, arrays, ranges,
+  and supported PostGIS and pgvector types. Reviewed edits recheck the original
+  value, column and primary key before sending a write.
+- New: `ignatius plan-history` records local query plan and latency changes
+  across schema revisions with a private, bounded catalog.
+- New: `ignatius fleet` compares schema, installed extensions and selected
+  settings across named profiles and reports connection and recovery health.
+
 - New: Built-in `material` palette (`[ui] theme = "material"` and
   `[theme] extends = "material"`) inspired by Google Material Design 3 Tonal Dark
   surfaces (`#111318`, `#191C22`, `#22262E`, `#2B303A`) with Material blue,

@@ -3070,6 +3070,7 @@ impl std::fmt::Debug for UpdateCandidate {
 /// A source mapping waiting for live relation metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateLookup {
+    pub(crate) patch: Option<crate::app::inspect::Patch>,
     /// Monotonic request identity.
     pub request: u64,
     /// Result identity to revalidate when the response returns.
@@ -3081,6 +3082,7 @@ pub struct UpdateLookup {
 /// A replacement value prompt for one update candidate.
 #[derive(Clone)]
 pub struct UpdatePrompt {
+    pub(crate) patch: Option<crate::app::inspect::Patch>,
     /// Result identity to revalidate before the review step.
     pub candidate: UpdateCandidate,
     /// The value-free source mapping.
@@ -3113,15 +3115,29 @@ impl UpdatePrompt {
             candidate,
             source,
             relation,
+            patch: None,
             typed: SecretString::from(String::new()),
         }
     }
 
     /// Adds one Unicode scalar value to the replacement.
     pub fn push(&mut self, character: char) {
-        let mut typed = self.typed.expose_secret().to_owned();
-        typed.push(character);
+        self.append(character.encode_utf8(&mut [0_u8; 4]));
+    }
+
+    /// Appends a paste as one edit, within the structured-input limit.
+    pub(crate) fn append(&mut self, fragment: &str) -> bool {
+        let current = self.typed.expose_secret();
+        if self.patch.is_some()
+            && current.len().saturating_add(fragment.len()) > crate::structured::MAX_BYTES
+        {
+            return false;
+        }
+        let mut typed = String::with_capacity(current.len().saturating_add(fragment.len()));
+        typed.push_str(current);
+        typed.push_str(fragment);
         self.typed = SecretString::from(typed);
+        true
     }
 
     /// Removes one Unicode scalar value from the replacement.

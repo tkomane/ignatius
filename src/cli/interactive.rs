@@ -2151,7 +2151,9 @@ fn spawn_execute(
         if !scope.is_current() {
             return;
         }
-        let execution = session.execute(&sql, row_cap, job).await;
+        let execution = session
+            .execute_for_workbench(&sql, None, row_cap, job)
+            .await;
         if !scope.is_current() {
             return;
         }
@@ -2190,7 +2192,7 @@ fn spawn_execute_parameterized(
             return;
         }
         let execution = session
-            .execute_with_parameters(&sql, &parameters, row_cap, job)
+            .execute_for_workbench(&sql, Some(&parameters), row_cap, job)
             .await;
         if !scope.is_current() {
             return;

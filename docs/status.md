@@ -4,6 +4,63 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 43: Milestone 15 and readiness checks - 19 November 2026
+
+- [PR 92](https://github.com/tkomane/ignatius/pull/92) refreshed the README
+  with 12 reproducible synthetic Ratatui captures, including both new themes
+  and the three M14 overlays. The companion HTML guide passed headless
+  Chrome layout, keyboard focus, console and image checks at 320, 390, 820
+  and 1440 px.
+- [059](../specs/059-structured-type-and-jsonb-inspector/spec.md) adds a
+  bounded tree and reviewed edits to Cell Detail.
+  [060](../specs/060-query-plan-history-and-regression-timeline/spec.md)
+  records local query-plan observations and measurements.
+  [061](../specs/061-multi-target-environment-diff-and-fleet-health/spec.md)
+  compares read-only catalog and health evidence across named profiles.
+- The integrated `cargo --locked xtask verify` passed at `10b76d9` on
+  macOS arm64 with PostgreSQL 18.7 plain and TLS. Live contracts also covered
+  PostGIS 3.6.4 on 17.11 (geometry, geography and a whole-geometry update)
+  and pgvector 0.8.2 on 18.4 (dense vector inspection and a coordinate
+  update). Half and sparse vectors have parser evidence. The local Unix
+  socket case skipped because its fixture URI was unset.
+- Five focused M15 live contracts per major passed on the local reviewed
+  PostgreSQL 14.25, 15.20, 16.16 and 17.12 plain fixtures. They covered
+  three structured-edit routes, the index revision timeline, and fleet
+  equality and partial results. The manifest digests are in
+  [the fixture map](../docker/postgres-images.env).
+- [Windows ConPTY diagnostic 44595685632](https://github.com/tkomane/ignatius/actions/runs/44595685632)
+  at `28dcc4b` passed no-guard, known-unrestored and hung-child controls.
+  Native setters and main-screen VT cursor visibility were observable.
+  Alternate-screen VT visibility remained unobservable, and the strict
+  capability check failed. Windows Terminal, Linux full-screen and Warp
+  hand-use acceptance remain open.
+- [Candidate rehearsal 44595130441](https://github.com/tkomane/ignatius/actions/runs/44595130441)
+  archived and smoke-tested Linux, macOS and Windows at `28dcc4b`. The
+  retrieved aggregate passed all three checksum checks. Linux and macOS
+  repeat builds matched. Windows used different MSVC linker versions
+  (14.52 and 14.51) and failed byte equality. The candidate remains
+  non-publishable under ADR-0008.
+
+## Wave 42: Post-merge baseline and local fixtures - 19 November 2026
+
+- On `main` at `28dcc4b927b04d5822b1392f902b6d37ebc90aa6`,
+  [CI run 44592484401](https://github.com/tkomane/ignatius/actions/runs/44592484401)
+  passed all 16 runnable jobs. This includes Rust 1.90, Linux, macOS, Windows,
+  the PostgreSQL 14-18 matrix and the PostgreSQL 18 Unix-socket job. The
+  scheduled fixture-drift job was skipped on this push.
+- [CodeQL run 44592484219](https://github.com/tkomane/ignatius/actions/runs/44592484219)
+  passed its Actions, Python and Rust jobs on the same commit.
+- The local plain and TLS Compose defaults now use PostgreSQL 18.7, matching
+  the server patch version in the reviewed PostgreSQL 18 digest. Explicit
+  `IGNATIUS_POSTGRES_IMAGE` and `IGNATIUS_PG_VERSION` overrides still work.
+- The official Docker Hub `14-alpine` through `18-alpine` manifests matched
+  the reviewed digest map on 19 November 2026. Both default fixtures reported
+  18.7 with three synthetic orders and the expected plain/TLS transport.
+- `cargo --offline --locked xtask verify` passed formatting, lints, API docs,
+  workspace and doc tests on macOS arm64 with those two live fixtures. The
+  local Unix-socket integration skipped because `IGNATIUS_TEST_PG_SOCKET_URI`
+  was unset. `actionlint` passed.
+
 ## Wave 41 (056-058, Milestone 14: Benchmarks, Snapshots & Runbooks, Material 3 Theme & CI Fixes) Delivery - 19 November 2026
 
 Branch `feat/m14-bench-snapshot-runbook-polish` (stacked on Wave 40 `0346210`) delivers Milestone 14 (`056-058`), built-in Google Material Design 3 Tonal Dark theming and TUI/CLI polish, and DevOps CI fixes:
@@ -3599,10 +3656,9 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-Milestone 9 source work is closed. No M10 feature set is specified, so the next
-source slice is a W16 decision from an observed job, not an invented feature.
-The open items below are correctness, native, accessibility and release
-evidence, plus owner decisions.
+See the current wave above for Milestone 15 and the latest verification.
+The open items below cover correctness, native platform use, accessibility
+and release evidence.
 
 1. **W07:** calibrate the Windows cursor sensor under the owned native contract,
    preserving `7d167a9`'s three control passes and failed capability. Admit the
@@ -3619,6 +3675,7 @@ evidence, plus owner decisions.
    resource work; mouse capture stays off until pointer behavior/parity exists.
 5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence when
    access exists. Synthetic buffers and PTYs do not replace hand use.
-6. **W11/W13/W12/W14:** keep prepared trust/governance/naming decisions open and
-   today's owner-skipped external review explicit. Branch push, draft PR and CI
-   are authorised; merge, signing and release remain separate owner decisions.
+6. **W11/W13/W12/W14:** keep the trust, governance and naming decisions open.
+   Verified branch pushes, pull requests and green merges follow the
+   constitution. Signing, tagging and public release decisions require
+   explicit owner authority.

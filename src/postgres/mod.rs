@@ -9,14 +9,17 @@ pub mod crud;
 mod dbdoc;
 pub mod drill;
 pub mod error;
+mod fleet;
 pub mod growth;
 pub mod metadata;
 mod notices;
 pub mod partition;
+pub(crate) mod plan_history;
 pub mod plandiff;
 pub mod replication;
 pub mod session;
 pub mod snapshot;
+mod structured;
 pub mod tls;
 
 pub use metadata::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary, quote_identifier};

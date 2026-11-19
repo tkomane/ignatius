@@ -490,6 +490,13 @@ pub(crate) fn render_inspector(
     let Some(row) = model.selected_source_row() else {
         return;
     };
+    let structure = crate::app::inspect::structured_view(set, row, model.selected_column);
+    if !inspector.raw()
+        && let Some(Ok(tree)) = &structure
+    {
+        render_structured_inspector(model, tree, inspector.scroll(), presentation, box_area, buf);
+        return;
+    }
     let Some(view) = crate::app::inspect::CellView::build(set, row, model.selected_column, width)
     else {
         return;
@@ -513,6 +520,18 @@ pub(crate) fn render_inspector(
             theme.style(Token::Muted),
         )),
     ];
+
+    let height = height.saturating_sub(usize::from(structure.is_some()));
+    if let Some(structure) = structure {
+        let status = match structure {
+            Ok(_) => "Server text. r shows the tree.",
+            Err(error) => error.description(),
+        };
+        lines.push(Line::from(Span::styled(
+            truncate_to_width(status, width, !presentation.glyphs.is_ascii()),
+            theme.style(Token::Info),
+        )));
+    }
 
     if view.is_null {
         // A NULL has no characters to show. Saying so is the point: this is the
@@ -545,6 +564,90 @@ pub(crate) fn render_inspector(
             presentation,
         ))
         .render(box_area, buf);
+}
+
+fn render_structured_inspector(
+    model: &Model,
+    tree: &crate::structured::Tree<'_>,
+    selected: usize,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let width = area.width.saturating_sub(4) as usize;
+    let available = area.height.saturating_sub(2) as usize;
+    let selected = selected.min(tree.nodes.len().saturating_sub(1));
+    let set = model.visible_result();
+    let editable = set
+        .and_then(|set| set.structured_column(model.selected_column))
+        .and_then(|column| column.edit_input(tree, selected))
+        .is_some()
+        && crate::app::discovery::action_is_available(
+            model,
+            &crate::app::message::Action::GenerateCellUpdate,
+        );
+    let title = if editable {
+        " Cell Detail  r Raw  e Edit "
+    } else {
+        " Cell Detail  r Raw "
+    };
+    let mut lines = Vec::new();
+    let status = if tree.truncated {
+        format!(
+            "Truncated tree  node {} of {} shown",
+            selected + 1,
+            tree.nodes.len()
+        )
+    } else {
+        format!("Node {} of {}", selected + 1, tree.nodes.len())
+    };
+    let column = set
+        .and_then(|set| set.columns.get(model.selected_column))
+        .map_or_else(String::new, |column| sanitize_for_display(column));
+    lines.push(Line::from(Span::styled(
+        truncate_to_width(&format!("{status}  |  {column}"), width, unicode),
+        theme.style(if tree.truncated {
+            Token::Warning
+        } else {
+            Token::Muted
+        }),
+    )));
+    let has_path = available >= 3;
+    let visible = available.saturating_sub(lines.len() + usize::from(has_path));
+    let start = selected.saturating_sub(visible.saturating_sub(1));
+    for (index, node) in tree.nodes.iter().enumerate().skip(start).take(visible) {
+        let marker = if index == selected { ">" } else { " " };
+        let indent = " ".repeat((node.depth * 2).min(width / 2));
+        let label = sanitize_for_display(&node.label);
+        let value = sanitize_for_display(tree.preview(index));
+        let text = truncate_to_width(
+            &format!("{marker} {indent}{label}  {value}"),
+            width,
+            unicode,
+        );
+        let style = if index == selected {
+            theme.style(Token::Selection)
+        } else {
+            theme.style(Token::Text)
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
+    if has_path {
+        lines.push(Line::from(Span::styled(
+            truncate_to_width(
+                &format!("Path {}", sanitize_for_display(&tree.path(selected))),
+                width,
+                unicode,
+            ),
+            theme.style(Token::Info),
+        )));
+    }
+    ratatui::widgets::Clear.render(area, buf);
+    Paragraph::new(lines)
+        .block(overlay_block(title.to_owned(), presentation))
+        .render(area, buf);
 }
 
 fn render_results_placeholder(

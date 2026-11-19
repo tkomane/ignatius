@@ -46,14 +46,21 @@ SELECT
     n.nspname::text AS schema_name,
     c.relname::text AS table_name,
     a.attname::text AS column_name,
-    pg_catalog.format_type(a.atttypid, a.atttypmod)::text AS data_type,
+    CASE WHEN pg_catalog.octet_length(expr.data_type) <= $3 THEN expr.data_type END AS data_type,
     (NOT a.attnotnull) AS nullable,
-    pg_catalog.pg_get_expr(d.adbin, d.adrelid)::text AS default_expr,
+    CASE WHEN pg_catalog.octet_length(expr.definition) <= $3 THEN expr.definition END AS default_expr,
+    COALESCE(pg_catalog.octet_length(expr.definition) > $3, false)
+        OR pg_catalog.octet_length(expr.data_type) > $3 AS definition_bounded,
     a.attnum AS ordinal
 FROM pg_catalog.pg_attribute a
 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+CROSS JOIN LATERAL (
+    SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid)::text AS definition,
+           pg_catalog.format_type(a.atttypid, a.atttypmod)::text AS data_type
+    OFFSET 0
+) expr
 WHERE c.relkind IN ('r', 'p')
   AND a.attnum > 0
   AND NOT a.attisdropped
@@ -83,10 +90,14 @@ SELECT
         WHEN 'x' THEN 'EXCLUSION'
         ELSE con.contype::text
     END AS kind,
-    COALESCE(pg_catalog.pg_get_constraintdef(con.oid)::text, '') AS definition
+    CASE WHEN pg_catalog.octet_length(expr.definition) <= $3 THEN expr.definition END AS definition,
+    pg_catalog.octet_length(expr.definition) > $3 AS definition_bounded
 FROM pg_catalog.pg_constraint con
 JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_catalog.pg_get_constraintdef(con.oid)::text, '') AS definition OFFSET 0
+) expr
 WHERE c.relkind IN ('r', 'p')
   AND con.contype IN ('p', 'f', 'u', 'c', 'x')
   AND (
@@ -109,11 +120,15 @@ SELECT
     ic.relname::text AS index_name,
     i.indisunique AS is_unique,
     i.indisprimary AS is_primary,
-    COALESCE(pg_catalog.pg_get_indexdef(i.indexrelid)::text, '') AS definition
+    CASE WHEN pg_catalog.octet_length(expr.definition) <= $3 THEN expr.definition END AS definition,
+    pg_catalog.octet_length(expr.definition) > $3 AS definition_bounded
 FROM pg_catalog.pg_index i
 JOIN pg_catalog.pg_class c ON c.oid = i.indrelid
 JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_catalog.pg_get_indexdef(i.indexrelid)::text, '') AS definition OFFSET 0
+) expr
 WHERE c.relkind IN ('r', 'p')
   AND i.indislive
   AND (
@@ -150,13 +165,21 @@ SELECT
             FROM pg_catalog.unnest(p.polroles) AS roid
             JOIN pg_catalog.pg_roles r ON r.oid = roid
             ORDER BY r.rolname
+            LIMIT $4
         )
     END AS roles,
-    pg_catalog.pg_get_expr(p.polqual, p.polrelid)::text AS qual,
-    pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)::text AS with_check
+    CASE WHEN pg_catalog.octet_length(expr.qual) <= $3 THEN expr.qual END AS qual,
+    CASE WHEN pg_catalog.octet_length(expr.with_check) <= $3 THEN expr.with_check END AS with_check,
+    COALESCE(pg_catalog.octet_length(expr.qual) > $3, false)
+        OR COALESCE(pg_catalog.octet_length(expr.with_check) > $3, false) AS definition_bounded
 FROM pg_catalog.pg_policy p
 JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL (
+    SELECT pg_catalog.pg_get_expr(p.polqual, p.polrelid)::text AS qual,
+           pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)::text AS with_check
+    OFFSET 0
+) expr
 WHERE c.relkind IN ('r', 'p')
   AND (
       ($1::text IS NOT NULL AND n.nspname = $1::text)
@@ -176,9 +199,13 @@ SELECT
     n.nspname::text AS schema_name,
     c.relname::text AS view_name,
     (c.relkind = 'm') AS materialized,
-    COALESCE(pg_catalog.pg_get_viewdef(c.oid, true)::text, '') AS definition
+    CASE WHEN pg_catalog.octet_length(expr.definition) <= $3 THEN expr.definition END AS definition,
+    pg_catalog.octet_length(expr.definition) > $3 AS definition_bounded
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_catalog.pg_get_viewdef(c.oid, true)::text, '') AS definition OFFSET 0
+) expr
 WHERE c.relkind IN ('v', 'm')
   AND (
       ($1::text IS NOT NULL AND n.nspname = $1::text)
@@ -227,6 +254,7 @@ SELECT
         FROM pg_catalog.pg_enum e
         WHERE e.enumtypid = t.oid
         ORDER BY e.enumsortorder
+        LIMIT $3
     ) AS labels
 FROM pg_catalog.pg_type t
 JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
@@ -253,6 +281,23 @@ pub async fn capture_schema_snapshot(
     client: &Client,
     schema: Option<&str>,
 ) -> Result<SchemaSnapshot, Diagnostic> {
+    capture(client, schema, i32::MAX, i64::MAX - 1).await
+}
+
+/// Adds wire bounds for definitions and nested arrays before comparison.
+pub(super) async fn capture_bounded_schema_snapshot(
+    client: &Client,
+    schema: Option<&str>,
+) -> Result<SchemaSnapshot, Diagnostic> {
+    capture(client, schema, 4096, 128).await
+}
+
+async fn capture(
+    client: &Client,
+    schema: Option<&str>,
+    definition_bytes: i32,
+    nested_items: i64,
+) -> Result<SchemaSnapshot, Diagnostic> {
     if let Some(filter) = schema
         && filter.trim().is_empty()
     {
@@ -265,6 +310,7 @@ pub async fn capture_schema_snapshot(
     }
 
     let mut snapshot = SchemaSnapshot::new(schema.map(str::to_owned));
+    let nested_limit = nested_items + 1;
 
     let table_limit = (MAX_SNAPSHOT_TABLES + 1) as i64;
     let table_rows = client
@@ -297,7 +343,7 @@ pub async fn capture_schema_snapshot(
     if !table_map.is_empty() {
         let col_limit = (MAX_SNAPSHOT_COLUMNS + 1) as i64;
         let col_rows = client
-            .query(COLUMNS_SQL, &[&schema, &col_limit])
+            .query(COLUMNS_SQL, &[&schema, &col_limit, &definition_bytes])
             .await
             .map_err(|error| from_query_error(&error, 2))?;
         if col_rows.len() > MAX_SNAPSHOT_COLUMNS {
@@ -309,9 +355,10 @@ pub async fn capture_schema_snapshot(
                 get::<String>(row, "table_name")?,
             );
             if let Some(table) = table_map.get_mut(&key) {
+                snapshot.truncated |= get::<bool>(row, "definition_bounded")?;
                 table.columns.push(ColumnSnapshot {
                     name: get(row, "column_name")?,
-                    data_type: get(row, "data_type")?,
+                    data_type: get::<Option<String>>(row, "data_type")?.unwrap_or_default(),
                     nullable: get(row, "nullable")?,
                     default_expr: get(row, "default_expr")?,
                     ordinal: get(row, "ordinal")?,
@@ -321,7 +368,7 @@ pub async fn capture_schema_snapshot(
 
         let con_limit = (MAX_SNAPSHOT_CONSTRAINTS + 1) as i64;
         let con_rows = client
-            .query(CONSTRAINTS_SQL, &[&schema, &con_limit])
+            .query(CONSTRAINTS_SQL, &[&schema, &con_limit, &definition_bytes])
             .await
             .map_err(|error| from_query_error(&error, 3))?;
         if con_rows.len() > MAX_SNAPSHOT_CONSTRAINTS {
@@ -333,17 +380,18 @@ pub async fn capture_schema_snapshot(
                 get::<String>(row, "table_name")?,
             );
             if let Some(table) = table_map.get_mut(&key) {
+                snapshot.truncated |= get::<bool>(row, "definition_bounded")?;
                 table.constraints.push(ConstraintSnapshot {
                     name: get(row, "constraint_name")?,
                     kind: get(row, "kind")?,
-                    definition: get(row, "definition")?,
+                    definition: get::<Option<String>>(row, "definition")?.unwrap_or_default(),
                 });
             }
         }
 
         let idx_limit = (MAX_SNAPSHOT_INDEXES + 1) as i64;
         let idx_rows = client
-            .query(INDEXES_SQL, &[&schema, &idx_limit])
+            .query(INDEXES_SQL, &[&schema, &idx_limit, &definition_bytes])
             .await
             .map_err(|error| from_query_error(&error, 4))?;
         if idx_rows.len() > MAX_SNAPSHOT_INDEXES {
@@ -355,18 +403,22 @@ pub async fn capture_schema_snapshot(
                 get::<String>(row, "table_name")?,
             );
             if let Some(table) = table_map.get_mut(&key) {
+                snapshot.truncated |= get::<bool>(row, "definition_bounded")?;
                 table.indexes.push(IndexSnapshot {
                     name: get(row, "index_name")?,
                     is_unique: get(row, "is_unique")?,
                     is_primary: get(row, "is_primary")?,
-                    definition: get(row, "definition")?,
+                    definition: get::<Option<String>>(row, "definition")?.unwrap_or_default(),
                 });
             }
         }
 
         let pol_limit = (MAX_SNAPSHOT_POLICIES + 1) as i64;
         let pol_rows = client
-            .query(POLICIES_SQL, &[&schema, &pol_limit])
+            .query(
+                POLICIES_SQL,
+                &[&schema, &pol_limit, &definition_bytes, &nested_limit],
+            )
             .await
             .map_err(|error| from_query_error(&error, 5))?;
         if pol_rows.len() > MAX_SNAPSHOT_POLICIES {
@@ -378,11 +430,14 @@ pub async fn capture_schema_snapshot(
                 get::<String>(row, "table_name")?,
             );
             if let Some(table) = table_map.get_mut(&key) {
+                let mut roles: Vec<String> = get(row, "roles")?;
+                snapshot.truncated |=
+                    get::<bool>(row, "definition_bounded")? | trim_nested(&mut roles, nested_items);
                 table.policies.push(PolicySnapshot {
                     name: get(row, "policy_name")?,
                     cmd: get(row, "cmd")?,
                     permissive: get(row, "permissive")?,
-                    roles: get(row, "roles")?,
+                    roles,
                     qual: get(row, "qual")?,
                     with_check: get(row, "with_check")?,
                 });
@@ -394,14 +449,15 @@ pub async fn capture_schema_snapshot(
 
     let view_limit = (MAX_SNAPSHOT_TABLES + 1) as i64;
     let view_rows = client
-        .query(VIEWS_SQL, &[&schema, &view_limit])
+        .query(VIEWS_SQL, &[&schema, &view_limit, &definition_bytes])
         .await
         .map_err(|error| from_query_error(&error, 6))?;
     if view_rows.len() > MAX_SNAPSHOT_TABLES {
         snapshot.truncated = true;
     }
     for row in view_rows.iter().take(MAX_SNAPSHOT_TABLES) {
-        let definition: String = get(row, "definition")?;
+        snapshot.truncated |= get::<bool>(row, "definition_bounded")?;
+        let definition = get::<Option<String>>(row, "definition")?.unwrap_or_default();
         snapshot.views.push(ViewSnapshot {
             schema: get(row, "schema_name")?,
             name: get(row, "view_name")?,
@@ -431,21 +487,31 @@ pub async fn capture_schema_snapshot(
 
     let enum_limit = (MAX_SNAPSHOT_TABLES + 1) as i64;
     let enum_rows = client
-        .query(ENUMS_SQL, &[&schema, &enum_limit])
+        .query(ENUMS_SQL, &[&schema, &enum_limit, &nested_limit])
         .await
         .map_err(|error| from_query_error(&error, 8))?;
     if enum_rows.len() > MAX_SNAPSHOT_TABLES {
         snapshot.truncated = true;
     }
     for row in enum_rows.iter().take(MAX_SNAPSHOT_TABLES) {
+        let mut labels: Vec<String> = get(row, "labels")?;
+        snapshot.truncated |= trim_nested(&mut labels, nested_items);
         snapshot.enums.push(EnumSnapshot {
             schema: get(row, "schema_name")?,
             name: get(row, "enum_name")?,
-            labels: get(row, "labels")?,
+            labels,
         });
     }
 
     Ok(snapshot.finalize())
+}
+
+fn trim_nested(values: &mut Vec<String>, max: i64) -> bool {
+    let bounded = values.len() as i64 > max;
+    if bounded {
+        values.truncate(max as usize);
+    }
+    bounded
 }
 
 fn get<'a, T>(row: &'a tokio_postgres::Row, column: &str) -> Result<T, Diagnostic>
@@ -461,3 +527,6 @@ where
         .next_action("report this with the PostgreSQL server version")
     })
 }
+
+#[cfg(test)]
+mod tests;
