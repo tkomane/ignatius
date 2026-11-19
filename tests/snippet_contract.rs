@@ -29,17 +29,11 @@ fn binary(temp_dir: &std::path::Path) -> Command {
     command
 }
 
-fn temp_config_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "ignatius-snippet-test-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp config dir");
-    dir
+fn temp_config_dir() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("ignatius-snippet-test-")
+        .tempdir()
+        .expect("create temp config dir")
 }
 
 fn stdout(output: &Output) -> String {
@@ -78,7 +72,7 @@ fn cli_snippet_list_table_and_json() {
     let temp_dir = temp_config_dir();
 
     // 1. Table output (default)
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("list")
         .output()
@@ -93,7 +87,7 @@ fn cli_snippet_list_table_and_json() {
     assert!(out.contains("table-sizes"), "built-in missing");
 
     // 2. JSON output
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("list")
         .arg("--format")
@@ -115,7 +109,7 @@ fn cli_snippet_list_table_and_json() {
     );
 
     // 3. Category filter
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("list")
         .arg("--category")
@@ -126,8 +120,6 @@ fn cli_snippet_list_table_and_json() {
     let admin_out = stdout(&output);
     assert!(admin_out.contains("kill-idle-tx"));
     assert!(!admin_out.contains("cache-hit-ratio"));
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
@@ -135,7 +127,7 @@ fn cli_snippet_show_sql_and_json() {
     let temp_dir = temp_config_dir();
 
     // 1. Show SQL (default format)
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("show")
         .arg("cache-hit-ratio")
@@ -147,7 +139,7 @@ fn cli_snippet_show_sql_and_json() {
     assert!(out.contains("pg_statio_user_indexes"));
 
     // 2. Show JSON
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("show")
         .arg("cache-hit-ratio")
@@ -163,7 +155,7 @@ fn cli_snippet_show_sql_and_json() {
     assert_eq!(json_val["is_builtin"], true);
 
     // 3. Unknown snippet reports usage error (exit code 2)
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("show")
         .arg("nonexistent-snippet")
@@ -172,8 +164,6 @@ fn cli_snippet_show_sql_and_json() {
     assert_eq!(code(&output), 2);
     let err = stderr(&output);
     assert!(err.contains("nonexistent-snippet"));
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
@@ -181,7 +171,7 @@ fn cli_snippet_add_user_snippet_and_persist() {
     let temp_dir = temp_config_dir();
 
     // 1. Add user snippet via CLI
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("add")
         .arg("my-daily-report")
@@ -198,11 +188,11 @@ fn cli_snippet_add_user_snippet_and_persist() {
     assert!(err.contains("Saved snippet 'my-daily-report'"));
 
     // Verify file exists on disk
-    let snippet_file = temp_dir.join("snippets").join("my-daily-report.sql");
+    let snippet_file = temp_dir.path().join("snippets").join("my-daily-report.sql");
     assert!(snippet_file.exists(), "snippet file was not persisted");
 
     // 2. Show the newly added snippet
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("show")
         .arg("my-daily-report")
@@ -212,7 +202,7 @@ fn cli_snippet_add_user_snippet_and_persist() {
     assert!(stdout(&output).contains("SELECT date_trunc('day', created_at)"));
 
     // 3. List with user category
-    let output = binary(&temp_dir)
+    let output = binary(temp_dir.path())
         .arg("snippet")
         .arg("list")
         .arg("--category")
@@ -223,8 +213,6 @@ fn cli_snippet_add_user_snippet_and_persist() {
     let out = stdout(&output);
     assert!(out.contains("my-daily-report"));
     assert!(out.contains("Daily Executive Summary"));
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
