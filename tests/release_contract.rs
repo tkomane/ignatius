@@ -2692,6 +2692,53 @@ fn release_workflow_uses_the_required_actions_and_pinned_build_inputs() {
 }
 
 #[test]
+fn windows_archive_and_repeats_use_the_same_pinned_native_inputs() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let archive = workflow_job_block(workflow, "archive");
+    let repeats = workflow_job_block(workflow, "reproducibility");
+    let archive_setup = archive
+        .split_once("      - &windows-release-toolchain\n")
+        .expect("archive defines the shared Windows setup")
+        .1;
+    let (setup, other_steps) = archive_setup
+        .split_once("      - name: Cache Rust build inputs")
+        .expect("native setup runs before using build inputs");
+    for expected in [
+        "if: runner.os == 'Windows'",
+        "$msvc = '14.44.35207'",
+        "$sdk = '10.0.26100.0'",
+        "x64 $sdk -vcvars_ver=$msvc",
+        "$settings.VCToolsVersion -ne $msvc",
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker",
+        "CC_x86_64_pc_windows_msvc=$compiler",
+        "AR_x86_64_pc_windows_msvc=$librarian",
+    ] {
+        assert!(
+            setup.contains(expected),
+            "Windows native setup missing {expected}"
+        );
+    }
+    assert!(other_steps.contains("      - name: Build the target binary"));
+    assert_eq!(
+        repeats
+            .matches("      - *windows-release-toolchain")
+            .count(),
+        1,
+        "both Windows repeats must use the archive job's native toolchain setup",
+    );
+    assert!(
+        repeats.find("      - *windows-release-toolchain")
+            < repeats.find("      - name: Build a fixed-identity reproducibility candidate"),
+    );
+    for job in [archive, repeats] {
+        assert!(
+            job.contains("        if: runner.os != 'Windows'\n        uses: Swatinem/rust-cache@"),
+            "Windows native objects must be rebuilt after selecting the native toolchain",
+        );
+    }
+}
+
+#[test]
 fn shared_ci_scans_only_the_checked_release_evidence_scope() {
     let workflow = include_str!("../.github/workflows/ci.yml");
     let evidence_scan = workflow_job_block(workflow, "release-evidence");
