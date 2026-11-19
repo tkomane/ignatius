@@ -10,7 +10,7 @@
 use std::time::Instant;
 
 use futures_util::StreamExt;
-use tokio_postgres::{Client, SimpleQueryMessage};
+use tokio_postgres::{Client, SimpleQueryMessage, Statement, types::ToSql};
 
 use crate::bench::{BenchConfig, BenchSample, BenchStats, compute_bench_stats};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
@@ -31,23 +31,57 @@ pub async fn run_benchmark(
 ) -> Result<BenchStats, Diagnostic> {
     let stmt_text = validate_single_statement(sql)?;
     let effective = config.clamped();
+    collect_samples(label, &stmt_text, &effective, || {
+        run_iteration(client, &stmt_text, effective.rollback)
+    })
+    .await
+}
 
-    for _ in 0..effective.warmup_runs {
-        let _ = run_iteration(client, &stmt_text, effective.rollback).await?;
+/// Collect warmup and measured samples using the caller's execution route.
+pub(super) async fn collect_samples<F, Fut>(
+    label: &str,
+    sql: &str,
+    config: &BenchConfig,
+    mut iteration: F,
+) -> Result<BenchStats, Diagnostic>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(f64, u64), Diagnostic>>,
+{
+    for _ in 0..config.warmup_runs {
+        let _ = iteration().await?;
     }
 
-    let mut samples = Vec::with_capacity(effective.measured_runs);
-    for iteration in 1..=effective.measured_runs {
-        let (duration_ms, rows_returned) =
-            run_iteration(client, &stmt_text, effective.rollback).await?;
+    let mut samples = Vec::with_capacity(config.measured_runs);
+    for sample in 1..=config.measured_runs {
+        let (duration_ms, rows_returned) = iteration().await?;
         samples.push(BenchSample {
-            iteration,
+            iteration: sample,
             duration_ms,
             rows_returned,
         });
     }
 
-    Ok(compute_bench_stats(label, &stmt_text, &effective, &samples))
+    Ok(compute_bench_stats(label, sql, config, &samples))
+}
+
+/// Time one parameterless prepared read without retaining its result rows.
+pub(super) async fn timed_prepared_read(
+    client: &Client,
+    statement: &Statement,
+) -> Result<(f64, u64), Diagnostic> {
+    let started = Instant::now();
+    let rows = client
+        .query_raw(statement, std::iter::empty::<&(dyn ToSql + Sync)>())
+        .await
+        .map_err(|error| from_query_error(&error, 1))?;
+    tokio::pin!(rows);
+    let mut count = 0u64;
+    while let Some(row) = rows.next().await {
+        row.map_err(|error| from_query_error(&error, 1))?;
+        count = count.saturating_add(1);
+    }
+    Ok((started.elapsed().as_secs_f64() * 1000.0, count))
 }
 
 fn validate_single_statement(sql: &str) -> Result<String, Diagnostic> {

@@ -220,6 +220,8 @@ jobs:
           --test runtime_privacy_contract
           --test notice_retention_contract
           --test retained_result_contract
+          --test plan_history_contract
+          --test fleet_contract
       - name: Session and notice lifecycle guards over plain PostgreSQL
         env:
           IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@127.0.0.1:55432/ignatius_demo
@@ -230,7 +232,7 @@ jobs:
         env:
           IGNATIUS_TEST_PG_URI: postgres://ignatius_test:not-a-real-password-disposable-container@localhost:55433/ignatius_demo?sslmode=verify-full&sslrootcert=${{ github.workspace }}/docker/tls/generated/ca.crt
         run: |
-          cargo test --locked --test parameter_semantics_contract --test runtime_privacy_contract --test notice_retention_contract --test retained_result_contract
+          cargo test --locked --test parameter_semantics_contract --test runtime_privacy_contract --test notice_retention_contract --test retained_result_contract --test plan_history_contract
           cargo test --locked --lib postgres::session
           cargo test --locked --lib cli::interactive::tests::notice_
       - name: Show fixture diagnostics after a failure

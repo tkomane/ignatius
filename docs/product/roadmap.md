@@ -129,6 +129,7 @@ below; broadening the feature list does not move a milestone forward.
 | M12 Complete psql & Server/Replication Parity | Interactive `psql` backslash commands, bounded `\watch`, logical replication/slot safety, and server config/HBA/FDW/tablespace management | W16 (Features 050-052) | Pure meta-command lexer & bounded watch timer, `pg_publication`/`pg_subscription`/`pg_replication_slots` safety manager, `pg_settings`/`pg_hba_file_rules`/`pg_available_extensions`/FDW/tablespace inspector |
 | M13 Live Data CRUD, Plan Diff & Analytics | Keyset-paginated data browser with reviewed multi-row CRUD, `EXPLAIN (BUFFERS, WAL)` A/B plan diffing, and result sparklines/Parquet export | W16 (Features 053-055) | Table data browser with reviewed INSERT/DELETE/batch UPDATE, baseline plan diffing, terminal histograms/sparklines, HTML/Parquet export |
 | M14 Query Benchmarks, Schema Snapshots & Runbooks | Multi-iteration A/B query latency benchmarking, canonical SHA-256 schema snapshots with drift CI gates, Markdown SQL runbooks, and Material Tonal polish | W16 (Features 056-058) | Rollback-safe warmup/measured benchmark engine with regression gates, zero-row `pg_catalog` snapshot diffing, Markdown/`-- @cell` runbooks with write guards, built-in `material` theme |
+| M15 Structured Values, Plan History & Fleet Health | Inspect structured cells, track query plan regressions and compare named environments | W16 (Features 059-061) | Reviewed typed edits, digest-only local plan history and bounded read-only fleet comparisons |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -211,8 +212,14 @@ and recorded in `docs/status.md` Wave 41.
   planning, and Markdown/JSON/plain/table reports (`ignatius runbook`,
   `Ctrl+K ?` / `sql-runbook`).
 
-No new feature is implied by milestone completion; the next source slice opens
-from an observed job under W16.
+M15 has three source specifications and their accompanying evidence tasks.
+
+- [059 Structured Type and JSONB Inspector](../../specs/059-structured-type-and-jsonb-inspector/spec.md)
+  extends Cell Detail with navigation, a raw view and reviewed editing.
+- [060 Query Plan History and Regression Timeline](../../specs/060-query-plan-history-and-regression-timeline/spec.md)
+  records local observations across index and schema changes.
+- [061 Multi-Target Environment Diff and Fleet Health](../../specs/061-multi-target-environment-diff-and-fleet-health/spec.md)
+  compares one baseline and up to three candidate profiles with read-only probes.
 
 ```mermaid
 flowchart LR
@@ -235,6 +242,7 @@ flowchart LR
     M11 --> M12["M12 psql & Cluster/Replication Parity (050-052)"]
     M12 --> M13["M13 Live CRUD, Plan Diff & Analytics (053-055)"]
     M13 --> M14["M14 Benchmarks, Snapshots & Runbooks (056-058)"]
+    M14 --> M15["M15 Structured Values, Plan History & Fleet Health (059-061)"]
 ```
 
 ## Start here

@@ -23,13 +23,17 @@ use crate::query::value::{self, Cell};
 pub struct Inspector {
     /// First visible line of the wrapped value.
     scroll: usize,
+    raw: bool,
 }
 
 impl Inspector {
     /// Opens an inspector at the top of the value.
     #[must_use]
     pub const fn new() -> Self {
-        Self { scroll: 0 }
+        Self {
+            scroll: 0,
+            raw: false,
+        }
     }
 
     /// First visible line.
@@ -51,10 +55,46 @@ impl Inspector {
         self.scroll = self.scroll.saturating_sub(1);
     }
 
-    /// Returns to the top, which is what moving to another cell should do.
-    pub const fn reset(&mut self) {
+    pub(crate) const fn raw(self) -> bool {
+        self.raw
+    }
+
+    pub(crate) const fn toggle_raw(&mut self) {
+        self.raw = !self.raw;
         self.scroll = 0;
     }
+
+    pub(crate) fn move_node(&mut self, down: bool, action_size: usize, count: usize) {
+        self.scroll = if down {
+            self.scroll
+                .saturating_add(action_size)
+                .min(count.saturating_sub(1))
+        } else {
+            self.scroll.saturating_sub(action_size)
+        };
+    }
+
+    /// Returns to the top, which is what moving to another cell should do.
+    pub const fn reset(&mut self) {
+        *self = Self::new();
+    }
+}
+
+/// An index into the tree derived from the same retained result cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Patch {
+    pub(crate) node: usize,
+    pub(crate) input: crate::structured::Input,
+}
+
+pub(crate) fn structured_view(
+    set: &ResultSet,
+    row: usize,
+    column: usize,
+) -> Option<crate::structured::Parsed<crate::structured::Tree<'_>>> {
+    let info = set.structured_column(column)?;
+    let raw = set.rows.get(row)?.get(column)?.raw()?;
+    Some(crate::structured::Tree::parse(info.kind, raw))
 }
 
 /// Everything needed to draw the inspector, derived rather than stored.

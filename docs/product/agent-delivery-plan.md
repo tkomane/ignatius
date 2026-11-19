@@ -470,10 +470,10 @@ and follows the strict Elm reducer architecture, bounded memory, and explicit SQ
 | **`032-plpgsql-routine-runner-and-profiler`**<br>PL/pgSQL Routine Runner & Profiler | `src/postgres/routines.rs`<br>`src/ui/widgets/routine_runner.rs` | Typed argument modal, CLI `ignatius run-routine`/`profile-routine` | Optional rollback savepoints; safe parameter binding; diagnostic stream redaction | Parameter harness unit tests, notice stream capture tests, rollback verification |
 | **`033-listen-notify-and-maintenance-ops`**<br>LISTEN/NOTIFY & Maintenance Ops | `src/postgres/pubsub.rs`<br>`src/postgres/maintenance.rs`<br>`src/ui/widgets/maintenance.rs` | Asynchronous pub/sub monitor, maintenance runner, CLI `ignatius listen`/`notify`/`maintain` | Lock escalation warnings; live progress tracking; explicit production confirmation | Async event notification tests, progress parser tests, maintenance dry-run checks |
 
-### Delivered Post-M6 Milestones (M7-M14: Features 034-058)
+### Post-M6 Milestones (M7-M15: Features 034-061)
 
 Post-M6 milestones follow the same pure-core TEA architecture, explicit write
-guards, memory bounds, and dual TUI/CLI contracts:
+guards, memory bounds and explicit TUI or CLI contracts.
 
 | Milestone & Feature Slugs | Primary Modules | CLI / TUI Surfaces | Status |
 | --- | --- | --- | --- |
@@ -485,6 +485,7 @@ guards, memory bounds, and dual TUI/CLI contracts:
 | **M12 (`050`-`052`)** `psql` & Cluster Parity | `src/metacommand/`, `src/replication/`, `src/cluster/` | `\d`/`\dt`/`\watch`, `Ctrl+K :`/`#`/`@`; `ignatius replication`, `cluster` | Implemented |
 | **M13 (`053`-`055`)** CRUD, Plan Diff & Analytics | `src/crud/`, `src/plandiff/`, `src/analytics/` | `Ctrl+K _`/`/`/`$`/`e`; `ignatius browse`, `plan-diff`, `analytics` | Implemented |
 | **M14 (`056`-`058`)** Bench, Snapshot & Runbook | `src/bench/`, `src/snapshot/`, `src/runbook/`, `src/ui/theme.rs` | `Ctrl+K '`/`"`/`?`, `material` theme; `ignatius bench`, `snapshot`, `runbook` | Implemented |
+| **M15 (`059`-`061`)** Structured Values, Plan History & Fleet Health | `src/structured/`, `src/plan_history/`, `src/fleet/` | Cell Detail, `ignatius plan-history` and `ignatius fleet` | Source and evidence in [Wave 43](../status.md#wave-43-milestone-15-and-readiness-checks---19-november-2026) |
 
 Generic databases, an AI upload path, accounts/sync, BI and a plugin
 marketplace remain outside the vision. Reopening a constitutional constraint

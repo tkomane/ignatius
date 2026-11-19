@@ -179,6 +179,16 @@ impl RetentionBudget {
         self.admit_optional(text)
     }
 
+    /// Charges aligned structured-type slots only when the optional vector will be retained.
+    pub(crate) fn admit_structured_columns(&mut self, columns: usize) -> bool {
+        matches!(
+            self.admit_optional(
+                columns.checked_mul(size_of::<Option<crate::structured::Column>>())
+            ),
+            TypeAdmission::Admitted { .. }
+        )
+    }
+
     fn admit_data(&mut self, charge: Option<usize>) -> Option<usize> {
         if self.data_closed {
             return None;

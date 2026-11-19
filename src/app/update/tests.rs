@@ -11927,3 +11927,81 @@ fn sql_runbook_overlay_parses_locally_previews_write_guard_and_jumps_to_cell() {
     let _ = update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.sql_runbook.is_none());
 }
+
+#[test]
+fn structured_inspector_uses_existing_review_and_discards_stale_selection() {
+    let mut model = cell_update_model();
+    let table = model.last_execution.as_mut().unwrap().statements[0]
+        .result_set
+        .as_mut()
+        .unwrap();
+    table.rows[0][1] = Cell::Text(r#"{"key":[null]}"#.to_owned());
+    table.set_structured_columns(vec![
+        None,
+        Some(crate::structured::Column {
+            kind: crate::structured::Kind::Jsonb,
+            partial_edit: true,
+            origin: Some(crate::structured::Origin {
+                table: 20001,
+                attribute: 2,
+                type_oid: 3802,
+                typmod: -1,
+            }),
+        }),
+    ]);
+    update(&mut model, Message::Action(Action::Activate));
+    assert!(model.inspector.is_some());
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(model.inspector.unwrap().raw());
+    assert!(update(&mut model, Message::Action(Action::Insert('e'))).is_empty());
+    update(&mut model, Message::Action(Action::Insert('r')));
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    let effects = update(&mut model, Message::Action(Action::Insert('e')));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("expected metadata lookup, got {effects:?}");
+    };
+    update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    assert!(model.inspector.is_none());
+    assert!(model.update_prompt.is_some());
+    assert!(update(&mut model, Message::Pasted("true,false".to_owned())).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.pending_update.is_none());
+    assert!(model.update_prompt.is_some());
+    update(&mut model, Message::Action(Action::Dismiss));
+
+    update(&mut model, Message::Action(Action::Activate));
+    update(
+        &mut model,
+        Message::Action(Action::MovePage(Direction::Down)),
+    );
+    let effects = update(&mut model, Message::Action(Action::Insert('e')));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("expected metadata lookup, got {effects:?}");
+    };
+    update(
+        &mut model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+        },
+    );
+    assert!(update(&mut model, Message::Pasted("true".to_owned())).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    let plan = &model.pending_update.as_ref().expect("review").plan;
+    assert!(plan.guarded);
+    assert!(!plan.sql_template.contains("true"));
+    let review = plan.bound_sql().unwrap();
+    assert!(review.contains(r#"{"key":[true]}"#));
+    assert!(review.contains(r#"{"key":[null]}"#));
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    model.selected_column = 0;
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.pending_update.is_none());
+}

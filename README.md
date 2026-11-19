@@ -687,6 +687,11 @@ ignatius snapshot check "$DATABASE_URL" --against schema.snapshot.json --schema 
 ignatius runbook --file incident.md --dry-run --format table
 ignatius runbook "$DATABASE_URL" --file incident.md --format markdown -o runbook-report.md
 
+# Record a local plan estimate and compare two named environments
+ignatius plan-history capture @app-dev --series orders-plan --schema public --sql-file orders.sql
+ignatius plan-history show --series orders-plan --format json
+ignatius fleet --baseline @app-dev --candidate @app-staging --schema public --format json
+
 # Shell completion generator
 ignatius completion zsh > ~/.zfunc/_ignatius
 ```
@@ -696,7 +701,7 @@ Scripts can reliably inspect exit codes to determine exact failure modes:
 | Code | Identifier | Meaning |
 | --- | --- | --- |
 | `0` | `success` | Command completed successfully; all statements succeeded |
-| `1` | `findings` | `ignatius lint` found an issue at or above `--fail-on` |
+| `1` | `findings` | A configured report threshold was reached, or a fleet comparison found drift or incomplete evidence |
 | `2` | `usage` | Invalid CLI arguments, missing parameters, or conflicting flags |
 | `3` | `config` | Configuration file is invalid, missing, or unparseable |
 | `4` | `connection` | Network, socket, DNS, or TCP connection failure |
@@ -841,6 +846,10 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - `056-query-benchmarks-and-regression-suite` [Implemented]: Warmup-separated multi-iteration query latency benchmarking (`ignatius bench` + `Ctrl+K '`) with `p50`/`p95`/`p99`/QPS statistics, 12-bucket latency sparklines, rollback-safe `BEGIN`/`ROLLBACK` isolation, and A/B regression CI gates.
   - `057-schema-snapshots-and-drift-guard` [Implemented]: Bounded zero-row-read `pg_catalog` schema snapshot capture (`ignatius snapshot capture|check` + `Ctrl+K "`) with deterministic lowercase SHA-256 fingerprints (`fingerprint_sha256`) across PostgreSQL 14-18 and `Breaking`/`Warning`/`Info` drift gates.
   - `058-interactive-sql-notebook-runner` [Implemented]: Markdown fenced SQL runbooks (`-- @name:`, `-- @readonly`, `-- @expect-rows:`) and local `-- @cell` buffer notebooks (`ignatius runbook` + `Ctrl+K ?`) with `classify_all` write guards, offline `--dry-run` planning, and Markdown/JSON/table reports.
+- **Milestone 15: Structured Values, Plan History and Fleet Health (`059` - `061`)**:
+  - [Structured Type Inspector](docs/design/structured-type-inspector.md) extends Cell Detail with a tree, exact raw text and reviewed edits on eligible cells.
+  - [Query Plan History](docs/design/query-plan-history.md) compares local estimates and explicit latency measurements across schema revisions.
+  - `ignatius fleet` compares named environments using read-only catalog queries and reports drift and unavailable evidence.
 
 ---
 

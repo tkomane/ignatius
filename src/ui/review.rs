@@ -277,7 +277,11 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             );
             push(
                 &mut rows,
-                "The replacement is literal text data, including empty text; it cannot add SQL syntax.",
+                if pending.plan.guarded {
+                    "The structured edit requires the same column identity, observed value and safe type settings."
+                } else {
+                    "The replacement is literal text data, including empty text; it cannot add SQL syntax."
+                },
                 Token::Muted,
             );
             push(&mut rows, "Exact bound statement:", Token::Header);

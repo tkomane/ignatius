@@ -4,9 +4,11 @@
 //! prompts when it is not attached to a terminal, keeps data on stdout and
 //! diagnostics on stderr, and returns documented exit codes.
 
+mod fleet;
 pub mod interactive;
 pub mod output;
 pub mod plain;
+pub mod plan_history;
 pub mod prompt;
 
 use crate::ExitCode;
@@ -16,6 +18,7 @@ use crate::connection::{ConnectionArgs, EnvSnapshot, Environment, SslMode};
 use crate::diagnostics::doctor;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+pub use fleet::FleetArgs;
 use output::{Format, OutputOptions};
 use secrecy::SecretString;
 use std::io::{IsTerminal, Read, Write};
@@ -360,6 +363,9 @@ pub enum Command {
     #[command(name = "plan-diff")]
     PlanDiff(PlanDiffArgs),
 
+    /// Capture or inspect a local query plan and latency timeline.
+    PlanHistory(plan_history::PlanHistoryArgs),
+
     /// Profile a query result set or export it to HTML or Apache Parquet.
     #[command(name = "analytics")]
     Analytics(AnalyticsArgs),
@@ -375,6 +381,9 @@ pub enum Command {
     /// Parse, dry-run, or execute a Markdown SQL runbook with write-guard safety.
     #[command(name = "runbook")]
     Runbook(RunbookArgs),
+
+    /// Compare named PostgreSQL profiles with read-only catalog probes.
+    Fleet(FleetArgs),
 }
 
 /// Arguments for the audit command.
@@ -986,10 +995,14 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Cluster(args)) => run_cluster(args, &paths, out, err),
         Some(Command::Browse(args)) => run_browse(args, &paths, out, err),
         Some(Command::PlanDiff(args)) => run_plan_diff(args, &paths, out, err),
+        Some(Command::PlanHistory(args)) => {
+            plan_history::run(args, &paths, cli.global.no_history, out)
+        }
         Some(Command::Analytics(args)) => run_analytics(args, &paths, out, err),
         Some(Command::Bench(args)) => run_bench(args, &paths, out, err),
         Some(Command::Snapshot(args)) => run_snapshot(args, &paths, out, err),
         Some(Command::Runbook(args)) => run_runbook(args, &paths, out, err),
+        Some(Command::Fleet(args)) => fleet::run(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
