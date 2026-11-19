@@ -124,6 +124,21 @@ own job context and reports an unavailable condition with a bounded receipt.
 An available result admits a separate renderer experiment. The default
 dispatch continues to run the native controls and capability assertions.
 
+## Windows Terminal renderer calibration
+
+On an active hosted desktop, run the official portable Windows Terminal
+distribution in an owned Job with isolated settings. Record the exact package
+and compiler identities. A native actor in Terminal's actual ConPTY sends
+controlled VT cursor and alternate-screen changes. A nonce-authenticated
+marker fences each phase. The foreground window's pixels establish whether
+the cursor and main-screen marker rendered in the expected state. Each phase
+requires a stable observation before the actor advances.
+
+Explicit displayed and hidden controls must work on both screens, and leaving
+the alternate screen must reveal the original main-screen marker. Retain
+only the synthetic pixel crops and bounded metadata. This calibration precedes
+any `TerminalGuard` renderer cases. Windows 11 hand use remains its own gate.
+
 ## Cases and ordering
 
 After capability admission, use one fresh process/console per normal return,

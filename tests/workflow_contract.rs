@@ -482,8 +482,15 @@ fn windows_conpty_diagnostic_preserves_native_assertions_and_evidence_scope() {
     assert!(desktop.contains("if: inputs.probe == 'renderer-desktop'"));
     assert!(desktop.contains("tests/support/windows_conpty/Test-Desktop.ps1"));
     assert!(desktop.contains("$facts.status -cne 'available'"));
+    let renderer = job_block(&workflow, "renderer-cursor");
+    assert!(renderer.contains("if: inputs.probe == 'renderer-cursor'"));
+    assert!(renderer.contains("tests/support/windows_conpty/Run-RendererCalibration.ps1"));
+    for phase in 0..6 {
+        assert!(renderer.contains(&format!("/work/phase-{phase}.bmp")));
+    }
+    assert!(!renderer.contains("/work/**"));
     let platform = job_block(&workflow, "diagnostic");
-    assert!(platform.contains("if: inputs.probe != 'renderer-desktop'"));
+    assert!(platform.contains("if: inputs.probe == 'native-controls' || inputs.probe == ''"));
     assert!(platform.contains("runs-on: windows-latest"));
     let native = platform
         .split("- name: Windows ConPTY capability and ownership controls")

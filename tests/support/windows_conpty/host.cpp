@@ -531,9 +531,21 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
     else emit(r, kind, server.bytes(), server.quiescent());
     return r.success ? 0 : 1;
 }
+#ifdef IGNATIUS_RENDERER_CALIBRATION
+#include "renderer_pixels.hpp"
+#include "renderer_probe.hpp"
+#endif
 }
 int wmain(int argc, wchar_t** argv) {
     try {
+#ifdef IGNATIUS_RENDERER_CALIBRATION
+        if (argc == 5 && std::wstring_view(argv[1]) == L"--renderer-supervise") {
+            return renderer_supervise(argv[2], argv[3], argv[4]);
+        }
+        if (argc == 4 && std::wstring_view(argv[1]) == L"--renderer-actor") {
+            return renderer_actor(argv[2], argv[3]);
+        }
+#endif
         if (argc == 8 && std::wstring_view(argv[1]) == L"--worker") return worker(argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
         if (argc == 8 && std::wstring_view(argv[1]) == L"--probe") { std::uint32_t pid{}; require(w07::number(ascii(argv[7]), pid), "controlled Rust PID"); return probe(argv[2], argv[3], argv[4], argv[5], argv[6], pid); }
         require(argc == 6 && std::wstring_view(argv[1]) == L"--supervise", "first capability/control invocation only");
