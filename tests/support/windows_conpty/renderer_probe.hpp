@@ -415,6 +415,7 @@ struct RendererReceipt {
     std::uint64_t start{}, registered{}, restore_qpc{}, end{}, control_bytes{};
     std::string failure;
     RendererFit fit;
+    ignatius_renderer_modal::ModalReceipt modal;
     std::vector<RendererPhase> phases;
 };
 
@@ -481,6 +482,11 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"actor_pid\":" << receipt.actor_pid << ",\"console_processes\":" << receipt.associated_consoles
               << ",\"actor_registered_qpc\":" << receipt.registered
               << ",\"observed_profile\":\"" << renderer_profile_states[receipt.profile_state] << '"'
+              << ",\"settings_dialog\":{\"category\":\"" << receipt.modal.category << '"'
+              << ",\"automation_hresult\":" << receipt.modal.automation_hresult
+              << ",\"settings_hresult\":" << receipt.modal.settings_hresult
+              << ",\"json_line\":" << receipt.modal.json.line
+              << ",\"json_column\":" << receipt.modal.json.column << '}'
               << ",\"columns\":" << receipt.columns << ",\"rows\":" << receipt.rows
               << ",\"control_bytes\":" << receipt.control_bytes
               << ",\"fit\":{\"measured\":" << truth(receipt.fit.measured)
@@ -632,6 +638,12 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 renderer = find_renderer_window(job.value, terminal, title, work_deadline);
                 receipt.renderer_pid = renderer.pid;
                 fit_renderer_window(renderer, job.value, terminal, title, work_deadline, receipt.fit);
+                if (receipt.profile_state != 3) {
+                    receipt.modal = ignatius_renderer_modal::inspect(renderer.hwnd, renderer.pid, work_deadline);
+                    verify_renderer_window(renderer, job.value, terminal, title);
+                    if (std::string_view(receipt.modal.category) == "settings_load_error")
+                        throw std::runtime_error("owned portable Terminal fell back after a settings load error");
+                }
                 server->ack(work_deadline);
                 continue;
             }

@@ -22,6 +22,9 @@ int main() { std::cerr << "W07-064 native host requires actual Windows; no nativ
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#ifdef IGNATIUS_RENDERER_CALIBRATION
+#include "renderer_modal.hpp"
+#endif
 using namespace std::chrono_literals;
 namespace {
 struct Handle {

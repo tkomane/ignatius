@@ -101,7 +101,7 @@ $settingsFile = Join-Path $settings 'settings.json'
 [IO.File]::WriteAllText($settingsFile, (ConvertTo-Json $configuration -Depth 8))
 
 $sourceHashes = [ordered] @{}
-foreach ($source in @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp',
+foreach ($source in @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp', 'renderer_modal.hpp',
         'Test-Desktop.ps1', 'Run-RendererCalibration.ps1')) {
     $sourceHashes[$source] = FileDigest (Join-Path $PSScriptRoot $source)
 }
