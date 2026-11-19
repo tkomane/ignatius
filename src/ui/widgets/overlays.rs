@@ -8165,14 +8165,21 @@ pub(crate) fn render_data_browser(
                 "  ".to_owned(),
                 theme.style(Token::Header).add_modifier(Modifier::BOLD),
             )];
-            for col_idx in col_start..col_end {
-                let raw_name = sanitize_for_display(&page.columns[col_idx]);
+            for (col_idx, (col_name, &col_width)) in page
+                .columns
+                .iter()
+                .zip(col_widths.iter())
+                .enumerate()
+                .take(col_end)
+                .skip(col_start)
+            {
+                let raw_name = sanitize_for_display(col_name);
                 let label = if col_idx == active_col {
                     format!("[{raw_name}]")
                 } else {
                     raw_name
                 };
-                let fitted = fit_cell(&label, col_widths[col_idx], unicode);
+                let fitted = fit_cell(&label, col_width, unicode);
                 let style = if col_idx == active_col {
                     theme.style(Token::Focus).add_modifier(Modifier::BOLD)
                 } else {
