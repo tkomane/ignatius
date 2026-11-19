@@ -27,7 +27,7 @@ in the workspace's committed lockfile and security checks.
 
 | Command | What it does |
 | --- | --- |
-| `cargo xtask db up` | Starts `postgres:18.6-alpine` on port 55432, waits until it is really accepting connections, loads the synthetic fixtures, and prints the URI |
+| `cargo xtask db up` | Starts `postgres:18.7-alpine` on ports 55432 and 55433, waits until both servers accept connections, and prints the connection details |
 | `cargo xtask db down` | Stops it and deletes its data |
 | `cargo xtask db status` | Whether it is running and ready |
 | `cargo xtask run [args]` | Opens the full-screen client against it |

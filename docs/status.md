@@ -4,6 +4,26 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 42: Post-merge baseline and local fixtures - 19 November 2026
+
+- On `main` at `28dcc4b927b04d5822b1392f902b6d37ebc90aa6`,
+  [CI run 44592484401](https://github.com/tkomane/ignatius/actions/runs/44592484401)
+  passed all 16 runnable jobs. This includes Rust 1.90, Linux, macOS, Windows,
+  the PostgreSQL 14-18 matrix and the PostgreSQL 18 Unix-socket job. The
+  scheduled fixture-drift job was skipped on this push.
+- [CodeQL run 44592484219](https://github.com/tkomane/ignatius/actions/runs/44592484219)
+  passed its Actions, Python and Rust jobs on the same commit.
+- The local plain and TLS Compose defaults now use PostgreSQL 18.7, matching
+  the server patch version in the reviewed PostgreSQL 18 digest. Explicit
+  `IGNATIUS_POSTGRES_IMAGE` and `IGNATIUS_PG_VERSION` overrides still work.
+- The official Docker Hub `14-alpine` through `18-alpine` manifests matched
+  the reviewed digest map on 19 November 2026. Both default fixtures reported
+  18.7 with three synthetic orders and the expected plain/TLS transport.
+- `cargo --offline --locked xtask verify` passed formatting, lints, API docs,
+  workspace and doc tests on macOS arm64 with those two live fixtures. The
+  local Unix-socket integration skipped because `IGNATIUS_TEST_PG_SOCKET_URI`
+  was unset. `actionlint` passed.
+
 ## Wave 41 (056-058, Milestone 14: Benchmarks, Snapshots & Runbooks, Material 3 Theme & CI Fixes) Delivery - 19 November 2026
 
 Branch `feat/m14-bench-snapshot-runbook-polish` (stacked on Wave 40 `0346210`) delivers Milestone 14 (`056-058`), built-in Google Material Design 3 Tonal Dark theming and TUI/CLI polish, and DevOps CI fixes:
