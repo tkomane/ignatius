@@ -4,6 +4,18 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 47: Windows live archive verification - 19 November 2026
+
+- [Windows archive run 44617258680](https://github.com/tkomane/ignatius/actions/runs/44617258680)
+  verified the retained `4cdfa5c` Windows ZIP from build `ci/44605153852-1`.
+  The extracted client queried PostgreSQL 17.11 in a read-only `verify-full`
+  session on Windows Server 2025 x64. It rejected the numeric hostname with
+  TLS exit 6, passed the scoped debug privacy check, and the job confirmed
+  fixture cleanup. [Exact archive evidence](operations/verification.md#exact-archive-runtime-checks---19-november-2026)
+- The diagnostic is a manual workflow with read-only permissions. It verifies
+  the exact candidate aggregate before extracting and executing the Windows
+  binary. Windows Terminal hand use and release readiness remain open.
+
 ## Wave 46: Linux renderer and release trust preflight - 19 November 2026
 
 - The exact Linux archive from rehearsal `44605153852` passed a live
@@ -94,6 +106,8 @@ before trusting anything else.
 - [Windows ConPTY diagnostic 44595685632](https://github.com/tkomane/ignatius/actions/runs/44595685632)
   at `28dcc4b` passed no-guard, known-unrestored and hung-child controls.
   Native setters and main-screen VT cursor visibility were observable.
+  The retained transport emitted cursor hide and show before leaving the
+  alternate screen.
   Alternate-screen VT visibility remained unobservable, and the strict
   capability check failed. Windows Terminal, Linux full-screen and Warp
   hand-use acceptance remain open.

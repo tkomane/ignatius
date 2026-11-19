@@ -15,8 +15,22 @@ on macOS 27.2.1 and Ubuntu 24.04.5 respectively. They queried PostgreSQL
 verification with exit 6. A synthetic SQL marker returned only its length.
 The marker was absent from stdout, stderr and isolated local state under
 `IGNATIUS_LOG=debug`. The named probe adds archive-bound privacy and TLS
-evidence for those two targets. Live archive probes on Windows and the full
-release and human acceptance gates remain open.
+evidence for those two targets.
+
+[Windows archive probe 44617258680](https://github.com/tkomane/ignatius/actions/runs/44617258680)
+verified the same aggregate, extracted the Windows ZIP, and ran the packaged
+binary on Windows Server 2025 x64, runner image `win25-vs2026` build
+`20261103.298.1`. Its executable SHA-256 was
+`69b81903d3b679eec2b95b8c2beb57d68ea098abac1edcd12a25b0a141b16b7b`.
+The client queried disposable PostgreSQL 17.11 over `verify-full`. PostgreSQL
+reported TLS active and `transaction_read_only` on. The numeric address
+produced the typed hostname error with exit 6 and empty stdout. The debug log
+contained the value-free statement descriptor. The log and stderr contained
+none of the synthetic SQL, row or password markers or dependency debug output.
+The job stopped the owned cluster and removed its scratch directory.
+
+Windows Terminal interaction, the full release privacy audit and independent
+cryptographic verification remain open.
 
 ## Linux xterm renderer and restoration - 19 November 2026
 

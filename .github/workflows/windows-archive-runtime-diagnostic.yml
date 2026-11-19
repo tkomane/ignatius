@@ -1,10 +1,6 @@
 name: Windows live archive diagnostic
 
 on:
-  # Exercise the retained bytes on the isolated review branch before the
-  # dispatch-only workflow is merged.
-  push:
-    branches: [codex/verify-windows-release-archive]
   workflow_dispatch:
     inputs:
       candidate_run:
@@ -31,9 +27,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      CANDIDATE_RUN: ${{ inputs.candidate_run || '44605153852' }}
-      CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt || '1' }}
-      SOURCE_REVISION: ${{ inputs.source_revision || '4cdfa5c273faae12826e7bcd96c6c37af29ef16c' }}
+      CANDIDATE_RUN: ${{ inputs.candidate_run }}
+      CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
+      SOURCE_REVISION: ${{ inputs.source_revision }}
     steps:
       - name: Resolve the completed release run and attempt
         id: candidate

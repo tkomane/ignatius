@@ -769,7 +769,7 @@ on all three targets. [Exact rehearsal](https://github.com/tkomane/ignatius/acti
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
 | `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, local archive checks | The downloaded archive passed local verified TLS and the scoped debug privacy probe on macOS arm64. Warp visual hand use remains open |
-| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging and runtime | The hosted archive passed installed identity, configuration, refusal and rollback. Live archive TLS and Windows Terminal hand use remain open |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | The downloaded archive passed verified TLS and the scoped debug privacy probe on Windows Server 2025 x64. Windows Terminal hand use remains open |
 | `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, local archive checks | The downloaded archive passed verified TLS, the scoped debug privacy probe and automated xterm use on Ubuntu. Linux desktop hand use remains open |
 
 The earlier macOS archive at `24f1c8e` failed its privacy audit when debug

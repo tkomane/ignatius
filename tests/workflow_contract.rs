@@ -443,6 +443,31 @@ fn shared_ci_runs_the_complete_declared_coverage() {
 }
 
 #[test]
+fn windows_archive_diagnostic_verifies_retained_bytes_before_execution() {
+    let workflow = include_str!("../.github/workflows/windows-archive-runtime-diagnostic.yml");
+    let events: Vec<_> = workflow
+        .lines()
+        .skip_while(|line| *line != "on:")
+        .skip(1)
+        .take_while(|line| line.is_empty() || line.starts_with(' '))
+        .filter(|line| line.starts_with("  ") && !line.starts_with("    "))
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(events, ["workflow_dispatch:"]);
+
+    let job = job_block(workflow, "runtime");
+    let archive_verification = job
+        .find("cargo --locked xtask release manifest verify")
+        .expect("retained manifest and archive verification");
+    let extraction = job.find("Expand-Archive").expect("verified extraction");
+    let runtime = job
+        .find("./scripts/release-runtime-windows.ps1")
+        .expect("Windows runtime probe");
+    assert!(archive_verification < extraction && extraction < runtime);
+}
+
+#[test]
 fn windows_conpty_diagnostic_preserves_native_assertions_and_evidence_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workflow = workflow_text(&root.join(".github/workflows/windows-conpty-diagnostic.yml"));
