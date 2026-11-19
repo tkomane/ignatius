@@ -67,9 +67,9 @@ finally {
     Pop-Location
 }
 
-$profile = '{cac612cd-581f-4749-b07b-15930ed48cf2}'
+$rendererProfileId = '{cac612cd-581f-4749-b07b-15930ed48cf2}'
 $configuration = [ordered] @{
-    defaultProfile = $profile
+    defaultProfile = $rendererProfileId
     theme = 'dark'
     disableAnimations = $true
     alwaysOnTop = $true
@@ -91,7 +91,7 @@ $configuration = [ordered] @{
             useAcrylic = $false
         }
         list = @([ordered] @{
-            guid = $profile
+            guid = $rendererProfileId
             name = 'Ignatius renderer calibration'
             commandline = ('"' + $probe + '"')
         })
@@ -114,7 +114,7 @@ $build = [ordered] @{
     terminal_sha256 = FileDigest $terminal.FullName
     package_sha256 = $expectedSha256
     settings_sha256 = FileDigest $settingsFile
-    profile_id = $profile
+    profile_id = $rendererProfileId
     msvc_sha256 = FileDigest $compiler.Source
     windows_version = [Environment]::OSVersion.Version.ToString()
     image_os = $env:ImageOS
@@ -127,7 +127,7 @@ $nonce = [Guid]::NewGuid().ToString('N')
 $stdout = Join-Path $root 'renderer.stdout'
 $stderr = Join-Path $root 'renderer.stderr'
 $controller = Start-Process -FilePath $probe -WorkingDirectory $work -NoNewWindow -PassThru `
-    -ArgumentList @('--renderer-supervise', ('"' + $terminal.FullName + '"'), ('"' + $work + '"'), $nonce, $profile) `
+    -ArgumentList @('--renderer-supervise', ('"' + $terminal.FullName + '"'), ('"' + $work + '"'), $nonce, $rendererProfileId) `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 try {
     if (-not $controller.WaitForExit(40000)) {

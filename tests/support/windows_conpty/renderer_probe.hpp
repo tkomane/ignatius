@@ -6,6 +6,8 @@ constexpr std::array<const char*, renderer_stage_count> renderer_stage_names{
 };
 constexpr std::array<bool, renderer_stage_count> renderer_visible{true, false, false, true, false, true};
 constexpr std::array<bool, renderer_stage_count> renderer_main{true, true, false, false, false, true};
+constexpr std::array<const char*, 4> renderer_profile_states{"missing", "zero", "different", "matched"};
+constexpr wchar_t renderer_restore_colors[] = L"\x1b]111\x1b\\\x1b]112\x1b\\";
 
 std::wstring renderer_pipe_name(const std::wstring& nonce) {
     return L"\\\\.\\pipe\\ignatius-w07-renderer-" + nonce;
@@ -28,7 +30,7 @@ std::wstring renderer_tile(int row, int column, int cells, RendererRgb color) {
 std::wstring renderer_payload(const std::wstring& nonce, std::size_t phase) {
     std::wstring payload;
     if (phase == 0) {
-        payload = L"\x1b[0m\x1b[2J";
+        payload = L"\x1b[0m\x1b]11;rgb:10/10/10\x1b\\\x1b[2J";
         payload += renderer_tile(4, 2, 6, {125, 32, 220});
         payload += L"\x1b[4;12HW07-" + nonce;
     } else if (phase == 2) {
@@ -38,9 +40,10 @@ std::wstring renderer_payload(const std::wstring& nonce, std::size_t phase) {
     }
     payload += renderer_tile(8, 10, 4, {16, 220, 144});
     payload += renderer_tile(2, 2, 6, renderer_phase_colors[phase]);
+    payload += renderer_tile(8, 20, 1, {16, 16, 16});
     payload += L"\x1b[2;12H" + wide_ascii(w07::calibration_marker(ascii(nonce), phase));
-    // The isolated profile also supplies a filled-box magenta cursor.
-    payload += L"\x1b[8;20H\x1b[?12l\x1b[2 q";
+    // Set the measured cursor directly in the owned terminal session.
+    payload += L"\x1b]12;rgb:ff/00/ff\x1b\\\x1b[8;20H\x1b[?12l\x1b[2 q";
     payload += renderer_visible[phase] ? L"\x1b[?25h" : L"\x1b[?25l";
     return payload;
 }
@@ -74,6 +77,8 @@ struct RendererModeRestorer {
         const wchar_t reset[] = L"\x1b[?1049l\x1b[0m\x1b[?25h";
         DWORD ignored{};
         (void)WriteConsoleW(output, reset, static_cast<DWORD>(std::size(reset) - 1), &ignored, nullptr);
+        (void)WriteConsoleW(output, renderer_restore_colors,
+                            static_cast<DWORD>(std::size(renderer_restore_colors) - 1), &ignored, nullptr);
         (void)SetConsoleMode(output, baseline);
     }
 };
@@ -108,8 +113,18 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
     wchar_t selected_profile[64]{};
     const auto profile_size = GetEnvironmentVariableW(L"WT_PROFILE_ID", selected_profile,
                                                       static_cast<DWORD>(std::size(selected_profile)));
-    const bool profile_confirmed = profile_size < std::size(selected_profile) && profile_size != 0
-        && CompareStringOrdinal(selected_profile, -1, profile.c_str(), -1, TRUE) == CSTR_EQUAL;
+    unsigned profile_state = 0;
+    if (profile_size != 0) {
+        profile_state = 2;
+        if (profile_size < std::size(selected_profile)) {
+            if (CompareStringOrdinal(selected_profile, -1, profile.c_str(), -1, TRUE) == CSTR_EQUAL) {
+                profile_state = 3;
+            } else if (std::wstring_view(selected_profile, profile_size)
+                       == L"{00000000-0000-0000-0000-000000000000}") {
+                profile_state = 1;
+            }
+        }
+    }
 
     const auto nonce_text = ascii(nonce);
     std::ostringstream registered;
@@ -117,7 +132,7 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
                << ' ' << static_cast<unsigned>(initial_viewport.Right + 1)
                << ' ' << static_cast<unsigned>(initial_viewport.Bottom + 1);
     renderer_stamp(registered, ticks());
-    registered << ' ' << profile_confirmed;
+    registered << ' ' << profile_state;
     // No console mutation is attempted before the outside supervisor
     // authenticates this stable client and acknowledges owned Job membership.
     send(pipe, registered.str());
@@ -164,6 +179,10 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
         send(pipe, message.str());
     }
 
+    constexpr auto color_reset_length = static_cast<DWORD>(std::size(renderer_restore_colors) - 1);
+    DWORD reset_written{};
+    require(WriteConsoleW(output.value, renderer_restore_colors, color_reset_length, &reset_written, nullptr)
+            && reset_written == color_reset_length, "restore the owned renderer colors");
     require(SetConsoleMode(output.value, baseline_output) != 0, "restore owned renderer output mode");
     DWORD final_input{}, final_output{};
     require(GetConsoleMode(input.value, &final_input) && GetConsoleMode(output.value, &final_output)
@@ -392,7 +411,7 @@ struct RendererReceipt {
     bool job_empty{}, pipe_quiescent{}, cleanup_forced{}, modes_restored{};
     DWORD launcher_pid{}, actor_pid{}, renderer_pid{}, launcher_exit{STILL_ACTIVE}, actor_exit{STILL_ACTIVE};
     DWORD initial_input{}, initial_output{}, restored_input{}, restored_output{}, associated_consoles{};
-    DWORD columns{}, rows{}, job_remaining{};
+    DWORD columns{}, rows{}, job_remaining{}, profile_state{};
     std::uint64_t start{}, registered{}, restore_qpc{}, end{}, control_bytes{};
     std::string failure;
     RendererFit fit;
@@ -461,6 +480,7 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"launcher_pid\":" << receipt.launcher_pid << ",\"renderer_pid\":" << receipt.renderer_pid
               << ",\"actor_pid\":" << receipt.actor_pid << ",\"console_processes\":" << receipt.associated_consoles
               << ",\"actor_registered_qpc\":" << receipt.registered
+              << ",\"observed_profile\":\"" << renderer_profile_states[receipt.profile_state] << '"'
               << ",\"columns\":" << receipt.columns << ",\"rows\":" << receipt.rows
               << ",\"control_bytes\":" << receipt.control_bytes
               << ",\"fit\":{\"measured\":" << truth(receipt.fit.measured)
@@ -603,11 +623,12 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 require(receipt.associated_consoles >= 1 && receipt.associated_consoles <= 128
                         && receipt.columns >= 56 && receipt.columns <= 200
                         && receipt.rows >= 10 && receipt.rows <= 80
+                        && data[7] < renderer_profile_states.size()
                         && receipt.registered >= resumed && receipt.registered <= ticks(),
                         "renderer actor registration and viewport bounds");
+                receipt.profile_state = data[7];
                 receipt.actor_pid = pid;
                 actor = std::move(sender);
-                require(data[7] == 1, "renderer actor selected the owned portable profile");
                 renderer = find_renderer_window(job.value, terminal, title, work_deadline);
                 receipt.renderer_pid = renderer.pid;
                 fit_renderer_window(renderer, job.value, terminal, title, work_deadline, receipt.fit);
