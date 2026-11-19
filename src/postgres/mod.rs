@@ -18,6 +18,7 @@ pub mod plandiff;
 pub mod replication;
 pub mod session;
 pub mod snapshot;
+mod structured;
 pub mod tls;
 
 pub use metadata::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary, quote_identifier};

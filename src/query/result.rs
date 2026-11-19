@@ -428,6 +428,8 @@ pub struct ResultSet {
     /// values keep their server rendering. A missing entry means the type could
     /// not be described, never that it was inferred from a cell.
     pub column_types: Vec<Option<String>>,
+    /// Optional aligned structured-type metadata. Empty when no columns qualify.
+    structured_columns: Vec<Option<crate::structured::Column>>,
     /// Retained rows. Never longer than the cap.
     pub rows: Vec<Vec<Cell>>,
     /// Total rows the server sent, including any beyond the cap.
@@ -444,6 +446,7 @@ impl ResultSet {
     pub fn new(columns: Vec<String>, cap: usize) -> Self {
         Self {
             column_types: vec![None; columns.len()],
+            structured_columns: Vec::new(),
             columns,
             rows: Vec::new(),
             rows_seen: 0,
@@ -459,6 +462,7 @@ impl ResultSet {
         Self {
             columns: Vec::new(),
             column_types: Vec::new(),
+            structured_columns: Vec::new(),
             rows: Vec::new(),
             rows_seen: 0,
             cap,
@@ -532,6 +536,7 @@ impl ResultSet {
         if !self.is_available() {
             return false;
         }
+        self.structured_columns.clear();
         if column_types.len() != self.columns.len() {
             self.column_types = vec![None; self.columns.len()];
             return false;
@@ -544,6 +549,19 @@ impl ResultSet {
     #[must_use]
     pub fn column_type(&self, index: usize) -> Option<&str> {
         self.column_types.get(index).and_then(Option::as_deref)
+    }
+
+    pub(crate) fn set_structured_columns(
+        &mut self,
+        columns: Vec<Option<crate::structured::Column>>,
+    ) {
+        if self.is_available() && columns.len() == self.columns.len() {
+            self.structured_columns = columns;
+        }
+    }
+
+    pub(crate) fn structured_column(&self, index: usize) -> Option<crate::structured::Column> {
+        self.structured_columns.get(index).copied().flatten()
     }
 
     /// Adds a row, keeping it only while the cap allows.

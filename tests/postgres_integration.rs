@@ -3426,3 +3426,371 @@ fn postgres_listen_notify_and_maintenance_operations() {
     assert!(res.success);
     assert!(res.message.contains("Maintenance completed successfully"));
 }
+
+fn open_structured_detail(
+    fx: &Fixture,
+    source: &str,
+    column: usize,
+) -> ignatius::app::model::Model {
+    use ignatius::app::{
+        message::{Action, Message},
+        model::{ConnectionState, Focus, Model},
+        update::update,
+    };
+
+    let execution = fx.block_on(
+        fx.session
+            .execute_for_workbench(source, None, 10, JobId(5900)),
+    );
+    assert_eq!(
+        execution.status,
+        ExecutionStatus::Succeeded,
+        "{execution:?}"
+    );
+    let mut model = Model::new(10);
+    model.connection = ConnectionState::Connected(Box::new(fx.session.info().clone()));
+    model.focus = Focus::Results;
+    model.last_sql = Some(source.to_owned());
+    model.last_execution = Some(execution);
+    model.selected_column = column;
+    assert!(update(&mut model, Message::Action(Action::ToggleInspector)).is_empty());
+    model
+}
+
+fn stage_structured_edit(
+    fx: &Fixture,
+    source: &str,
+    column: usize,
+    steps: usize,
+    replacement: &str,
+) -> (String, ParameterBindings) {
+    use ignatius::app::{
+        message::{Action, Direction, Effect, Message},
+        update::update,
+    };
+
+    let mut model = open_structured_detail(fx, source, column);
+    for _ in 0..steps {
+        update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    }
+    let effects = update(&mut model, Message::Action(Action::Insert('e')));
+    let [Effect::LoadUpdateTarget { request, relation }] = effects.as_slice() else {
+        panic!("expected structured metadata lookup, got {effects:?}");
+    };
+    let metadata = fx.block_on(
+        fx.session
+            .update_relation(relation.schema.as_deref(), &relation.relation),
+    );
+    assert!(metadata.is_ok(), "{metadata:?}");
+    assert!(
+        update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request: *request,
+                result: Box::new(metadata)
+            },
+        )
+        .is_empty()
+    );
+    assert!(
+        model.update_prompt.is_some(),
+        "{:?}",
+        model.cell_update_notice
+    );
+    update(&mut model, Message::Pasted(replacement.to_owned()));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    let review = model
+        .pending_update
+        .as_ref()
+        .expect("structured edit review");
+    assert!(
+        review
+            .plan
+            .bound_sql()
+            .expect("valid reviewed SQL")
+            .contains(replacement)
+    );
+    update(&mut model, Message::Action(Action::MoveBufferEnd));
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    let [
+        Effect::ExecuteParameterized {
+            sql, parameters, ..
+        },
+    ] = effects.as_slice()
+    else {
+        panic!("expected a confirmed structured update, got {effects:?}");
+    };
+    (sql.clone(), parameters.clone())
+}
+
+fn run_structured_edit(fx: &Fixture, plan: &(String, ParameterBindings)) -> u64 {
+    let result = fx.block_on(
+        fx.session
+            .execute_with_parameters(&plan.0, &plan.1, 10, JobId(5901)),
+    );
+    assert_eq!(result.status, ExecutionStatus::Succeeded, "{result:?}");
+    result.statements[0]
+        .rows_affected
+        .expect("affected row count")
+}
+
+#[test]
+fn structured_jsonb_edit_preserves_precision_and_refuses_changed_value_or_relation() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = r#"SET search_path TO pg_temp;
+        CREATE TEMP TABLE inspection_test (id int PRIMARY KEY, payload jsonb);
+        INSERT INTO inspection_test VALUES
+        (1, '{"a":[null],"precision":123456789012345678901.234567890123456789}');"#;
+    let created = fx.block_on(fx.session.execute(setup, 10, JobId(5902)));
+    assert_eq!(created.status, ExecutionStatus::Succeeded, "{created:?}");
+    let source = "SELECT id, payload FROM inspection_test";
+    let plan = stage_structured_edit(&fx, source, 1, 2, "true");
+    assert!(!plan.0.contains("123456789012345678901"));
+    assert_eq!(run_structured_edit(&fx, &plan), 1);
+    assert_eq!(run_structured_edit(&fx, &plan), 0, "stale value guard");
+    let result = fx.block_on(fx.session.execute(
+        "SELECT payload->'a'->0, payload->'precision' FROM inspection_test",
+        10,
+        JobId(5903),
+    ));
+    assert_eq!(result.status, ExecutionStatus::Succeeded, "{result:?}");
+    let row = &result.statements[0].result_set.as_ref().unwrap().rows[0];
+    assert_eq!(row[0].raw(), Some("true"));
+    assert_eq!(
+        row[1].raw(),
+        Some("123456789012345678901.234567890123456789")
+    );
+
+    let replaced_relation = fx.block_on(fx.session.execute(
+        "DROP TABLE inspection_test; CREATE TEMP TABLE inspection_test (id int PRIMARY KEY, payload jsonb); \
+         INSERT INTO inspection_test VALUES (1, '{\"a\":[null],\"precision\":123456789012345678901.234567890123456789}');",
+        10,
+        JobId(5904),
+    ));
+    assert_eq!(
+        replaced_relation.status,
+        ExecutionStatus::Succeeded,
+        "{replaced_relation:?}"
+    );
+    assert_eq!(
+        run_structured_edit(&fx, &plan),
+        0,
+        "same-name table has different origin"
+    );
+    let pending = stage_structured_edit(&fx, source, 1, 2, "false");
+    let changed_key = fx.block_on(fx.session.execute(
+        "ALTER TABLE inspection_test DROP CONSTRAINT inspection_test_pkey; \
+         INSERT INTO inspection_test SELECT * FROM inspection_test;",
+        10,
+        JobId(5905),
+    ));
+    assert_eq!(
+        changed_key.status,
+        ExecutionStatus::Succeeded,
+        "{changed_key:?}"
+    );
+    assert_eq!(
+        run_structured_edit(&fx, &pending),
+        0,
+        "lost unique key refuses both rows"
+    );
+}
+
+#[test]
+fn structured_array_and_range_edits_keep_subscripts_nulls_and_open_bound() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = r#"SET search_path TO pg_temp;
+        CREATE TEMP TABLE inspection_native (
+          id int, included int, members text[], period numrange,
+          PRIMARY KEY (id) INCLUDE (included)
+        );
+        INSERT INTO inspection_native VALUES
+          (1, 10, '[0:2]={NULL,"NULL","other"}', '(,12345678901234.125]');"#;
+    let created = fx.block_on(fx.session.execute(setup, 10, JobId(5910)));
+    assert_eq!(created.status, ExecutionStatus::Succeeded, "{created:?}");
+    let source = "SELECT id, members, period FROM inspection_native";
+    let plan = stage_structured_edit(&fx, source, 1, 3, r#""x,y""#);
+    assert_eq!(run_structured_edit(&fx, &plan), 1);
+    let plan = stage_structured_edit(&fx, source, 2, 1, "-999999999999.125");
+    assert_eq!(run_structured_edit(&fx, &plan), 1);
+    let result = fx.block_on(fx.session.execute(
+        "SELECT array_lower(members, 1), members[0] IS NULL, members[1], members[2], \
+                lower(period), upper(period), lower_inc(period), upper_inc(period) FROM inspection_native",
+        10,
+        JobId(5911),
+    ));
+    assert_eq!(result.status, ExecutionStatus::Succeeded, "{result:?}");
+    let row = &result.statements[0].result_set.as_ref().unwrap().rows[0];
+    assert_eq!(
+        row.iter().map(Cell::raw).collect::<Vec<_>>(),
+        [
+            Some("0"),
+            Some("t"),
+            Some("NULL"),
+            Some("x,y"),
+            Some("-999999999999.125"),
+            Some("12345678901234.125"),
+            Some("f"),
+            Some("t"),
+        ]
+    );
+}
+
+fn extension_fixture(variable: &str, extension: &str) -> Option<(Fixture, String)> {
+    let Ok(uri) = std::env::var(variable) else {
+        eprintln!("skipping live {extension} inspection: {variable} is unset");
+        return None;
+    };
+    assert!(!uri.is_empty(), "{variable} must name a disposable fixture");
+    let fx = fixture(&uri);
+    let result = fx.block_on(fx.session.execute(
+        &format!(
+            "SELECT n.nspname FROM pg_catalog.pg_extension AS e \
+             JOIN pg_catalog.pg_namespace AS n ON n.oid = e.extnamespace \
+             WHERE e.extname = '{extension}'"
+        ),
+        1,
+        JobId(5920),
+    ));
+    assert_eq!(result.status, ExecutionStatus::Succeeded, "{result:?}");
+    let schema = result
+        .statements
+        .first()
+        .and_then(|statement| statement.result_set.as_ref())
+        .and_then(|set| set.rows.first())
+        .and_then(|row| row[0].raw())
+        .unwrap_or_else(|| panic!("the disposable {variable} fixture must enable {extension}"));
+    Some((fx, ignatius::query::quote_identifier(schema)))
+}
+
+fn assert_structured_detail(fx: &Fixture, source: &str, column: usize, expected: &[&str]) {
+    let model = open_structured_detail(fx, source, column);
+    let screen = ignatius::ui::layout::render_to_string(
+        &model,
+        &ignatius::ui::Keymap::new(),
+        &model.presentation,
+        112,
+        30,
+    );
+    assert!(screen.contains("Cell Detail"), "{screen}");
+    for text in expected {
+        assert!(screen.contains(text), "missing {text:?}: {screen}");
+    }
+}
+
+#[test]
+fn structured_postgis_decodes_ewkb_and_reviews_a_whole_geometry_replacement() {
+    let Some((fx, schema)) = extension_fixture("IGNATIUS_TEST_PG_POSTGIS_URI", "postgis") else {
+        return;
+    };
+    let created = fx.block_on(fx.session.execute(
+        &format!(
+            "SET search_path TO pg_temp;
+             CREATE TEMP TABLE inspection_spatial (
+                 id int PRIMARY KEY,
+                 location {schema}.geometry(PointZ,4326),
+                 zone {schema}.geography(Point,4326)
+             );
+             INSERT INTO inspection_spatial VALUES
+                 (1, 'SRID=4326;POINT Z (1 2 3)', 'SRID=4326;POINT (4 5)');"
+        ),
+        5,
+        JobId(5921),
+    ));
+    assert_eq!(created.status, ExecutionStatus::Succeeded, "{created:?}");
+    let source = "SELECT id, location, zone FROM inspection_spatial";
+    assert_structured_detail(
+        &fx,
+        source,
+        1,
+        &["Point XYZ, SRID 4326", "X=1.0, Y=2.0, Z=3.0"],
+    );
+    assert_structured_detail(&fx, source, 2, &["Point XY, SRID 4326", "X=4.0, Y=5.0"]);
+    let plan = stage_structured_edit(&fx, source, 1, 0, "SRID=4326;POINT Z (7 8 9)");
+    assert_eq!(run_structured_edit(&fx, &plan), 1);
+    assert_structured_detail(
+        &fx,
+        source,
+        1,
+        &["Point XYZ, SRID 4326", "X=7.0, Y=8.0, Z=9.0"],
+    );
+}
+
+#[test]
+fn structured_pgvector_decodes_and_patches_one_coordinate() {
+    let Some((fx, schema)) = extension_fixture("IGNATIUS_TEST_PG_VECTOR_URI", "vector") else {
+        return;
+    };
+    let created = fx.block_on(fx.session.execute(
+        &format!(
+            "SET search_path TO pg_temp;
+             CREATE TEMP TABLE inspection_vector (
+                 id int PRIMARY KEY, embedding {schema}.vector(3)
+             );
+             INSERT INTO inspection_vector VALUES (1, '[1,2,3]');"
+        ),
+        5,
+        JobId(5922),
+    ));
+    assert_eq!(created.status, ExecutionStatus::Succeeded, "{created:?}");
+    let source = "SELECT id, embedding FROM inspection_vector";
+    assert_structured_detail(&fx, source, 1, &["3 dimensions", "[2]  2"]);
+    let plan = stage_structured_edit(&fx, source, 1, 2, "4.125");
+    assert_eq!(run_structured_edit(&fx, &plan), 1);
+    assert_structured_detail(&fx, source, 1, &["[1]  1", "[2]  4.125", "[3]  3"]);
+}
+
+#[test]
+fn structured_result_observed_under_lossy_output_stays_inspect_only() {
+    use ignatius::app::{
+        message::{Action, Message},
+        update::update,
+    };
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let created = fx.block_on(fx.session.execute(
+        "SET search_path TO pg_temp; SET extra_float_digits TO 0; \
+         CREATE TEMP TABLE inspection_loss (id int PRIMARY KEY, samples float8[]); \
+         INSERT INTO inspection_loss VALUES (1, '{1.0000000000000002,2.5}');",
+        5,
+        JobId(5930),
+    ));
+    assert_eq!(created.status, ExecutionStatus::Succeeded, "{created:?}");
+    let source = "SELECT id, samples FROM inspection_loss";
+    let mut earlier = open_structured_detail(&fx, source, 1);
+    assert_eq!(
+        earlier.visible_result().unwrap().rows[0][1].raw(),
+        Some("{1,2.5}")
+    );
+    let screen = ignatius::ui::layout::render_to_string(
+        &earlier,
+        &ignatius::ui::Keymap::new(),
+        &earlier.presentation,
+        112,
+        30,
+    );
+    assert!(screen.contains("Cell Detail"), "{screen}");
+    assert!(!screen.contains("e Edit"), "{screen}");
+
+    let restored = fx.block_on(
+        fx.session
+            .execute("SET extra_float_digits TO 3", 5, JobId(5931)),
+    );
+    assert_eq!(restored.status, ExecutionStatus::Succeeded, "{restored:?}");
+    assert!(
+        update(&mut earlier, Message::Action(Action::Insert('e'))).is_empty(),
+        "a settings change cannot promote previously rounded results"
+    );
+    assert!(earlier.update_lookup.is_none());
+
+    let ordinary = fx.block_on(fx.session.execute(source, 5, JobId(5932)));
+    assert_eq!(ordinary.status, ExecutionStatus::Succeeded, "{ordinary:?}");
+    let result = ordinary.statements[0].result_set.as_ref().unwrap();
+    assert_eq!(result.column_type(1), Some("_float8"));
+    assert_eq!(result.rows[0][1].raw(), Some("{1.0000000000000002,2.5}"));
+    let fresh = stage_structured_edit(&fx, source, 1, 2, "4.25");
+    assert_eq!(run_structured_edit(&fx, &fresh), 1);
+}

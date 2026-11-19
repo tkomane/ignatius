@@ -93,6 +93,11 @@ enum QueryPrivacy {
     Parameterized,
 }
 
+struct BufferedQuery {
+    privacy: QueryPrivacy,
+    structure: Option<super::structured::EditSettings>,
+}
+
 impl QueryPrivacy {
     fn diagnostic(self, error: &tokio_postgres::Error, statement_number: usize) -> Diagnostic {
         match self {
@@ -1368,6 +1373,34 @@ impl Session {
     /// Statements after a failure do not run. Results produced before the failure
     /// are kept and returned along with the diagnostic, because they happened.
     pub async fn execute(&self, sql: &str, row_cap: usize, job: JobId) -> Execution {
+        self.execute_ordinary(sql, row_cap, job, false).await
+    }
+
+    /// Executes into the interactive workbench's retained result. Structured
+    /// type metadata and its edit posture are observed only for this surface.
+    pub async fn execute_for_workbench(
+        &self,
+        sql: &str,
+        parameters: Option<&crate::query::ParameterBindings>,
+        row_cap: usize,
+        job: JobId,
+    ) -> Execution {
+        match parameters {
+            Some(parameters) => {
+                self.execute_parameterized(sql, parameters, row_cap, job, true)
+                    .await
+            }
+            None => self.execute_ordinary(sql, row_cap, job, true).await,
+        }
+    }
+
+    async fn execute_ordinary(
+        &self,
+        sql: &str,
+        row_cap: usize,
+        job: JobId,
+        workbench: bool,
+    ) -> Execution {
         let _operation = self.user_sql_gate.lock().await;
         tracing::debug!(
             target: "ignatius::query",
@@ -1376,7 +1409,14 @@ impl Session {
         );
         let operation = self.notices.begin(NoticeScope::Query);
         let mut execution = self
-            .execute_bound(sql, row_cap, job, QueryPrivacy::Ordinary, &operation)
+            .execute_bound(
+                sql,
+                row_cap,
+                job,
+                QueryPrivacy::Ordinary,
+                &operation,
+                workbench,
+            )
             .await;
         execution.notice_report = operation.finish();
         execution
@@ -1393,6 +1433,18 @@ impl Session {
         parameters: &crate::query::ParameterBindings,
         row_cap: usize,
         job: JobId,
+    ) -> Execution {
+        self.execute_parameterized(sql, parameters, row_cap, job, false)
+            .await
+    }
+
+    async fn execute_parameterized(
+        &self,
+        sql: &str,
+        parameters: &crate::query::ParameterBindings,
+        row_cap: usize,
+        job: JobId,
+        workbench: bool,
     ) -> Execution {
         let _operation = self.user_sql_gate.lock().await;
         activate_notice_privacy(&self.notices, &self.notice_privacy);
@@ -1432,6 +1484,7 @@ impl Session {
                     job,
                     QueryPrivacy::Parameterized,
                     &operation,
+                    workbench,
                 )
                 .await;
             execution.elapsed = started.elapsed();
@@ -1525,6 +1578,7 @@ impl Session {
         job: JobId,
         privacy: QueryPrivacy,
         operation: &Operation<'_>,
+        workbench: bool,
     ) -> Execution {
         let started = Instant::now();
         let parsed = statements::split(sql);
@@ -1555,6 +1609,31 @@ impl Session {
                     .failed_execution(job, started, results, diagnostic)
                     .await;
             }
+            let structure = if workbench
+                && parsed.len() == 1
+                && crate::query::update::may_update_source(&statement.text)
+            {
+                match super::structured::edit_settings(&self.client).await {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        let mut diagnostic = privacy.diagnostic(&error, index + 1);
+                        if matches!(
+                            diagnostic.kind,
+                            DiagnosticKind::Cancelled | DiagnosticKind::Connection
+                        ) || self.is_closed()
+                        {
+                            diagnostic.attempted =
+                                "checking structured-edit posture before sending SQL".into();
+                            return self
+                                .failed_execution(job, started, results, diagnostic)
+                                .await;
+                        }
+                        Some(super::structured::EditSettings::default())
+                    }
+                }
+            } else {
+                workbench.then(super::structured::EditSettings::default)
+            };
             operation.hold_unattributed();
             let statement_started = Instant::now();
             match self
@@ -1562,7 +1641,7 @@ impl Session {
                     &statement.text,
                     row_cap,
                     index + 1,
-                    privacy,
+                    BufferedQuery { privacy, structure },
                     operation,
                     &mut budget,
                 )
@@ -1602,7 +1681,7 @@ impl Session {
         sql: &str,
         row_cap: usize,
         statement_number: usize,
-        privacy: QueryPrivacy,
+        query: BufferedQuery,
         operation: &Operation<'_>,
         budget: &mut RetentionBudget,
     ) -> Result<(Option<ResultSet>, Option<u64>, Vec<Notice>), Diagnostic> {
@@ -1610,14 +1689,14 @@ impl Session {
             .client
             .simple_query_raw(sql)
             .await
-            .map_err(|err| privacy.diagnostic(&err, statement_number))?;
+            .map_err(|err| query.privacy.diagnostic(&err, statement_number))?;
         tokio::pin!(stream);
 
         let mut result_set: Option<ResultSet> = None;
         let mut rows_affected = None;
 
         while let Some(message) = stream.next().await {
-            match message.map_err(|err| privacy.diagnostic(&err, statement_number))? {
+            match message.map_err(|err| query.privacy.diagnostic(&err, statement_number))? {
                 tokio_postgres::SimpleQueryMessage::RowDescription(columns) => {
                     result_set = Some(retain_description(
                         columns.iter().map(|c| c.name()),
@@ -1653,9 +1732,9 @@ impl Session {
             && let Some(set) = result_set
                 .as_mut()
                 .filter(|set| set.is_available() && !set.columns.is_empty())
-            && let Some(types) = self.describe_columns(sql, &set.columns, budget).await
         {
-            let _ = set.set_column_types(types);
+            self.describe_columns(sql, set, budget, query.structure)
+                .await;
         }
 
         operation.hold_unattributed();
@@ -1671,18 +1750,21 @@ impl Session {
     async fn describe_columns(
         &self,
         sql: &str,
-        names: &[String],
+        set: &mut ResultSet,
         budget: &mut RetentionBudget,
-    ) -> Option<Vec<Option<String>>> {
-        let statement = self.client.prepare(sql).await.ok()?;
+        edit_settings: Option<super::structured::EditSettings>,
+    ) {
+        let Ok(statement) = self.client.prepare(sql).await else {
+            return;
+        };
         let columns = statement.columns();
-        if columns.len() != names.len()
+        if columns.len() != set.columns.len()
             || columns
                 .iter()
-                .zip(names)
+                .zip(&set.columns)
                 .any(|(column, name)| column.name() != name)
         {
-            return None;
+            return;
         }
         if !matches!(
             budget.admit_type_names(
@@ -1691,15 +1773,19 @@ impl Session {
             ),
             TypeAdmission::Admitted { .. }
         ) {
-            return None;
+            return;
         }
-        Some(
+        let _ = set.set_column_types(
             columns
                 .iter()
                 .map(|column| Some(column.type_().name().to_owned()))
                 .collect(),
-        )
+        );
+        if let Some(settings) = edit_settings {
+            super::structured::describe(&self.client, set, columns, budget, settings).await;
+        }
     }
+
     /// Reads every applied migration ledger row.
     ///
     /// A missing ledger table is an empty ledger, not an error: a database that

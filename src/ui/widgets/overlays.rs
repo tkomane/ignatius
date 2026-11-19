@@ -273,7 +273,12 @@ pub(crate) fn render_update_value_prompt(
         sanitize_for_display(&prompt.relation.relation)
     );
     let replacement = if prompt.typed_length() == 0 {
-        "(empty string)".to_owned()
+        if prompt.patch.is_some() {
+            "(empty input)"
+        } else {
+            "(empty string)"
+        }
+        .to_owned()
     } else {
         sanitize_for_display(prompt.replacement())
     };
@@ -304,7 +309,10 @@ pub(crate) fn render_update_value_prompt(
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "The replacement is literal text. Empty text is valid; NULL is not a shorthand here.",
+            prompt.patch.map_or(
+                "The replacement is literal text. Empty text is valid; NULL is not a shorthand here.",
+                |patch| patch.input.hint(),
+            ),
             theme.style(Token::Muted),
         )),
         Line::from(Span::styled(

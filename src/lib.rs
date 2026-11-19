@@ -63,6 +63,7 @@ pub mod runbook;
 pub mod seed;
 pub mod snapshot;
 pub mod snippet;
+mod structured;
 pub mod sync;
 pub mod telemetry;
 pub mod transfer;

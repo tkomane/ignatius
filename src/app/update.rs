@@ -5597,11 +5597,12 @@ fn toggle_inspector(model: &mut Model) {
         model.inspector = None;
         return;
     }
-    let (width, _) = crate::ui::layout::inspector_viewport(model.size, &model.presentation);
-    let row = model.selected_source_row();
-    let exists = row.is_some_and(|row| {
+    let exists = model.selected_source_row().is_some_and(|row| {
         model.visible_result().is_some_and(|set| {
-            crate::app::inspect::CellView::build(set, row, model.selected_column, width).is_some()
+            set.rows
+                .get(row)
+                .and_then(|row| row.get(model.selected_column))
+                .is_some()
         })
     });
     if exists {
@@ -5613,14 +5614,16 @@ fn toggle_inspector(model: &mut Model) {
 fn inspected_extent(model: &Model) -> (usize, usize) {
     let (width, height) = crate::ui::layout::inspector_viewport(model.size, &model.presentation);
     let row = model.selected_source_row();
-    let lines = row
-        .and_then(|row| {
-            model.visible_result().and_then(|set| {
-                crate::app::inspect::CellView::build(set, row, model.selected_column, width)
-            })
-        })
-        .map_or(0, |view| view.lines.len());
-    (lines, height)
+    row.and_then(|row| {
+        let set = model.visible_result()?;
+        let view = crate::app::inspect::CellView::build(set, row, model.selected_column, width)?;
+        let structured = !view.is_null && set.structured_column(model.selected_column).is_some();
+        Some((
+            view.lines.len(),
+            height.saturating_sub(usize::from(structured)),
+        ))
+    })
+    .unwrap_or((0, height))
 }
 
 /// Handles input while the result filter is being typed.
@@ -5675,6 +5678,9 @@ fn result_filter_action(model: &mut Model, action: Action) -> Vec<Effect> {
 /// a wide row is read one value at a time. Up and down scroll the value. Nothing
 /// else reaches the pane underneath.
 fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if let Some(effects) = structured_inspector_action(model, &action) {
+        return effects;
+    }
     match action {
         Action::Move(Direction::Up) => {
             if let Some(inspector) = model.inspector.as_mut() {
@@ -5723,6 +5729,59 @@ fn inspector_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
     }
     Vec::new()
+}
+
+fn structured_inspector_action(model: &mut Model, action: &Action) -> Option<Vec<Effect>> {
+    use crate::app::inspect::{Patch, structured_view};
+    if !matches!(
+        action,
+        Action::Insert('r' | 'e')
+            | Action::Move(Direction::Up | Direction::Down)
+            | Action::MovePage(Direction::Up | Direction::Down)
+    ) {
+        return None;
+    }
+    let inspector = model.inspector?;
+    let set = model.visible_result()?;
+    let column = model.selected_column;
+    let tree = structured_view(set, model.selected_source_row()?, column)?.ok()?;
+    if matches!(action, Action::Insert('r')) {
+        model.inspector.as_mut()?.toggle_raw();
+        return Some(Vec::new());
+    }
+    if inspector.raw() {
+        return None;
+    }
+    match action {
+        Action::Move(direction @ (Direction::Up | Direction::Down))
+        | Action::MovePage(direction @ (Direction::Up | Direction::Down)) => {
+            let step = if matches!(action, Action::MovePage(_)) {
+                crate::ui::layout::inspector_viewport(model.size, &model.presentation)
+                    .1
+                    .max(1)
+            } else {
+                1
+            };
+            let count = tree.nodes.len();
+            model
+                .inspector
+                .as_mut()?
+                .move_node(*direction == Direction::Down, step, count);
+            Some(Vec::new())
+        }
+        Action::Insert('e') => {
+            let node = inspector.scroll();
+            let Some(input) = set.structured_column(column)?.edit_input(&tree, node) else {
+                return Some(Vec::new());
+            };
+            let effects = begin_cell_update_with_patch(model, Some(Patch { node, input }));
+            if !effects.is_empty() {
+                model.inspector = None;
+            }
+            Some(effects)
+        }
+        _ => None,
+    }
 }
 
 /// Handles input while a password is being typed.
@@ -6174,7 +6233,10 @@ fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
     };
     match action {
         Action::Insert(character) => {
-            prompt.push(character);
+            if !prompt.append(character.encode_utf8(&mut [0_u8; 4])) {
+                model.cell_update_notice =
+                    Some(crate::structured::Error::Limit.description().into());
+            }
             model.update_prompt = Some(prompt);
             Vec::new()
         }
@@ -6216,15 +6278,50 @@ fn update_prompt_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     primary_key: column.primary_key,
                 })
                 .collect::<Vec<_>>();
-            let plan = crate::query::plan_update(
-                &prompt.source,
-                &prompt.relation.schema,
-                &prompt.relation.relation,
-                &set.columns,
-                row,
-                &relation_columns,
-                prompt.replacement(),
-            );
+            let plan = if let Some(patch) = prompt.patch {
+                let column = model.selected_column;
+                let replacement = crate::app::inspect::structured_view(set, selected_row, column)
+                    .ok_or(crate::structured::Error::NotEditable)
+                    .and_then(|tree| tree)
+                    .and_then(|tree| tree.replace(patch.node, prompt.replacement()));
+                let replacement = match replacement {
+                    Ok(value) => value,
+                    Err(error) => {
+                        model.cell_update_notice = Some(error.description().to_owned());
+                        model.update_prompt = Some(prompt);
+                        return Vec::new();
+                    }
+                };
+                let Some(info) = set.structured_column(column) else {
+                    return Vec::new();
+                };
+                let Some(origin) = info.origin else {
+                    return Vec::new();
+                };
+                crate::query::update::plan_guarded_update(
+                    &prompt.source,
+                    &prompt.relation.schema,
+                    &prompt.relation.relation,
+                    &set.columns,
+                    row,
+                    &relation_columns,
+                    crate::query::update::GuardedValue {
+                        text: &replacement,
+                        origin,
+                        kind: info.kind,
+                    },
+                )
+            } else {
+                crate::query::plan_update(
+                    &prompt.source,
+                    &prompt.relation.schema,
+                    &prompt.relation.relation,
+                    &set.columns,
+                    row,
+                    &relation_columns,
+                    prompt.replacement(),
+                )
+            };
             match plan {
                 Ok(plan) => {
                     model.review_scroll = 0;
@@ -6385,6 +6482,13 @@ fn begin_refresh_result(model: &mut Model) -> Vec<Effect> {
 
 /// Starts the value-free source analysis and live metadata lookup for a cell.
 fn begin_cell_update(model: &mut Model) -> Vec<Effect> {
+    begin_cell_update_with_patch(model, None)
+}
+
+fn begin_cell_update_with_patch(
+    model: &mut Model,
+    patch: Option<crate::app::inspect::Patch>,
+) -> Vec<Effect> {
     if refuse_unavailable_result(model) {
         return Vec::new();
     }
@@ -6471,6 +6575,7 @@ fn begin_cell_update(model: &mut Model) -> Vec<Effect> {
         source_sql,
     };
     model.update_lookup = Some(UpdateLookup {
+        patch,
         request,
         candidate,
         source: source.clone(),
@@ -6551,7 +6656,9 @@ fn finish_update_target(
         );
         return Vec::new();
     }
-    model.update_prompt = Some(UpdatePrompt::new(lookup.candidate, lookup.source, relation));
+    let mut prompt = UpdatePrompt::new(lookup.candidate, lookup.source, relation);
+    prompt.patch = lookup.patch;
+    model.update_prompt = Some(prompt);
     model.cell_update_notice = None;
     Vec::new()
 }
@@ -7559,8 +7666,8 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
         return Vec::new();
     }
     if let Some(prompt) = model.update_prompt.as_mut() {
-        for character in text.chars() {
-            prompt.push(character);
+        if !prompt.append(&text) {
+            model.cell_update_notice = Some(crate::structured::Error::Limit.description().into());
         }
         model.paste_notice = None;
         return Vec::new();
