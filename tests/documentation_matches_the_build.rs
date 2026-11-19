@@ -14,7 +14,7 @@
 //! that rots silently.
 
 use ignatius::ExitCode;
-use ignatius::config::schema::PROFILE_FIELDS;
+use ignatius::config::{Config, schema::PROFILE_FIELDS};
 use ignatius::ui::keymap::{CHORDS, CONFIGURABLE, Keymap};
 
 const KEYMAP: &str = include_str!("../docs/design/keymap.md");
@@ -642,6 +642,24 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         !README.contains('\u{2013}'),
         "README.md must not contain en dashes"
     );
+}
+
+#[test]
+fn readme_profile_example_loads_with_production_read_only() {
+    let (_, profile_section) = README
+        .split_once("### Configuration Profiles")
+        .expect("README.md must describe configuration profiles");
+    let (_, toml_block) = profile_section
+        .split_once("```toml\n")
+        .expect("profile section must include a TOML example");
+    let (example, _) = toml_block
+        .split_once("\n```")
+        .expect("profile example must end with a closing code fence");
+
+    let config: Config = toml::from_str(example).expect("README.md profile example must parse");
+    let issues = config.validate();
+    assert!(issues.is_empty(), "profile example is invalid: {issues:?}");
+    assert!(config.profiles["production-orders"].read_only);
 }
 
 #[test]

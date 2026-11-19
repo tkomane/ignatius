@@ -52,7 +52,7 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 | --- | --- |
 | **4-Tier Surface Architecture & Adaptive Themes** | Five built-in palettes: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, and Google Material 3 Tonal `material`, plus `[theme]` `custom` overrides and `OSC 11` background detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
 | **Truthful Results Grid** | `NULL` (`[null]`), empty string (`""`), and literal `"NULL"` (`"NULL"`) are always visually and copy-distinct. JSON/JSONB values, arrays, numeric right-alignment, sort indicators, row numbers, and horizontal/vertical scrolling work out of the box. |
-| **Safety by Construction** | Production profiles (`environment = "prod"` or `read_only = true`) visibly change the header pill (`[PROD]` / `[READ ONLY]`), guard destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) behind a confirmation modal, and require an explicit reviewed `UPDATE` modal (`Ctrl+K u` on a cell) with primary-key targeting and `Enter` to execute. |
+| **Safety by Construction** | Production profiles (`environment = "prod"`) and read-only profiles (`read-only = true`) show distinct header badges. Destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) open a confirmation in production. Reviewed cell edits (`Ctrl+K u`) show the primary-key target before execution and are refused on read-only connections. |
 | **Schema-Aware Editor & Overlays** | Multi-line SQL editor with active `CursorLine` & `CursorLineNr`, 1 MiB bounded bracketed paste, schema-aware `Ctrl+Space` completion popup, 80%x75% Command Palette (`Ctrl+P`) with 40%/60% list-and-SQL preview split, interactive `EXPLAIN` / `EXPLAIN ANALYZE` Plan Explorer (`Ctrl+K l` / `Ctrl+K a`), and layered PostgreSQL diagnostics (`SQLSTATE`, statement line/column, token pinning, likely cause, and next step). |
 | **Non-Interactive CLI & Streaming Export** | Scriptable `ignatius query` with `--file`, `--param-env NAME=VARIABLE`, table, CSV, TSV, JSON, NDJSON, Markdown and SQL INSERT output, and row streaming via `--output <path>`. |
 
@@ -270,24 +270,35 @@ Ignatius includes a self-contained local PostgreSQL container playground pre-see
 ```bash
 cargo xtask db up
 ```
-This spins up disposable local PostgreSQL containers:
-- Plain connection: `postgres://ignatius_test:ignatius_test_pw@127.0.0.1:55432/ignatius_demo?sslmode=disable`
-- TLS connection: `postgres://ignatius_test:ignatius_test_pw@localhost:55433/ignatius_demo?sslmode=verify-full`
-Pre-seeded schemas include `orders`, `recent_orders`, `rendering_cases`, `type_coverage`, and `reporting.order_totals`.
+This starts disposable PostgreSQL on port 55432 (plain) and on port 55433 (TLS).
+The fixture includes `public.orders`, `public.recent_orders`,
+`public.rendering_cases`, `public.type_coverage`, and `reporting.order_totals`.
 
 ### 2. Launch the Workbench
-Run directly from source or install the binary:
-```bash
-# Option A: Run directly via xtask
-cargo xtask run
+Open the plain fixture from source with its synthetic credentials.
 
-# Option B: Install to ~/.local/bin/ignatius and launch
+```bash
+cargo xtask run
+```
+
+To launch the installed binary against the same fixture, run this from the repository root in Bash or Zsh.
+
+```bash
 cargo xtask install
-ignatius "postgres://ignatius_test:ignatius_test_pw@127.0.0.1:55432/ignatius_demo?sslmode=disable"
+PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' docker/dev.env)" \
+  ignatius connect 'postgres://ignatius_test@127.0.0.1:55432/ignatius_demo?sslmode=disable'
+```
+
+For verified TLS, use the playground CA and the hostname on its certificate.
+
+```bash
+PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' docker/dev.env)" \
+  PGSSLROOTCERT="$PWD/docker/tls/generated/ca.crt" \
+  ignatius connect 'postgres://ignatius_test@localhost:55433/ignatius_demo?sslmode=verify-full'
 ```
 
 ### 3. Immediate Actions to Try
-- Press `Ctrl+R` to execute the pre-loaded query buffer.
+- Enter `SELECT order_id, customer_id, total, note FROM public.orders ORDER BY order_id;` and press `Ctrl+R`. The fresh fixture returns three rows.
 - Press `Tab` to navigate focus from Editor to the Results grid.
 - Navigate cells with the arrow keys (`Up`, `Down`, `Left`, `Right`). Press `Enter` (or `Ctrl+K i`) to inspect any value in the Cell Detail viewer.
 - On a single-table result row with a primary key, press `Ctrl+K u` to preview a reviewed `UPDATE` statement.
@@ -329,7 +340,7 @@ Connection profiles and client preferences live in `~/.config/ignatius/config.to
 theme = "auto"              # "dark", "light", "high-contrast", "field-industrial", "material", "custom", or "auto" (OSC 11)
 mouse = true                # enable mouse clicks, drags, and scrolling
 density = "comfortable"     # "comfortable" or "compact"
-reduced_motion = false      # disable animations for accessibility
+reduced-motion = false      # set true to disable animations
 glyphs = "nerd-font"        # "unicode", "ascii", or "nerd-font"
 
 [profiles.local-dev]
@@ -355,7 +366,7 @@ dbname = "orders"
 user = "readonly_admin"
 sslmode = "verify-full"
 environment = "prod"        # triggers [PROD] header badge and write guards
-read_only = true            # enforces PostgreSQL session read-only transaction mode
+read-only = true            # enforces PostgreSQL session read-only transaction mode
 ```
 
 ### Cloud Identity Authentication (No Stored Passwords)
