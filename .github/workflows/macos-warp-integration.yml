@@ -1,0 +1,82 @@
+name: Native Warp source integration
+
+on:
+  push:
+    branches: [codex/warp-integration-check]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  renderer:
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      WARP_SOURCE_SHA: 0b2db6e0bf3fa3c19f4c1a94899eb67c634a6973
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Stage the exact Ignatius archive and synthetic fixture
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT:$RUNNER_OS:$RUNNER_ARCH" = github-hosted:macOS:ARM64
+          test "$(uname -m)" = arm64
+          test "$GITHUB_EVENT_NAME:$GITHUB_REF" = push:refs/heads/codex/warp-integration-check
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          archive_root="$(mktemp -d "$RUNNER_TEMP/ignatius-source-archive.XXXXXXXX")"
+          gh run download 44627234677 --repo "$GITHUB_REPOSITORY" \
+            --name release-candidate-aggregate-44627234677-1 --dir "$archive_root"
+          python3 tests/support/macos/prepare_warp_source_fixture.py "$archive_root"
+      - name: Check out pinned Warp source and configure the native build
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_root="$(mktemp -d "$RUNNER_TEMP/warp-integration-source.XXXXXXXX")"
+          git init --quiet "$source_root"
+          git -C "$source_root" remote add origin https://github.com/warpdotdev/warp.git
+          git -C "$source_root" fetch --depth=1 origin "$WARP_SOURCE_SHA"
+          GIT_LFS_SKIP_SMUDGE=1 git -C "$source_root" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$source_root" rev-parse HEAD)" = "$WARP_SOURCE_SHA"
+          git -C "$source_root" lfs pull
+          test -z "$(git -C "$source_root" status --porcelain)"
+          rustup toolchain install 1.92.0 --profile minimal
+          if ! command -v protoc >/dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install protobuf
+          fi
+          protoc --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --sdk macosx metal --version
+          df -h "$RUNNER_TEMP"
+          echo "WARP_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"
+      - name: Build and run the native Warp Integration renderer case
+        shell: bash
+        env:
+          CARGO_PROFILE_DEV_DEBUG: '0'
+          CARGO_PROFILE_DEV_INCREMENTAL: 'false'
+          CARGO_BUILD_JOBS: '2'
+          CARGO_TERM_COLOR: never
+          WARPUI_USE_REAL_DISPLAY_IN_INTEGRATION_TESTS: '1'
+        run: |
+          set -euo pipefail
+          python3 tests/support/macos/register_warp_source_fixture.py "$WARP_SOURCE_ROOT"
+          cd "$WARP_SOURCE_ROOT"
+          cargo +1.92.0 run --locked -p integration --bin integration -- test_ignatius_native_renderer_restore
+      - name: Retain the native fixture receipts and frames
+        if: always() && env.IGNATIUS_WARP_FIXTURE_ROOT != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ignatius-warp-open-source-renderer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/state/active.json
+            ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/state/runtime.json
+            ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/capture/test_ignatius_native_renderer_restore/*/ignatius-active.png
+            ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/capture/test_ignatius_native_renderer_restore/*/ignatius-restored.png
+          retention-days: 7
+          if-no-files-found: ignore

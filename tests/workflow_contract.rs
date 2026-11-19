@@ -297,9 +297,11 @@ fn workflows_are_read_only_bounded_and_do_not_use_privileged_pr_code() {
         // earlier run in this repository. All other workflows read source only.
         let expected_permissions: &[&str] = match path.file_name().and_then(|name| name.to_str()) {
             Some("codeql.yml") => &["contents: read", "security-events: write"],
-            Some("windows-archive-runtime-diagnostic.yml" | "macos-desktop-diagnostic.yml") => {
-                &["actions: read", "contents: read"]
-            }
+            Some(
+                "windows-archive-runtime-diagnostic.yml"
+                | "macos-desktop-diagnostic.yml"
+                | "macos-warp-integration.yml",
+            ) => &["actions: read", "contents: read"],
             _ => &["contents: read"],
         };
         assert_eq!(
