@@ -50,7 +50,7 @@ private struct Inputs {
         }
     }
 
-    func verifyHostedScope() throws {
+    func verifyHostedScope() throws -> URL {
         let environment = ProcessInfo.processInfo.environment
         guard environment["GITHUB_ACTIONS"] == "true", environment["RUNNER_ENVIRONMENT"] == "github-hosted",
               environment["RUNNER_OS"] == "macOS", let temp = environment["RUNNER_TEMP"], temp.hasPrefix("/"),
@@ -63,6 +63,7 @@ private struct Inputs {
         guard [app, readiness, output].allSatisfy({ $0.path.hasPrefix(prefix) }) else {
             throw DriverFailure("path_outside_owned_warp_job")
         }
+        return owned
     }
 
     private static func positiveDecimal(_ value: String) -> Bool {
@@ -168,6 +169,39 @@ private struct Receipt: Encodable {
     let key_posted_uptime_ns: UInt64
 }
 
+private struct StartupReceipt: Encodable {
+    let schema = 1
+    let status = "startup_diagnostic"
+    let reason = "active_receipt_timeout"
+    let product_evidence = false
+    let input_posted = false
+    let app_pid: pid_t
+    let nonce: String
+    let launch_claim: String
+    var window_id: CGWindowID?
+    var first_window: Capture?
+    var capture_failure: String?
+}
+
+private func launchClaimStatus(in owned: URL) -> String {
+    let marker = owned.appendingPathComponent("launch.claim")
+    var mode = stat()
+    if lstat(marker.path, &mode) != 0 {
+        return errno == ENOENT ? "absent" : "unavailable"
+    }
+    return mode.st_mode & S_IFMT == S_IFDIR && mode.st_uid == geteuid() ? "present" : "unexpected"
+}
+
+private func requireStartupReceiptsAbsent(in readiness: URL) throws {
+    for name in ["active.json", "runtime.json"] {
+        var mode = stat()
+        if lstat(readiness.appendingPathComponent(name).path, &mode) == 0 {
+            throw DriverFailure("fixture_receipt_appeared_after_timeout")
+        }
+        guard errno == ENOENT else { throw DriverFailure("startup_receipt_status_unavailable") }
+    }
+}
+
 private func publish(_ data: Data, named name: String, to output: URL) throws {
     let temporary = output.appendingPathComponent("." + name + ".part")
     let destination = output.appendingPathComponent(name)
@@ -238,7 +272,7 @@ private struct OwnedWarp {
         }
     }
 
-    func regularWindow(title: String, expectedID: CGWindowID? = nil) async throws -> (SCWindow, String)? {
+    func regularWindow(title: String, expectedID: CGWindowID? = nil, uniqueOnly: Bool = false) async throws -> (SCWindow, String)? {
         try verify()
         let listing = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         try verify()
@@ -255,7 +289,7 @@ private struct OwnedWarp {
             selected = single
             method = single.title == title ? "exact_fixture_title" : "one_owned_regular_window"
         } else {
-            guard matching.count == 1, let exact = matching.first else {
+            guard !uniqueOnly, matching.count == 1, let exact = matching.first else {
                 throw DriverFailure("ambiguous_owned_warp_window")
             }
             try focusedWindowMatches(title)
@@ -268,7 +302,7 @@ private struct OwnedWarp {
         return (selected, method)
     }
 
-    func capture(window: SCWindow, name: String) async throws -> Capture {
+    func capture(window: SCWindow, name: String, startupTitle: String? = nil) async throws -> Capture {
         guard CGPreflightScreenCaptureAccess() else { throw DriverFailure("warp_capture_access_unavailable") }
         try verify(requireForeground: true)
         let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -286,6 +320,12 @@ private struct OwnedWarp {
         config.showsCursor = false
         config.capturesAudio = false
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        if let startupTitle {
+            guard try await regularWindow(title: startupTitle, expectedID: window.windowID, uniqueOnly: true) != nil else {
+                throw DriverFailure("startup_warp_window_disappeared")
+            }
+            try requireStartupReceiptsAbsent(in: inputs.readiness)
+        }
         try verify(requireForeground: true)
         guard image.width == config.width, image.height == config.height,
               image.width > 0, image.height > 0 else { throw DriverFailure("unexpected_warp_image_bounds") }
@@ -342,7 +382,7 @@ private struct WarpDriver {
     }
 
     static func run(_ inputs: Inputs) async throws {
-        try inputs.verifyHostedScope()
+        let owned = try inputs.verifyHostedScope()
         guard CGPreflightScreenCaptureAccess(), CGPreflightPostEventAccess(), AXIsProcessTrusted() else {
             throw DriverFailure("required_macos_access_unavailable")
         }
@@ -351,12 +391,18 @@ private struct WarpDriver {
         let runtimeFile = inputs.readiness.appendingPathComponent("runtime.json")
         let clock = ContinuousClock()
 
-        let active: Active = try await poll(until: clock.now + .seconds(24), missing: "active_receipt_timeout") {
-            try app.verify()
-            if try readReceipt(runtimeFile, as: Runtime.self) != nil {
-                throw DriverFailure("restoration_reported_before_key")
+        let active: Active
+        do {
+            active = try await poll(until: clock.now + .seconds(24), missing: "active_receipt_timeout") {
+                try app.verify()
+                if try readReceipt(runtimeFile, as: Runtime.self) != nil {
+                    throw DriverFailure("restoration_reported_before_key")
+                }
+                return try readReceipt(activeFile, as: Active.self)
             }
-            return try readReceipt(activeFile, as: Active.self)
+        } catch let failure as DriverFailure where failure.reason == "active_receipt_timeout" {
+            await retainStartupDiagnostic(app: app, owned: owned)
+            throw failure
         }
         try active.verify(nonce: inputs.nonce)
 
@@ -394,6 +440,32 @@ private struct WarpDriver {
         let data = try encoder.encode(receipt)
         try publish(data + Data("\n".utf8), named: "driver.json", to: inputs.output)
         try FileHandle.standardOutput.write(contentsOf: data + Data("\n".utf8))
+    }
+
+    static func retainStartupDiagnostic(app: OwnedWarp, owned: URL) async {
+        let inputs = app.inputs
+        var receipt = StartupReceipt(app_pid: inputs.pid, nonce: inputs.nonce, launch_claim: launchClaimStatus(in: owned))
+        do {
+            try app.verify(requireForeground: true)
+            let title = "W07Warp-" + inputs.nonce
+            guard let (window, _) = try await app.regularWindow(title: title, uniqueOnly: true) else {
+                throw DriverFailure("startup_warp_window_missing")
+            }
+            try requireStartupReceiptsAbsent(in: inputs.readiness)
+            receipt.window_id = window.windowID
+            receipt.first_window = try await app.capture(window: window, name: "warp-first-window.png", startupTitle: title)
+        } catch {
+            receipt.capture_failure = (error as? DriverFailure)?.reason ?? "framework_or_io_failure"
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        do {
+            let data = try encoder.encode(receipt) + Data("\n".utf8)
+            try publish(data, named: "driver-startup.json", to: inputs.output)
+            try FileHandle.standardOutput.write(contentsOf: data)
+        } catch {
+            try? FileHandle.standardError.write(contentsOf: Data("warp-driver: startup_receipt_unavailable\n".utf8))
+        }
     }
 
     static func poll<T>(until deadline: ContinuousClock.Instant, missing: String,

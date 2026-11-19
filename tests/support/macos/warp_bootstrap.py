@@ -26,6 +26,7 @@ ARCHIVE = "ignatius-0.1.0-aarch64-apple-darwin.tar.gz"
 # permissions, keyboard events, app substitution or recent-items changes.
 LAUNCH_HELPER = r"""
 import AppKit
+import CoreGraphics
 import Foundation
 
 @main
@@ -71,11 +72,38 @@ enum OwnedWarp {
         config.activates = true
         config.promptsUserIfNeeded = false
         do {
-            let app = try await NSWorkspace.shared.open(
-                [uri], withApplicationAt: URL(fileURLWithPath: bundle), configuration: config
-            )
-            guard matches(app) else { exit(3) }
-            print(app.processIdentifier)
+            let target = URL(fileURLWithPath: bundle)
+            let app = try await NSWorkspace.shared.openApplication(at: target, configuration: config)
+            guard matches(app), let birth = app.launchDate else { exit(3) }
+            let claim = target.deletingLastPathComponent().appendingPathComponent("launch.claim")
+            var windowReady = false
+            for _ in 0..<140 {
+                guard matches(app) else { exit(3) }
+                let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                        kCGNullWindowID) as? [[String: Any]] ?? []
+                windowReady = app.isFinishedLaunching && app.isActive && windows.contains { window in
+                    (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == app.processIdentifier
+                        && (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
+                }
+                if windowReady { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard windowReady else { exit(6) }
+
+            config.createsNewApplicationInstance = false
+            var deliveries = 0
+            for _ in 0..<2 {
+                let accepted = try await NSWorkspace.shared.open([uri], withApplicationAt: target, configuration: config)
+                guard matches(accepted), accepted.processIdentifier == app.processIdentifier,
+                      accepted.launchDate == birth else { exit(3) }
+                deliveries += 1
+                for _ in 0..<35 {
+                    if FileManager.default.fileExists(atPath: claim.path) { break }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                if FileManager.default.fileExists(atPath: claim.path) { break }
+            }
+            print("\(app.processIdentifier) \(deliveries)")
         } catch {
             exit(5)
         }
@@ -241,9 +269,11 @@ def launch(temp, root, binary):
     # Write the one owned identity before issuing Launch Services requests so
     # the cleanup step can find our copy even if the launch step is interrupted.
     launch_record = root / "launch-identity.json"
-    identity = {"app": str(app), "executable": str(executable)}
+    identity = {"app": str(app), "executable": str(executable), "nonce": nonce}
     launch_record.write_text(json.dumps(identity), encoding="utf-8")
-    pid = run("owned_vendor_uri_launch", [helper, "launch", app, executable, uri], 35).decode().strip()
+    delivered = run("owned_vendor_uri_launch", [helper, "launch", app, executable, uri], 40).decode().split()
+    require(len(delivered) == 2 and delivered[1] in {"1", "2"}, "invalid URI delivery receipt")
+    pid, deliveries = delivered
     require(pid.isascii() and pid.isdecimal() and 0 < int(pid) <= 2147483647, "invalid app PID")
     identity["pid"] = int(pid)
     pending_record = root / "launch-identity.pending"
@@ -253,7 +283,8 @@ def launch(temp, root, binary):
     receipt = {"schema": 1, "warpVersion": WARP_VERSION, "observedBundleVersion": bundle_version,
                "vendorDmgSha256": WARP_DMG_SHA, "appleSignatureVerified": True, "gatekeeperAccepted": True,
                "warpArm64Slice": True, "ignatiusArchiveRun": ARCHIVE_RUN, "ignatiusArchiveSha256": ARCHIVE_SHA,
-               "ignatiusExecutableSha256": IGNATIUS_SHA, "ownedWarpPid": int(pid), "uriDelivered": True}
+               "ignatiusExecutableSha256": IGNATIUS_SHA, "ownedWarpPid": int(pid),
+               "launchServicesRequests": int(deliveries), "launchClaimObserved": (root / "launch.claim").is_dir()}
     encoded = json.dumps(receipt, sort_keys=True)
     (temp / "ignatius-warp-bootstrap.json").write_text(encoded + "\n", encoding="utf-8")
     print(encoded)
@@ -269,6 +300,31 @@ def terminate(root):
     require(Path(data["app"]).resolve() == app and executable.is_relative_to(app), "cleanup identity mismatch")
     run("terminate_only_owned_warp", [root / "owned-warp-launch", "terminate", app, executable,
                                      str(data.get("pid", ""))], 12)
+
+    # Report known startup markers from this fresh runner account's Warp logs.
+    log_markers = {"receivedOwnedUri": False, "configParseError": False, "missingNamedConfiguration": False}
+    nonce = str(data.get("nonce", ""))
+    if re.fullmatch(r"[a-f0-9]{32}", nonce):
+        token = f"w07warp-{nonce}".encode("ascii")
+        for name in ("warp.log", "warp.log.1"):
+            log = Path.home() / "Library" / "Logs" / name
+            if not log.is_file() or log.is_symlink():
+                continue
+            with log.open("rb") as source:
+                source.seek(max(0, log.stat().st_size - 1024 * 1024))
+                tail = source.read(1024 * 1024).lower()
+            log_markers["receivedOwnedUri"] |= any(b"received url" in line and token in line for line in tail.splitlines())
+            log_markers["configParseError"] |= b"failed to parse config file at" in tail
+            log_markers["missingNamedConfiguration"] |= b"couldn't find a matching file path for" in tail
+    state = root / "state"
+    startup = {
+        "schema": 1, "launchClaim": (root / "launch.claim").is_dir(),
+        "fixtureLock": (state / "fixture.lock").is_file(),
+        "activeReceipt": (state / "active.json").is_file(),
+        "runtimeReceipt": (state / "runtime.json").is_file(), **log_markers,
+    }
+    print(json.dumps(startup, sort_keys=True))
+    (root / "startup.json").write_text(json.dumps(startup, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main():

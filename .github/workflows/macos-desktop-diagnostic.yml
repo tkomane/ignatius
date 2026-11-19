@@ -123,6 +123,7 @@ jobs:
           path: |
             ${{ runner.temp }}/ignatius-macos-desktop-preflight.json
             ${{ runner.temp }}/ignatius-warp-bootstrap.json
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/startup.json
           retention-days: 7
           if-no-files-found: warn
       - name: Retain just the owned Warp observations
@@ -132,6 +133,8 @@ jobs:
           name: ignatius-warp-renderer-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/driver.json
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/driver-startup.json
+            ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/warp-first-window.png
             ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/ignatius-active.png
             ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/capture/ignatius-restored.png
             ${{ runner.temp }}/ignatius-warp-${{ github.run_id }}-${{ github.run_attempt }}/state/active.json
