@@ -78,6 +78,15 @@ struct RendererModeRestorer {
     }
 };
 
+SMALL_RECT renderer_console_viewport(HANDLE output) {
+    CONSOLE_SCREEN_BUFFER_INFO screen{};
+    require(GetConsoleScreenBufferInfo(output, &screen) != 0, "read renderer actor console viewport");
+    require(screen.srWindow.Left == 0 && screen.srWindow.Top == 0
+            && screen.srWindow.Right >= 55 && screen.srWindow.Bottom >= 9,
+            "renderer actor viewport contains the synthetic markers");
+    return screen.srWindow;
+}
+
 int renderer_actor(const std::wstring& pipe, const std::wstring& nonce) {
     require_renderer_nonce(nonce);
     require(pipe == renderer_pipe_name(nonce), "exact renderer pipe name");
@@ -93,23 +102,26 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce) {
                               nullptr, OPEN_EXISTING, 0, nullptr));
     require(input && output, "renderer actor owns console device handles");
     DWORD baseline_input{}, baseline_output{};
-    CONSOLE_SCREEN_BUFFER_INFO screen{};
-    require(GetConsoleMode(input.value, &baseline_input) && GetConsoleMode(output.value, &baseline_output)
-            && GetConsoleScreenBufferInfo(output.value, &screen), "renderer actor console preflight");
-    require(screen.srWindow.Left == 0 && screen.srWindow.Top == 0
-            && screen.srWindow.Right >= 55 && screen.srWindow.Bottom >= 9,
-            "renderer actor viewport contains the synthetic markers");
+    require(GetConsoleMode(input.value, &baseline_input) && GetConsoleMode(output.value, &baseline_output),
+            "renderer actor console preflight");
+    const auto initial_viewport = renderer_console_viewport(output.value);
 
     const auto nonce_text = ascii(nonce);
     std::ostringstream registered;
     registered << "R " << nonce_text << ' ' << attached_count << ' ' << baseline_input << ' ' << baseline_output
-               << ' ' << static_cast<unsigned>(screen.srWindow.Right + 1)
-               << ' ' << static_cast<unsigned>(screen.srWindow.Bottom + 1);
+               << ' ' << static_cast<unsigned>(initial_viewport.Right + 1)
+               << ' ' << static_cast<unsigned>(initial_viewport.Bottom + 1);
     renderer_stamp(registered, ticks());
     // No console mutation is attempted before the outside supervisor
     // authenticates this stable client and acknowledges owned Job membership.
     send(pipe, registered.str());
 
+    // Registration acknowledgement follows the supervisor's owned window fit.
+    const auto viewport = renderer_console_viewport(output.value);
+    DWORD fitted_input{}, fitted_output{};
+    require(GetConsoleMode(input.value, &fitted_input) && GetConsoleMode(output.value, &fitted_output)
+            && fitted_input == baseline_input && fitted_output == baseline_output,
+            "renderer resize preserves the untouched console modes");
     RendererModeRestorer restore{output.value, baseline_output};
     const auto active_output = baseline_output | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     require(SetConsoleMode(output.value, active_output) != 0, "enable VT on the owned renderer console");
@@ -135,6 +147,9 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce) {
         require(GetConsoleMode(input.value, &current_input) && GetConsoleMode(output.value, &current_output)
                 && current_input == baseline_input && current_output == active_output,
                 "renderer owns the expected console mode baseline");
+        const auto current_viewport = renderer_console_viewport(output.value);
+        require(current_viewport.Right == viewport.Right && current_viewport.Bottom == viewport.Bottom,
+                "renderer owns the stable fitted console viewport");
         std::ostringstream message;
         message << "V " << nonce_text << ' ' << phase << ' ' << written << ' ' << marker_read << ' '
                 << sentinel_read << ' ' << saw_sentinel << ' ' << current_input << ' ' << current_output;
@@ -249,6 +264,115 @@ RendererWindow find_renderer_window(HANDLE job, const std::wstring& terminal,
     fail("owned renderer window did not become visible");
 }
 
+struct RendererFit {
+    bool measured{}, reposition_requested{}, stable{};
+    RECT work{}, before{}, requested{}, last_window{}, last_client{};
+};
+
+constexpr std::int64_t renderer_fit_width = 880;
+constexpr std::int64_t renderer_fit_height = 570;
+constexpr LONG renderer_fit_margin = 12;
+
+RECT renderer_window_bounds(HWND window) {
+    RECT bounds{};
+    require(GetWindowRect(window, &bounds) != 0, "read owned renderer window bounds");
+    return bounds;
+}
+
+RECT renderer_client_bounds(HWND window) {
+    RECT bounds{};
+    require(GetClientRect(window, &bounds) != 0, "read owned renderer client bounds");
+    POINT first{bounds.left, bounds.top};
+    POINT last{bounds.right, bounds.bottom};
+    require(ClientToScreen(window, &first) && ClientToScreen(window, &last),
+            "map owned renderer client bounds to physical screen coordinates");
+    return {first.x, first.y, last.x, last.y};
+}
+
+bool renderer_contains(const RECT& outside, const RECT& inside) {
+    return inside.right > inside.left && inside.bottom > inside.top
+        && inside.left >= outside.left && inside.top >= outside.top
+        && inside.right <= outside.right && inside.bottom <= outside.bottom;
+}
+
+RECT renderer_fit_target(const RECT& window, const RECT& work) {
+    const auto available_width = static_cast<std::int64_t>(work.right) - work.left - 2 * renderer_fit_margin;
+    const auto available_height = static_cast<std::int64_t>(work.bottom) - work.top - 2 * renderer_fit_margin;
+    const auto width = std::min({static_cast<std::int64_t>(window.right) - window.left,
+                                 available_width, renderer_fit_width});
+    const auto height = std::min({static_cast<std::int64_t>(window.bottom) - window.top,
+                                  available_height, renderer_fit_height});
+    require(width > 0 && height > 0, "renderer monitor work area has room for an owned window fit");
+    const auto left = std::clamp(static_cast<std::int64_t>(window.left),
+        static_cast<std::int64_t>(work.left) + renderer_fit_margin,
+        static_cast<std::int64_t>(work.right) - renderer_fit_margin - width);
+    const auto top = std::clamp(static_cast<std::int64_t>(window.top),
+        static_cast<std::int64_t>(work.top) + renderer_fit_margin,
+        static_cast<std::int64_t>(work.bottom) - renderer_fit_margin - height);
+    return {static_cast<LONG>(left), static_cast<LONG>(top),
+            static_cast<LONG>(left + width), static_cast<LONG>(top + height)};
+}
+
+void fit_renderer_window(const RendererWindow& renderer, HANDLE job, const std::wstring& terminal,
+                         const std::wstring& title, Clock::time_point work_deadline, RendererFit& fit) {
+    using namespace renderer_pixels_detail;
+    PixelCoordinates coordinates;
+    const auto deadline = (std::min)(work_deadline, Clock::now() + 3s);
+    while (GetForegroundWindow() != renderer.hwnd && Clock::now() < deadline)
+        Sleep(remaining(deadline, 20));
+    verify_renderer_window(renderer, job, terminal, title);
+    require_foreground(renderer.hwnd);
+    fit.before = fit.last_window = renderer_window_bounds(renderer.hwnd);
+    fit.last_client = renderer_client_bounds(renderer.hwnd);
+    fit.measured = true;
+    const auto monitor = MonitorFromWindow(renderer.hwnd, MONITOR_DEFAULTTONULL);
+    MONITORINFO info{};
+    info.cbSize = static_cast<DWORD>(sizeof(info));
+    require(monitor && GetMonitorInfoW(monitor, &info), "find owned renderer's current monitor work area");
+    fit.work = info.rcWork;
+    fit.requested = renderer_fit_target(fit.before, fit.work);
+
+    if (!same_rectangle(fit.before, fit.requested)) {
+        require(Clock::now() < deadline, "renderer window fit deadline before reposition");
+        verify_renderer_window(renderer, job, terminal, title);
+        require_foreground(renderer.hwnd);
+        fit.reposition_requested = true;
+        require(SetWindowPos(renderer.hwnd, nullptr, fit.requested.left, fit.requested.top,
+                             fit.requested.right - fit.requested.left, fit.requested.bottom - fit.requested.top,
+                             SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS) != 0,
+                "fit only the verified owned renderer window");
+        verify_renderer_window(renderer, job, terminal, title);
+    }
+
+    auto stable_since = Clock::now();
+    while (Clock::now() < deadline) {
+        require_foreground(renderer.hwnd);
+        const auto window = renderer_window_bounds(renderer.hwnd);
+        const auto client = renderer_client_bounds(renderer.hwnd);
+        const bool unchanged = same_rectangle(window, fit.last_window) && same_rectangle(client, fit.last_client);
+        fit.last_window = window;
+        fit.last_client = client;
+        const bool fitted = renderer_contains(fit.work, window) && renderer_contains(window, client)
+            && static_cast<std::int64_t>(window.right) - window.left <= renderer_fit_width
+            && static_cast<std::int64_t>(window.bottom) - window.top <= renderer_fit_height
+            && MonitorFromWindow(renderer.hwnd, MONITOR_DEFAULTTONULL) == monitor
+            && (!fit.reposition_requested || !same_rectangle(window, fit.before));
+        if (!fitted || !unchanged) {
+            stable_since = Clock::now();
+        } else if (Clock::now() - stable_since >= 100ms
+                   && same_rectangle(visible_client(renderer.hwnd), client)
+                   && same_rectangle(renderer_window_bounds(renderer.hwnd), window)) {
+            verify_renderer_window(renderer, job, terminal, title);
+            coordinates.restore();
+            fit.stable = true;
+            return;
+        }
+        Sleep(remaining(deadline, 20));
+    }
+    SetLastError(ERROR_TIMEOUT);
+    fail("owned renderer did not settle within its monitor work area");
+}
+
 struct RendererPhase {
     std::size_t index{};
     std::uint32_t written{}, marker_read{}, sentinel_read{}, input{}, output{};
@@ -265,6 +389,7 @@ struct RendererReceipt {
     DWORD columns{}, rows{}, job_remaining{};
     std::uint64_t start{}, registered{}, restore_qpc{}, end{}, control_bytes{};
     std::string failure;
+    RendererFit fit;
     std::vector<RendererPhase> phases;
 };
 
@@ -314,6 +439,11 @@ std::string renderer_json_message(std::string_view message) {
     return escaped;
 }
 
+std::string renderer_json_rectangle(const RECT& rect) {
+    return "[" + std::to_string(rect.left) + "," + std::to_string(rect.top)
+        + "," + std::to_string(rect.right) + "," + std::to_string(rect.bottom) + "]";
+}
+
 void emit_renderer_receipt(const RendererReceipt& receipt) {
     const auto truth = [](bool value) { return value ? "true" : "false"; };
     std::cout << "{\"schema\":1,\"case\":\"renderer-calibration\",\"native_windows\":true"
@@ -327,6 +457,14 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"actor_registered_qpc\":" << receipt.registered
               << ",\"columns\":" << receipt.columns << ",\"rows\":" << receipt.rows
               << ",\"control_bytes\":" << receipt.control_bytes
+              << ",\"fit\":{\"measured\":" << truth(receipt.fit.measured)
+              << ",\"reposition_requested\":" << truth(receipt.fit.reposition_requested)
+              << ",\"stable\":" << truth(receipt.fit.stable)
+              << ",\"work_area\":" << renderer_json_rectangle(receipt.fit.work)
+              << ",\"before_window\":" << renderer_json_rectangle(receipt.fit.before)
+              << ",\"requested_window\":" << renderer_json_rectangle(receipt.fit.requested)
+              << ",\"last_window\":" << renderer_json_rectangle(receipt.fit.last_window)
+              << ",\"last_client\":" << renderer_json_rectangle(receipt.fit.last_client) << '}'
               << ",\"modes\":{\"before_input\":" << receipt.initial_input
               << ",\"before_output\":" << receipt.initial_output
               << ",\"restored_input\":" << receipt.restored_input
@@ -460,6 +598,9 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         "renderer actor registration and viewport bounds");
                 receipt.actor_pid = pid;
                 actor = std::move(sender);
+                renderer = find_renderer_window(job.value, terminal, title, work_deadline);
+                receipt.renderer_pid = renderer.pid;
+                fit_renderer_window(renderer, job.value, terminal, title, work_deadline, receipt.fit);
                 server->ack(work_deadline);
                 continue;
             }
@@ -493,10 +634,6 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         && phase.actor_qpc >= prior_qpc && phase.actor_qpc <= ticks(),
                         "renderer native write, marker, buffer and mode evidence");
 
-                if (!renderer.hwnd) {
-                    renderer = find_renderer_window(job.value, terminal, title, work_deadline);
-                    receipt.renderer_pid = renderer.pid;
-                }
                 verify_renderer_window(renderer, job.value, terminal, title);
                 phase.pixels = observe_renderer_frame(renderer.hwnd, index, renderer_visible[index],
                                                        renderer_main[index], work_deadline,
@@ -565,7 +702,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
     receipt.end = ticks();
     receipt.passed = observed_all && receipt.failure.empty() && receipt.launcher_owned
         && receipt.launcher_waited && receipt.renderer_waited && receipt.actor_waited
-        && receipt.job_empty && receipt.pipe_quiescent;
+        && receipt.job_empty && receipt.pipe_quiescent && receipt.fit.stable;
     emit_renderer_receipt(receipt);
     return receipt.passed ? 0 : 1;
 }
