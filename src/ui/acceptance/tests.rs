@@ -1460,6 +1460,213 @@ fn render_showcase(model: &Model) -> Buffer {
     buf
 }
 
+fn showcase_development_model(theme_choice: ThemeChoice) -> Model {
+    let mut model = showcase_base_model(theme_choice);
+    let ConnectionState::Connected(session) = &mut model.connection else {
+        unreachable!("showcase fixture is connected");
+    };
+    session.environment = Environment::Development;
+    session.tls = TlsState::Disabled;
+    model
+}
+
+fn check_showcase_scene(
+    writer: Option<&mut impl Write>,
+    model: &Model,
+    scene: &str,
+    title: &str,
+    subtitle: &str,
+    expected: &[&str],
+) {
+    let buf = render_showcase(model);
+    let text = buffer_to_string(&buf);
+    for item in expected {
+        assert!(text.contains(item), "{scene} is missing {item:?}:\n{text}");
+    }
+    if let Some(writer) = writer {
+        capture_showcase_scene(writer, &buf, SHOWCASE_AREA, scene, title, subtitle);
+    }
+}
+
+fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
+    let field = showcase_development_model(ThemeChoice::FieldIndustrial);
+    check_showcase_scene(
+        writer.as_mut(),
+        &field,
+        "workbench-field-industrial",
+        "Field Industrial",
+        "Workbench with a populated results grid",
+        &["[DEV]", "Ada Lovelace", "[null]"],
+    );
+    let mut material = showcase_development_model(ThemeChoice::Material);
+    material.last_execution = None;
+    material.last_elapsed = None;
+    check_showcase_scene(
+        writer.as_mut(),
+        &material,
+        "workbench-material",
+        "Material 3 Tonal",
+        "Workbench before the first query",
+        &[
+            "[DEV]",
+            "No query has run yet.",
+            "Run the buffer after entering SQL.",
+        ],
+    );
+}
+
+fn showcase_bench_scene(writer: Option<&mut impl Write>) {
+    use crate::app::message::BenchTarget;
+    use crate::bench::{BenchSample, compute_bench_stats};
+
+    let mut model = showcase_development_model(ThemeChoice::Material);
+    model.editor.set_text(
+        "SELECT order_id FROM public.orders WHERE total >= 100;\n\
+         SELECT order_id FROM public.orders WHERE 100 <= total;",
+    );
+    model.editor.set_cursor(0);
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    assert_eq!(effects.len(), 2);
+    for effect in effects {
+        let Effect::RunQueryBench {
+            request,
+            target,
+            sql,
+            config,
+        } = effect
+        else {
+            panic!("expected a benchmark effect");
+        };
+        let (name, durations) = match target {
+            BenchTarget::Baseline => (
+                "Baseline (A)",
+                [3.1, 3.4, 3.7, 3.9, 4.5, 3.8, 4.1, 3.5, 3.4, 3.9],
+            ),
+            BenchTarget::Candidate => (
+                "Candidate (B)",
+                [2.1, 2.4, 2.8, 2.6, 3.2, 2.8, 3.0, 2.5, 2.4, 2.9],
+            ),
+        };
+        let samples = durations
+            .into_iter()
+            .zip(1..)
+            .map(|(duration_ms, iteration)| BenchSample {
+                iteration,
+                duration_ms,
+                rows_returned: 10,
+            })
+            .collect::<Vec<_>>();
+        let stats = compute_bench_stats(name, &sql, &config, &samples);
+        update(
+            &mut model,
+            Message::QueryBenchLoaded {
+                request,
+                target,
+                result: Box::new(Ok(stats)),
+            },
+        );
+    }
+    check_showcase_scene(
+        writer,
+        &model,
+        "query-bench",
+        "Query Benchmarks",
+        "A/B latency summary in rollback mode",
+        &[
+            "[BENCHMARK]",
+            "[MODE: ROLLBACK]",
+            "[FASTER]",
+            "p95",
+            "sparkline",
+        ],
+    );
+}
+
+fn showcase_snapshot_scene(writer: Option<&mut impl Write>) {
+    use crate::snapshot::{ColumnSnapshot, SchemaSnapshot, TableSnapshot};
+
+    let mut model = showcase_development_model(ThemeChoice::FieldIndustrial);
+    let mut snapshot = SchemaSnapshot::new(None);
+    snapshot.tables.push(TableSnapshot {
+        schema: "public".into(),
+        name: "orders".into(),
+        columns: vec![
+            ColumnSnapshot {
+                name: "order_id".into(),
+                data_type: "bigint".into(),
+                nullable: false,
+                default_expr: None,
+                ordinal: 1,
+            },
+            ColumnSnapshot {
+                name: "legacy_note".into(),
+                data_type: "text".into(),
+                nullable: true,
+                default_expr: None,
+                ordinal: 2,
+            },
+        ],
+        constraints: vec![],
+        indexes: vec![],
+        rls_enabled: false,
+        rls_forced: false,
+        policies: vec![],
+    });
+    let baseline = snapshot.clone().finalize();
+    snapshot.tables[0].columns[1].name = "delivery_note".into();
+    for (action, capture) in [
+        (Action::SchemaSnapshot, baseline),
+        (Action::Insert('r'), snapshot.finalize()),
+    ] {
+        let pin_baseline = action == Action::SchemaSnapshot;
+        let effects = update(&mut model, Message::Action(action));
+        let [Effect::CaptureSchemaSnapshot { request, .. }] = effects.as_slice() else {
+            panic!("expected a snapshot effect");
+        };
+        update(
+            &mut model,
+            Message::SchemaSnapshotLoaded {
+                request: *request,
+                result: Box::new(Ok(capture)),
+            },
+        );
+        if pin_baseline {
+            update(&mut model, Message::Action(Action::Insert('b')));
+        }
+    }
+    check_showcase_scene(
+        writer,
+        &model,
+        "schema-snapshot",
+        "Schema Snapshot & Drift",
+        "Catalog fingerprint and changes against a pinned baseline",
+        &[
+            "[SNAPSHOT v1]",
+            "[SHA256:",
+            "[BREAKING: 1]",
+            "public.orders",
+        ],
+    );
+}
+
+fn showcase_runbook_scene(writer: Option<&mut impl Write>) {
+    let mut model = showcase_development_model(ThemeChoice::Material);
+    model.editor.set_text(
+        "-- @cell check-orders\nSELECT count(*) FROM public.orders;\n\
+         -- @cell annotate-order\nUPDATE public.orders SET note = 'reviewed' WHERE order_id = 1;",
+    );
+    update(&mut model, Message::Action(Action::SqlRunbook));
+    update(&mut model, Message::Action(Action::Insert('2')));
+    check_showcase_scene(
+        writer,
+        &model,
+        "sql-runbook",
+        "SQL Runbook",
+        "Safety dry-run with the write cell blocked",
+        &["[RUNBOOK]", "[WRITES: BLOCKED]", "planned=1", "blocked=1"],
+    );
+}
+
 #[test]
 fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     use crate::app::completion::CompletionMenu;
@@ -1787,7 +1994,7 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     }
 
     // 6. "reviewed-update"
-    let mut model = showcase_base_model(ThemeChoice::Dark);
+    let mut model = showcase_development_model(ThemeChoice::Dark);
     model.focus = Focus::Results;
     let candidate = crate::app::model::UpdateCandidate {
         result_job: JobId(1),
@@ -1943,4 +2150,9 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             "Full workbench interface rendered in crisp, accessible light mode",
         );
     }
+
+    showcase_theme_scenes(&mut writer);
+    showcase_bench_scene(writer.as_mut());
+    showcase_snapshot_scene(writer.as_mut());
+    showcase_runbook_scene(writer.as_mut());
 }

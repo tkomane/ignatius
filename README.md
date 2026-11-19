@@ -37,7 +37,7 @@ the PostgreSQL client you can point at production
 ---
 
 <p align="center">
-  <img src="docs/assets/screenshots/workbench-overview.png" alt="Ignatius Workbench Overview" width="94%" />
+  <img src="docs/assets/screenshots/workbench-field-industrial.png" alt="Ignatius workbench in Field Industrial with the object tree, SQL editor, and results grid" width="94%" />
 </p>
 
 A keyboard-first, mouse-fluent terminal workbench and scriptable CLI for PostgreSQL built in Rust (`ratatui` + `tokio-postgres`). Inspired by modern developer terminal tools like OpenCode, Lazygit, Harlequin, Neo-tree, Telescope.nvim, Blink.cmp, and Trouble.nvim, Ignatius delivers a calm, truthful, GUI-grade experience right inside your terminal. No telemetry, no user accounts, and no cloud intermediaries in the loop.
@@ -54,7 +54,7 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 | **Truthful Results Grid** | `NULL` (`[null]`), empty string (`""`), and literal `"NULL"` (`"NULL"`) are always visually and copy-distinct. JSON/JSONB values, arrays, numeric right-alignment, sort indicators, row numbers, and horizontal/vertical scrolling work out of the box. |
 | **Safety by Construction** | Production profiles (`environment = "prod"` or `read_only = true`) visibly change the header pill (`[PROD]` / `[READ ONLY]`), guard destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) behind a confirmation modal, and require an explicit reviewed `UPDATE` modal (`Ctrl+K u` on a cell) with primary-key targeting and `Enter` to execute. |
 | **Schema-Aware Editor & Overlays** | Multi-line SQL editor with active `CursorLine` & `CursorLineNr`, 1 MiB bounded bracketed paste, schema-aware `Ctrl+Space` completion popup, 80%x75% Command Palette (`Ctrl+P`) with 40%/60% list-and-SQL preview split, interactive `EXPLAIN` / `EXPLAIN ANALYZE` Plan Explorer (`Ctrl+K l` / `Ctrl+K a`), and layered PostgreSQL diagnostics (`SQLSTATE`, statement line/column, token pinning, likely cause, and next step). |
-| **Non-Interactive CLI & Streaming Export** | Scriptable `ignatius query` with `--format table|csv|tsv|json|jsonl|sql`, `--file`, `--var key=value`, `--tx single|none`, and constant-memory streaming export via `--output <path>`. |
+| **Non-Interactive CLI & Streaming Export** | Scriptable `ignatius query` with `--file`, `--param-env NAME=VARIABLE`, table, CSV, TSV, JSON, NDJSON, Markdown and SQL INSERT output, and row streaming via `--output <path>`. |
 
 ---
 
@@ -84,6 +84,9 @@ Ignatius is designed under the philosophy that developer tools should feel like 
 ---
 
 ## Visual Tour
+
+Images are 2x captures of the Ignatius TUI renderer with synthetic data. The
+connection details, timings, and drift findings are examples.
 
 ### Three-Pane Workbench & Neo-tree Schema Sidebar
 
@@ -217,12 +220,45 @@ Ignatius makes quick data edits safe, transparent, and auditable:
 
 ### Adaptive Dark, Light, High-Contrast, Field Industrial & Material Tonal Themes
 
+#### Material 3 Tonal
+
+![Material 3 Tonal workbench with the Results pane's first-query guidance](docs/assets/screenshots/workbench-material.png)
+
+#### Field Industrial
+
+![Field Industrial workbench with a populated results grid and focused SQL editor](docs/assets/screenshots/workbench-field-industrial.png)
+
+#### Light
+
 ![Ignatius Light Theme](docs/assets/screenshots/workbench-light.png)
 
 Built on a 4-tier painted surface system (`Surface`, `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`):
 - **Five Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, and Google Material 3 Tonal Dark `material`.
 - **Runtime Theme Cycling**: Open the Command Palette (`Ctrl+P` -> "Switch theme") or configure `[keys] switch-theme = "..."` to instantly cycle `dark -> light -> high-contrast -> field-industrial -> material -> custom?` without reconnecting or re-running SQL.
 - **Terminal Integration**: Supports automatic background luminance detection via `OSC 11` queries (`ui.theme = "auto"`), and user-defined color overrides in `[theme]`.
+
+### Benchmarks, Schema Drift & SQL Runbooks
+
+#### Query benchmarks
+
+`Ctrl+K '` compares queries A and B in rollback mode by default. Select the
+summary or sample tab to inspect latency percentiles and individual runs.
+
+![Query benchmark overlay in Material 3 Tonal showing synthetic A/B latency and rollback mode](docs/assets/screenshots/query-bench.png)
+
+#### Schema drift
+
+`Ctrl+K "` opens the snapshot overlay. Pin a catalog baseline with `b`, then
+refresh with `r` to compare fingerprints and inspect drift severities.
+
+![Schema snapshot overlay in Field Industrial showing a fingerprint and drift findings](docs/assets/screenshots/schema-snapshot.png)
+
+#### SQL runbooks
+
+`Ctrl+K ?` opens the runbook overlay for the active buffer. Press `2` to
+preview the safety plan and see which cells the write guard would block.
+
+![SQL runbook overlay in Material 3 Tonal showing one planned read and one blocked write](docs/assets/screenshots/sql-runbook.png)
 
 ---
 
@@ -493,22 +529,22 @@ Ignatius functions as a Unix-friendly command-line query engine, data exporter, 
 
 ### Query Execution & Output Formatting
 ```bash
-# Formats: table, csv, tsv, json, jsonl (ndjson), and sql (INSERT statements)
+# Formats: table, csv, tsv, json, ndjson, markdown, and insert
 ignatius query "$DATABASE_URL" -c "SELECT id, name, email FROM users" --format json
 
-# Execute a query file with parameterized variable substitution
-ignatius query "$DATABASE_URL" -f monthly_report.sql --var month=2026-11 --var min_orders=5 --format table
+# Execute a query file with :month and :min_orders supplied from the environment
+IGNATIUS_MONTH=2026-11 IGNATIUS_MIN_ORDERS=5 ignatius query "$DATABASE_URL" -f monthly_report.sql --param-env month=IGNATIUS_MONTH --param-env min_orders=IGNATIUS_MIN_ORDERS --format table
 
 # Generate SQL INSERT statements targeting a specific table name
-ignatius query "$DATABASE_URL" -c "SELECT * FROM legacy_users" --format sql --table target_users
+ignatius query "$DATABASE_URL" -c "SELECT * FROM legacy_users" --format insert --insert-table target_users
 ```
 
-### Constant-Memory Streaming Export
-For large result sets, `--output` streams rows directly to disk without loading the entire result set into process memory:
+### Streaming Export
+`--output` writes rows to disk as they arrive. Individual values, rows and driver frames still use memory.
 ```bash
 ignatius query "$DATABASE_URL" -c "SELECT * FROM large_audit_log" --format csv --output audit_export.csv
 ```
-If an export is cancelled or interrupted, Ignatius writes partial progress to a `.partial` file, cleans up the destination path, and exits with code `9` (`export-interrupted`), ensuring partial files are never mistaken for completed exports.
+If an export is cancelled or interrupted, Ignatius leaves the partial progress at a `.partial` path and exits with code `9` (`export-interrupted`). The requested destination is only replaced after a complete export.
 
 ### CLI Management Commands
 ```bash

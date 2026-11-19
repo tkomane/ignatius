@@ -553,6 +553,11 @@ fn readme_showcase_and_workflow_guide_matches_the_build() {
         "docs/assets/screenshots/error-diagnostics.png",
         "docs/assets/screenshots/reviewed-update.png",
         "docs/assets/screenshots/workbench-light.png",
+        "docs/assets/screenshots/workbench-field-industrial.png",
+        "docs/assets/screenshots/workbench-material.png",
+        "docs/assets/screenshots/query-bench.png",
+        "docs/assets/screenshots/schema-snapshot.png",
+        "docs/assets/screenshots/sql-runbook.png",
     ];
 
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
