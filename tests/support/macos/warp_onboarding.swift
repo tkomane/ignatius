@@ -118,7 +118,7 @@ func advanceOwnedWarpOnboarding(
 
     let clock = ContinuousClock()
     let deadline = clock.now + .seconds(40)
-    var advanced = Set<String>()
+    var advanced: [String] = []
     while clock.now < deadline, let (id, frame) = topWindow() {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         let candidates = content.windows.filter {
@@ -182,18 +182,21 @@ func advanceOwnedWarpOnboarding(
             }
         } else if has("are you sure you don't want ai?"), let confirm = button("i don't want ai") {
             action = ("terminal_confirmation", confirm)
-        } else if has("customize your warp"), let next = button("next") {
-            action = ("customize", next)
-        } else if has("choose a theme"), let next = button("next") {
+        } else if has("customize your warp"), has("tab styling"), has("tools panel"), has("code review"),
+                  let next = button("next"), next.midX > 0.68, next.midY < 0.22 {
+            // The captured control advertises Return. Deliver it to the
+            // verified foreground process, as on the welcome screen.
+            action = ("customize", nil)
+        } else if has("choose a theme"), let next = button("next"), next.midX > 0.68, next.midY < 0.22 {
             // The release's account-first theme screen has this exact Next
             // action and leads to the account notice guarded above.
-            action = ("theme_next", next)
+            action = ("theme_next", nil)
         }
         if let action, !advanced.contains(action.stage) {
             guard clock.now < deadline, post(action.box, frame: frame, id: id) else { return "window_scope_changed" }
-            advanced.insert(action.stage)
+            advanced.append(action.stage)
         }
         try await clock.sleep(until: min(deadline, clock.now + .milliseconds(320)))
     }
-    return advanced.isEmpty ? "no_recognized_setup" : "setup_progressed"
+    return advanced.last.map { "setup_\($0)" } ?? "no_recognized_setup"
 }
