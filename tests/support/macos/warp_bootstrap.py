@@ -90,6 +90,13 @@ enum OwnedWarp {
             }
             guard windowReady else { exit(6) }
 
+            let setup = (try? await advanceOwnedWarpOnboarding(app, birth: birth, matches: matches))
+                ?? "onboarding_observer_error"
+            if setup == "terms_notice" || setup == "account_notice" {
+                print("\(app.processIdentifier) 0 \(setup)")
+                return
+            }
+            guard matches(app), app.launchDate == birth else { exit(3) }
             config.createsNewApplicationInstance = false
             let accepted = try await NSWorkspace.shared.open([uri], withApplicationAt: target, configuration: config)
             guard matches(accepted), accepted.processIdentifier == app.processIdentifier,
@@ -98,7 +105,7 @@ enum OwnedWarp {
                 if FileManager.default.fileExists(atPath: claim.path) { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            print("\(app.processIdentifier) 1")
+            print("\(app.processIdentifier) 1 \(setup)")
         } catch {
             exit(5)
         }
@@ -255,9 +262,10 @@ def launch(temp, root, binary):
     app, executable, bundle_version = stage_warp(root)
     helper, source = root / "owned-warp-launch", root / "owned-warp-launch.swift"
     source.write_text(LAUNCH_HELPER, encoding="utf-8")
+    onboarding = actor.with_name("warp_onboarding.swift")
     run("compile_launch_identity_helper",
         ["/usr/bin/xcrun", "swiftc", "-swift-version", "6", "-parse-as-library", "-warnings-as-errors",
-         "-target", "arm64-apple-macos15.0", source, "-o", helper], 35)
+         "-target", "arm64-apple-macos15.0", source, onboarding, "-o", helper], 35)
     nonce = secrets.token_hex(16)
     uri = make_config(root, state, actor, binary, nonce)
     # Write the one owned identity before issuing Launch Services requests so
@@ -265,9 +273,10 @@ def launch(temp, root, binary):
     launch_record = root / "launch-identity.json"
     identity = {"app": str(app), "executable": str(executable), "nonce": nonce}
     launch_record.write_text(json.dumps(identity), encoding="utf-8")
-    delivered = run("owned_vendor_uri_launch", [helper, "launch", app, executable, uri], 40).decode().split()
-    require(len(delivered) == 2 and delivered[1] in {"1", "2"}, "invalid URI delivery receipt")
-    pid, deliveries = delivered
+    delivered = run("owned_vendor_uri_launch", [helper, "launch", app, executable, uri], 90).decode().split()
+    require(len(delivered) == 3 and delivered[1] in {"0", "1"} and
+            re.fullmatch(r"[a-z_]{1,40}", delivered[2]), "invalid URI delivery receipt")
+    pid, deliveries, setup = delivered
     require(pid.isascii() and pid.isdecimal() and 0 < int(pid) <= 2147483647, "invalid app PID")
     identity["pid"] = int(pid)
     pending_record = root / "launch-identity.pending"
@@ -278,7 +287,8 @@ def launch(temp, root, binary):
                "vendorDmgSha256": WARP_DMG_SHA, "appleSignatureVerified": True, "gatekeeperAccepted": True,
                "warpArm64Slice": True, "ignatiusArchiveRun": ARCHIVE_RUN, "ignatiusArchiveSha256": ARCHIVE_SHA,
                "ignatiusExecutableSha256": IGNATIUS_SHA, "ownedWarpPid": int(pid),
-               "launchServicesRequests": int(deliveries), "launchClaimObserved": (root / "launch.claim").is_dir()}
+               "launchServicesRequests": int(deliveries), "onboarding": setup,
+               "launchClaimObserved": (root / "launch.claim").is_dir()}
     encoded = json.dumps(receipt, sort_keys=True)
     (temp / "ignatius-warp-bootstrap.json").write_text(encoded + "\n", encoding="utf-8")
     print(encoded)
