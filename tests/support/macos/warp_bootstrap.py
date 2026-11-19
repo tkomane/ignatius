@@ -188,7 +188,8 @@ def stage_warp(root):
     require(executable.is_file() and executable.is_relative_to(app), "Warp executable outside bundle")
     run("verify_apple_signature", ["/usr/bin/codesign", "--verify", "--deep", "--strict", app], 30)
     run("gatekeeper_assessment", ["/usr/sbin/spctl", "--assess", "--type", "execute", app], 35)
-    run("warp_arm64_slice", ["/usr/bin/xcrun", "lipo", "-verify_arch", "arm64", executable], 15)
+    architectures = run("warp_architectures", ["/usr/bin/xcrun", "lipo", "-archs", executable], 15)
+    require(b"arm64" in architectures.split(), "Warp bundle has no arm64 slice")
     return app, executable, info.get("CFBundleShortVersionString")
 
 
