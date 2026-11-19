@@ -120,10 +120,15 @@ procedures.
   cargo xtask release trust verify --manifest-dir=dist --bundle-dir=dist
   ```
   Wrapper tooling accepts `--dir <bundle-dir>` mapping to identical manifest and
-  bundle directories. The task confirms that `<archive>.sigstore.json` and
-  `<archive>.intoto.jsonl` explicitly bind the SHA-256 archive checksums recorded
-  in `release-manifest.json` and `SHA256SUMS`. Missing, malformed, or mismatched
-  sidecars fail closed before any release candidate is approved.
+  bundle directories. The task checks the signature digest in
+  `<archive>.sigstore.json`, then checks for an SLSA v1 subject that pairs the
+  exact archive name and SHA-256 in `<archive>.intoto.jsonl` against
+  `release-manifest.json`. The provenance sidecar holds one in-toto v1 statement,
+  directly or inside a DSSE envelope. GitHub Artifact Attestations retain
+  that envelope inside a Sigstore bundle. `manifest verify` independently
+  checks the archive bytes against the manifest and `SHA256SUMS`. [GitHub
+  attestation output](https://github.com/actions/attest#outputs),
+  [Sigstore DSSE bundle](https://docs.sigstore.dev/about/bundle/#dsse-envelope).
 
 ### Independent consumer verification
 
@@ -148,13 +153,15 @@ using standard ecosystem verifiers:
     <archive>
   ```
 
-- **SLSA provenance verification (slsa-verifier)**:
-  ```bash
-  slsa-verifier verify-artifact <archive> \
-    --provenance-path <archive>.intoto.jsonl \
-    --source-uri github.com/tkomane/ignatius \
-    --source-tag <version-tag>
-  ```
+- **SLSA provenance verification**. For a GitHub Artifact Attestations bundle,
+  use `gh attestation verify --bundle` with the approved signer workflow,
+  exact source ref and source digest, and the SLSA v1 predicate. For a
+  supported SLSA GitHub generator's standalone DSSE envelope, use
+  `slsa-verifier verify-artifact` with the approved builder and source tag,
+  then compare the verified source revision to the release record.
+  Follow the [release operations guide](../../operations/release.md#slsa-provenance-verification)
+  for the commands. The live signing and provenance identities remain
+  approval gates.
 
 ### Dependency vulnerability triage and emergency patch-release runbook
 

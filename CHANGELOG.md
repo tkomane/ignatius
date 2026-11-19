@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Release trust preflight accepts SLSA v1 provenance in DSSE and
+  Sigstore bundles and checks the archive name and SHA-256 together.
 - New: Cell Detail opens a bounded structured tree for JSONB, arrays, ranges,
   and supported PostGIS and pgvector types. Reviewed edits recheck the original
   value, column and primary key before sending a write.

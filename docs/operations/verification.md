@@ -1,5 +1,53 @@
 # Verification
 
+## Exact archive runtime checks - 19 November 2026
+
+[Rehearsal 44605153852](https://github.com/tkomane/ignatius/actions/runs/44605153852)
+retained archives at source `4cdfa5c` and build `ci/44605153852-1`. The
+downloaded manifest and checksums verified all three archives. Each hosted
+target passed nine runtime checks covering installed identity, doctor,
+configuration, non-interactive refusal, a side-by-side candidate, controlled
+invalid configuration and validation after rollback.
+
+The exact macOS arm64 and Linux x86-64 binaries also ran live local probes,
+on macOS 27.2.1 and Ubuntu 24.04.5 respectively. They queried PostgreSQL
+18.7 with `verify-full`. The same fixture addressed by IP failed hostname
+verification with exit 6. A synthetic SQL marker returned only its length.
+The marker was absent from stdout, stderr and isolated local state under
+`IGNATIUS_LOG=debug`. The named probe adds archive-bound privacy and TLS
+evidence for those two targets. Live archive probes on Windows and the full
+release and human acceptance gates remain open.
+
+## Linux xterm renderer and restoration - 19 November 2026
+
+The verified Linux x86-64 archive from
+[rehearsal 44605153852](https://github.com/tkomane/ignatius/actions/runs/44605153852)
+reported clean source `4cdfa5c` and build `ci/44605153852-1`. It ran in xterm
+390-1ubuntu3 on Ubuntu 24.04.5 x86-64 under an isolated Xvfb display in Docker
+Desktop on Apple silicon. The synthetic PostgreSQL 18.7 fixture used
+`verify-full` and a read-only profile.
+
+- The actual xterm framebuffer showed TLS 1.3 with verified hostname, three
+  query rows, keyboard focus and the structured JSONB cell tree. Resize
+  covered 116x30, 100x30, 80x24, 60x20 and 30x6. The 30x6 frame showed the
+  minimum-size guidance, and the full viewport regained the retained result.
+- xterm answered OSC 11 on both dark and light backgrounds. The light
+  ASCII/no-colour case with mouse capture off preserved connection posture,
+  selected-cell focus and JSONB labels.
+- Ctrl+Q exited 0 and restored the exact POSIX terminal settings. xterm
+  reported its original cursor, alternate-screen, paste and tested mouse
+  modes. Both fixed-size cases restored the main frame pixel for pixel.
+- With xterm's default SouthWest resize gravity, the extreme shrink and grow
+  left the cursor visible and displaced the earlier shell text. A bare
+  alternate-screen control with a bottom-row redraw reproduced the same final
+  pixels. With NorthWest gravity set on the isolated xterm, the same Ignatius
+  resize sequence restored the main frame pixel for pixel. The output trace
+  contained no scrollback purge and left the alternate screen after restoring
+  cursor, mouse and paste. [xterm resize gravity](https://invisible-island.net/xterm/manpage/xterm.html)
+
+This evidence covers automated xterm rendering and restoration. Human desktop
+use and the remaining terminal and accessibility journeys are open under W08.
+
 ## Wave 35 (043-session-state-and-crash-recovery) Delivery - 12 November 2026
 
 Feature `043-session-state-and-crash-recovery` completed Milestone 9 with atomic
