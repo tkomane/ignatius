@@ -2370,8 +2370,16 @@ fn release_workflow_aggregates_three_reverified_target_bundles() {
         "actual_revision",
         "actual_build_identity",
         "cargo --locked xtask release manifest verify",
+        "sbom=\"$bundle/evidence/$target.cdx.json\"",
+        "! -f \"$sbom\" || ! -s \"$sbom\" || -L \"$sbom\"",
+        "cargo --locked xtask release sbom candidate bind",
+        "\"--target=$target\" \"--manifest=$manifest\" \"--sbom=$sbom\"",
+        "cp \"$inventory/$target.cdx.json\" \"$upload/evidence/$target.cdx.json\"",
         "cargo --locked xtask release aggregate",
         "runtime-evidence.json",
+        "runtime_binary=\"$(jq -er '.binary_sha256' \"$runtime_evidence\")\"",
+        "ignatius:release:binary-sha256",
+        "\"$runtime_binary\" != \"$inventory_binary\"",
         "runtime/%s.json",
         "cargo --locked xtask release evidence-scope --root \"$upload\" --allowlist \"$scope\"",
         "--volume \"$upload:/scan:ro\"",
@@ -2384,6 +2392,22 @@ fn release_workflow_aggregates_three_reverified_target_bundles() {
             "missing aggregate workflow contract: {expected}"
         );
     }
+    let aggregate = workflow_job_block(workflow, "aggregate");
+    let reverify = aggregate
+        .find("cargo --locked xtask release sbom candidate bind")
+        .expect("verify transported SBOM");
+    let stage = aggregate
+        .find("cp \"$sbom\" \"$inventory/$target.cdx.json\"")
+        .expect("stage verified SBOM");
+    let upload = aggregate
+        .find("      - name: Store run-scoped aggregate evidence")
+        .expect("aggregate upload");
+    assert!(reverify < stage && stage < upload);
+    assert_eq!(
+        aggregate.matches("evidence/%s.cdx.json").count(),
+        4,
+        "scope must require one SBOM per input and exactly three in the aggregate"
+    );
 }
 
 #[test]
@@ -2492,6 +2516,7 @@ fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
         "run: release-notes/validate.sh",
         "uses: ./.github/actions/select-postgres-fixture",
         "Run the source supply-chain policy",
+        "sbom_policy: ${{ steps.supply_chain.outputs.sbom_policy }}",
         "cargo install --locked --version 0.20.2 --root \"$install_root\" cargo-deny",
         "Scan immutable candidate history for secrets",
         "git --no-banner --redact --log-opts=--all",
@@ -2506,9 +2531,22 @@ fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
             "release workflow is missing its frozen-source preflight contract: {expected}"
         );
     }
+    let archive = workflow_job_block(workflow, "archive");
     assert!(
-        workflow.contains("needs: [source, preflight]"),
+        archive.contains("needs: [source, preflight]"),
         "archives must wait for successful source preflight"
+    );
+    let policy_check = preflight
+        .find("\"$install_root/bin/cargo-deny\" check advisories licenses bans sources")
+        .expect("source dependency policy check");
+    let pass_output = preflight
+        .find("printf 'sbom_policy=pass\\n' >> \"$GITHUB_OUTPUT\"")
+        .expect("source dependency policy pass receipt");
+    assert!(policy_check < pass_output);
+    assert!(
+        archive.contains("SBOM_POLICY: ${{ needs.preflight.outputs.sbom_policy }}")
+            && archive.contains("\"--policy=$SBOM_POLICY\""),
+        "candidate SBOM must use the successful frozen preflight result"
     );
     for expected in [
         "fetch-depth: 0",
@@ -2522,6 +2560,54 @@ fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
             "release source preflight is missing its full-history or live-socket contract: {expected}"
         );
     }
+}
+
+#[test]
+fn release_workflow_generates_one_candidate_sbom_from_private_build_traces() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let archive = workflow_job_block(workflow, "archive");
+    for expected in [
+        "build-inputs",
+        "cargo build --locked --release --target \"$TARGET\" --message-format=json",
+        "> \"$build_inputs/product-build.jsonl\"",
+        "cargo build --locked -p xtask --message-format=json > \"$packaging_build\"",
+        "cargo metadata --locked --format-version 1 --filter-platform \"$TARGET\" > \"$metadata\"",
+        "cygpath -am \"$1\"",
+        "PRODUCT_RUSTFLAGS: ${{ matrix.rustflags }}",
+        "\"--rustflags=$PRODUCT_RUSTFLAGS\"",
+    ] {
+        assert!(
+            archive.contains(expected),
+            "missing inventory capture: {expected}"
+        );
+    }
+    assert_eq!(
+        archive
+            .matches("cargo build --locked --release --target")
+            .count(),
+        1
+    );
+    let manifest = archive
+        .find("cargo --locked xtask release manifest verify")
+        .expect("verify archive manifest");
+    let generate = archive
+        .find("cargo --locked xtask release sbom candidate generate")
+        .expect("generate candidate SBOM");
+    let reverify = archive
+        .find("cargo --locked xtask release sbom candidate verify-build")
+        .expect("verify candidate SBOM against build traces");
+    let stage = archive
+        .find("cp \"$sbom\" \"$upload/evidence/$TARGET.cdx.json\"")
+        .expect("stage verified SBOM");
+    assert!(manifest < generate && generate < reverify && reverify < stage);
+    assert_eq!(archive.matches("evidence/%s.cdx.json").count(), 1);
+    let (_, upload) = archive
+        .split_once("      - name: Store run-scoped candidate evidence")
+        .expect("target upload");
+    assert!(
+        upload.contains("path: ${{ runner.temp }}/ignatius-release/${{ matrix.target }}/upload")
+    );
+    assert!(!upload.contains("build-inputs"));
 }
 
 #[test]

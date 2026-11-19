@@ -97,6 +97,8 @@ fn print_help() {
                            Generate the deterministic CycloneDX SBOM
   cargo xtask release sbom verify --lockfile=PATH --sbom=PATH
                            Verify the SBOM matches the lockfile
+  cargo xtask release sbom candidate <generate|verify-build|bind> OPTIONS
+                           Generate or verify a built target's inventory
   cargo xtask release trust verify --manifest-dir=DIR --bundle-dir=DIR
                            Check signature and provenance sidecars bind
                            their artefacts (binding only, not the

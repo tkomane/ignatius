@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: The release rehearsal verifies and retains a CycloneDX inventory
+  for each packaged target's observed Rust build inputs.
 - Fixed: Release trust preflight accepts SLSA v1 provenance in DSSE and
   Sigstore bundles and checks the archive name and SHA-256 together.
 - New: Cell Detail opens a bounded structured tree for JSONB, arrays, ranges,

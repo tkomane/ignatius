@@ -234,16 +234,17 @@ source revision and runs release-note validation, the dependency policy, a
 full-history secret scan and the complete Linux verifier before retaining any
 target bundle. Each matrix job emits a per-target record with one shared
 run-attempt build identity. A final job downloads the three bundles, rechecks
-each four-file scope, re-verifies each archive against its manifest, and uses
+each five-file scope, verifies each archive and inventory against its manifest,
+and uses
 `cargo --locked xtask release aggregate` to create a canonical three-target
 record. It then generates and verifies one combined manifest, collects one
 runtime sidecar per target, scans each retained target bundle and the final
 package, and retains only the exact
-three archives, aggregate record, combined manifest, checksum list and three
-runtime sidecars. Missing, duplicate, unsupported or identity-mismatched
-inputs fail closed. The corrected hosted run and its retained nine-file scope
-are recorded below. The workflow is not a release, signing or publication gate;
-T015 provides the readiness assertion and T016 records reproducibility evidence.
+three archives, aggregate record, combined manifest, checksum list, three
+runtime sidecars and three CycloneDX inventories. Missing, duplicate,
+unsupported or identity-mismatched inputs fail closed. Earlier rehearsals and
+their retained file sets are recorded below. The readiness assertion and byte
+reproducibility evidence remain part of the rehearsal.
 
 The run-attempt identity intentionally prevents mixing target bytes from partial
 reruns. If one archive job needs retrying, use **Re-run all jobs** or start a
@@ -799,6 +800,32 @@ If any dependency is added, removed, or changed in version without regenerating
 the SBOM, `sbom verify` exits non-zero and reports the exact byte offset where
 the inventory diverges from the stored file.
 
+### Candidate dependency inventories
+
+The release workflow builds with pinned Cargo and captures the compiler records
+for the archive's native target build and the `xtask` packaging build. It
+compares the emitted package identities against locked Cargo metadata and binds
+the sidecar to the exact archive manifest. Reproduction uses the same build
+flags, source, policy checks and build inputs. The two raw Cargo traces and
+metadata file stay in runner scratch storage.
+
+Each retained `evidence/<target>.cdx.json` includes the observed crate inputs
+and their Cargo features, the inactive lockfile entries, and the release,
+source, build, toolchain and archive identities. The workflow runs
+`release sbom candidate verify-build` before upload and
+`release sbom candidate bind` after the download. The aggregate also compares
+the built executable's checksum with the checksum observed by the runtime job
+after extraction.
+
+To verify a downloaded sidecar's binding, use the frozen source checkout and
+first verify the archive manifest and checksums. Then run the following command.
+
+~~~sh
+cargo --locked xtask release sbom candidate bind \
+  --target="$TARGET" --manifest="$AGGREGATE/evidence/release-manifest.json" \
+  --sbom="$AGGREGATE/evidence/$TARGET.cdx.json"
+~~~
+
 ### Trust bundle sidecar verification
 
 Before publishing or distributing release archives, operators verify that the
@@ -998,7 +1025,7 @@ ensure compromised identities cannot publish or validate releases:
 5. Tag the commit. One tag, one version, one changelog entry.
 6. Build artefacts in CI for each target from that tagged commit.
 7. Re-verify all three target bundles, aggregate their records and exact bytes,
-   and inspect the retained nine-file scope.
+   and inspect the retained twelve-file scope, including one inventory per target.
 8. Execute the packaged-archive J8 and W04 rehearsal probes on each extracted archive
    before recording candidate validation:
    - J8 Identity Probe: run `version --verbose` and verify Cargo.toml version, git revision,

@@ -390,6 +390,7 @@ states that ADR-0012 closed the native route without implementation.
 
 - [ ] T033 Run the full release quickstart and `cargo xtask verify`, recording every gate and evidence class in `docs/operations/verification.md`
 - [x] T033a Implement fail-closed three-target record and archive aggregation without publication in `xtask/src/release.rs` and `.github/workflows/release.yml`
+- [ ] T033b Rehearse a deterministic CycloneDX inventory for each exact target using successful Cargo compilation messages and locked metadata. Verify the source, build and archive binding before and after artifact transport. Retain only sanitized sidecars and record the hosted outcome.
 - [x] T034 Perform a non-publishing dry run of the release workflow and record the owner authorization gate in `docs/operations/release.md`
 - [ ] T035 Update `docs/product/roadmap.md` and `docs/status.md` only after all accepted release criteria have evidence
 

@@ -251,6 +251,24 @@ to the evidence class that proves it.
 | FR-811 to FR-813, UX-801 to UX-802, NFR-801, SC-806 to SC-807 | Support identity and evidence-class rules | Documentation review, evidence-index review and secret-safe diagnostic captures |
 | FR-814 to FR-815 | Ownership and overwrite controls | Review of authorization and idempotency gates before live release |
 
+## T033b - Rehearse per-target dependency inventories
+
+Implement the selected CycloneDX format for FR-806 in the existing
+non-publishing release workflow. Capture Cargo's successful compilation
+messages for the exact product build and its native packaging task. Join the
+compiled package identities to locked Cargo metadata and the committed
+lockfile. Record compilation roles and activated features. Identify locked
+packages outside scope for each target. Keep the machine-specific Cargo
+outputs in runner scratch storage.
+
+Bind each deterministic sidecar to the manifest's archive checksum, source
+revision, target and build identity. Include the toolchain, profile, reviewed
+build flags, hashed repository inputs and the preflight policy result. Compare
+the sidecar against the build inputs before upload, then recheck its binding
+and canonical structure after the target bundle is downloaded. Add only the
+three sidecars to the aggregate allowlist. Missing, altered or mixed evidence
+stops aggregation. Keep the current blocked release record and owner gates.
+
 ## Dependency and collision gates
 
 - ADR-0012 closed Feature 001a without implementation. Feature 008 owns the

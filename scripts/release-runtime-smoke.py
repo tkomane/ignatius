@@ -197,6 +197,7 @@ def main() -> int:
         root = Path(temporary)
         extraction = root / "extracted"
         candidate_binary = extract_archive(archive, expected_binary, extraction)
+        binary_sha256 = hashlib.sha256(candidate_binary.read_bytes()).hexdigest()
         known_good = root / "known-good" / expected_binary
         known_good.parent.mkdir(parents=True)
         shutil.copy2(candidate_binary, known_good)
@@ -269,6 +270,7 @@ def main() -> int:
         "build_identity": record.get("build_identity"),
         "target": options.target,
         "archive_name": artefact.get("name"),
+        "binary_sha256": binary_sha256,
         "runner": {
             "os": platform.system(),
             "release": platform.release(),
