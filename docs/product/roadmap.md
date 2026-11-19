@@ -192,7 +192,7 @@ implemented and recorded in `docs/status.md` Wave 40.
 
 M14 is delivered in source as of 2026-11-19: Features 056, 057 and 058 plus the
 built-in `material` theme and Material 3 quiet-precision polish are implemented
-and awaiting Wave 41 final verification in `docs/status.md`.
+and recorded in `docs/status.md` Wave 41.
 
 - **`056-query-benchmarks-and-regression-suite`** [Implemented]: Warmup-separated
   multi-iteration query benchmark engine (`DEFAULT_WARMUP_RUNS = 2`,

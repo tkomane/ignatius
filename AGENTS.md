@@ -22,7 +22,7 @@ Read [the roadmap](docs/product/roadmap.md) for milestone order,
 and [the agent playbook](docs/operations/agent-playbook.md) for ownership and
 handoff. Use full feature slugs, including the two historical `007` directories.
 The selected feature's spec/tasks remain authoritative; roadmap packages do not
-replace their completion evidence or authorize external actions.
+replace their completion evidence or authorize public releases or destructive actions.
 
 ## Where authority lives
 
@@ -69,8 +69,9 @@ shipped code.
 - Inspect before writing. Never overwrite a file you have not read.
 - When two changes conflict, keep both behaviours unless one is wrong. A merge
   being inconvenient is not a reason to discard a side.
-- Commits are small, imperative, and explain why. Do not push, publish, tag or
-  release without the owner saying so.
+- Commits are small, imperative, and explain why. Push verified branches and
+  merge green PRs into main once verification gates pass; do not tag, sign, or
+  publish public releases without owner authority.
 
 ## Reporting verification
 

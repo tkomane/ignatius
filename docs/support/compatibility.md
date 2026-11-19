@@ -197,7 +197,11 @@ Deliberate differences:
   `--null` changes it.
 - **On error, execution stops.** Statements after a failure do not run, and the
   results produced before it are still returned.
-- **No meta-commands.** No `\d`, `\dt` or `\copy` yet.
+- **Bounded meta-commands (Feature 050).** Built-in interactive and plain-mode
+  meta-commands (`\d`, `\dt`, `\di`, `\dv`, `\dn`, `\df`, `\du`, `\l`,
+  `\conninfo`, `\timing`, `\x`, `\watch`, `\format`, `\?`) cover daily
+  inspection and watch loops; full `psql` scripting parity (`\if`, `\gset`,
+  arbitrary shell `\!`) remains intentionally out of scope.
 
 ## SQL buffer formatting
 
@@ -685,6 +689,32 @@ not track alternate-VT visibility. The original capability still fails; the full
 option/path matrix and Windows 11/Windows Terminal hand use remain open. These results do
 not upgrade full Windows restoration or release acceptance; see the
 [dated verification record](../operations/verification.md).
+
+## Themes and M12-M14 CLI subcommands
+
+Built-in themes accept `"dark"`, `"light"`, `"high-contrast"`, `"field-industrial"`,
+`"material"`, or `"auto"` (with optional `[theme]` color token overrides in
+config):
+
+- `field-industrial`: dark matte slate surface palette with amber/orange signal
+  tokens.
+- `material`: Google Material Design 3 Tonal Dark palette with blue primary, cyan
+  secondary, and sage semantic tokens meeting WCAG contrast thresholds across
+  all four surface tiers.
+
+Non-interactive M12-M14 subcommands (`ignatius replication`, `cluster`, `browse`,
+`plan-diff`, `analytics`, `bench`, `snapshot`, `runbook`) follow the repository
+read/write safety contract:
+
+- **Read vs write guards.** `replication`, `cluster`, `browse` reads,
+  `plan-diff` (`ROLLBACK`-wrapped `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)`),
+  `bench` (default transaction rollback isolation unless `--no-rollback`),
+  `snapshot capture|check`, and `runbook` (`--dry-run` or live mode without
+  `--allow-writes`) refuse or isolate unintended mutations on target databases.
+- **Deterministic exit gates.** Gate failures (`bench --fail-on-regression-pct`,
+  `snapshot check --fail-on <breaking|warning|any|never>`, `runbook` write-guard
+  refusal or `@expect-rows` mismatch) return exit code `1` (`ExitCode::Findings`)
+  alongside structured `table`, `plain`, `json`, or `markdown` output.
 
 ## Platforms
 

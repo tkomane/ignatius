@@ -4,7 +4,7 @@ One process, one binary. The boundaries below are enforced by review and stated
 in each module's own documentation, not by separate crates: there is no second
 consumer and no compile-time reason to split.
 
-Reconciled on **2026-09-04**. Retain this architecture through the roadmap;
+Reconciled on **2026-11-19**. Retain this architecture through the roadmap;
 extend a module at its existing boundary before adding another service, crate
 or abstraction. [ADR-0012](decisions/0012-enterprise-authentication-without-libpq.md)
 keeps `tokio-postgres` and crate-wide unsafe denial.
@@ -75,6 +75,7 @@ flowchart TB
 | `history`, `queries`, `query::export` | Controlled SQL history, named saved files and atomic export | Persist result rows outside explicit export, or bound parameter values in history |
 | `clipboard` and its runtime writer | Bounded redacted payload and one confirmed OSC 52 write | Read the clipboard or claim terminal acceptance |
 | `diagnostics` | Redaction, layered diagnostics, logging, doctor | Have a second redaction implementation |
+| Pure domain engines (`metacommand`, `replication`, `cluster`, `crud`, `analytics`, `bench`, `snapshot`, `runbook`, M6-M11 engines) | Pure parsing, diffing, statistics, formatting, write-guard classification, and layout calculations (with thin `postgres/` extractors for queries) | Perform network/filesystem I/O, invoke external tools, or mutate UI state directly |
 | `cli` | Command tree, output contracts, the event loop | Contain domain logic |
 | `platform` | OS differences | Grow into a general abstraction layer |
 
