@@ -68,6 +68,15 @@ pub(crate) struct Store {
     dir: PathBuf,
 }
 
+struct CatalogLock(File);
+
+impl Drop for CatalogLock {
+    fn drop(&mut self) {
+        // A forked child can still hold a reference to the open file until exec.
+        let _ = self.0.unlock();
+    }
+}
+
 impl Store {
     pub(crate) fn new(data_dir: &Path) -> Self {
         Self {
@@ -158,7 +167,7 @@ impl Store {
         }
     }
 
-    fn lock(&self) -> Result<File, Diagnostic> {
+    fn lock(&self) -> Result<CatalogLock, Diagnostic> {
         fs::create_dir_all(&self.dir).map_err(local_io)?;
         self.check_directory()?;
         restrict_to_owner(&self.dir).map_err(local_io)?;
@@ -189,7 +198,7 @@ impl Store {
                 local_io(error)
             }
         })?;
-        Ok(file)
+        Ok(CatalogLock(file))
     }
 }
 
@@ -219,3 +228,6 @@ fn local_io(error: io::Error) -> Diagnostic {
     )
     .technical("I/O kind", format!("{:?}", error.kind()))
 }
+
+#[cfg(all(test, unix))]
+mod tests;
