@@ -1,0 +1,75 @@
+name: Native macOS desktop preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-preflight:
+    runs-on: macos-26
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Measure the hosted Aqua session and synthetic window
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$RUNNER_OS" = macOS
+          test "$RUNNER_ARCH" = ARM64
+          test "$(uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          xcrun --sdk macosx swiftc -swift-version 6 -parse-as-library -warnings-as-errors \
+            -target arm64-apple-macos15.0 tests/support/macos/desktop_preflight.swift \
+            -o "$RUNNER_TEMP/ignatius-own-window-preflight"
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          work = Path(sys.argv[1])
+          receipt = {
+              "revision": os.environ["GITHUB_SHA"],
+              "runnerArchitecture": os.environ["RUNNER_ARCH"],
+              "runnerImage": os.environ.get("ImageOS"),
+              "runnerImageVersion": os.environ.get("ImageVersion"),
+          }
+          try:
+              result = subprocess.run(
+                  [work / "ignatius-own-window-preflight"],
+                  capture_output=True,
+                  timeout=15,
+                  check=False,
+              )
+              if result.returncode != 0 or len(result.stdout) > 4096:
+                  raise ValueError("probe did not return a bounded receipt")
+              parsed = json.loads(result.stdout)
+              if parsed.get("schema") != 1:
+                  raise ValueError("probe receipt schema mismatch")
+              receipt["probe"] = parsed
+          except subprocess.TimeoutExpired:
+              receipt["probeError"] = "timeout"
+          except (ValueError, AttributeError, OSError):
+              receipt["probeError"] = "invalid_receipt"
+
+          encoded = json.dumps(receipt, sort_keys=True)
+          (work / "ignatius-macos-desktop-preflight.json").write_text(encoded + "\n", encoding="utf-8")
+          print(encoded)
+          if not receipt.get("probe", {}).get("externalWindowCapturePreflight"):
+              sys.exit("Hosted macOS external window capture prerequisites are unavailable.")
+          PY
+      - name: Retain the preflight receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ignatius-macos-desktop-preflight
+          path: ${{ runner.temp }}/ignatius-macos-desktop-preflight.json
+          retention-days: 7
+          if-no-files-found: warn
