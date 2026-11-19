@@ -762,11 +762,20 @@ The non-publishing release workflow defines the first archive targets. A target
 is not inferred from the host that verifies it, and a target outside this table
 has no release artefact claim.
 
+The current receipts bind source `4cdfa5c` and build `ci/44605153852-1`.
+Archive checksums, repeat builds and hosted install and rollback checks passed
+on all three targets. [Exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44605153852)
+
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging plus native macOS installation and recovery evidence, rejected by privacy audit | Run `33563497933` packaged exact revision `24f1c8e`. The archive passed record, byte, scope, header, installed-path identity, plain and verified-TLS PostgreSQL 18.4 checks, full-screen pseudo-terminal start/quit, source-revision replacement, state preservation and controlled rollback on arm64 macOS. It is not release-acceptable: `IGNATIUS_LOG=debug` persisted full synthetic SQL through dependency tracing. The corrected build has local modified-worktree evidence only. |
-| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging evidence | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope and PE32+ x86-64 header checks; Windows runtime, PowerShell, PATH, upgrade and rollback evidence remain open |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging evidence | Run `33563497933` packaged exact revision `24f1c8e`, and the downloaded archive passed record, byte, scope and ELF x86-64 GNU/Linux header checks; Linux runtime, installed-path, upgrade and rollback evidence remain open |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, local archive checks | The downloaded archive passed local verified TLS and the scoped debug privacy probe on macOS arm64. Warp visual hand use remains open |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging and runtime | The hosted archive passed installed identity, configuration, refusal and rollback. Live archive TLS and Windows Terminal hand use remain open |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, local archive checks | The downloaded archive passed verified TLS, the scoped debug privacy probe and automated xterm use on Ubuntu. Linux desktop hand use remains open |
+
+The earlier macOS archive at `24f1c8e` failed its privacy audit when debug
+logging persisted synthetic SQL. The current probes use the newer archive
+and a separately verified marker. [Earlier run](https://github.com/tkomane/ignatius/actions/runs/33563497933) and
+[current archive probe results](../operations/verification.md#exact-archive-runtime-checks---19-november-2026).
 
 Evidence classes have distinct meanings:
 

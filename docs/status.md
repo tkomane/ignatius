@@ -11,6 +11,11 @@ before trusting anything else.
   isolated Ubuntu xterm display. Native terminal mode reports and framebuffer
   checks distinguish fixed-size restoration from xterm's resize gravity.
   [Renderer evidence](operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026)
+- The downloaded macOS and Linux archives from the same exact rehearsal
+  passed a PostgreSQL 18.7 `verify-full` query and rejected a mismatched
+  hostname. A synthetic SQL marker stayed out of debug outputs and local
+  state. The Windows archive has the hosted install and rollback receipt.
+  [Archive runtime evidence](operations/verification.md#exact-archive-runtime-checks---19-november-2026)
 - The release trust preflight accepts SLSA v1 statements in bare in-toto,
   standalone DSSE and supported Sigstore bundle formats. It now requires
   the same provenance subject to bind the exact manifest archive name and

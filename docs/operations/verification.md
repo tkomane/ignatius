@@ -1,5 +1,23 @@
 # Verification
 
+## Exact archive runtime checks - 19 November 2026
+
+[Rehearsal 44605153852](https://github.com/tkomane/ignatius/actions/runs/44605153852)
+retained archives at source `4cdfa5c` and build `ci/44605153852-1`. The
+downloaded manifest and checksums verified all three archives. Each hosted
+target passed nine runtime checks covering installed identity, doctor,
+configuration, non-interactive refusal, a side-by-side candidate, controlled
+invalid configuration and validation after rollback.
+
+The exact macOS arm64 and Linux x86-64 binaries also ran live local probes,
+on macOS 27.2.1 and Ubuntu 24.04.5 respectively. They queried PostgreSQL
+18.7 with `verify-full`. The same fixture addressed by IP failed hostname
+verification with exit 6. A synthetic SQL marker returned only its length.
+The marker was absent from stdout, stderr and isolated local state under
+`IGNATIUS_LOG=debug`. The named probe adds archive-bound privacy and TLS
+evidence for those two targets. Live archive probes on Windows and the full
+release and human acceptance gates remain open.
+
 ## Linux xterm renderer and restoration - 19 November 2026
 
 The verified Linux x86-64 archive from
