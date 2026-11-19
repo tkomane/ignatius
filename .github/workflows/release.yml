@@ -862,7 +862,7 @@ jobs:
           path: ${{ runner.temp }}/ignatius-release/aggregate/upload
 
   reproducibility:
-    name: Reproducibility ${{ matrix.target }} repeat ${{ matrix.repeat }}
+    name: Reproducibility ${{ matrix.target }} repeat ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'one and two' || matrix.repeat }}
     needs: [source, preflight]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -900,12 +900,6 @@ jobs:
             binary: ignatius.exe
             rustflags: "-D warnings -C link-arg=/Brepro"
             repeat: one
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            format: zip
-            binary: ignatius.exe
-            rustflags: "-D warnings -C link-arg=/Brepro"
-            repeat: two
 
     steps:
       - name: Check out the requested source
@@ -945,24 +939,66 @@ jobs:
             exit 1
           fi
           export IGNATIUS_BUILD_IDENTITY="ci/repro-${source_revision}"
-          cargo build --locked --release --target "$TARGET"
 
+          repeat_labels=("$REPEAT")
+          repro_root="$RUNNER_TEMP/ignatius-repro/$TARGET"
           if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
             if ! command -v cygpath >/dev/null 2>&1; then
               echo "cygpath is required on Windows for reproducibility packaging" >&2
               exit 1
             fi
-            repro_root="$(cygpath -u "$RUNNER_TEMP")/ignatius-repro/$TARGET/$REPEAT"
-          else
-            repro_root="$RUNNER_TEMP/ignatius-repro/$TARGET/$REPEAT"
+            # Keep both cold builds on one image and installed native toolset.
+            repeat_labels=(one two)
+            repro_root="$(cygpath -u "$RUNNER_TEMP")/ignatius-repro/$TARGET"
+            compile_root="$repro_root/compile-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            compile_target="$compile_root/target"
+            compile_build="$compile_root/build"
+            mkdir -p "$repro_root"
+            mkdir -- "$compile_root"
+            CARGO_TARGET_DIR="$(cygpath -am "$compile_target")"
+            CARGO_BUILD_BUILD_DIR="$(cygpath -am "$compile_build")"
+            export CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR
+
+            vc_tools="$(cygpath -u "$VCToolsInstallDir")"
+            sdk_root="$(cygpath -u "$WindowsSdkDir")"
+            sdk_version="${WindowsSDKVersion%\\}"
+            native_inputs=(
+              "$(cygpath -u "$CC_x86_64_pc_windows_msvc")"
+              "$(cygpath -u "$CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER")"
+              "$(cygpath -u "$AR_x86_64_pc_windows_msvc")"
+              "$vc_tools/lib/x64/libvcruntime.lib"
+              "$sdk_root/bin/$sdk_version/x64/rc.exe"
+              "$sdk_root/Lib/$sdk_version/um/x64/kernel32.lib"
+              "$sdk_root/Lib/$sdk_version/ucrt/x64/ucrt.lib"
+            )
+            hash_windows_inputs() {
+              local input checksum digest
+              for input in "${native_inputs[@]}"; do
+                if [[ ! -f "$input" ]] || ! checksum="$(sha256sum -b < "$input")"; then
+                  printf 'Could not hash selected Windows input: %s\n' "${input##*/}" >&2
+                  return 1
+                fi
+                digest="${checksum%% *}"
+                [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+                printf '%s %s\n' "${input##*/}" "$digest"
+              done
+            }
+            selected_input_hashes="$(hash_windows_inputs)"
+            printf 'Selected Windows inputs on image %s (SHA-256):\n%s\n' \
+              "${ImageVersion:-unreported}" "$selected_input_hashes"
+            check_windows_inputs() {
+              local observed
+              observed="$(hash_windows_inputs)"
+              if [[ "$observed" != "$selected_input_hashes" ]]; then
+                printf 'Windows repeat %s changed selected input hashes %s the build:\n%s\n' \
+                  "$1" "$2" "$observed" >&2
+                return 1
+              fi
+              printf 'Windows repeat %s selected input hashes matched %s the build\n' "$1" "$2"
+            }
           fi
-          bundle="$repro_root/bundle"
-          artefacts="$repro_root/artefacts"
-          mkdir -p "$bundle" "$artefacts"
-          binary_path="target/$TARGET/release/$BINARY"
-          test -f "$binary_path" && test ! -L "$binary_path"
-          cp "$binary_path" "$bundle/$BINARY"
-          version="$(sed -n 's/^version = "\([^\"]*\)"$/\1/p' Cargo.toml | head -n 1)"
+
+          version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1)"
           test -n "$version"
           archive_stem="ignatius-${version}-${TARGET}"
           case "$FORMAT" in
@@ -978,12 +1014,37 @@ jobs:
             echo "a Python 3 interpreter is required for reproducibility packaging" >&2
             exit 1
           fi
-          "$python_bin" scripts/create-release-archive.py \
-            --format "$FORMAT" \
-            --source-dir "$bundle" \
-            --binary "$BINARY" \
-            --output "$artefacts/$archive_name"
-          test -s "$artefacts/$archive_name"
+
+          for repeat in "${repeat_labels[@]}"; do
+            bundle="$repro_root/$repeat/bundle"
+            artefacts="$repro_root/$repeat/artefacts"
+            mkdir -p "$bundle" "$artefacts"
+            binary_path="target/$TARGET/release/$BINARY"
+            if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+              # Each mkdir is create-only. Reuse the path spelling across the
+              # builds while keeping their compiler outputs independent.
+              mkdir -- "$compile_target" "$compile_build"
+              check_windows_inputs "$repeat" before
+              binary_path="$compile_target/$TARGET/release/$BINARY"
+            fi
+            cargo build --locked --release --target "$TARGET"
+            if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+              check_windows_inputs "$repeat" after
+            fi
+            test -f "$binary_path" && test ! -L "$binary_path"
+            cp "$binary_path" "$bundle/$BINARY"
+            "$python_bin" scripts/create-release-archive.py \
+              --format "$FORMAT" \
+              --source-dir "$bundle" \
+              --binary "$BINARY" \
+              --output "$artefacts/$archive_name"
+            test -s "$artefacts/$archive_name"
+
+            if [[ "${RUNNER_OS:-}" == "Windows" && "$repeat" == "one" ]]; then
+              mv -- "$compile_target" "$compile_root/first-target"
+              mv -- "$compile_build" "$compile_root/first-build"
+            fi
+          done
 
       - name: Store reproducibility candidate
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -992,6 +1053,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/ignatius-repro/${{ matrix.target }}/${{ matrix.repeat }}/artefacts
+
+      - name: Store second Windows reproducibility candidate
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-repro-${{ matrix.target }}-two-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/ignatius-repro/${{ matrix.target }}/two/artefacts
 
   compare-reproducibility:
     name: Compare reproducibility candidates
@@ -1066,7 +1136,7 @@ jobs:
               digest="${hashes[$index]#*:}"
               printf '{"target":"%s","checksum":"%s"}' "$target" "$digest"
             done
-            printf '],\n  "scope": "two fixed-identity hosted builds per target; no publication action"\n}\n'
+            printf '],\n  "scope": "two fixed-identity hosted builds per target; separate Linux and macOS jobs; clean Windows builds on one runner; Windows cross-image reproducibility unverified; no publication action"\n}\n'
           } > "$evidence_root/reproducibility-evidence.json"
 
       - name: Store reproducibility comparison

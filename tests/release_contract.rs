@@ -2768,7 +2768,7 @@ fn release_workflow_uses_the_required_actions_and_pinned_build_inputs() {
     }
     assert_eq!(
         workflow.matches("        uses: ").count(),
-        25,
+        26,
         "each external workflow action must remain explicit and pinned"
     );
     assert!(
@@ -2822,6 +2822,70 @@ fn windows_archive_and_repeats_use_the_same_pinned_native_inputs() {
             "Windows native objects must be rebuilt after selecting the native toolchain",
         );
     }
+}
+
+#[test]
+fn windows_repeat_pair_uses_one_runner_with_independent_cold_compiler_outputs() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let repeats = workflow_job_block(workflow, "reproducibility");
+    let (matrix, steps) = repeats
+        .split_once("\n    steps:\n")
+        .expect("reproducibility matrix and steps");
+    assert_eq!(matrix.matches("- runner: ubuntu-latest").count(), 2);
+    assert_eq!(matrix.matches("- runner: macos-latest").count(), 2);
+    assert_eq!(matrix.matches("- runner: windows-latest").count(), 1);
+    let (_, windows) = matrix
+        .split_once("- runner: windows-latest")
+        .expect("paired Windows matrix row");
+    assert!(windows.contains("repeat: one") && !windows.contains("repeat: two"));
+
+    for expected in [
+        "repeat_labels=(one two)",
+        "compile_root=\"$repro_root/compile-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\"",
+        "CARGO_TARGET_DIR=\"$(cygpath -am \"$compile_target\")\"",
+        "CARGO_BUILD_BUILD_DIR=\"$(cygpath -am \"$compile_build\")\"",
+        "selected_input_hashes=\"$(hash_windows_inputs)\"",
+        "[[ \"$observed\" != \"$selected_input_hashes\" ]]",
+        "sha256sum -b < \"$input\"",
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
+        "CC_x86_64_pc_windows_msvc",
+        "AR_x86_64_pc_windows_msvc",
+        "libvcruntime.lib",
+        "rc.exe",
+        "kernel32.lib",
+        "ucrt.lib",
+        "name: release-repro-${{ matrix.target }}-${{ matrix.repeat }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        "name: release-repro-${{ matrix.target }}-two-${{ github.run_id }}-${{ github.run_attempt }}",
+        "path: ${{ runner.temp }}/ignatius-repro/${{ matrix.target }}/two/artefacts",
+    ] {
+        assert!(
+            steps.contains(expected),
+            "missing cold repeat contract: {expected}"
+        );
+    }
+    let mut previous = 0;
+    for expected in [
+        "for repeat in \"${repeat_labels[@]}\"",
+        "mkdir -- \"$compile_target\" \"$compile_build\"",
+        "check_windows_inputs \"$repeat\" before",
+        "cargo build --locked --release --target \"$TARGET\"",
+        "check_windows_inputs \"$repeat\" after",
+        "test -s \"$artefacts/$archive_name\"",
+        "mv -- \"$compile_target\" \"$compile_root/first-target\"",
+        "mv -- \"$compile_build\" \"$compile_root/first-build\"",
+    ] {
+        let next = steps.find(expected).expect(expected);
+        assert!(
+            next > previous,
+            "cold repeat operation out of order: {expected}"
+        );
+        previous = next;
+    }
+
+    let comparison = workflow_job_block(workflow, "compare-reproducibility");
+    assert!(comparison.contains("expected=6"));
+    assert!(comparison.contains("cmp -- \"$first\" \"$second\"\n            digest="));
+    assert!(comparison.contains("Windows cross-image reproducibility unverified"));
 }
 
 #[test]

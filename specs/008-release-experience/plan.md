@@ -269,6 +269,14 @@ and canonical structure after the target bundle is downloaded. Add only the
 three sidecars to the aggregate allowlist. Missing, altered or mixed evidence
 stops aggregation. Keep the current blocked release record and owner gates.
 
+Windows repeat builds use a single disposable VM and independent clean
+compiler output directories. The Windows runner images can ship different
+compiler and linker bytes under the same version labels. Compare the selected
+native input hashes around the builds and preserve both repeat artefacts for
+the existing exact-byte comparator. Linux and macOS retain independent runners
+for their repeats. Windows reproducibility across different images remains a
+separate observation.
+
 ## Dependency and collision gates
 
 - ADR-0012 closed Feature 001a without implementation. Feature 008 owns the

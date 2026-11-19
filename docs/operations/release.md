@@ -252,6 +252,13 @@ fresh full dispatch. A partial rerun leaves the aggregate without three bundles
 from one attempt and fails with an actionable recovery instruction instead of
 assembling mixed-attempt evidence.
 
+The Windows reproducibility pair uses independent clean compiler outputs on
+one hosted Windows VM. It records and checks the selected native inputs around
+the two builds. This controls for image revisions that ship different compiler
+and linker bytes under the same version labels. The comparator still compares
+both Windows archives exactly, along with the independent Linux and macOS
+repeat pairs. Reproducibility across different Windows images remains open.
+
 The archive helper refuses an existing output and a symlinked output parent. It
 creates the completed archive in the destination directory and installs it
 with a same-directory hard link, so a concurrent destination cannot be
