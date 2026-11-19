@@ -18,6 +18,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$probeEnvironmentPattern = '^(PG|IGNATIUS_|OPENSSL_)|^RUST_LOG$'
 
 function Assert-Probe {
     param([bool] $Condition, [string] $Message)
@@ -47,7 +48,7 @@ function Invoke-ProbeProcess {
         $startInfo.ArgumentList.Add($argument)
     }
     foreach ($variableName in @($startInfo.Environment.Keys)) {
-        if ($variableName -match '^(PG|IGNATIUS_|OPENSSL_)|^RUST_LOG$') {
+        if ($variableName -match $probeEnvironmentPattern) {
             $null = $startInfo.Environment.Remove($variableName)
         }
     }
@@ -245,10 +246,34 @@ try {
         "hostssl postgres $bootstrapUser ::1/128 scram-sha-256"
     ), [Text.Encoding]::ASCII)
     $clusterStartAttempted = $true
-    $started = Invoke-ProbeProcess $stage $pgCtl @(
-        'start', '-D', $cluster, '-l', (Join-Path $workRoot 'postgres.log'), '-w', '-t', '25'
-    ) $workRoot -TimeoutSeconds 32
-    Assert-Probe ($started.ExitCode -eq 0) 'Owned PostgreSQL cluster did not start with SSL'
+    $serverLog = Join-Path $workRoot 'postgres.log'
+    $emptyInput = Join-Path $workRoot 'pg-ctl.stdin'
+    [IO.File]::WriteAllBytes($emptyInput, [byte[]] @())
+    $fixtureEnvironment = @{}
+    foreach ($variableName in [Environment]::GetEnvironmentVariables().Keys) {
+        if ($variableName -match $probeEnvironmentPattern) {
+            $fixtureEnvironment[$variableName] = $null
+        }
+    }
+    # The Windows launcher can keep inherited handles until the server stops.
+    $started = Start-Process -FilePath $pgCtl -WorkingDirectory $workRoot -Environment $fixtureEnvironment `
+        -ArgumentList @('start', '-D', ('"' + $cluster + '"'), '-l', ('"' + $serverLog + '"'), '-w', '-t', '25') `
+        -RedirectStandardInput $emptyInput -RedirectStandardOutput (Join-Path $workRoot 'pg-ctl.stdout') `
+        -RedirectStandardError (Join-Path $workRoot 'pg-ctl.stderr') -NoNewWindow -PassThru
+    try {
+        if (-not $started.WaitForExit(32000)) {
+            if (-not $started.HasExited) {
+                $started.Kill($true)
+                $null = $started.WaitForExit(3000)
+            }
+            throw 'Owned PostgreSQL startup exceeded its deadline'
+        }
+        $startExit = $started.ExitCode
+        Assert-Probe ($startExit -eq 0) "Owned PostgreSQL cluster did not start with SSL (pg_ctl exit $startExit)"
+    }
+    finally {
+        $started.Dispose()
+    }
 
     $stage = 'exact archive verify-full read-only SELECT and debug logging'
     $passfile = Join-Path $workRoot 'pgpass.conf'
