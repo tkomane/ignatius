@@ -5,6 +5,7 @@ use crate::app::model::PasteNotice;
 use crate::config::ThemeChoice;
 use crate::ui::glyphs::{GlyphTier, Glyphs};
 use crate::ui::theme::Theme;
+use ratatui::style::Modifier;
 
 fn model_with(notice: PasteNotice) -> Model {
     let mut model = Model::new(120);
@@ -472,4 +473,68 @@ fn footer_renders_surface_alt_statusbar() {
     let surface_alt_bg = p.theme.surface(Token::SurfaceAlt).bg.unwrap();
     // Verify trailing cell carries SurfaceAlt background
     assert_eq!(buf[(79, 0)].bg, surface_alt_bg);
+}
+
+#[test]
+fn footer_uses_tonal_key_pills_and_ascii_or_unicode_hint_separators() {
+    use crate::app::model::{ConnectionState, Focus};
+    let mut model = Model::new(120);
+    model.connection = ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+        target: "app@localhost:5432/orders".into(),
+        database: "orders".into(),
+        user: "app".into(),
+        server_version: "18.6".into(),
+        backend_pid: "42".into(),
+        tls: crate::postgres::TlsState::Disabled,
+        read_only: false,
+        search_path: "public".into(),
+        environment: crate::connection::Environment::Local,
+    }));
+    model.focus = Focus::Editor;
+    model.editor.set_text("SELECT 1;");
+    let keymap = Keymap::new();
+
+    // Unicode + Material theme: uses middle dot separator and Focus pill styling
+    let p_unicode = presentation(ThemeChoice::Material, true, GlyphTier::Unicode);
+    let area = Rect::new(0, 0, 140, 1);
+    let mut buf_unicode = Buffer::empty(area);
+    render_footer(&model, &keymap, &p_unicode, area, &mut buf_unicode);
+    let text_unicode = crate::ui::layout::buffer_to_string(&buf_unicode);
+    assert!(
+        text_unicode.contains(" \u{00b7} "),
+        "Unicode footer hints should use middle-dot separator: {text_unicode}"
+    );
+    let run_pos = text_unicode
+        .find("Ctrl+R")
+        .unwrap_or_else(|| panic!("Ctrl+R hint missing: {text_unicode}"));
+    let run_col = text_unicode[..run_pos].chars().count() as u16;
+    let expected_pill = p_unicode.theme.pill(Token::Focus);
+    assert_eq!(buf_unicode[(run_col, 0)].fg, expected_pill.fg.unwrap());
+    assert_eq!(buf_unicode[(run_col, 0)].bg, expected_pill.bg.unwrap());
+    assert!(buf_unicode[(run_col, 0)].modifier.contains(Modifier::BOLD));
+
+    // ASCII + NO_COLOR: uses plain ASCII pipe separator, zero ANSI/Unicode, bold keys
+    let p_ascii = presentation(ThemeChoice::Material, false, GlyphTier::Ascii);
+    let mut buf_ascii = Buffer::empty(area);
+    render_footer(&model, &keymap, &p_ascii, area, &mut buf_ascii);
+    let text_ascii = crate::ui::layout::buffer_to_string(&buf_ascii);
+    assert!(
+        text_ascii.is_ascii(),
+        "ASCII footer must stay strictly ASCII: {text_ascii:?}"
+    );
+    assert!(
+        text_ascii.contains(" | "),
+        "ASCII footer hints should use pipe separator: {text_ascii}"
+    );
+    let run_ascii_pos = text_ascii.find("Ctrl+R").expect("Ctrl+R hint in ASCII");
+    let run_ascii_col = text_ascii[..run_ascii_pos].chars().count() as u16;
+    assert_eq!(
+        buf_ascii[(run_ascii_col, 0)].fg,
+        ratatui::style::Color::Reset
+    );
+    assert!(
+        buf_ascii[(run_ascii_col, 0)]
+            .modifier
+            .contains(Modifier::BOLD)
+    );
 }

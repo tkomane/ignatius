@@ -21,16 +21,18 @@ use crate::query::value::display_width;
 use crate::ui::keymap::Keymap;
 use crate::ui::theme::Token;
 use crate::ui::widgets::{
-    render_banner, render_chords, render_compact_header, render_completion, render_confirmation,
-    render_connection_details, render_connection_pool, render_copy_confirmation,
-    render_data_masking, render_data_sync, render_definition, render_editor, render_error,
-    render_footer, render_header, render_help, render_import_wizard, render_index_advisor,
-    render_inspector, render_lint_findings, render_maintenance_ops, render_name_prompt,
-    render_objects, render_palette, render_parameter_prompt, render_password_prompt,
-    render_plan_confirmation, render_query_performance, render_results, render_routine_runner,
-    render_schema_diagram, render_schema_diff, render_security_audit, render_server_activity,
-    render_snippet_library, render_synthetic_seed, render_update_review,
-    render_update_value_prompt, render_wal_observability,
+    render_banner, render_chords, render_cluster_config, render_compact_header, render_completion,
+    render_confirmation, render_connection_details, render_connection_pool,
+    render_copy_confirmation, render_data_browser, render_data_masking, render_data_sync,
+    render_definition, render_editor, render_error, render_footer, render_header, render_help,
+    render_import_wizard, render_index_advisor, render_inspector, render_lint_findings,
+    render_logical_replication, render_maintenance_ops, render_name_prompt, render_objects,
+    render_palette, render_parameter_prompt, render_password_prompt, render_plan_confirmation,
+    render_plan_diff, render_query_bench, render_query_performance, render_result_analytics,
+    render_results, render_routine_runner, render_schema_diagram, render_schema_diff,
+    render_schema_snapshot, render_security_audit, render_server_activity, render_snippet_library,
+    render_sql_runbook, render_synthetic_seed, render_update_review, render_update_value_prompt,
+    render_wal_observability,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -163,6 +165,30 @@ fn render_with(
     }
     if let Some(lint) = &model.lint_findings {
         render_lint_findings(lint, presentation, area, buf);
+    }
+    if let Some(rep) = &model.logical_replication {
+        render_logical_replication(rep, presentation, area, buf);
+    }
+    if let Some(cfg) = &model.cluster_config {
+        render_cluster_config(cfg, presentation, area, buf);
+    }
+    if let Some(browser) = &model.data_browser {
+        render_data_browser(browser, presentation, area, buf);
+    }
+    if let Some(diff) = &model.plan_diff {
+        render_plan_diff(diff, presentation, area, buf);
+    }
+    if let Some(analytics) = &model.result_analytics {
+        render_result_analytics(analytics, presentation, area, buf);
+    }
+    if let Some(bench) = &model.query_bench {
+        render_query_bench(bench, presentation, area, buf);
+    }
+    if let Some(snapshot) = &model.schema_snapshot {
+        render_schema_snapshot(snapshot, presentation, area, buf);
+    }
+    if let Some(runbook) = &model.sql_runbook {
+        render_sql_runbook(runbook, presentation, area, buf);
     }
     if model.help_open {
         render_help(model, presentation, area, buf);

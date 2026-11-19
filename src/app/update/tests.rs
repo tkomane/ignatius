@@ -91,6 +91,7 @@ fn manual_theme_cycle_preserves_the_complete_model_including_busy_sessions() {
                     ThemeChoice::Light,
                     ThemeChoice::HighContrast,
                     ThemeChoice::FieldIndustrial,
+                    ThemeChoice::Material,
                     ThemeChoice::Dark,
                 ] {
                     let before = format!("{model:?}");
@@ -260,6 +261,7 @@ fn manual_theme_custom_cycle_preserves_state_and_discovery_during_queries() {
             ThemeSelection::Light,
             ThemeSelection::HighContrast,
             ThemeSelection::FieldIndustrial,
+            ThemeSelection::Material,
             ThemeSelection::Custom,
         ] {
             let previous = model.presentation.theme.clone();
@@ -4205,7 +4207,7 @@ fn writing_the_rows_on_screen_says_how_many_that_is_and_what_it_is_not() {
     update(&mut model, Message::Action(Action::ExportRows));
     let palette = model.palette.as_ref().expect("a format palette");
     assert_eq!(palette.purpose, crate::app::palette::Purpose::ExportFormats);
-    assert_eq!(palette.entries.len(), 5);
+    assert_eq!(palette.entries.len(), 7);
     assert!(
         palette
             .context_note
@@ -11231,4 +11233,697 @@ fn lint_on_an_empty_buffer_is_a_no_op() {
     let effects = update(&mut model, Message::Action(Action::LintBuffer));
     assert!(effects.is_empty());
     assert!(model.lint_findings.is_none());
+}
+
+#[test]
+fn metacommand_local_toggles_and_help_work_without_execution_effects() {
+    let mut model = Model::new(100);
+    assert!(!model.expanded_row);
+    model.editor.set_text("\\x");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(effects.is_empty());
+    assert!(model.expanded_row, "\\x toggles expanded row mode");
+
+    model.editor.set_text("\\timing on");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(effects.is_empty());
+    assert_eq!(
+        model.timing_display,
+        crate::app::model::TimingDisplay::Always
+    );
+
+    model.editor.set_text("\\timing off");
+    let _ = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_eq!(model.timing_display, crate::app::model::TimingDisplay::Off);
+
+    model.editor.set_text("\\?");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(effects.is_empty());
+    assert!(model.last_execution.is_some());
+    assert_eq!(model.focus, Focus::Results);
+}
+
+#[test]
+fn metacommand_catalog_query_and_shell_refusal_behave_safely() {
+    let mut model = connected();
+    model.editor.set_text("\\dt public.*");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_eq!(effects.len(), 1);
+    let Effect::Execute { sql, .. } = &effects[0] else {
+        panic!("expected Execute effect for \\dt");
+    };
+    assert!(sql.contains("pg_catalog.pg_class"));
+    assert!(sql.contains("'r', 'p'"));
+
+    model.phase = QueryPhase::Idle;
+    model.editor.set_text("\\! id");
+    let refused = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(refused.is_empty());
+    assert!(
+        model
+            .error
+            .as_ref()
+            .is_some_and(|diag| diag.kind == DiagnosticKind::Usage),
+        "shell escape produces explicit Usage diagnostic"
+    );
+}
+
+#[test]
+fn watch_loop_starts_ticks_and_stops_on_stop_cancel_and_loss() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1; \\watch 5");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_eq!(effects.len(), 1);
+    let Effect::Execute { job, sql } = &effects[0] else {
+        panic!("expected initial Execute effect");
+    };
+    assert_eq!(sql.trim(), "SELECT 1;");
+    assert_eq!(
+        model.watch.as_ref().map(|w| (w.interval_secs, w.iteration)),
+        Some((5, 1))
+    );
+
+    // Simulate completion, then tick to iteration 2.
+    let _ = update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            job: *job,
+            statements: Vec::new(),
+            status: crate::query::result::ExecutionStatus::Succeeded,
+            elapsed: Duration::from_millis(2),
+            error: None,
+            transaction: crate::query::result::TransactionState::Autocommit,
+            notice_report: Default::default(),
+        })),
+    );
+    let tick_effects = update(&mut model, Message::WatchTick);
+    assert_eq!(tick_effects.len(), 1);
+    assert_eq!(model.watch.as_ref().map(|w| w.iteration), Some(2));
+
+    // StopWatch clears active watch cleanly.
+    let _ = update(&mut model, Message::Action(Action::StopWatch));
+    assert!(model.watch.is_none());
+
+    // Simulate execution failure stopping watch automatically.
+    model.phase = QueryPhase::Idle;
+    model.editor.set_text("SELECT bad; \\watch 2");
+    let effects2 = update(&mut model, Message::Action(Action::RunBuffer));
+    let Effect::Execute { job: job2, .. } = effects2[0] else {
+        panic!("expected Execute effect");
+    };
+    assert!(model.watch.is_some());
+    let _ = update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            job: job2,
+            statements: Vec::new(),
+            status: crate::query::result::ExecutionStatus::Failed,
+            elapsed: Duration::from_millis(1),
+            error: Some(Diagnostic::new(
+                DiagnosticKind::Query,
+                "syntax error",
+                "running query",
+            )),
+            transaction: crate::query::result::TransactionState::Failed,
+            notice_report: Default::default(),
+        })),
+    );
+    assert!(model.watch.is_none(), "failure stops active watch loop");
+
+    // Simulate ConnectionLost clearing active watch.
+    model.watch = Some(crate::app::model::WatchState {
+        sql: "SELECT 1".into(),
+        interval_secs: 2,
+        iteration: 1,
+    });
+    let _ = update(&mut model, Message::ConnectionLost);
+    assert!(model.watch.is_none());
+}
+
+#[test]
+fn logical_replication_overlay_loads_tabs_and_inserts_reviewed_sql() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::LogicalReplication));
+    assert_eq!(effects.len(), 1);
+    let Effect::LoadLogicalReplication { request } = effects[0] else {
+        panic!("expected LoadLogicalReplication effect");
+    };
+    let report = crate::replication::ReplicationReport {
+        publications: vec![crate::replication::PublicationSummary {
+            name: "orders_pub".into(),
+            owner: "postgres".into(),
+            all_tables: true,
+            insert: true,
+            update: true,
+            delete: true,
+            truncate: false,
+            tables: Vec::new(),
+            tables_truncated: false,
+        }],
+        subscriptions: Vec::new(),
+        slots: vec![crate::replication::ReplicationSlotSummary {
+            slot_name: "orders_sub".into(),
+            plugin: Some("pgoutput".into()),
+            slot_type: "logical".into(),
+            database: Some("ignatius_demo".into()),
+            temporary: false,
+            active: false,
+            active_pid: None,
+            wal_status: "extended".into(),
+            retained_bytes: Some(200 * 1024 * 1024),
+            safe_wal_size: None,
+            risk: crate::replication::SlotRiskSeverity::Warning,
+            finding: Some("inactive slot retains 200 MiB of WAL".into()),
+        }],
+        ..Default::default()
+    };
+    let _ = update(
+        &mut model,
+        Message::LogicalReplicationLoaded {
+            request,
+            result: Box::new(Ok(report)),
+        },
+    );
+    assert!(
+        model
+            .logical_replication
+            .as_ref()
+            .is_some_and(|r| !r.loading)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.logical_replication.as_ref().map(|r| r.active_tab),
+        Some(1)
+    );
+
+    let _ = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.logical_replication.is_none());
+    assert!(model.editor.text().contains("CREATE PUBLICATION"));
+}
+
+#[test]
+fn cluster_config_overlay_filters_tabs_and_inserts_reviewed_ddl() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::ClusterConfig));
+    assert_eq!(effects.len(), 1);
+    let Effect::LoadClusterConfig { request } = effects[0] else {
+        panic!("expected LoadClusterConfig effect");
+    };
+    let report = crate::cluster::ClusterReport {
+        settings: vec![crate::cluster::SettingEntry {
+            name: "work_mem".into(),
+            setting: "16MB".into(),
+            unit: Some("kB".into()),
+            category: "Resource Usage / Memory".into(),
+            context: "user".into(),
+            source: "configuration file".into(),
+            boot_val: Some("4096".into()),
+            reset_val: Some("16384".into()),
+            pending_restart: false,
+            is_non_default: true,
+        }],
+        hba_rules: vec![crate::cluster::HbaRule::new(
+            Some(1),
+            "host".into(),
+            vec!["all".into()],
+            vec!["all".into()],
+            Some("0.0.0.0/0".into()),
+            "trust".into(),
+            None,
+        )],
+        extensions: vec![crate::cluster::AvailableExtension {
+            name: "pg_stat_statements".into(),
+            installed_version: Some("1.10".into()),
+            default_version: Some("1.11".into()),
+            upgrade_available: true,
+            comment: Some("track planning and execution statistics".into()),
+        }],
+        tablespaces: Vec::new(),
+        fdws: Vec::new(),
+        truncated_settings: false,
+        truncated_hba_rules: false,
+        truncated_extensions: false,
+        truncated_tablespaces: false,
+        truncated_fdws: false,
+        hba_access_restricted: false,
+    };
+    let _ = update(
+        &mut model,
+        Message::ClusterConfigLoaded {
+            request,
+            result: Box::new(Ok(report)),
+        },
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('m')));
+    assert!(
+        model
+            .cluster_config
+            .as_ref()
+            .is_some_and(|c| c.modified_only)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('3')));
+    assert_eq!(model.cluster_config.as_ref().map(|c| c.active_tab), Some(2));
+    let _ = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.cluster_config.is_none());
+    assert!(model.editor.text().contains("ALTER EXTENSION"));
+}
+
+#[test]
+fn data_browser_overlay_paginates_and_generates_pk_guarded_crud_sql() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::DataBrowser));
+    assert_eq!(effects.len(), 1);
+    let Effect::LoadBrowsePage { request, browse } = &effects[0] else {
+        panic!("expected LoadBrowsePage effect");
+    };
+    assert_eq!(browse.schema, "public");
+    assert_eq!(browse.table, "orders");
+
+    let page = crate::crud::BrowsePage {
+        schema: "public".into(),
+        table: "orders".into(),
+        columns: vec!["id".into(), "status".into()],
+        pk_columns: vec!["id".into()],
+        rows: vec![vec![Some("101".into()), Some("paid".into())]],
+        page_size: 50,
+        has_more: true,
+        has_prev: false,
+        next_cursor: Some(crate::crud::KeysetCursor {
+            pk_columns: vec!["id".into()],
+            pk_values: vec![Some("101".into())],
+        }),
+        prev_cursor: None,
+    };
+    let mut browse_rs = crate::query::result::ResultSet::new(vec!["id".into()], 50);
+    browse_rs.push(vec![crate::query::value::Cell::Text("101".into())]);
+    let res = crate::postgres::crud::BrowsePageResult {
+        page,
+        result_set: browse_rs,
+        sql: "SELECT \"id\", \"status\" FROM \"public\".\"orders\" LIMIT 51".into(),
+        has_more: true,
+        next_cursor: Some(crate::crud::KeysetCursor {
+            pk_columns: vec!["id".into()],
+            pk_values: vec![Some("101".into())],
+        }),
+        prev_cursor: None,
+    };
+    let _ = update(
+        &mut model,
+        Message::BrowsePageLoaded {
+            request: *request,
+            result: Box::new(Ok(res)),
+        },
+    );
+    assert!(model.data_browser.as_ref().is_some_and(|b| !b.loading));
+
+    let next_effects = update(&mut model, Message::Action(Action::Insert('n')));
+    assert_eq!(next_effects.len(), 1);
+    assert!(matches!(next_effects[0], Effect::LoadBrowsePage { .. }));
+
+    // Select status col and generate reviewed UPDATE into active editor
+    let _ = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    let _ = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.data_browser.is_none());
+    assert!(model.editor.text().contains("UPDATE \"public\".\"orders\""));
+    assert!(model.editor.text().contains("WHERE \"id\" = '101'"));
+}
+
+#[test]
+fn plan_diff_overlay_captures_two_statements_and_computes_ab_verdict() {
+    let mut model = connected();
+    model
+        .editor
+        .set_text("SELECT * FROM orders; SELECT id FROM orders WHERE id = 1;");
+    let effects = update(&mut model, Message::Action(Action::PlanDiff));
+    assert_eq!(effects.len(), 2);
+    let Effect::LoadExtendedExplain { request, .. } = effects[0] else {
+        panic!("expected LoadExtendedExplain effect");
+    };
+    let snap_a = crate::plandiff::parse_extended_explain_json(
+        "Baseline (A)",
+        r#"[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Startup Cost":0.0,"Total Cost":250.0,"Plan Rows":5000,"Actual Total Time":12.5,"Actual Rows":5000,"Shared Hit Blocks":10,"Shared Read Blocks":40}}]"#,
+    )
+    .expect("parse A");
+    let snap_b = crate::plandiff::parse_extended_explain_json(
+        "Candidate (B)",
+        r#"[{"Plan":{"Node Type":"Index Scan","Relation Name":"orders","Index Name":"orders_pkey","Startup Cost":0.2,"Total Cost":8.2,"Plan Rows":1,"Actual Total Time":0.4,"Actual Rows":1,"Shared Hit Blocks":4,"Shared Read Blocks":0}}]"#,
+    )
+    .expect("parse B");
+    let _ = update(
+        &mut model,
+        Message::ExtendedExplainLoaded {
+            request,
+            target: crate::app::message::PlanDiffTarget::Baseline,
+            result: Box::new(Ok(snap_a)),
+        },
+    );
+    let _ = update(
+        &mut model,
+        Message::ExtendedExplainLoaded {
+            request,
+            target: crate::app::message::PlanDiffTarget::Candidate,
+            result: Box::new(Ok(snap_b)),
+        },
+    );
+    assert_eq!(
+        model
+            .plan_diff
+            .as_ref()
+            .and_then(|d| d.report.as_ref())
+            .map(|r| r.verdict),
+        Some(crate::plandiff::DiffVerdict::Improvement)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(model.plan_diff.as_ref().map(|d| d.active_tab), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.plan_diff.is_none());
+}
+
+#[test]
+fn result_analytics_overlay_profiles_visible_rows_and_opens_export_formats() {
+    let mut model = connected();
+    let mut set = crate::query::result::ResultSet::new(vec!["id".into(), "amount".into()], 100);
+    set.push(vec![
+        crate::query::value::Cell::Text("1".into()),
+        crate::query::value::Cell::Text("100".into()),
+    ]);
+    set.push(vec![
+        crate::query::value::Cell::Text("2".into()),
+        crate::query::value::Cell::Null,
+    ]);
+    model.last_execution = Some(Execution {
+        job: JobId(1),
+        statements: vec![StatementResult {
+            result_set: Some(set),
+            rows_affected: None,
+            elapsed: Duration::from_millis(2),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: Duration::from_millis(2),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: Default::default(),
+    });
+
+    let effects = update(&mut model, Message::Action(Action::ResultAnalytics));
+    assert!(effects.is_empty());
+    let analytics = model
+        .result_analytics
+        .as_ref()
+        .expect("analytics overlay opens on retained result");
+    assert_eq!(analytics.analytics.column_count, 2);
+    assert_eq!(analytics.analytics.columns[1].null_count, 1);
+
+    let _ = update(&mut model, Message::Action(Action::Insert('e')));
+    assert!(model.result_analytics.is_none());
+    assert!(model.palette.is_some());
+}
+
+#[test]
+fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict() {
+    let mut model = connected();
+    model
+        .editor
+        .set_text("SELECT * FROM orders; SELECT id FROM orders WHERE id = 1;");
+
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    assert_eq!(effects.len(), 2);
+    let Effect::RunQueryBench {
+        request,
+        target: crate::app::message::BenchTarget::Baseline,
+        sql: base_sql,
+        config,
+    } = &effects[0]
+    else {
+        panic!("expected Baseline RunQueryBench effect");
+    };
+    assert_eq!(base_sql, "SELECT * FROM orders");
+    assert!(config.rollback);
+    assert!(matches!(
+        &effects[1],
+        Effect::RunQueryBench {
+            target: crate::app::message::BenchTarget::Candidate,
+            ..
+        }
+    ));
+
+    let req = *request;
+    let base_stats = crate::bench::compute_bench_stats(
+        "Baseline (A)",
+        "SELECT * FROM orders",
+        config,
+        &[
+            crate::bench::BenchSample {
+                iteration: 1,
+                duration_ms: 12.0,
+                rows_returned: 100,
+            },
+            crate::bench::BenchSample {
+                iteration: 2,
+                duration_ms: 14.0,
+                rows_returned: 100,
+            },
+        ],
+    );
+    let cand_stats = crate::bench::compute_bench_stats(
+        "Candidate (B)",
+        "SELECT id FROM orders WHERE id = 1",
+        config,
+        &[
+            crate::bench::BenchSample {
+                iteration: 1,
+                duration_ms: 2.0,
+                rows_returned: 1,
+            },
+            crate::bench::BenchSample {
+                iteration: 2,
+                duration_ms: 3.0,
+                rows_returned: 1,
+            },
+        ],
+    );
+
+    // Stale request is ignored.
+    let _ = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: req.wrapping_add(99),
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(base_stats.clone())),
+        },
+    );
+    assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
+
+    let _ = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(base_stats)),
+        },
+    );
+    let _ = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: crate::app::message::BenchTarget::Candidate,
+            result: Box::new(Ok(cand_stats)),
+        },
+    );
+
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(!bench.loading);
+    assert_eq!(
+        bench
+            .report
+            .as_ref()
+            .and_then(|r| r.comparison.as_ref())
+            .map(|c| c.verdict),
+        Some(crate::bench::BenchVerdict::Faster)
+    );
+
+    // Tab switching & selection movement.
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.active_tab), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Insert('j')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.selected_idx), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Insert('k')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.selected_idx), Some(0));
+    let _ = update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(model.query_bench.as_ref().map(|b| b.active_tab), Some(0));
+
+    // Toggle rollback safety and re-run.
+    let toggle_effects = update(&mut model, Message::Action(Action::Insert('m')));
+    assert_eq!(toggle_effects.len(), 2);
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| !b.config.rollback && b.loading)
+    );
+    assert!(matches!(
+        &toggle_effects[0],
+        Effect::RunQueryBench { config, .. } if !config.rollback
+    ));
+
+    // Explicit rerun increments request and re-emits effects.
+    let rerun_effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert_eq!(rerun_effects.len(), 2);
+
+    // Escape closes overlay.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.query_bench.is_none());
+}
+
+#[test]
+fn schema_snapshot_overlay_pins_baseline_detects_drift_and_copies_fingerprint() {
+    let mut model = connected();
+    let effects = update(&mut model, Message::Action(Action::SchemaSnapshot));
+    assert_eq!(effects.len(), 1);
+    let Effect::CaptureSchemaSnapshot { request, schema } = &effects[0] else {
+        panic!("expected CaptureSchemaSnapshot effect");
+    };
+    assert_eq!(*schema, None);
+
+    let make_snapshot = |nullable: bool| {
+        let mut snap = crate::snapshot::SchemaSnapshot::new(None);
+        snap.tables.push(crate::snapshot::TableSnapshot {
+            schema: "public".into(),
+            name: "orders".into(),
+            columns: vec![crate::snapshot::ColumnSnapshot {
+                name: "id".into(),
+                data_type: "bigint".into(),
+                nullable,
+                default_expr: None,
+                ordinal: 1,
+            }],
+            constraints: Vec::new(),
+            indexes: Vec::new(),
+            rls_enabled: false,
+            rls_forced: false,
+            policies: Vec::new(),
+        });
+        snap.finalize()
+    };
+
+    let v1 = make_snapshot(false);
+    let req1 = *request;
+    let _ = update(
+        &mut model,
+        Message::SchemaSnapshotLoaded {
+            request: req1,
+            result: Box::new(Ok(v1.clone())),
+        },
+    );
+    let state = model.schema_snapshot.as_ref().expect("snapshot open");
+    assert!(!state.loading);
+    assert_eq!(
+        state.current.as_ref().map(|s| &s.fingerprint_sha256),
+        Some(&v1.fingerprint_sha256)
+    );
+
+    // Pin current as baseline.
+    let _ = update(&mut model, Message::Action(Action::Insert('b')));
+    assert!(
+        model.schema_snapshot.as_ref().is_some_and(
+            |s| s.baseline.is_some() && s.diff.as_ref().is_some_and(|d| !d.has_drift())
+        )
+    );
+
+    // Refresh via 'r' and deliver drifted snapshot.
+    let refresh_effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let [Effect::CaptureSchemaSnapshot { request: req2, .. }] = refresh_effects.as_slice() else {
+        panic!("expected CaptureSchemaSnapshot on refresh");
+    };
+    let v2 = make_snapshot(true);
+    let _ = update(
+        &mut model,
+        Message::SchemaSnapshotLoaded {
+            request: *req2,
+            result: Box::new(Ok(v2.clone())),
+        },
+    );
+    let state = model.schema_snapshot.as_ref().expect("snapshot open");
+    let diff = state.diff.as_ref().expect("diff recomputed");
+    assert!(diff.has_drift());
+    assert_eq!(diff.breaking_count, 1);
+
+    // Tab switching & selection movement.
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(
+        model.schema_snapshot.as_ref().map(|s| s.active_tab),
+        Some(1)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('1')));
+    assert_eq!(
+        model.schema_snapshot.as_ref().map(|s| s.active_tab),
+        Some(0)
+    );
+    let _ = update(&mut model, Message::Action(Action::Insert('j')));
+    let _ = update(&mut model, Message::Action(Action::Insert('k')));
+
+    // Copy SHA-256 fingerprint via OSC 52.
+    let copy_effects = update(&mut model, Message::Action(Action::Insert('c')));
+    let [Effect::CopyValue { payload }] = copy_effects.as_slice() else {
+        panic!("expected Effect::CopyValue");
+    };
+    assert_eq!(payload.clone().into_inner(), v2.fingerprint_sha256);
+
+    // Escape closes overlay.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.schema_snapshot.is_none());
+}
+
+#[test]
+fn sql_runbook_overlay_parses_locally_previews_write_guard_and_jumps_to_cell() {
+    let mut model = Model::new(100);
+    model.editor.set_text(
+        "-- @cell read-check\n\
+         SELECT 1;\n\
+         -- @cell write-step\n\
+         DELETE FROM orders WHERE id = 1;",
+    );
+
+    let effects = update(&mut model, Message::Action(Action::SqlRunbook));
+    assert!(effects.is_empty(), "runbook parsing is purely local");
+    let rb = model.sql_runbook.as_ref().expect("runbook overlay opens");
+    assert_eq!(rb.runbook.cells.len(), 2);
+    assert!(!rb.allow_writes);
+    let guarded_report = rb.dry_run_report();
+    assert_eq!(guarded_report.blocked_count, 1);
+    assert_eq!(guarded_report.planned_count(), 1);
+
+    // Switch to Safety Dry-Run tab and toggle allow_writes with 'w'.
+    let _ = update(&mut model, Message::Action(Action::Insert('2')));
+    assert_eq!(model.sql_runbook.as_ref().map(|r| r.active_tab), Some(1));
+    let _ = update(&mut model, Message::Action(Action::Insert('w')));
+    let rb = model.sql_runbook.as_ref().expect("runbook still open");
+    assert!(rb.allow_writes);
+    let allowed_report = rb.dry_run_report();
+    assert_eq!(allowed_report.blocked_count, 0);
+    assert_eq!(allowed_report.planned_count(), 2);
+
+    // Navigate to second cell and jump to start_line with Enter.
+    let _ = update(&mut model, Message::Action(Action::Insert('1')));
+    let _ = update(&mut model, Message::Action(Action::Insert('j')));
+    let target_line = model
+        .sql_runbook
+        .as_ref()
+        .and_then(|r| r.selected_cell())
+        .expect("second cell selected")
+        .start_line;
+    assert_eq!(target_line, 4);
+
+    let jump_effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(jump_effects.is_empty());
+    assert!(model.sql_runbook.is_none(), "jumping closes overlay");
+    assert_eq!(model.editor.position(), (4, 1));
+    assert_eq!(model.focus, Focus::Editor);
+
+    // Reopen and close with Esc.
+    let _ = update(&mut model, Message::Action(Action::SqlRunbook));
+    assert!(model.sql_runbook.is_some());
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.sql_runbook.is_none());
 }

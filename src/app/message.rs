@@ -163,6 +163,42 @@ pub enum Action {
     DiscardRecovery,
     /// Lint the active editor buffer without contacting a server.
     LintBuffer,
+    /// Open the logical replication and replication slots manager overlay.
+    LogicalReplication,
+    /// Open server configuration, HBA, extensions, tablespaces, and FDW catalog overlay.
+    ClusterConfig,
+    /// Stop an active psql `\watch` periodic polling loop.
+    StopWatch,
+    /// Open the keyset-paginated live data browser and batch CRUD overlay.
+    DataBrowser,
+    /// Open extended EXPLAIN (BUFFERS, WAL, SETTINGS) and A/B plan diff overlay.
+    PlanDiff,
+    /// Open the zero-query result analytics profiler and HTML/Parquet export overlay.
+    ResultAnalytics,
+    /// Open the query latency benchmark and A/B regression suite overlay.
+    QueryBench,
+    /// Open the canonical schema snapshot and drift guard overlay.
+    SchemaSnapshot,
+    /// Open the interactive SQL Markdown runbook overlay.
+    SqlRunbook,
+}
+
+/// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanDiffTarget {
+    /// Baseline query plan (Plan A).
+    Baseline,
+    /// Candidate query plan (Plan B).
+    Candidate,
+}
+
+/// Slot targeted by a query benchmark execution for A/B comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BenchTarget {
+    /// Baseline query benchmark (Query A).
+    Baseline,
+    /// Candidate query benchmark (Query B).
+    Candidate,
 }
 
 /// A password on its way from the prompt to a connection attempt.
@@ -283,6 +319,15 @@ impl Action {
             Self::RestoreSession,
             Self::DiscardRecovery,
             Self::LintBuffer,
+            Self::LogicalReplication,
+            Self::ClusterConfig,
+            Self::StopWatch,
+            Self::DataBrowser,
+            Self::PlanDiff,
+            Self::ResultAnalytics,
+            Self::QueryBench,
+            Self::SchemaSnapshot,
+            Self::SqlRunbook,
         ]
     }
 }
@@ -725,6 +770,38 @@ pub enum Message {
         /// Table generator plan or error.
         result: Box<Result<Vec<crate::seed::TableGenerator>, Diagnostic>>,
     },
+    /// Logical replication and replication slot report loaded from catalog.
+    LogicalReplicationLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Replication report or error.
+        result: Box<Result<crate::replication::ReplicationReport, Diagnostic>>,
+    },
+    /// Server settings, HBA rules, extensions, tablespaces, and FDW report loaded.
+    ClusterConfigLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Cluster report or error.
+        result: Box<Result<crate::cluster::ClusterReport, Diagnostic>>,
+    },
+    /// Timer tick for an active `\watch` polling loop.
+    WatchTick,
+    /// Keyset-paginated data browser page loaded from PostgreSQL.
+    BrowsePageLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Browse result or error.
+        result: Box<Result<crate::postgres::crud::BrowsePageResult, Diagnostic>>,
+    },
+    /// Extended EXPLAIN snapshot loaded for Baseline (A) or Candidate (B).
+    ExtendedExplainLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Plan slot (`Baseline` or `Candidate`).
+        target: PlanDiffTarget,
+        /// Captured snapshot or error.
+        result: Box<Result<crate::plandiff::PlanSnapshot, Diagnostic>>,
+    },
     /// Hypothetical index test executed via HypoPG.
     HypoIndexTested {
         /// Which request this answers, so a late answer is discarded.
@@ -747,6 +824,22 @@ pub enum Message {
         request: u64,
         /// Newly received notifications.
         notifications: Vec<crate::ops::PubSubNotification>,
+    },
+    /// Query benchmark statistics loaded for Baseline (A) or Candidate (B).
+    QueryBenchLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Benchmark slot (`Baseline` or `Candidate`).
+        target: BenchTarget,
+        /// Measured benchmark statistics or error.
+        result: Box<Result<crate::bench::BenchStats, Diagnostic>>,
+    },
+    /// Canonical schema snapshot captured from PostgreSQL catalog.
+    SchemaSnapshotLoaded {
+        /// Which request this answers, so a late answer is discarded.
+        request: u64,
+        /// Captured schema snapshot or error.
+        result: Box<Result<crate::snapshot::SchemaSnapshot, Diagnostic>>,
     },
 }
 
@@ -1055,6 +1148,52 @@ pub enum Effect {
         /// Identity used to reject a late response.
         request: u64,
         /// Optional schema name to inspect.
+        schema: Option<String>,
+    },
+    /// Load logical replication publications, subscriptions, and slots report.
+    LoadLogicalReplication {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Load server settings, HBA, extensions, tablespaces, and FDWs report.
+    LoadClusterConfig {
+        /// Identity used to reject a late response.
+        request: u64,
+    },
+    /// Load one keyset-paginated data browser page for a table.
+    LoadBrowsePage {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Keyset browse parameters.
+        browse: crate::crud::BrowseRequest,
+    },
+    /// Capture an extended `EXPLAIN (FORMAT JSON, ...)` plan snapshot.
+    LoadExtendedExplain {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Plan slot (`Baseline` or `Candidate`).
+        target: PlanDiffTarget,
+        /// SQL statement to explain.
+        sql: String,
+        /// Whether to execute `ANALYZE, BUFFERS, WAL` inside a rollback transaction.
+        analyze: bool,
+    },
+    /// Execute warmup and measured benchmark iterations for one SQL statement.
+    RunQueryBench {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Benchmark slot (`Baseline` or `Candidate`).
+        target: BenchTarget,
+        /// SQL statement to benchmark.
+        sql: String,
+        /// Warmup, measured iteration, and rollback isolation configuration.
+        config: crate::bench::BenchConfig,
+    },
+    /// Capture a bounded canonical schema snapshot from PostgreSQL catalog.
+    CaptureSchemaSnapshot {
+        /// Identity used to reject a late response.
+        request: u64,
+        /// Optional single schema filter.
         schema: Option<String>,
     },
 }

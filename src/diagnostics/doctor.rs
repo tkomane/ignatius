@@ -173,7 +173,15 @@ impl Report {
             .iter()
             .map(|c| c.name.chars().count())
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max("CHECK".len());
+        let rule = "-".repeat(7 + 1 + width + 2 + 40);
+        out.push_str(&format!(
+            "{:<7} {:<width$}  {}\n",
+            "STATUS", "CHECK", "DETAIL"
+        ));
+        out.push_str(&rule);
+        out.push('\n');
         for check in &self.checks {
             out.push_str(&format!(
                 "{:<7} {:<width$}  {}\n",
@@ -186,6 +194,7 @@ impl Report {
             }
         }
         let (ok, warn, fail, skipped) = self.counts();
+        out.push_str(&rule);
         out.push('\n');
         out.push_str(&format!(
             "Summary: {ok} ok, {warn} warning(s), {fail} failure(s), {skipped} skipped\n"
@@ -259,16 +268,26 @@ pub fn environment_report(
                 ConfigSource::Defaults => "built-in defaults (no file yet)".to_owned(),
                 ConfigSource::File => format!("loaded from {}", paths.config_file.display()),
             };
+            let theme_label = match loaded.config.ui.theme {
+                crate::ui::theme::ThemeSelection::Dark => "dark",
+                crate::ui::theme::ThemeSelection::Light => "light",
+                crate::ui::theme::ThemeSelection::HighContrast => "high-contrast",
+                crate::ui::theme::ThemeSelection::FieldIndustrial => "field-industrial",
+                crate::ui::theme::ThemeSelection::Material => "material",
+                crate::ui::theme::ThemeSelection::Custom => "custom",
+                crate::ui::theme::ThemeSelection::Auto => "auto",
+            };
+            let detail = format!("{source}; theme {theme_label}");
             match loaded.pending_migration {
                 Some((from, to)) => Check::warn(
                     "configuration",
-                    format!("{source}; schema version {from} is older than {to}"),
+                    format!("{detail}; schema version {from} is older than {to}"),
                     format!(
                         "run `{} config migrate` to update it",
                         crate::branding::BINARY_NAME
                     ),
                 ),
-                None => Check::ok("configuration", source),
+                None => Check::ok("configuration", detail),
             }
         }
         Err(diagnostic) => Check::fail(
@@ -300,12 +319,7 @@ pub fn environment_report(
 fn theme_auto_check(terminal: &TerminalFacts) -> Check {
     match terminal.background_rgb {
         Some(rgb) => {
-            let selected = match crate::ui::theme::theme_for_background(rgb) {
-                crate::config::ThemeChoice::Light => "light",
-                crate::config::ThemeChoice::Dark => "dark",
-                crate::config::ThemeChoice::HighContrast => "high-contrast",
-                crate::config::ThemeChoice::FieldIndustrial => "field-industrial",
-            };
+            let selected = crate::ui::theme::theme_for_background(rgb).label();
             Check::ok(
                 "theme",
                 format!(

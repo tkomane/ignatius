@@ -134,6 +134,15 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("restore-session", Action::RestoreSession),
     ("discard-recovery", Action::DiscardRecovery),
     ("lint-sql", Action::LintBuffer),
+    ("logical-replication", Action::LogicalReplication),
+    ("cluster-config", Action::ClusterConfig),
+    ("stop-watch", Action::StopWatch),
+    ("data-browser", Action::DataBrowser),
+    ("plan-diff", Action::PlanDiff),
+    ("result-analytics", Action::ResultAnalytics),
+    ("query-bench", Action::QueryBench),
+    ("schema-snapshot", Action::SchemaSnapshot),
+    ("sql-runbook", Action::SqlRunbook),
 ];
 
 /// The action a configuration name means.
@@ -870,6 +879,47 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         "Open snippet and scratchpad library",
     ),
     ('!', Action::LintBuffer, "Lint the active SQL buffer"),
+    (
+        '#',
+        Action::LogicalReplication,
+        "Open logical replication and slots manager",
+    ),
+    (
+        '@',
+        Action::ClusterConfig,
+        "Open server config, HBA, extensions, and FDWs",
+    ),
+    (':', Action::StopWatch, "Stop active psql watch loop"),
+    (
+        '_',
+        Action::DataBrowser,
+        "Open live data browser and batch CRUD",
+    ),
+    (
+        '/',
+        Action::PlanDiff,
+        "Open extended EXPLAIN and A/B plan diff",
+    ),
+    (
+        '$',
+        Action::ResultAnalytics,
+        "Open result profiler and HTML/Parquet export",
+    ),
+    (
+        '\'',
+        Action::QueryBench,
+        "Run query latency benchmark and A/B suite",
+    ),
+    (
+        '"',
+        Action::SchemaSnapshot,
+        "Inspect schema snapshot and drift guard",
+    ),
+    (
+        '?',
+        Action::SqlRunbook,
+        "Open interactive SQL Markdown runbook",
+    ),
 ];
 
 /// The contextual second keys offered while the crash recovery capsule is on
@@ -1027,6 +1077,15 @@ const fn short_label(action: &Action) -> &'static str {
         Action::RestoreSession => "Restore",
         Action::DiscardRecovery => "Discard",
         Action::LintBuffer => "Lint",
+        Action::LogicalReplication => "Replication",
+        Action::ClusterConfig => "Cluster",
+        Action::StopWatch => "Stop watch",
+        Action::DataBrowser => "Data browser",
+        Action::PlanDiff => "Plan diff",
+        Action::ResultAnalytics => "Analytics",
+        Action::QueryBench => "Bench",
+        Action::SchemaSnapshot => "Snapshot",
+        Action::SqlRunbook => "Runbook",
     }
 }
 

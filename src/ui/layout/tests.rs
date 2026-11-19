@@ -2690,6 +2690,8 @@ fn the_export_palette_names_shapes_and_retained_row_scope() {
             crate::app::model::ExportFormat::Json,
             crate::app::model::ExportFormat::Ndjson,
             crate::app::model::ExportFormat::Markdown,
+            crate::app::model::ExportFormat::Html,
+            crate::app::model::ExportFormat::Parquet,
         ]
         .into_iter()
         .map(|format| crate::app::palette::PaletteEntry {
@@ -2711,6 +2713,8 @@ fn the_export_palette_names_shapes_and_retained_row_scope() {
         "JSON",
         "NDJSON",
         "Markdown",
+        "HTML",
+        "Parquet",
         "Enter to choose",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");

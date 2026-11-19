@@ -6,7 +6,6 @@ use crate::ui::layout::Presentation;
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
@@ -217,6 +216,15 @@ pub(crate) fn render_footer(
         }
     }
 
+    let mut used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+    let separator = if presentation.glyphs.is_ascii() {
+        " | "
+    } else {
+        " \u{00b7} "
+    };
+    let separator_width = display_width(separator);
+    let mut hints_rendered = 0usize;
+
     for action in crate::app::discovery::hint_actions_for(model, presentation)
         .into_iter()
         .take(presentation.footer_hint_cap())
@@ -224,16 +232,27 @@ pub(crate) fn render_footer(
         let Some((key, label)) = keymap.contextual_hint(&action) else {
             continue;
         };
-        let segment_width = display_width(&key) + display_width(label) + 3;
-        if used.saturating_add(segment_width) > usize::from(area.width) {
-            break;
+        let key_width = display_width(&key);
+        let label_width = display_width(label);
+        if hints_rendered == 0 {
+            let segment_width = key_width + label_width + 3;
+            if used.saturating_add(segment_width) > usize::from(area.width) {
+                break;
+            }
+            spans.push(Span::styled(format!(" {key} "), theme.pill(Token::Focus)));
+            spans.push(Span::styled(label, theme.style(Token::Muted)));
+            used += key_width + label_width + 2;
+        } else {
+            let segment_width = separator_width + key_width + 1 + label_width;
+            if used.saturating_add(segment_width) > usize::from(area.width) {
+                break;
+            }
+            spans.push(Span::styled(separator, theme.style(Token::Border)));
+            spans.push(Span::styled(format!("{key} "), theme.pill(Token::Focus)));
+            spans.push(Span::styled(label, theme.style(Token::Muted)));
+            used += segment_width;
         }
-        spans.push(Span::styled(
-            format!(" {key} "),
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(label, theme.style(Token::Muted)));
-        used += segment_width;
+        hints_rendered += 1;
     }
 
     Paragraph::new(Line::from(spans))

@@ -488,3 +488,634 @@ fn snippet_library_renders_ascii_and_unicode_dividers_and_full_width_selection()
     assert!(!ascii_text.contains('\u{2500}'), "{ascii_text}");
     assert!(!ascii_text.contains('\u{2502}'), "{ascii_text}");
 }
+
+#[test]
+fn data_browser_overlay_renders_capsules_null_empty_and_ascii_cleanly() {
+    let mut state = crate::app::model::DataBrowserState::new("public", "orders");
+    state.loading = false;
+    state.page = Some(crate::crud::BrowsePage {
+        schema: "public".to_owned(),
+        table: "orders".to_owned(),
+        columns: vec!["id".to_owned(), "note".to_owned(), "tag".to_owned()],
+        pk_columns: vec!["id".to_owned()],
+        rows: vec![
+            vec![Some("1".to_owned()), None, Some(String::new())],
+            vec![
+                Some("2".to_owned()),
+                Some("paid".to_owned()),
+                Some("vip".to_owned()),
+            ],
+        ],
+        page_size: 50,
+        has_more: true,
+        has_prev: false,
+        next_cursor: None,
+        prev_cursor: None,
+    });
+    state.selected_col = 1;
+
+    let area = Rect::new(0, 0, 120, 30);
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut buf = Buffer::empty(area);
+    render_data_browser(&state, &ascii_pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.is_ascii(), "data browser emitted non-ASCII:\n{text}");
+    for expected in [
+        "TABLE: public.orders",
+        "PK: id",
+        "ROWS: 2",
+        "SORT: id ASC",
+        "[MORE]",
+        "[note]",
+        "[null]",
+        "\"\"",
+        "Next/Prev Keyset Page",
+    ] {
+        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+    }
+}
+
+#[test]
+fn plan_diff_overlay_renders_verdict_tabs_and_ascii_cleanly() {
+    let baseline = crate::plandiff::parse_extended_explain_json(
+        "Baseline (A): SELECT * FROM orders",
+        PLAIN_PLAN,
+    )
+    .expect("baseline plan parses");
+    let candidate = crate::plandiff::parse_extended_explain_json(
+        "Candidate (B): SELECT * FROM orders WHERE id = 1",
+        PLAIN_PLAN,
+    )
+    .expect("candidate plan parses");
+
+    let mut state = crate::app::model::PlanDiffState {
+        baseline: Some(baseline),
+        candidate: Some(candidate),
+        ..Default::default()
+    };
+    state.recompute_diff();
+
+    let area = Rect::new(0, 0, 130, 32);
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut buf = Buffer::empty(area);
+    render_plan_diff(&state, &ascii_pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.is_ascii(), "plan diff emitted non-ASCII:\n{text}");
+    for expected in [
+        "[UNCHANGED]",
+        "[1] Summary & Diff",
+        "[2] Nodes",
+        "[3] Buffers / WAL / Settings",
+        "[MODE: ESTIMATE]",
+        "Toggle Analyze+Buffers+WAL",
+    ] {
+        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+    }
+}
+
+#[test]
+fn result_analytics_overlay_switches_sparkline_glyph_tier_and_tabs() {
+    use crate::query::result::ResultSet;
+    use crate::query::value::Cell;
+
+    let mut set = ResultSet::with_column_types(
+        vec!["id".to_owned(), "amount".to_owned()],
+        vec![Some("int4".to_owned()), Some("numeric".to_owned())],
+        100,
+    );
+    set.push(vec![
+        Cell::Text("1".to_owned()),
+        Cell::Text("10".to_owned()),
+    ]);
+    set.push(vec![Cell::Text("2".to_owned()), Cell::Null]);
+    set.push(vec![
+        Cell::Text("3".to_owned()),
+        Cell::Text("30".to_owned()),
+    ]);
+    let mut state = crate::app::model::ResultAnalyticsState::from_result(&set);
+    let area = Rect::new(0, 0, 130, 32);
+
+    let ascii_pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(area);
+    render_result_analytics(&state, &ascii_pres, area, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(
+        ascii_text.is_ascii(),
+        "result analytics emitted non-ASCII:\n{ascii_text}"
+    );
+    assert!(ascii_text.contains("ROWS: 3/3"), "{ascii_text}");
+    assert!(ascii_text.contains("COLUMNS: 2"), "{ascii_text}");
+    assert!(ascii_text.contains("PROFILE: ZERO-QUERY"), "{ascii_text}");
+    assert!(
+        ascii_text.contains(&state.analytics.columns[0].sparkline_ascii),
+        "{ascii_text}"
+    );
+
+    let unicode_pres = presentation(ColorDepth::TrueColor);
+    let mut unicode_buf = Buffer::empty(area);
+    render_result_analytics(&state, &unicode_pres, area, &mut unicode_buf);
+    let unicode_text = buffer_to_string(&unicode_buf);
+    assert!(
+        unicode_text.contains(&state.analytics.columns[0].sparkline_unicode),
+        "{unicode_text}"
+    );
+
+    state.set_tab(1);
+    let mut detail_buf = Buffer::empty(area);
+    render_result_analytics(&state, &ascii_pres, area, &mut detail_buf);
+    let detail_text = buffer_to_string(&detail_buf);
+    assert!(detail_text.is_ascii(), "{detail_text}");
+    assert!(detail_text.contains("TOP FREQUENT VALUES"), "{detail_text}");
+    assert!(detail_text.contains("HISTOGRAM BUCKETS"), "{detail_text}");
+}
+
+fn material_presentation(depth: ColorDepth) -> Presentation {
+    Presentation::new(
+        Theme::new(ThemeChoice::Material, depth != ColorDepth::None).with_depth(depth),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    )
+}
+
+fn ascii_presentation() -> Presentation {
+    Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    )
+}
+
+#[test]
+fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
+    use crate::bench::{BenchConfig, BenchSample, compare_benchmarks, compute_bench_stats};
+
+    let cfg = BenchConfig::new(2, 10, true);
+    let base_samples = vec![
+        BenchSample {
+            iteration: 1,
+            duration_ms: 4.0,
+            rows_returned: 12,
+        },
+        BenchSample {
+            iteration: 2,
+            duration_ms: 6.0,
+            rows_returned: 12,
+        },
+        BenchSample {
+            iteration: 3,
+            duration_ms: 8.0,
+            rows_returned: 12,
+        },
+    ];
+    let slower_samples = vec![
+        BenchSample {
+            iteration: 1,
+            duration_ms: 10.0,
+            rows_returned: 12,
+        },
+        BenchSample {
+            iteration: 2,
+            duration_ms: 14.0,
+            rows_returned: 12,
+        },
+        BenchSample {
+            iteration: 3,
+            duration_ms: 18.0,
+            rows_returned: 12,
+        },
+    ];
+    let base = compute_bench_stats(
+        "Baseline (A)",
+        "SELECT * FROM orders WHERE id = 1",
+        &cfg,
+        &base_samples,
+    );
+    let slower = compute_bench_stats(
+        "Candidate (B)",
+        "SELECT * FROM orders ORDER BY id",
+        &cfg,
+        &slower_samples,
+    );
+    let slower_report = compare_benchmarks(base.clone(), Some(slower.clone()), Some(10.0));
+    assert!(slower_report.failed_gate);
+
+    let mut state = crate::app::model::QueryBenchState {
+        config: cfg,
+        baseline_sql: "SELECT * FROM orders WHERE id = 1".to_owned(),
+        candidate_sql: "SELECT * FROM orders ORDER BY id".to_owned(),
+        baseline: Some(base.clone()),
+        candidate: Some(slower),
+        report: Some(slower_report),
+        active_tab: 0,
+        selected_idx: 3,
+        loading: false,
+        status_message: None,
+    };
+
+    let area = Rect::new(0, 0, 126, 32);
+    let ascii_pres = ascii_presentation();
+    let mut ascii_buf = Buffer::empty(area);
+    render_query_bench(&state, &ascii_pres, area, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(
+        ascii_text.is_ascii(),
+        "query bench ASCII emitted non-ASCII:\n{ascii_text}"
+    );
+    for expected in [
+        "[BENCHMARK]",
+        "[MODE: ROLLBACK]",
+        "[WARMUP: 2]",
+        "[RUNS: 10]",
+        "[SLOWER]",
+        "[GATE: FAILED]",
+        "[1] Summary & A/B Compare",
+        "[2] Latency Samples",
+        "p50",
+        "p95",
+        "p99",
+        "mean",
+        "stddev",
+        "qps",
+        "sparkline",
+        base.sparkline_ascii.as_str(),
+        "[1-2] Tabs  [j/k] Select  [m] Toggle Rollback  [r] Re-run  [Esc] Close",
+    ] {
+        assert!(
+            ascii_text.contains(expected),
+            "{expected:?} missing:\n{ascii_text}"
+        );
+    }
+
+    // Material TrueColor theme + LIVE mode + FASTER verdict + Unicode sparkline + Tab 2 samples.
+    let faster_samples = vec![
+        BenchSample {
+            iteration: 1,
+            duration_ms: 1.0,
+            rows_returned: 12,
+        },
+        BenchSample {
+            iteration: 2,
+            duration_ms: 2.0,
+            rows_returned: 12,
+        },
+        BenchSample {
+            iteration: 3,
+            duration_ms: 3.0,
+            rows_returned: 12,
+        },
+    ];
+    let live_cfg = cfg.with_rollback(false);
+    let faster = compute_bench_stats("Candidate (B)", "SELECT 1", &live_cfg, &faster_samples);
+    state.config = live_cfg;
+    state.candidate = Some(faster.clone());
+    state.report = Some(compare_benchmarks(base.clone(), Some(faster), None));
+    state.set_tab(1);
+    state.move_selection(1);
+
+    for pres in [
+        presentation(ColorDepth::TrueColor),
+        material_presentation(ColorDepth::TrueColor),
+    ] {
+        let mut buf = Buffer::empty(area);
+        render_query_bench(&state, &pres, area, &mut buf);
+        let text = buffer_to_string(&buf);
+        for expected in [
+            "[BENCHMARK]",
+            "[MODE: LIVE]",
+            "[FASTER]",
+            base.sparkline_unicode.as_str(),
+            "#2",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(!text.contains("[GATE: FAILED]"), "{text}");
+
+        let sel_bg = pres.theme.style(Token::Selection).bg.unwrap();
+        let sel_y = (0..area.height)
+            .find(|&y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("> #2")
+            })
+            .expect("selected sample row present");
+        let row_str: String = (0..area.width).map(|x| buf[(x, sel_y)].symbol()).collect();
+        let left_x = row_str[..row_str.find("> #2").unwrap()].chars().count() as u16;
+        let right_x = left_x + 40;
+        for x in left_x..right_x {
+            assert_eq!(
+                buf[(x, sel_y)].bg,
+                sel_bg,
+                "x={x} must carry full-width Selection background"
+            );
+        }
+    }
+}
+
+#[test]
+fn schema_snapshot_overlay_renders_drift_pills_tables_and_themes() {
+    use crate::snapshot::{
+        ColumnSnapshot, SchemaSnapshot, TableSnapshot, ViewSnapshot, diff_snapshots,
+    };
+
+    let base_snap = SchemaSnapshot {
+        tables: vec![TableSnapshot {
+            schema: "public".to_owned(),
+            name: "orders".to_owned(),
+            columns: vec![
+                ColumnSnapshot {
+                    name: "id".to_owned(),
+                    data_type: "bigint".to_owned(),
+                    nullable: false,
+                    default_expr: None,
+                    ordinal: 1,
+                },
+                ColumnSnapshot {
+                    name: "legacy_note".to_owned(),
+                    data_type: "text".to_owned(),
+                    nullable: true,
+                    default_expr: None,
+                    ordinal: 2,
+                },
+            ],
+            constraints: Vec::new(),
+            indexes: Vec::new(),
+            rls_enabled: true,
+            rls_forced: false,
+            policies: Vec::new(),
+        }],
+        views: vec![ViewSnapshot {
+            schema: "public".to_owned(),
+            name: "active_orders".to_owned(),
+            materialized: false,
+            definition_sha256: "abc123".to_owned(),
+        }],
+        ..SchemaSnapshot::new(Some("public".to_owned()))
+    }
+    .finalize();
+
+    let curr_snap = SchemaSnapshot {
+        tables: vec![
+            TableSnapshot {
+                schema: "public".to_owned(),
+                name: "orders".to_owned(),
+                columns: vec![ColumnSnapshot {
+                    name: "id".to_owned(),
+                    data_type: "bigint".to_owned(),
+                    nullable: false,
+                    default_expr: None,
+                    ordinal: 1,
+                }],
+                constraints: Vec::new(),
+                indexes: Vec::new(),
+                rls_enabled: true,
+                rls_forced: true,
+                policies: Vec::new(),
+            },
+            TableSnapshot {
+                schema: "public".to_owned(),
+                name: "audit_log".to_owned(),
+                columns: vec![ColumnSnapshot {
+                    name: "event_id".to_owned(),
+                    data_type: "uuid".to_owned(),
+                    nullable: false,
+                    default_expr: None,
+                    ordinal: 1,
+                }],
+                constraints: Vec::new(),
+                indexes: Vec::new(),
+                rls_enabled: false,
+                rls_forced: false,
+                policies: Vec::new(),
+            },
+        ],
+        views: vec![ViewSnapshot {
+            schema: "public".to_owned(),
+            name: "active_orders".to_owned(),
+            materialized: false,
+            definition_sha256: "abc123".to_owned(),
+        }],
+        ..SchemaSnapshot::new(Some("public".to_owned()))
+    }
+    .finalize();
+
+    let diff = diff_snapshots(&base_snap, &curr_snap);
+    assert!(diff.breaking_count > 0);
+    assert!(diff.info_count > 0);
+
+    let sha12: String = curr_snap.fingerprint_sha256.chars().take(12).collect();
+    let mut state = crate::app::model::SchemaSnapshotState {
+        schema_filter: Some("public".to_owned()),
+        baseline: Some(base_snap),
+        current: Some(curr_snap),
+        diff: Some(diff.clone()),
+        active_tab: 0,
+        selected_idx: 0,
+        loading: false,
+        status_message: None,
+    };
+
+    let area = Rect::new(0, 0, 126, 32);
+    let ascii_pres = ascii_presentation();
+    let mut ascii_buf = Buffer::empty(area);
+    render_schema_snapshot(&state, &ascii_pres, area, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(
+        ascii_text.is_ascii(),
+        "schema snapshot ASCII emitted non-ASCII:\n{ascii_text}"
+    );
+    let expected_sha = format!("[SHA256: {sha12}]");
+    let expected_breaking = format!("[BREAKING: {}]", diff.breaking_count);
+    let expected_warn = format!("[WARN: {}]", diff.warning_count);
+    let expected_info = format!("[INFO: {}]", diff.info_count);
+    for expected in [
+        "[SNAPSHOT v1]",
+        expected_sha.as_str(),
+        "[TABLES: 2]",
+        "[VIEWS: 1]",
+        expected_breaking.as_str(),
+        expected_warn.as_str(),
+        expected_info.as_str(),
+        "[1] Overview & Drift",
+        "[2] Catalog Tables",
+        "public.orders",
+        "[1-2] Tabs  [b] Pin Baseline  [c] Copy SHA-256  [j/k] Select  [r] Refresh  [Esc] Close",
+    ] {
+        assert!(
+            ascii_text.contains(expected),
+            "{expected:?} missing:\n{ascii_text}"
+        );
+    }
+
+    // Switch to Tab 2 (Catalog Tables) and verify Material + Dark TrueColor full-width selection bar.
+    state.set_tab(1);
+    state.move_selection(1);
+    for pres in [
+        presentation(ColorDepth::TrueColor),
+        material_presentation(ColorDepth::TrueColor),
+    ] {
+        let mut buf = Buffer::empty(area);
+        render_schema_snapshot(&state, &pres, area, &mut buf);
+        let text = buffer_to_string(&buf);
+        assert!(text.contains("public.audit_log"), "{text}");
+        assert!(text.contains("public.orders"), "{text}");
+
+        let sel_bg = pres.theme.style(Token::Selection).bg.unwrap();
+        let sel_y = (0..area.height)
+            .find(|&y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("> public.orders")
+            })
+            .expect("selected table row present");
+        let row_str: String = (0..area.width).map(|x| buf[(x, sel_y)].symbol()).collect();
+        let left_x = row_str[..row_str.find("> public.orders").unwrap()]
+            .chars()
+            .count() as u16;
+        for x in left_x..(left_x + 50) {
+            assert_eq!(
+                buf[(x, sel_y)].bg,
+                sel_bg,
+                "x={x} must carry full-width Selection background"
+            );
+        }
+    }
+}
+
+#[test]
+fn sql_runbook_overlay_renders_badges_write_guard_and_dry_run_across_themes() {
+    let md = r#"# Step 1: Health Check
+```sql
+-- @name: check-orders
+-- @expect-rows: 5
+SELECT count(*) FROM public.orders;
+```
+
+# Step 2: Update Note
+```sql
+-- @name: patch-note
+UPDATE public.orders SET note = 'ok' WHERE id = 1;
+```
+
+# Step 3: Cleanup
+```sql
+-- @name: drop-staging
+DROP TABLE IF EXISTS public.staging_tmp;
+```
+"#;
+    let runbook = crate::runbook::parse_markdown_runbook(md, "ops.md").expect("valid markdown");
+    let mut state = crate::app::model::SqlRunbookState {
+        runbook,
+        active_tab: 0,
+        selected_idx: 1,
+        allow_writes: false,
+        status_message: None,
+    };
+
+    let area = Rect::new(0, 0, 126, 32);
+    let ascii_pres = ascii_presentation();
+    let mut ascii_buf = Buffer::empty(area);
+    render_sql_runbook(&state, &ascii_pres, area, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(
+        ascii_text.is_ascii(),
+        "sql runbook ASCII emitted non-ASCII:\n{ascii_text}"
+    );
+    for expected in [
+        "[RUNBOOK]",
+        "[CELLS: 3]",
+        "[WRITES: BLOCKED]",
+        "[WRITE-GUARD: 2]",
+        "[1] Notebook Cells",
+        "[2] Safety Dry-Run Plan",
+        "check-orders",
+        "Step 1: Health Check",
+        "READ",
+        "WRITE",
+        "DESTRUCTIVE",
+        "@expect-rows:5",
+        "SELECT count(*) FROM public.orders;",
+        "[1-2] Tabs  [w] Toggle Allow Writes  [j/k] Select Cell  [Enter] Jump To Cell  [Esc] Close",
+    ] {
+        assert!(
+            ascii_text.contains(expected),
+            "{expected:?} missing:\n{ascii_text}"
+        );
+    }
+
+    // Tab 2 (Safety Dry-Run Plan) blocked vs allowed, Dark & Material themes.
+    state.set_tab(1);
+    for pres in [
+        presentation(ColorDepth::TrueColor),
+        material_presentation(ColorDepth::TrueColor),
+    ] {
+        let mut blocked_buf = Buffer::empty(area);
+        render_sql_runbook(&state, &pres, area, &mut blocked_buf);
+        let blocked_text = buffer_to_string(&blocked_buf);
+        assert!(
+            blocked_text.contains("blocked-by-write-guard"),
+            "{blocked_text}"
+        );
+        assert!(blocked_text.contains("planned=1"), "{blocked_text}");
+        assert!(blocked_text.contains("blocked=2"), "{blocked_text}");
+
+        let mut allowed_state = state.clone();
+        allowed_state.allow_writes = true;
+        let mut allowed_buf = Buffer::empty(area);
+        render_sql_runbook(&allowed_state, &pres, area, &mut allowed_buf);
+        let allowed_text = buffer_to_string(&allowed_buf);
+        assert!(allowed_text.contains("[WRITES: ALLOWED]"), "{allowed_text}");
+        assert!(!allowed_text.contains("[WRITE-GUARD:"), "{allowed_text}");
+        assert!(allowed_text.contains("planned=3"), "{allowed_text}");
+    }
+}
+
+#[test]
+fn new_overlays_block_panes_and_render_through_layout() {
+    use crate::ui::layout::{render, render_to_string};
+    use crate::ui::widgets::{overlay_blocks_panes, region_at};
+
+    let area = Rect::new(0, 0, 120, 30);
+    let mut model = crate::app::Model::default();
+    model.sql_runbook = Some(crate::app::model::SqlRunbookState::from_buffer(
+        "-- @name: first\nSELECT 1;",
+    ));
+    assert!(overlay_blocks_panes(&model));
+    assert_eq!(region_at(&model, area, 10, 10), None);
+
+    let keymap = crate::ui::keymap::Keymap::new();
+    let pres = material_presentation(ColorDepth::TrueColor);
+    let text = render_to_string(&model, &keymap, &pres, area.width, area.height);
+    assert!(text.contains("[RUNBOOK]"), "{text}");
+
+    let mut buf = Buffer::empty(area);
+    render(&model, &keymap, area, &mut buf);
+    assert!(buffer_to_string(&buf).contains("[RUNBOOK]"));
+
+    model.sql_runbook = None;
+    model.schema_snapshot = Some(crate::app::model::SchemaSnapshotState::default());
+    assert!(overlay_blocks_panes(&model));
+    assert_eq!(region_at(&model, area, 10, 10), None);
+    let snap_text = render_to_string(&model, &keymap, &pres, area.width, area.height);
+    assert!(snap_text.contains("[SNAPSHOT v1]"), "{snap_text}");
+
+    model.schema_snapshot = None;
+    model.query_bench = Some(crate::app::model::QueryBenchState::default());
+    assert!(overlay_blocks_panes(&model));
+    assert_eq!(region_at(&model, area, 10, 10), None);
+    let bench_text = render_to_string(&model, &keymap, &pres, area.width, area.height);
+    assert!(bench_text.contains("[BENCHMARK]"), "{bench_text}");
+}

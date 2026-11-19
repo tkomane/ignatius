@@ -6818,5 +6818,4583 @@ pub(crate) fn render_lint_findings(
     .render(footer_area, buf);
 }
 
+fn format_optional_wal_bytes(bytes: Option<i64>) -> String {
+    match bytes {
+        Some(value) if value >= 0 => crate::telemetry::format_bytes(value as u64),
+        _ => "-".to_owned(),
+    }
+}
+
+fn fit_cell(raw: &str, width: usize, unicode: bool) -> String {
+    let sanitized = sanitize_for_display(raw);
+    let clipped = truncate_to_width(&sanitized, width, unicode);
+    pad_to_width(&clipped, width)
+}
+
+fn modal_inner_layout(
+    title: String,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) -> Option<(Rect, Rect, Rect, Rect, Rect)> {
+    let modal_width = (area.width.saturating_mul(92) / 100)
+        .max(76)
+        .min(area.width);
+    let modal_height = (area.height.saturating_mul(88) / 100)
+        .max(20)
+        .min(area.height);
+    let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+    if modal_area.width < 30 || modal_area.height < 8 {
+        return None;
+    }
+
+    ratatui::widgets::Clear.render(modal_area, buf);
+    overlay_block(title, presentation).render(modal_area, buf);
+
+    let inner = Rect::new(
+        modal_area.x.saturating_add(1),
+        modal_area.y.saturating_add(1),
+        modal_area.width.saturating_sub(2),
+        modal_area.height.saturating_sub(2),
+    );
+    if inner.width < 4 || inner.height < 6 {
+        return None;
+    }
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(4),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    Some((chunks[0], chunks[1], chunks[3], chunks[4], chunks[5]))
+}
+
+/// Renders the Logical Replication & Replication Slots Manager overlay (`051`).
+pub(crate) fn render_logical_replication(
+    state: &crate::app::model::LogicalReplicationState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} LOGICAL REPLICATION & SLOTS ",
+        presentation.icon(Icon::Database)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let report_opt = state.report.as_ref();
+    let slots_cnt = report_opt.map_or(0, |r| r.slots.len());
+    let pubs_cnt = report_opt.map_or(0, |r| r.publications.len());
+    let subs_cnt = report_opt.map_or(0, |r| r.subscriptions.len());
+    let inactive_cnt = report_opt.map_or(0, |r| r.inactive_slots_count());
+    let max_retained = format_optional_wal_bytes(report_opt.and_then(|r| r.max_retained_bytes()));
+    let risk_token = if report_opt.is_some_and(|r| r.has_critical_findings()) {
+        Token::Danger
+    } else if report_opt.is_some_and(|r| r.has_warning_findings()) {
+        Token::Warning
+    } else {
+        Token::Success
+    };
+
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("SLOTS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{slots_cnt}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("INACTIVE: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{inactive_cnt}"),
+            theme.style(risk_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("MAX WAL: ", theme.style(Token::Muted)),
+        Span::styled(max_retained, theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("PUBS: ", theme.style(Token::Muted)),
+        Span::styled(format!("{pubs_cnt}"), theme.style(Token::Text)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("SUBS: ", theme.style(Token::Muted)),
+        Span::styled(format!("{subs_cnt}"), theme.style(Token::Text)),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let tab_labels = [
+        format!(" [1] Slots ({slots_cnt}) "),
+        format!(" [2] Publications ({pubs_cnt}) "),
+        format!(" [3] Subscriptions ({subs_cnt}) "),
+    ];
+    let mut tab_spans = Vec::new();
+    for (idx, label) in tab_labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let style = if idx == state.active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled(label.clone(), style));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let body_rows = usize::from(body_area.height).saturating_sub(1);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "Loading replication slots, publications, and subscriptions from PostgreSQL catalogs...",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else if let Some(report) = report_opt {
+        match state.active_tab {
+            0 => {
+                if report.slots.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No replication slots found.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<22} {:<9} {:<12} {:<9} {:<10} {:>10} {:<6} {}",
+                                "SLOT",
+                                "TYPE",
+                                "PLUGIN",
+                                "STATE",
+                                "WAL",
+                                "RETAINED",
+                                "RISK",
+                                "SUMMARY"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, slot) in report.slots.iter().enumerate().skip(start).take(body_rows) {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let active_label = if slot.active { "ACTIVE" } else { "INACTIVE" };
+                        let active_token = if slot.active {
+                            Token::Success
+                        } else {
+                            Token::Warning
+                        };
+                        let (risk_badge, risk_token) =
+                            if slot.wal_status.trim().eq_ignore_ascii_case("lost") {
+                                ("LOST", Token::Danger)
+                            } else {
+                                match slot.risk {
+                                    crate::replication::SlotRiskSeverity::Critical => {
+                                        ("CRIT", Token::Danger)
+                                    }
+                                    crate::replication::SlotRiskSeverity::Warning => {
+                                        ("WARN", Token::Warning)
+                                    }
+                                    crate::replication::SlotRiskSeverity::Ok => {
+                                        ("OK", Token::Success)
+                                    }
+                                }
+                            };
+                        let retained = format_optional_wal_bytes(slot.retained_bytes);
+                        let summary_raw = slot
+                            .finding
+                            .as_deref()
+                            .or(slot.database.as_deref())
+                            .unwrap_or("-");
+                        let summary = sanitize_for_display(summary_raw);
+                        let slot_name = fit_cell(&slot.slot_name, 22, unicode);
+                        let slot_type = fit_cell(&slot.slot_type, 9, unicode);
+                        let plugin = fit_cell(slot.plugin.as_deref().unwrap_or("-"), 12, unicode);
+                        let wal_status = fit_cell(&slot.wal_status, 10, unicode);
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{slot_name} "), selection_style),
+                                (format!("{slot_type} "), selection_style),
+                                (format!("{plugin} "), selection_style),
+                                (format!("{active_label:<9} "), selection_style),
+                                (format!("{wal_status} "), selection_style),
+                                (format!("{retained:>10} "), selection_style),
+                                (
+                                    format!("{risk_badge:<6} "),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (summary, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{slot_name} "), theme.style(Token::Text)),
+                                (format!("{slot_type} "), theme.style(Token::Info)),
+                                (format!("{plugin} "), theme.style(Token::Muted)),
+                                (format!("{active_label:<9} "), theme.style(active_token)),
+                                (format!("{wal_status} "), theme.style(Token::Muted)),
+                                (format!("{retained:>10} "), theme.style(Token::Text)),
+                                (
+                                    format!("{risk_badge:<6} "),
+                                    theme.style(risk_token).add_modifier(Modifier::BOLD),
+                                ),
+                                (summary, theme.style(Token::Muted)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            1 => {
+                if report.publications.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No logical publications found in this database.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<24} {:<11} {:<9} {:<16} {}",
+                                "PUBLICATION", "SCOPE", "OPS", "OWNER", "TABLES"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, pub_item) in report
+                        .publications
+                        .iter()
+                        .enumerate()
+                        .skip(start)
+                        .take(body_rows)
+                    {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let scope = if pub_item.all_tables {
+                            "ALL TABLES"
+                        } else {
+                            "SELECTED"
+                        };
+                        let ops = format!(
+                            "{}/{}/{}/{}",
+                            if pub_item.insert { "I" } else { "-" },
+                            if pub_item.update { "U" } else { "-" },
+                            if pub_item.delete { "D" } else { "-" },
+                            if pub_item.truncate { "T" } else { "-" },
+                        );
+                        let tables_summary = if pub_item.all_tables {
+                            "ALL TABLES".to_owned()
+                        } else if pub_item.tables.is_empty() {
+                            "0 tables".to_owned()
+                        } else {
+                            let preview = pub_item
+                                .tables
+                                .iter()
+                                .take(3)
+                                .map(|t| sanitize_for_display(t))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let suffix = if pub_item.tables_truncated || pub_item.tables.len() > 3 {
+                                ", ..."
+                            } else {
+                                ""
+                            };
+                            format!("{} ({}{})", pub_item.tables.len(), preview, suffix)
+                        };
+                        let name = fit_cell(&pub_item.name, 24, unicode);
+                        let owner = fit_cell(&pub_item.owner, 16, unicode);
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{name} "), selection_style),
+                                (format!("{scope:<11} "), selection_style),
+                                (format!("{ops:<9} "), selection_style),
+                                (format!("{owner} "), selection_style),
+                                (tables_summary, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{name} "), theme.style(Token::Text)),
+                                (
+                                    format!("{scope:<11} "),
+                                    theme.style(if pub_item.all_tables {
+                                        Token::Info
+                                    } else {
+                                        Token::Muted
+                                    }),
+                                ),
+                                (format!("{ops:<9} "), theme.style(Token::Focus)),
+                                (format!("{owner} "), theme.style(Token::Muted)),
+                                (tables_summary, theme.style(Token::Text)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            2 => {
+                if report.subscription_access_restricted {
+                    Paragraph::new(Line::from(Span::styled(
+                        "Subscription catalog (pg_subscription) is restricted for the current role (SQLSTATE 42501).",
+                        theme.style(Token::Warning),
+                    )))
+                    .render(body_area, buf);
+                } else if report.subscriptions.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No logical subscriptions found in this database.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<20} {:<9} {:<13} {:<18} {:>10} {}",
+                                "SUBSCRIPTION", "STATUS", "STATE", "SLOT", "LAG", "CONNINFO"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, sub) in report
+                        .subscriptions
+                        .iter()
+                        .enumerate()
+                        .skip(start)
+                        .take(body_rows)
+                    {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let enabled_label = if sub.enabled { "ENABLED" } else { "DISABLED" };
+                        let enabled_token = if sub.enabled {
+                            Token::Success
+                        } else {
+                            Token::Warning
+                        };
+                        let name = fit_cell(&sub.name, 20, unicode);
+                        let sync_state = fit_cell(&sub.sync_state, 13, unicode);
+                        let slot = fit_cell(sub.slot_name.as_deref().unwrap_or("-"), 18, unicode);
+                        let lag = format_optional_wal_bytes(sub.lag_bytes);
+                        let conninfo = sanitize_for_display(&sub.conninfo_redacted);
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{name} "), selection_style),
+                                (format!("{enabled_label:<9} "), selection_style),
+                                (format!("{sync_state} "), selection_style),
+                                (format!("{slot} "), selection_style),
+                                (format!("{lag:>10} "), selection_style),
+                                (conninfo, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{name} "), theme.style(Token::Text)),
+                                (format!("{enabled_label:<9} "), theme.style(enabled_token)),
+                                (format!("{sync_state} "), theme.style(Token::Info)),
+                                (format!("{slot} "), theme.style(Token::Muted)),
+                                (format!("{lag:>10} "), theme.style(Token::Text)),
+                                (conninfo, theme.style(Token::Muted)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            _ => {}
+        }
+    } else {
+        Paragraph::new(Line::from(Span::styled(
+            "No logical replication snapshot loaded. Press [r] to refresh.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(report) = report_opt {
+        let mut notices = Vec::new();
+        if report.subscription_access_restricted {
+            notices.push("pg_subscription restricted (42501)");
+        }
+        if report.slots_truncated || report.publications_truncated || report.subscriptions_truncated
+        {
+            notices.push("results truncated at catalog bound");
+        }
+        if !notices.is_empty() {
+            (format!("Notice: {}", notices.join("; ")), Token::Warning)
+        } else if state.active_tab == 0
+            && let Some(slot) = report.slots.get(state.selected_idx)
+            && let Some(finding) = &slot.finding
+        {
+            (
+                sanitize_for_display(finding),
+                match slot.risk {
+                    crate::replication::SlotRiskSeverity::Critical => Token::Danger,
+                    crate::replication::SlotRiskSeverity::Warning => Token::Warning,
+                    crate::replication::SlotRiskSeverity::Ok => Token::Muted,
+                },
+            )
+        } else {
+            (
+                "Press [Enter] or [g] to load reviewed SQL into the editor (never auto-executed)."
+                    .to_owned(),
+                Token::Muted,
+            )
+        }
+    } else {
+        (String::new(), Token::Muted)
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    Paragraph::new(Line::from(vec![
+        Span::styled(
+            "[1-3] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Select  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Enter/g] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Load Reviewed SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ]))
+    .render(footer_area, buf);
+}
+
+/// Renders the Server Settings, HBA Auth, Extensions, Tablespaces & FDWs overlay (`052`).
+pub(crate) fn render_cluster_config(
+    state: &crate::app::model::ClusterConfigState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} CLUSTER CONFIG, HBA & INFRASTRUCTURE ",
+        presentation.icon(Icon::Database)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let report_opt = state.report.as_ref();
+    let filter = (!state.filter_text.is_empty()).then_some(state.filter_text.as_str());
+
+    let settings_rows = report_opt
+        .map(|r| r.filtered_settings(state.modified_only, filter))
+        .unwrap_or_default();
+    let hba_rows = report_opt
+        .map(|r| r.filtered_hba_rules(filter))
+        .unwrap_or_default();
+    let ext_rows = report_opt
+        .map(|r| r.filtered_extensions(filter))
+        .unwrap_or_default();
+    let ts_rows = report_opt
+        .map(|r| r.filtered_tablespaces(filter))
+        .unwrap_or_default();
+    let fdw_rows = report_opt
+        .map(|r| r.filtered_fdws(filter))
+        .unwrap_or_default();
+
+    let non_default_cnt = report_opt.map_or(0, |r| r.non_default_settings_count());
+    let pending_restart_cnt = report_opt.map_or(0, |r| r.pending_restart_count());
+    let hba_warn_cnt = report_opt.map_or(0, |r| r.hba_warnings_count());
+    let hba_crit_cnt = report_opt.map_or(0, |r| r.hba_critical_count());
+    let ext_upgrade_cnt = report_opt.map_or(0, |r| r.upgradable_extensions_count());
+    let servers_cnt: usize = report_opt.map_or(0, |r| r.fdws.iter().map(|f| f.servers.len()).sum());
+
+    let hba_token = if hba_crit_cnt > 0 {
+        Token::Danger
+    } else if hba_warn_cnt > 0 {
+        Token::Warning
+    } else {
+        Token::Success
+    };
+
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("MODIFIED: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{non_default_cnt}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("RESTART: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{pending_restart_cnt}"),
+            theme
+                .style(if pending_restart_cnt > 0 {
+                    Token::Warning
+                } else {
+                    Token::Success
+                })
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("HBA RISKS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{hba_warn_cnt}"),
+            theme.style(hba_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("EXT UPGRADES: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{ext_upgrade_cnt}"),
+            theme.style(if ext_upgrade_cnt > 0 {
+                Token::Warning
+            } else {
+                Token::Success
+            }),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("FOREIGN SERVERS: ", theme.style(Token::Muted)),
+        Span::styled(format!("{servers_cnt}"), theme.style(Token::Text)),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let tab_labels = [
+        format!(" [1] Settings ({}) ", settings_rows.len()),
+        format!(" [2] HBA Auth ({}) ", hba_rows.len()),
+        format!(" [3] Extensions ({}) ", ext_rows.len()),
+        format!(" [4] Tablespaces ({}) ", ts_rows.len()),
+        format!(" [5] FDWs ({}) ", fdw_rows.len()),
+    ];
+    let mut tab_spans = Vec::new();
+    for (idx, label) in tab_labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" ", theme.style(Token::Border)));
+        }
+        let style = if idx == state.active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled(label.clone(), style));
+    }
+    tab_spans.push(Span::raw("  "));
+    let modified_badge = if state.modified_only {
+        "[m] Modified-only: ON"
+    } else {
+        "[m] Modified-only: OFF"
+    };
+    tab_spans.push(Span::styled(
+        modified_badge,
+        if state.modified_only {
+            super::header::capsule_style(presentation, Token::Warning)
+        } else {
+            theme.style(Token::Muted)
+        },
+    ));
+    if !state.filter_text.is_empty() {
+        tab_spans.push(Span::raw("  "));
+        tab_spans.push(Span::styled(
+            format!("[Filter: {}]", sanitize_for_display(&state.filter_text)),
+            theme.style(Token::Info),
+        ));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let body_rows = usize::from(body_area.height).saturating_sub(1);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "Loading settings, HBA rules, extensions, tablespaces, and foreign data wrappers...",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else if let Some(report) = report_opt {
+        match state.active_tab {
+            0 => {
+                if settings_rows.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No settings match the current filter.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<32} {:<20} {:<12} {:<18} {}",
+                                "NAME", "VALUE", "CONTEXT", "SOURCE", "STATE"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, setting) in
+                        settings_rows.iter().enumerate().skip(start).take(body_rows)
+                    {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let name = fit_cell(&setting.name, 32, unicode);
+                        let value = fit_cell(&setting.display_value(), 20, unicode);
+                        let context = fit_cell(&setting.context, 12, unicode);
+                        let source = fit_cell(&setting.source, 18, unicode);
+                        let (badge, badge_token) = if setting.pending_restart {
+                            ("[RESTART]", Token::Danger)
+                        } else if setting.is_non_default {
+                            ("[MODIFIED]", Token::Warning)
+                        } else {
+                            ("default", Token::Muted)
+                        };
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{name} "), selection_style),
+                                (format!("{value} "), selection_style),
+                                (format!("{context} "), selection_style),
+                                (format!("{source} "), selection_style),
+                                (
+                                    badge.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{name} "), theme.style(Token::Text)),
+                                (format!("{value} "), theme.style(Token::Info)),
+                                (format!("{context} "), theme.style(Token::Muted)),
+                                (format!("{source} "), theme.style(Token::Muted)),
+                                (
+                                    badge.to_owned(),
+                                    theme.style(badge_token).add_modifier(Modifier::BOLD),
+                                ),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            1 => {
+                if report.hba_access_restricted {
+                    Paragraph::new(Line::from(Span::styled(
+                        "pg_hba_file_rules is restricted for the current role (requires pg_read_all_settings or superuser).",
+                        theme.style(Token::Warning),
+                    )))
+                    .render(body_area, buf);
+                } else if hba_rows.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No pg_hba.conf rules found.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<5} {:<9} {:<12} {:<12} {:<18} {:<13} {:<6} {}",
+                                "LINE",
+                                "TYPE",
+                                "DATABASE",
+                                "USER",
+                                "ADDRESS",
+                                "METHOD",
+                                "RISK",
+                                "REASON"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, rule) in hba_rows.iter().enumerate().skip(start).take(body_rows) {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let line_num = rule
+                            .line_number
+                            .map_or_else(|| "-".to_owned(), |n| n.to_string());
+                        let rtype = fit_cell(&rule.rule_type, 9, unicode);
+                        let dbs = fit_cell(&rule.databases.join(","), 12, unicode);
+                        let users = fit_cell(&rule.users.join(","), 12, unicode);
+                        let addr = fit_cell(rule.address.as_deref().unwrap_or("-"), 18, unicode);
+                        let method = fit_cell(&rule.auth_method, 13, unicode);
+                        let (risk_badge, risk_token) = match rule.risk {
+                            crate::cluster::HbaRisk::Critical => ("HIGH", Token::Danger),
+                            crate::cluster::HbaRisk::Warning => ("MED", Token::Warning),
+                            crate::cluster::HbaRisk::Ok => ("LOW", Token::Muted),
+                        };
+                        let reason = sanitize_for_display(
+                            rule.risk_reason
+                                .as_deref()
+                                .or(rule.error.as_deref())
+                                .unwrap_or("-"),
+                        );
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{line_num:<5} "), selection_style),
+                                (format!("{rtype} "), selection_style),
+                                (format!("{dbs} "), selection_style),
+                                (format!("{users} "), selection_style),
+                                (format!("{addr} "), selection_style),
+                                (format!("{method} "), selection_style),
+                                (
+                                    format!("{risk_badge:<6} "),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (reason, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{line_num:<5} "), theme.style(Token::Muted)),
+                                (format!("{rtype} "), theme.style(Token::Text)),
+                                (format!("{dbs} "), theme.style(Token::Text)),
+                                (format!("{users} "), theme.style(Token::Text)),
+                                (format!("{addr} "), theme.style(Token::Info)),
+                                (format!("{method} "), theme.style(Token::Text)),
+                                (
+                                    format!("{risk_badge:<6} "),
+                                    theme.style(risk_token).add_modifier(Modifier::BOLD),
+                                ),
+                                (reason, theme.style(Token::Muted)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            2 => {
+                if ext_rows.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No extensions match the current filter.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<26} {:<11} {:<11} {:<11} {}",
+                                "EXTENSION", "INSTALLED", "DEFAULT", "STATUS", "COMMENT"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, ext) in ext_rows.iter().enumerate().skip(start).take(body_rows) {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let name = fit_cell(&ext.name, 26, unicode);
+                        let installed =
+                            fit_cell(ext.installed_version.as_deref().unwrap_or("-"), 11, unicode);
+                        let default_ver =
+                            fit_cell(ext.default_version.as_deref().unwrap_or("-"), 11, unicode);
+                        let (status_badge, status_token) = if ext.upgrade_available {
+                            ("[UPGRADE]", Token::Warning)
+                        } else if ext.is_installed() {
+                            ("installed", Token::Success)
+                        } else {
+                            ("available", Token::Muted)
+                        };
+                        let comment = sanitize_for_display(ext.comment.as_deref().unwrap_or("-"));
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{name} "), selection_style),
+                                (format!("{installed} "), selection_style),
+                                (format!("{default_ver} "), selection_style),
+                                (
+                                    format!("{status_badge:<11} "),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (comment, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{name} "), theme.style(Token::Text)),
+                                (format!("{installed} "), theme.style(Token::Info)),
+                                (format!("{default_ver} "), theme.style(Token::Muted)),
+                                (
+                                    format!("{status_badge:<11} "),
+                                    theme.style(status_token).add_modifier(Modifier::BOLD),
+                                ),
+                                (comment, theme.style(Token::Muted)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            3 => {
+                if ts_rows.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No tablespaces found.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<20} {:<16} {:>10} {:<26} {}",
+                                "TABLESPACE", "OWNER", "SIZE", "LOCATION", "OPTIONS"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, ts) in ts_rows.iter().enumerate().skip(start).take(body_rows) {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let name = fit_cell(&ts.name, 20, unicode);
+                        let owner = fit_cell(&ts.owner, 16, unicode);
+                        let size_pretty = ts.size_bytes.map_or_else(
+                            || "-".to_owned(),
+                            |b| {
+                                if b >= 0 {
+                                    crate::cluster::format_bytes(b as u64)
+                                } else {
+                                    "-".to_owned()
+                                }
+                            },
+                        );
+                        let location = fit_cell(ts.location.as_deref().unwrap_or("-"), 26, unicode);
+                        let options = if ts.options.is_empty() {
+                            "-".to_owned()
+                        } else {
+                            sanitize_for_display(
+                                &crate::cluster::mask_options(&ts.options).join(", "),
+                            )
+                        };
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{name} "), selection_style),
+                                (format!("{owner} "), selection_style),
+                                (format!("{size_pretty:>10} "), selection_style),
+                                (format!("{location} "), selection_style),
+                                (options, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{name} "), theme.style(Token::Text)),
+                                (format!("{owner} "), theme.style(Token::Muted)),
+                                (format!("{size_pretty:>10} "), theme.style(Token::Info)),
+                                (format!("{location} "), theme.style(Token::Text)),
+                                (options, theme.style(Token::Muted)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            4 => {
+                if fdw_rows.is_empty() {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No foreign data wrappers found.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<18} {:<14} {:<18} {:<18} {}",
+                                "FDW", "OWNER", "HANDLER", "VALIDATOR", "SERVERS"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let start = state
+                        .selected_idx
+                        .saturating_sub(body_rows.saturating_sub(1));
+                    for (idx, fdw) in fdw_rows.iter().enumerate().skip(start).take(body_rows) {
+                        let selected = idx == state.selected_idx;
+                        let marker = if selected { "> " } else { "  " };
+                        let name = fit_cell(&fdw.name, 18, unicode);
+                        let owner = fit_cell(&fdw.owner, 14, unicode);
+                        let handler = fit_cell(fdw.handler.as_deref().unwrap_or("-"), 18, unicode);
+                        let validator =
+                            fit_cell(fdw.validator.as_deref().unwrap_or("-"), 18, unicode);
+                        let servers_summary = if fdw.servers.is_empty() {
+                            "0 servers".to_owned()
+                        } else {
+                            let details = fdw
+                                .servers
+                                .iter()
+                                .map(|srv| {
+                                    let masked = crate::cluster::mask_options(&srv.options);
+                                    if masked.is_empty() {
+                                        sanitize_for_display(&srv.name)
+                                    } else {
+                                        format!(
+                                            "{}({})",
+                                            sanitize_for_display(&srv.name),
+                                            sanitize_for_display(&masked.join(", "))
+                                        )
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            format!("{}: {}", fdw.servers.len(), details)
+                        };
+                        let segments = if selected {
+                            vec![
+                                (
+                                    marker.to_owned(),
+                                    selection_style.add_modifier(Modifier::BOLD),
+                                ),
+                                (format!("{name} "), selection_style),
+                                (format!("{owner} "), selection_style),
+                                (format!("{handler} "), selection_style),
+                                (format!("{validator} "), selection_style),
+                                (servers_summary, selection_style),
+                            ]
+                        } else {
+                            vec![
+                                (marker.to_owned(), theme.style(Token::Muted)),
+                                (format!("{name} "), theme.style(Token::Text)),
+                                (format!("{owner} "), theme.style(Token::Muted)),
+                                (format!("{handler} "), theme.style(Token::Info)),
+                                (format!("{validator} "), theme.style(Token::Muted)),
+                                (servers_summary, theme.style(Token::Text)),
+                            ]
+                        };
+                        lines.push(bounded_row(
+                            segments,
+                            body_width,
+                            unicode,
+                            selected.then_some(selection_style),
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                }
+            }
+            _ => {}
+        }
+    } else {
+        Paragraph::new(Line::from(Span::styled(
+            "No cluster configuration report loaded. Press [r] to refresh.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(report) = report_opt {
+        let mut notices = Vec::new();
+        if report.hba_access_restricted {
+            notices.push("pg_hba_file_rules restricted");
+        }
+        if report.truncated_settings
+            || report.truncated_hba_rules
+            || report.truncated_extensions
+            || report.truncated_tablespaces
+            || report.truncated_fdws
+        {
+            notices.push("results truncated at catalog bound");
+        }
+        if !notices.is_empty() {
+            (format!("Notice: {}", notices.join("; ")), Token::Warning)
+        } else {
+            (
+                "Press [Enter] or [g] to load reviewed SQL into the editor (never auto-executed)."
+                    .to_owned(),
+                Token::Muted,
+            )
+        }
+    } else {
+        (String::new(), Token::Muted)
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    Paragraph::new(Line::from(vec![
+        Span::styled(
+            "[1-5] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Tabs  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[m] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Modified/Risk  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[j/k] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Select  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Enter/g] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Load Reviewed SQL  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[r] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Refresh  ", theme.style(Token::Muted)),
+        Span::styled(
+            "[Esc] ",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Close", theme.style(Token::Muted)),
+    ]))
+    .render(footer_area, buf);
+}
+
+/// Renders the Live Data Browser & Batch CRUD overlay (`053`).
+pub(crate) fn render_data_browser(
+    state: &crate::app::model::DataBrowserState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} LIVE DATA BROWSER & CRUD ",
+        presentation.icon(Icon::Table)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let page_opt = state.page.as_ref();
+    let pk_vec = page_opt
+        .map(|p| &p.pk_columns)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(&state.request.pk_columns);
+    let pk_label = if pk_vec.is_empty() {
+        "ctid".to_owned()
+    } else {
+        sanitize_for_display(&pk_vec.join(","))
+    };
+    let rows_count = page_opt.map_or(0, |p| p.rows.len());
+    let sort_col = state
+        .request
+        .sort_column
+        .as_deref()
+        .or_else(|| pk_vec.first().map(String::as_str))
+        .unwrap_or("ctid");
+    let sort_label = format!(
+        "{} {}",
+        sanitize_for_display(sort_col),
+        state.request.sort_order.sql_keyword()
+    );
+    let (page_badge, page_token) = if page_opt.is_some_and(|p| p.has_more) {
+        ("MORE", Token::Info)
+    } else {
+        ("END", Token::Muted)
+    };
+    let table_label = sanitize_for_display(&format!("{}.{}", state.schema, state.table));
+
+    let capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("TABLE: ", theme.style(Token::Muted)),
+        Span::styled(
+            table_label,
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("PK: ", theme.style(Token::Muted)),
+        Span::styled(pk_label, theme.style(Token::Info)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("ROWS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{rows_count}"),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("SORT: ", theme.style(Token::Muted)),
+        Span::styled(sort_label, theme.style(Token::Focus)),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled(
+            page_badge,
+            theme.style(page_token).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("]", theme.style(Token::Border)),
+    ];
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let active_col_name = page_opt
+        .and_then(|p| p.columns.get(state.selected_col))
+        .map(|c| sanitize_for_display(c))
+        .unwrap_or_else(|| "-".to_owned());
+    let mut tab_spans = vec![
+        Span::styled(
+            format!(" [CELL: {active_col_name}] "),
+            super::header::capsule_style(presentation, Token::Focus),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("[PAGE SIZE: {}]", state.request.effective_page_size()),
+            theme.style(Token::Muted),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            if page_opt.is_some_and(|p| p.has_prev) {
+                "[PREV: YES]"
+            } else {
+                "[PREV: NO]"
+            },
+            theme.style(Token::Muted),
+        ),
+    ];
+    if let Some(filter) = &state.request.filter_predicate {
+        tab_spans.push(Span::raw("  "));
+        tab_spans.push(Span::styled(
+            format!("[FILTER: {}]", sanitize_for_display(filter)),
+            theme.style(Token::Info),
+        ));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let body_rows = usize::from(body_area.height).saturating_sub(1);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "Loading keyset-paginated data page from PostgreSQL...",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else if let Some(page) = page_opt {
+        if page.columns.is_empty() {
+            Paragraph::new(Line::from(Span::styled(
+                "Table has no visible columns.",
+                theme.style(Token::Muted),
+            )))
+            .render(body_area, buf);
+        } else {
+            let active_col = state.selected_col.min(page.columns.len() - 1);
+            let mut col_widths = Vec::with_capacity(page.columns.len());
+            for (col_idx, col_name) in page.columns.iter().enumerate() {
+                let header_label = if col_idx == active_col {
+                    format!("[{}]", sanitize_for_display(col_name))
+                } else {
+                    sanitize_for_display(col_name)
+                };
+                let mut width = display_width(&header_label);
+                for row in &page.rows {
+                    let cell_text =
+                        format_browser_cell(row.get(col_idx).and_then(|v| v.as_deref()));
+                    width = width.max(display_width(&cell_text));
+                }
+                col_widths.push(width.clamp(8, 24));
+            }
+
+            let (col_start, col_end) =
+                browser_column_window(&col_widths, active_col, body_width.saturating_sub(2));
+
+            let mut lines = Vec::new();
+            let mut header_segments = vec![(
+                "  ".to_owned(),
+                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+            )];
+            for (col_idx, (col_name, &col_width)) in page
+                .columns
+                .iter()
+                .zip(col_widths.iter())
+                .enumerate()
+                .take(col_end)
+                .skip(col_start)
+            {
+                let raw_name = sanitize_for_display(col_name);
+                let label = if col_idx == active_col {
+                    format!("[{raw_name}]")
+                } else {
+                    raw_name
+                };
+                let fitted = fit_cell(&label, col_width, unicode);
+                let style = if col_idx == active_col {
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                } else {
+                    theme.style(Token::Header).add_modifier(Modifier::BOLD)
+                };
+                header_segments.push((format!("{fitted} "), style));
+            }
+            lines.push(bounded_row(header_segments, body_width, unicode, None));
+
+            if page.rows.is_empty() {
+                lines.push(bounded_row(
+                    vec![(
+                        "  No rows on this page. Press [Enter/g] to load a reviewed INSERT template."
+                            .to_owned(),
+                        theme.style(Token::Muted),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+            } else {
+                let start = state
+                    .selected_row
+                    .saturating_sub(body_rows.saturating_sub(1));
+                for (row_idx, row) in page.rows.iter().enumerate().skip(start).take(body_rows) {
+                    let selected = row_idx == state.selected_row;
+                    let marker = if selected { "> " } else { "  " };
+                    let mut segments = Vec::with_capacity((col_end - col_start) + 1);
+                    if selected {
+                        segments.push((
+                            marker.to_owned(),
+                            selection_style.add_modifier(Modifier::BOLD),
+                        ));
+                    } else {
+                        segments.push((marker.to_owned(), theme.style(Token::Muted)));
+                    }
+
+                    for (col_idx, &width) in
+                        col_widths.iter().enumerate().take(col_end).skip(col_start)
+                    {
+                        let raw = row.get(col_idx).and_then(|v| v.as_deref());
+                        let cell_text = format_browser_cell(raw);
+                        let fitted = fit_cell(&cell_text, width, unicode);
+                        let style = if selected && col_idx == active_col {
+                            selection_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                        } else if selected {
+                            selection_style
+                        } else {
+                            let token = match raw {
+                                None => Token::NullValue,
+                                Some("") => Token::Muted,
+                                Some(_) => Token::Text,
+                            };
+                            if col_idx == active_col {
+                                theme.style(token).add_modifier(Modifier::BOLD)
+                            } else {
+                                theme.style(token)
+                            }
+                        };
+                        segments.push((format!("{fitted} "), style));
+                    }
+
+                    lines.push(bounded_row(
+                        segments,
+                        body_width,
+                        unicode,
+                        selected.then_some(selection_style),
+                    ));
+                }
+            }
+            Paragraph::new(lines).render(body_area, buf);
+        }
+    } else {
+        Paragraph::new(Line::from(Span::styled(
+            "No browse page loaded. Press [r] to refresh.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(page) = page_opt
+        && let Some(row) = page.rows.get(state.selected_row)
+        && let Some(col_name) = page.columns.get(state.selected_col)
+    {
+        let raw = row.get(state.selected_col).and_then(|v| v.as_deref());
+        let preview = format_browser_cell(raw);
+        (
+            format!(
+                "Cell [{}] = {}  |  Reviewed CRUD loads SQL into editor (never auto-executed).",
+                sanitize_for_display(col_name),
+                preview
+            ),
+            Token::Muted,
+        )
+    } else {
+        (
+            "Press [Enter/g] to load reviewed CRUD SQL or [d] for DELETE SQL (never auto-executed)."
+                .to_owned(),
+            Token::Muted,
+        )
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[j/k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Row  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[h/l] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Col  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[n/p] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Next/Prev Keyset Page  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[s] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Sort  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Enter/g] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Load CRUD SQL  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[d] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Load DELETE SQL  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[r] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Refresh  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+}
+
+fn format_browser_cell(raw: Option<&str>) -> String {
+    match raw {
+        None => "[null]".to_owned(),
+        Some("") => "\"\"".to_owned(),
+        Some(text) => sanitize_for_display(text),
+    }
+}
+
+fn browser_column_window(
+    widths: &[usize],
+    selected_col: usize,
+    max_width: usize,
+) -> (usize, usize) {
+    if widths.is_empty() {
+        return (0, 0);
+    }
+    let selected = selected_col.min(widths.len() - 1);
+    let mut start = selected;
+    let mut end = selected + 1;
+    let mut used = widths[selected] + 1;
+
+    while end < widths.len() && used + widths[end] < max_width {
+        used += widths[end] + 1;
+        end += 1;
+    }
+    while start > 0 && used + widths[start - 1] < max_width {
+        start -= 1;
+        used += widths[start] + 1;
+    }
+    (start, end)
+}
+
+/// Renders the Extended EXPLAIN (BUFFERS, WAL, SETTINGS) & Plan Diff overlay (`054`).
+pub(crate) fn render_plan_diff(
+    state: &crate::app::model::PlanDiffState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} EXTENDED EXPLAIN & PLAN DIFF ",
+        presentation.icon(Icon::Database)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let report_opt = state.report.as_ref();
+    let single_opt = state.baseline.as_ref().or(state.candidate.as_ref());
+
+    let capsules = if let Some(report) = report_opt {
+        let (verdict_label, verdict_token) = match report.verdict {
+            crate::plandiff::DiffVerdict::Improvement => ("IMPROVEMENT", Token::Success),
+            crate::plandiff::DiffVerdict::Regression => ("REGRESSION", Token::Danger),
+            crate::plandiff::DiffVerdict::Mixed => ("MIXED", Token::Warning),
+            crate::plandiff::DiffVerdict::Unchanged => ("UNCHANGED", Token::Muted),
+        };
+        let cost_delta = match report.total_cost_pct {
+            Some(pct) => format!("{:+.2} ({:+.1}%)", report.total_cost_delta, pct),
+            None => format!("{:+.2}", report.total_cost_delta),
+        };
+        let time_delta = match (report.execution_time_delta_ms, report.execution_time_pct) {
+            (Some(ms), Some(pct)) => format!("{ms:+.2}ms ({pct:+.1}%)"),
+            (Some(ms), None) => format!("{ms:+.2}ms"),
+            _ => "n/a".to_owned(),
+        };
+        let buf_delta = format!(
+            "{:+} / {:+}",
+            report.shared_hit_delta, report.shared_read_delta
+        );
+        let wal_delta = format_signed_bytes(report.wal_bytes_delta);
+        vec![
+            Span::styled(" [", theme.style(Token::Border)),
+            Span::styled(
+                verdict_label,
+                theme.style(verdict_token).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("COST: ", theme.style(Token::Muted)),
+            Span::styled(cost_delta, theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("TIME: ", theme.style(Token::Muted)),
+            Span::styled(time_delta, theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("HIT/READ: ", theme.style(Token::Muted)),
+            Span::styled(buf_delta, theme.style(Token::Info)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("WAL: ", theme.style(Token::Muted)),
+            Span::styled(wal_delta, theme.style(Token::Text)),
+            Span::styled("]", theme.style(Token::Border)),
+        ]
+    } else if let Some(snap) = single_opt {
+        let time_str = snap
+            .execution_time_ms
+            .map_or_else(|| "n/a".to_owned(), |ms| format!("{ms:.2}ms"));
+        let wal_str = crate::telemetry::format_bytes(snap.wal_bytes);
+        vec![
+            Span::styled(" [", theme.style(Token::Border)),
+            Span::styled(
+                "SINGLE PLAN",
+                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("COST: ", theme.style(Token::Muted)),
+            Span::styled(format!("{:.2}", snap.total_cost), theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("TIME: ", theme.style(Token::Muted)),
+            Span::styled(time_str, theme.style(Token::Text)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("HIT/READ: ", theme.style(Token::Muted)),
+            Span::styled(
+                format!("{}/{}", snap.shared_hit_blocks, snap.shared_read_blocks),
+                theme.style(Token::Info),
+            ),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[", theme.style(Token::Border)),
+            Span::styled("WAL: ", theme.style(Token::Muted)),
+            Span::styled(wal_str, theme.style(Token::Text)),
+            Span::styled("]", theme.style(Token::Border)),
+        ]
+    } else {
+        vec![
+            Span::styled(" [", theme.style(Token::Border)),
+            Span::styled("UNCHANGED", theme.style(Token::Muted)),
+            Span::styled("] ", theme.style(Token::Border)),
+            Span::styled("[NO PLANS CAPTURED]", theme.style(Token::Muted)),
+        ]
+    };
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let tab_labels = [
+        " [1] Summary & Diff ",
+        " [2] Nodes ",
+        " [3] Buffers / WAL / Settings ",
+    ];
+    let mut tab_spans = Vec::new();
+    for (idx, label) in tab_labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let style = if idx == state.active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled(*label, style));
+    }
+    tab_spans.push(Span::raw("  "));
+    let (mode_label, mode_token) = if state.analyze_mode {
+        ("[MODE: ANALYZE+BUFFERS+WAL]", Token::Warning)
+    } else {
+        ("[MODE: ESTIMATE]", Token::Info)
+    };
+    tab_spans.push(Span::styled(
+        mode_label,
+        super::header::capsule_style(presentation, mode_token),
+    ));
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "Capturing extended EXPLAIN (FORMAT JSON, VERBOSE, SETTINGS)...",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else {
+        match state.active_tab {
+            0 => {
+                if let Some(report) = report_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![
+                            ("  A (Baseline): ".to_owned(), theme.style(Token::Muted)),
+                            (
+                                sanitize_for_display(&report.baseline.label),
+                                theme.style(Token::Text),
+                            ),
+                            ("  |  B (Candidate): ".to_owned(), theme.style(Token::Muted)),
+                            (
+                                sanitize_for_display(&report.candidate.label),
+                                theme.style(Token::Text),
+                            ),
+                        ],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Cost: {:.2} -> {:.2} ({:+.2})  |  Exec Time: {} -> {} ({})",
+                                report.baseline.total_cost,
+                                report.candidate.total_cost,
+                                report.total_cost_delta,
+                                fmt_opt_ms_short(report.baseline.execution_time_ms),
+                                fmt_opt_ms_short(report.candidate.execution_time_ms),
+                                fmt_opt_ms_delta_short(report.execution_time_delta_ms),
+                            ),
+                            theme.style(Token::Info),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Buffers Hit/Read: {}/{} -> {}/{} (Delta {:+}/{:+})  |  Temp Write: {} -> {} ({:+})  |  WAL: {} -> {} ({})",
+                                report.baseline.shared_hit_blocks,
+                                report.baseline.shared_read_blocks,
+                                report.candidate.shared_hit_blocks,
+                                report.candidate.shared_read_blocks,
+                                report.shared_hit_delta,
+                                report.shared_read_delta,
+                                report.baseline.temp_written_blocks,
+                                report.candidate.temp_written_blocks,
+                                report.temp_written_delta,
+                                crate::telemetry::format_bytes(report.baseline.wal_bytes),
+                                crate::telemetry::format_bytes(report.candidate.wal_bytes),
+                                format_signed_bytes(report.wal_bytes_delta),
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  FINDINGS ({})  |  NODE CHANGES ({})  |  SETTING CHANGES ({})",
+                                report.findings.len(),
+                                report.node_changes.len(),
+                                report.setting_changes.len()
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
+                    if report.findings.is_empty() {
+                        lines.push(bounded_row(
+                            vec![(
+                                "  No findings reported.".to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    } else {
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(list_rows.saturating_sub(1));
+                        for (idx, finding) in report
+                            .findings
+                            .iter()
+                            .enumerate()
+                            .skip(start)
+                            .take(list_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let text = sanitize_for_display(finding);
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (text, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (text, theme.style(Token::Text)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else if let Some(snap) = single_opt {
+                    let slot_name = if state.baseline.is_some() {
+                        "Baseline (A)"
+                    } else {
+                        "Candidate (B)"
+                    };
+                    let lines = vec![
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  {slot_name}: {}  [analyzed={}]",
+                                    sanitize_for_display(&snap.label),
+                                    if snap.analyzed { "yes" } else { "no" }
+                                ),
+                                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  Cost: {:.2} (startup {:.2})  |  Plan Rows: {}  |  Actual Rows: {}",
+                                    snap.total_cost,
+                                    snap.startup_cost,
+                                    snap.plan_rows,
+                                    snap.actual_rows
+                                        .map_or_else(|| "-".to_owned(), |r| r.to_string())
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  Planning: {}  |  Execution: {}  |  Buffer Hit Ratio: {}",
+                                    fmt_opt_ms_short(snap.planning_time_ms),
+                                    fmt_opt_ms_short(snap.execution_time_ms),
+                                    snap.buffer_hit_ratio_pct
+                                        .map_or_else(|| "-".to_owned(), |p| format!("{p:.1}%"))
+                                ),
+                                theme.style(Token::Info),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  Shared Hit/Read/Dirtied/Written: {}/{}/{}/{}  |  Temp R/W: {}/{}",
+                                    snap.shared_hit_blocks,
+                                    snap.shared_read_blocks,
+                                    snap.shared_dirtied_blocks,
+                                    snap.shared_written_blocks,
+                                    snap.temp_read_blocks,
+                                    snap.temp_written_blocks,
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                format!(
+                                    "  WAL Records: {}  |  WAL FPI: {}  |  WAL Bytes: {}  |  Settings: {}",
+                                    snap.wal_records,
+                                    snap.wal_fpi,
+                                    crate::telemetry::format_bytes(snap.wal_bytes),
+                                    snap.settings.len()
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                        bounded_row(
+                            vec![(
+                                "  Capture the second plan with [a] or [b] to compute A/B Plan Diff."
+                                    .to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ),
+                    ];
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No EXPLAIN snapshot captured yet. Press [a] for Baseline A or [b] for Candidate B.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            1 => {
+                let body_rows = usize::from(body_area.height).saturating_sub(1);
+                if let Some(report) = report_opt {
+                    if report.node_changes.is_empty() {
+                        Paragraph::new(Line::from(Span::styled(
+                            "No material node changes detected between Baseline A and Candidate B.",
+                            theme.style(Token::Muted),
+                        )))
+                        .render(body_area, buf);
+                    } else {
+                        let mut lines = Vec::new();
+                        lines.push(bounded_row(
+                            vec![(
+                                format!(
+                                    "  {:<8} {:>10} {:>10} {}",
+                                    "VERDICT", "COST_D", "TIME_D", "NODE CHANGE"
+                                ),
+                                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(body_rows.saturating_sub(1));
+                        for (idx, change) in report
+                            .node_changes
+                            .iter()
+                            .enumerate()
+                            .skip(start)
+                            .take(body_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let (sev_label, sev_token) = match change.severity {
+                                crate::plandiff::DiffVerdict::Improvement => {
+                                    ("IMPR", Token::Success)
+                                }
+                                crate::plandiff::DiffVerdict::Regression => ("REGR", Token::Danger),
+                                crate::plandiff::DiffVerdict::Mixed => ("MIXED", Token::Warning),
+                                crate::plandiff::DiffVerdict::Unchanged => ("SAME", Token::Muted),
+                            };
+                            let cost_d = format!("{:+.2}", change.cost_delta);
+                            let time_d = change
+                                .time_delta_ms
+                                .map_or_else(|| "-".to_owned(), |t| format!("{t:+.2}ms"));
+                            let desc = sanitize_for_display(&change.description);
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (
+                                        format!("{sev_label:<8} "),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{cost_d:>10} "), selection_style),
+                                    (format!("{time_d:>10} "), selection_style),
+                                    (desc, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (
+                                        format!("{sev_label:<8} "),
+                                        theme.style(sev_token).add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{cost_d:>10} "), theme.style(Token::Text)),
+                                    (format!("{time_d:>10} "), theme.style(Token::Info)),
+                                    (desc, theme.style(Token::Text)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                        Paragraph::new(lines).render(body_area, buf);
+                    }
+                } else if let Some(snap) = single_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<8} {:<20} {:<20} {:>10} {:>10} {:>11}",
+                                "PATH", "NODE", "TARGET", "COST", "ROWS", "HIT/READ"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    for node in snap.nodes.iter().take(body_rows) {
+                        let target = node
+                            .relation_name
+                            .as_deref()
+                            .or(node.index_name.as_deref())
+                            .unwrap_or("-");
+                        let rows_text = node.actual_rows.unwrap_or(node.plan_rows).to_string();
+                        let hr = format!("{}/{}", node.shared_hit_blocks, node.shared_read_blocks);
+                        lines.push(bounded_row(
+                            vec![(
+                                format!(
+                                    "  {:<8} {} {} {:>10.2} {:>10} {:>11}",
+                                    fit_cell(&node.path, 8, unicode),
+                                    fit_cell(&node.node_type, 20, unicode),
+                                    fit_cell(target, 20, unicode),
+                                    node.total_cost,
+                                    rows_text,
+                                    hr
+                                ),
+                                theme.style(Token::Text),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No plan nodes available yet. Press [a] or [b] to capture an EXPLAIN snapshot.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            2 => {
+                if let Some(report) = report_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Shared Hit/Read: A {}/{} -> B {}/{} (Delta {:+} / {:+})",
+                                report.baseline.shared_hit_blocks,
+                                report.baseline.shared_read_blocks,
+                                report.candidate.shared_hit_blocks,
+                                report.candidate.shared_read_blocks,
+                                report.shared_hit_delta,
+                                report.shared_read_delta
+                            ),
+                            theme.style(Token::Info),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Dirtied/Written: A {}/{} -> B {}/{}  |  Temp R/W: A {}/{} -> B {}/{}",
+                                report.baseline.shared_dirtied_blocks,
+                                report.baseline.shared_written_blocks,
+                                report.candidate.shared_dirtied_blocks,
+                                report.candidate.shared_written_blocks,
+                                report.baseline.temp_read_blocks,
+                                report.baseline.temp_written_blocks,
+                                report.candidate.temp_read_blocks,
+                                report.candidate.temp_written_blocks,
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  WAL (Rec/FPI/Bytes): A {}/{}/{} -> B {}/{}/{} (Delta {})",
+                                report.baseline.wal_records,
+                                report.baseline.wal_fpi,
+                                crate::telemetry::format_bytes(report.baseline.wal_bytes),
+                                report.candidate.wal_records,
+                                report.candidate.wal_fpi,
+                                crate::telemetry::format_bytes(report.candidate.wal_bytes),
+                                format_signed_bytes(report.wal_bytes_delta),
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  {:<32} {:<20} {}",
+                                "SETTING", "BASELINE (A)", "CANDIDATE (B)"
+                            ),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
+                    if report.setting_changes.is_empty() {
+                        lines.push(bounded_row(
+                            vec![(
+                                "  No planner setting differences between Baseline A and Candidate B."
+                                    .to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    } else {
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(list_rows.saturating_sub(1));
+                        for (idx, sc) in report
+                            .setting_changes
+                            .iter()
+                            .enumerate()
+                            .skip(start)
+                            .take(list_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let name = fit_cell(&sc.name, 32, unicode);
+                            let base_val = fit_cell(
+                                sc.baseline.as_deref().unwrap_or("(default)"),
+                                20,
+                                unicode,
+                            );
+                            let cand_val = sanitize_for_display(
+                                sc.candidate.as_deref().unwrap_or("(default)"),
+                            );
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{name} "), selection_style),
+                                    (format!("{base_val} "), selection_style),
+                                    (cand_val, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (format!("{name} "), theme.style(Token::Text)),
+                                    (format!("{base_val} "), theme.style(Token::Muted)),
+                                    (cand_val, theme.style(Token::Info)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else if let Some(snap) = single_opt {
+                    let mut lines = Vec::new();
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Single-Plan Buffers: Shared Hit={} Read={} Dirtied={} Written={}  |  Local Hit/Read={}/{}",
+                                snap.shared_hit_blocks,
+                                snap.shared_read_blocks,
+                                snap.shared_dirtied_blocks,
+                                snap.shared_written_blocks,
+                                snap.local_hit_blocks,
+                                snap.local_read_blocks,
+                            ),
+                            theme.style(Token::Info),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!(
+                                "  Temp Read/Written={}/{}  |  WAL Records={} FPI={} Bytes={}",
+                                snap.temp_read_blocks,
+                                snap.temp_written_blocks,
+                                snap.wal_records,
+                                snap.wal_fpi,
+                                crate::telemetry::format_bytes(snap.wal_bytes),
+                            ),
+                            theme.style(Token::Text),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    lines.push(bounded_row(
+                        vec![(
+                            format!("  {:<36} {}", "NON-DEFAULT PLANNER SETTING", "VALUE"),
+                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                    let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
+                    if snap.settings.is_empty() {
+                        lines.push(bounded_row(
+                            vec![(
+                                "  No non-default planner settings reported by EXPLAIN (SETTINGS)."
+                                    .to_owned(),
+                                theme.style(Token::Muted),
+                            )],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    } else {
+                        let start = state
+                            .selected_idx
+                            .saturating_sub(list_rows.saturating_sub(1));
+                        for (idx, (name, value)) in
+                            snap.settings.iter().enumerate().skip(start).take(list_rows)
+                        {
+                            let selected = idx == state.selected_idx;
+                            let marker = if selected { "> " } else { "  " };
+                            let col_name = fit_cell(name, 36, unicode);
+                            let col_val = sanitize_for_display(value);
+                            let segments = if selected {
+                                vec![
+                                    (
+                                        marker.to_owned(),
+                                        selection_style.add_modifier(Modifier::BOLD),
+                                    ),
+                                    (format!("{col_name} "), selection_style),
+                                    (col_val, selection_style),
+                                ]
+                            } else {
+                                vec![
+                                    (marker.to_owned(), theme.style(Token::Muted)),
+                                    (format!("{col_name} "), theme.style(Token::Text)),
+                                    (col_val, theme.style(Token::Info)),
+                                ]
+                            };
+                            lines.push(bounded_row(
+                                segments,
+                                body_width,
+                                unicode,
+                                selected.then_some(selection_style),
+                            ));
+                        }
+                    }
+                    Paragraph::new(lines).render(body_area, buf);
+                } else {
+                    Paragraph::new(Line::from(Span::styled(
+                        "No Buffers / WAL / Settings data yet. Press [a] or [b] to capture a plan.",
+                        theme.style(Token::Muted),
+                    )))
+                    .render(body_area, buf);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(report) = report_opt {
+        (
+            format!(
+                "Diff Verdict: {}  |  A: {}  vs  B: {}",
+                report.verdict.label(),
+                sanitize_for_display(&report.baseline.label),
+                sanitize_for_display(&report.candidate.label)
+            ),
+            Token::Muted,
+        )
+    } else {
+        (
+            "Press [a] to capture Baseline A, [b] to capture Candidate B, [m] for ANALYZE+BUFFERS+WAL."
+                .to_owned(),
+            Token::Muted,
+        )
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[1-3] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Tabs  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[a] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Capture Baseline A  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[b] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Capture Candidate B  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[m] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Toggle Analyze+Buffers+WAL  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[j/k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Select  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[r] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Refresh  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+}
+
+fn format_signed_bytes(delta: i64) -> String {
+    if delta == 0 {
+        return "0 B".to_owned();
+    }
+    let sign = if delta > 0 { "+" } else { "-" };
+    format!(
+        "{sign}{}",
+        crate::telemetry::format_bytes(delta.unsigned_abs())
+    )
+}
+
+fn fmt_opt_ms_short(value: Option<f64>) -> String {
+    value.map_or_else(|| "n/a".to_owned(), |v| format!("{v:.2}ms"))
+}
+
+fn fmt_opt_ms_delta_short(value: Option<f64>) -> String {
+    value.map_or_else(|| "n/a".to_owned(), |v| format!("{v:+.2}ms"))
+}
+
+/// Renders the Zero-Query Result Analytics overlay (`055`).
+pub(crate) fn render_result_analytics(
+    state: &crate::app::model::ResultAnalyticsState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} RESULT ANALYTICS (ZERO-QUERY) ",
+        presentation.icon(Icon::Rows)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let analytics = &state.analytics;
+    let mut capsules = vec![
+        Span::styled(" [", theme.style(Token::Border)),
+        Span::styled("ROWS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}/{}", analytics.row_count, analytics.rows_seen),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+        Span::styled("[", theme.style(Token::Border)),
+        Span::styled("COLUMNS: ", theme.style(Token::Muted)),
+        Span::styled(
+            format!("{}", analytics.column_count),
+            theme.style(Token::Text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("] ", theme.style(Token::Border)),
+    ];
+    if analytics.truncated {
+        capsules.push(Span::styled("[", theme.style(Token::Border)));
+        capsules.push(Span::styled(
+            "TRUNCATED",
+            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+        ));
+        capsules.push(Span::styled("] ", theme.style(Token::Border)));
+    }
+    capsules.push(Span::styled("[", theme.style(Token::Border)));
+    capsules.push(Span::styled("PROFILE: ", theme.style(Token::Muted)));
+    capsules.push(Span::styled(
+        "ZERO-QUERY",
+        theme.style(Token::Success).add_modifier(Modifier::BOLD),
+    ));
+    capsules.push(Span::styled("]", theme.style(Token::Border)));
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let tab_labels = [
+        " [1] Column Profiles & Sparklines ",
+        " [2] Top Values & Detail ",
+    ];
+    let mut tab_spans = Vec::new();
+    for (idx, label) in tab_labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let style = if idx == state.active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled(*label, style));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+
+    let body_width = usize::from(body_area.width);
+    let body_rows = usize::from(body_area.height).saturating_sub(1);
+    let selection_style = theme.style(Token::Selection);
+
+    match state.active_tab {
+        0 => {
+            if analytics.columns.is_empty() {
+                Paragraph::new(Line::from(Span::styled(
+                    "No columns available to profile.",
+                    theme.style(Token::Muted),
+                )))
+                .render(body_area, buf);
+            } else {
+                let mut lines = Vec::new();
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  {:<18} {:<11} {:>6} {:>8} {:<11} {:<11} {:>9} {:>9} {:>9} {}",
+                            "COLUMN",
+                            "TYPE",
+                            "NULL%",
+                            "DIST",
+                            "MIN",
+                            "MAX",
+                            "MEAN",
+                            "P50",
+                            "P95",
+                            "SPARK"
+                        ),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                let start = state
+                    .selected_col
+                    .saturating_sub(body_rows.saturating_sub(1));
+                for (idx, col) in analytics
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .skip(start)
+                    .take(body_rows)
+                {
+                    let selected = idx == state.selected_col;
+                    let marker = if selected { "> " } else { "  " };
+                    let name = fit_cell(&col.name, 18, unicode);
+                    let typ = fit_cell(&col.type_name, 11, unicode);
+                    let null_pct = format!("{:.1}%", col.null_pct);
+                    let distinct = if col.distinct_capped {
+                        format!("{}+", col.distinct_count)
+                    } else {
+                        col.distinct_count.to_string()
+                    };
+                    let min_str = fit_cell(
+                        &format_analytics_opt_str(col.min_value.as_deref()),
+                        11,
+                        unicode,
+                    );
+                    let max_str = fit_cell(
+                        &format_analytics_opt_str(col.max_value.as_deref()),
+                        11,
+                        unicode,
+                    );
+                    let mean_str = format_analytics_opt_f64(col.mean);
+                    let p50_str = format_analytics_opt_f64(col.p50);
+                    let p95_str = format_analytics_opt_f64(col.p95);
+                    let spark = if presentation.glyphs.is_ascii() {
+                        col.sparkline_ascii.clone()
+                    } else {
+                        col.sparkline_unicode.clone()
+                    };
+                    let segments = if selected {
+                        vec![
+                            (
+                                marker.to_owned(),
+                                selection_style.add_modifier(Modifier::BOLD),
+                            ),
+                            (format!("{name} "), selection_style),
+                            (format!("{typ} "), selection_style),
+                            (format!("{null_pct:>6} "), selection_style),
+                            (format!("{distinct:>8} "), selection_style),
+                            (format!("{min_str} "), selection_style),
+                            (format!("{max_str} "), selection_style),
+                            (format!("{mean_str:>9} "), selection_style),
+                            (format!("{p50_str:>9} "), selection_style),
+                            (format!("{p95_str:>9} "), selection_style),
+                            (spark, selection_style),
+                        ]
+                    } else {
+                        vec![
+                            (marker.to_owned(), theme.style(Token::Muted)),
+                            (format!("{name} "), theme.style(Token::Text)),
+                            (format!("{typ} "), theme.style(Token::Info)),
+                            (
+                                format!("{null_pct:>6} "),
+                                theme.style(if col.null_count > 0 {
+                                    Token::Warning
+                                } else {
+                                    Token::Muted
+                                }),
+                            ),
+                            (format!("{distinct:>8} "), theme.style(Token::Text)),
+                            (format!("{min_str} "), theme.style(Token::Muted)),
+                            (format!("{max_str} "), theme.style(Token::Muted)),
+                            (format!("{mean_str:>9} "), theme.style(Token::Text)),
+                            (format!("{p50_str:>9} "), theme.style(Token::Text)),
+                            (format!("{p95_str:>9} "), theme.style(Token::Text)),
+                            (spark, theme.style(Token::Focus)),
+                        ]
+                    };
+                    lines.push(bounded_row(
+                        segments,
+                        body_width,
+                        unicode,
+                        selected.then_some(selection_style),
+                    ));
+                }
+                Paragraph::new(lines).render(body_area, buf);
+            }
+        }
+        1 => {
+            if let Some(col) = analytics.columns.get(state.selected_col) {
+                let mut lines = Vec::new();
+                let distinct_label = if col.distinct_capped {
+                    format!("{}+", col.distinct_count)
+                } else {
+                    col.distinct_count.to_string()
+                };
+                let spark = if presentation.glyphs.is_ascii() {
+                    col.sparkline_ascii.as_str()
+                } else {
+                    col.sparkline_unicode.as_str()
+                };
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  Column: {} ({})  |  Rows: {}  Non-Null: {}  Nulls: {} ({:.1}%)  Empty: {}",
+                            sanitize_for_display(&col.name),
+                            sanitize_for_display(&col.type_name),
+                            col.total_rows,
+                            col.non_null_count,
+                            col.null_count,
+                            col.null_pct,
+                            col.empty_count
+                        ),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  Distinct: {}  |  Min: {}  Max: {}  |  Sparkline: [{}]",
+                            distinct_label,
+                            format_analytics_opt_str(col.min_value.as_deref()),
+                            format_analytics_opt_str(col.max_value.as_deref()),
+                            spark
+                        ),
+                        theme.style(Token::Info),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                lines.push(bounded_row(
+                    vec![(
+                        format!(
+                            "  Numeric ({}): Mean={}  StdDev={}  p50={}  p95={}",
+                            col.numeric_count,
+                            format_analytics_opt_f64(col.mean),
+                            format_analytics_opt_f64(col.stddev),
+                            format_analytics_opt_f64(col.p50),
+                            format_analytics_opt_f64(col.p95),
+                        ),
+                        theme.style(Token::Text),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                lines.push(bounded_row(
+                    vec![(
+                        "  TOP FREQUENT VALUES".to_owned(),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                if col.top_values.is_empty() {
+                    lines.push(bounded_row(
+                        vec![(
+                            "    (no non-null values observed)".to_owned(),
+                            theme.style(Token::Muted),
+                        )],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                } else {
+                    for (rank, (val, count)) in col.top_values.iter().enumerate() {
+                        let pct = if col.non_null_count > 0 {
+                            (*count as f64) * 100.0 / (col.non_null_count as f64)
+                        } else {
+                            0.0
+                        };
+                        let display_val = if val.is_empty() {
+                            "\"\"".to_owned()
+                        } else {
+                            sanitize_for_display(val)
+                        };
+                        lines.push(bounded_row(
+                            vec![
+                                (format!("    #{:<2} ", rank + 1), theme.style(Token::Muted)),
+                                (
+                                    format!("{:<28} ", fit_cell(&display_val, 28, unicode)),
+                                    theme.style(Token::Text),
+                                ),
+                                (
+                                    format!("{count:>6} ({pct:>5.1}%)",),
+                                    theme.style(Token::Info),
+                                ),
+                            ],
+                            body_width,
+                            unicode,
+                            None,
+                        ));
+                    }
+                }
+                lines.push(bounded_row(
+                    vec![(
+                        "  HISTOGRAM BUCKETS".to_owned(),
+                        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                    )],
+                    body_width,
+                    unicode,
+                    None,
+                ));
+                let max_bucket = col.histogram_counts.iter().copied().max().unwrap_or(0);
+                let bar_char = if presentation.glyphs.is_ascii() {
+                    '#'
+                } else {
+                    '\u{2588}'
+                };
+                for (bucket_idx, count) in col.histogram_counts.iter().enumerate() {
+                    let bar_len = if max_bucket > 0 && *count > 0 {
+                        ((*count * 20) / max_bucket).max(1)
+                    } else {
+                        0
+                    };
+                    let bar: String = std::iter::repeat_n(bar_char, bar_len).collect();
+                    lines.push(bounded_row(
+                        vec![
+                            (
+                                format!("    B{}: ", bucket_idx + 1),
+                                theme.style(Token::Muted),
+                            ),
+                            (format!("{count:>6}  "), theme.style(Token::Text)),
+                            (bar, theme.style(Token::Focus)),
+                        ],
+                        body_width,
+                        unicode,
+                        None,
+                    ));
+                }
+                Paragraph::new(lines).render(body_area, buf);
+            } else {
+                Paragraph::new(Line::from(Span::styled(
+                    "No column selected.",
+                    theme.style(Token::Muted),
+                )))
+                .render(body_area, buf);
+            }
+        }
+        _ => {}
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if analytics.truncated {
+        (
+            format!(
+                "Notice: zero-query profile covers {} retained row(s) of {} seen.",
+                analytics.row_count, analytics.rows_seen
+            ),
+            Token::Warning,
+        )
+    } else if let Some(col) = analytics.columns.get(state.selected_col) {
+        (
+            format!(
+                "Selected: {} ({})  |  nulls={}  empty=\"\"={}  distinct={}",
+                sanitize_for_display(&col.name),
+                sanitize_for_display(&col.type_name),
+                col.null_count,
+                col.empty_count,
+                col.distinct_count
+            ),
+            Token::Muted,
+        )
+    } else {
+        (String::new(), Token::Muted)
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[1-2] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Tabs  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[j/k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Column  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[e] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        (
+            "Export CSV/HTML/Parquet  ".to_owned(),
+            theme.style(Token::Muted),
+        ),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+}
+
+fn format_analytics_opt_str(value: Option<&str>) -> String {
+    match value {
+        None => "-".to_owned(),
+        Some("") => "\"\"".to_owned(),
+        Some(text) => sanitize_for_display(text),
+    }
+}
+
+fn format_analytics_opt_f64(value: Option<f64>) -> String {
+    match value {
+        Some(v) if v.is_finite() => format!("{v:.2}"),
+        _ => "-".to_owned(),
+    }
+}
+
+fn push_kv_capsule(
+    spans: &mut Vec<Span<'static>>,
+    presentation: &Presentation,
+    label: &str,
+    value: String,
+    value_token: Token,
+) {
+    let theme = &presentation.theme;
+    spans.push(Span::styled("[", theme.style(Token::Border)));
+    spans.push(Span::styled(label.to_owned(), theme.style(Token::Muted)));
+    spans.push(Span::styled(
+        value,
+        theme.style(value_token).add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled("] ", theme.style(Token::Border)));
+}
+
+fn push_pill_capsule(
+    spans: &mut Vec<Span<'static>>,
+    presentation: &Presentation,
+    text: String,
+    token: Token,
+) {
+    spans.push(Span::styled(
+        text,
+        super::header::capsule_style(presentation, token),
+    ));
+    spans.push(Span::raw(" "));
+}
+
+fn render_overlay_tabs(
+    labels: &[&str],
+    active_tab: usize,
+    trailing: Option<(String, Token)>,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let mut tab_spans = Vec::new();
+    for (idx, label) in labels.iter().enumerate() {
+        if idx > 0 {
+            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
+        }
+        let style = if idx == active_tab {
+            super::header::capsule_style(presentation, Token::Focus)
+        } else {
+            theme.style(Token::Muted)
+        };
+        tab_spans.push(Span::styled((*label).to_owned(), style));
+    }
+    if let Some((badge, token)) = trailing {
+        tab_spans.push(Span::raw("  "));
+        tab_spans.push(Span::styled(
+            badge,
+            super::header::capsule_style(presentation, token),
+        ));
+    }
+    Paragraph::new(Line::from(tab_spans)).render(area, buf);
+}
+
+fn render_footer_hints(
+    hints: &[(&str, &str)],
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let mut segments = Vec::with_capacity(hints.len() * 2);
+    for (idx, (key, desc)) in hints.iter().enumerate() {
+        segments.push((
+            format!("{key} "),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+        let suffix = if idx + 1 < hints.len() { "  " } else { "" };
+        segments.push((format!("{desc}{suffix}"), theme.style(Token::Muted)));
+    }
+    Paragraph::new(bounded_row(
+        segments,
+        usize::from(area.width),
+        unicode,
+        None,
+    ))
+    .render(area, buf);
+}
+
+fn render_overlay_status(
+    text: &str,
+    token: Token,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let unicode = !presentation.glyphs.is_ascii();
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(text, usize::from(area.width), unicode),
+        presentation.theme.style(token),
+    )))
+    .render(area, buf);
+}
+
+fn single_line_preview(raw: &str) -> String {
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    sanitize_for_display(&collapsed)
+}
+
+fn bench_sparkline<'a>(
+    stats: &'a crate::bench::BenchStats,
+    presentation: &Presentation,
+) -> &'a str {
+    if presentation.glyphs.is_ascii() {
+        stats.sparkline_ascii.as_str()
+    } else {
+        stats.sparkline_unicode.as_str()
+    }
+}
+
+fn fmt_bench_ms_delta(base: f64, cand: Option<f64>) -> Option<String> {
+    cand.map(|c| {
+        let delta = c - base;
+        if base.abs() > 1e-9 {
+            let pct = (delta / base) * 100.0;
+            format!("{delta:+.3} ms ({pct:+.1}%)")
+        } else {
+            format!("{delta:+.3} ms")
+        }
+    })
+}
+
+/// Renders the Query Latency Benchmark & A/B Regression Suite overlay (`056`).
+pub(crate) fn render_query_bench(
+    state: &crate::app::model::QueryBenchState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(
+        " {} QUERY BENCHMARK & A/B REGRESSION SUITE ",
+        presentation.icon(Icon::Clock)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let mut capsules = vec![Span::raw(" ")];
+    push_pill_capsule(
+        &mut capsules,
+        presentation,
+        "[BENCHMARK]".to_owned(),
+        Token::Focus,
+    );
+    let (mode_label, mode_token) = if state.config.rollback {
+        ("ROLLBACK", Token::Success)
+    } else {
+        ("LIVE", Token::Warning)
+    };
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "MODE: ",
+        mode_label.to_owned(),
+        mode_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "WARMUP: ",
+        state.config.warmup_runs.to_string(),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "RUNS: ",
+        state.config.measured_runs.to_string(),
+        Token::Text,
+    );
+    if let Some(report) = &state.report {
+        if let Some(cmp) = &report.comparison {
+            let (verdict_label, verdict_token) = match cmp.verdict {
+                crate::bench::BenchVerdict::Faster => ("[FASTER]", Token::Success),
+                crate::bench::BenchVerdict::Slower => ("[SLOWER]", Token::Danger),
+                crate::bench::BenchVerdict::Unchanged => ("[UNCHANGED]", Token::Muted),
+            };
+            push_pill_capsule(
+                &mut capsules,
+                presentation,
+                verdict_label.to_owned(),
+                verdict_token,
+            );
+        } else {
+            push_pill_capsule(
+                &mut capsules,
+                presentation,
+                "[SINGLE]".to_owned(),
+                Token::Info,
+            );
+        }
+        if report.failed_gate {
+            push_pill_capsule(
+                &mut capsules,
+                presentation,
+                "[GATE: FAILED]".to_owned(),
+                Token::Danger,
+            );
+        }
+    }
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    render_overlay_tabs(
+        &[" [1] Summary & A/B Compare ", " [2] Latency Samples "],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
+
+    let body_width = usize::from(body_area.width);
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        let mut lines = vec![bounded_row(
+            vec![(
+                format!(
+                    "  Running query benchmark ({} warmup, {} measured, rollback={})...",
+                    state.config.warmup_runs,
+                    state.config.measured_runs,
+                    if state.config.rollback { "on" } else { "off" }
+                ),
+                theme.style(Token::Info),
+            )],
+            body_width,
+            unicode,
+            None,
+        )];
+        if !state.baseline_sql.trim().is_empty() {
+            lines.push(bounded_row(
+                vec![
+                    ("  Query A: ".to_owned(), theme.style(Token::Muted)),
+                    (
+                        single_line_preview(&state.baseline_sql),
+                        theme.style(Token::Text),
+                    ),
+                ],
+                body_width,
+                unicode,
+                None,
+            ));
+        }
+        if !state.candidate_sql.trim().is_empty() {
+            lines.push(bounded_row(
+                vec![
+                    ("  Query B: ".to_owned(), theme.style(Token::Muted)),
+                    (
+                        single_line_preview(&state.candidate_sql),
+                        theme.style(Token::Text),
+                    ),
+                ],
+                body_width,
+                unicode,
+                None,
+            ));
+        }
+        Paragraph::new(lines).render(body_area, buf);
+    } else {
+        match state.active_tab {
+            0 => render_query_bench_summary(state, presentation, body_area, buf, selection_style),
+            1 => render_query_bench_samples(state, presentation, body_area, buf, selection_style),
+            _ => {}
+        }
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        let tok = if state.report.as_ref().is_some_and(|r| r.failed_gate) || msg.contains("failed")
+        {
+            Token::Danger
+        } else {
+            Token::Info
+        };
+        (sanitize_for_display(msg), tok)
+    } else if let Some(report) = &state.report {
+        if let Some(cmp) = &report.comparison {
+            (
+                format!(
+                    "Verdict: {}  |  Speedup: {:.2}x  |  p50: {:+.3}ms ({:+.1}%)  |  p95: {:+.3}ms ({:+.1}%)",
+                    cmp.verdict.label(),
+                    cmp.speedup_ratio,
+                    cmp.p50_delta_ms,
+                    cmp.p50_delta_pct,
+                    cmp.p95_delta_ms,
+                    cmp.p95_delta_pct,
+                ),
+                if report.failed_gate {
+                    Token::Danger
+                } else {
+                    Token::Muted
+                },
+            )
+        } else {
+            (
+                format!(
+                    "Single-query benchmark: p50={:.3}ms  p95={:.3}ms  p99={:.3}ms  qps={:.1}",
+                    report.baseline.p50_ms,
+                    report.baseline.p95_ms,
+                    report.baseline.p99_ms,
+                    report.baseline.qps,
+                ),
+                Token::Muted,
+            )
+        }
+    } else {
+        (
+            "Press [r] to run benchmark, [m] to toggle BEGIN/ROLLBACK isolation.".to_owned(),
+            Token::Muted,
+        )
+    };
+    render_overlay_status(&status_text, status_token, presentation, status_area, buf);
+
+    render_footer_hints(
+        &[
+            ("[1-2]", "Tabs"),
+            ("[j/k]", "Select"),
+            ("[m]", "Toggle Rollback"),
+            ("[r]", "Re-run"),
+            ("[Esc]", "Close"),
+        ],
+        presentation,
+        footer_area,
+        buf,
+    );
+}
+
+fn render_query_bench_summary(
+    state: &crate::app::model::QueryBenchState,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+    selection_style: Style,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let body_width = usize::from(body_area.width);
+
+    let Some(report) = &state.report else {
+        let mut lines = vec![bounded_row(
+            vec![(
+                "  No benchmark results yet. Press [r] to execute warmup and measured runs."
+                    .to_owned(),
+                theme.style(Token::Muted),
+            )],
+            body_width,
+            unicode,
+            None,
+        )];
+        if !state.baseline_sql.trim().is_empty() {
+            lines.push(bounded_row(
+                vec![
+                    ("  Query A: ".to_owned(), theme.style(Token::Muted)),
+                    (
+                        single_line_preview(&state.baseline_sql),
+                        theme.style(Token::Text),
+                    ),
+                ],
+                body_width,
+                unicode,
+                None,
+            ));
+        }
+        Paragraph::new(lines).render(body_area, buf);
+        return;
+    };
+
+    let base = &report.baseline;
+    let cand = report.candidate.as_ref();
+    let cmp = report.comparison.as_ref();
+
+    let mut lines = Vec::new();
+    lines.push(bounded_row(
+        vec![
+            ("  A (Baseline): ".to_owned(), theme.style(Token::Muted)),
+            (
+                sanitize_for_display(&base.sql_preview),
+                theme.style(Token::Text),
+            ),
+            (
+                format!("  [rows: {}]", base.total_rows),
+                theme.style(Token::Info),
+            ),
+        ],
+        body_width,
+        unicode,
+        None,
+    ));
+    if let Some(c) = cand {
+        lines.push(bounded_row(
+            vec![
+                ("  B (Candidate): ".to_owned(), theme.style(Token::Muted)),
+                (
+                    sanitize_for_display(&c.sql_preview),
+                    theme.style(Token::Text),
+                ),
+                (
+                    format!("  [rows: {}]", c.total_rows),
+                    theme.style(Token::Info),
+                ),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+    if let Some(c) = cmp {
+        let gate_note = report
+            .threshold_pct
+            .map_or_else(String::new, |pct| format!("  |  Gate: <={pct:.1}%"));
+        let token = match c.verdict {
+            crate::bench::BenchVerdict::Faster => Token::Success,
+            crate::bench::BenchVerdict::Slower => Token::Danger,
+            crate::bench::BenchVerdict::Unchanged => Token::Info,
+        };
+        lines.push(bounded_row(
+            vec![(
+                format!(
+                    "  A/B Speedup: {:.2}x  |  p50 Delta: {:+.3}ms ({:+.1}%)  |  p95 Delta: {:+.3}ms ({:+.1}%){gate_note}",
+                    c.speedup_ratio,
+                    c.p50_delta_ms,
+                    c.p50_delta_pct,
+                    c.p95_delta_ms,
+                    c.p95_delta_pct
+                ),
+                theme.style(token),
+            )],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+    lines.push(bounded_row(
+        vec![(
+            format!(
+                "  {:<12} {:<18} {:<18} {}",
+                "METRIC",
+                "BASELINE (A)",
+                if cand.is_some() { "CANDIDATE (B)" } else { "-" },
+                "DELTA / NOTE"
+            ),
+            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+        )],
+        body_width,
+        unicode,
+        None,
+    ));
+
+    let metric_rows: [(&str, String, Option<String>, Option<String>); 9] = [
+        (
+            "min",
+            format!("{:.3} ms", base.min_ms),
+            cand.map(|c| format!("{:.3} ms", c.min_ms)),
+            fmt_bench_ms_delta(base.min_ms, cand.map(|c| c.min_ms)),
+        ),
+        (
+            "mean",
+            format!("{:.3} ms", base.mean_ms),
+            cand.map(|c| format!("{:.3} ms", c.mean_ms)),
+            fmt_bench_ms_delta(base.mean_ms, cand.map(|c| c.mean_ms)),
+        ),
+        (
+            "stddev",
+            format!("{:.3} ms", base.stddev_ms),
+            cand.map(|c| format!("{:.3} ms", c.stddev_ms)),
+            fmt_bench_ms_delta(base.stddev_ms, cand.map(|c| c.stddev_ms)),
+        ),
+        (
+            "p50",
+            format!("{:.3} ms", base.p50_ms),
+            cand.map(|c| format!("{:.3} ms", c.p50_ms)),
+            cmp.map(|c| format!("{:+.3} ms ({:+.1}%)", c.p50_delta_ms, c.p50_delta_pct)),
+        ),
+        (
+            "p95",
+            format!("{:.3} ms", base.p95_ms),
+            cand.map(|c| format!("{:.3} ms", c.p95_ms)),
+            cmp.map(|c| format!("{:+.3} ms ({:+.1}%)", c.p95_delta_ms, c.p95_delta_pct)),
+        ),
+        (
+            "p99",
+            format!("{:.3} ms", base.p99_ms),
+            cand.map(|c| format!("{:.3} ms", c.p99_ms)),
+            fmt_bench_ms_delta(base.p99_ms, cand.map(|c| c.p99_ms)),
+        ),
+        (
+            "max",
+            format!("{:.3} ms", base.max_ms),
+            cand.map(|c| format!("{:.3} ms", c.max_ms)),
+            fmt_bench_ms_delta(base.max_ms, cand.map(|c| c.max_ms)),
+        ),
+        (
+            "qps",
+            format!("{:.1} /s", base.qps),
+            cand.map(|c| format!("{:.1} /s", c.qps)),
+            cand.map(|c| format!("{:+.1} /s", c.qps - base.qps)),
+        ),
+        (
+            "sparkline",
+            bench_sparkline(base, presentation).to_owned(),
+            cand.map(|c| bench_sparkline(c, presentation).to_owned()),
+            Some(format!(
+                "{} buckets ({})",
+                crate::bench::BENCH_SPARKLINE_BUCKETS,
+                if presentation.glyphs.is_ascii() {
+                    "ascii"
+                } else {
+                    "unicode"
+                }
+            )),
+        ),
+    ];
+
+    let list_rows = usize::from(body_area.height)
+        .saturating_sub(lines.len())
+        .max(1);
+    let start = state
+        .selected_idx
+        .saturating_sub(list_rows.saturating_sub(1));
+    for (idx, (name, base_val, cand_val, delta_val)) in
+        metric_rows.iter().enumerate().skip(start).take(list_rows)
+    {
+        let selected = idx == state.selected_idx;
+        let marker = if selected { "> " } else { "  " };
+        let cand_str = cand_val.as_deref().unwrap_or("-");
+        let delta_str = delta_val.as_deref().unwrap_or("-");
+        let name_cell = fit_cell(name, 12, unicode);
+        let base_cell = fit_cell(base_val, 18, unicode);
+        let cand_cell = fit_cell(cand_str, 18, unicode);
+        let delta_cell = sanitize_for_display(delta_str);
+        let segments = if selected {
+            vec![
+                (
+                    marker.to_owned(),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (
+                    format!("{name_cell} "),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{base_cell} "), selection_style),
+                (format!("{cand_cell} "), selection_style),
+                (delta_cell, selection_style),
+            ]
+        } else {
+            let base_tok = if *name == "sparkline" {
+                Token::Focus
+            } else {
+                Token::Text
+            };
+            let cand_tok = if *name == "sparkline" {
+                Token::Info
+            } else {
+                Token::Text
+            };
+            vec![
+                (marker.to_owned(), theme.style(Token::Muted)),
+                (
+                    format!("{name_cell} "),
+                    theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                ),
+                (format!("{base_cell} "), theme.style(base_tok)),
+                (format!("{cand_cell} "), theme.style(cand_tok)),
+                (delta_cell, theme.style(Token::Muted)),
+            ]
+        };
+        lines.push(bounded_row(
+            segments,
+            body_width,
+            unicode,
+            selected.then_some(selection_style),
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
+}
+
+fn render_query_bench_samples(
+    state: &crate::app::model::QueryBenchState,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+    selection_style: Style,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let body_width = usize::from(body_area.width);
+
+    if state.baseline.is_none() && state.candidate.is_none() {
+        Paragraph::new(Line::from(Span::styled(
+            "  No latency samples captured yet. Press [r] to run benchmark.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+        return;
+    }
+
+    let mut lines = Vec::new();
+    if let Some(base) = &state.baseline {
+        lines.push(bounded_row(
+            vec![
+                ("  Baseline (A): ".to_owned(), theme.style(Token::Header)),
+                (
+                    format!(
+                        "p50={:.3}ms  p95={:.3}ms  p99={:.3}ms  mean={:.3}ms  stddev={:.3}ms  qps={:.1}  ",
+                        base.p50_ms,
+                        base.p95_ms,
+                        base.p99_ms,
+                        base.mean_ms,
+                        base.stddev_ms,
+                        base.qps
+                    ),
+                    theme.style(Token::Text),
+                ),
+                (
+                    format!("[{}]", bench_sparkline(base, presentation)),
+                    theme.style(Token::Focus),
+                ),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+    if let Some(cand) = &state.candidate {
+        lines.push(bounded_row(
+            vec![
+                ("  Candidate (B): ".to_owned(), theme.style(Token::Header)),
+                (
+                    format!(
+                        "p50={:.3}ms  p95={:.3}ms  p99={:.3}ms  mean={:.3}ms  stddev={:.3}ms  qps={:.1}  ",
+                        cand.p50_ms,
+                        cand.p95_ms,
+                        cand.p99_ms,
+                        cand.mean_ms,
+                        cand.stddev_ms,
+                        cand.qps
+                    ),
+                    theme.style(Token::Text),
+                ),
+                (
+                    format!("[{}]", bench_sparkline(cand, presentation)),
+                    theme.style(Token::Info),
+                ),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+
+    let has_cand = state.candidate.is_some();
+    let header_str = if has_cand {
+        format!(
+            "  {:<6} {:>12} {:>10} {:>12} {:>10} {:>12}",
+            "ITER", "BASE (ms)", "BASE ROWS", "CAND (ms)", "CAND ROWS", "DELTA (ms)"
+        )
+    } else {
+        format!(
+            "  {:<6} {:>14} {:>14} {}",
+            "ITER", "DURATION (ms)", "ROWS RETURNED", "LATENCY PROFILE"
+        )
+    };
+    lines.push(bounded_row(
+        vec![(
+            header_str,
+            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+        )],
+        body_width,
+        unicode,
+        None,
+    ));
+
+    let base_samples = state.baseline.as_ref().map_or(&[][..], |b| &b.samples);
+    let cand_samples = state.candidate.as_ref().map_or(&[][..], |c| &c.samples);
+    let total = base_samples.len().max(cand_samples.len());
+    let max_duration = base_samples
+        .iter()
+        .chain(cand_samples.iter())
+        .map(|s| s.duration_ms)
+        .fold(0.0f64, f64::max)
+        .max(1e-6);
+    let bar_char = if presentation.glyphs.is_ascii() {
+        '#'
+    } else {
+        '\u{2588}'
+    };
+
+    let list_rows = usize::from(body_area.height)
+        .saturating_sub(lines.len())
+        .max(1);
+    let start = state
+        .selected_idx
+        .saturating_sub(list_rows.saturating_sub(1));
+    for idx in start..total.min(start + list_rows) {
+        let selected = idx == state.selected_idx;
+        let marker = if selected { "> " } else { "  " };
+        let b = base_samples.get(idx);
+        let c = cand_samples.get(idx);
+        let iter_num = b.or(c).map_or(idx + 1, |s| s.iteration);
+
+        let segments = if has_cand {
+            let b_dur = b.map_or_else(|| "-".to_owned(), |s| format!("{:.3}", s.duration_ms));
+            let b_rows = b.map_or_else(|| "-".to_owned(), |s| s.rows_returned.to_string());
+            let c_dur = c.map_or_else(|| "-".to_owned(), |s| format!("{:.3}", s.duration_ms));
+            let c_rows = c.map_or_else(|| "-".to_owned(), |s| s.rows_returned.to_string());
+            let delta = match (b, c) {
+                (Some(bs), Some(cs)) => format!("{:+.3}", cs.duration_ms - bs.duration_ms),
+                _ => "-".to_owned(),
+            };
+            if selected {
+                vec![
+                    (
+                        marker.to_owned(),
+                        selection_style.add_modifier(Modifier::BOLD),
+                    ),
+                    (format!("#{iter_num:<5} "), selection_style),
+                    (format!("{b_dur:>12} "), selection_style),
+                    (format!("{b_rows:>10} "), selection_style),
+                    (format!("{c_dur:>12} "), selection_style),
+                    (format!("{c_rows:>10} "), selection_style),
+                    (format!("{delta:>12}"), selection_style),
+                ]
+            } else {
+                vec![
+                    (marker.to_owned(), theme.style(Token::Muted)),
+                    (format!("#{iter_num:<5} "), theme.style(Token::Info)),
+                    (format!("{b_dur:>12} "), theme.style(Token::Text)),
+                    (format!("{b_rows:>10} "), theme.style(Token::Muted)),
+                    (format!("{c_dur:>12} "), theme.style(Token::Text)),
+                    (format!("{c_rows:>10} "), theme.style(Token::Muted)),
+                    (format!("{delta:>12}"), theme.style(Token::Focus)),
+                ]
+            }
+        } else {
+            let dur = b.map_or(0.0, |s| s.duration_ms);
+            let rows = b.map_or(0, |s| s.rows_returned);
+            let bar_len = ((dur / max_duration) * 24.0).round().clamp(1.0, 24.0) as usize;
+            let bar: String = std::iter::repeat_n(bar_char, bar_len).collect();
+            if selected {
+                vec![
+                    (
+                        marker.to_owned(),
+                        selection_style.add_modifier(Modifier::BOLD),
+                    ),
+                    (format!("#{iter_num:<5} "), selection_style),
+                    (format!("{dur:>14.3} "), selection_style),
+                    (format!("{rows:>14} "), selection_style),
+                    (bar, selection_style),
+                ]
+            } else {
+                vec![
+                    (marker.to_owned(), theme.style(Token::Muted)),
+                    (format!("#{iter_num:<5} "), theme.style(Token::Info)),
+                    (format!("{dur:>14.3} "), theme.style(Token::Text)),
+                    (format!("{rows:>14} "), theme.style(Token::Muted)),
+                    (bar, theme.style(Token::Focus)),
+                ]
+            }
+        };
+        lines.push(bounded_row(
+            segments,
+            body_width,
+            unicode,
+            selected.then_some(selection_style),
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
+}
+
+/// Renders the Canonical Schema Snapshot & Drift Guard overlay (`057`).
+pub(crate) fn render_schema_snapshot(
+    state: &crate::app::model::SchemaSnapshotState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let title = format!(
+        " {} SCHEMA SNAPSHOT & DRIFT GUARD ",
+        presentation.icon(Icon::Schema)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let snap_opt = state.current.as_ref().or(state.baseline.as_ref());
+    let version = snap_opt.map_or(crate::snapshot::SNAPSHOT_SCHEMA_VERSION, |s| {
+        s.schema_version
+    });
+    let sha12 = snap_opt
+        .map(|s| s.fingerprint_sha256.chars().take(12).collect::<String>())
+        .filter(|fp| !fp.is_empty())
+        .unwrap_or_else(|| "none".to_owned());
+    let tables_count = snap_opt.map_or(0, |s| s.tables.len());
+    let views_count = snap_opt.map_or(0, |s| s.views.len());
+
+    let mut capsules = vec![Span::raw(" ")];
+    push_pill_capsule(
+        &mut capsules,
+        presentation,
+        format!("[SNAPSHOT v{version}]"),
+        Token::Focus,
+    );
+    push_kv_capsule(&mut capsules, presentation, "SHA256: ", sha12, Token::Info);
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TABLES: ",
+        tables_count.to_string(),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "VIEWS: ",
+        views_count.to_string(),
+        Token::Text,
+    );
+    if let Some(diff) = &state.diff {
+        push_pill_capsule(
+            &mut capsules,
+            presentation,
+            format!("[BREAKING: {}]", diff.breaking_count),
+            Token::Danger,
+        );
+        push_pill_capsule(
+            &mut capsules,
+            presentation,
+            format!("[WARN: {}]", diff.warning_count),
+            Token::Warning,
+        );
+        push_pill_capsule(
+            &mut capsules,
+            presentation,
+            format!("[INFO: {}]", diff.info_count),
+            Token::Info,
+        );
+    }
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    let baseline_badge = if state.baseline.is_some() {
+        ("[BASELINE: PINNED]".to_owned(), Token::Success)
+    } else {
+        ("[BASELINE: NONE]".to_owned(), Token::Muted)
+    };
+    render_overlay_tabs(
+        &[" [1] Overview & Drift ", " [2] Catalog Tables "],
+        state.active_tab,
+        Some(baseline_badge),
+        presentation,
+        tab_area,
+        buf,
+    );
+
+    let selection_style = theme.style(Token::Selection);
+
+    if state.loading {
+        Paragraph::new(Line::from(Span::styled(
+            "  Capturing canonical PostgreSQL schema snapshot from pg_catalog...",
+            theme.style(Token::Info),
+        )))
+        .render(body_area, buf);
+    } else {
+        match state.active_tab {
+            0 => render_schema_snapshot_overview(
+                state,
+                presentation,
+                body_area,
+                buf,
+                selection_style,
+            ),
+            1 => {
+                render_schema_snapshot_tables(state, presentation, body_area, buf, selection_style)
+            }
+            _ => {}
+        }
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        let tok = if msg.contains("failed") {
+            Token::Danger
+        } else {
+            Token::Info
+        };
+        (sanitize_for_display(msg), tok)
+    } else if let Some(diff) = &state.diff {
+        (
+            format!(
+                "Drift: {} breaking, {} warning, {} info  |  Match: {}",
+                diff.breaking_count,
+                diff.warning_count,
+                diff.info_count,
+                if diff.fingerprints_match { "YES" } else { "NO" }
+            ),
+            if diff.breaking_count > 0 {
+                Token::Danger
+            } else {
+                Token::Muted
+            },
+        )
+    } else if let Some(snap) = snap_opt {
+        (
+            format!(
+                "Snapshot v{} ready ({} table(s), {} column(s)). Press [b] to pin baseline.",
+                snap.schema_version,
+                snap.tables.len(),
+                snap.total_columns()
+            ),
+            Token::Muted,
+        )
+    } else {
+        (
+            "Press [r] to capture live schema snapshot.".to_owned(),
+            Token::Muted,
+        )
+    };
+    render_overlay_status(&status_text, status_token, presentation, status_area, buf);
+
+    render_footer_hints(
+        &[
+            ("[1-2]", "Tabs"),
+            ("[b]", "Pin Baseline"),
+            ("[c]", "Copy SHA-256"),
+            ("[j/k]", "Select"),
+            ("[r]", "Refresh"),
+            ("[Esc]", "Close"),
+        ],
+        presentation,
+        footer_area,
+        buf,
+    );
+}
+
+fn render_schema_snapshot_overview(
+    state: &crate::app::model::SchemaSnapshotState,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+    selection_style: Style,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let body_width = usize::from(body_area.width);
+    let snap_opt = state.current.as_ref().or(state.baseline.as_ref());
+
+    let mut lines = Vec::new();
+    if let Some(snap) = snap_opt {
+        let filter = snap
+            .schema_filter
+            .as_deref()
+            .map(sanitize_for_display)
+            .unwrap_or_else(|| "<all user schemas>".to_owned());
+        let curr_fp = state
+            .current
+            .as_ref()
+            .map(|s| s.fingerprint_sha256.chars().take(16).collect::<String>())
+            .filter(|fp| !fp.is_empty())
+            .unwrap_or_else(|| "-".to_owned());
+        let base_fp = state
+            .baseline
+            .as_ref()
+            .map(|s| s.fingerprint_sha256.chars().take(16).collect::<String>())
+            .filter(|fp| !fp.is_empty())
+            .unwrap_or_else(|| "(not pinned)".to_owned());
+
+        lines.push(bounded_row(
+            vec![
+                ("  Filter: ".to_owned(), theme.style(Token::Muted)),
+                (format!("{filter}  |  "), theme.style(Token::Text)),
+                ("Current: ".to_owned(), theme.style(Token::Muted)),
+                (format!("{curr_fp}  |  "), theme.style(Token::Info)),
+                ("Baseline: ".to_owned(), theme.style(Token::Muted)),
+                (base_fp, theme.style(Token::Focus)),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+        let trunc_note = if snap.truncated { " [TRUNCATED]" } else { "" };
+        lines.push(bounded_row(
+            vec![(
+                format!(
+                    "  Tables: {}  |  Columns: {}  |  Indexes: {}  |  Policies: {}  |  Views: {}  |  Sequences: {}  |  Enums: {}{trunc_note}",
+                    snap.tables.len(),
+                    snap.total_columns(),
+                    snap.total_indexes(),
+                    snap.total_policies(),
+                    snap.views.len(),
+                    snap.sequences.len(),
+                    snap.enums.len(),
+                ),
+                theme.style(Token::Text),
+            )],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+
+    if let Some(diff) = &state.diff {
+        let (status_label, status_tok) = if diff.has_drift() {
+            ("DRIFT DETECTED", Token::Warning)
+        } else {
+            ("NO DRIFT", Token::Success)
+        };
+        lines.push(bounded_row(
+            vec![
+                ("  Drift Status: ".to_owned(), theme.style(Token::Muted)),
+                (
+                    format!("{status_label}  |  "),
+                    theme.style(status_tok).add_modifier(Modifier::BOLD),
+                ),
+                (
+                    format!(
+                        "Breaking: {}  Warning: {}  Info: {}  Findings: {}",
+                        diff.breaking_count,
+                        diff.warning_count,
+                        diff.info_count,
+                        diff.findings.len()
+                    ),
+                    theme.style(Token::Text),
+                ),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+
+        if diff.findings.is_empty() {
+            lines.push(bounded_row(
+                vec![(
+                    "  No schema drift findings between pinned baseline and current snapshot."
+                        .to_owned(),
+                    theme.style(Token::Success),
+                )],
+                body_width,
+                unicode,
+                None,
+            ));
+        } else {
+            lines.push(bounded_row(
+                vec![(
+                    format!(
+                        "  {:<9} {:<20} {:<26} {}",
+                        "SEVERITY", "KIND", "OBJECT", "DETAIL"
+                    ),
+                    theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                )],
+                body_width,
+                unicode,
+                None,
+            ));
+            let list_rows = usize::from(body_area.height)
+                .saturating_sub(lines.len())
+                .max(1);
+            let start = state
+                .selected_idx
+                .saturating_sub(list_rows.saturating_sub(1));
+            for (idx, finding) in diff.findings.iter().enumerate().skip(start).take(list_rows) {
+                let selected = idx == state.selected_idx;
+                let marker = if selected { "> " } else { "  " };
+                let sev_tok = match finding.severity {
+                    crate::snapshot::DriftSeverity::Breaking => Token::Danger,
+                    crate::snapshot::DriftSeverity::Warning => Token::Warning,
+                    crate::snapshot::DriftSeverity::Info => Token::Info,
+                };
+                let sev_cell = fit_cell(finding.severity.badge(), 9, unicode);
+                let kind_cell = fit_cell(&finding.kind, 20, unicode);
+                let obj_cell = fit_cell(&finding.object, 26, unicode);
+                let detail_cell = sanitize_for_display(&finding.detail);
+                let segments = if selected {
+                    vec![
+                        (
+                            marker.to_owned(),
+                            selection_style.add_modifier(Modifier::BOLD),
+                        ),
+                        (
+                            format!("{sev_cell} "),
+                            selection_style.add_modifier(Modifier::BOLD),
+                        ),
+                        (format!("{kind_cell} "), selection_style),
+                        (format!("{obj_cell} "), selection_style),
+                        (detail_cell, selection_style),
+                    ]
+                } else {
+                    vec![
+                        (marker.to_owned(), theme.style(Token::Muted)),
+                        (
+                            format!("{sev_cell} "),
+                            theme.style(sev_tok).add_modifier(Modifier::BOLD),
+                        ),
+                        (format!("{kind_cell} "), theme.style(Token::Muted)),
+                        (format!("{obj_cell} "), theme.style(Token::Text)),
+                        (detail_cell, theme.style(Token::Info)),
+                    ]
+                };
+                lines.push(bounded_row(
+                    segments,
+                    body_width,
+                    unicode,
+                    selected.then_some(selection_style),
+                ));
+            }
+        }
+    } else if snap_opt.is_some() {
+        lines.push(bounded_row(
+            vec![(
+                "  Press [b] to pin current snapshot as baseline, then [r] to check live drift."
+                    .to_owned(),
+                theme.style(Token::Muted),
+            )],
+            body_width,
+            unicode,
+            None,
+        ));
+    } else {
+        lines.push(bounded_row(
+            vec![(
+                "  No schema snapshot captured yet. Press [r] to capture from PostgreSQL."
+                    .to_owned(),
+                theme.style(Token::Muted),
+            )],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
+}
+
+fn render_schema_snapshot_tables(
+    state: &crate::app::model::SchemaSnapshotState,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+    selection_style: Style,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let body_width = usize::from(body_area.width);
+
+    let Some(snap) = state.current.as_ref().or(state.baseline.as_ref()) else {
+        Paragraph::new(Line::from(Span::styled(
+            "  No schema snapshot captured yet. Press [r] to capture.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+        return;
+    };
+
+    if snap.tables.is_empty() {
+        Paragraph::new(Line::from(Span::styled(
+            "  No user tables found in this schema snapshot.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+        return;
+    }
+
+    let mut lines = Vec::new();
+    lines.push(bounded_row(
+        vec![(
+            format!(
+                "  {:<28} {:>5} {:>5} {:>5} {:<7} {:>8} {}",
+                "TABLE", "COLS", "CONS", "IDX", "RLS", "POLICIES", "COLUMNS PREVIEW"
+            ),
+            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+        )],
+        body_width,
+        unicode,
+        None,
+    ));
+
+    let detail_rows = usize::from(body_area.height >= 10) * 2;
+    let list_rows = usize::from(body_area.height)
+        .saturating_sub(1 + detail_rows)
+        .max(1);
+    let start = state
+        .selected_idx
+        .saturating_sub(list_rows.saturating_sub(1));
+    for (idx, table) in snap.tables.iter().enumerate().skip(start).take(list_rows) {
+        let selected = idx == state.selected_idx;
+        let marker = if selected { "> " } else { "  " };
+        let qname = fit_cell(&table.qualified_name(), 28, unicode);
+        let rls_label = if table.rls_forced {
+            "FORCED"
+        } else if table.rls_enabled {
+            "ON"
+        } else {
+            "off"
+        };
+        let col_preview = table
+            .columns
+            .iter()
+            .take(4)
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    sanitize_for_display(&c.name),
+                    sanitize_for_display(&c.data_type)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let segments = if selected {
+            vec![
+                (
+                    marker.to_owned(),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (
+                    format!("{qname} "),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{:>5} ", table.columns.len()), selection_style),
+                (format!("{:>5} ", table.constraints.len()), selection_style),
+                (format!("{:>5} ", table.indexes.len()), selection_style),
+                (format!("{rls_label:<7} "), selection_style),
+                (format!("{:>8} ", table.policies.len()), selection_style),
+                (col_preview, selection_style),
+            ]
+        } else {
+            let rls_tok = if table.rls_forced || table.rls_enabled {
+                Token::Success
+            } else {
+                Token::Muted
+            };
+            vec![
+                (marker.to_owned(), theme.style(Token::Muted)),
+                (format!("{qname} "), theme.style(Token::Text)),
+                (
+                    format!("{:>5} ", table.columns.len()),
+                    theme.style(Token::Info),
+                ),
+                (
+                    format!("{:>5} ", table.constraints.len()),
+                    theme.style(Token::Muted),
+                ),
+                (
+                    format!("{:>5} ", table.indexes.len()),
+                    theme.style(Token::Muted),
+                ),
+                (format!("{rls_label:<7} "), theme.style(rls_tok)),
+                (
+                    format!("{:>8} ", table.policies.len()),
+                    theme.style(Token::Muted),
+                ),
+                (col_preview, theme.style(Token::Muted)),
+            ]
+        };
+        lines.push(bounded_row(
+            segments,
+            body_width,
+            unicode,
+            selected.then_some(selection_style),
+        ));
+    }
+
+    if detail_rows > 0
+        && let Some(sel_table) = snap.tables.get(state.selected_idx)
+    {
+        let idx_names = sel_table
+            .indexes
+            .iter()
+            .take(3)
+            .map(|i| sanitize_for_display(&i.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let idx_summary = if idx_names.is_empty() {
+            "none".to_owned()
+        } else {
+            idx_names
+        };
+        lines.push(bounded_row(
+            vec![("  ---".to_owned(), theme.style(Token::Border))],
+            body_width,
+            unicode,
+            None,
+        ));
+        lines.push(bounded_row(
+            vec![
+                ("  Selected: ".to_owned(), theme.style(Token::Muted)),
+                (
+                    sanitize_for_display(&sel_table.qualified_name()),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                (
+                    format!(
+                        "  |  Cols: {}  |  Constraints: {}  |  Indexes: {idx_summary}",
+                        sel_table.columns.len(),
+                        sel_table.constraints.len()
+                    ),
+                    theme.style(Token::Text),
+                ),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
+}
+
+/// Renders the Interactive SQL Markdown Runbook & Write-Guard overlay (`058`).
+pub(crate) fn render_sql_runbook(
+    state: &crate::app::model::SqlRunbookState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let title = format!(
+        " {} SQL RUNBOOK & WRITE-GUARD PLANNER ",
+        presentation.icon(Icon::Editor)
+    );
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf)
+    else {
+        return;
+    };
+
+    let report = state.dry_run_report();
+    let mut capsules = vec![Span::raw(" ")];
+    push_pill_capsule(
+        &mut capsules,
+        presentation,
+        "[RUNBOOK]".to_owned(),
+        Token::Focus,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "CELLS: ",
+        state.runbook.len().to_string(),
+        Token::Text,
+    );
+    let (writes_label, writes_token) = if state.allow_writes {
+        ("ALLOWED", Token::Warning)
+    } else {
+        ("BLOCKED", Token::Success)
+    };
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "WRITES: ",
+        writes_label.to_owned(),
+        writes_token,
+    );
+    if !state.allow_writes {
+        let guard_token = if report.blocked_count > 0 {
+            Token::Warning
+        } else {
+            Token::Muted
+        };
+        push_pill_capsule(
+            &mut capsules,
+            presentation,
+            format!("[WRITE-GUARD: {}]", report.blocked_count),
+            guard_token,
+        );
+    }
+    if state.runbook.truncated {
+        push_pill_capsule(
+            &mut capsules,
+            presentation,
+            "[TRUNCATED]".to_owned(),
+            Token::Warning,
+        );
+    }
+    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+
+    render_overlay_tabs(
+        &[" [1] Notebook Cells ", " [2] Safety Dry-Run Plan "],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
+
+    if state.runbook.cells.is_empty() {
+        Paragraph::new(Line::from(Span::styled(
+            "  No SQL cells found in the active editor buffer.",
+            theme.style(Token::Muted),
+        )))
+        .render(body_area, buf);
+    } else {
+        let selection_style = theme.style(Token::Selection);
+        match state.active_tab {
+            0 => render_sql_runbook_cells(state, presentation, body_area, buf, selection_style),
+            1 => render_sql_runbook_dry_run(
+                state,
+                &report,
+                presentation,
+                body_area,
+                buf,
+                selection_style,
+            ),
+            _ => {}
+        }
+    }
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let Some(cell) = state.selected_cell() {
+        (
+            format!(
+                "Cell #{} ({}) at line {}  |  Press [Enter] to jump to editor line {}",
+                cell.index + 1,
+                sanitize_for_display(&cell.name),
+                cell.start_line,
+                cell.start_line
+            ),
+            Token::Muted,
+        )
+    } else {
+        (
+            "No runbook cells available in active buffer.".to_owned(),
+            Token::Muted,
+        )
+    };
+    render_overlay_status(&status_text, status_token, presentation, status_area, buf);
+
+    render_footer_hints(
+        &[
+            ("[1-2]", "Tabs"),
+            ("[w]", "Toggle Allow Writes"),
+            ("[j/k]", "Select Cell"),
+            ("[Enter]", "Jump To Cell"),
+            ("[Esc]", "Close"),
+        ],
+        presentation,
+        footer_area,
+        buf,
+    );
+}
+
+fn runbook_access_badge(is_write: bool, is_destructive: bool) -> (&'static str, Token) {
+    if is_destructive {
+        ("DESTRUCTIVE", Token::Danger)
+    } else if is_write {
+        ("WRITE", Token::Warning)
+    } else {
+        ("READ", Token::Success)
+    }
+}
+
+fn runbook_sql_preview(sql: &str) -> String {
+    let body: Vec<&str> = sql
+        .lines()
+        .skip_while(|line| {
+            let trimmed = line.trim_start();
+            trimmed.is_empty() || trimmed.starts_with("-- @")
+        })
+        .collect();
+    let preview = if body.is_empty() {
+        single_line_preview(sql)
+    } else {
+        single_line_preview(&body.join(" "))
+    };
+    if preview.is_empty() {
+        single_line_preview(sql)
+    } else {
+        preview
+    }
+}
+
+fn render_sql_runbook_cells(
+    state: &crate::app::model::SqlRunbookState,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+    selection_style: Style,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let body_width = usize::from(body_area.width);
+
+    let mut lines = Vec::new();
+    lines.push(bounded_row(
+        vec![(
+            format!(
+                "  {:<4} {:<16} {:<20} {:<11} {:<15} {}",
+                "#", "NAME", "HEADING", "ACCESS", "EXPECT", "SQL PREVIEW"
+            ),
+            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+        )],
+        body_width,
+        unicode,
+        None,
+    ));
+
+    let detail_rows = usize::from(body_area.height >= 10) * 2;
+    let list_rows = usize::from(body_area.height)
+        .saturating_sub(1 + detail_rows)
+        .max(1);
+    let start = state
+        .selected_idx
+        .saturating_sub(list_rows.saturating_sub(1));
+    for (idx, cell) in state
+        .runbook
+        .cells
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(list_rows)
+    {
+        let selected = idx == state.selected_idx;
+        let marker = if selected { "> " } else { "  " };
+        let idx_str = format!("#{}", cell.index + 1);
+        let idx_cell = fit_cell(&idx_str, 4, unicode);
+        let name_cell = fit_cell(&cell.name, 16, unicode);
+        let heading_cell = fit_cell(cell.heading.as_deref().unwrap_or("-"), 20, unicode);
+        let (access_label, access_tok) = runbook_access_badge(cell.is_write, cell.is_destructive);
+        let access_cell = fit_cell(access_label, 11, unicode);
+        let expect_raw = cell
+            .expect_rows
+            .map_or_else(|| "-".to_owned(), |n| format!("@expect-rows:{n}"));
+        let expect_cell = fit_cell(&expect_raw, 15, unicode);
+        let sql_preview = runbook_sql_preview(&cell.sql);
+
+        let segments = if selected {
+            vec![
+                (
+                    marker.to_owned(),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{idx_cell} "), selection_style),
+                (
+                    format!("{name_cell} "),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{heading_cell} "), selection_style),
+                (
+                    format!("{access_cell} "),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{expect_cell} "), selection_style),
+                (sql_preview, selection_style),
+            ]
+        } else {
+            vec![
+                (marker.to_owned(), theme.style(Token::Muted)),
+                (format!("{idx_cell} "), theme.style(Token::Info)),
+                (format!("{name_cell} "), theme.style(Token::Text)),
+                (format!("{heading_cell} "), theme.style(Token::Muted)),
+                (
+                    format!("{access_cell} "),
+                    theme.style(access_tok).add_modifier(Modifier::BOLD),
+                ),
+                (format!("{expect_cell} "), theme.style(Token::Info)),
+                (sql_preview, theme.style(Token::Text)),
+            ]
+        };
+        lines.push(bounded_row(
+            segments,
+            body_width,
+            unicode,
+            selected.then_some(selection_style),
+        ));
+    }
+
+    if detail_rows > 0
+        && let Some(sel) = state.selected_cell()
+    {
+        let heading_note = sel
+            .heading
+            .as_deref()
+            .map(|h| format!(" ({})", sanitize_for_display(h)))
+            .unwrap_or_default();
+        let readonly_note = if sel.readonly_hint && sel.is_write {
+            "  |  note: @readonly hint ignored by write-guard"
+        } else {
+            ""
+        };
+        lines.push(bounded_row(
+            vec![("  ---".to_owned(), theme.style(Token::Border))],
+            body_width,
+            unicode,
+            None,
+        ));
+        lines.push(bounded_row(
+            vec![
+                (
+                    format!(
+                        "  Line {} [{}]{heading_note}: ",
+                        sel.start_line,
+                        sanitize_for_display(&sel.name)
+                    ),
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                (
+                    format!("{}{readonly_note}", runbook_sql_preview(&sel.sql)),
+                    theme.style(Token::Text),
+                ),
+            ],
+            body_width,
+            unicode,
+            None,
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
+}
+
+fn render_sql_runbook_dry_run(
+    state: &crate::app::model::SqlRunbookState,
+    report: &crate::runbook::RunbookReport,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+    selection_style: Style,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let body_width = usize::from(body_area.width);
+
+    let mut lines = Vec::new();
+    lines.push(bounded_row(
+        vec![
+            ("  Dry-Run Plan: ".to_owned(), theme.style(Token::Muted)),
+            (
+                format!(
+                    "planned={}  blocked={}  skipped={}  writes={}",
+                    report.planned_count(),
+                    report.blocked_count,
+                    report.skipped_count,
+                    if report.allow_writes {
+                        "ALLOWED"
+                    } else {
+                        "BLOCKED"
+                    }
+                ),
+                theme.style(if report.blocked_count > 0 {
+                    Token::Warning
+                } else {
+                    Token::Success
+                }),
+            ),
+        ],
+        body_width,
+        unicode,
+        None,
+    ));
+    lines.push(bounded_row(
+        vec![(
+            format!(
+                "  {:<4} {:<16} {:<14} {:<11} {:<22} {}",
+                "#", "NAME", "HEADING", "ACCESS", "STATUS", "EXPECT / SQL"
+            ),
+            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+        )],
+        body_width,
+        unicode,
+        None,
+    ));
+
+    let list_rows = usize::from(body_area.height).saturating_sub(2).max(1);
+    let start = state
+        .selected_idx
+        .saturating_sub(list_rows.saturating_sub(1));
+    for (idx, rec) in report.cells.iter().enumerate().skip(start).take(list_rows) {
+        let selected = idx == state.selected_idx;
+        let marker = if selected { "> " } else { "  " };
+        let cell_opt = state.runbook.cells.get(idx);
+        let is_destructive = cell_opt.is_some_and(|c| c.is_destructive);
+        let (access_label, access_tok) = runbook_access_badge(rec.is_write, is_destructive);
+        let status_tok = match rec.status {
+            crate::runbook::CellStatus::Planned | crate::runbook::CellStatus::Passed => {
+                Token::Success
+            }
+            crate::runbook::CellStatus::BlockedByWriteGuard
+            | crate::runbook::CellStatus::Failed => Token::Danger,
+            crate::runbook::CellStatus::Skipped => Token::Muted,
+        };
+        let expect_part = cell_opt
+            .and_then(|c| c.expect_rows)
+            .map(|n| format!("@expect-rows:{n}  "))
+            .unwrap_or_default();
+        let sql_part = cell_opt
+            .map(|c| runbook_sql_preview(&c.sql))
+            .unwrap_or_default();
+        let note_part = rec
+            .message
+            .as_deref()
+            .map(sanitize_for_display)
+            .filter(|m| !m.is_empty());
+        let tail = match note_part {
+            Some(msg) => format!("{expect_part}{msg} | {sql_part}"),
+            None => format!("{expect_part}{sql_part}"),
+        };
+
+        let idx_cell = fit_cell(&format!("#{}", rec.index + 1), 4, unicode);
+        let name_cell = fit_cell(&rec.name, 16, unicode);
+        let heading_cell = fit_cell(rec.heading.as_deref().unwrap_or("-"), 14, unicode);
+        let access_cell = fit_cell(access_label, 11, unicode);
+        let status_cell = fit_cell(rec.status.label(), 22, unicode);
+
+        let segments = if selected {
+            vec![
+                (
+                    marker.to_owned(),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{idx_cell} "), selection_style),
+                (
+                    format!("{name_cell} "),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{heading_cell} "), selection_style),
+                (
+                    format!("{access_cell} "),
+                    selection_style.add_modifier(Modifier::BOLD),
+                ),
+                (format!("{status_cell} "), selection_style),
+                (tail, selection_style),
+            ]
+        } else {
+            vec![
+                (marker.to_owned(), theme.style(Token::Muted)),
+                (format!("{idx_cell} "), theme.style(Token::Info)),
+                (format!("{name_cell} "), theme.style(Token::Text)),
+                (format!("{heading_cell} "), theme.style(Token::Muted)),
+                (
+                    format!("{access_cell} "),
+                    theme.style(access_tok).add_modifier(Modifier::BOLD),
+                ),
+                (format!("{status_cell} "), theme.style(status_tok)),
+                (tail, theme.style(Token::Muted)),
+            ]
+        };
+        lines.push(bounded_row(
+            segments,
+            body_width,
+            unicode,
+            selected.then_some(selection_style),
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

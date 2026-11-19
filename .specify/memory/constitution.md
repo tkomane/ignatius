@@ -140,8 +140,11 @@ broken connection, an interrupted export, and an incompatible terminal.
   unit and snapshot tests, representative PostgreSQL integration tests,
   dependency advisory and licence checks, secret scanning, and a terminal
   restoration check.
-- Commits are small and imperative and explain why. Nothing is published, pushed,
-  signed or released without the owner's explicit authority.
+- Commits are small and imperative and explain why. Agents may push verified
+  branches, open pull requests, and merge green pull requests (including
+  dependency updates) into main once repository verification gates pass. Signing,
+  tagging, and publishing public releases still require explicit owner
+  authority.
 
 ## Governance
 
@@ -155,4 +158,4 @@ must either be removed or justified in writing in the relevant plan, in a
 
 Operational guidance for working in this repository lives in `CLAUDE.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-08-15
+**Version**: 1.1.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-11-19

@@ -343,6 +343,38 @@ pub enum Command {
     /// Inspect, restore, or discard an unrecovered crash session journal.
     #[command(name = "recovery")]
     Recovery(RecoveryArgs),
+
+    /// Inspect logical publications, subscriptions, and replication slot WAL retention.
+    #[command(name = "replication")]
+    Replication(ReplicationArgs),
+
+    /// Inspect server configuration, HBA rules, extensions, tablespaces, and FDWs.
+    #[command(name = "cluster")]
+    Cluster(ClusterArgs),
+
+    /// Browse table rows with bounded keyset pagination.
+    #[command(name = "browse")]
+    Browse(BrowseArgs),
+
+    /// Capture extended EXPLAIN (BUFFERS, WAL, SETTINGS) telemetry or diff two query plans.
+    #[command(name = "plan-diff")]
+    PlanDiff(PlanDiffArgs),
+
+    /// Profile a query result set or export it to HTML or Apache Parquet.
+    #[command(name = "analytics")]
+    Analytics(AnalyticsArgs),
+
+    /// Benchmark one SQL query or compare baseline vs candidate latency with rollback isolation.
+    #[command(name = "bench")]
+    Bench(BenchArgs),
+
+    /// Capture canonical schema snapshots or check a live database for schema drift.
+    #[command(name = "snapshot")]
+    Snapshot(SnapshotArgs),
+
+    /// Parse, dry-run, or execute a Markdown SQL runbook with write-guard safety.
+    #[command(name = "runbook")]
+    Runbook(RunbookArgs),
 }
 
 /// Arguments for the audit command.
@@ -950,6 +982,14 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Seed(args)) => run_seed(args, &paths, out, err),
         Some(Command::Snippet(args)) => run_snippet(args, &paths, out, err),
         Some(Command::Recovery(args)) => run_recovery(args, &paths, out, err),
+        Some(Command::Replication(args)) => run_replication(args, &paths, out, err),
+        Some(Command::Cluster(args)) => run_cluster(args, &paths, out, err),
+        Some(Command::Browse(args)) => run_browse(args, &paths, out, err),
+        Some(Command::PlanDiff(args)) => run_plan_diff(args, &paths, out, err),
+        Some(Command::Analytics(args)) => run_analytics(args, &paths, out, err),
+        Some(Command::Bench(args)) => run_bench(args, &paths, out, err),
+        Some(Command::Snapshot(args)) => run_snapshot(args, &paths, out, err),
+        Some(Command::Runbook(args)) => run_runbook(args, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -1440,6 +1480,40 @@ fn query_command(
     }
 
     output::validate_options(&request.options)?;
+
+    let sql = if request.command.is_some() && crate::metacommand::contains_metacommand(&sql) {
+        match crate::metacommand::parse_input(&sql) {
+            Some(Err(diag)) => return Err(diag),
+            Some(Ok(crate::metacommand::MetaCommand::CatalogQuery {
+                sql: catalog_sql, ..
+            })) => catalog_sql,
+            Some(Ok(crate::metacommand::MetaCommand::Help)) => {
+                return write_metacommand_help(&request, out, err);
+            }
+            Some(Ok(
+                crate::metacommand::MetaCommand::ToggleExpanded(_)
+                | crate::metacommand::MetaCommand::ToggleTiming(_)
+                | crate::metacommand::MetaCommand::StartWatch { .. }
+                | crate::metacommand::MetaCommand::StopWatch,
+            )) => {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "\\x, \\timing, and \\watch require the interactive TUI workbench",
+                    "parsing query meta-command",
+                )
+                .likely_cause(
+                    "display toggles and watch loops are interactive session controls",
+                )
+                .next_action(format!(
+                    "launch `{}` without -c for interactive \\x, \\timing, and \\watch, or pass --format with -c in headless mode",
+                    branding::BINARY_NAME
+                )));
+            }
+            None => sql,
+        }
+    } else {
+        sql
+    };
 
     let parameters = parameter_bindings_from_env(&sql, request.parameter_env)?;
 
@@ -6248,6 +6322,2087 @@ fn run_recovery(
                 writeln!(out, "No session recovery journal to discard.").map_err(io_diagnostic)?;
             }
         }
+    }
+
+    Ok(ExitCode::Success)
+}
+
+fn write_metacommand_help(
+    request: &QueryRequest<'_>,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let set = crate::metacommand::help_result();
+    if let Some(destination) = request.output {
+        let mut writer = output::StreamWriter::new(request.options.clone())?;
+        let mut export = crate::query::export::Export::create(destination, request.force)?;
+        writer
+            .columns(export.writer(), set.columns.clone())
+            .map_err(io_diagnostic)?;
+        for row in &set.rows {
+            writer.row(export.writer(), row).map_err(io_diagnostic)?;
+            export.count_row();
+        }
+        let finished = export.finish()?;
+        writeln!(
+            err,
+            "Exported {} row(s) to {}",
+            finished.rows,
+            finished.path.display()
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Success);
+    }
+    let execution = crate::query::result::Execution {
+        job: crate::query::result::JobId(0),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some(set),
+            rows_affected: None,
+            elapsed: std::time::Duration::ZERO,
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::ZERO,
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: crate::query::result::NoticeReport::default(),
+    };
+    write_query_execution(out, err, &execution, &request.options)
+}
+
+/// Section filter for logical replication and slot safety reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliReplicationSection {
+    /// Include publications, subscriptions, and replication slots.
+    #[default]
+    All,
+    /// Include logical publications only.
+    Publications,
+    /// Include logical subscriptions only.
+    Subscriptions,
+    /// Include replication slots and WAL retention risk only.
+    Slots,
+}
+
+impl From<CliReplicationSection> for crate::replication::ReplicationSection {
+    fn from(val: CliReplicationSection) -> Self {
+        match val {
+            CliReplicationSection::All => Self::All,
+            CliReplicationSection::Publications => Self::Publications,
+            CliReplicationSection::Subscriptions => Self::Subscriptions,
+            CliReplicationSection::Slots => Self::Slots,
+        }
+    }
+}
+
+/// Arguments for the `replication` command.
+#[derive(Debug, Args, Clone)]
+pub struct ReplicationArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, publications, subscriptions, slots).
+    #[arg(short = 's', long, value_enum, default_value_t = CliReplicationSection::All)]
+    pub section: CliReplicationSection,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Section filter for server configuration, HBA, and infrastructure reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliClusterSection {
+    /// Include all sections: settings, HBA rules, extensions, tablespaces, and FDWs.
+    #[default]
+    All,
+    /// Server configuration parameters (`pg_settings`).
+    Settings,
+    /// Host-based authentication rules (`pg_hba_file_rules`).
+    Hba,
+    /// Installed and available extensions (`pg_available_extensions`).
+    Extensions,
+    /// Cluster tablespaces (`pg_tablespace`).
+    Tablespaces,
+    /// Foreign data wrappers and foreign servers.
+    Fdw,
+}
+
+impl From<CliClusterSection> for crate::cluster::ClusterSection {
+    fn from(val: CliClusterSection) -> Self {
+        match val {
+            CliClusterSection::All => Self::All,
+            CliClusterSection::Settings => Self::Settings,
+            CliClusterSection::Hba => Self::Hba,
+            CliClusterSection::Extensions => Self::Extensions,
+            CliClusterSection::Tablespaces => Self::Tablespaces,
+            CliClusterSection::Fdw => Self::Fdw,
+        }
+    }
+}
+
+/// Arguments for the `cluster` command.
+#[derive(Debug, Args, Clone)]
+pub struct ClusterArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Report section to display (all, settings, hba, extensions, tablespaces, fdw).
+    #[arg(short = 's', long, value_enum, default_value_t = CliClusterSection::All)]
+    pub section: CliClusterSection,
+    /// Show only settings modified from default or pending restart.
+    #[arg(long)]
+    pub modified_only: bool,
+    /// Case-insensitive substring filter applied across matching entries.
+    #[arg(long, value_name = "TEXT")]
+    pub filter: Option<String>,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn connect_and_run<T, F, Fut>(
+    target_arg: Option<&str>,
+    connection: &ConnectionOptions,
+    output: Option<&std::path::Path>,
+    force: bool,
+    paths: &Paths,
+    task: F,
+) -> Result<T, Diagnostic>
+where
+    F: FnOnce(crate::postgres::session::Session) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
+{
+    connect_and_run_with_config(
+        target_arg,
+        connection,
+        output,
+        force,
+        paths,
+        |session, _config| task(session),
+    )
+}
+
+fn ensure_output_writable(output: Option<&Path>, force: bool) -> Result<(), Diagnostic> {
+    if let Some(destination) = output
+        && destination.exists()
+        && !force
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{} already exists", destination.display()),
+            "opening the export destination",
+        )
+        .likely_cause("an export never replaces a file that is already there")
+        .next_action("choose another path, or pass --force to replace it"));
+    }
+    Ok(())
+}
+
+fn connect_and_run_with_config<T, F, Fut>(
+    target_arg: Option<&str>,
+    connection: &ConnectionOptions,
+    output: Option<&std::path::Path>,
+    force: bool,
+    paths: &Paths,
+    task: F,
+) -> Result<T, Diagnostic>
+where
+    F: FnOnce(crate::postgres::session::Session, config::Config) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
+{
+    ensure_output_writable(output, force)?;
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(target_arg, connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    let target = authenticate_target(resolved, &loaded.config)?;
+    let timeout = std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds);
+
+    runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(&target, timeout)
+            .await
+            .value?;
+        task(session, loaded.config).await
+    })
+}
+
+fn write_report_output(
+    mut rendered: String,
+    output: Option<&std::path::Path>,
+    force: bool,
+    label: &str,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    if let Some(destination) = output {
+        let mut export = crate::query::export::Export::create(destination, force)?;
+        export
+            .writer()
+            .write_all(rendered.as_bytes())
+            .map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(err, "{label} written to {}", destination.display()).map_err(io_diagnostic)?;
+    } else if let Err(error) = out.write_all(rendered.as_bytes()) {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(ExitCode::Success);
+        }
+        return Err(io_diagnostic(error));
+    }
+    Ok(ExitCode::Success)
+}
+
+fn filter_replication_report(
+    report: &crate::replication::ReplicationReport,
+    section: crate::replication::ReplicationSection,
+) -> crate::replication::ReplicationReport {
+    use crate::replication::ReplicationSection;
+    if section == ReplicationSection::All {
+        return report.clone();
+    }
+    crate::replication::ReplicationReport {
+        publications: if section == ReplicationSection::Publications {
+            report.publications.clone()
+        } else {
+            Vec::new()
+        },
+        subscriptions: if section == ReplicationSection::Subscriptions {
+            report.subscriptions.clone()
+        } else {
+            Vec::new()
+        },
+        slots: if section == ReplicationSection::Slots {
+            report.slots.clone()
+        } else {
+            Vec::new()
+        },
+        publications_truncated: section == ReplicationSection::Publications
+            && report.publications_truncated,
+        subscriptions_truncated: section == ReplicationSection::Subscriptions
+            && report.subscriptions_truncated,
+        slots_truncated: section == ReplicationSection::Slots && report.slots_truncated,
+        subscription_access_restricted: section == ReplicationSection::Subscriptions
+            && report.subscription_access_restricted,
+    }
+}
+
+fn run_replication(
+    args: &ReplicationArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let report = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session.replication_overview().await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let section = crate::replication::ReplicationSection::from(args.section);
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(section),
+        CliTelemetryFormat::Plain => report.render_plain(section),
+        CliTelemetryFormat::Json => filter_replication_report(&report, section).render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Replication report",
+        out,
+        err,
+    )
+}
+
+fn filter_cluster_report(
+    report: &crate::cluster::ClusterReport,
+    section: crate::cluster::ClusterSection,
+    modified_only: bool,
+    filter: Option<&str>,
+) -> crate::cluster::ClusterReport {
+    use crate::cluster::ClusterSection;
+    let include = |target: ClusterSection| section == ClusterSection::All || section == target;
+    crate::cluster::ClusterReport {
+        settings: if include(ClusterSection::Settings) {
+            report
+                .filtered_settings(modified_only, filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        hba_rules: if include(ClusterSection::Hba) {
+            report
+                .filtered_hba_rules(filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        extensions: if include(ClusterSection::Extensions) {
+            report
+                .filtered_extensions(filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        tablespaces: if include(ClusterSection::Tablespaces) {
+            report
+                .filtered_tablespaces(filter)
+                .into_iter()
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        fdws: if include(ClusterSection::Fdw) {
+            report.filtered_fdws(filter).into_iter().cloned().collect()
+        } else {
+            Vec::new()
+        },
+        truncated_settings: include(ClusterSection::Settings) && report.truncated_settings,
+        truncated_hba_rules: include(ClusterSection::Hba) && report.truncated_hba_rules,
+        truncated_extensions: include(ClusterSection::Extensions) && report.truncated_extensions,
+        truncated_tablespaces: include(ClusterSection::Tablespaces) && report.truncated_tablespaces,
+        truncated_fdws: include(ClusterSection::Fdw) && report.truncated_fdws,
+        hba_access_restricted: include(ClusterSection::Hba) && report.hba_access_restricted,
+    }
+}
+
+fn run_cluster(
+    args: &ClusterArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let report = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session.cluster_overview().await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let section = crate::cluster::ClusterSection::from(args.section);
+    let filter = args.filter.as_deref();
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(section, args.modified_only, filter),
+        CliTelemetryFormat::Plain => report.render_plain(section, args.modified_only, filter),
+        CliTelemetryFormat::Json => {
+            filter_cluster_report(&report, section, args.modified_only, filter).render_json()
+        }
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Cluster report",
+        out,
+        err,
+    )
+}
+
+/// Arguments for the `browse` command.
+#[derive(Debug, Args, Clone)]
+pub struct BrowseArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Target table name in `table` or `schema.table` form (defaults to `public`).
+    #[arg(short = 't', long, value_name = "SCHEMA.TABLE")]
+    pub table: String,
+    /// Maximum rows per page (clamped to 1..=500).
+    #[arg(long, value_name = "N", default_value_t = crate::crud::DEFAULT_PAGE_SIZE)]
+    pub page_size: usize,
+    /// Optional primary sort column applied ahead of primary-key tie-breakers.
+    #[arg(long, value_name = "COLUMN")]
+    pub sort: Option<String>,
+    /// Sort in descending order instead of ascending.
+    #[arg(long)]
+    pub desc: bool,
+    /// Keyset cursor primary-key value(s) to continue from (repeatable or comma-separated).
+    #[arg(long, value_name = "VALUE", value_delimiter = ',')]
+    pub after: Vec<String>,
+    /// Step backward from the keyset cursor (`PageDirection::Prev`).
+    #[arg(long)]
+    pub prev: bool,
+    /// Optional validated SQL `WHERE` filter predicate.
+    #[arg(long, value_name = "SQL_PREDICATE")]
+    pub filter: Option<String>,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn parse_browse_table_name(raw: &str) -> Result<(String, String), Diagnostic> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "table name cannot be empty",
+            "parsing browse table name",
+        )
+        .next_action("pass --table <table> or --table <schema>.<table>"));
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut characters = trimmed.chars().peekable();
+    while let Some(character) = characters.next() {
+        if quoted {
+            match character {
+                '"' if characters.peek() == Some(&'"') => {
+                    current.push('"');
+                    characters.next();
+                }
+                '"' => quoted = false,
+                other => current.push(other),
+            }
+        } else if character == '"' {
+            quoted = true;
+        } else if character == '.' {
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(character);
+        }
+    }
+    if quoted {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("unterminated quoted identifier in {raw}"),
+            "parsing browse table name",
+        )
+        .next_action("close the quoted identifier"));
+    }
+    parts.push(current);
+
+    match parts.as_slice() {
+        [table] if !table.is_empty() => Ok(("public".to_owned(), table.clone())),
+        [schema, table] if !schema.is_empty() && !table.is_empty() => {
+            Ok((schema.clone(), table.clone()))
+        }
+        _ => Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("--table must be <table> or <schema>.<table>: {raw}"),
+            "parsing browse table name",
+        )
+        .next_action("pass a table name such as users or public.users")),
+    }
+}
+
+fn run_browse(
+    args: &BrowseArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let (schema, table) = parse_browse_table_name(&args.table)?;
+    let sort_order = if args.desc {
+        crate::crud::SortOrder::Desc
+    } else {
+        crate::crud::SortOrder::Asc
+    };
+    let direction = if args.prev {
+        crate::crud::PageDirection::Prev
+    } else {
+        crate::crud::PageDirection::Next
+    };
+
+    let result = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let mut req = crate::crud::BrowseRequest::new(&schema, &table);
+            req.sort_column = args.sort.clone();
+            req.sort_order = sort_order;
+            req.page_size = args.page_size;
+            req.direction = direction;
+            req.filter_predicate = args.filter.clone();
+
+            if !args.after.is_empty() {
+                let mut probe = crate::crud::BrowseRequest::new(&schema, &table);
+                probe.page_size = 1;
+                let probe_res = session.browse_table_page(&probe).await?;
+                req.columns = probe_res.page.columns;
+                req.pk_columns = probe_res.page.pk_columns.clone();
+                req.cursor = Some(crate::crud::KeysetCursor {
+                    pk_columns: probe_res.page.pk_columns,
+                    pk_values: args.after.iter().cloned().map(Some).collect(),
+                });
+            }
+
+            let res = session.browse_table_page(&req).await;
+            drop(session);
+            res
+        },
+    )?;
+
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => result.page.render_table(),
+        CliTelemetryFormat::Plain => result.page.render_plain(),
+        CliTelemetryFormat::Json => result.page.render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Browse page",
+        out,
+        err,
+    )
+}
+
+/// Arguments for the `plan-diff` command.
+#[derive(Debug, Args, Clone)]
+pub struct PlanDiffArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Baseline SQL statement (A).
+    #[arg(short = 'a', long, value_name = "SQL")]
+    pub baseline: Option<String>,
+    /// Read baseline SQL statement (A) from a file. Use `-` for standard input.
+    #[arg(long, value_name = "PATH")]
+    pub baseline_file: Option<PathBuf>,
+    /// Optional candidate SQL statement (B) to compare against the baseline.
+    #[arg(short = 'b', long, value_name = "SQL")]
+    pub candidate: Option<String>,
+    /// Optional path to read candidate SQL statement (B) from. Use `-` for standard input.
+    #[arg(long, value_name = "PATH")]
+    pub candidate_file: Option<PathBuf>,
+    /// Run `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON)` inside `BEGIN ... ROLLBACK`.
+    #[arg(long)]
+    pub analyze: bool,
+    /// Output representation format: table (default), json, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn read_non_empty_sql_input(
+    inline: Option<&str>,
+    file: Option<&Path>,
+    role: &str,
+    inline_flag: &str,
+    file_flag: &str,
+    required: bool,
+) -> Result<Option<String>, Diagnostic> {
+    let sql = match (inline, file) {
+        (Some(_), Some(_)) => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("cannot specify both {inline_flag} and {file_flag}"),
+                format!("reading {role} SQL"),
+            )
+            .next_action(format!(
+                "pass either {inline_flag} or {file_flag}, not both"
+            )));
+        }
+        (None, None) => {
+            if required {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("{role} SQL is required"),
+                    format!("reading {role} SQL"),
+                )
+                .next_action(format!("pass {inline_flag} <SQL> or {file_flag} <PATH>")));
+            }
+            return Ok(None);
+        }
+        (Some(sql), None) => sql.to_owned(),
+        (None, Some(path)) => read_sql(None, Some(path))?,
+    };
+
+    if sql.trim().is_empty() {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{role} SQL cannot be empty"),
+            format!("reading {role} SQL"),
+        )
+        .next_action(format!(
+            "provide a non-empty SQL statement via {inline_flag} or {file_flag}"
+        )));
+    }
+
+    Ok(Some(sql))
+}
+
+fn resolve_plan_diff_inputs(args: &PlanDiffArgs) -> Result<(String, Option<String>), Diagnostic> {
+    let baseline = read_non_empty_sql_input(
+        args.baseline.as_deref(),
+        args.baseline_file.as_deref(),
+        "baseline",
+        "-a/--baseline",
+        "--baseline-file",
+        true,
+    )?
+    .ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            "baseline SQL is required",
+            "reading baseline SQL",
+        )
+    })?;
+
+    let candidate = read_non_empty_sql_input(
+        args.candidate.as_deref(),
+        args.candidate_file.as_deref(),
+        "candidate",
+        "-b/--candidate",
+        "--candidate-file",
+        false,
+    )?;
+
+    Ok((baseline, candidate))
+}
+
+enum PlanDiffOutput {
+    Single(Box<crate::plandiff::PlanSnapshot>),
+    Diff(Box<crate::plandiff::PlanDiffReport>),
+}
+
+fn format_opt_ms(value: Option<f64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |ms| format!("{ms:.3}"))
+}
+
+fn format_opt_pct(value: Option<f64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |pct| format!("{pct:.1}%"))
+}
+
+fn render_plan_snapshot_table(snapshot: &crate::plandiff::PlanSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "EXTENDED EXPLAIN SNAPSHOT: {}", snapshot.label);
+    let _ = writeln!(
+        out,
+        "Mode: {}",
+        if snapshot.analyzed {
+            "EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)"
+        } else {
+            "EXPLAIN (ESTIMATE, VERBOSE, SETTINGS)"
+        }
+    );
+    out.push('\n');
+
+    let _ = writeln!(out, "{:<24}  {:>18}", "METRIC", "VALUE");
+    let _ = writeln!(out, "{}", "-".repeat(44));
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Analyzed",
+        if snapshot.analyzed { "yes" } else { "no" }
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Planning Time (ms)",
+        format_opt_ms(snapshot.planning_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Execution Time (ms)",
+        format_opt_ms(snapshot.execution_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18.2}",
+        "Startup Cost", snapshot.startup_cost
+    );
+    let _ = writeln!(out, "{:<24}  {:>18.2}", "Total Cost", snapshot.total_cost);
+    let _ = writeln!(out, "{:<24}  {:>18}", "Plan Rows", snapshot.plan_rows);
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Actual Rows",
+        snapshot
+            .actual_rows
+            .map_or_else(|| "-".to_owned(), |v| v.to_string())
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Hit Blocks", snapshot.shared_hit_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Read Blocks", snapshot.shared_read_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Dirtied Blocks", snapshot.shared_dirtied_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Shared Written Blocks", snapshot.shared_written_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Local Hit Blocks", snapshot.local_hit_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Local Read Blocks", snapshot.local_read_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Temp Read Blocks", snapshot.temp_read_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Temp Written Blocks", snapshot.temp_written_blocks
+    );
+    let _ = writeln!(
+        out,
+        "{:<24}  {:>18}",
+        "Buffer Hit Ratio",
+        format_opt_pct(snapshot.buffer_hit_ratio_pct)
+    );
+    let _ = writeln!(out, "{:<24}  {:>18}", "WAL Records", snapshot.wal_records);
+    let _ = writeln!(out, "{:<24}  {:>18}", "WAL FPI", snapshot.wal_fpi);
+    let _ = writeln!(out, "{:<24}  {:>18}", "WAL Bytes", snapshot.wal_bytes);
+
+    if !snapshot.settings.is_empty() {
+        out.push_str("\nNON-DEFAULT PLANNER SETTINGS\n");
+        for (k, v) in &snapshot.settings {
+            let _ = writeln!(out, "  {k} = {v}");
+        }
+    }
+
+    if !snapshot.nodes.is_empty() {
+        out.push_str("\nPLAN NODES\n");
+        let _ = writeln!(
+            out,
+            "{:<8}  {:<24}  {:<18}  {:>10}  {:>10}  {:>10}  {:>10}",
+            "PATH", "NODE", "TARGET", "COST", "ROWS", "TIME(ms)", "WAL(B)"
+        );
+        let _ = writeln!(out, "{}", "-".repeat(100));
+        for node in &snapshot.nodes {
+            let target = node
+                .index_name
+                .as_deref()
+                .or(node.relation_name.as_deref())
+                .unwrap_or("-");
+            let rows = node
+                .actual_rows
+                .map_or_else(|| node.plan_rows.to_string(), |r| r.to_string());
+            let _ = writeln!(
+                out,
+                "{:<8}  {:<24}  {:<18}  {:>10.2}  {:>10}  {:>10}  {:>10}",
+                node.path,
+                node.node_type,
+                target,
+                node.total_cost,
+                rows,
+                format_opt_ms(node.actual_total_time_ms),
+                node.wal_bytes
+            );
+        }
+    }
+
+    out
+}
+
+fn render_plan_snapshot_plain(snapshot: &crate::plandiff::PlanSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "label={}", snapshot.label);
+    let _ = writeln!(out, "analyzed={}", snapshot.analyzed);
+    let _ = writeln!(
+        out,
+        "planning_time_ms={}",
+        format_opt_ms(snapshot.planning_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "execution_time_ms={}",
+        format_opt_ms(snapshot.execution_time_ms)
+    );
+    let _ = writeln!(
+        out,
+        "cost: startup={:.2} total={:.2} plan_rows={} actual_rows={}",
+        snapshot.startup_cost,
+        snapshot.total_cost,
+        snapshot.plan_rows,
+        snapshot
+            .actual_rows
+            .map_or_else(|| "-".to_owned(), |v| v.to_string())
+    );
+    let _ = writeln!(
+        out,
+        "buffers: shared_hit={} shared_read={} shared_dirtied={} shared_written={} local_hit={} local_read={} temp_read={} temp_written={} hit_ratio={}",
+        snapshot.shared_hit_blocks,
+        snapshot.shared_read_blocks,
+        snapshot.shared_dirtied_blocks,
+        snapshot.shared_written_blocks,
+        snapshot.local_hit_blocks,
+        snapshot.local_read_blocks,
+        snapshot.temp_read_blocks,
+        snapshot.temp_written_blocks,
+        format_opt_pct(snapshot.buffer_hit_ratio_pct)
+    );
+    let _ = writeln!(
+        out,
+        "wal: records={} fpi={} bytes={}",
+        snapshot.wal_records, snapshot.wal_fpi, snapshot.wal_bytes
+    );
+    for (k, v) in &snapshot.settings {
+        let _ = writeln!(out, "setting: {k}={v}");
+    }
+    for node in &snapshot.nodes {
+        let target = node
+            .index_name
+            .as_deref()
+            .or(node.relation_name.as_deref())
+            .unwrap_or("-");
+        let _ = writeln!(
+            out,
+            "node[{}]: type={} target={} cost={:.2} plan_rows={} actual_rows={} time_ms={} shared_hit={} shared_read={} temp_written={} wal_bytes={}",
+            node.path,
+            node.node_type,
+            target,
+            node.total_cost,
+            node.plan_rows,
+            node.actual_rows
+                .map_or_else(|| "-".to_owned(), |r| r.to_string()),
+            format_opt_ms(node.actual_total_time_ms),
+            node.shared_hit_blocks,
+            node.shared_read_blocks,
+            node.temp_written_blocks,
+            node.wal_bytes
+        );
+    }
+    out
+}
+
+fn run_plan_diff(
+    args: &PlanDiffArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let (base_sql, cand_sql) = resolve_plan_diff_inputs(args)?;
+    let analyze = args.analyze;
+
+    let outcome = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let base = session
+                .explain_extended(&base_sql, analyze, "Baseline (A)")
+                .await?;
+            let result = match cand_sql {
+                Some(cand_sql) => {
+                    let cand = session
+                        .explain_extended(&cand_sql, analyze, "Candidate (B)")
+                        .await?;
+                    PlanDiffOutput::Diff(Box::new(crate::plandiff::diff_plans(base, cand)))
+                }
+                None => PlanDiffOutput::Single(Box::new(base)),
+            };
+            drop(session);
+            Ok(result)
+        },
+    )?;
+
+    let rendered = match outcome {
+        PlanDiffOutput::Diff(report) => match args.format {
+            CliTelemetryFormat::Table => report.render_table(),
+            CliTelemetryFormat::Plain => report.render_plain(),
+            CliTelemetryFormat::Json => report.render_json(),
+        },
+        PlanDiffOutput::Single(snapshot) => match args.format {
+            CliTelemetryFormat::Table => render_plan_snapshot_table(&snapshot),
+            CliTelemetryFormat::Plain => render_plan_snapshot_plain(&snapshot),
+            CliTelemetryFormat::Json => {
+                serde_json::to_string_pretty(&snapshot).unwrap_or_else(|_| "{}".to_owned())
+            }
+        },
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Plan diff report",
+        out,
+        err,
+    )
+}
+
+/// Output representation format for result analytics and exports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum CliAnalyticsFormat {
+    /// Aligned plain-ASCII summary table (default).
+    #[default]
+    Table,
+    /// Plain machine-readable text summary.
+    Plain,
+    /// Structured JSON analytics profile.
+    Json,
+    /// Self-contained interactive HTML report.
+    Html,
+    /// Binary Apache Parquet file (`PAR1`).
+    Parquet,
+}
+
+/// Arguments for the `analytics` command.
+#[derive(Debug, Args, Clone)]
+pub struct AnalyticsArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// SQL query to execute and profile.
+    #[arg(short = 'c', long, value_name = "SQL")]
+    pub command: Option<String>,
+    /// Read SQL query from a file. Use `-` for standard input.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+    /// Output representation format: table (default), plain, json, html, or parquet.
+    #[arg(long, value_enum, default_value_t = CliAnalyticsFormat::Table)]
+    pub format: CliAnalyticsFormat,
+    /// Title shown when rendering an HTML analytics report.
+    #[arg(long, value_name = "TEXT", default_value = "Ignatius Result Analytics")]
+    pub title: String,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Overwrite destination file without prompting if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn resolve_analytics_sql(command: Option<&str>, file: Option<&Path>) -> Result<String, Diagnostic> {
+    read_non_empty_sql_input(command, file, "query", "-c/--command", "-f/--file", true)?.ok_or_else(
+        || {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                "SQL input is required",
+                "reading analytics SQL",
+            )
+        },
+    )
+}
+
+fn extract_analytics_result_set(
+    execution: crate::query::result::Execution,
+) -> Result<crate::query::result::ResultSet, Diagnostic> {
+    if let Some(error) = execution.error {
+        return Err(error);
+    }
+    if execution.status != crate::query::result::ExecutionStatus::Succeeded {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Query,
+            execution.status.label(),
+            "executing analytics query",
+        ));
+    }
+
+    execution
+        .statements
+        .into_iter()
+        .find_map(|stmt| stmt.result_set)
+        .ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                "query did not produce a result set",
+                "profiling query results",
+            )
+            .likely_cause("the statement returned a command tag without result rows")
+            .next_action("provide a SELECT query or a statement with a RETURNING clause")
+        })
+}
+
+fn write_binary_output(
+    bytes: &[u8],
+    output: Option<&Path>,
+    force: bool,
+    label: &str,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    if let Some(destination) = output {
+        let mut export = crate::query::export::Export::create(destination, force)?;
+        export.writer().write_all(bytes).map_err(io_diagnostic)?;
+        let _ = export.finish()?;
+        writeln!(
+            err,
+            "{label} ({} bytes) written to {}",
+            bytes.len(),
+            destination.display()
+        )
+        .map_err(io_diagnostic)?;
+    } else if let Err(error) = out.write_all(bytes) {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(ExitCode::Success);
+        }
+        return Err(io_diagnostic(error));
+    }
+    Ok(ExitCode::Success)
+}
+
+fn run_analytics(
+    args: &AnalyticsArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let sql = resolve_analytics_sql(args.command.as_deref(), args.file.as_deref())?;
+
+    let execution = connect_and_run_with_config(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session, cfg| async move {
+            let execution = session
+                .execute(
+                    &sql,
+                    cfg.query.max_buffered_rows,
+                    crate::query::result::JobId(1),
+                )
+                .await;
+            drop(session);
+            Ok(execution)
+        },
+    )?;
+
+    let result_set = extract_analytics_result_set(execution)?;
+
+    match args.format {
+        CliAnalyticsFormat::Parquet => {
+            let bytes = crate::analytics::export_parquet_bytes(&result_set).map_err(|error| {
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    error.to_string(),
+                    "encoding Apache Parquet output",
+                )
+            })?;
+            write_binary_output(
+                &bytes,
+                args.output.as_deref(),
+                args.force,
+                "Parquet analytics export",
+                out,
+                err,
+            )
+        }
+        CliAnalyticsFormat::Table
+        | CliAnalyticsFormat::Plain
+        | CliAnalyticsFormat::Json
+        | CliAnalyticsFormat::Html => {
+            let profile = crate::analytics::profile_result_set(&result_set);
+            let rendered = match args.format {
+                CliAnalyticsFormat::Table => profile.render_table(),
+                CliAnalyticsFormat::Plain => profile.render_plain(),
+                CliAnalyticsFormat::Json => profile.render_json(),
+                CliAnalyticsFormat::Html => {
+                    crate::analytics::render_html_report(&result_set, &args.title, &profile)
+                }
+                CliAnalyticsFormat::Parquet => unreachable!(),
+            };
+            write_report_output(
+                rendered,
+                args.output.as_deref(),
+                args.force,
+                "Analytics report",
+                out,
+                err,
+            )
+        }
+    }
+}
+
+/// Arguments for the `bench` command (`056-query-benchmarks-and-regression-suite`).
+#[derive(Debug, Args, Clone)]
+pub struct BenchArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Baseline SQL statement to benchmark.
+    #[arg(short = 'c', long, value_name = "SQL")]
+    pub command: Option<String>,
+    /// Read baseline SQL statement from a file. Use `-` for standard input.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+    /// Optional candidate SQL statement to compare against the baseline.
+    #[arg(long, value_name = "SQL")]
+    pub candidate: Option<String>,
+    /// Optional path to read candidate SQL statement from. Use `-` for standard input.
+    #[arg(long, value_name = "PATH")]
+    pub candidate_file: Option<PathBuf>,
+    /// Number of unmeasured warmup iterations (clamped to 0..=20).
+    #[arg(long, value_name = "N", default_value_t = crate::bench::DEFAULT_WARMUP_RUNS)]
+    pub warmup: usize,
+    /// Number of measured iterations (clamped to 1..=200).
+    #[arg(long, value_name = "N", default_value_t = crate::bench::DEFAULT_MEASURED_RUNS)]
+    pub runs: usize,
+    /// Disable per-iteration BEGIN / ROLLBACK isolation (writes will persist).
+    #[arg(long)]
+    pub no_rollback: bool,
+    /// Exit 1 when candidate p50 or p95 regresses beyond this percentage.
+    #[arg(long = "fail-on-regression-pct", value_name = "PCT")]
+    pub fail_on_regression_pct: Option<f64>,
+    /// Output representation format: table (default), plain, or json.
+    #[arg(long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn validate_regression_pct(pct: Option<f64>) -> Result<Option<f64>, Diagnostic> {
+    if let Some(value) = pct
+        && (!value.is_finite() || value < 0.0)
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("invalid --fail-on-regression-pct value: {value}"),
+            "validating benchmark regression threshold",
+        )
+        .next_action("pass a non-negative finite percentage such as 10 or 5.5"));
+    }
+    Ok(pct)
+}
+
+fn resolve_bench_inputs(args: &BenchArgs) -> Result<(String, Option<String>), Diagnostic> {
+    if args.file.as_deref() == Some(Path::new("-"))
+        && args.candidate_file.as_deref() == Some(Path::new("-"))
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "cannot read both baseline and candidate SQL from standard input",
+            "reading benchmark SQL inputs",
+        )
+        .next_action("read at least one query from -c/--command, --candidate, or a file path"));
+    }
+
+    let baseline = read_non_empty_sql_input(
+        args.command.as_deref(),
+        args.file.as_deref(),
+        "baseline",
+        "-c/--command",
+        "-f/--file",
+        true,
+    )?
+    .ok_or_else(|| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            "baseline SQL is required",
+            "reading baseline SQL",
+        )
+    })?;
+
+    let candidate = read_non_empty_sql_input(
+        args.candidate.as_deref(),
+        args.candidate_file.as_deref(),
+        "candidate",
+        "--candidate",
+        "--candidate-file",
+        false,
+    )?;
+
+    Ok((baseline, candidate))
+}
+
+fn run_bench(
+    args: &BenchArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let threshold_pct = validate_regression_pct(args.fail_on_regression_pct)?;
+    let (base_sql, cand_sql) = resolve_bench_inputs(args)?;
+    let config = crate::bench::BenchConfig::new(args.warmup, args.runs, !args.no_rollback);
+
+    let report = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let baseline = session
+                .run_benchmark(&base_sql, &config, "Baseline (A)")
+                .await?;
+            let candidate = match cand_sql {
+                Some(ref sql) => Some(session.run_benchmark(sql, &config, "Candidate (B)").await?),
+                None => None,
+            };
+            drop(session);
+            Ok(crate::bench::compare_benchmarks(
+                baseline,
+                candidate,
+                threshold_pct,
+            ))
+        },
+    )?;
+
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(),
+        CliTelemetryFormat::Plain => report.render_plain(),
+        CliTelemetryFormat::Json => report.render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Benchmark report",
+        out,
+        err,
+    )?;
+
+    if report.failed_gate {
+        if let (Some(cmp), Some(limit)) = (&report.comparison, report.threshold_pct) {
+            writeln!(
+                err,
+                "Benchmark regression gate failed: p50 {:+.1}%, p95 {:+.1}% (limit {:.1}%).",
+                cmp.p50_delta_pct, cmp.p95_delta_pct, limit
+            )
+            .map_err(io_diagnostic)?;
+        }
+        return Ok(ExitCode::Findings);
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Arguments for `ignatius snapshot` (`057-schema-snapshots-and-drift-guard`).
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotArgs {
+    #[command(subcommand)]
+    pub action: SnapshotAction,
+}
+
+/// Subcommands for `ignatius snapshot`.
+#[derive(Debug, Subcommand, Clone)]
+pub enum SnapshotAction {
+    /// Capture a canonical schema snapshot from a live database.
+    Capture(SnapshotCaptureArgs),
+    /// Compare a live database against a saved baseline snapshot JSON file.
+    Check(SnapshotCheckArgs),
+}
+
+/// Arguments for `ignatius snapshot capture`.
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotCaptureArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Restrict the snapshot to a single schema (defaults to all non-system schemas).
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Output representation format: json (default), table, or plain.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Json)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+/// Failure threshold for `ignatius snapshot check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliDriftFailOn {
+    /// Exit 1 when any breaking schema change is detected (default).
+    #[default]
+    Breaking,
+    /// Exit 1 when any breaking or warning change is detected.
+    Warning,
+    /// Exit 1 when any drift finding (breaking, warning, or info) is detected.
+    Any,
+    /// Always exit 0 after producing the drift report.
+    Never,
+}
+
+impl CliDriftFailOn {
+    /// Maps the CLI drift fail threshold to the domain policy.
+    #[must_use]
+    pub const fn into_domain(self) -> crate::snapshot::DriftFailThreshold {
+        match self {
+            Self::Breaking => crate::snapshot::DriftFailThreshold::Breaking,
+            Self::Warning => crate::snapshot::DriftFailThreshold::Warning,
+            Self::Any => crate::snapshot::DriftFailThreshold::Any,
+            Self::Never => crate::snapshot::DriftFailThreshold::Never,
+        }
+    }
+}
+
+/// Arguments for `ignatius snapshot check`.
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotCheckArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name.
+    pub target: Option<String>,
+    /// Path to the expected baseline schema snapshot JSON file.
+    #[arg(long, value_name = "PATH")]
+    pub against: PathBuf,
+    /// Restrict the live capture to a single schema (defaults to baseline filter or all user schemas).
+    #[arg(short = 's', long, value_name = "SCHEMA")]
+    pub schema: Option<String>,
+    /// Exit 1 when drift findings reach this severity threshold.
+    #[arg(long = "fail-on", value_enum, default_value_t = CliDriftFailOn::Breaking)]
+    pub fail_on: CliDriftFailOn,
+    /// Output representation format: table (default), plain, or json.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliTelemetryFormat::Table)]
+    pub format: CliTelemetryFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn sanitize_cli_ascii(input: &str) -> String {
+    use std::fmt::Write as _;
+
+    let safe = crate::query::value::sanitize_for_display(input);
+    let mut out = String::with_capacity(safe.len());
+    for ch in safe.chars() {
+        if ch.is_ascii() && !ch.is_ascii_control() {
+            out.push(ch);
+        } else {
+            let _ = write!(out, "\\u{{{:04X}}}", ch as u32);
+        }
+    }
+    out
+}
+
+fn render_snapshot_table(snapshot: &crate::snapshot::SchemaSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = snapshot.render_summary();
+    if !snapshot.tables.is_empty() {
+        out.push_str("\n-- Tables --\n");
+        let name_width = snapshot
+            .tables
+            .iter()
+            .map(|t| sanitize_cli_ascii(&t.qualified_name()).len())
+            .max()
+            .unwrap_or(5)
+            .clamp(5, 48);
+        let _ = writeln!(
+            out,
+            "{:<name_width$}  {:>5}  {:>6}  {:>5}  {:<5}  {:>8}",
+            "TABLE", "COLS", "CONST", "IDX", "RLS", "POLICIES"
+        );
+        let _ = writeln!(out, "{}", "-".repeat(name_width + 39));
+        for table in &snapshot.tables {
+            let rls = match (table.rls_enabled, table.rls_forced) {
+                (true, true) => "force",
+                (true, false) => "on",
+                (false, _) => "off",
+            };
+            let _ = writeln!(
+                out,
+                "{:<name_width$}  {:>5}  {:>6}  {:>5}  {:<5}  {:>8}",
+                sanitize_cli_ascii(&table.qualified_name()),
+                table.columns.len(),
+                table.constraints.len(),
+                table.indexes.len(),
+                rls,
+                table.policies.len(),
+            );
+        }
+    }
+    if !snapshot.views.is_empty() {
+        out.push_str("\n-- Views --\n");
+        for view in &snapshot.views {
+            let kind = if view.materialized {
+                "materialized"
+            } else {
+                "view"
+            };
+            let _ = writeln!(
+                out,
+                "  {} ({})",
+                sanitize_cli_ascii(&view.qualified_name()),
+                kind
+            );
+        }
+    }
+    if !snapshot.sequences.is_empty() {
+        out.push_str("\n-- Sequences --\n");
+        for seq in &snapshot.sequences {
+            let _ = writeln!(
+                out,
+                "  {} ({} start={} inc={})",
+                sanitize_cli_ascii(&seq.qualified_name()),
+                sanitize_cli_ascii(&seq.data_type),
+                seq.start_value,
+                seq.increment_by
+            );
+        }
+    }
+    if !snapshot.enums.is_empty() {
+        out.push_str("\n-- Enums --\n");
+        for item in &snapshot.enums {
+            let labels: Vec<String> = item.labels.iter().map(|l| sanitize_cli_ascii(l)).collect();
+            let _ = writeln!(
+                out,
+                "  {} [{}]",
+                sanitize_cli_ascii(&item.qualified_name()),
+                labels.join(", ")
+            );
+        }
+    }
+    out
+}
+
+fn render_snapshot_plain(snapshot: &crate::snapshot::SchemaSnapshot) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = snapshot.render_summary();
+    for table in &snapshot.tables {
+        let _ = writeln!(
+            out,
+            "table={} cols={} constraints={} indexes={} rls={} forced={} policies={}",
+            sanitize_cli_ascii(&table.qualified_name()),
+            table.columns.len(),
+            table.constraints.len(),
+            table.indexes.len(),
+            table.rls_enabled,
+            table.rls_forced,
+            table.policies.len(),
+        );
+    }
+    for view in &snapshot.views {
+        let _ = writeln!(
+            out,
+            "view={} materialized={} sha256={}",
+            sanitize_cli_ascii(&view.qualified_name()),
+            view.materialized,
+            sanitize_cli_ascii(&view.definition_sha256),
+        );
+    }
+    for seq in &snapshot.sequences {
+        let _ = writeln!(
+            out,
+            "sequence={} type={} start={} increment={} cycle={}",
+            sanitize_cli_ascii(&seq.qualified_name()),
+            sanitize_cli_ascii(&seq.data_type),
+            seq.start_value,
+            seq.increment_by,
+            seq.cycle,
+        );
+    }
+    for item in &snapshot.enums {
+        let labels: Vec<String> = item.labels.iter().map(|l| sanitize_cli_ascii(l)).collect();
+        let _ = writeln!(
+            out,
+            "enum={} labels={}",
+            sanitize_cli_ascii(&item.qualified_name()),
+            labels.join(","),
+        );
+    }
+    out
+}
+
+fn read_bounded_utf8_file(
+    path: &Path,
+    max_bytes: usize,
+    context: &str,
+) -> Result<String, Diagnostic> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("could not read {}: {error}", path.display()),
+            context,
+        )
+        .next_action("verify that the file exists and is readable")
+    })?;
+    let mut raw = Vec::new();
+    file.take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut raw)
+        .map_err(io_diagnostic)?;
+    if raw.len() > max_bytes {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!(
+                "{} exceeds the {max_bytes}-byte safety bound",
+                path.display()
+            ),
+            context,
+        )
+        .next_action("provide a smaller file within the documented safety limit"));
+    }
+    String::from_utf8(raw).map_err(|_| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{} is not valid UTF-8 text", path.display()),
+            context,
+        )
+        .next_action("ensure the file is UTF-8 encoded")
+    })
+}
+
+fn read_expected_snapshot(path: &Path) -> Result<crate::snapshot::SchemaSnapshot, Diagnostic> {
+    let json = read_bounded_utf8_file(
+        path,
+        crate::snapshot::MAX_SNAPSHOT_JSON_BYTES,
+        "reading expected schema snapshot",
+    )?;
+    crate::snapshot::SchemaSnapshot::from_json(&json)
+}
+
+fn run_snapshot(
+    args: &SnapshotArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    match &args.action {
+        SnapshotAction::Capture(capture) => run_snapshot_capture(capture, paths, out, err),
+        SnapshotAction::Check(check) => run_snapshot_check(check, paths, out, err),
+    }
+}
+
+fn run_snapshot_capture(
+    args: &SnapshotCaptureArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let schema = args.schema.clone();
+    let snapshot = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session.capture_schema_snapshot(schema.as_deref()).await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let rendered = match args.format {
+        CliTelemetryFormat::Json => snapshot.render_json(),
+        CliTelemetryFormat::Table => render_snapshot_table(&snapshot),
+        CliTelemetryFormat::Plain => render_snapshot_plain(&snapshot),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Schema snapshot",
+        out,
+        err,
+    )
+}
+
+fn run_snapshot_check(
+    args: &SnapshotCheckArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let expected = read_expected_snapshot(&args.against)?;
+    let effective_schema = args
+        .schema
+        .clone()
+        .or_else(|| expected.schema_filter.clone());
+
+    let actual = connect_and_run(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session| async move {
+            let result = session
+                .capture_schema_snapshot(effective_schema.as_deref())
+                .await;
+            drop(session);
+            result
+        },
+    )?;
+
+    let report = crate::snapshot::diff_snapshots(&expected, &actual);
+    let rendered = match args.format {
+        CliTelemetryFormat::Table => report.render_table(),
+        CliTelemetryFormat::Plain => report.render_plain(),
+        CliTelemetryFormat::Json => report.render_json(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Schema drift report",
+        out,
+        err,
+    )?;
+
+    let threshold = args.fail_on.into_domain();
+    if report.exceeds_threshold(threshold) {
+        writeln!(
+            err,
+            "Schema drift check failed: {} breaking, {} warning, {} info finding(s); threshold '{}' exceeded.",
+            report.breaking_count,
+            report.warning_count,
+            report.info_count,
+            threshold.label(),
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Findings);
+    }
+
+    Ok(ExitCode::Success)
+}
+
+/// Output representation format for `ignatius runbook`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliRunbookFormat {
+    /// Aligned plain-ASCII summary table (default).
+    #[default]
+    Table,
+    /// Line-oriented plain-ASCII summary.
+    Plain,
+    /// Structured JSON runbook report.
+    Json,
+    /// Plain-ASCII Markdown report.
+    Markdown,
+}
+
+/// Arguments for `ignatius runbook` (`058-interactive-sql-notebook-runner`).
+#[derive(Debug, Args, Clone)]
+pub struct RunbookArgs {
+    /// Connection target: a URI, a keyword string, @profile, or a database name (optional with `--dry-run`).
+    pub target: Option<String>,
+    /// Markdown SQL runbook file to parse and execute. Use `-` for standard input.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    pub file: PathBuf,
+    /// Execute or plan only the cell matching this `--name` slug.
+    #[arg(long, value_name = "NAME")]
+    pub cell: Option<String>,
+    /// Parse and print the safety execution plan without opening a database connection.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Authorize write, DDL, or destructive cells to run (blocked by default).
+    #[arg(long)]
+    pub allow_writes: bool,
+    /// Stop executing further cells after the first cell error or expectation failure.
+    #[arg(long)]
+    pub stop_on_error: bool,
+    /// Output representation format: table (default), plain, json, or markdown.
+    #[arg(long, value_enum, default_value_t = CliRunbookFormat::Table)]
+    pub format: CliRunbookFormat,
+    /// Destination file to write output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub connection: ConnectionOptions,
+}
+
+fn load_markdown_runbook(
+    path: &Path,
+    selected_cell: Option<&str>,
+) -> Result<crate::runbook::SqlRunbook, Diagnostic> {
+    let (markdown, title) = if path == Path::new("-") {
+        (read_stdin()?, "stdin".to_owned())
+    } else {
+        let text = read_bounded_utf8_file(
+            path,
+            crate::runbook::MAX_RUNBOOK_BYTES,
+            "reading markdown SQL runbook",
+        )?;
+        let title = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map_or_else(|| path.display().to_string(), ToOwned::to_owned);
+        (text, title)
+    };
+
+    let runbook = crate::runbook::parse_markdown_runbook(&markdown, &title)?;
+    if let Some(cell_name) = selected_cell
+        && runbook.find_cell(cell_name).is_none()
+    {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("runbook cell '{cell_name}' not found"),
+            "selecting runbook cell",
+        )
+        .likely_cause("no SQL cell in the runbook carries that -- @name slug or default cell-N")
+        .next_action(
+            "check `-- @name:` directives in the runbook or omit --cell to run all cells",
+        ));
+    }
+    Ok(runbook)
+}
+
+fn runbook_write_guard_message(cell: &crate::runbook::RunbookCell) -> String {
+    let reason = if cell.is_destructive {
+        "blocked by write guard: destructive SQL requires --allow-writes"
+    } else {
+        "blocked by write guard: write or structural SQL requires --allow-writes"
+    };
+    if cell.readonly_hint {
+        format!("{reason} (cell also declares @readonly)")
+    } else {
+        reason.to_owned()
+    }
+}
+
+fn evaluate_runbook_cell_execution(
+    cell: &crate::runbook::RunbookCell,
+    execution: &crate::query::result::Execution,
+    duration_ms: u64,
+) -> crate::runbook::CellExecutionRecord {
+    use crate::query::result::ExecutionStatus;
+    use crate::runbook::{CellExecutionRecord, CellStatus};
+
+    let mut rows_returned: Option<u64> = None;
+    let mut rows_affected: Option<u64> = None;
+    for stmt in &execution.statements {
+        if let Some(set) = &stmt.result_set {
+            rows_returned = Some(rows_returned.unwrap_or(0).saturating_add(set.rows_seen));
+        } else if let Some(affected) = stmt.rows_affected {
+            rows_affected = Some(rows_affected.unwrap_or(0).saturating_add(affected));
+        }
+    }
+
+    if let Some(diag) = &execution.error {
+        let sqlstate = diag
+            .technical
+            .iter()
+            .find(|field| field.label == "SQLSTATE")
+            .map(|field| field.value.as_str());
+        let message = match sqlstate {
+            Some(code) => format!("[{code}] {}", diag.headline),
+            None => diag.headline.clone(),
+        };
+        return CellExecutionRecord {
+            index: cell.index,
+            name: cell.name.clone(),
+            heading: cell.heading.clone(),
+            is_write: cell.is_write,
+            status: CellStatus::Failed,
+            rows_returned,
+            rows_affected,
+            duration_ms,
+            message: Some(message),
+        };
+    }
+
+    if execution.status != ExecutionStatus::Succeeded {
+        return CellExecutionRecord {
+            index: cell.index,
+            name: cell.name.clone(),
+            heading: cell.heading.clone(),
+            is_write: cell.is_write,
+            status: CellStatus::Failed,
+            rows_returned,
+            rows_affected,
+            duration_ms,
+            message: Some(execution.status.label().to_owned()),
+        };
+    }
+
+    if let Some(expected) = cell.expect_rows {
+        let observed = rows_returned.or(rows_affected);
+        match observed {
+            Some(actual) if actual == expected => {}
+            Some(actual) => {
+                return CellExecutionRecord {
+                    index: cell.index,
+                    name: cell.name.clone(),
+                    heading: cell.heading.clone(),
+                    is_write: cell.is_write,
+                    status: CellStatus::Failed,
+                    rows_returned,
+                    rows_affected,
+                    duration_ms,
+                    message: Some(format!("expected {expected} row(s), got {actual}")),
+                };
+            }
+            None => {
+                return CellExecutionRecord {
+                    index: cell.index,
+                    name: cell.name.clone(),
+                    heading: cell.heading.clone(),
+                    is_write: cell.is_write,
+                    status: CellStatus::Failed,
+                    rows_returned,
+                    rows_affected,
+                    duration_ms,
+                    message: Some(format!(
+                        "expected {expected} row(s), but statement produced no row count"
+                    )),
+                };
+            }
+        }
+    }
+
+    let message = if cell.readonly_hint && cell.is_write {
+        Some("warning: cell marked @readonly executed write SQL".to_owned())
+    } else {
+        None
+    };
+
+    CellExecutionRecord {
+        index: cell.index,
+        name: cell.name.clone(),
+        heading: cell.heading.clone(),
+        is_write: cell.is_write,
+        status: CellStatus::Passed,
+        rows_returned,
+        rows_affected,
+        duration_ms,
+        message,
+    }
+}
+
+async fn execute_runbook_live(
+    session: &crate::postgres::Session,
+    runbook: &crate::runbook::SqlRunbook,
+    row_cap: usize,
+    allow_writes: bool,
+    stop_on_error: bool,
+    selected_cell: Option<&str>,
+) -> crate::runbook::RunbookReport {
+    use crate::query::result::{ExecutionStatus, JobId};
+    use crate::runbook::{CellExecutionRecord, CellStatus, summarize_report};
+
+    let mut records = Vec::with_capacity(runbook.cells.len());
+    let mut aborted_reason: Option<&'static str> = None;
+
+    for cell in &runbook.cells {
+        if let Some(target) = selected_cell
+            && cell.name != target
+        {
+            records.push(CellExecutionRecord {
+                index: cell.index,
+                name: cell.name.clone(),
+                heading: cell.heading.clone(),
+                is_write: cell.is_write,
+                status: CellStatus::Skipped,
+                rows_returned: None,
+                rows_affected: None,
+                duration_ms: 0,
+                message: Some(format!(
+                    "skipped (selected cell: {})",
+                    sanitize_cli_ascii(target)
+                )),
+            });
+            continue;
+        }
+
+        if let Some(reason) = aborted_reason {
+            records.push(CellExecutionRecord {
+                index: cell.index,
+                name: cell.name.clone(),
+                heading: cell.heading.clone(),
+                is_write: cell.is_write,
+                status: CellStatus::Skipped,
+                rows_returned: None,
+                rows_affected: None,
+                duration_ms: 0,
+                message: Some(reason.to_owned()),
+            });
+            continue;
+        }
+
+        if cell.is_write && !allow_writes {
+            records.push(CellExecutionRecord {
+                index: cell.index,
+                name: cell.name.clone(),
+                heading: cell.heading.clone(),
+                is_write: cell.is_write,
+                status: CellStatus::BlockedByWriteGuard,
+                rows_returned: None,
+                rows_affected: None,
+                duration_ms: 0,
+                message: Some(runbook_write_guard_message(cell)),
+            });
+            continue;
+        }
+
+        let job = JobId((cell.index + 1) as u64);
+        let execution = session.execute(&cell.sql, row_cap, job).await;
+        let duration_ms = u64::try_from(execution.elapsed.as_millis()).unwrap_or(u64::MAX);
+        let record = evaluate_runbook_cell_execution(cell, &execution, duration_ms);
+
+        if execution.status == ExecutionStatus::ConnectionLost {
+            aborted_reason = Some("skipped (connection lost)");
+        } else if stop_on_error && record.status == CellStatus::Failed {
+            aborted_reason = Some("skipped (--stop-on-error)");
+        }
+
+        records.push(record);
+    }
+
+    summarize_report(runbook.title.clone(), false, allow_writes, records)
+}
+
+fn render_runbook_report(
+    report: &crate::runbook::RunbookReport,
+    format: CliRunbookFormat,
+) -> String {
+    match format {
+        CliRunbookFormat::Table => report.render_table(),
+        CliRunbookFormat::Plain => report.render_plain(),
+        CliRunbookFormat::Json => report.render_json(),
+        CliRunbookFormat::Markdown => report.render_markdown(),
+    }
+}
+
+fn run_runbook(
+    args: &RunbookArgs,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let runbook = load_markdown_runbook(&args.file, args.cell.as_deref())?;
+
+    if args.dry_run {
+        ensure_output_writable(args.output.as_deref(), args.force)?;
+
+        let report =
+            crate::runbook::plan_dry_run(&runbook, args.allow_writes, args.cell.as_deref());
+        let rendered = render_runbook_report(&report, args.format);
+        return write_report_output(
+            rendered,
+            args.output.as_deref(),
+            args.force,
+            "Runbook dry-run plan",
+            out,
+            err,
+        );
+    }
+
+    let allow_writes = args.allow_writes;
+    let stop_on_error = args.stop_on_error;
+    let selected_cell = args.cell.clone();
+
+    let report = connect_and_run_with_config(
+        args.target.as_deref(),
+        &args.connection,
+        args.output.as_deref(),
+        args.force,
+        paths,
+        |session, cfg| async move {
+            let report = execute_runbook_live(
+                &session,
+                &runbook,
+                cfg.query.max_buffered_rows,
+                allow_writes,
+                stop_on_error,
+                selected_cell.as_deref(),
+            )
+            .await;
+            drop(session);
+            Ok(report)
+        },
+    )?;
+
+    let rendered = render_runbook_report(&report, args.format);
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Runbook report",
+        out,
+        err,
+    )?;
+
+    if report.has_failures() {
+        writeln!(
+            err,
+            "Runbook '{}': {} failed, {} blocked by write guard.",
+            report.title, report.failed_count, report.blocked_count
+        )
+        .map_err(io_diagnostic)?;
+        return Ok(ExitCode::Findings);
     }
 
     Ok(ExitCode::Success)

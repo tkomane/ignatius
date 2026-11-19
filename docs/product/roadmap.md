@@ -126,8 +126,9 @@ below; broadening the feature list does not move a milestone forward.
 | M9 Multi-Buffer Editor Workspaces & Scratchpad Persistence | Multi-tab query editing and crash-resilient local scratchpad session persistence | W16 (Features 041-043) | Multi-tab editor workspaces (`Ctrl+K =`/`Ctrl+K -`), persistent named scratchpads under `config_dir/snippets`, and automatic unsaved buffer crash recovery under `IGNATIUS_DATA_DIR` |
 | M10 Developer Workflow & CI Automation | Unsafe SQL is caught before CI, migrations apply once with an audit trail, and schema documentation is reproducible | W16 (Features 044-046) | Offline lint findings and thresholds, checksummed forward-only migration ledger with drift refusal, deterministic data dictionary export |
 | M11 Operational Data Lifecycle | Backups are proven restorable, partitions are managed deliberately, and growth/retention risks are visible | W16 (Features 047-049) | Restore-drill evidence, reviewed partition lifecycle DDL, bounded retention and growth audit |
-| M12 Complete psql & Server/Replication Parity (Planned) | Interactive `psql` backslash commands, bounded `\watch`, logical replication/slot safety, and server config/HBA/FDW/tablespace management | W16 (Features 050-052) | Pure meta-command lexer & bounded watch timer, `pg_publication`/`pg_subscription`/`pg_replication_slots` safety manager, `pg_settings`/`pg_hba_file_rules`/`pg_available_extensions`/FDW/tablespace inspector |
-| M13 Live Data CRUD, Plan Diff & Analytics (Planned) | Keyset-paginated data browser with reviewed multi-row CRUD, `EXPLAIN (BUFFERS, WAL)` A/B plan diffing, and result sparklines/Parquet export | W16 (Features 053-055) | Table data browser with reviewed INSERT/DELETE/batch UPDATE, baseline plan diffing, terminal histograms/sparklines, HTML/Parquet export |
+| M12 Complete psql & Server/Replication Parity | Interactive `psql` backslash commands, bounded `\watch`, logical replication/slot safety, and server config/HBA/FDW/tablespace management | W16 (Features 050-052) | Pure meta-command lexer & bounded watch timer, `pg_publication`/`pg_subscription`/`pg_replication_slots` safety manager, `pg_settings`/`pg_hba_file_rules`/`pg_available_extensions`/FDW/tablespace inspector |
+| M13 Live Data CRUD, Plan Diff & Analytics | Keyset-paginated data browser with reviewed multi-row CRUD, `EXPLAIN (BUFFERS, WAL)` A/B plan diffing, and result sparklines/Parquet export | W16 (Features 053-055) | Table data browser with reviewed INSERT/DELETE/batch UPDATE, baseline plan diffing, terminal histograms/sparklines, HTML/Parquet export |
+| M14 Query Benchmarks, Schema Snapshots & Runbooks | Multi-iteration A/B query latency benchmarking, canonical SHA-256 schema snapshots with drift CI gates, Markdown SQL runbooks, and Material Tonal polish | W16 (Features 056-058) | Rollback-safe warmup/measured benchmark engine with regression gates, zero-row `pg_catalog` snapshot diffing, Markdown/`-- @cell` runbooks with write guards, built-in `material` theme |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -156,6 +157,60 @@ implemented and carry focused and full verification in `docs/status.md` Wave 37.
   read-only, catalog-statistics audit for sequence exhaustion, vacuum debt and
   partitioning candidates, bounded to 200 relations and 200 sequences.
 
+M12 is delivered in source as of 2026-11-18: Features 050, 051 and 052 are
+implemented and recorded in `docs/status.md` Wave 39.
+
+- **`050-psql-metacommands-and-watch-mode`** [Implemented]: Interactive TUI and
+  headless `-c` backslash meta-commands (`\d`, `\d+`, `\dt`, `\dt+`, `\dv`,
+  `\dm`, `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`,
+  `\conninfo`, `\x`, `\timing`, `\?`/`\h`) plus a bounded `[1..3600]s` / 1000
+  iteration `\watch` polling loop (`Ctrl+K :` / `stop-watch`) with explicit
+  `\!` shell-escape refusal.
+- **`051-logical-replication-and-slot-manager`** [Implemented]: Bounded
+  inspection of `pg_publication`, `pg_subscription` (redacted `conninfo`), and
+  `pg_replication_slots` WAL retention risks via `ignatius replication` and
+  `Ctrl+K #` (`logical-replication`) with reviewed SQL insertion.
+- **`052-server-config-hba-and-infra-catalog`** [Implemented]: Bounded
+  inspection of `pg_settings`, `pg_hba_file_rules` risk classification,
+  `pg_available_extensions`, `pg_tablespace`, and FDW/foreign servers (masked
+  options) via `ignatius cluster` and `Ctrl+K @` (`cluster-config`).
+
+M13 is delivered in source as of 2026-11-18: Features 053, 054 and 055 are
+implemented and recorded in `docs/status.md` Wave 40.
+
+- **`053-live-data-browser-and-batch-crud`** [Implemented]: Keyset-paginated
+  table browsing (`ignatius browse`, `Ctrl+K _` / `data-browser`) using tuple
+  cursors bounded at 500 rows/page, plus reviewed transactional `INSERT`,
+  `UPDATE`, and `DELETE` synthesis refusing keyless writes.
+- **`054-explain-buffers-wal-and-plan-diff`** [Implemented]: Rollback-safe
+  `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON)` telemetry extractor
+  and A/B plan comparison engine (`ignatius plan-diff`, `Ctrl+K /` / `plan-diff`).
+- **`055-result-analytics-and-rich-exports`** [Implemented]: Zero-query column
+  statistics, p50/p95, histograms, and sparklines (`Ctrl+K $` / `result-analytics`)
+  plus dependency-free HTML and streaming Apache Parquet exports (`ignatius analytics`,
+  `Ctrl+K e`).
+
+M14 is delivered in source as of 2026-11-19: Features 056, 057 and 058 plus the
+built-in `material` theme and Material 3 quiet-precision polish are implemented
+and recorded in `docs/status.md` Wave 41.
+
+- **`056-query-benchmarks-and-regression-suite`** [Implemented]: Warmup-separated
+  multi-iteration query benchmark engine (`DEFAULT_WARMUP_RUNS = 2`,
+  `DEFAULT_MEASURED_RUNS = 10`) with Welford mean/stddev, `p50`/`p95`/`p99`
+  percentiles, `qps`, 12-bucket latency sparklines, rollback-safe `BEGIN`/`ROLLBACK`
+  per-iteration isolation, and A/B regression gate (`ignatius bench`,
+  `Ctrl+K '` / `query-bench`).
+- **`057-schema-snapshots-and-drift-guard`** [Implemented]: Bounded zero-row-read
+  `pg_catalog` snapshot capture and deterministic lowercase SHA-256
+  `fingerprint_sha256` across PostgreSQL 14-18, plus `Breaking`/`Warning`/`Info`
+  drift diffing with configurable fail thresholds (`ignatius snapshot capture|check`,
+  `Ctrl+K "` / `schema-snapshot`).
+- **`058-interactive-sql-notebook-runner`** [Implemented]: Markdown fenced SQL
+  runbook parser (`-- @name:`, `-- @readonly`, `-- @expect-rows:`) and local
+  `-- @cell` buffer splitter with `classify_all` write guards, offline `--dry-run`
+  planning, and Markdown/JSON/plain/table reports (`ignatius runbook`,
+  `Ctrl+K ?` / `sql-runbook`).
+
 No new feature is implied by milestone completion; the next source slice opens
 from an observed job under W16.
 
@@ -179,6 +234,7 @@ flowchart LR
     M10 --> M11["M11 Operational Data Lifecycle (047-049)"]
     M11 --> M12["M12 psql & Cluster/Replication Parity (050-052)"]
     M12 --> M13["M13 Live CRUD, Plan Diff & Analytics (053-055)"]
+    M13 --> M14["M14 Benchmarks, Snapshots & Runbooks (056-058)"]
 ```
 
 ## Start here

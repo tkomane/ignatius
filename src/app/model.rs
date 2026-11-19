@@ -1939,6 +1939,707 @@ impl SessionRecoveryBanner {
     }
 }
 
+/// Controls how statement execution timing is displayed in the status chrome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimingDisplay {
+    /// Quiet-chrome default: show elapsed duration once a query reaches 200ms.
+    #[default]
+    Threshold200ms,
+    /// Always show completed query elapsed duration (`\timing on`).
+    Always,
+    /// Suppress idle completed elapsed duration (`\timing off`).
+    Off,
+}
+
+/// State for an active bounded `\watch` periodic execution loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchState {
+    /// SQL query executed at each interval tick.
+    pub sql: String,
+    /// Interval in seconds between ticks (`1..=3600`).
+    pub interval_secs: u64,
+    /// 1-based execution count for the active watch session.
+    pub iteration: u64,
+}
+
+/// State for the Logical Replication & Slots Manager overlay (`051`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalReplicationState {
+    /// Loaded replication snapshot from PostgreSQL catalog.
+    pub report: Option<crate::replication::ReplicationReport>,
+    /// Active tab (0: Slots, 1: Publications, 2: Subscriptions).
+    pub active_tab: usize,
+    /// Selected index within the active tab.
+    pub selected_idx: usize,
+    /// Whether an asynchronous catalog fetch is currently in flight.
+    pub loading: bool,
+    /// Status or feedback message shown in overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for LogicalReplicationState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl LogicalReplicationState {
+    /// Number of items visible in the current tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        match self.active_tab {
+            0 => report.slots.len(),
+            1 => report.publications.len(),
+            2 => report.subscriptions.len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+
+    /// Generates a reviewed SQL statement for the selected slot/publication/subscription.
+    #[must_use]
+    pub fn selected_reviewed_sql(&self) -> Option<(String, String)> {
+        let report = self.report.as_ref()?;
+        match self.active_tab {
+            0 => report.slots.get(self.selected_idx).map(|slot| {
+                (
+                    format!("Drop slot '{}'", slot.slot_name),
+                    crate::replication::drop_slot_sql(&slot.slot_name),
+                )
+            }),
+            1 => report.publications.get(self.selected_idx).map(|pub_| {
+                (
+                    format!("Publication '{}' template", pub_.name),
+                    crate::replication::create_publication_sql(&pub_.name, pub_.all_tables),
+                )
+            }),
+            2 => report.subscriptions.get(self.selected_idx).map(|sub| {
+                (
+                    format!(
+                        "{} subscription '{}'",
+                        if sub.enabled { "Disable" } else { "Enable" },
+                        sub.name
+                    ),
+                    crate::replication::alter_subscription_toggle_sql(&sub.name, !sub.enabled),
+                )
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// State for the Server Settings, HBA, Extensions, Tablespaces & FDW overlay (`052`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterConfigState {
+    /// Loaded cluster report from PostgreSQL catalog.
+    pub report: Option<crate::cluster::ClusterReport>,
+    /// Active tab (0: Settings, 1: HBA Auth, 2: Extensions, 3: Tablespaces, 4: FDWs).
+    pub active_tab: usize,
+    /// Selected index within the active filtered tab.
+    pub selected_idx: usize,
+    /// When true, narrows to non-default settings, HBA risks, or upgradable/installed extensions.
+    pub modified_only: bool,
+    /// Optional substring filter applied within the overlay.
+    pub filter_text: String,
+    /// Whether an asynchronous catalog fetch is currently in flight.
+    pub loading: bool,
+    /// Status or feedback message shown in overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl Default for ClusterConfigState {
+    fn default() -> Self {
+        Self {
+            report: None,
+            active_tab: 0,
+            selected_idx: 0,
+            modified_only: false,
+            filter_text: String::new(),
+            loading: true,
+            status_message: None,
+        }
+    }
+}
+
+impl ClusterConfigState {
+    /// Number of items visible in the current filtered tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        let Some(report) = &self.report else {
+            return 0;
+        };
+        let f = (!self.filter_text.trim().is_empty()).then_some(self.filter_text.as_str());
+        match self.active_tab {
+            0 => report.filtered_settings(self.modified_only, f).len(),
+            1 => report.filtered_hba_rules(f).len(),
+            2 => report.filtered_extensions(f).len(),
+            3 => report.filtered_tablespaces(f).len(),
+            4 => report.filtered_fdws(f).len(),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current filtered tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(4);
+        self.selected_idx = 0;
+    }
+
+    /// Generates a reviewed SQL statement for the selected cluster configuration item.
+    #[must_use]
+    pub fn selected_reviewed_sql(&self) -> Option<(String, String)> {
+        let report = self.report.as_ref()?;
+        let f = (!self.filter_text.trim().is_empty()).then_some(self.filter_text.as_str());
+        match self.active_tab {
+            0 => report
+                .filtered_settings(self.modified_only, f)
+                .get(self.selected_idx)
+                .map(|s| {
+                    let reload = if s.context == "sighup" {
+                        format!("\n{}", crate::cluster::reload_conf_sql())
+                    } else {
+                        String::new()
+                    };
+                    (
+                        format!("Reviewed ALTER SYSTEM for '{}'", s.name),
+                        format!(
+                            "{}{reload}",
+                            crate::cluster::alter_system_sql(&s.name, &s.setting)
+                        ),
+                    )
+                }),
+            2 => report
+                .filtered_extensions(f)
+                .get(self.selected_idx)
+                .map(|ext| {
+                    if let (Some(_installed), Some(default_ver)) =
+                        (&ext.installed_version, &ext.default_version)
+                    {
+                        if ext.upgrade_available {
+                            (
+                                format!("Upgrade extension '{}'", ext.name),
+                                crate::cluster::alter_extension_update_sql(&ext.name, default_ver),
+                            )
+                        } else {
+                            (
+                                format!("Extension '{}' DDL", ext.name),
+                                crate::cluster::create_extension_sql(&ext.name),
+                            )
+                        }
+                    } else {
+                        (
+                            format!("Install extension '{}'", ext.name),
+                            crate::cluster::create_extension_sql(&ext.name),
+                        )
+                    }
+                }),
+            3 => report
+                .filtered_tablespaces(f)
+                .get(self.selected_idx)
+                .map(|ts| {
+                    (
+                        format!("Tablespace '{}' DDL", ts.name),
+                        crate::cluster::create_tablespace_sql(ts),
+                    )
+                }),
+            4 => report.filtered_fdws(f).get(self.selected_idx).map(|fdw| {
+                let mut sql = crate::cluster::create_fdw_sql(fdw);
+                for srv in &fdw.servers {
+                    sql.push('\n');
+                    sql.push_str(&crate::cluster::create_server_sql(srv, &fdw.name));
+                }
+                (format!("Foreign Data Wrapper '{}' DDL", fdw.name), sql)
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// State for the Keyset-Paginated Data Browser & Batch CRUD overlay (`053`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataBrowserState {
+    /// Active target schema.
+    pub schema: String,
+    /// Active target relation.
+    pub table: String,
+    /// Current keyset browse request.
+    pub request: crate::crud::BrowseRequest,
+    /// Loaded browse page, if available.
+    pub page: Option<crate::crud::BrowsePage>,
+    /// Selected row index within the visible page.
+    pub selected_row: usize,
+    /// Selected column index within the visible page.
+    pub selected_col: usize,
+    /// Whether an asynchronous browse query is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl DataBrowserState {
+    /// Initializes a new loading state for `schema.table`.
+    #[must_use]
+    pub fn new(schema: impl Into<String>, table: impl Into<String>) -> Self {
+        let schema = schema.into();
+        let table = table.into();
+        let request = crate::crud::BrowseRequest {
+            schema: schema.clone(),
+            table: table.clone(),
+            columns: Vec::new(),
+            pk_columns: Vec::new(),
+            sort_column: None,
+            sort_order: crate::crud::SortOrder::Asc,
+            page_size: crate::crud::DEFAULT_PAGE_SIZE,
+            cursor: None,
+            direction: crate::crud::PageDirection::Next,
+            filter_predicate: None,
+        };
+        Self {
+            schema,
+            table,
+            request,
+            page: None,
+            selected_row: 0,
+            selected_col: 0,
+            loading: true,
+            status_message: None,
+        }
+    }
+
+    /// Moves selected row within bounds of the loaded page.
+    pub fn move_row(&mut self, delta: isize) {
+        let total = self.page.as_ref().map_or(0, |p| p.rows.len());
+        if total == 0 {
+            self.selected_row = 0;
+            return;
+        }
+        let next = (self.selected_row as isize + delta).clamp(0, total as isize - 1);
+        self.selected_row = next as usize;
+    }
+
+    /// Moves selected column within bounds of the loaded page.
+    pub fn move_col(&mut self, delta: isize) {
+        let total = self.page.as_ref().map_or(0, |p| p.columns.len());
+        if total == 0 {
+            self.selected_col = 0;
+            return;
+        }
+        let next = (self.selected_col as isize + delta).clamp(0, total as isize - 1);
+        self.selected_col = next as usize;
+    }
+
+    /// Synthesizes a reviewed transactional CRUD script for the selected row/cell.
+    pub fn reviewed_crud_sql(&self, delete_row: bool) -> Result<(String, String), String> {
+        let Some(page) = &self.page else {
+            return Err("No browse page loaded yet.".to_owned());
+        };
+        if page.rows.is_empty() {
+            if delete_row {
+                return Err("Cannot generate DELETE on an empty page.".to_owned());
+            }
+            let values: Vec<(String, Option<String>)> =
+                page.columns.iter().map(|c| (c.clone(), None)).collect();
+            let plan = crate::crud::BatchCrudPlan {
+                schema: page.schema.clone(),
+                table: page.table.clone(),
+                pk_columns: page.pk_columns.clone(),
+                mutations: vec![crate::crud::RowMutation::Insert { values }],
+                dry_run_rollback: false,
+            };
+            let sql = plan.build_reviewed_sql().map_err(|d| d.headline)?;
+            return Ok((
+                format!("Reviewed INSERT into {}.{}", page.schema, page.table),
+                sql,
+            ));
+        }
+        if page.pk_columns.is_empty() {
+            return Err(
+                "Table has no primary key; reviewed UPDATE/DELETE is disabled for safety."
+                    .to_owned(),
+            );
+        }
+        let row = &page.rows[self.selected_row.min(page.rows.len() - 1)];
+        let mut pk_match = Vec::with_capacity(page.pk_columns.len());
+        for pk in &page.pk_columns {
+            let Some(idx) = page.columns.iter().position(|c| c == pk) else {
+                return Err(format!(
+                    "Primary key column '{pk}' missing from page projection."
+                ));
+            };
+            let Some(Some(val)) = row.get(idx) else {
+                return Err(format!(
+                    "Primary key column '{pk}' is NULL on selected row."
+                ));
+            };
+            pk_match.push((pk.clone(), val.clone()));
+        }
+        let mutation = if delete_row {
+            crate::crud::RowMutation::Delete { pk_match }
+        } else {
+            let col_idx = self.selected_col.min(page.columns.len().saturating_sub(1));
+            let col_name = page.columns[col_idx].clone();
+            let current = row.get(col_idx).cloned().flatten();
+            crate::crud::RowMutation::Update {
+                pk_match,
+                changes: vec![(col_name, current)],
+            }
+        };
+        let plan = crate::crud::BatchCrudPlan {
+            schema: page.schema.clone(),
+            table: page.table.clone(),
+            pk_columns: page.pk_columns.clone(),
+            mutations: vec![mutation],
+            dry_run_rollback: false,
+        };
+        let sql = plan.build_reviewed_sql().map_err(|d| d.headline)?;
+        let op = if delete_row { "DELETE" } else { "UPDATE" };
+        Ok((
+            format!("Reviewed {op} on {}.{}", page.schema, page.table),
+            sql,
+        ))
+    }
+}
+
+/// State for Extended EXPLAIN (BUFFERS, WAL, SETTINGS) & Plan Diff overlay (`054`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PlanDiffState {
+    /// Baseline query SQL (Plan A).
+    pub baseline_sql: String,
+    /// Candidate query SQL (Plan B).
+    pub candidate_sql: String,
+    /// Captured baseline plan snapshot.
+    pub baseline: Option<crate::plandiff::PlanSnapshot>,
+    /// Captured candidate plan snapshot.
+    pub candidate: Option<crate::plandiff::PlanSnapshot>,
+    /// Computed A/B plan comparison report.
+    pub report: Option<crate::plandiff::PlanDiffReport>,
+    /// Active tab (`0`: Summary & Diff, `1`: Node Comparison, `2`: Buffers / WAL / Settings).
+    pub active_tab: usize,
+    /// Selected item row index within active tab.
+    pub selected_idx: usize,
+    /// Whether extended EXPLAIN uses `ANALYZE, BUFFERS, WAL` inside rollback transaction.
+    pub analyze_mode: bool,
+    /// Whether an async EXPLAIN capture is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl PlanDiffState {
+    /// Returns item count in the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => self.report.as_ref().map_or(0, |r| r.findings.len()),
+            1 => self.report.as_ref().map_or(0, |r| r.node_changes.len()),
+            2 => self.report.as_ref().map_or(
+                self.baseline.as_ref().map_or(0, |p| p.settings.len()),
+                |r| r.setting_changes.len(),
+            ),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(2);
+        self.selected_idx = 0;
+    }
+
+    /// Recomputes `report` whenever both `baseline` and `candidate` are loaded.
+    pub fn recompute_diff(&mut self) {
+        if let (Some(base), Some(cand)) = (&self.baseline, &self.candidate) {
+            self.report = Some(crate::plandiff::diff_plans(base.clone(), cand.clone()));
+        } else {
+            self.report = None;
+        }
+    }
+}
+
+/// State for the Zero-Query Result Analytics overlay (`055`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultAnalyticsState {
+    /// Computed column statistics, histograms, and sparklines.
+    pub analytics: crate::analytics::ResultAnalytics,
+    /// Active tab (`0`: Column Profiles & Sparklines, `1`: Top Values & Distributions).
+    pub active_tab: usize,
+    /// Selected column index.
+    pub selected_col: usize,
+    /// Status message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl ResultAnalyticsState {
+    /// Creates an analytics state directly from a visible [`crate::query::result::ResultSet`].
+    #[must_use]
+    pub fn from_result(set: &crate::query::result::ResultSet) -> Self {
+        Self {
+            analytics: crate::analytics::profile_result_set(set),
+            active_tab: 0,
+            selected_col: 0,
+            status_message: None,
+        }
+    }
+
+    /// Moves column selection within bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.analytics.columns.len();
+        if total == 0 {
+            self.selected_col = 0;
+            return;
+        }
+        let next = (self.selected_col as isize + delta).clamp(0, total as isize - 1);
+        self.selected_col = next as usize;
+    }
+
+    /// Switches active tab (`0` or `1`).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+    }
+}
+
+/// State for the Query Latency Benchmark & A/B Regression Suite overlay (`056`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct QueryBenchState {
+    /// Warmup, measured iteration, and rollback safety parameters.
+    pub config: crate::bench::BenchConfig,
+    /// Baseline SQL query (Query A).
+    pub baseline_sql: String,
+    /// Candidate SQL query (Query B), when two statements are benchmarked.
+    pub candidate_sql: String,
+    /// Captured baseline benchmark statistics.
+    pub baseline: Option<crate::bench::BenchStats>,
+    /// Captured candidate benchmark statistics.
+    pub candidate: Option<crate::bench::BenchStats>,
+    /// Computed single-query or A/B comparison benchmark report.
+    pub report: Option<crate::bench::BenchReport>,
+    /// Active tab (`0`: Summary & Latency, `1`: Iteration Samples & Sparkline).
+    pub active_tab: usize,
+    /// Selected item row index within the active tab.
+    pub selected_idx: usize,
+    /// Whether an async benchmark run is currently in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl QueryBenchState {
+    /// Returns item count in the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => usize::from(self.report.is_some()) * 9,
+            1 => self
+                .baseline
+                .as_ref()
+                .map_or(0, |b| b.samples.len())
+                .max(self.candidate.as_ref().map_or(0, |c| c.samples.len())),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab (`0` or `1`) and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+        self.selected_idx = 0;
+    }
+
+    /// Recomputes `report` from `baseline` and optional `candidate` statistics.
+    pub fn recompute_report(&mut self) {
+        if let Some(base) = &self.baseline {
+            self.report = Some(crate::bench::compare_benchmarks(
+                base.clone(),
+                self.candidate.clone(),
+                None,
+            ));
+        } else {
+            self.report = None;
+        }
+    }
+}
+
+/// State for the Schema Snapshot & Drift Guard overlay (`057`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SchemaSnapshotState {
+    /// Optional single-schema filter (`None` captures all user schemas).
+    pub schema_filter: Option<String>,
+    /// Pinned baseline snapshot used for local live drift checks.
+    pub baseline: Option<crate::snapshot::SchemaSnapshot>,
+    /// Most recently captured live schema snapshot.
+    pub current: Option<crate::snapshot::SchemaSnapshot>,
+    /// Computed drift diff report between `baseline` and `current`.
+    pub diff: Option<crate::snapshot::SnapshotDiffReport>,
+    /// Active tab (`0`: Overview & Drift, `1`: Tables).
+    pub active_tab: usize,
+    /// Selected item row index within the active tab.
+    pub selected_idx: usize,
+    /// Whether an async catalog snapshot capture is in flight.
+    pub loading: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl SchemaSnapshotState {
+    /// Returns item count in the currently active tab.
+    #[must_use]
+    pub fn current_tab_len(&self) -> usize {
+        match self.active_tab {
+            0 => self.diff.as_ref().map_or(0, |d| d.findings.len()),
+            1 => self.current.as_ref().map_or(0, |s| s.tables.len()),
+            _ => 0,
+        }
+    }
+
+    /// Moves selection within the current tab bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.current_tab_len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab (`0` or `1`) and resets row selection.
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+        self.selected_idx = 0;
+    }
+
+    /// Pins the currently captured snapshot as the baseline and recomputes the drift report.
+    pub fn capture_as_baseline(&mut self) {
+        if let Some(current) = self.current.clone() {
+            self.baseline = Some(current);
+            self.recompute_diff();
+        }
+    }
+
+    /// Recomputes `diff` whenever both `baseline` and `current` snapshots exist.
+    pub fn recompute_diff(&mut self) {
+        if let (Some(base), Some(curr)) = (&self.baseline, &self.current) {
+            self.diff = Some(crate::snapshot::diff_snapshots(base, curr));
+        } else {
+            self.diff = None;
+        }
+    }
+}
+
+/// State for the Interactive SQL Markdown Runbook overlay (`058`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqlRunbookState {
+    /// Parsed SQL runbook from the active editor buffer.
+    pub runbook: crate::runbook::SqlRunbook,
+    /// Active tab (`0`: Cells, `1`: Safety Dry-Run).
+    pub active_tab: usize,
+    /// Selected cell index within `runbook.cells`.
+    pub selected_idx: usize,
+    /// Whether write/DDL cells are permitted in the dry-run preview.
+    pub allow_writes: bool,
+    /// Status or diagnostic message shown in footer.
+    pub status_message: Option<String>,
+}
+
+impl SqlRunbookState {
+    /// Parses `sql` into a bounded [`crate::runbook::SqlRunbook`] for overlay inspection.
+    #[must_use]
+    pub fn from_buffer(sql: &str) -> Self {
+        Self {
+            runbook: crate::runbook::parse_buffer_runbook(sql, "active-buffer"),
+            active_tab: 0,
+            selected_idx: 0,
+            allow_writes: false,
+            status_message: None,
+        }
+    }
+
+    /// Moves cell selection within bounds.
+    pub fn move_selection(&mut self, delta: isize) {
+        let total = self.runbook.cells.len();
+        if total == 0 {
+            self.selected_idx = 0;
+            return;
+        }
+        let next = (self.selected_idx as isize + delta).clamp(0, total as isize - 1);
+        self.selected_idx = next as usize;
+    }
+
+    /// Switches active tab (`0`: Cells, `1`: Safety Dry-Run).
+    pub fn set_tab(&mut self, tab: usize) {
+        self.active_tab = tab.min(1);
+    }
+
+    /// Returns the currently highlighted runbook cell, if any.
+    #[must_use]
+    pub fn selected_cell(&self) -> Option<&crate::runbook::RunbookCell> {
+        self.runbook.cells.get(self.selected_idx)
+    }
+
+    /// Computes a pure dry-run execution preview reflecting `allow_writes`.
+    #[must_use]
+    pub fn dry_run_report(&self) -> crate::runbook::RunbookReport {
+        crate::runbook::plan_dry_run(&self.runbook, self.allow_writes, None)
+    }
+}
+
 /// Interactive state of the offline SQL lint findings overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintFindingsState {
@@ -1999,6 +2700,10 @@ pub enum ExportFormat {
     Ndjson,
     /// A Markdown pipe table.
     Markdown,
+    /// Self-contained Field Industrial HTML report.
+    Html,
+    /// Streaming Apache Parquet binary column file.
+    Parquet,
 }
 
 impl ExportFormat {
@@ -2011,6 +2716,8 @@ impl ExportFormat {
             Self::Json => "JSON",
             Self::Ndjson => "NDJSON",
             Self::Markdown => "Markdown",
+            Self::Html => "HTML",
+            Self::Parquet => "Parquet",
         }
     }
 
@@ -2023,6 +2730,8 @@ impl ExportFormat {
             Self::Json => ".json",
             Self::Ndjson => ".ndjson",
             Self::Markdown => ".md",
+            Self::Html => ".html",
+            Self::Parquet => ".parquet",
         }
     }
 
@@ -2035,6 +2744,8 @@ impl ExportFormat {
             Self::Json => "one JSON document",
             Self::Ndjson => "one JSON object per row",
             Self::Markdown => "a Markdown table",
+            Self::Html => "self-contained Field Industrial HTML report",
+            Self::Parquet => "columnar binary Apache Parquet file",
         }
     }
 }
@@ -3287,6 +3998,38 @@ pub struct Model {
     pub recovery_banner: Option<SessionRecoveryBanner>,
     /// Active offline lint findings overlay, when one is open.
     pub lint_findings: Option<LintFindingsState>,
+    /// Active psql `\watch` periodic polling loop.
+    pub watch: Option<WatchState>,
+    /// Controls statement execution timing visibility (`\timing`).
+    pub timing_display: TimingDisplay,
+    /// Interactive logical replication and slots manager overlay state.
+    pub logical_replication: Option<LogicalReplicationState>,
+    /// Request counter for in-flight logical replication queries.
+    pub logical_replication_request: u64,
+    /// Interactive server config, HBA, extensions, tablespaces, and FDWs overlay state.
+    pub cluster_config: Option<ClusterConfigState>,
+    /// Request counter for in-flight cluster configuration queries.
+    pub cluster_config_request: u64,
+    /// Interactive keyset-paginated live data browser and batch CRUD overlay state.
+    pub data_browser: Option<DataBrowserState>,
+    /// Request counter for in-flight keyset data browse queries.
+    pub data_browser_request: u64,
+    /// Interactive extended EXPLAIN and A/B plan diff overlay state.
+    pub plan_diff: Option<PlanDiffState>,
+    /// Request counter for in-flight extended EXPLAIN snapshots.
+    pub plan_diff_request: u64,
+    /// Interactive zero-query result analytics profiler overlay state.
+    pub result_analytics: Option<ResultAnalyticsState>,
+    /// Interactive query latency benchmark and A/B regression suite overlay state.
+    pub query_bench: Option<QueryBenchState>,
+    /// Request counter for in-flight query benchmark executions.
+    pub query_bench_request: u64,
+    /// Interactive canonical schema snapshot and drift guard overlay state.
+    pub schema_snapshot: Option<SchemaSnapshotState>,
+    /// Request counter for in-flight schema snapshot catalog captures.
+    pub schema_snapshot_request: u64,
+    /// Interactive SQL Markdown runbook overlay state.
+    pub sql_runbook: Option<SqlRunbookState>,
 }
 
 impl Model {

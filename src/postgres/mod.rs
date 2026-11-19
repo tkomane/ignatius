@@ -3,6 +3,9 @@
 //! This is the only module that knows the driver exists. Everything above it
 //! works with the pure types in [`crate::query`] and [`crate::diagnostics`].
 
+pub mod bench;
+pub mod cluster;
+pub mod crud;
 mod dbdoc;
 pub mod drill;
 pub mod error;
@@ -10,7 +13,10 @@ pub mod growth;
 pub mod metadata;
 mod notices;
 pub mod partition;
+pub mod plandiff;
+pub mod replication;
 pub mod session;
+pub mod snapshot;
 pub mod tls;
 
 pub use metadata::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary, quote_identifier};

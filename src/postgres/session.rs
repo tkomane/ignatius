@@ -349,6 +349,54 @@ impl Session {
         crate::postgres::partition::partition_snapshot(&self.client, schema).await
     }
 
+    /// Reads the bounded logical replication and slot safety overview.
+    pub async fn replication_overview(
+        &self,
+    ) -> Result<crate::replication::ReplicationReport, Diagnostic> {
+        crate::postgres::replication::replication_report(&self.client).await
+    }
+
+    /// Reads the bounded cluster settings, HBA rules, extensions, tablespaces, and FDWs overview.
+    pub async fn cluster_overview(&self) -> Result<crate::cluster::ClusterReport, Diagnostic> {
+        crate::postgres::cluster::cluster_report(&self.client).await
+    }
+
+    /// Reads one keyset-paginated data page and primary-key metadata for a table.
+    pub async fn browse_table_page(
+        &self,
+        request: &crate::crud::BrowseRequest,
+    ) -> Result<crate::postgres::crud::BrowsePageResult, Diagnostic> {
+        crate::postgres::crud::browse_table_page(&self.client, request).await
+    }
+
+    /// Captures an extended `EXPLAIN (BUFFERS, WAL, SETTINGS, FORMAT JSON)` snapshot.
+    pub async fn explain_extended(
+        &self,
+        sql: &str,
+        analyze: bool,
+        label: &str,
+    ) -> Result<crate::plandiff::PlanSnapshot, Diagnostic> {
+        crate::postgres::plandiff::explain_extended(&self.client, sql, analyze, label).await
+    }
+
+    /// Executes warmup and measured iterations of one SQL statement and returns benchmark statistics.
+    pub async fn run_benchmark(
+        &self,
+        sql: &str,
+        config: &crate::bench::BenchConfig,
+        label: &str,
+    ) -> Result<crate::bench::BenchStats, Diagnostic> {
+        crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await
+    }
+
+    /// Captures a bounded canonical PostgreSQL schema snapshot for drift detection.
+    pub async fn capture_schema_snapshot(
+        &self,
+        schema: Option<&str>,
+    ) -> Result<crate::snapshot::SchemaSnapshot, Diagnostic> {
+        crate::postgres::snapshot::capture_schema_snapshot(&self.client, schema).await
+    }
+
     /// Whether a database with this exact name exists on the server.
     pub async fn drill_database_exists(&self, name: &str) -> Result<bool, Diagnostic> {
         crate::postgres::drill::database_exists(&self.client, name).await

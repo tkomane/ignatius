@@ -7,6 +7,7 @@ use crate::ui::layout::Presentation;
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -147,65 +148,129 @@ pub(crate) fn render_objects(
     }
 
     if rows.is_empty() {
-        let lines = if model.tree.filter.is_empty() {
+        let mut empty_lines: Vec<Line<'static>> = Vec::new();
+        if model.tree.filter.is_empty() {
             if model.connection.is_usable() {
-                vec![
-                    "No object rows are loaded yet.".to_owned(),
-                    format!(
-                        "{} Reload the object tree.",
-                        action_key_label(keymap, &crate::app::Action::ReloadObjects)
+                let reload_key = action_key_label(keymap, &crate::app::Action::ReloadObjects);
+                empty_lines.push(Line::from(vec![
+                    Span::styled(
+                        presentation.glyphs.prefix(Icon::Database),
+                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
                     ),
-                ]
+                    Span::styled("No object rows are loaded yet.", theme.style(Token::Header)),
+                ]));
+                empty_lines.push(Line::from(Span::styled(
+                    "Schemas, tables, and views populate here once loaded.",
+                    theme.style(Token::Muted),
+                )));
+                if body.height >= 5 {
+                    empty_lines.push(Line::raw(""));
+                }
+                empty_lines.push(Line::from(vec![
+                    Span::styled(reload_key, theme.pill(Token::Focus)),
+                    Span::styled(" Reload the object tree.", theme.style(Token::Text)),
+                ]));
             } else if matches!(
                 model.connection,
                 crate::app::model::ConnectionState::Connecting { .. }
             ) {
-                vec![
-                    "Object tree unavailable until connected.".to_owned(),
-                    "The connection is being established.".to_owned(),
-                ]
+                empty_lines.push(Line::from(vec![
+                    Span::styled(
+                        presentation.glyphs.prefix(Icon::Info),
+                        theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Object tree unavailable until connected.",
+                        theme.style(Token::Header),
+                    ),
+                ]));
+                empty_lines.push(Line::from(Span::styled(
+                    "The connection is being established.",
+                    theme.style(Token::Muted),
+                )));
             } else if model.connection_profiles.is_empty() {
                 // Nothing to pick from, so the one next action is outside the
                 // client: name the configuration route and the command-line
                 // route rather than offering a key that would open nothing.
-                vec![
-                    "Object tree unavailable until connected.".to_owned(),
-                    "Add a profile in config.toml or pass a connection target when starting."
-                        .to_owned(),
-                ]
+                empty_lines.push(Line::from(vec![
+                    Span::styled(
+                        presentation.glyphs.prefix(Icon::Warning),
+                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Object tree unavailable until connected.",
+                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                empty_lines.push(Line::from(Span::styled(
+                    "Add a profile in config.toml or pass a connection target when starting.",
+                    theme.style(Token::Muted),
+                )));
             } else {
                 // The picker is the configured route; use its existing key and
                 // wording rather than inventing a second description.
-                let picker = keymap
-                    .contextual_hint(&crate::app::Action::OpenConnectionPicker)
-                    .map_or_else(
-                        || "Open the command palette to choose a connection".to_owned(),
-                        |(key, label)| format!("{key} {label}"),
-                    );
-                vec![
-                    "Object tree unavailable until connected.".to_owned(),
-                    format!("{picker}. Object names appear after reload."),
-                ]
+                empty_lines.push(Line::from(vec![
+                    Span::styled(
+                        presentation.glyphs.prefix(Icon::Warning),
+                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Object tree unavailable until connected.",
+                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                empty_lines.push(Line::from(Span::styled(
+                    "Object names appear after reload.",
+                    theme.style(Token::Muted),
+                )));
+                if body.height >= 5 {
+                    empty_lines.push(Line::raw(""));
+                }
+                if let Some((key, label)) =
+                    keymap.contextual_hint(&crate::app::Action::OpenConnectionPicker)
+                {
+                    empty_lines.push(Line::from(vec![
+                        Span::styled(key, theme.pill(Token::Focus)),
+                        Span::styled(format!(" {label}."), theme.style(Token::Text)),
+                    ]));
+                } else {
+                    empty_lines.push(Line::from(Span::styled(
+                        "Open the command palette to choose a connection.",
+                        theme.style(Token::Info),
+                    )));
+                }
             }
         } else {
-            vec![
-                "No object matches this filter.".to_owned(),
-                format!("Searched {:?}.", sanitize_for_display(&model.tree.filter)),
-                format!(
-                    "{} or {} clears the filter.",
-                    action_key_label(keymap, &crate::app::Action::Dismiss),
-                    action_key_label(keymap, &crate::app::Action::StartFilter)
+            empty_lines.push(Line::from(vec![
+                Span::styled(
+                    presentation.glyphs.prefix(Icon::Index),
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
                 ),
-            ]
-        };
-        Paragraph::new(
-            lines
-                .into_iter()
-                .map(|line| Line::from(Span::styled(line, theme.style(Token::Muted))))
-                .collect::<Vec<_>>(),
-        )
-        .wrap(Wrap { trim: true })
-        .render(body, buf);
+                Span::styled("No object matches this filter.", theme.style(Token::Header)),
+            ]));
+            empty_lines.push(Line::from(Span::styled(
+                format!("Searched {:?}.", sanitize_for_display(&model.tree.filter)),
+                theme.style(Token::Muted),
+            )));
+            if body.height >= 5 {
+                empty_lines.push(Line::raw(""));
+            }
+            empty_lines.push(Line::from(vec![
+                Span::styled(
+                    action_key_label(keymap, &crate::app::Action::Dismiss),
+                    theme.pill(Token::Focus),
+                ),
+                Span::styled(" or ", theme.style(Token::Muted)),
+                Span::styled(
+                    action_key_label(keymap, &crate::app::Action::StartFilter),
+                    theme.pill(Token::Focus),
+                ),
+                Span::styled(" clears the filter.", theme.style(Token::Muted)),
+            ]));
+        }
+        Paragraph::new(empty_lines)
+            .wrap(Wrap { trim: true })
+            .render(body, buf);
         return;
     }
 

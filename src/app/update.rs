@@ -188,6 +188,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.pending_update = None;
             model.running_refresh = false;
             model.refresh_pending = false;
+            model.watch = None;
             model.cell_update_notice = cell_update_in_flight
                 .then(|| "The connection was lost; no cell update was retried.".to_owned());
             if refresh_in_flight && !cell_update_in_flight {
@@ -240,6 +241,9 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.focus = Focus::Editor;
             }
             model.notices.clear();
+            if execution.status != ExecutionStatus::Succeeded {
+                model.watch = None;
+            }
             if execution.status == ExecutionStatus::ConnectionLost
                 && let Some(info) = model.connection.info()
             {
@@ -1120,6 +1124,172 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::LogicalReplicationLoaded { request, result } => {
+            if model.logical_replication_request != request {
+                return Vec::new();
+            }
+            if let Some(rep) = &mut model.logical_replication {
+                rep.loading = false;
+                match *result {
+                    Ok(report) => {
+                        rep.report = Some(report);
+                        rep.status_message = None;
+                    }
+                    Err(diag) => {
+                        rep.status_message = Some(format!(
+                            "Replication catalog fetch failed: {}",
+                            diag.headline
+                        ));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::ClusterConfigLoaded { request, result } => {
+            if model.cluster_config_request != request {
+                return Vec::new();
+            }
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.loading = false;
+                match *result {
+                    Ok(report) => {
+                        cfg.report = Some(report);
+                        cfg.status_message = None;
+                    }
+                    Err(diag) => {
+                        cfg.status_message =
+                            Some(format!("Cluster config fetch failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::BrowsePageLoaded { request, result } => {
+            if model.data_browser_request != request {
+                return Vec::new();
+            }
+            if let Some(browser) = &mut model.data_browser {
+                browser.loading = false;
+                match *result {
+                    Ok(res) => {
+                        browser.request.columns = res.page.columns.clone();
+                        browser.request.pk_columns = res.page.pk_columns.clone();
+                        browser.page = Some(res.page);
+                        browser.selected_row = 0;
+                        browser.selected_col = 0;
+                        browser.status_message = None;
+                    }
+                    Err(diag) => {
+                        browser.status_message =
+                            Some(format!("Browse load failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::ExtendedExplainLoaded {
+            request,
+            target,
+            result,
+        } => {
+            if model.plan_diff_request != request {
+                return Vec::new();
+            }
+            if let Some(diff) = &mut model.plan_diff {
+                diff.loading = false;
+                match *result {
+                    Ok(snapshot) => {
+                        match target {
+                            crate::app::message::PlanDiffTarget::Baseline => {
+                                diff.baseline = Some(snapshot);
+                                diff.status_message =
+                                    Some("Captured Baseline (A) plan snapshot".to_owned());
+                            }
+                            crate::app::message::PlanDiffTarget::Candidate => {
+                                diff.candidate = Some(snapshot);
+                                diff.status_message =
+                                    Some("Captured Candidate (B) plan snapshot".to_owned());
+                            }
+                        }
+                        diff.recompute_diff();
+                    }
+                    Err(diag) => {
+                        diff.status_message =
+                            Some(format!("Extended EXPLAIN failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::QueryBenchLoaded {
+            request,
+            target,
+            result,
+        } => {
+            if model.query_bench_request != request {
+                return Vec::new();
+            }
+            if let Some(bench) = &mut model.query_bench {
+                bench.loading = false;
+                match *result {
+                    Ok(stats) => {
+                        match target {
+                            crate::app::message::BenchTarget::Baseline => {
+                                bench.baseline = Some(stats);
+                                bench.status_message =
+                                    Some("Captured Baseline (A) benchmark".to_owned());
+                            }
+                            crate::app::message::BenchTarget::Candidate => {
+                                bench.candidate = Some(stats);
+                                bench.status_message =
+                                    Some("Captured Candidate (B) benchmark".to_owned());
+                            }
+                        }
+                        bench.recompute_report();
+                    }
+                    Err(diag) => {
+                        bench.status_message =
+                            Some(format!("Query benchmark failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::SchemaSnapshotLoaded { request, result } => {
+            if model.schema_snapshot_request != request {
+                return Vec::new();
+            }
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.loading = false;
+                match *result {
+                    Ok(snapshot) => {
+                        let table_count = snapshot.tables.len();
+                        snap.current = Some(snapshot);
+                        snap.recompute_diff();
+                        snap.status_message = Some(if let Some(diff) = &snap.diff {
+                            if diff.has_drift() {
+                                format!(
+                                    "Captured {table_count} table(s); drift: {} breaking, {} warning, {} info",
+                                    diff.breaking_count, diff.warning_count, diff.info_count
+                                )
+                            } else {
+                                format!(
+                                    "Captured {table_count} table(s); no drift vs pinned baseline"
+                                )
+                            }
+                        } else {
+                            format!("Captured snapshot of {table_count} table(s)")
+                        });
+                    }
+                    Err(diag) => {
+                        snap.status_message =
+                            Some(format!("Schema snapshot failed: {}", diag.headline));
+                    }
+                }
+            }
+            Vec::new()
+        }
+        Message::WatchTick => watch_tick(model),
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
         model.mouse.drag = None;
@@ -1391,6 +1561,9 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.import_wizard.is_some()
         || model.routine_runner.is_some()
         || model.maintenance_ops.is_some()
+        || model.query_bench.is_some()
+        || model.schema_snapshot.is_some()
+        || model.sql_runbook.is_some()
         || model.completion.menu.is_some()
         || model.tree.filtering
         || model.result_filtering
@@ -1524,6 +1697,30 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if model.lint_findings.is_some() {
         return lint_findings_action(model, action);
     }
+    if model.logical_replication.is_some() {
+        return logical_replication_action(model, action);
+    }
+    if model.cluster_config.is_some() {
+        return cluster_config_action(model, action);
+    }
+    if model.data_browser.is_some() {
+        return data_browser_action(model, action);
+    }
+    if model.plan_diff.is_some() {
+        return plan_diff_action(model, action);
+    }
+    if model.result_analytics.is_some() {
+        return result_analytics_action(model, action);
+    }
+    if model.query_bench.is_some() {
+        return query_bench_action(model, action);
+    }
+    if model.schema_snapshot.is_some() {
+        return schema_snapshot_action(model, action);
+    }
+    if model.sql_runbook.is_some() {
+        return sql_runbook_action(model, action);
+    }
     if model.focus == Focus::Objects
         && !matches!(action, Action::Quit | Action::ToggleHelp)
         && let Some(effects) = objects_action(model, &action)
@@ -1554,6 +1751,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 model.help_open = false;
             } else if !model.tree.filter.is_empty() {
                 model.tree.filter.clear();
+            } else if model.error.is_some() {
+                model.error = None;
+                model.error_expanded = false;
+                clear_error_location(model);
+            } else if model.watch.is_some() {
+                model.watch = None;
             } else {
                 model.error = None;
                 model.error_expanded = false;
@@ -1733,6 +1936,18 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::RestoreSession => restore_session_action(model),
         Action::DiscardRecovery => discard_recovery_action(model),
         Action::LintBuffer => lint_buffer_open(model),
+        Action::LogicalReplication => logical_replication_open(model),
+        Action::ClusterConfig => cluster_config_open(model),
+        Action::DataBrowser => data_browser_open(model),
+        Action::PlanDiff => plan_diff_open(model),
+        Action::ResultAnalytics => result_analytics_open(model),
+        Action::QueryBench => query_bench_open(model),
+        Action::SchemaSnapshot => schema_snapshot_open(model),
+        Action::SqlRunbook => sql_runbook_open(model),
+        Action::StopWatch => {
+            model.watch = None;
+            Vec::new()
+        }
         Action::OpenHistory => {
             model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
                 model,
@@ -1936,6 +2151,7 @@ fn automatic_completion_should_open(result: &crate::query::completion::Completio
 
 /// The existing cancellation transition, also used by read-only notice recovery.
 fn cancel_query(model: &mut Model) -> Vec<Effect> {
+    model.watch = None;
     match model.phase {
         QueryPhase::Running { job, .. } => {
             model.phase = QueryPhase::CancellationRequested { job };
@@ -3451,6 +3667,948 @@ fn connection_pool_open(model: &mut Model) -> Vec<Effect> {
     model.connection_pool = Some(state);
 
     vec![Effect::LoadConnectionPool { request }]
+}
+
+/// Opens the logical replication, publications, subscriptions, and slots overlay.
+fn logical_replication_open(model: &mut Model) -> Vec<Effect> {
+    if model.logical_replication.is_some() {
+        model.logical_replication = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::LogicalReplicationState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.logical_replication_request = model.logical_replication_request.wrapping_add(1);
+    let request = model.logical_replication_request;
+    model.logical_replication = Some(state);
+
+    vec![Effect::LoadLogicalReplication { request }]
+}
+
+/// Handles input while the logical replication and slots overlay is on screen.
+fn logical_replication_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::LogicalReplication => {
+            model.logical_replication = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(1);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(-8);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.move_selection(8);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.set_tab(2);
+            }
+        }
+        Action::Activate | Action::Insert('\n' | 'g' | 'G') => {
+            if let Some((_label, sql)) = model
+                .logical_replication
+                .as_ref()
+                .and_then(crate::app::model::LogicalReplicationState::selected_reviewed_sql)
+            {
+                load_reviewed_sql_into_editor(model, &sql);
+                model.logical_replication = None;
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(rep) = &mut model.logical_replication {
+                rep.loading = true;
+            }
+            model.logical_replication_request = model.logical_replication_request.wrapping_add(1);
+            let request = model.logical_replication_request;
+            return vec![Effect::LoadLogicalReplication { request }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the server settings, HBA rules, extensions, tablespaces, and FDW overlay.
+fn cluster_config_open(model: &mut Model) -> Vec<Effect> {
+    if model.cluster_config.is_some() {
+        model.cluster_config = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+
+    let state = crate::app::model::ClusterConfigState {
+        loading: true,
+        ..Default::default()
+    };
+
+    model.cluster_config_request = model.cluster_config_request.wrapping_add(1);
+    let request = model.cluster_config_request;
+    model.cluster_config = Some(state);
+
+    vec![Effect::LoadClusterConfig { request }]
+}
+
+/// Handles input while the cluster configuration overlay is on screen.
+fn cluster_config_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ClusterConfig => {
+            model.cluster_config = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(1);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(-8);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.move_selection(8);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(2);
+            }
+        }
+        Action::Insert('4') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(3);
+            }
+        }
+        Action::Insert('5') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.set_tab(4);
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.modified_only = !cfg.modified_only;
+                cfg.selected_idx = 0;
+            }
+        }
+        Action::Activate | Action::Insert('\n' | 'g' | 'G') => {
+            if let Some((_label, sql)) = model
+                .cluster_config
+                .as_ref()
+                .and_then(crate::app::model::ClusterConfigState::selected_reviewed_sql)
+            {
+                load_reviewed_sql_into_editor(model, &sql);
+                model.cluster_config = None;
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(cfg) = &mut model.cluster_config {
+                cfg.loading = true;
+            }
+            model.cluster_config_request = model.cluster_config_request.wrapping_add(1);
+            let request = model.cluster_config_request;
+            return vec![Effect::LoadClusterConfig { request }];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Inserts a reviewed SQL template into the active editor buffer without executing it.
+fn load_reviewed_sql_into_editor(model: &mut Model, sql: &str) {
+    edit_editor(model, |editor| {
+        if editor.text().trim().is_empty() {
+            editor.set_text(sql.to_owned());
+        } else {
+            editor.insert_paste(&format!("\n\n{sql}"));
+        }
+    });
+    model.focus = Focus::Editor;
+}
+
+/// Drives one periodic `\watch` execution when idle and connected.
+fn watch_tick(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_usable() {
+        model.watch = None;
+        return Vec::new();
+    }
+    if model.phase.is_busy() {
+        return Vec::new();
+    }
+    let Some(mut watch) = model.watch.take() else {
+        return Vec::new();
+    };
+    if watch.iteration >= crate::metacommand::MAX_WATCH_ITERATIONS {
+        return Vec::new();
+    }
+    watch.iteration += 1;
+    let sql = watch.sql.clone();
+    model.watch = Some(watch);
+    start(model, sql, None)
+}
+
+/// Opens the keyset-paginated data browser and batch CRUD overlay (`053`).
+fn data_browser_open(model: &mut Model) -> Vec<Effect> {
+    if model.data_browser.is_some() {
+        model.data_browser = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    let (schema, table) = selected_object(model)
+        .filter(|obj| {
+            matches!(
+                obj.kind,
+                crate::postgres::metadata::ObjectKind::Table
+                    | crate::postgres::metadata::ObjectKind::PartitionedTable
+                    | crate::postgres::metadata::ObjectKind::View
+                    | crate::postgres::metadata::ObjectKind::MaterializedView
+                    | crate::postgres::metadata::ObjectKind::ForeignTable
+            )
+        })
+        .map_or_else(
+            || ("public".to_owned(), "orders".to_owned()),
+            |obj| (obj.schema, obj.name),
+        );
+
+    let state = crate::app::model::DataBrowserState::new(schema, table);
+    let browse = state.request.clone();
+    model.data_browser_request = model.data_browser_request.wrapping_add(1);
+    let request = model.data_browser_request;
+    model.data_browser = Some(state);
+    vec![Effect::LoadBrowsePage { request, browse }]
+}
+
+/// Handles input while the keyset-paginated data browser overlay is open.
+fn data_browser_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::DataBrowser => {
+            model.data_browser = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(browser) = &mut model.data_browser {
+                browser.move_row(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(browser) = &mut model.data_browser {
+                browser.move_row(1);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(browser) = &mut model.data_browser {
+                browser.move_row(-10);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(browser) = &mut model.data_browser {
+                browser.move_row(10);
+            }
+        }
+        Action::Move(Direction::Left) | Action::Insert('h' | 'H') => {
+            if let Some(browser) = &mut model.data_browser {
+                browser.move_col(-1);
+            }
+        }
+        Action::Move(Direction::Right) | Action::Insert('l' | 'L') => {
+            if let Some(browser) = &mut model.data_browser {
+                browser.move_col(1);
+            }
+        }
+        Action::Insert('n' | 'N' | ']') => {
+            let next_req = if let Some(browser) = &mut model.data_browser
+                && let Some(page) = &browser.page
+                && page.has_more
+                && let Some(cursor) = &page.next_cursor
+            {
+                browser.request.direction = crate::crud::PageDirection::Next;
+                browser.request.cursor = Some(cursor.clone());
+                browser.loading = true;
+                Some(browser.request.clone())
+            } else {
+                None
+            };
+            if let Some(browse) = next_req {
+                model.data_browser_request = model.data_browser_request.wrapping_add(1);
+                return vec![Effect::LoadBrowsePage {
+                    request: model.data_browser_request,
+                    browse,
+                }];
+            }
+        }
+        Action::Insert('p' | 'P' | '[') => {
+            let prev_req = if let Some(browser) = &mut model.data_browser
+                && let Some(page) = &browser.page
+                && page.has_prev
+                && let Some(cursor) = &page.prev_cursor
+            {
+                browser.request.direction = crate::crud::PageDirection::Prev;
+                browser.request.cursor = Some(cursor.clone());
+                browser.loading = true;
+                Some(browser.request.clone())
+            } else {
+                None
+            };
+            if let Some(browse) = prev_req {
+                model.data_browser_request = model.data_browser_request.wrapping_add(1);
+                return vec![Effect::LoadBrowsePage {
+                    request: model.data_browser_request,
+                    browse,
+                }];
+            }
+        }
+        Action::Insert('s' | 'S') => {
+            let sort_req = if let Some(browser) = &mut model.data_browser {
+                if browser.request.sort_column.is_none()
+                    && let Some(page) = &browser.page
+                {
+                    browser.request.sort_column = page.columns.get(browser.selected_col).cloned();
+                }
+                browser.request.sort_order = browser.request.sort_order.flipped();
+                browser.request.cursor = None;
+                browser.request.direction = crate::crud::PageDirection::Next;
+                browser.loading = true;
+                Some(browser.request.clone())
+            } else {
+                None
+            };
+            if let Some(browse) = sort_req {
+                model.data_browser_request = model.data_browser_request.wrapping_add(1);
+                return vec![Effect::LoadBrowsePage {
+                    request: model.data_browser_request,
+                    browse,
+                }];
+            }
+        }
+        Action::Activate | Action::Insert('\n' | 'g' | 'G') => {
+            let generated = model
+                .data_browser
+                .as_ref()
+                .map(|b| b.reviewed_crud_sql(false));
+            match generated {
+                Some(Ok((_title, sql))) => {
+                    load_reviewed_sql_into_editor(model, &sql);
+                    model.data_browser = None;
+                }
+                Some(Err(err)) => {
+                    if let Some(browser) = &mut model.data_browser {
+                        browser.status_message = Some(err);
+                    }
+                }
+                None => {}
+            }
+        }
+        Action::Insert('d' | 'D') => {
+            let generated = model
+                .data_browser
+                .as_ref()
+                .map(|b| b.reviewed_crud_sql(true));
+            match generated {
+                Some(Ok((_title, sql))) => {
+                    load_reviewed_sql_into_editor(model, &sql);
+                    model.data_browser = None;
+                }
+                Some(Err(err)) => {
+                    if let Some(browser) = &mut model.data_browser {
+                        browser.status_message = Some(err);
+                    }
+                }
+                None => {}
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            let reload_req = if let Some(browser) = &mut model.data_browser {
+                browser.loading = true;
+                Some(browser.request.clone())
+            } else {
+                None
+            };
+            if let Some(browse) = reload_req {
+                model.data_browser_request = model.data_browser_request.wrapping_add(1);
+                return vec![Effect::LoadBrowsePage {
+                    request: model.data_browser_request,
+                    browse,
+                }];
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the extended EXPLAIN (BUFFERS, WAL, SETTINGS) and A/B plan diff overlay (`054`).
+fn plan_diff_open(model: &mut Model) -> Vec<Effect> {
+    if model.plan_diff.is_some() {
+        model.plan_diff = None;
+        return Vec::new();
+    }
+    let buffer_sql = model.editor.text().to_owned();
+    if !model.connection.is_ready() || buffer_sql.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let parsed = statements::split(&buffer_sql);
+    let baseline_sql = parsed.first().map_or_else(
+        || buffer_sql.clone(),
+        |s| buffer_sql[s.start..s.end].to_owned(),
+    );
+    let candidate_sql = parsed
+        .get(1)
+        .map(|s| buffer_sql[s.start..s.end].to_owned())
+        .unwrap_or_default();
+
+    model.plan_diff_request = model.plan_diff_request.wrapping_add(1);
+    let request = model.plan_diff_request;
+    let mut effects = vec![Effect::LoadExtendedExplain {
+        request,
+        target: crate::app::message::PlanDiffTarget::Baseline,
+        sql: baseline_sql.clone(),
+        analyze: false,
+    }];
+    if !candidate_sql.trim().is_empty() {
+        effects.push(Effect::LoadExtendedExplain {
+            request,
+            target: crate::app::message::PlanDiffTarget::Candidate,
+            sql: candidate_sql.clone(),
+            analyze: false,
+        });
+    }
+
+    model.plan_diff = Some(crate::app::model::PlanDiffState {
+        baseline_sql,
+        candidate_sql,
+        loading: true,
+        status_message: Some("Capturing EXPLAIN (FORMAT JSON, VERBOSE, SETTINGS)...".to_owned()),
+        ..Default::default()
+    });
+    effects
+}
+
+/// Handles input while the extended EXPLAIN & plan diff overlay is open.
+fn plan_diff_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::PlanDiff => {
+            model.plan_diff = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.set_tab(1);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.set_tab(2);
+            }
+        }
+        Action::Insert('a' | 'A') => {
+            let sql = current_editor_statement_or_buffer(model);
+            if !sql.trim().is_empty()
+                && let Some(diff) = &mut model.plan_diff
+            {
+                diff.baseline_sql = sql.clone();
+                diff.loading = true;
+                let analyze = diff.analyze_mode;
+                model.plan_diff_request = model.plan_diff_request.wrapping_add(1);
+                return vec![Effect::LoadExtendedExplain {
+                    request: model.plan_diff_request,
+                    target: crate::app::message::PlanDiffTarget::Baseline,
+                    sql,
+                    analyze,
+                }];
+            }
+        }
+        Action::Insert('b' | 'B') => {
+            let sql = current_editor_statement_or_buffer(model);
+            if !sql.trim().is_empty()
+                && let Some(diff) = &mut model.plan_diff
+            {
+                diff.candidate_sql = sql.clone();
+                diff.loading = true;
+                let analyze = diff.analyze_mode;
+                model.plan_diff_request = model.plan_diff_request.wrapping_add(1);
+                return vec![Effect::LoadExtendedExplain {
+                    request: model.plan_diff_request,
+                    target: crate::app::message::PlanDiffTarget::Candidate,
+                    sql,
+                    analyze,
+                }];
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.analyze_mode = !diff.analyze_mode;
+                diff.loading = true;
+                let analyze = diff.analyze_mode;
+                let base_sql = diff.baseline_sql.clone();
+                let cand_sql = diff.candidate_sql.clone();
+                model.plan_diff_request = model.plan_diff_request.wrapping_add(1);
+                let request = model.plan_diff_request;
+                let mut effects = Vec::new();
+                if !base_sql.trim().is_empty() {
+                    effects.push(Effect::LoadExtendedExplain {
+                        request,
+                        target: crate::app::message::PlanDiffTarget::Baseline,
+                        sql: base_sql,
+                        analyze,
+                    });
+                }
+                if !cand_sql.trim().is_empty() {
+                    effects.push(Effect::LoadExtendedExplain {
+                        request,
+                        target: crate::app::message::PlanDiffTarget::Candidate,
+                        sql: cand_sql,
+                        analyze,
+                    });
+                }
+                return effects;
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            if let Some(diff) = &mut model.plan_diff {
+                diff.loading = true;
+                let analyze = diff.analyze_mode;
+                let base_sql = diff.baseline_sql.clone();
+                let cand_sql = diff.candidate_sql.clone();
+                model.plan_diff_request = model.plan_diff_request.wrapping_add(1);
+                let request = model.plan_diff_request;
+                let mut effects = Vec::new();
+                if !base_sql.trim().is_empty() {
+                    effects.push(Effect::LoadExtendedExplain {
+                        request,
+                        target: crate::app::message::PlanDiffTarget::Baseline,
+                        sql: base_sql,
+                        analyze,
+                    });
+                }
+                if !cand_sql.trim().is_empty() {
+                    effects.push(Effect::LoadExtendedExplain {
+                        request,
+                        target: crate::app::message::PlanDiffTarget::Candidate,
+                        sql: cand_sql,
+                        analyze,
+                    });
+                }
+                return effects;
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+fn current_editor_statement_or_buffer(model: &Model) -> String {
+    let text = model.editor.text();
+    if let Some(source) = error_location::source_at_cursor(text, model.editor.cursor()) {
+        text[source.start..source.end].to_owned()
+    } else {
+        text.to_owned()
+    }
+}
+
+/// Opens the zero-query result analytics profiler overlay (`055`).
+fn result_analytics_open(model: &mut Model) -> Vec<Effect> {
+    if model.result_analytics.is_some() {
+        model.result_analytics = None;
+        return Vec::new();
+    }
+    let Some(set) = model.visible_result() else {
+        return Vec::new();
+    };
+    model.result_analytics = Some(crate::app::model::ResultAnalyticsState::from_result(set));
+    Vec::new()
+}
+
+/// Handles input while the result analytics profiler overlay is open.
+fn result_analytics_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::ResultAnalytics => {
+            model.result_analytics = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(analytics) = &mut model.result_analytics {
+                analytics.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(analytics) = &mut model.result_analytics {
+                analytics.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(analytics) = &mut model.result_analytics {
+                analytics.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(analytics) = &mut model.result_analytics {
+                analytics.set_tab(1);
+            }
+        }
+        Action::Insert('e' | 'E') => {
+            model.result_analytics = None;
+            return update(model, Message::Action(Action::ExportRows));
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the query latency benchmark and A/B regression suite overlay (`056`).
+fn query_bench_open(model: &mut Model) -> Vec<Effect> {
+    if model.query_bench.is_some() {
+        model.query_bench = None;
+        return Vec::new();
+    }
+    let buffer_sql = model.editor.text().to_owned();
+    if !model.connection.is_ready() || buffer_sql.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let parsed = statements::split(&buffer_sql);
+    let baseline_sql = parsed.first().map_or_else(
+        || buffer_sql.clone(),
+        |s| buffer_sql[s.start..s.end].to_owned(),
+    );
+    let candidate_sql = parsed
+        .get(1)
+        .map(|s| buffer_sql[s.start..s.end].to_owned())
+        .unwrap_or_default();
+
+    model.query_bench = Some(crate::app::model::QueryBenchState {
+        baseline_sql,
+        candidate_sql,
+        ..Default::default()
+    });
+    query_bench_dispatch_runs(model)
+}
+
+fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
+    let Some(bench) = &mut model.query_bench else {
+        return Vec::new();
+    };
+    let config = bench.config;
+    let base_sql = bench.baseline_sql.clone();
+    let cand_sql = bench.candidate_sql.clone();
+    bench.loading = true;
+    bench.status_message = Some(format!(
+        "Running benchmark ({} warmup, {} measured, rollback={})...",
+        config.warmup_runs,
+        config.measured_runs,
+        if config.rollback { "on" } else { "off" }
+    ));
+
+    model.query_bench_request = model.query_bench_request.wrapping_add(1);
+    let request = model.query_bench_request;
+    let mut effects = Vec::new();
+    if !base_sql.trim().is_empty() {
+        effects.push(Effect::RunQueryBench {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            sql: base_sql,
+            config,
+        });
+    }
+    if !cand_sql.trim().is_empty() {
+        effects.push(Effect::RunQueryBench {
+            request,
+            target: crate::app::message::BenchTarget::Candidate,
+            sql: cand_sql,
+            config,
+        });
+    }
+    if effects.is_empty()
+        && let Some(bench) = &mut model.query_bench
+    {
+        bench.loading = false;
+    }
+    effects
+}
+
+/// Handles input while the query latency benchmark overlay is open.
+fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::QueryBench => {
+            model.query_bench = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.set_tab(1);
+            }
+        }
+        Action::Insert('m' | 'M') => {
+            if let Some(bench) = &mut model.query_bench {
+                bench.config.rollback = !bench.config.rollback;
+            }
+            return query_bench_dispatch_runs(model);
+        }
+        Action::Insert('r' | 'R') => {
+            return query_bench_dispatch_runs(model);
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the canonical schema snapshot and drift guard overlay (`057`).
+fn schema_snapshot_open(model: &mut Model) -> Vec<Effect> {
+    if model.schema_snapshot.is_some() {
+        model.schema_snapshot = None;
+        return Vec::new();
+    }
+    if !model.connection.is_ready() {
+        return Vec::new();
+    }
+    model.schema_snapshot = Some(crate::app::model::SchemaSnapshotState::default());
+    schema_snapshot_dispatch(model)
+}
+
+fn schema_snapshot_dispatch(model: &mut Model) -> Vec<Effect> {
+    let schema = model
+        .schema_snapshot
+        .as_ref()
+        .and_then(|s| s.schema_filter.clone());
+    if let Some(snap) = &mut model.schema_snapshot {
+        snap.loading = true;
+        snap.status_message = Some("Capturing PostgreSQL schema snapshot...".to_owned());
+    }
+    model.schema_snapshot_request = model.schema_snapshot_request.wrapping_add(1);
+    vec![Effect::CaptureSchemaSnapshot {
+        request: model.schema_snapshot_request,
+        schema,
+    }]
+}
+
+/// Handles input while the schema snapshot and drift guard overlay is open.
+fn schema_snapshot_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::SchemaSnapshot => {
+            model.schema_snapshot = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                snap.set_tab(1);
+            }
+        }
+        Action::Insert('b' | 'B') => {
+            if let Some(snap) = &mut model.schema_snapshot {
+                if snap.current.is_some() {
+                    snap.capture_as_baseline();
+                    snap.status_message = Some(
+                        "Pinned current snapshot as baseline; press [r] to check live drift."
+                            .to_owned(),
+                    );
+                } else {
+                    snap.status_message =
+                        Some("No captured snapshot available to pin as baseline.".to_owned());
+                }
+            }
+        }
+        Action::Insert('r' | 'R') => {
+            return schema_snapshot_dispatch(model);
+        }
+        Action::Insert('c' | 'C') => {
+            if let Some(snap) = &mut model.schema_snapshot
+                && let Some(fp) = snap
+                    .current
+                    .as_ref()
+                    .or(snap.baseline.as_ref())
+                    .map(|s| s.fingerprint_sha256.clone())
+                    .filter(|fp| !fp.is_empty())
+                && let Ok(payload) = crate::clipboard::ClipboardPayload::try_new(fp)
+            {
+                snap.status_message = Some("Copied SHA-256 fingerprint via OSC 52.".to_owned());
+                return vec![Effect::CopyValue { payload }];
+            }
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Opens the interactive SQL Markdown runbook overlay (`058`).
+fn sql_runbook_open(model: &mut Model) -> Vec<Effect> {
+    if model.sql_runbook.is_some() {
+        model.sql_runbook = None;
+        return Vec::new();
+    }
+    if model.editor.text().trim().is_empty() {
+        return Vec::new();
+    }
+    model.sql_runbook = Some(crate::app::model::SqlRunbookState::from_buffer(
+        model.editor.text(),
+    ));
+    Vec::new()
+}
+
+/// Handles input while the SQL Markdown runbook overlay is open.
+fn sql_runbook_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::SqlRunbook => {
+            model.sql_runbook = None;
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        Action::Move(Direction::Up) | Action::Insert('k' | 'K') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.move_selection(-1);
+            }
+        }
+        Action::Move(Direction::Down) | Action::Insert('j' | 'J') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.move_selection(1);
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.set_tab(0);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.set_tab(1);
+            }
+        }
+        Action::Insert('w' | 'W') => {
+            if let Some(rb) = &mut model.sql_runbook {
+                rb.allow_writes = !rb.allow_writes;
+                rb.status_message = Some(if rb.allow_writes {
+                    "Write-guard preview: writes ALLOWED in dry-run plan.".to_owned()
+                } else {
+                    "Write-guard preview: writes GUARDED in dry-run plan.".to_owned()
+                });
+            }
+        }
+        Action::Activate => {
+            if let Some(cell) = model.sql_runbook.as_ref().and_then(|rb| rb.selected_cell()) {
+                let start_line = cell.start_line;
+                model.editor.set_position(start_line, 1);
+                model.sync_active_buffer_from_editor();
+                model.focus = Focus::Editor;
+            }
+            model.sql_runbook = None;
+        }
+        _ => {}
+    }
+    Vec::new()
 }
 
 /// Handles input while the connection pool and PgBouncer telemetry overlay is on screen.
@@ -5543,9 +6701,160 @@ fn is_explain_statement(sql: &str) -> bool {
         .is_some_and(|word| word.eq_ignore_ascii_case("explain"))
 }
 
-/// Starts an execution, refusing when there is nothing to run or nowhere to run
-/// it, and holding it back when the target is production and it is not a read.
+/// Starts an execution, interpreting `psql`-style meta-commands first, refusing when
+/// there is nothing to run or nowhere to run it, and holding it back when the target is
+/// production and it is not a read.
 fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
+    if model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
+    if crate::metacommand::contains_metacommand(&sql) {
+        match crate::metacommand::parse_input(&sql) {
+            Some(Ok(cmd)) => return run_metacommand(model, cmd, source),
+            None => {}
+            Some(Err(diag)) => {
+                model.error = Some(diag);
+                clear_error_location(model);
+                return Vec::new();
+            }
+        }
+    }
+    run_sql_statement(model, sql, source)
+}
+
+/// Applies or dispatches a parsed `psql`-style meta-command.
+fn run_metacommand(
+    model: &mut Model,
+    command: crate::metacommand::MetaCommand,
+    source: Option<StatementSource>,
+) -> Vec<Effect> {
+    match command {
+        crate::metacommand::MetaCommand::ToggleExpanded(explicit) => {
+            model.expanded_row = explicit.unwrap_or(!model.expanded_row);
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::ToggleTiming(explicit) => {
+            model.timing_display = match explicit {
+                Some(true) => crate::app::model::TimingDisplay::Always,
+                Some(false) => crate::app::model::TimingDisplay::Off,
+                None => match model.timing_display {
+                    crate::app::model::TimingDisplay::Always => {
+                        crate::app::model::TimingDisplay::Off
+                    }
+                    crate::app::model::TimingDisplay::Threshold200ms
+                    | crate::app::model::TimingDisplay::Off => {
+                        crate::app::model::TimingDisplay::Always
+                    }
+                },
+            };
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::StopWatch => {
+            model.watch = None;
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::Help => {
+            let set = crate::metacommand::help_result();
+            let columns = set.columns.clone();
+            model.error = None;
+            model.error_expanded = false;
+            clear_error_location(model);
+            model.plan.clear();
+            model.selected_row = 0;
+            model.selected_column = 0;
+            model.result_filter.clear();
+            model.result_filtering = false;
+            model.inspector = None;
+            model.last_sql = None;
+            model.last_execution = Some(crate::query::result::Execution {
+                job: model.allocate_job(),
+                statements: vec![crate::query::result::StatementResult {
+                    result_set: Some(set),
+                    rows_affected: None,
+                    elapsed: std::time::Duration::ZERO,
+                    notices: Vec::new(),
+                }],
+                status: ExecutionStatus::Succeeded,
+                elapsed: std::time::Duration::ZERO,
+                error: None,
+                transaction: model.transaction,
+                notice_report: crate::query::result::NoticeReport::default(),
+            });
+            model.result_grid.reset_for_result(&columns);
+            model.focus = Focus::Results;
+            Vec::new()
+        }
+        crate::metacommand::MetaCommand::CatalogQuery { sql, .. } => {
+            run_sql_statement(model, sql, source)
+        }
+        crate::metacommand::MetaCommand::StartWatch {
+            interval_secs,
+            companion_sql,
+        } => {
+            if !model.connection.is_usable() {
+                return Vec::new();
+            }
+            let Some(mut target_sql) = companion_sql.or_else(|| model.last_sql.clone()) else {
+                model.error = Some(
+                    crate::diagnostics::Diagnostic::new(
+                        crate::diagnostics::DiagnosticKind::Usage,
+                        "No query available to watch",
+                        "starting \\watch",
+                    )
+                    .next_action("Run a query first or write `SELECT ...; \\watch 2`."),
+                );
+                clear_error_location(model);
+                return Vec::new();
+            };
+            if crate::metacommand::contains_metacommand(&target_sql) {
+                match crate::metacommand::parse_input(&target_sql) {
+                    Some(Ok(crate::metacommand::MetaCommand::CatalogQuery { sql, .. })) => {
+                        target_sql = sql;
+                    }
+                    Some(Ok(_)) => {
+                        model.error = Some(
+                            crate::diagnostics::Diagnostic::new(
+                                crate::diagnostics::DiagnosticKind::Usage,
+                                "Cannot watch a local client toggle or help command",
+                                "starting \\watch",
+                            )
+                            .next_action(
+                                "Provide a SQL query or catalog meta-command such as `\\dt`.",
+                            ),
+                        );
+                        clear_error_location(model);
+                        return Vec::new();
+                    }
+                    None => {}
+                    Some(Err(diag)) => {
+                        model.error = Some(diag);
+                        clear_error_location(model);
+                        return Vec::new();
+                    }
+                }
+            }
+            let effects = run_sql_statement(model, target_sql.clone(), source);
+            if model.pending_run.is_none()
+                && model.parameter_prompt.is_none()
+                && model.error.is_none()
+                && !effects.is_empty()
+            {
+                model.watch = Some(crate::app::model::WatchState {
+                    sql: target_sql,
+                    interval_secs,
+                    iteration: 1,
+                });
+            }
+            effects
+        }
+    }
+}
+
+fn run_sql_statement(
+    model: &mut Model,
+    sql: String,
+    source: Option<StatementSource>,
+) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
     }
@@ -6526,6 +7835,8 @@ fn export_format_entries() -> Vec<crate::app::palette::PaletteEntry> {
         ExportFormat::Json,
         ExportFormat::Ndjson,
         ExportFormat::Markdown,
+        ExportFormat::Html,
+        ExportFormat::Parquet,
     ]
     .into_iter()
     .map(|format| PaletteEntry {

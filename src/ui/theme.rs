@@ -417,6 +417,7 @@ impl Theme {
             ActivePalette::Builtin(ThemeChoice::Light) => light(token),
             ActivePalette::Builtin(ThemeChoice::HighContrast) => high_contrast(token),
             ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => field_industrial(token),
+            ActivePalette::Builtin(ThemeChoice::Material) => material(token),
             ActivePalette::Custom(palette) => palette.colors[token.index()],
         }
     }
@@ -596,6 +597,30 @@ const fn field_industrial(token: Token) -> Rgb {
     }
 }
 
+const fn material(token: Token) -> Rgb {
+    // Google Material Design 3 tonal dark surfaces with cool slate typography
+    // and blue, cyan, sage, amber, and coral accents.
+    match token {
+        Token::Surface => Rgb(0x11, 0x13, 0x18),
+        Token::SurfacePane => Rgb(0x19, 0x1c, 0x22),
+        Token::SurfaceAlt => Rgb(0x22, 0x26, 0x2e),
+        Token::SurfaceOverlay => Rgb(0x2b, 0x30, 0x3a),
+        Token::Text => Rgb(0xe3, 0xe8, 0xf0),
+        Token::Header => Rgb(0xf1, 0xf5, 0xfb),
+        Token::Muted | Token::EnvironmentNonProduction | Token::NullValue => Rgb(0x9a, 0xa3, 0xb2),
+        Token::Border => Rgb(0x3d, 0x44, 0x52),
+        Token::Focus | Token::Selection => Rgb(0x8a, 0xb4, 0xf8),
+        Token::Success | Token::SyntaxLiteral => Rgb(0x81, 0xc9, 0x95),
+        Token::Warning | Token::TransactionActive | Token::SyntaxNumber => Rgb(0xfd, 0xd6, 0x63),
+        Token::Danger | Token::TransactionFailed | Token::EnvironmentProduction => {
+            Rgb(0xf2, 0x8b, 0x82)
+        }
+        Token::Info | Token::SyntaxIdentifier => Rgb(0x78, 0xd9, 0xec),
+        Token::SyntaxKeyword => Rgb(0xc5, 0x8a, 0xf9),
+        Token::SyntaxComment => Rgb(0x93, 0x9c, 0xa9),
+    }
+}
+
 impl Theme {
     /// A filled capsule: the token as a background, the surface as the text.
     ///
@@ -678,6 +703,9 @@ impl Theme {
             }
             ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => {
                 (Rgb(0xFF, 0x6A, 0x00), Rgb(0xFB, 0xBF, 0x24))
+            }
+            ActivePalette::Builtin(ThemeChoice::Material) => {
+                (Rgb(0x8A, 0xB4, 0xF8), Rgb(0x78, 0xD9, 0xEC))
             }
             ActivePalette::Custom(_) => (self.rgb(Token::SyntaxKeyword), self.rgb(Token::Info)),
         }

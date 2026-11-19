@@ -153,11 +153,14 @@ For an unresolved architecture choice, first prepare alternatives, consequences,
 the proposed spec/ADR change and a recommended choice. Ask only for the
 material decision that remains; continue independent work while it is pending.
 
-Owner authority is required for the repository's protected actions: push,
-publish, tag, sign or release, plus destructive actions, production changes,
-new paid resources and outbound messages. Existing explicit session authority
-persists; do not request it again. Prepare and verify the exact diff, candidate
-or external configuration before seeking approval so the decision is concrete.
+Pushing verified branches, opening pull requests, and merging green pull
+requests (including dependency updates) into `main` are authorized once
+repository verification gates pass. Explicit owner authority is still required
+for tagging, signing, publishing public releases, destructive actions,
+production changes, new paid resources, and outbound messages. Existing
+explicit session authority persists; do not request it again. Prepare and
+verify the exact diff, candidate, or external configuration before seeking
+approval when owner authority is needed.
 An instruction to plan a cloud test does not authorize obtaining a production
 credential or creating the test infrastructure.
 

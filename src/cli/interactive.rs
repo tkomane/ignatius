@@ -801,6 +801,7 @@ async fn event_loop(
     draw(&mut terminal, &mut model, &keymap)?;
     let mut last_mouse_at = std::time::Instant::now();
     let mut recovery_error_reported = false;
+    let mut watch_next_at: Option<(u64, u64, tokio::time::Instant)> = None;
 
     loop {
         for (index,pending) in pending_installs.iter_mut().enumerate() {
@@ -809,6 +810,26 @@ async fn event_loop(
                 *pending=try_session_install(install,slot,&mut model,connection_generation.load(std::sync::atomic::Ordering::SeqCst));
             }
         }
+        match &model.watch {
+            Some(watch) if !model.phase.is_busy() => {
+                let needs_reset = !matches!(
+                    watch_next_at,
+                    Some((interval, iter, _))
+                        if interval == watch.interval_secs && iter == watch.iteration
+                );
+                if needs_reset {
+                    watch_next_at = Some((
+                        watch.interval_secs,
+                        watch.iteration,
+                        tokio::time::Instant::now() + Duration::from_secs(watch.interval_secs),
+                    ));
+                }
+            }
+            _ => {
+                watch_next_at = None;
+            }
+        }
+        let watch_deadline = watch_next_at.map(|(_, _, deadline)| deadline);
         let message=tokio::select! {
             install=install_rx.recv()=> {
                 if let Some(install)=install {
@@ -834,6 +855,16 @@ async fn event_loop(
                     }
                 }
                 continue;
+            },
+            _=async {
+                if let Some(deadline) = watch_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            }=> {
+                watch_next_at = None;
+                Message::WatchTick
             },
             message=rx.recv()=>match message {Some(message)=>message,None=>break},
         };
@@ -1319,6 +1350,77 @@ async fn event_loop(
                 }
                 Effect::LoadSyntheticSeed { request, schema } => {
                     spawn_load_synthetic_seed(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        schema,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadLogicalReplication { request } => {
+                    spawn_load_logical_replication(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadClusterConfig { request } => {
+                    spawn_load_cluster_config(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadBrowsePage { request, browse } => {
+                    spawn_load_browse_page(
+                        tx.clone(),
+                        reader(&session, &metadata),
+                        request,
+                        browse,
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::LoadExtendedExplain {
+                    request,
+                    target,
+                    sql,
+                    analyze,
+                } => {
+                    spawn_load_extended_explain(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        (request, target, sql, analyze),
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::RunQueryBench {
+                    request,
+                    target,
+                    sql,
+                    config,
+                } => {
+                    spawn_run_query_bench(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        BenchRunSpec {
+                            request,
+                            target,
+                            sql,
+                            config,
+                        },
+                        Arc::clone(&connection_generation),
+                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                    );
+                }
+                Effect::CaptureSchemaSnapshot { request, schema } => {
+                    spawn_capture_schema_snapshot(
                         tx.clone(),
                         reader(&session, &metadata),
                         request,
@@ -2477,33 +2579,62 @@ fn export_visible_rows(
         false,
         "choose another name, or move the file that is there",
     )?;
-    let execution = crate::query::result::Execution {
-        notice_report: crate::query::result::NoticeReport::default(),
-        job: crate::query::result::JobId(0),
-        statements: vec![crate::query::result::StatementResult {
-            result_set: Some(visible),
-            rows_affected: None,
-            elapsed: Duration::ZERO,
-            notices: Vec::new(),
-        }],
-        status: crate::query::result::ExecutionStatus::Succeeded,
-        elapsed: Duration::ZERO,
-        error: None,
-        transaction: crate::query::result::TransactionState::Autocommit,
-    };
-    let options = crate::cli::output::OutputOptions {
-        format: match format {
-            crate::app::model::ExportFormat::Csv => crate::cli::output::Format::Csv,
-            crate::app::model::ExportFormat::Tsv => crate::cli::output::Format::Tsv,
-            crate::app::model::ExportFormat::Json => crate::cli::output::Format::Json,
-            crate::app::model::ExportFormat::Ndjson => crate::cli::output::Format::Ndjson,
-            crate::app::model::ExportFormat::Markdown => crate::cli::output::Format::Markdown,
-        },
-        unicode: false,
-        ..crate::cli::output::OutputOptions::default()
-    };
-    crate::cli::output::write_execution(export.writer(), &execution, &options)
-        .map_err(|err| write_failure(path, &err))?;
+    match format {
+        crate::app::model::ExportFormat::Html => {
+            let analytics = crate::analytics::profile_result_set(&visible);
+            let html = crate::analytics::render_html_report(
+                &visible,
+                "Ignatius Result Report",
+                &analytics,
+            );
+            use std::io::Write as _;
+            export
+                .writer()
+                .write_all(html.as_bytes())
+                .map_err(|err| write_failure(path, &err))?;
+        }
+        crate::app::model::ExportFormat::Parquet => {
+            crate::analytics::write_parquet(&visible, export.writer())
+                .map_err(|err| write_failure(path, &err))?;
+        }
+        crate::app::model::ExportFormat::Csv
+        | crate::app::model::ExportFormat::Tsv
+        | crate::app::model::ExportFormat::Json
+        | crate::app::model::ExportFormat::Ndjson
+        | crate::app::model::ExportFormat::Markdown => {
+            let execution = crate::query::result::Execution {
+                notice_report: crate::query::result::NoticeReport::default(),
+                job: crate::query::result::JobId(0),
+                statements: vec![crate::query::result::StatementResult {
+                    result_set: Some(visible),
+                    rows_affected: None,
+                    elapsed: Duration::ZERO,
+                    notices: Vec::new(),
+                }],
+                status: crate::query::result::ExecutionStatus::Succeeded,
+                elapsed: Duration::ZERO,
+                error: None,
+                transaction: crate::query::result::TransactionState::Autocommit,
+            };
+            let options = crate::cli::output::OutputOptions {
+                format: match format {
+                    crate::app::model::ExportFormat::Csv => crate::cli::output::Format::Csv,
+                    crate::app::model::ExportFormat::Tsv => crate::cli::output::Format::Tsv,
+                    crate::app::model::ExportFormat::Json => crate::cli::output::Format::Json,
+                    crate::app::model::ExportFormat::Ndjson => crate::cli::output::Format::Ndjson,
+                    crate::app::model::ExportFormat::Markdown => {
+                        crate::cli::output::Format::Markdown
+                    }
+                    crate::app::model::ExportFormat::Html
+                    | crate::app::model::ExportFormat::Parquet => unreachable!(),
+                },
+                unicode: false,
+                ..crate::cli::output::OutputOptions::default()
+            };
+            crate::cli::output::write_execution(export.writer(), &execution, &options)
+                .map_err(|err| write_failure(path, &err))?;
+        }
+    }
     for _ in 0..visible_row_count {
         export.count_row();
     }
@@ -3199,6 +3330,204 @@ fn spawn_load_wal_observability(
         let _ = tx.send(connection_message(
             request_generation,
             Message::WalObservabilityLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_logical_replication(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.replication_overview().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::LogicalReplicationLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_cluster_config(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.cluster_overview().await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ClusterConfigLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_browse_page(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    browse: crate::crud::BrowseRequest,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.browse_table_page(&browse).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::BrowsePageLoaded {
+                request,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_load_extended_explain(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    spec: (u64, crate::app::message::PlanDiffTarget, String, bool),
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    let (request, target, sql, analyze) = spec;
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let prefix = match target {
+            crate::app::message::PlanDiffTarget::Baseline => "Baseline (A)",
+            crate::app::message::PlanDiffTarget::Candidate => "Candidate (B)",
+        };
+        let preview = crate::plandiff::bound_label(&sql);
+        let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
+        let result = session.explain_extended(&sql, analyze, &label).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::ExtendedExplainLoaded {
+                request,
+                target,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+struct BenchRunSpec {
+    request: u64,
+    target: crate::app::message::BenchTarget,
+    sql: String,
+    config: crate::bench::BenchConfig,
+}
+
+fn spawn_run_query_bench(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    spec: BenchRunSpec,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let prefix = match spec.target {
+            crate::app::message::BenchTarget::Baseline => "Baseline (A)",
+            crate::app::message::BenchTarget::Candidate => "Candidate (B)",
+        };
+        let preview = crate::plandiff::bound_label(&spec.sql);
+        let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
+        let result = session.run_benchmark(&spec.sql, &spec.config, &label).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::QueryBenchLoaded {
+                request: spec.request,
+                target: spec.target,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
+fn spawn_capture_schema_snapshot(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    request: u64,
+    schema: Option<String>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.capture_schema_snapshot(schema.as_deref()).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::SchemaSnapshotLoaded {
                 request,
                 result: Box::new(result),
             },

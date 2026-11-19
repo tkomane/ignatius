@@ -1061,3 +1061,1068 @@ fn unavailable_description_json_keeps_completed_prefix_and_single_notice_failure
         );
     }
 }
+
+#[test]
+fn replication_and_cluster_commands_parse_flags() {
+    Cli::command().debug_assert();
+
+    let rep = Cli::try_parse_from([
+        "ignatius",
+        "replication",
+        "postgres://localhost/db",
+        "--section",
+        "slots",
+        "--format",
+        "json",
+        "-o",
+        "rep.json",
+        "--force",
+    ])
+    .expect("parse replication");
+    let Some(Command::Replication(rep_args)) = rep.command else {
+        panic!("expected replication command");
+    };
+    assert_eq!(rep_args.target.as_deref(), Some("postgres://localhost/db"));
+    assert_eq!(rep_args.section, CliReplicationSection::Slots);
+    assert_eq!(rep_args.format, CliTelemetryFormat::Json);
+    assert_eq!(
+        rep_args.output.as_deref(),
+        Some(std::path::Path::new("rep.json"))
+    );
+    assert!(rep_args.force);
+
+    let cl = Cli::try_parse_from([
+        "ignatius",
+        "cluster",
+        "--section",
+        "settings",
+        "--modified-only",
+        "--filter",
+        "work_mem",
+        "--format",
+        "plain",
+    ])
+    .expect("parse cluster");
+    let Some(Command::Cluster(cl_args)) = cl.command else {
+        panic!("expected cluster command");
+    };
+    assert_eq!(cl_args.section, CliClusterSection::Settings);
+    assert!(cl_args.modified_only);
+    assert_eq!(cl_args.filter.as_deref(), Some("work_mem"));
+    assert_eq!(cl_args.format, CliTelemetryFormat::Plain);
+}
+
+#[test]
+fn query_command_handles_headless_metacommands_and_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted_at(dir.path());
+
+    // 1. \? outputs built-in help in table and json formats without requiring a DB.
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = query_command(
+        QueryRequest {
+            target: None,
+            command: Some("\\?"),
+            file: None,
+            options: output::OutputOptions {
+                format: Format::Json,
+                ..output::OutputOptions::default()
+            },
+            max_rows: None,
+            output: None,
+            force: false,
+            allow_write: false,
+            parameter_env: &[],
+            connection: &ConnectionOptions::default(),
+        },
+        &paths,
+        &mut out,
+        &mut err,
+    )
+    .expect("\\? json succeeds");
+    assert_eq!(code, ExitCode::Success);
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(!json[0]["rows"].as_array().unwrap().is_empty());
+
+    // 2. \? also supports --output streaming export and --force protection.
+    let export_path = dir.path().join("help.csv");
+    std::fs::write(&export_path, "existing").unwrap();
+    let refused = query_command(
+        QueryRequest {
+            target: None,
+            command: Some("\\?"),
+            file: None,
+            options: output::OutputOptions {
+                format: Format::Csv,
+                ..output::OutputOptions::default()
+            },
+            max_rows: None,
+            output: Some(&export_path),
+            force: false,
+            allow_write: false,
+            parameter_env: &[],
+            connection: &ConnectionOptions::default(),
+        },
+        &paths,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .expect_err("existing export path without --force must refuse");
+    assert_eq!(refused.kind, DiagnosticKind::Usage);
+
+    let code = query_command(
+        QueryRequest {
+            target: None,
+            command: Some("\\?"),
+            file: None,
+            options: output::OutputOptions {
+                format: Format::Csv,
+                ..output::OutputOptions::default()
+            },
+            max_rows: None,
+            output: Some(&export_path),
+            force: true,
+            allow_write: false,
+            parameter_env: &[],
+            connection: &ConnectionOptions::default(),
+        },
+        &paths,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .expect("\\? csv export with --force succeeds");
+    assert_eq!(code, ExitCode::Success);
+    let csv = std::fs::read_to_string(&export_path).unwrap();
+    assert!(csv.contains("\\watch"));
+
+    // 3. Interactive-only metacommands (\x, \timing, \watch) and \! refuse with Usage.
+    for cmd in [
+        "\\x",
+        "\\timing on",
+        "SELECT 1; \\watch 2",
+        "\\watch stop",
+        "\\! id",
+    ] {
+        let diag = query_command(
+            QueryRequest {
+                target: None,
+                command: Some(cmd),
+                file: None,
+                options: output::OutputOptions::default(),
+                max_rows: None,
+                output: None,
+                force: false,
+                allow_write: false,
+                parameter_env: &[],
+                connection: &ConnectionOptions::default(),
+            },
+            &paths,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect_err("interactive or shell metacommand must refuse headlessly");
+        assert_eq!(diag.kind, DiagnosticKind::Usage);
+        assert_eq!(diag.exit_code(), ExitCode::Usage);
+    }
+}
+
+#[test]
+fn filter_replication_and_cluster_reports_respect_sections_and_filters() {
+    let mut rep = crate::replication::ReplicationReport::default();
+    rep.publications
+        .push(crate::replication::PublicationSummary {
+            name: "pub_orders".into(),
+            owner: "postgres".into(),
+            all_tables: true,
+            ..Default::default()
+        });
+    rep.subscriptions
+        .push(crate::replication::SubscriptionSummary {
+            name: "sub_orders".into(),
+            owner: "postgres".into(),
+            enabled: true,
+            conninfo_redacted: "host=db password=[redacted]".into(),
+            ..Default::default()
+        });
+    rep.slots.push(crate::replication::ReplicationSlotSummary {
+        slot_name: "slot_a".into(),
+        slot_type: "logical".into(),
+        active: false,
+        wal_status: "reserved".into(),
+        retained_bytes: Some(crate::replication::INACTIVE_SLOT_CRITICAL_BYTES + 1),
+        ..Default::default()
+    });
+
+    let slots_only = filter_replication_report(&rep, crate::replication::ReplicationSection::Slots);
+    assert!(slots_only.publications.is_empty());
+    assert!(slots_only.subscriptions.is_empty());
+    assert_eq!(slots_only.slots.len(), 1);
+    let json =
+        filter_replication_report(&rep, crate::replication::ReplicationSection::Subscriptions)
+            .render_json();
+    assert!(json.contains("password=[redacted]"));
+
+    let mut cluster = crate::cluster::ClusterReport::empty();
+    cluster.settings.push(crate::cluster::SettingEntry {
+        name: "work_mem".into(),
+        setting: "64MB".into(),
+        unit: None,
+        category: "Resource Usage / Memory".into(),
+        context: "user".into(),
+        source: "configuration file".into(),
+        boot_val: Some("4MB".into()),
+        reset_val: Some("64MB".into()),
+        pending_restart: false,
+        is_non_default: true,
+    });
+    cluster.settings.push(crate::cluster::SettingEntry {
+        name: "shared_buffers".into(),
+        setting: "128MB".into(),
+        unit: None,
+        category: "Resource Usage / Memory".into(),
+        context: "postmaster".into(),
+        source: "default".into(),
+        boot_val: Some("128MB".into()),
+        reset_val: Some("128MB".into()),
+        pending_restart: false,
+        is_non_default: false,
+    });
+    cluster.extensions.push(crate::cluster::AvailableExtension {
+        name: "pg_stat_statements".into(),
+        default_version: Some("1.10".into()),
+        installed_version: None,
+        comment: None,
+        upgrade_available: false,
+    });
+
+    let filtered = filter_cluster_report(
+        &cluster,
+        crate::cluster::ClusterSection::Settings,
+        true,
+        Some("work"),
+    );
+    assert_eq!(filtered.settings.len(), 1);
+    assert_eq!(filtered.settings[0].name, "work_mem");
+    assert!(filtered.extensions.is_empty());
+}
+
+#[test]
+fn browse_plan_diff_and_analytics_commands_parse_flags() {
+    Cli::command().debug_assert();
+
+    let browse = Cli::try_parse_from([
+        "ignatius",
+        "browse",
+        "postgres://localhost/app",
+        "--table",
+        "sales.orders",
+        "--page-size",
+        "25",
+        "--sort",
+        "created_at",
+        "--desc",
+        "--after",
+        "100,200",
+        "--prev",
+        "--filter",
+        "status = 'open'",
+        "--format",
+        "json",
+        "-o",
+        "page.json",
+        "--force",
+    ])
+    .expect("parse browse");
+    let Some(Command::Browse(browse_args)) = browse.command else {
+        panic!("expected browse command");
+    };
+    assert_eq!(
+        browse_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(browse_args.table, "sales.orders");
+    assert_eq!(browse_args.page_size, 25);
+    assert_eq!(browse_args.sort.as_deref(), Some("created_at"));
+    assert!(browse_args.desc);
+    assert_eq!(browse_args.after, vec!["100", "200"]);
+    assert!(browse_args.prev);
+    assert_eq!(browse_args.filter.as_deref(), Some("status = 'open'"));
+    assert_eq!(browse_args.format, CliTelemetryFormat::Json);
+    assert_eq!(
+        browse_args.output.as_deref(),
+        Some(std::path::Path::new("page.json"))
+    );
+    assert!(browse_args.force);
+
+    let browse_repeatable = Cli::try_parse_from([
+        "ignatius", "browse", "-t", "users", "--after", "1", "--after", "2",
+    ])
+    .expect("parse repeatable after");
+    let Some(Command::Browse(browse_rep_args)) = browse_repeatable.command else {
+        panic!("expected browse command");
+    };
+    assert_eq!(browse_rep_args.table, "users");
+    assert_eq!(browse_rep_args.page_size, crate::crud::DEFAULT_PAGE_SIZE);
+    assert_eq!(browse_rep_args.after, vec!["1", "2"]);
+    assert_eq!(browse_rep_args.format, CliTelemetryFormat::Table);
+
+    let plan_diff = Cli::try_parse_from([
+        "ignatius",
+        "plan-diff",
+        "postgres://localhost/app",
+        "-a",
+        "SELECT 1",
+        "-b",
+        "SELECT 2",
+        "--analyze",
+        "--format",
+        "plain",
+        "-o",
+        "diff.txt",
+        "--force",
+    ])
+    .expect("parse plan-diff");
+    let Some(Command::PlanDiff(diff_args)) = plan_diff.command else {
+        panic!("expected plan-diff command");
+    };
+    assert_eq!(
+        diff_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(diff_args.baseline.as_deref(), Some("SELECT 1"));
+    assert_eq!(diff_args.candidate.as_deref(), Some("SELECT 2"));
+    assert!(diff_args.analyze);
+    assert_eq!(diff_args.format, CliTelemetryFormat::Plain);
+    assert_eq!(
+        diff_args.output.as_deref(),
+        Some(std::path::Path::new("diff.txt"))
+    );
+    assert!(diff_args.force);
+
+    let analytics_html = Cli::try_parse_from([
+        "ignatius",
+        "analytics",
+        "postgres://localhost/app",
+        "-c",
+        "SELECT id, amount FROM orders",
+        "--format",
+        "html",
+        "--title",
+        "Orders Profile",
+        "-o",
+        "orders.html",
+        "--force",
+    ])
+    .expect("parse analytics html");
+    let Some(Command::Analytics(html_args)) = analytics_html.command else {
+        panic!("expected analytics command");
+    };
+    assert_eq!(
+        html_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(
+        html_args.command.as_deref(),
+        Some("SELECT id, amount FROM orders")
+    );
+    assert_eq!(html_args.format, CliAnalyticsFormat::Html);
+    assert_eq!(html_args.title, "Orders Profile");
+    assert_eq!(
+        html_args.output.as_deref(),
+        Some(std::path::Path::new("orders.html"))
+    );
+    assert!(html_args.force);
+
+    let analytics_parquet = Cli::try_parse_from([
+        "ignatius",
+        "analytics",
+        "-f",
+        "query.sql",
+        "--format",
+        "parquet",
+        "-o",
+        "orders.parquet",
+    ])
+    .expect("parse analytics parquet");
+    let Some(Command::Analytics(parquet_args)) = analytics_parquet.command else {
+        panic!("expected analytics command");
+    };
+    assert_eq!(
+        parquet_args.file.as_deref(),
+        Some(std::path::Path::new("query.sql"))
+    );
+    assert_eq!(parquet_args.format, CliAnalyticsFormat::Parquet);
+    assert_eq!(parquet_args.title, "Ignatius Result Analytics");
+}
+
+#[test]
+fn browse_table_name_and_m13_cli_helpers_validate_and_render() {
+    assert_eq!(
+        parse_browse_table_name("users").unwrap(),
+        ("public".to_owned(), "users".to_owned())
+    );
+    assert_eq!(
+        parse_browse_table_name("sales.orders").unwrap(),
+        ("sales".to_owned(), "orders".to_owned())
+    );
+    assert_eq!(
+        parse_browse_table_name("\"MySchema\".\"My.Table\"").unwrap(),
+        ("MySchema".to_owned(), "My.Table".to_owned())
+    );
+    assert_eq!(
+        parse_browse_table_name("\"my.table\"").unwrap(),
+        ("public".to_owned(), "my.table".to_owned())
+    );
+    for invalid in ["", "   ", "a.b.c", ".users", "public.", "\"unterminated"] {
+        let diag = parse_browse_table_name(invalid).expect_err("invalid table name");
+        assert_eq!(diag.kind, DiagnosticKind::Usage);
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.sql");
+    let cand_path = dir.path().join("cand.sql");
+    std::fs::write(&base_path, "SELECT 1").unwrap();
+    std::fs::write(&cand_path, "SELECT 2").unwrap();
+
+    let empty_diff = PlanDiffArgs {
+        target: None,
+        baseline: None,
+        baseline_file: None,
+        candidate: None,
+        candidate_file: None,
+        analyze: false,
+        format: CliTelemetryFormat::Table,
+        output: None,
+        force: false,
+        connection: ConnectionOptions::default(),
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&empty_diff).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_base = PlanDiffArgs {
+        baseline: Some("SELECT 1".to_owned()),
+        baseline_file: Some(base_path.clone()),
+        ..empty_diff.clone()
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&both_base).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_cand = PlanDiffArgs {
+        baseline: Some("SELECT 1".to_owned()),
+        candidate: Some("SELECT 2".to_owned()),
+        candidate_file: Some(cand_path.clone()),
+        ..empty_diff.clone()
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&both_cand).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let file_inputs = PlanDiffArgs {
+        baseline_file: Some(base_path.clone()),
+        candidate_file: Some(cand_path),
+        ..empty_diff
+    };
+    assert_eq!(
+        resolve_plan_diff_inputs(&file_inputs).unwrap(),
+        ("SELECT 1".to_owned(), Some("SELECT 2".to_owned()))
+    );
+
+    let mut settings = std::collections::BTreeMap::new();
+    settings.insert("work_mem".to_owned(), "64MB".to_owned());
+    let snapshot = crate::plandiff::PlanSnapshot {
+        label: "Baseline (A)".to_owned(),
+        analyzed: true,
+        planning_time_ms: Some(0.25),
+        execution_time_ms: Some(1.5),
+        total_cost: 12.5,
+        startup_cost: 0.0,
+        plan_rows: 10,
+        actual_rows: Some(10),
+        shared_hit_blocks: 8,
+        shared_read_blocks: 2,
+        shared_dirtied_blocks: 0,
+        shared_written_blocks: 0,
+        local_hit_blocks: 0,
+        local_read_blocks: 0,
+        temp_read_blocks: 0,
+        temp_written_blocks: 0,
+        wal_records: 3,
+        wal_fpi: 1,
+        wal_bytes: 256,
+        settings,
+        nodes: vec![crate::plandiff::PlanNodeSummary {
+            path: "0".to_owned(),
+            depth: 0,
+            node_type: "Seq Scan".to_owned(),
+            relation_name: Some("orders".to_owned()),
+            index_name: None,
+            startup_cost: 0.0,
+            total_cost: 12.5,
+            plan_rows: 10,
+            actual_rows: Some(10),
+            actual_total_time_ms: Some(1.2),
+            shared_hit_blocks: 8,
+            shared_read_blocks: 2,
+            temp_written_blocks: 0,
+            wal_bytes: 256,
+        }],
+        buffer_hit_ratio_pct: Some(80.0),
+    };
+    let snap_table = render_plan_snapshot_table(&snapshot);
+    assert!(snap_table.contains("EXTENDED EXPLAIN SNAPSHOT: Baseline (A)"));
+    assert!(snap_table.contains("work_mem = 64MB"));
+    assert!(snap_table.contains("Seq Scan"));
+    let snap_plain = render_plan_snapshot_plain(&snapshot);
+    assert!(snap_plain.contains("wal: records=3 fpi=1 bytes=256"));
+    assert!(snap_plain.contains("setting: work_mem=64MB"));
+
+    assert_eq!(
+        resolve_analytics_sql(None, None).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+    assert_eq!(
+        resolve_analytics_sql(Some("SELECT 1"), Some(&base_path))
+            .unwrap_err()
+            .kind,
+        DiagnosticKind::Usage
+    );
+    assert_eq!(
+        resolve_analytics_sql(None, Some(&base_path)).unwrap(),
+        "SELECT 1"
+    );
+
+    let no_rows_exec = crate::query::result::Execution {
+        job: crate::query::result::JobId(1),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: None,
+            rows_affected: Some(1),
+            elapsed: std::time::Duration::from_millis(1),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::from_millis(1),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: crate::query::result::NoticeReport::default(),
+    };
+    assert_eq!(
+        extract_analytics_result_set(no_rows_exec).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let mut set = crate::query::result::ResultSet::new(vec!["id".to_owned()], 10);
+    set.push(vec![crate::query::value::Cell::Text("42".to_owned())]);
+    let parquet_bytes = crate::analytics::export_parquet_bytes(&set).unwrap();
+    let parquet_path = dir.path().join("out.parquet");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        write_binary_output(
+            &parquet_bytes,
+            Some(&parquet_path),
+            false,
+            "Parquet analytics export",
+            &mut out,
+            &mut err
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    assert!(out.is_empty());
+    assert_eq!(std::fs::read(&parquet_path).unwrap(), parquet_bytes);
+    let mut stdout_bin = Vec::new();
+    assert_eq!(
+        write_binary_output(
+            &parquet_bytes,
+            None,
+            false,
+            "Parquet analytics export",
+            &mut stdout_bin,
+            &mut err
+        )
+        .unwrap(),
+        ExitCode::Success
+    );
+    assert_eq!(stdout_bin, parquet_bytes);
+}
+
+#[test]
+fn bench_snapshot_and_runbook_commands_parse_flags() {
+    Cli::command().debug_assert();
+
+    let bench = Cli::try_parse_from([
+        "ignatius",
+        "bench",
+        "postgres://localhost/app",
+        "-c",
+        "SELECT 1",
+        "--candidate",
+        "SELECT 2",
+        "--warmup",
+        "3",
+        "--runs",
+        "25",
+        "--no-rollback",
+        "--fail-on-regression-pct",
+        "12.5",
+        "--format",
+        "json",
+        "-o",
+        "bench.json",
+        "--force",
+    ])
+    .expect("parse bench");
+    let Some(Command::Bench(bench_args)) = bench.command else {
+        panic!("expected bench command");
+    };
+    assert_eq!(
+        bench_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(bench_args.command.as_deref(), Some("SELECT 1"));
+    assert_eq!(bench_args.candidate.as_deref(), Some("SELECT 2"));
+    assert_eq!(bench_args.warmup, 3);
+    assert_eq!(bench_args.runs, 25);
+    assert!(bench_args.no_rollback);
+    assert_eq!(bench_args.fail_on_regression_pct, Some(12.5));
+    assert_eq!(bench_args.format, CliTelemetryFormat::Json);
+    assert_eq!(
+        bench_args.output.as_deref(),
+        Some(std::path::Path::new("bench.json"))
+    );
+    assert!(bench_args.force);
+
+    let bench_defaults = Cli::try_parse_from([
+        "ignatius",
+        "bench",
+        "-f",
+        "base.sql",
+        "--candidate-file",
+        "cand.sql",
+    ])
+    .expect("parse bench defaults");
+    let Some(Command::Bench(bench_def_args)) = bench_defaults.command else {
+        panic!("expected bench command");
+    };
+    assert_eq!(
+        bench_def_args.file.as_deref(),
+        Some(std::path::Path::new("base.sql"))
+    );
+    assert_eq!(
+        bench_def_args.candidate_file.as_deref(),
+        Some(std::path::Path::new("cand.sql"))
+    );
+    assert_eq!(bench_def_args.warmup, crate::bench::DEFAULT_WARMUP_RUNS);
+    assert_eq!(bench_def_args.runs, crate::bench::DEFAULT_MEASURED_RUNS);
+    assert!(!bench_def_args.no_rollback);
+    assert_eq!(bench_def_args.fail_on_regression_pct, None);
+    assert_eq!(bench_def_args.format, CliTelemetryFormat::Table);
+
+    let snap_capture = Cli::try_parse_from([
+        "ignatius",
+        "snapshot",
+        "capture",
+        "postgres://localhost/app",
+        "-s",
+        "public",
+        "-f",
+        "table",
+        "-o",
+        "snap.txt",
+        "--force",
+    ])
+    .expect("parse snapshot capture");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Capture(cap_args),
+    })) = snap_capture.command
+    else {
+        panic!("expected snapshot capture command");
+    };
+    assert_eq!(cap_args.target.as_deref(), Some("postgres://localhost/app"));
+    assert_eq!(cap_args.schema.as_deref(), Some("public"));
+    assert_eq!(cap_args.format, CliTelemetryFormat::Table);
+    assert_eq!(
+        cap_args.output.as_deref(),
+        Some(std::path::Path::new("snap.txt"))
+    );
+    assert!(cap_args.force);
+
+    let snap_capture_default =
+        Cli::try_parse_from(["ignatius", "snapshot", "capture"]).expect("capture defaults");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Capture(cap_def),
+    })) = snap_capture_default.command
+    else {
+        panic!("expected snapshot capture command");
+    };
+    assert_eq!(cap_def.format, CliTelemetryFormat::Json);
+
+    let snap_check = Cli::try_parse_from([
+        "ignatius",
+        "snapshot",
+        "check",
+        "postgres://localhost/app",
+        "--against",
+        "baseline.json",
+        "-s",
+        "public",
+        "--fail-on",
+        "warning",
+        "-f",
+        "json",
+        "-o",
+        "drift.json",
+        "--force",
+    ])
+    .expect("parse snapshot check");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Check(check_args),
+    })) = snap_check.command
+    else {
+        panic!("expected snapshot check command");
+    };
+    assert_eq!(
+        check_args.target.as_deref(),
+        Some("postgres://localhost/app")
+    );
+    assert_eq!(
+        check_args.against.as_path(),
+        std::path::Path::new("baseline.json")
+    );
+    assert_eq!(check_args.schema.as_deref(), Some("public"));
+    assert_eq!(check_args.fail_on, CliDriftFailOn::Warning);
+    assert_eq!(check_args.format, CliTelemetryFormat::Json);
+    assert!(check_args.force);
+
+    let snap_check_default =
+        Cli::try_parse_from(["ignatius", "snapshot", "check", "--against", "b.json"])
+            .expect("check defaults");
+    let Some(Command::Snapshot(SnapshotArgs {
+        action: SnapshotAction::Check(check_def),
+    })) = snap_check_default.command
+    else {
+        panic!("expected snapshot check command");
+    };
+    assert_eq!(check_def.fail_on, CliDriftFailOn::Breaking);
+    assert_eq!(check_def.format, CliTelemetryFormat::Table);
+
+    let runbook = Cli::try_parse_from([
+        "ignatius",
+        "runbook",
+        "postgres://localhost/app",
+        "-f",
+        "ops.md",
+        "--cell",
+        "smoke",
+        "--dry-run",
+        "--allow-writes",
+        "--stop-on-error",
+        "--format",
+        "markdown",
+        "-o",
+        "report.md",
+        "--force",
+    ])
+    .expect("parse runbook");
+    let Some(Command::Runbook(rb_args)) = runbook.command else {
+        panic!("expected runbook command");
+    };
+    assert_eq!(rb_args.target.as_deref(), Some("postgres://localhost/app"));
+    assert_eq!(rb_args.file.as_path(), std::path::Path::new("ops.md"));
+    assert_eq!(rb_args.cell.as_deref(), Some("smoke"));
+    assert!(rb_args.dry_run);
+    assert!(rb_args.allow_writes);
+    assert!(rb_args.stop_on_error);
+    assert_eq!(rb_args.format, CliRunbookFormat::Markdown);
+    assert_eq!(
+        rb_args.output.as_deref(),
+        Some(std::path::Path::new("report.md"))
+    );
+    assert!(rb_args.force);
+
+    let runbook_offline = Cli::try_parse_from(["ignatius", "runbook", "-f", "ops.md", "--dry-run"])
+        .expect("parse offline dry-run runbook");
+    let Some(Command::Runbook(rb_off_args)) = runbook_offline.command else {
+        panic!("expected runbook command");
+    };
+    assert_eq!(rb_off_args.target, None);
+    assert!(rb_off_args.dry_run);
+    assert_eq!(rb_off_args.format, CliRunbookFormat::Table);
+}
+
+#[test]
+fn bench_snapshot_and_runbook_cli_helpers_validate_and_render() {
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.sql");
+    let cand_path = dir.path().join("cand.sql");
+    std::fs::write(&base_path, "SELECT 1").unwrap();
+    std::fs::write(&cand_path, "SELECT 2").unwrap();
+
+    assert_eq!(validate_regression_pct(None).unwrap(), None);
+    assert_eq!(validate_regression_pct(Some(10.0)).unwrap(), Some(10.0));
+    for bad in [-0.1, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            validate_regression_pct(Some(bad)).unwrap_err().kind,
+            DiagnosticKind::Usage
+        );
+    }
+
+    let empty_bench = BenchArgs {
+        target: None,
+        command: None,
+        file: None,
+        candidate: None,
+        candidate_file: None,
+        warmup: 2,
+        runs: 10,
+        no_rollback: false,
+        fail_on_regression_pct: None,
+        format: CliTelemetryFormat::Table,
+        output: None,
+        force: false,
+        connection: ConnectionOptions::default(),
+    };
+    assert_eq!(
+        resolve_bench_inputs(&empty_bench).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_base = BenchArgs {
+        command: Some("SELECT 1".to_owned()),
+        file: Some(base_path.clone()),
+        ..empty_bench.clone()
+    };
+    assert_eq!(
+        resolve_bench_inputs(&both_base).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_cand = BenchArgs {
+        command: Some("SELECT 1".to_owned()),
+        candidate: Some("SELECT 2".to_owned()),
+        candidate_file: Some(cand_path.clone()),
+        ..empty_bench.clone()
+    };
+    assert_eq!(
+        resolve_bench_inputs(&both_cand).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let both_stdin = BenchArgs {
+        file: Some(PathBuf::from("-")),
+        candidate_file: Some(PathBuf::from("-")),
+        ..empty_bench.clone()
+    };
+    assert_eq!(
+        resolve_bench_inputs(&both_stdin).unwrap_err().kind,
+        DiagnosticKind::Usage
+    );
+
+    let file_bench = BenchArgs {
+        file: Some(base_path),
+        candidate_file: Some(cand_path),
+        ..empty_bench
+    };
+    assert_eq!(
+        resolve_bench_inputs(&file_bench).unwrap(),
+        ("SELECT 1".to_owned(), Some("SELECT 2".to_owned()))
+    );
+
+    // Snapshot render & JSON reader validation
+    let mut snapshot = crate::snapshot::SchemaSnapshot::new(Some("public".to_owned()));
+    snapshot.tables.push(crate::snapshot::TableSnapshot {
+        schema: "public".to_owned(),
+        name: "orders".to_owned(),
+        columns: vec![crate::snapshot::ColumnSnapshot {
+            name: "order_id".to_owned(),
+            data_type: "bigint".to_owned(),
+            nullable: false,
+            default_expr: None,
+            ordinal: 1,
+        }],
+        constraints: Vec::new(),
+        indexes: Vec::new(),
+        rls_enabled: true,
+        rls_forced: false,
+        policies: Vec::new(),
+    });
+    snapshot.views.push(crate::snapshot::ViewSnapshot {
+        schema: "public".to_owned(),
+        name: "recent_orders".to_owned(),
+        materialized: false,
+        definition_sha256: "abc123".to_owned(),
+    });
+    snapshot.sequences.push(crate::snapshot::SequenceSnapshot {
+        schema: "public".to_owned(),
+        name: "orders_order_id_seq".to_owned(),
+        data_type: "bigint".to_owned(),
+        start_value: 1,
+        increment_by: 1,
+        cycle: false,
+    });
+    snapshot.enums.push(crate::snapshot::EnumSnapshot {
+        schema: "public".to_owned(),
+        name: "order_tier".to_owned(),
+        labels: vec!["standard".to_owned(), "priority".to_owned()],
+    });
+    let snapshot = snapshot.finalize();
+
+    let table_view = render_snapshot_table(&snapshot);
+    assert!(table_view.is_ascii());
+    assert!(table_view.contains("public.orders"));
+    assert!(table_view.contains("public.recent_orders"));
+    assert!(table_view.contains("public.orders_order_id_seq"));
+    assert!(table_view.contains("public.order_tier"));
+
+    let plain_view = render_snapshot_plain(&snapshot);
+    assert!(plain_view.is_ascii());
+    assert!(plain_view.contains("table=public.orders cols=1"));
+    assert!(plain_view.contains("view=public.recent_orders"));
+
+    let snap_path = dir.path().join("snapshot.json");
+    std::fs::write(&snap_path, snapshot.render_json()).unwrap();
+    let loaded_snap = read_expected_snapshot(&snap_path).unwrap();
+    assert_eq!(loaded_snap, snapshot);
+    assert_eq!(
+        read_expected_snapshot(&dir.path().join("missing.json"))
+            .unwrap_err()
+            .kind,
+        DiagnosticKind::Usage
+    );
+
+    // Runbook offline dry-run & cell execution evaluator
+    let md_path = dir.path().join("ops.md");
+    std::fs::write(
+        &md_path,
+        "# Ops Runbook\n\n## Inspect\n```sql\n-- @name: read-orders\n-- @expect-rows: 3\nSELECT order_id FROM public.orders;\n```\n\n## Mutate\n```sql\n-- @name: purge\nDELETE FROM public.orders;\n```\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        load_markdown_runbook(&md_path, Some("missing-cell"))
+            .unwrap_err()
+            .kind,
+        DiagnosticKind::Usage
+    );
+
+    let report_md_path = dir.path().join("dry_run.md");
+    let cfg_dir = dir.path().join("cfg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    let dry_cli = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "runbook",
+        "-f",
+        md_path.to_str().unwrap(),
+        "--dry-run",
+        "--format",
+        "markdown",
+        "-o",
+        report_md_path.to_str().unwrap(),
+    ])
+    .unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(run(&dry_cli, &mut out, &mut err), ExitCode::Success);
+    assert!(out.is_empty());
+    let written_md = std::fs::read_to_string(&report_md_path).unwrap();
+    assert!(written_md.contains("# Runbook Report:"));
+    assert!(written_md.contains("read-orders"));
+    assert!(written_md.contains("blocked-by-write-guard"));
+
+    // Refuses overwrite without --force in dry-run too
+    let dry_overwrite = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "runbook",
+        "-f",
+        md_path.to_str().unwrap(),
+        "--dry-run",
+        "-o",
+        report_md_path.to_str().unwrap(),
+    ])
+    .unwrap();
+    let mut err_overwrite = Vec::new();
+    assert_eq!(
+        run(&dry_overwrite, &mut Vec::new(), &mut err_overwrite),
+        ExitCode::Usage
+    );
+
+    // Cell execution evaluator checks expect_rows and SQL errors
+    let rb = load_markdown_runbook(&md_path, None).unwrap();
+    let read_cell = &rb.cells[0];
+    let mut three_rows = crate::query::result::ResultSet::new(vec!["order_id".to_owned()], 100);
+    for id in ["1", "2", "3"] {
+        three_rows.push(vec![crate::query::value::Cell::Text(id.to_owned())]);
+    }
+    let ok_exec = crate::query::result::Execution {
+        job: crate::query::result::JobId(1),
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some(three_rows),
+            rows_affected: Some(3),
+            elapsed: std::time::Duration::from_millis(2),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: std::time::Duration::from_millis(2),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: crate::query::result::NoticeReport::default(),
+    };
+    let passed = evaluate_runbook_cell_execution(read_cell, &ok_exec, 2);
+    assert_eq!(passed.status, crate::runbook::CellStatus::Passed);
+    assert_eq!(passed.rows_returned, Some(3));
+    assert_eq!(passed.rows_affected, None);
+
+    let one_row_exec = crate::query::result::Execution {
+        statements: vec![crate::query::result::StatementResult {
+            result_set: Some({
+                let mut set = crate::query::result::ResultSet::new(vec!["order_id".to_owned()], 10);
+                set.push(vec![crate::query::value::Cell::Text("1".to_owned())]);
+                set
+            }),
+            rows_affected: Some(1),
+            elapsed: std::time::Duration::from_millis(1),
+            notices: Vec::new(),
+        }],
+        ..ok_exec.clone()
+    };
+    let mismatch = evaluate_runbook_cell_execution(read_cell, &one_row_exec, 1);
+    assert_eq!(mismatch.status, crate::runbook::CellStatus::Failed);
+    assert!(
+        mismatch
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("expected 3 row(s), got 1"))
+    );
+
+    let err_exec = crate::query::result::Execution {
+        statements: Vec::new(),
+        status: crate::query::result::ExecutionStatus::Failed,
+        error: Some(
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "relation \"nope\" does not exist",
+                "running query",
+            )
+            .technical("SQLSTATE", "42P01"),
+        ),
+        ..ok_exec
+    };
+    let failed = evaluate_runbook_cell_execution(read_cell, &err_exec, 1);
+    assert_eq!(failed.status, crate::runbook::CellStatus::Failed);
+    assert!(
+        failed
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("[42P01]"))
+    );
+}

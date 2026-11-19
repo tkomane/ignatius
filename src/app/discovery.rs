@@ -501,7 +501,16 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::ConnectionPool
         | Action::DataMasking
         | Action::DataSync
-        | Action::SyntheticSeed => model.connection.is_ready(),
+        | Action::SyntheticSeed
+        | Action::LogicalReplication
+        | Action::ClusterConfig => model.connection.is_ready(),
+        Action::DataBrowser => model.connection.is_ready(),
+        Action::PlanDiff => model.connection.is_ready() && !model.editor.text().trim().is_empty(),
+        Action::ResultAnalytics => model.visible_result().is_some(),
+        Action::QueryBench => model.connection.is_ready() && !model.editor.text().trim().is_empty(),
+        Action::SchemaSnapshot => model.connection.is_ready(),
+        Action::SqlRunbook => !model.editor.text().trim().is_empty(),
+        Action::StopWatch => model.watch.is_some(),
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -670,7 +679,21 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::ConnectionPool
         | Action::DataMasking
         | Action::DataSync
-        | Action::SyntheticSeed => "connect to a database first".to_owned(),
+        | Action::SyntheticSeed
+        | Action::LogicalReplication
+        | Action::ClusterConfig
+        | Action::DataBrowser
+        | Action::SchemaSnapshot => "connect to a database first".to_owned(),
+        Action::PlanDiff | Action::QueryBench => {
+            if !model.connection.is_ready() {
+                "connect to a database first".to_owned()
+            } else {
+                "write at least one SQL query in the editor first".to_owned()
+            }
+        }
+        Action::SqlRunbook => "write SQL in the editor first".to_owned(),
+        Action::ResultAnalytics => "run a query that produces rows first".to_owned(),
+        Action::StopWatch => "an active psql \\watch loop".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
         | Action::Backspace
@@ -702,7 +725,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::CloseEditorBuffer
         | Action::NextEditorBuffer
         | Action::PrevEditorBuffer
-        | Action::ToggleEditorSplit => "Editor",
+        | Action::ToggleEditorSplit
+        | Action::SqlRunbook => "Editor",
         Action::OpenResultControls
         | Action::NarrowColumn
         | Action::WidenColumn
@@ -738,7 +762,14 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ConnectionPool
         | Action::DataMasking
         | Action::DataSync
-        | Action::SyntheticSeed => "Data",
+        | Action::SyntheticSeed
+        | Action::LogicalReplication
+        | Action::ClusterConfig
+        | Action::DataBrowser
+        | Action::PlanDiff
+        | Action::QueryBench
+        | Action::SchemaSnapshot => "Data",
+        Action::StopWatch | Action::ResultAnalytics => "Results",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

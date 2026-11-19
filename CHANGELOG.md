@@ -8,6 +8,71 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Built-in `material` palette (`[ui] theme = "material"` and
+  `[theme] extends = "material"`) inspired by Google Material Design 3 Tonal Dark
+  surfaces (`#111318`, `#191C22`, `#22262E`, `#2B303A`) with Material blue,
+  cyan, sage, warm amber, and coral accents, WCAG-verified across all 4 surface
+  depths and added to the `SwitchTheme` cycle.
+
+- Improved: Material 3 quiet-precision polish across TUI chrome and CLI health
+  diagnostics, including `Theme::pill(Token::Focus)` key hints with subtle
+  delimiters in the footer, left-vs-right group separator in the header,
+  structured bold headlines and starter key pills in empty Objects and Results
+  states, and aligned `STATUS  CHECK  DETAIL` output with active theme reporting
+  in `ignatius doctor`.
+
+- New: Feature `056-query-benchmarks-and-regression-suite` advances Milestone 14
+  with `ignatius bench` and the `Ctrl+K '` (`query-bench`) overlay, executing
+  warmup-separated multi-iteration benchmarks inside rollback-safe `BEGIN`/`ROLLBACK`
+  transactions by default (`--no-rollback` opt-out), computing `p50`/`p95`/`p99`/QPS
+  and 12-bucket latency sparklines, and evaluating A/B `--fail-on-regression-pct`
+  gates.
+
+- New: Feature `057-schema-snapshots-and-drift-guard` advances Milestone 14 with
+  `ignatius snapshot capture|check` and `Ctrl+K "` (`schema-snapshot`), producing
+  canonical, zero-row-read `pg_catalog` snapshots with deterministic SHA-256
+  fingerprints (`fingerprint_sha256`) across PostgreSQL 14-18 and gating schema
+  drift by `Breaking`, `Warning`, and `Info` thresholds.
+
+- New: Feature `058-interactive-sql-notebook-runner` advances Milestone 14 with
+  `ignatius runbook` and the local `Ctrl+K ?` (`sql-runbook`) overlay, parsing
+  Markdown fenced SQL cells (`-- @name:`, `-- @readonly`, `-- @expect-rows:`) and
+  editor `-- @cell` blocks with `classify_all` write guards, offline `--dry-run`
+  planning, and plain-ASCII table/plain/JSON/Markdown reports.
+
+- New: Feature `053-live-data-browser-and-batch-crud` advances Milestone 13 with
+  `ignatius browse` and the `Ctrl+K _` (`data-browser`) keyset-paginated table
+  browser + reviewed primary-key-guarded `INSERT`/`UPDATE`/`DELETE` SQL builder.
+
+- New: Feature `054-explain-buffers-wal-and-plan-diff` advances Milestone 13 with
+  `ignatius plan-diff` and `Ctrl+K /` (`plan-diff`), capturing `EXPLAIN
+  (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON)` safely inside rollback
+  transactions and computing A/B regressions/improvements and settings diffs.
+
+- New: Feature `055-result-analytics-and-rich-exports` advances Milestone 13 with
+  zero-query column profiling (`Ctrl+K $` / `result-analytics`), standalone
+  Field Industrial HTML reports, and a zero-dependency streaming Apache Parquet
+  exporter across `ignatius analytics --format html|parquet` and `Ctrl+K e`.
+
+- New: Feature `050-psql-metacommands-and-watch-mode` advances Milestone 12 with
+  `psql`-style backslash meta-commands (`\d`, `\d+`, `\dt`, `\dt+`, `\dv`, `\dm`,
+  `\di`, `\ds`, `\dn`, `\du`, `\dg`, `\df`, `\dx`, `\l`, `\l+`, `\conninfo`, `\x`,
+  `\timing`, `\?`/`\h`) across the SQL editor and `ignatius query -c`, plus a
+  bounded `\watch [N]` polling loop (`Ctrl+K :` / `stop-watch` to cancel) and
+  explicit `\!` shell refusal.
+
+- New: Feature `051-logical-replication-and-slot-manager` advances Milestone 12
+  with `ignatius replication` and the `Ctrl+K #` (`logical-replication`) TUI
+  overlay inspecting publications, subscriptions (redacted connection strings),
+  and replication slot WAL retention risk (`ok`, `warning`, `critical`) with
+  reviewed DDL insertion.
+
+- New: Feature `052-server-config-hba-and-infra-catalog` advances Milestone 12
+  with `ignatius cluster` and the `Ctrl+K @` (`cluster-config`) TUI overlay
+  inspecting `pg_settings`, `pg_hba_file_rules`, extensions, tablespaces, and
+  foreign data wrappers / foreign servers with secret option masking and
+  reviewed DDL generation.
+
 - New: Built-in `field-industrial` palette (`[ui] theme = "field-industrial"` and
   `[theme] extends = "field-industrial"`) delivering the Dieter Rams / Teenage
   Engineering matte slate, warm bone, signal orange, phosphor amber, and alpine
