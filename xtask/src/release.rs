@@ -4030,13 +4030,10 @@ fn sbom_verify(args: &[&str]) -> Result<(), String> {
 ///
 /// For each artefact in `release-manifest.json` this expects siblings
 /// `<name>.sigstore.json` (Sigstore bundle) and `<name>.intoto.jsonl` (SLSA
-/// provenance) in the bundle directory and requires both to name the
-/// artefact's SHA-256 digest. A bound sidecar proves the signature and the
-/// provenance statement are *about* these exact bytes; it is not
-/// cryptographic verification, which needs the Sigstore client and the SLSA
-/// verifier named in the release record against the release identity.
-/// Missing, mismatched or malformed sidecars are explicit blockers, never a
-/// passing claim.
+/// provenance) in the bundle directory. The signature digest and the named
+/// SLSA v1 subject must match the manifest. This is a structural check.
+/// Cryptographic verification uses the approved independent verifiers and
+/// release identity.
 pub fn trust(args: &[&str]) -> Result<(), String> {
     let (command, rest) = args
         .split_first()
@@ -4097,11 +4094,10 @@ pub fn trust(args: &[&str]) -> Result<(), String> {
         let provenance_path = checked_trust_sidecar(&bundle_dir, &artefact.name, "intoto.jsonl")?;
         let provenance_bytes = fs::read(&provenance_path)
             .map_err(|error| format!("could not read {}: {error}", provenance_path.display()))?;
-        let predicate =
-            check_provenance_binding(&provenance_bytes, &artefact.checksum, &provenance_path)?;
+        check_provenance_binding(&provenance_bytes, artefact, &provenance_path)?;
         println!(
-            "bound {} (sigstore bundle and {} provenance)",
-            artefact.name, predicate
+            "bound {} (sigstore bundle and SLSA v1 provenance)",
+            artefact.name
         );
         bound += 1;
     }
@@ -4175,45 +4171,122 @@ fn check_sigstore_binding(bytes: &[u8], checksum: &str, path: &Path) -> Result<(
     Ok(())
 }
 
-/// Requires the first in-toto statement to carry the artefact's digest.
-fn check_provenance_binding(bytes: &[u8], checksum: &str, path: &Path) -> Result<String, String> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| format!("{} is not UTF-8 JSON lines", path.display()))?;
-    let first = text
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .ok_or_else(|| format!("{} names no statement", path.display()))?;
-    let statement: serde_json::Value = serde_json::from_str(first)
-        .map_err(|error| format!("{} is not an in-toto statement: {error}", path.display()))?;
-    if statement
-        .pointer("/_type")
-        .and_then(serde_json::Value::as_str)
-        != Some("https://in-toto.io/Statement/v1")
-    {
+fn check_provenance_binding(
+    bytes: &[u8],
+    artefact: &ManifestArtefact,
+    path: &Path,
+) -> Result<(), String> {
+    let statement =
+        provenance_statement(bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    if statement.get("_type").and_then(Value::as_str) != Some("https://in-toto.io/Statement/v1") {
         return Err(format!("{} is not an in-toto v1 statement", path.display()));
     }
-    let subjects = statement
-        .pointer("/subject")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| format!("{} has no statement subject", path.display()))?;
-    let bound = subjects.iter().any(|subject| {
-        subject
-            .pointer("/digest/sha256")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|digest| digest.eq_ignore_ascii_case(checksum))
-    });
-    if !bound {
+    if statement.get("predicateType").and_then(Value::as_str)
+        != Some("https://slsa.dev/provenance/v1")
+    {
         return Err(format!(
-            "{} names no subject with the manifest checksum",
+            "{} requires the SLSA v1 predicate type",
             path.display()
         ));
     }
-    Ok(statement
-        .pointer("/predicateType")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("untyped")
-        .to_owned())
+    let subjects = statement
+        .get("subject")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{} has no statement subject", path.display()))?;
+    let mut named_subjects = subjects.iter().filter(|subject| {
+        subject.get("name").and_then(Value::as_str) == Some(artefact.name.as_str())
+    });
+    let bound = named_subjects
+        .next()
+        .and_then(|subject| subject.pointer("/digest/sha256"))
+        .and_then(Value::as_str)
+        .is_some_and(|digest| digest.eq_ignore_ascii_case(&artefact.checksum));
+    if !bound {
+        return Err(format!(
+            "{} names no subject with the manifest checksum for {}",
+            path.display(),
+            artefact.name
+        ));
+    }
+    if named_subjects.next().is_some() {
+        return Err(format!(
+            "{} has multiple subjects named {}",
+            path.display(),
+            artefact.name
+        ));
+    }
+    Ok(())
+}
+
+fn provenance_statement(bytes: &[u8]) -> Result<Value, String> {
+    let document = parse_unique_json_bytes(bytes)
+        .map_err(|error| format!("expected one provenance JSON document: {error}"))?;
+    let statement = document.get("_type").is_some();
+    let envelope = ["payload", "payloadType", "signatures"]
+        .iter()
+        .any(|field| document.get(field).is_some());
+    let bundled_envelope = document.get("dsseEnvelope");
+    let sigstore_message = document.get("messageSignature").is_some();
+    let envelope = match (statement, envelope, bundled_envelope, sigstore_message) {
+        (true, false, None, false) => return Ok(document),
+        (false, true, None, false) => &document,
+        (false, false, Some(envelope), false) => {
+            // The Sigstore bundle schema retains the former version-parameter forms.
+            if !matches!(
+                document.get("mediaType").and_then(Value::as_str),
+                Some(
+                    "application/vnd.dev.sigstore.bundle.v0.3+json"
+                        | "application/vnd.dev.sigstore.bundle+json;version=0.1"
+                        | "application/vnd.dev.sigstore.bundle+json;version=0.2"
+                        | "application/vnd.dev.sigstore.bundle+json;version=0.3"
+                )
+            ) {
+                return Err("Sigstore provenance bundle requires a supported mediaType".to_owned());
+            }
+            envelope
+        }
+        _ => return Err("expected one in-toto statement or one DSSE envelope".to_owned()),
+    };
+
+    let payload_type = envelope.get("payloadType").and_then(Value::as_str);
+    let supported_type = payload_type == Some("application/vnd.in-toto+json")
+        || (bundled_envelope.is_none()
+            && payload_type == Some("application/vnd.in-toto.provenance+json"));
+    if !supported_type {
+        return Err("DSSE payloadType must identify in-toto JSON provenance".to_owned());
+    }
+
+    let signatures = envelope
+        .get("signatures")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "DSSE envelope requires a signatures array".to_owned())?;
+    if signatures.is_empty()
+        || (bundled_envelope.is_some() && signatures.len() != 1)
+        || signatures.iter().any(|signature| {
+            signature
+                .get("sig")
+                .and_then(Value::as_str)
+                .is_none_or(|sig| sig.trim().is_empty())
+        })
+    {
+        return Err("DSSE envelope has invalid signature entries".to_owned());
+    }
+
+    let encoded = envelope
+        .get("payload")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "DSSE envelope has no payload string".to_owned())?;
+    let payload = base64_decode(encoded)
+        .or_else(|| {
+            // DSSE also allows the padded URL-safe base64 alphabet.
+            if encoded.contains(['+', '/']) {
+                return None;
+            }
+            base64_decode(&encoded.replace('-', "+").replace('_', "/"))
+        })
+        .ok_or_else(|| "DSSE payload is not valid base64".to_owned())?;
+    parse_unique_json_bytes(&payload)
+        .map_err(|error| format!("expected one in-toto statement in the DSSE payload: {error}"))
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {
@@ -4462,7 +4535,7 @@ mod tests {
         )
         .expect("bundle");
         let provenance = format!(
-            "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"a.tar.gz\",\"digest\":{{\"sha256\":\"{digest_hex}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
+            "{{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{{\"name\":\"ignatius-0.1.0-aarch64-apple-darwin.tar.gz\",\"digest\":{{\"sha256\":\"{digest_hex}\"}}}}],\"predicateType\":\"https://slsa.dev/provenance/v1\"}}\n"
         );
         std::fs::write(
             bundle_dir.join("ignatius-0.1.0-aarch64-apple-darwin.tar.gz.intoto.jsonl"),

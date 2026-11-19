@@ -3148,6 +3148,218 @@ fn w11_sbom_generate_and_verify_cli_roundtrips_and_detects_tampered_lockfile_has
 }
 
 #[test]
+fn w11_trust_verify_binds_named_slsa_v1_subjects_in_dsse_and_sigstore_provenance() {
+    let temp = tempdir().expect("temporary directory");
+    let bundle_dir = temp.path();
+    let fixture = b"synthetic archive for provenance binding";
+    let (hex, digest) = fixture_digest_for_contract(fixture);
+    let archive_name = "ignatius-0.1.0-aarch64-apple-darwin.tar.gz";
+    let manifest = json!({
+        "schema_version": 1,
+        "product_version": "0.1.0",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "build_identity": "ci-rehearsal",
+        "artefacts": [{
+            "name": archive_name,
+            "target": "aarch64-apple-darwin",
+            "format": "tar.gz",
+            "size_bytes": fixture.len(),
+            "checksum_algorithm": "sha256",
+            "checksum": hex
+        }]
+    });
+    fs::write(
+        bundle_dir.join("release-manifest.json"),
+        format!("{manifest}\n"),
+    )
+    .expect("write manifest");
+    fs::write(
+        bundle_dir.join(format!("{archive_name}.sigstore.json")),
+        json!({
+            "messageSignature": {
+                "messageDigest": {"algorithm": "SHA2_256", "digest": digest},
+                "signature": "AAA="
+            }
+        })
+        .to_string(),
+    )
+    .expect("write synthetic signature bundle");
+
+    let provenance_path = bundle_dir.join(format!("{archive_name}.intoto.jsonl"));
+    let verify = |document: &str| {
+        fs::write(&provenance_path, document).expect("write synthetic provenance");
+        run_xtask(vec![
+            "release".to_owned(),
+            "trust".to_owned(),
+            "verify".to_owned(),
+            format!("--manifest-dir={}", bundle_dir.display()),
+            format!("--bundle-dir={}", bundle_dir.display()),
+        ])
+    };
+    let statement = json!({
+        "_type": "https://in-toto.io/Statement/v1",
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "subject": [
+            {"name": "other-archive.zip", "digest": {"sha256": "00".repeat(32)}},
+            {"name": archive_name, "digest": {"sha256": hex}}
+        ],
+        "predicate": {"fixtureMarker": ">>>"}
+    });
+    let encoded = base64_encode_contract(statement.to_string().as_bytes());
+    let envelope = json!({
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": encoded,
+        "signatures": [{"sig": "AAA="}]
+    });
+    let bundle = json!({
+        "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+        "verificationMaterial": {},
+        "dsseEnvelope": envelope
+    });
+    let mut url_safe_envelope = envelope.clone();
+    assert!(
+        encoded.contains('+'),
+        "fixture must exercise the URL-safe alphabet"
+    );
+    url_safe_envelope["payloadType"] = json!("application/vnd.in-toto.provenance+json");
+    url_safe_envelope["payload"] = json!(encoded.replace('+', "-").replace('/', "_"));
+
+    let assert_bound = |name: &str, document: &Value| {
+        let output = verify(&format!("{document}\n"));
+        let evidence = output_text(&output);
+        assert!(output.status.success(), "{name} binding failed: {evidence}");
+        assert!(evidence.contains("SLSA v1 provenance"), "{evidence}");
+        assert!(
+            evidence.contains("cryptographic verification still needs"),
+            "{evidence}"
+        );
+    };
+    assert_bound("standalone DSSE", &url_safe_envelope);
+    for media_type in [
+        "application/vnd.dev.sigstore.bundle.v0.3+json",
+        "application/vnd.dev.sigstore.bundle+json;version=0.1",
+        "application/vnd.dev.sigstore.bundle+json;version=0.2",
+        "application/vnd.dev.sigstore.bundle+json;version=0.3",
+    ] {
+        let mut supported_bundle = bundle.clone();
+        supported_bundle["mediaType"] = json!(media_type);
+        assert_bound(media_type, &supported_bundle);
+    }
+
+    let mut wrong_predicate = statement.clone();
+    wrong_predicate["predicateType"] = json!("https://slsa.dev/provenance/v0.2");
+    let mut missing_predicate = statement.clone();
+    missing_predicate
+        .as_object_mut()
+        .expect("statement object")
+        .remove("predicateType");
+    let mut wrong_subject = statement.clone();
+    wrong_subject["subject"][0]["digest"]["sha256"] = json!(hex);
+    wrong_subject["subject"][1]["digest"]["sha256"] = json!("00".repeat(32));
+    let mut wrong_payload_type = envelope.clone();
+    wrong_payload_type["payloadType"] = json!("application/json");
+    let mut malformed_payload = envelope.clone();
+    malformed_payload["payload"] = json!("invalid base64");
+    let mut ambiguous_bundle = bundle.clone();
+    ambiguous_bundle["messageSignature"] = json!({});
+    let mut missing_media_type = bundle.clone();
+    missing_media_type
+        .as_object_mut()
+        .expect("bundle object")
+        .remove("mediaType");
+    let mut wrong_media_type = bundle.clone();
+    wrong_media_type["mediaType"] = json!("application/json");
+    let mut blank_signature = envelope.clone();
+    blank_signature["signatures"][0]["sig"] = json!("");
+    let mut multiple_bundle_signatures = bundle.clone();
+    multiple_bundle_signatures["dsseEnvelope"]["signatures"] =
+        json!([{"sig": "AAA="}, {"sig": "AQI="}]);
+    let mut duplicate_subject = statement.clone();
+    duplicate_subject["subject"][0] = statement["subject"][1].clone();
+    let mut extra_payload = envelope.clone();
+    extra_payload["payload"] = json!(base64_encode_contract(
+        format!("{statement}\n{statement}").as_bytes()
+    ));
+
+    for (description, document, expected) in [
+        (
+            "another predicate",
+            wrong_predicate.to_string(),
+            "requires the SLSA v1 predicate type",
+        ),
+        (
+            "missing predicate",
+            missing_predicate.to_string(),
+            "requires the SLSA v1 predicate type",
+        ),
+        (
+            "wrong named subject",
+            wrong_subject.to_string(),
+            "names no subject with the manifest checksum",
+        ),
+        (
+            "duplicate named subject",
+            duplicate_subject.to_string(),
+            "has multiple subjects named",
+        ),
+        (
+            "wrong envelope type",
+            wrong_payload_type.to_string(),
+            "DSSE payloadType",
+        ),
+        (
+            "malformed encoded payload",
+            malformed_payload.to_string(),
+            "DSSE payload is not valid base64",
+        ),
+        (
+            "two bundle contents",
+            ambiguous_bundle.to_string(),
+            "expected one in-toto statement or one DSSE envelope",
+        ),
+        (
+            "missing bundle type",
+            missing_media_type.to_string(),
+            "Sigstore provenance bundle requires a supported mediaType",
+        ),
+        (
+            "unrelated bundle type",
+            wrong_media_type.to_string(),
+            "Sigstore provenance bundle requires a supported mediaType",
+        ),
+        (
+            "empty DSSE signature",
+            blank_signature.to_string(),
+            "DSSE envelope has invalid signature entries",
+        ),
+        (
+            "multiple signatures in a Sigstore bundle",
+            multiple_bundle_signatures.to_string(),
+            "DSSE envelope has invalid signature entries",
+        ),
+        (
+            "multiple documents",
+            format!("{bundle}\n{bundle}\n"),
+            "trailing characters",
+        ),
+        (
+            "multiple inner statements",
+            extra_payload.to_string(),
+            "expected one in-toto statement in the DSSE payload",
+        ),
+    ] {
+        let refused = verify(&document);
+        let evidence = output_text(&refused);
+        assert!(
+            !refused.status.success(),
+            "{description} unexpectedly bound: {evidence}"
+        );
+        assert!(evidence.contains(expected), "{description}: {evidence}");
+        assert!(evidence.contains(".intoto.jsonl"), "{evidence}");
+    }
+}
+
+#[test]
 fn w11_trust_verify_cli_validates_complete_bundle_and_refuses_tampered_sidecars() {
     let temp = tempdir().expect("temporary directory");
     let bundle_dir = temp.path().join("bundle");

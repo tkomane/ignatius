@@ -259,15 +259,15 @@ silently replaced or redirected through a directory symlink.
 ### Inventory and trust sidecars
 
 The owner trust choices are Sigstore keyless signing, a CycloneDX SBOM, and
-GitHub OIDC/SLSA provenance (ADR-0008). Two local commands implement the
-checkable halves; cryptographic verification stays an explicit independent
-step below.
+GitHub OIDC/SLSA provenance ([ADR-0008](../architecture/decisions/0008-packaging-and-release.md)).
+The local commands check inventory reproducibility and sidecar binding.
+The approved independent verifiers check cryptographic trust.
 
 ~~~text
 cargo --locked xtask release sbom generate \
-  --lockfile PATH --out PATH
+  --lockfile=PATH --out=PATH
 cargo --locked xtask release sbom verify \
-  --lockfile PATH --sbom PATH
+  --lockfile=PATH --sbom=PATH
 ~~~
 
 `sbom generate` derives a CycloneDX 1.5 inventory deterministically from
@@ -280,30 +280,26 @@ dependencies the source resolves, not what they do.
 
 ~~~text
 cargo --locked xtask release trust verify \
-  --manifest-dir DIR --bundle-dir DIR
+  --manifest-dir=DIR --bundle-dir=DIR
 ~~~
 
-`trust verify` requires `<name>.sigstore.json` and `<name>.intoto.jsonl`
-siblings for every manifest artefact and requires both to bind the
-artefact's SHA-256: the bundle's `messageSignature.messageDigest` must be
-`SHA2_256` over the manifest checksum, and the first in-toto v1 statement
-must carry that checksum as a subject digest. Missing, mismatched, or
-malformed sidecars fail closed. A bound sidecar proves the signature and the
-provenance statement are about these exact bytes. It does not prove who
-signed, which builder ran, or that the transparency log holds the entry.
+For every manifest artefact, `trust verify` requires a signature digest in
+`<name>.sigstore.json` and a provenance document in `<name>.intoto.jsonl`.
+The signature's `messageDigest` must carry the manifest SHA-256. The
+provenance document must identify the SLSA v1 predicate and bind the exact
+archive name and SHA-256 in one subject. See the [accepted provenance
+formats](#trust-bundle-sidecar-verification).
 
-The independent verification for a candidate is therefore:
-
-1. Run `manifest verify`, `sbom verify`, and `trust verify` above; all pass.
-2. With the Sigstore client, verify each bundle's signature against the
-   certificate identity named in the release record, confirm the digest in
-   the bundle equals the `SHA256SUMS` entry, and confirm the transparency
-   log entry is present.
-3. With the SLSA verifier, verify each provenance statement's builder
-   identity against the release record and confirm its subject equals the
-   `SHA256SUMS` entry.
-4. Any failure at any step blocks the candidate; a passing local binding
-   check never substitutes for steps 2 and 3.
+1. Run `manifest verify` to check the actual archive bytes against
+   `release-manifest.json` and `SHA256SUMS`, then run `sbom verify` and
+   `trust verify`.
+2. Use the independent Sigstore verifier to check each signature against the
+   certificate identity approved in the release record and verify its
+   transparency log evidence.
+3. Use the [independent provenance verifier](#slsa-provenance-verification)
+   for the approved producer. Verify the SLSA predicate, builder and source
+   identity against the exact candidate.
+4. Every step must pass before the candidate can meet its trust gate.
 
 ## Native dependency boundary
 
@@ -804,12 +800,20 @@ cargo xtask release trust verify \
 In operator wrapper tooling, `--dir <bundle-dir>` maps directly to passing the
 bundle directory to both `--manifest-dir` and `--bundle-dir`.
 
-The trust verifier fails closed with a non-zero exit code if:
-- an archive SHA-256 digest does not match `SHA256SUMS` or `release-manifest.json`;
-- `<archive>.sigstore.json` (or `.sig`/`.pem`) is missing or empty;
-- the Sigstore bundle digest algorithm is not `SHA2_256` or binds a foreign digest; or
-- `<archive>.intoto.jsonl` does not contain an in-toto v1 statement whose
-  subject SHA-256 digest matches the archive checksum.
+Each `<archive>.intoto.jsonl` contains one JSON document. The dry binding
+check accepts a bare in-toto v1 statement, a standalone DSSE envelope, or
+a [Sigstore bundle containing a DSSE envelope](https://docs.sigstore.dev/about/bundle/#dsse-envelope).
+Bundles must use the Sigstore v0.3 media type or a legacy version-parameter
+media type listed in the [Sigstore bundle schema](https://github.com/sigstore/protobuf-specs/blob/main/protos/sigstore_bundle.proto).
+An envelope contains a base64-encoded statement with an in-toto JSON
+payload type and nonempty signature fields. The statement must specify `https://slsa.dev/provenance/v1`
+as its predicate type. One subject must pair the exact manifest archive
+name with its SHA-256 digest. Missing sidecars, duplicate keys, multiple
+documents, ambiguous envelopes and mismatches block the check.
+
+Run `manifest verify` to check the archive bytes and `SHA256SUMS`.
+Cryptographic verification uses the signed envelope or bundle from the
+approved producer.
 
 ### Independent cryptographic verification
 
@@ -838,15 +842,33 @@ cosign verify-blob \
   <archive>
 ```
 
-#### SLSA provenance verification (slsa-verifier)
+#### SLSA provenance verification
 
-Verify the build provenance statement against the release tag and repository:
+For provenance produced by GitHub Artifact Attestations, pass the retained
+Sigstore bundle and the approved signer workflow, source ref, and source
+revision from the release record. [GitHub Actions attestation output](https://github.com/actions/attest#outputs), [GitHub CLI verification](https://cli.github.com/manual/gh_attestation_verify).
 
 ```bash
-slsa-verifier verify-artifact <archive> \
-  --provenance-path <archive>.intoto.jsonl \
+gh attestation verify "$ARCHIVE" \
+  --bundle "$PROVENANCE_SIDECAR" \
+  --repo tkomane/ignatius \
+  --signer-workflow "$APPROVED_SIGNER_WORKFLOW" \
+  --source-ref "$APPROVED_SOURCE_REF" \
+  --source-digest "$SOURCE_REVISION" \
+  --predicate-type https://slsa.dev/provenance/v1
+```
+
+For a supported SLSA GitHub generator with standalone DSSE output, verify
+using its approved builder identity and source tag. Compare the source
+revision in the verified output to the release record. [SLSA verifier](https://github.com/slsa-framework/slsa-verifier#verification-for-github-builders).
+
+```bash
+slsa-verifier verify-artifact "$ARCHIVE" \
+  --provenance-path "$PROVENANCE_SIDECAR" \
+  --builder-id "$APPROVED_BUILDER_ID" \
   --source-uri github.com/tkomane/ignatius \
-  --source-tag <version-tag>
+  --source-tag "$APPROVED_VERSION_TAG" \
+  --print-provenance
 ```
 
 ### Dependency vulnerability triage and emergency patch releases
@@ -915,10 +937,9 @@ Maintainers rehearse signing-identity revocation and trust-bundle rotation to
 ensure compromised identities cannot publish or validate releases:
 
 1. **Rehearsal protocol**:
-   - Maintainers simulate signing bundle revocation using synthetic or rotated
-     Sigstore bundles and in-toto provenance statements where `messageSignature`
-     is invalidated, revoked or stripped.
-   - Run trust verification to confirm fail-closed behavior:
+   - Prepare synthetic signature and provenance sidecars with missing or
+     mismatched digests to exercise structural check failures.
+   - Run trust verification to confirm the invalid sidecars are rejected:
      ```bash
      cargo --locked xtask release trust verify --manifest-dir=DIR --bundle-dir=DIR
      ```
@@ -934,8 +955,8 @@ ensure compromised identities cannot publish or validate releases:
 2. **Rotating GitHub Actions OIDC workflow references**:
    - When a workflow or signing identity is rotated, update the expected OIDC
      issuer and SAN URI in the release verification workflow and repository secrets.
-   - Verify that previous signatures produced under older or revoked workflow
-     identities are rejected.
+   - Use the approved independent verifier to check that signatures produced
+     under older or revoked workflow identities are rejected.
 3. **Operator rollback guidance**:
    - If a published release candidate is revoked or defective, mark its catalogue
      status as `withdrawn` or `blocked`.
