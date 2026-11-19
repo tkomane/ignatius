@@ -4,6 +4,20 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 46: Linux renderer and release trust preflight - 19 November 2026
+
+- The exact Linux archive from rehearsal `44605153852` passed a live
+  verified-TLS query, structured JSONB inspection, resize and Ctrl+Q in an
+  isolated Ubuntu xterm display. Native terminal mode reports and framebuffer
+  checks distinguish fixed-size restoration from xterm's resize gravity.
+  [Renderer evidence](operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026)
+- The release trust preflight accepts SLSA v1 statements in bare in-toto,
+  standalone DSSE and supported Sigstore bundle formats. It now requires
+  the same provenance subject to bind the exact manifest archive name and
+  SHA-256. Cryptographic verification, independently verified candidate
+  provenance and signatures, and release-owner authorization remain open.
+  [Release trust checks](operations/release.md#trust-bundle-sidecar-verification)
+
 ## Wave 45: Playground onboarding and terminal evidence - 19 November 2026
 
 - The merged packaging fix is `4cdfa5c`. Its exact push checks are

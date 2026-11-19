@@ -654,10 +654,10 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 | Terminal | Status |
 | --- | --- |
 | macOS, in a pseudo-terminal | Verified: full-screen render, Ctrl+R executed a query, Ctrl+Q restored the terminal, with the exact escape sequences captured |
-| Warp on macOS, interactive | **Not yet verified by hand.** The pty run above used a forced size, not Warp's own renderer |
-| Live terminal resize | Actual Ratatui TestBackend frame/input/stale-event boundaries tested; native terminal resize remains unverified |
+| Warp on macOS, interactive | A native SIGTERM run restored the POSIX terminal settings. Visual hand use, cursor appearance and OSC 11 response remain open |
+| Live terminal resize | The macOS PTY and automated Linux xterm verified compact and minimum-size layouts, then recovered retained results |
 | Windows Terminal with PowerShell 7 | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
-| Any VT-capable terminal on Linux | Builds and passes tests in CI. The full-screen client has not been opened there by anyone |
+| Linux xterm 390 | Automated Xvfb rendering, verified TLS, query, resize and terminal-mode restoration passed on Ubuntu 24.04.5 x86-64. Linux desktop hand use remains open. See the [renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
 
