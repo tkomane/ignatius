@@ -95,6 +95,28 @@ The local samples are in
 `/private/tmp/ignatius-w10-linux-grid.M27IIT0r/output/grid-cjk/samples.csv`,
 SHA-256 `af7867ac0b4f9de0152cfd99c3063a66819d4df25d13066c09124173604b1095`.
 
+The exact Windows x64 archive ran under emulation in native Windows Terminal
+1.25.3131.0 and PowerShell 7.6.10 on Windows 11 ARM64 (build `10.0.26200.0`,
+image `20261112.217.1`). The read-only PostgreSQL 17.12 fixture had two
+schemas and 30 ten-column tables. At 90x27, the probe waited for the fixture
+schema and table count to appear, then verified completion with the default
+Ctrl+Space. The earlier palette snapshot was taken before the connection
+enabled that command. [Readiness evidence](https://github.com/tkomane/ignatius/actions/runs/44701383153)
+
+Across 120 actions after 24 warm-ups, native console timings were 14.985 ms
+p50 and 15.441 ms p95, with a 15.769 ms maximum. QPC measured from before
+`WriteConsoleInputW` to the first matching screen-buffer read, including
+polling. The groups covered editor insertion and backspace, palette open
+and close, and schema completion open and close. The raw receipt's SHA-256
+is `a51fc2361d702b8c28d87254c9bdef30d561dad3e5e1fa3a96e8ee6ce2ea728b`.
+[Windows timing run and receipt](https://github.com/tkomane/ignatius/actions/runs/44702492388)
+
+The same client returned the server-confirmed read-only TLS result `42`.
+It exited zero and restored the console modes, all 171 calibrated cursor
+pixels and the byte-identical main-screen capture. The original PowerShell
+prompt ran a command and the owned job emptied. Windows grid and compositor
+timing, and desktop and screen-reader hand use, remain open.
+
 ### Selected archive verification and missing prerequisites
 
 The `ci/44681770913-1` archive installation instructions now verify one selected

@@ -25,6 +25,11 @@ before trusting anything else.
   input injection and framebuffer observation. Two server-order restorations
   in the grid run took more than 100 ms.
   [Linux timing method](operations/verification.md#archived-release-interaction-timings)
+- Windows 11 ARM64 measured 15.441 ms console-buffer p95 across 120 warmed
+  local actions on the emulated x64 archive, including default Ctrl+Space.
+  The live TLS query and cursor restoration passed afterward. Windows grid
+  timing and hand use remain open.
+  [Native Windows timing run](https://github.com/tkomane/ignatius/actions/runs/44702492388)
 
 ## Wave 61 - Selected archive installation preflight - 20 November 2026
 
