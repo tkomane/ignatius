@@ -16,19 +16,19 @@ from pathlib import Path
 EXPECTED_VERSION = '0.1.0'
 CHECKS: list[dict] = []
 REVISIONS = (
-    ('4cdfa5c273faae12826e7bcd96c6c37af29ef16c', 'ci/44605153852-1', 9),
-    ('bde6711802fe4c74c1330e4fe300029853d3a76e', 'ci/44655874167-1', 12),
+    ('4e9509c1337d98ad69c92dd013f5938d545b54f8', 'ci/44667989084-1', 12),
+    ('61425c34097020ecec3ffead0bec7d4251680814', 'ci/44681770913-1', 12),
 )
 ARCHIVES = {
     'aarch64-apple-darwin': ('tar.gz', (
-        'c42a38f87ec87ca1f090dbb0ef9dab5b2be8282aedbdc439e128e045f464ec00',
-        '0c67c03604f48451138ce2167e7d6db8f50b4f56f16c49339f7ab76ff814cbb8')),
+        'eec458113760a2a3d8ab7aa4890d5c6b7e84434d2b98a95b7050cc4c3e2fe055',
+        'd2a60c55b145927f9c4ae5a3229c9929258d9e01e83aff223f5bcf8effc6a02e')),
     'x86_64-unknown-linux-gnu': ('tar.gz', (
-        '5e23548a4c95c76cee50a06bdb575464494b46da370e1a6172c56079df9331b9',
-        'cd1d9575c5b8101759ab36fc70da098ed52a36deb0726d22ab239adb06703509')),
+        '1111a736e34658c46322419b0121a315e2bf57f5c46b5bb5e566259e7ab551c6',
+        '51425b934bc0bdeff702b31e7085a3fe860ee084d21253e423655f61909e08d4')),
     'x86_64-pc-windows-msvc': ('zip', (
-        '5d1b4047cee4a24cca401628d3726ef79d128e3b685e8d46f785385246c18af5',
-        '3e6f28b5350d0c85ddaa2db58a54a9bca9ee43ba6a1f1813cdcef04d7da3e830')),
+        'f4d440a9fdb868db709cfba3bc2649d866f77dc618f7c699d4b0c8bb05b008b8',
+        'f9a52972fe4ca3a911000448224de0bfba097052307bf3b59eb70be1040cadc7')),
 }
 
 def load_smoke(repo: Path):
