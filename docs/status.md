@@ -35,6 +35,11 @@ before trusting anything else.
   passed again. Windows compositor timing and desktop hand use remain
   open.
   [Windows grid run](https://github.com/tkomane/ignatius/actions/runs/44708743953)
+- The repeat measured 47.708 ms console-buffer p95 across 105 actions.
+  One authenticated capture after timing showed the filtered grid and both
+  CJK glyphs in native Windows Terminal. The live TLS result and PowerShell
+  restoration passed again.
+  [Windows compositor capture and repeat](https://github.com/tkomane/ignatius/actions/runs/44712917157)
 
 ## Wave 61 - Selected archive installation preflight - 20 November 2026
 
