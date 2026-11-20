@@ -568,6 +568,15 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-actor") {
             return renderer_actor(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
+        if (argc == 6 && std::wstring_view(argv[1]) == L"--renderer-paste-supervise") {
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], {}, std::nullopt, true);
+        }
+        if (argc == 6 && std::wstring_view(argv[1]) == L"--renderer-paste-actor") {
+            const std::wstring qpc = argv[5];
+            require(!qpc.empty() && qpc.size() <= 20 && qpc.find_first_not_of(L"0123456789") == std::wstring::npos,
+                    "owned paste calibration deadline");
+            return renderer_actor(argv[2], argv[3], argv[4], {}, {}, std::nullopt, std::stoull(qpc), true);
+        }
         if (argc == 9 && std::wstring_view(argv[1]) == L"--renderer-guard-supervise") {
             std::uint32_t bits{};
             require(w07::number(ascii(argv[8]), bits) && bits <= 7, "owned Guard options");
