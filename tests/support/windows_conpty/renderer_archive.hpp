@@ -170,6 +170,11 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
     }
 }
 
+struct RendererWindowProof {
+    std::array<std::int64_t, 2> compositor_times{};
+    bool foreground{};
+};
+
 struct RendererArchiveReceipt {
     DWORD pid{}, acquired_input{}, acquired_output{}, restored_input{}, restored_output{}, exit_code{STILL_ACTIVE};
     USHORT process_machine{}, native_machine{};
@@ -180,6 +185,8 @@ struct RendererArchiveReceipt {
     std::size_t active_surface_pixels{}, active_focus_pixels{};
     DWORD startup_facts{}, startup_last_input{}, startup_last_output{}, startup_early_exit{STILL_ACTIVE};
     RendererPixelObservation restored_pixels{};
+    bool wgc_software_device{};
+    RendererWindowProof wgc_baseline{}, wgc_active{}, wgc_restored{};
 };
 
 Handle renderer_register_archive(HANDLE actor, HANDLE job, const std::wstring& archive,
@@ -252,7 +259,97 @@ void renderer_capture_archive(HWND window, const std::filesystem::path& path, Cl
     throw std::runtime_error("product renderer did not display its Material pixels in the alternate screen");
 }
 
-void emit_renderer_archive(const RendererArchiveReceipt& receipt) {
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+struct RendererWindowFrame {
+    renderer_pixels_detail::Frame pixels;
+    ignatius_wgc::Rectangle bounds;
+    std::uint32_t generation;
+    std::int64_t compositor_time;
+    bool foreground;
+};
+
+RendererWindowFrame renderer_window_frame(ignatius_wgc::WindowCapture& capture, Clock::time_point deadline,
+                                          std::int64_t fence) {
+    using namespace renderer_pixels_detail;
+    const auto source = capture.next(deadline, fence);
+    require(source.width >= 450 && source.width <= 1024 && source.height >= 260 && source.height <= 768,
+            "owned WGC archive client dimensions");
+    Frame frame{source.width, source.height, std::vector<Pixel>(source.pixels.size())};
+    std::transform(source.pixels.begin(), source.pixels.end(), frame.pixels.begin(),
+                   [](const ignatius_wgc::Pixel& pixel) { return Pixel{pixel.b, pixel.g, pixel.r, 0}; });
+    return {std::move(frame), source.client, source.geometry_generation, source.compositor_time_100ns,
+            source.foreground};
+}
+
+bool renderer_same_window_sample(const RendererWindowFrame& first, const RendererWindowFrame& second) {
+    return first.generation == second.generation && first.bounds == second.bounds
+        && first.foreground == second.foreground;
+}
+
+std::int64_t renderer_capture_fence(std::uint64_t prior_qpc) {
+    return ignatius_wgc::qpc_to_100ns(prior_qpc, frequency());
+}
+
+RendererPixelObservation observe_archive_main_window(ignatius_wgc::WindowCapture& capture,
+    const std::filesystem::path& path, std::uint64_t prior_qpc, Clock::time_point deadline,
+    RendererWindowProof& proof) {
+    using namespace renderer_pixels_detail;
+    const auto fence = renderer_capture_fence(prior_qpc);
+    std::optional<RendererWindowFrame> previous;
+    std::vector<Pixel> previous_crop;
+    Box previous_box{};
+    while (Clock::now() < deadline) {
+        auto frame = renderer_window_frame(capture, deadline, fence);
+        const char* reason = nullptr;
+        auto verified = measure(frame.pixels, 0, false, true, reason, false);
+        if (!verified) continue;
+        auto pixels = cropped_pixels(frame.pixels, verified->crop);
+        if (previous && renderer_same_window_sample(*previous, frame)
+            && same_crop(previous_box, verified->crop) && previous_crop == pixels) {
+            write_crop(path, verified->crop, pixels, deadline);
+            proof = {{previous->compositor_time, frame.compositor_time}, frame.foreground};
+            verified->facts.stable_frames = 2;
+            return verified->facts;
+        }
+        previous = std::move(frame);
+        previous_box = verified->crop;
+        previous_crop = std::move(pixels);
+        capture.restart(deadline);
+    }
+    throw std::runtime_error("owned WGC window did not display the stable main sentinel");
+}
+
+void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const std::filesystem::path& path,
+                                     std::uint64_t prior_qpc, Clock::time_point deadline,
+                                     RendererArchiveReceipt& receipt) {
+    using namespace renderer_pixels_detail;
+    const auto fence = renderer_capture_fence(prior_qpc);
+    std::optional<RendererWindowFrame> previous;
+    while (Clock::now() < deadline) {
+        auto frame = renderer_window_frame(capture, deadline, fence);
+        const Box client{0, 0, frame.pixels.width, frame.pixels.height};
+        const auto surface = count_color(frame.pixels, client, {0x19, 0x1c, 0x22});
+        const auto focus = count_color(frame.pixels, client, {0x8a, 0xb4, 0xf8});
+        const bool verified = surface >= 2048 && focus >= 24 && find_anchor(frame.pixels).count == 0
+            && count_color(frame.pixels, client, sentinel_color) == 0;
+        if (!verified) continue;
+        if (previous && renderer_same_window_sample(*previous, frame)) {
+            write_crop(path, client, cropped_pixels(frame.pixels, client), deadline);
+            receipt.active_width = frame.pixels.width;
+            receipt.active_height = frame.pixels.height;
+            receipt.active_surface_pixels = surface;
+            receipt.active_focus_pixels = focus;
+            receipt.wgc_active = {{previous->compositor_time, frame.compositor_time}, frame.foreground};
+            return;
+        }
+        previous = std::move(frame);
+        capture.restart(deadline);
+    }
+    throw std::runtime_error("owned WGC window did not display positive Material alternate frames");
+}
+#endif
+
+void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_capture) {
     const auto truth = [](bool value) { return value ? "true" : "false"; };
     std::cout << ",\"archived_client\":{\"pid\":" << receipt.pid
               << ",\"owned\":" << truth(receipt.child_owned)
@@ -273,8 +370,23 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt) {
               << ",\"restored_modes\":" << truth(receipt.restored_modes)
               << ",\"restored_native_sentinel\":" << truth(receipt.restored_sentinel)
               << ",\"restored_qpc\":" << receipt.restored_qpc << ",\"restored_capture_qpc\":" << receipt.restored_capture_qpc
-              << ",\"restored_cursor_pixels\":" << receipt.restored_pixels.cursor_pixels
-              << ",\"restored_cursor_area\":" << receipt.restored_pixels.cursor_area
+              << ",\"restored_cursor_pixels\":"
+              << (window_capture ? "null" : std::to_string(receipt.restored_pixels.cursor_pixels))
+              << ",\"restored_cursor_area\":"
+              << (window_capture ? "null" : std::to_string(receipt.restored_pixels.cursor_area))
               << ",\"restored_sentinel_pixels\":" << receipt.restored_pixels.sentinel_pixels
-              << ",\"restored_stable_frames\":" << receipt.restored_pixels.stable_frames << '}';
+              << ",\"restored_stable_frames\":" << receipt.restored_pixels.stable_frames;
+    if (window_capture) {
+        std::cout << ",\"window_capture\":{\"software_d3d\":" << truth(receipt.wgc_software_device);
+        const auto sample = [&](const char* phase, const RendererWindowProof& proof) {
+            std::cout << ",\"" << phase << "\":{\"compositor_100ns\":[" << proof.compositor_times[0]
+                      << ',' << proof.compositor_times[1] << "],\"foreground\":"
+                      << (proof.compositor_times[1] ? truth(proof.foreground) : "null") << '}';
+        };
+        sample("baseline", receipt.wgc_baseline);
+        sample("active", receipt.wgc_active);
+        sample("restored", receipt.wgc_restored);
+        std::cout << '}';
+    }
+    std::cout << '}';
 }

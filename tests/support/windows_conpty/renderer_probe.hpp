@@ -373,22 +373,25 @@ RECT renderer_fit_target(const RECT& window, const RECT& work) {
 }
 
 void fit_renderer_window(const RendererWindow& renderer, HANDLE job, const std::wstring& terminal,
-                         const std::wstring& title, Clock::time_point work_deadline, RendererFit& fit) {
+                         const std::wstring& title, Clock::time_point work_deadline, RendererFit& fit,
+                         bool foreground_required) {
     using namespace renderer_pixels_detail;
     PixelCoordinates coordinates;
     const auto deadline = (std::min)(work_deadline, Clock::now() + 5s);
     verify_renderer_window(renderer, job, terminal, title);
-    if (GetForegroundWindow() != renderer.hwnd) {
-        // The hosted desktop may show an owned window without activating it.
-        // Request activation once and retain the real foreground observation.
-        fit.foreground_requested = true;
-        fit.foreground_api_succeeded = SetForegroundWindow(renderer.hwnd) != FALSE;
+    if (foreground_required) {
+        if (GetForegroundWindow() != renderer.hwnd) {
+            // The hosted desktop may show an owned window without activating it.
+            // Request activation once and retain the real foreground observation.
+            fit.foreground_requested = true;
+            fit.foreground_api_succeeded = SetForegroundWindow(renderer.hwnd) != FALSE;
+        }
+        while (GetForegroundWindow() != renderer.hwnd && Clock::now() < deadline)
+            Sleep(remaining(deadline, 20));
+        verify_renderer_window(renderer, job, terminal, title);
+        require_foreground(renderer.hwnd);
+        fit.foreground_verified = true;
     }
-    while (GetForegroundWindow() != renderer.hwnd && Clock::now() < deadline)
-        Sleep(remaining(deadline, 20));
-    verify_renderer_window(renderer, job, terminal, title);
-    require_foreground(renderer.hwnd);
-    fit.foreground_verified = true;
     fit.before = fit.last_window = renderer_window_bounds(renderer.hwnd);
     fit.last_client = renderer_client_bounds(renderer.hwnd);
     fit.measured = true;
@@ -402,7 +405,7 @@ void fit_renderer_window(const RendererWindow& renderer, HANDLE job, const std::
     if (!same_rectangle(fit.before, fit.requested)) {
         require(Clock::now() < deadline, "renderer window fit deadline before reposition");
         verify_renderer_window(renderer, job, terminal, title);
-        require_foreground(renderer.hwnd);
+        if (foreground_required) require_foreground(renderer.hwnd);
         fit.reposition_requested = true;
         require(SetWindowPos(renderer.hwnd, nullptr, fit.requested.left, fit.requested.top,
                              fit.requested.right - fit.requested.left, fit.requested.bottom - fit.requested.top,
@@ -413,7 +416,8 @@ void fit_renderer_window(const RendererWindow& renderer, HANDLE job, const std::
 
     auto stable_since = Clock::now();
     while (Clock::now() < deadline) {
-        require_foreground(renderer.hwnd);
+        if (foreground_required) require_foreground(renderer.hwnd);
+        else verify_renderer_window(renderer, job, terminal, title);
         const auto window = renderer_window_bounds(renderer.hwnd);
         const auto client = renderer_client_bounds(renderer.hwnd);
         const bool unchanged = same_rectangle(window, fit.last_window) && same_rectangle(client, fit.last_client);
@@ -427,7 +431,8 @@ void fit_renderer_window(const RendererWindow& renderer, HANDLE job, const std::
         if (!fitted || !unchanged) {
             stable_since = Clock::now();
         } else if (Clock::now() - stable_since >= 100ms
-                   && same_rectangle(visible_client(renderer.hwnd), client)
+                   && same_rectangle(foreground_required ? visible_client(renderer.hwnd)
+                                                         : renderer_client_bounds(renderer.hwnd), client)
                    && same_rectangle(renderer_window_bounds(renderer.hwnd), window)) {
             verify_renderer_window(renderer, job, terminal, title);
             coordinates.restore();
@@ -450,7 +455,7 @@ struct RendererPhase {
 
 struct RendererReceipt {
     bool passed{}, launcher_owned{}, actor_waited{}, launcher_waited{}, renderer_waited{};
-    bool job_empty{}, pipe_quiescent{}, cleanup_forced{}, modes_restored{};
+    bool job_empty{}, pipe_quiescent{}, cleanup_forced{}, modes_restored{}, window_capture{};
     DWORD launcher_pid{}, actor_pid{}, renderer_pid{}, launcher_exit{STILL_ACTIVE}, actor_exit{STILL_ACTIVE};
     DWORD initial_input{}, initial_output{}, restored_input{}, restored_output{}, associated_consoles{};
     DWORD columns{}, rows{}, job_remaining{}, profile_state{};
@@ -519,6 +524,9 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << (receipt.archive ? "renderer-archive" : "renderer-calibration") << "\",\"native_windows\":true"
               << ",\"calibration_complete\":" << truth(receipt.passed && !receipt.archive)
               << ",\"product_acceptance\":false,\"cursor_capability_accepted\":false"
+              << ",\"capture_backend\":\"" << (receipt.window_capture ? "wgc-owned-window" : "gdi-owned-client") << '"'
+              << ",\"cursor_scope\":\""
+              << (receipt.window_capture ? "unmeasured" : receipt.archive ? "focused-main" : "focused-controls") << '"'
               << ",\"qpc_frequency\":" << frequency()
               << ",\"start_qpc\":" << receipt.start << ",\"end_qpc\":" << receipt.end
               << ",\"failure\":\"" << renderer_json_message(receipt.failure) << '"'
@@ -562,7 +570,7 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"pipe_quiescent\":" << truth(receipt.pipe_quiescent) << '}';
     if (receipt.archive) {
         std::cout << ",\"archive_diagnostic_passed\":" << truth(receipt.passed);
-        emit_renderer_archive(*receipt.archive);
+        emit_renderer_archive(*receipt.archive, receipt.window_capture);
     }
     std::cout << ",\"phases\":[";
     bool first = true;
@@ -572,7 +580,7 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
         const auto& pixel = phase.pixels;
         std::cout << "{\"index\":" << phase.index
                   << ",\"name\":\"" << renderer_stage_names[phase.index] << '"'
-                  << ",\"expected_visible\":" << truth(renderer_visible[phase.index])
+                  << ",\"expected_visible\":" << (receipt.window_capture ? "null" : truth(renderer_visible[phase.index]))
                   << ",\"expected_main\":" << truth(renderer_main[phase.index])
                   << ",\"native_main\":" << truth(phase.native_main)
                   << ",\"native_written\":" << phase.written
@@ -591,17 +599,18 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
                   << ",\"anchor\":" << pixel.anchor_pixels
                   << ",\"phase\":" << pixel.phase_pixels
                   << ",\"sentinel\":" << pixel.sentinel_pixels
-                  << ",\"cursor\":" << pixel.cursor_pixels
-                  << ",\"cursor_area\":" << pixel.cursor_area
+                  << ",\"cursor\":" << (receipt.window_capture ? "null" : std::to_string(pixel.cursor_pixels))
+                  << ",\"cursor_area\":" << (receipt.window_capture ? "null" : std::to_string(pixel.cursor_area))
                   << ",\"stable_frames\":" << pixel.stable_frames << "}}";
     }
     std::cout << "]}\n";
 }
 
 int renderer_supervise(const std::wstring& terminal, const std::wstring& work, const std::wstring& nonce,
-                       const std::wstring& profile, const std::wstring& archive = {}) {
+                       const std::wstring& profile, const std::wstring& archive = {}, bool window_capture = false) {
     RendererReceipt receipt;
     if (!archive.empty()) receipt.archive.emplace();
+    receipt.window_capture = window_capture;
     const auto phase_count = receipt.archive ? std::size_t{1} : renderer_stage_count;
     receipt.start = ticks();
     const auto start = Clock::now();
@@ -611,8 +620,15 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
     Handle job, actor, archived_client;
     Child launcher;
     RendererWindow renderer;
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+    std::optional<ignatius_wgc::WindowCapture> owned_capture;
+#endif
     bool observed_all = false;
     try {
+        require(!window_capture || receipt.archive.has_value(), "WGC requires the owned archive route");
+#ifndef IGNATIUS_RENDERER_WINDOW_CAPTURE
+        require(!window_capture, "WGC is not compiled in this renderer helper");
+#endif
         require_renderer_nonce(nonce);
         const auto folder = std::filesystem::path(work);
         const auto executable = std::filesystem::path(terminal);
@@ -705,7 +721,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 actor = std::move(sender);
                 renderer = find_renderer_window(job.value, terminal, title, work_deadline);
                 receipt.renderer_pid = renderer.pid;
-                fit_renderer_window(renderer, job.value, terminal, title, work_deadline, receipt.fit);
+                fit_renderer_window(renderer, job.value, terminal, title, work_deadline, receipt.fit, !window_capture);
                 if (receipt.profile_state != 3) {
                     receipt.modal = ignatius_renderer_modal::inspect(renderer.hwnd, renderer.pid, work_deadline);
                     verify_renderer_window(renderer, job.value, terminal, title);
@@ -758,7 +774,17 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         "authenticated native raw alternate-screen checkpoint");
                 product.raw_alternate = true;
                 verify_renderer_window(renderer, job.value, terminal, title);
-                renderer_capture_archive(renderer.hwnd, folder / L"ignatius-active.bmp", work_deadline, product);
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+                if (window_capture) {
+                    require(owned_capture.has_value(), "WGC archive activation follows its baseline capture");
+                    owned_capture->restart(work_deadline);
+                    renderer_capture_archive_window(*owned_capture, folder / L"ignatius-active.bmp",
+                                                    prior_qpc, work_deadline, product);
+                } else
+#endif
+                {
+                    renderer_capture_archive(renderer.hwnd, folder / L"ignatius-active.bmp", work_deadline, product);
+                }
                 verify_renderer_window(renderer, job.value, terminal, title);
                 product.acquired_capture_qpc = ticks();
                 server->ack(work_deadline);
@@ -784,8 +810,19 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         && product.restored_qpc >= product.acquired_capture_qpc && product.restored_qpc <= ticks(),
                         "archived product restored the native main sentinel and seeded mode baseline");
                 verify_renderer_window(renderer, job.value, terminal, title);
-                product.restored_pixels = observe_renderer_frame(renderer.hwnd, 0, true, true, work_deadline,
-                    folder / L"ignatius-restored.bmp");
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+                if (window_capture) {
+                    require(owned_capture.has_value(), "WGC archive restoration follows its baseline capture");
+                    owned_capture->restart(work_deadline);
+                    product.restored_pixels = observe_archive_main_window(*owned_capture, folder / L"ignatius-restored.bmp",
+                        product.acquired_capture_qpc, work_deadline, product.wgc_restored);
+                    owned_capture->close();
+                } else
+#endif
+                {
+                    product.restored_pixels = observe_renderer_frame(renderer.hwnd, 0, true, true, work_deadline,
+                        folder / L"ignatius-restored.bmp");
+                }
                 verify_renderer_window(renderer, job.value, terminal, title);
                 product.restored_capture_qpc = ticks();
                 server->ack(work_deadline);
@@ -815,9 +852,22 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         "renderer native write, marker, buffer and mode evidence");
 
                 verify_renderer_window(renderer, job.value, terminal, title);
-                phase.pixels = observe_renderer_frame(renderer.hwnd, index, renderer_visible[index],
-                                                       renderer_main[index], work_deadline,
-                    folder / (receipt.archive ? L"baseline.bmp" : L"phase-" + std::to_wstring(index) + L".bmp"));
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+                if (window_capture) {
+                    require(index == 0 && receipt.archive && !owned_capture, "WGC captures exactly one archive baseline");
+                    owned_capture.emplace(renderer.hwnd, renderer.process.value, [&] {
+                        verify_renderer_window(renderer, job.value, terminal, title);
+                    }, work_deadline);
+                    receipt.archive->wgc_software_device = owned_capture->uses_software_device();
+                    phase.pixels = observe_archive_main_window(*owned_capture, folder / L"baseline.bmp",
+                        prior_qpc, work_deadline, receipt.archive->wgc_baseline);
+                } else
+#endif
+                {
+                    phase.pixels = observe_renderer_frame(renderer.hwnd, index, renderer_visible[index],
+                        renderer_main[index], work_deadline,
+                        folder / (receipt.archive ? L"baseline.bmp" : L"phase-" + std::to_wstring(index) + L".bmp"));
+                }
                 verify_renderer_window(renderer, job.value, terminal, title);
                 phase.capture_qpc = ticks();
                 require(phase.capture_qpc >= phase.actor_qpc && Clock::now() < work_deadline,

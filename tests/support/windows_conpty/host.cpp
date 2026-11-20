@@ -28,6 +28,12 @@ int main() { std::cerr << "W07-064 native host requires actual Windows; no nativ
 #ifdef IGNATIUS_RENDERER_CALIBRATION
 #include "renderer_modal.hpp"
 #endif
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+#if !defined(_M_ARM64)
+#error The Windows Graphics Capture archive probe requires an ARM64 native helper
+#endif
+#include "owned_window_capture.hpp"
+#endif
 using namespace std::chrono_literals;
 namespace {
 struct Handle {
@@ -565,6 +571,11 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-supervise") {
             return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+        if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-window-supervise") {
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6], true);
+        }
+#endif
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-actor") {
             return renderer_actor(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
