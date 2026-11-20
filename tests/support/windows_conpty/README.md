@@ -1,5 +1,13 @@
 # W07-064 first ConPTY capability/control harness
 
+The manual Windows ConPTY diagnostic also offers `renderer-guard-admission`
+and `renderer-guard-matrix`. Each builds the Cargo-selected production
+library, runs the native prerequisite controls, and calibrates the portable
+renderer before observing the actual Guard. Admission runs normal/5.
+The matrix runs the other 23 combinations only after normal/5 passes.
+The published captures and receipts contain only owned synthetic console
+fixtures. [Verified matrix](../../../docs/operations/verification.md#native-windows-terminal-guard-matrix---20-november-2026)
+
 This is the separate cursor-calibration review candidate, based on exact source
 `7d167a96103030914d12cda0e7f6ae2c5c903b84`. The original four capability/control
 paths and their acceptance assertions are preserved. It changes no product source,

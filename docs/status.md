@@ -4,6 +4,17 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 51: Native Windows Terminal Guard matrix - 20 November 2026
+
+- The actual non-test library Guard passed 24 normal, error and uncaught-panic
+  cases on Windows Server 2025 x64 in portable Windows Terminal 1.25.3131.0.
+  All eight option combinations were exercised per exit path. The original
+  input/output masks, cursor and main-screen sentinel returned. Independent
+  checks verified 72 captured crops and the ordered panic markers.
+  [Native Guard matrix](operations/verification.md#native-windows-terminal-guard-matrix---20-november-2026)
+- W07-064 is complete for this observed automation. Bracketed paste, full
+  T055a and Windows 11 hand use remain open.
+
 ## Wave 50: Archived Windows client rendering - 20 November 2026
 
 - The retained x64 binary from `ci/44631543576-1` rendered and exited cleanly
