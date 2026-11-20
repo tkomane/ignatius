@@ -45,8 +45,16 @@ std::uint64_t workbench_time_key(const Child& client, HANDLE input, Clock::time_
 
 void renderer_workbench_performance(const Child& client, HANDLE input,
                                     Clock::time_point archive_deadline, const std::wstring& work) {
-    const auto deadline = (std::min)(archive_deadline - 6s, Clock::now() + 8s);
-    require(Clock::now() < deadline, "leave six seconds for the existing workbench query and quit");
+    const auto work_deadline = archive_deadline - 6s;
+    require(Clock::now() < work_deadline, "leave six seconds for the existing workbench query and quit");
+    // The editor can paint the target and accept text before connection setup
+    // enables schema completion. The owned fixture's schema must be visible.
+    workbench_observe_until(client, work_deadline, [](const auto& lines) {
+        return workbench_contains(lines, L"Ready Autocommit")
+            && workbench_contains(lines, L"perf_aux")
+            && workbench_contains(lines, L"tables (15)");
+    }, "connected synthetic catalogue");
+    const auto deadline = (std::min)(work_deadline, Clock::now() + 8s);
     const std::wstring prefix = L"SELECT * FROM public.perf_catalog_0";
     const auto inserted = prefix + L"X";
     const auto caret = [](std::size_t length) {
@@ -83,15 +91,6 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     const auto changed = [&](const WorkbenchLines& lines) {
         return workbench_contains(lines, inserted_caret) && workbench_contains(lines, inserted);
     };
-    const auto select_completion = [&] {
-        renderer_key(input, 'P', L'p', LEFT_CTRL_PRESSED);
-        workbench_observe_until(client, deadline, palette, "open the completion command palette");
-        renderer_type_text(input, L"show schema completion");
-        workbench_observe_until(client, deadline, [&](const auto& lines) {
-            return palette(lines) && workbench_contains(lines, L" 1 match(es)")
-                && workbench_contains(lines, L"Show schema completion");
-        }, "select the single loaded completion command");
-    };
 
     (void)workbench_observe(client);
     renderer_key(input, 'K', L'k', LEFT_CTRL_PRESSED);
@@ -103,8 +102,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     renderer_type_text(input, prefix);
     workbench_observe_until(client, deadline, editor, "performance editor prefix");
     require(!completion(workbench_observe(client)), "workbench completion starts closed");
-    select_completion();
-    renderer_key(input, VK_RETURN, L'\r', 0);
+    renderer_key(input, VK_SPACE, L' ', LEFT_CTRL_PRESSED);
     workbench_observe_until(client, (std::min)(deadline, Clock::now() + 3s),
                            completion, "loaded synthetic catalogue");
     (void)workbench_time_key(client, input, deadline, VK_ESCAPE, L'\x1b', 0, editor, "dismiss catalogue warmload");
@@ -131,8 +129,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
         measure(1, VK_BACK, L'\b', 0, editor);
         measure(2, 'P', L'p', LEFT_CTRL_PRESSED, palette);
         measure(3, VK_ESCAPE, L'\x1b', 0, editor);
-        select_completion();
-        measure(4, VK_RETURN, L'\r', 0, completion);
+        measure(4, VK_SPACE, L' ', LEFT_CTRL_PRESSED, completion);
         measure(5, VK_ESCAPE, L'\x1b', 0, editor);
     }
 
@@ -140,7 +137,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     // Windows Terminal restoration assertions also pass.
     std::ofstream receipt(std::filesystem::path(work) / L"workbench-performance.pending");
     receipt << "{\"schema_version\":1,\"scope\":\"native console screen-buffer timing\","
-            << "\"completion_key\":\"Enter from command palette\","
+            << "\"completion_key\":\"Ctrl+Space\","
             << "\"warmup_actions\":" << warmup * names.size()
             << ",\"measured_actions\":" << cycles * names.size()
             << ",\"idle_unchanged\":true,\"catalogue_loaded\":true,\"qpc_frequency\":" << frequency()
