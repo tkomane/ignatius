@@ -20,6 +20,8 @@ source can generate user-facing notes.
 - Fixed: The workbench shows `Query cancelled by server` alongside the
   PostgreSQL diagnostic. Cancellation delivery errors stay scoped to their
   original query.
+- Fixed: Results label earlier cancelled rows during a new query and show
+  `ROLLBACK` before failed-transaction details in short panes.
 - Fixed: Cell Detail accepts PostgreSQL array literals with spaces around
   elements and dimension markers. Quoted and escaped spaces remain part of
   the value.

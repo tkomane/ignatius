@@ -2182,6 +2182,8 @@ fn server_confirmed_cancellation_keeps_status_and_diagnostics_visible() {
                     "canceling statement due to user request",
                     "running statement 1",
                 )
+                .likely_cause("the statement was cancelled")
+                .next_action("nothing was retried; run it again when ready")
                 .technical("SQLSTATE", "57014"),
             ),
             transaction: TransactionState::Autocommit,
@@ -2211,6 +2213,7 @@ fn server_confirmed_cancellation_keeps_status_and_diagnostics_visible() {
     assert!(text.contains("57014"));
 
     model.transaction = TransactionState::Failed;
+    model.focus = Focus::Results;
     let narrow = render_to_string(&model, &keymap, &ascii, 40, 8);
     assert!(
         narrow
@@ -2220,6 +2223,40 @@ fn server_confirmed_cancellation_keeps_status_and_diagnostics_visible() {
             .contains("Cancelled Transaction failed"),
         "{narrow}"
     );
+    assert!(narrow.contains("ROLLBACK"), "{narrow}");
+}
+
+#[test]
+fn a_previous_cancelled_result_does_not_confirm_the_next_cancellation() {
+    let mut model = connected_model(Environment::Local);
+    model.focus = Focus::Results;
+    model.last_execution = Some(Execution {
+        notice_report: crate::query::result::NoticeReport::default(),
+        job: JobId(1),
+        statements: Vec::new(),
+        status: ExecutionStatus::Cancelled,
+        elapsed: Duration::from_millis(20),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+    });
+    model.phase = QueryPhase::CancellationRequested { job: JobId(2) };
+    let keymap = Keymap::new();
+    let text = render_to_string(&model, &keymap, &rich(), 100, 30);
+    assert!(text.contains("Cancellation requested"), "{text}");
+    assert!(text.contains("It may still be running"), "{text}");
+    assert!(!text.contains("Query cancelled by server"), "{text}");
+
+    with_rows(
+        &mut model,
+        &["value"],
+        &[&[Cell::Text("previous row".into())]],
+    );
+    model.last_execution.as_mut().unwrap().status = ExecutionStatus::Cancelled;
+    let text = render_to_string(&model, &keymap, &rich(), 100, 30);
+    assert!(text.contains("Cancellation requested"), "{text}");
+    assert!(text.contains("Previous result"), "{text}");
+    assert!(text.contains("previous row"), "{text}");
+    assert!(!text.contains("Query cancelled by server"), "{text}");
 }
 
 #[test]

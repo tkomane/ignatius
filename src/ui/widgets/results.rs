@@ -2,6 +2,7 @@ use super::overlays::render_plan;
 use super::{action_key_label, input_cursor, overlay_block, pane_block};
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
+use crate::query::result::ExecutionStatus;
 use crate::query::value::{
     display_width, pad_to_width, sanitize_for_display, truncate_to_width, wrap_to_width,
 };
@@ -158,10 +159,19 @@ pub(crate) fn render_results(
         );
         let inner = block.inner(area);
         block.render(area, buf);
-        let mut lines = vec![Line::from(Span::styled(
-            "This transaction has failed.",
-            theme.style(Token::TransactionFailed),
-        ))];
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "This transaction has failed.",
+                theme.style(Token::TransactionFailed),
+            )),
+            Line::from(Span::styled(
+                model
+                    .transaction
+                    .recovery()
+                    .unwrap_or("Run ROLLBACK to end it."),
+                theme.style(Token::Info),
+            )),
+        ];
         if let Some(error) = &model.error {
             lines.push(Line::from(Span::styled(
                 error.headline.clone(),
@@ -180,16 +190,16 @@ pub(crate) fn render_results(
                 )));
             }
         }
-        lines.push(Line::from(Span::styled(
-            model
-                .transaction
-                .recovery()
-                .unwrap_or("Run ROLLBACK to end it."),
-            theme.style(Token::Info),
-        )));
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .render(inner, buf);
+        return;
+    }
+
+    let previous_cancellation =
+        model.phase.is_busy() && execution.status == ExecutionStatus::Cancelled;
+    if previous_cancellation && model.visible_result().is_none() {
+        render_results_placeholder(model, keymap, presentation, focused, area, buf);
         return;
     }
 
@@ -211,6 +221,8 @@ pub(crate) fn render_results(
     );
     let status = if model.running_refresh {
         "Refreshing retained result".to_owned()
+    } else if previous_cancellation {
+        "Previous result".to_owned()
     } else {
         execution.status.label().to_owned()
     };

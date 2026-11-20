@@ -79,7 +79,9 @@ precision: `rows M-N of Total retained` (qualifying when results are truncated o
 filtered), and explicitly stating `0 rows returned` when a query yields an empty
 set (never misleadingly reporting `rows 0-0`). Truncation is stated in the
 summary, never implied by an absence. When an error is present it replaces this
-pane, because an error is the result.
+pane, because an error is the result. While a new query runs, any retained rows
+from a cancelled query are labelled `Previous result`. A failed transaction
+shows `ROLLBACK` before diagnostic details.
 
 The same pane has a second shape, reached with `Ctrl+K x`: one row down the
 screen, one column per line, with the names aligned. It exists because a grid
