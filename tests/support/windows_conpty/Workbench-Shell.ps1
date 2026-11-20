@@ -32,12 +32,15 @@ try {
     function global:prompt { 'W07-PS> ' }
     Publish-ActorValue 'shell-ready' "$($PSVersionTable.PSVersion)"
     Wait-ActorSignal 'shell-launch'
-    $uri = "postgres://ig_probe@127.0.0.1:$Port/postgres?sslmode=disable&connect_timeout=3"
+    $ca = Join-Path $PSScriptRoot 'workbench-ca.crt'
+    if (-not [IO.File]::Exists($ca)) { throw 'Missing the owned workbench CA certificate.' }
+    $uri = "postgres://ig_probe@localhost:$Port/postgres?sslmode=verify-full&connect_timeout=5"
     $start = @{
         FilePath = $Archive
         WorkingDirectory = $PSScriptRoot
         NoNewWindow = $true
         PassThru = $true
+        Environment = @{ PGSSLROOTCERT = $ca }
         ArgumentList = @('connect', '--read-only', '--no-history', $uri)
     }
     $client = Start-Process @start

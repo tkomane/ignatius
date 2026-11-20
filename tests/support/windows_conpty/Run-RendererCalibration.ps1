@@ -7,6 +7,7 @@ param(
     [string] $CandidateBuild,
     [switch] $WindowCursorCalibration,
     [ValidateRange(0, 65535)] [int] $WorkbenchPort,
+    [string] $WorkbenchCa,
     [string] $GuardBuildManifest,
     [switch] $GuardMatrix,
     [switch] $GuardPaste,
@@ -157,6 +158,9 @@ if ($WindowCursorCalibration -and -not $windowCapture) {
     throw 'Window cursor calibration requires the owned Windows 11 ARM64 archive route.'
 }
 $liveWorkbench = $WorkbenchPort -gt 0
+if ($liveWorkbench -ne (-not [string]::IsNullOrWhiteSpace($WorkbenchCa))) {
+    throw 'The live workbench requires an owned loopback port and CA certificate.'
+}
 if ($liveWorkbench) {
     $shell = Get-Item -LiteralPath (Join-Path $PSHOME 'pwsh.exe')
     if (-not $WindowCursorCalibration -or $PSVersionTable.PSVersion.Major -ne 7 -or
@@ -399,6 +403,18 @@ if ($liveWorkbench) {
     if ((FileDigest $script) -cne $sourceHashes['Workbench-Shell.ps1']) {
         throw 'The owned PowerShell script differs from its tracked source.'
     }
+    $ca = Get-Item -LiteralPath $WorkbenchCa
+    if ($ca -isnot [IO.FileInfo] -or $ca.Length -lt 1 -or $ca.Length -gt 16384 -or
+        ($ca.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'The workbench requires a bounded regular CA certificate.'
+    }
+    $stagedCa = Join-Path $work 'workbench-ca.crt'
+    Copy-Item -LiteralPath $ca.FullName -Destination $stagedCa
+    $build['workbench_ca_sha256'] = FileDigest $ca.FullName
+    if ((FileDigest $stagedCa) -cne $build['workbench_ca_sha256']) {
+        throw 'The copied workbench CA does not match the owned fixture.'
+    }
+    $build['workbench_sslmode'] = 'verify-full'
     [IO.File]::WriteAllLines((Join-Path $work 'shell-request'), [string[]] @(
         $shell.FullName, $WorkbenchPort.ToString([Globalization.CultureInfo]::InvariantCulture)
     ), [Text.Encoding]::ASCII)

@@ -187,7 +187,7 @@ void renderer_shell_stage(const std::wstring& pipe, const std::wstring& nonce, u
 COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline,
                                const std::wstring& work) {
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
-        return lines.front().find(L"ig_probe@127.0.0.1:") != std::wstring::npos
+        return lines.front().find(L"ig_probe@localhost:") != std::wstring::npos
             && std::any_of(lines.begin(), lines.end(), [](const auto& line) {
                 return line.find(L"Editor") != std::wstring::npos && line.find(L"[focused]") != std::wstring::npos;
             });
@@ -201,7 +201,9 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
                 && line.find(L"[focused]") != std::wstring::npos;
         });
     }, work, "the archived workbench did not open a blank query buffer");
-    renderer_type_text(input, L"select 6*7*current_setting('transaction_read_only')::bool::int as journey_value");
+    renderer_type_text(input, L"select 42 as journey_value from pg_catalog.pg_stat_ssl");
+    renderer_type_text(input, L" where pid=pg_backend_pid() and ssl");
+    renderer_type_text(input, L" and current_setting('transaction_read_only')::bool");
     renderer_key(input, 'R', L'r', LEFT_CTRL_PRESSED);
     COORD result_position{};
     renderer_wait_for_screen(product, deadline, [&result_position](const auto& lines) {

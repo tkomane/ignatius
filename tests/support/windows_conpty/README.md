@@ -19,9 +19,10 @@ The archive diagnostic accepts `powershell_workbench=true` with
 `terminal-renderer-arm64` and `window_cursor_calibration=true`. It uses
 the verified Windows archive and native PowerShell 7 inside the owned
 Windows 11 ARM64 Terminal. Ctrl+K = opens a fresh editor buffer, then
-Ctrl+R sends the read-only query to a disposable
-loopback PostgreSQL 17.12 fixture. The probe reads the completed row and
-elapsed time from the active console and captures that frame. It verifies
+Ctrl+R queries disposable loopback PostgreSQL 17.12 over `verify-full`
+with a DNS-only server certificate. The completed row requires TLS and
+read-only mode in that session. The probe reads the row and elapsed time
+from the active console and captures that frame. It verifies
 the calibrated cursor and console modes after Ctrl+Q, then runs a command
 in the same PowerShell prompt. This is automated evidence for the
 foundation journey. Human hand use remains a separate T051 check.

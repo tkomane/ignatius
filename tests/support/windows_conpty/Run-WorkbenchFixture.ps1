@@ -1,3 +1,6 @@
+using namespace System.Security.Cryptography
+using namespace System.Security.Cryptography.X509Certificates
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $ArchivedClient,
@@ -33,6 +36,55 @@ function Confirm-ClusterOwner {
     }
 }
 
+function New-WorkbenchCertificates {
+    param([string] $Scratch, [string] $Cluster)
+
+    $caKey = [RSA]::Create(2048)
+    $serverKey = $null
+    $ca = $null
+    $server = $null
+    try {
+        $serverKey = [RSA]::Create(2048)
+        $now = [DateTimeOffset]::UtcNow
+        $rsaPadding = [RSASignaturePadding]::Pkcs1
+        $sha256 = [HashAlgorithmName]::SHA256
+        $signer = [X509SignatureGenerator]::CreateForRSA($caKey, $rsaPadding)
+        $caRequest = [CertificateRequest]::new('CN=Ignatius disposable workbench CA', $caKey,
+            $sha256, $rsaPadding)
+        $caRequest.CertificateExtensions.Add([X509BasicConstraintsExtension]::new($true, $true, 0, $true))
+        $caUsage = [X509KeyUsageFlags]::KeyCertSign -bor [X509KeyUsageFlags]::CrlSign
+        $caRequest.CertificateExtensions.Add([X509KeyUsageExtension]::new($caUsage, $true))
+        $ca = $caRequest.Create($caRequest.SubjectName, $signer, $now.AddMinutes(-5), $now.AddDays(1),
+            [RandomNumberGenerator]::GetBytes(16))
+
+        $serverRequest = [CertificateRequest]::new('CN=localhost', $serverKey,
+            $sha256, $rsaPadding)
+        $serverRequest.CertificateExtensions.Add([X509BasicConstraintsExtension]::new($false, $false, 0, $true))
+        $serverUsage = [X509KeyUsageFlags]::DigitalSignature -bor [X509KeyUsageFlags]::KeyEncipherment
+        $serverRequest.CertificateExtensions.Add([X509KeyUsageExtension]::new($serverUsage, $true))
+        $serverAuth = [OidCollection]::new()
+        $null = $serverAuth.Add([Oid]::new('1.3.6.1.5.5.7.3.1'))
+        $serverRequest.CertificateExtensions.Add([X509EnhancedKeyUsageExtension]::new($serverAuth, $false))
+        $names = [SubjectAlternativeNameBuilder]::new()
+        $names.AddDnsName('localhost')
+        $serverRequest.CertificateExtensions.Add($names.Build())
+        $server = $serverRequest.Create($ca.SubjectName, $signer, $now.AddMinutes(-4), $now.AddHours(1),
+            [RandomNumberGenerator]::GetBytes(16))
+
+        $caPath = Join-Path $Scratch 'ca.crt'
+        [IO.File]::WriteAllText($caPath, $ca.ExportCertificatePem() + "`n", [Text.Encoding]::ASCII)
+        [IO.File]::WriteAllText((Join-Path $Cluster 'server.crt'), $server.ExportCertificatePem() + "`n", [Text.Encoding]::ASCII)
+        [IO.File]::WriteAllText((Join-Path $Cluster 'server.key'), $serverKey.ExportPkcs8PrivateKeyPem() + "`n", [Text.Encoding]::ASCII)
+        return $caPath
+    }
+    finally {
+        if ($null -ne $server) { $server.Dispose() }
+        if ($null -ne $ca) { $ca.Dispose() }
+        if ($null -ne $serverKey) { $serverKey.Dispose() }
+        $caKey.Dispose()
+    }
+}
+
 try {
     # EDB publishes the reviewed hash next to the official portable ZIP.
     $fixtureDownload = @{
@@ -56,6 +108,7 @@ try {
     & (Join-Path $pgBin 'initdb.exe') -D $cluster -U ig_probe --locale=C --encoding=UTF8 --auth=trust |
         Set-Content -LiteralPath (Join-Path $scratch 'initdb.log')
     if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the owned PostgreSQL fixture.' }
+    $caPath = New-WorkbenchCertificates -Scratch $scratch -Cluster $cluster
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     try {
         $listener.Start()
@@ -65,11 +118,13 @@ try {
         $listener.Stop()
     }
     [IO.File]::AppendAllLines((Join-Path $cluster 'postgresql.conf'), [string[]] @(
-        '', "port = $port", "listen_addresses = '127.0.0.1'", "unix_socket_directories = ''",
-        'default_transaction_read_only = on'
+        '', "port = $port", "listen_addresses = '127.0.0.1,::1'", "unix_socket_directories = ''",
+        'default_transaction_read_only = on', 'ssl = on',
+        "ssl_cert_file = 'server.crt'", "ssl_key_file = 'server.key'"
     ), [Text.Encoding]::ASCII)
     [IO.File]::WriteAllLines((Join-Path $cluster 'pg_hba.conf'), [string[]] @(
-        'host postgres ig_probe 127.0.0.1/32 trust'
+        'hostssl postgres ig_probe 127.0.0.1/32 trust',
+        'hostssl postgres ig_probe ::1/128 trust'
     ), [Text.Encoding]::ASCII)
 
     $empty = Join-Path $scratch 'empty'
@@ -102,15 +157,23 @@ try {
     }
 
     Confirm-ClusterOwner
-    $fixtureUri = "postgres://ig_probe@127.0.0.1:$port/postgres?sslmode=disable&connect_timeout=5"
-    $identity = & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -c "SELECT current_setting('server_version_num'), current_setting('transaction_read_only')"
-    if ($LASTEXITCODE -ne 0 -or $identity -cne '170012|on') {
-        throw 'The owned PostgreSQL fixture did not report the expected read-only posture.'
+    $fixtureUri = "postgres://ig_probe@localhost:$port/postgres?sslmode=verify-full&connect_timeout=5"
+    $rootBefore = $env:PGSSLROOTCERT
+    try {
+        $env:PGSSLROOTCERT = $caPath
+        $identity = & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -c "SELECT current_setting('server_version_num'), current_setting('transaction_read_only'), ssl::text FROM pg_catalog.pg_stat_ssl WHERE pid = pg_backend_pid()"
+        if ($LASTEXITCODE -ne 0 -or $identity -cne '170012|on|true') {
+            throw 'The owned PostgreSQL fixture did not confirm PostgreSQL 17.12, verified TLS and read-only mode.'
+        }
+    }
+    finally {
+        $env:PGSSLROOTCERT = $rootBefore
     }
     [ordered] @{
         postgresql_version = '17.12'
         postgresql_zip_sha256 = $hash
         transaction_read_only = $true
+        sslmode = 'verify-full'
     } | ConvertTo-Json -Compress | Write-Output
 
     $journey = @{
@@ -120,6 +183,7 @@ try {
         CandidateBuild = $CandidateBuild
         WindowCursorCalibration = $true
         WorkbenchPort = $port
+        WorkbenchCa = $caPath
     }
     & (Join-Path $PSScriptRoot 'Run-RendererCalibration.ps1') @journey
 }
