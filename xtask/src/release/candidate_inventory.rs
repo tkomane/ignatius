@@ -13,6 +13,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod repository_patch;
+
 const MAX_CARGO_INPUT: u64 = 32 * 1024 * 1024;
 const MAX_EVIDENCE: u64 = 8 * 1024 * 1024;
 const REGISTRY_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
@@ -247,8 +249,14 @@ fn workspace_manifest(name: &str) -> Option<&'static str> {
 struct Package {
     name: String,
     version: String,
-    source: &'static str,
-    checksum: Option<String>,
+    source: PackageSource,
+}
+
+#[derive(Debug)]
+enum PackageSource {
+    Registry(String),
+    Workspace(&'static str),
+    RepositoryPatch(String),
 }
 
 #[derive(Debug)]
@@ -303,7 +311,7 @@ impl Inputs {
             .to_owned();
         let bytes = read_bounded(&root.join("Cargo.lock"), MAX_EVIDENCE, "Cargo.lock")?;
         let text = std::str::from_utf8(&bytes).map_err(|_| "Cargo.lock is not UTF-8")?;
-        let packages = locked_packages(text)?;
+        let packages = locked_packages(root, text)?;
         Ok(Self {
             version,
             digests,
@@ -315,25 +323,31 @@ impl Inputs {
         self.packages
             .iter()
             .find(|(_, package)| {
-                package.name == name && workspace_manifest(name) == Some(package.source)
+                package.name == name && matches!(package.source, PackageSource::Workspace(_))
             })
             .map(|(reference, _)| reference.as_str())
             .ok_or_else(|| format!("lockfile is missing workspace package {name}"))
     }
 }
 
-fn locked_packages(text: &str) -> Result<BTreeMap<String, Package>, String> {
+fn locked_packages(root: &Path, text: &str) -> Result<BTreeMap<String, Package>, String> {
     let mut packages = BTreeMap::new();
     for locked in parse_lockfile(text, Path::new("Cargo.lock"))
         .map_err(|_| "Cargo.lock is not a supported locked package inventory")?
     {
-        let source = match locked.source.as_deref() {
-            Some(REGISTRY_SOURCE) if locked.checksum.as_deref().is_some_and(is_digest) => {
-                "crates.io"
+        let source = match (locked.source.as_deref(), locked.checksum) {
+            (Some(REGISTRY_SOURCE), Some(checksum)) if is_digest(&checksum) => {
+                PackageSource::Registry(checksum)
             }
-            None if locked.checksum.is_none() => {
-                workspace_manifest(&locked.name).ok_or("unexpected local package in Cargo.lock")?
+            (None, None)
+                if locked.name == repository_patch::NAME
+                    && locked.version == repository_patch::VERSION =>
+            {
+                PackageSource::RepositoryPatch(repository_patch::tree_sha256(root)?)
             }
+            (None, None) => PackageSource::Workspace(
+                workspace_manifest(&locked.name).ok_or("unexpected local package in Cargo.lock")?,
+            ),
             _ => {
                 return Err("candidate lockfile contains an unsupported source or checksum".into());
             }
@@ -343,7 +357,6 @@ fn locked_packages(text: &str) -> Result<BTreeMap<String, Package>, String> {
             name: locked.name,
             version: locked.version,
             source,
-            checksum: locked.checksum,
         };
         if packages.insert(reference, package).is_some() {
             return Err("candidate lockfile contains an ambiguous component identity".into());
@@ -416,14 +429,22 @@ impl Metadata {
                 .packages
                 .get(&reference)
                 .ok_or("Cargo metadata package is absent from the lockfile")?;
-            let source_ok = if package.source == "crates.io" {
-                item["source"].as_str() == Some(REGISTRY_SOURCE)
-            } else {
-                item.get("source").is_some_and(Value::is_null)
-                    && same_path(
-                        Path::new(&string(item, "manifest_path")?),
-                        &root.join(package.source),
-                    )
+            let source_ok = match &package.source {
+                PackageSource::Registry(_) => item["source"].as_str() == Some(REGISTRY_SOURCE),
+                PackageSource::Workspace(manifest) => {
+                    item.get("source").is_some_and(Value::is_null)
+                        && same_path(
+                            Path::new(&string(item, "manifest_path")?),
+                            &root.join(manifest),
+                        )
+                }
+                PackageSource::RepositoryPatch(_) => {
+                    item.get("source").is_some_and(Value::is_null)
+                        && repository_patch::matches_manifest(
+                            root,
+                            Path::new(&string(item, "manifest_path")?),
+                        )
+                }
             };
             if !source_ok
                 || !seen.insert(reference.clone())
@@ -744,6 +765,17 @@ impl BuildFacts {
         if !is_digest(&self.binary_sha256) || !is_digest(&self.packaging_sha256) {
             return Err("candidate inventory executable digests are invalid".into());
         }
+        for (reference, package) in &inputs.packages {
+            if matches!(package.source, PackageSource::RepositoryPatch(_))
+                && !self.units.get(reference).is_some_and(|units| {
+                    units
+                        .iter()
+                        .any(|unit| unit.role == Role::Product && unit.kinds.contains("lib"))
+                })
+            {
+                return Err("candidate inventory is missing the compiled repository patch".into());
+            }
+        }
         for (reference, units) in &self.units {
             if !inputs.packages.contains_key(reference) || units.is_empty() {
                 return Err("candidate inventory contains an unrecognised compilation".into());
@@ -868,10 +900,19 @@ fn component(
     facts: &BuildFacts,
     graph: &BTreeMap<&str, Vec<&Relation>>,
 ) -> Value {
-    let mut properties = vec![property("ignatius:cargo:source", package.source)];
-    if let Some(checksum) = &package.checksum {
-        properties.push(property("ignatius:cargo:crate-sha256", checksum));
-    }
+    let source_property = "ignatius:cargo:source";
+    let mut properties = match &package.source {
+        PackageSource::Registry(checksum) => vec![
+            property(source_property, "crates.io"),
+            property("ignatius:cargo:crate-sha256", checksum),
+        ],
+        PackageSource::Workspace(manifest) => vec![property(source_property, manifest)],
+        PackageSource::RepositoryPatch(digest) => vec![
+            property(source_property, "repository-patch"),
+            property("ignatius:cargo:source-manifest", repository_patch::MANIFEST),
+            property("ignatius:cargo:source-tree-sha256", digest),
+        ],
+    };
     if let Some(units) = facts.units.get(reference) {
         properties.extend(units.iter().map(|unit| property(UNIT, unit.value())));
     } else {
@@ -892,7 +933,7 @@ fn component(
             )
         }));
     }
-    let application = workspace_manifest(&package.name) == Some(package.source);
+    let application = matches!(package.source, PackageSource::Workspace(_));
     json!({
         "bom-ref": reference,
         "name": package.name,

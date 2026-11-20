@@ -99,6 +99,7 @@ jobs:
             exit 1
           fi
           "$install_root/bin/cargo-deny" check advisories licenses bans sources
+          python3 scripts/check-driver-registry-advisories.py "$install_root/bin/cargo-deny"
           printf 'sbom_policy=pass\n' >> "$GITHUB_OUTPUT"
       - name: Scan immutable candidate history for secrets
         shell: bash

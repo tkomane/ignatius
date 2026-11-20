@@ -3,9 +3,11 @@
 ## Architecture and trust boundaries
 
 - **FR-5901** Attach aligned, budgeted structured metadata during
-  `Session::describe_columns` for workbench results. Reuse driver type kind
-  and column origin. Under the user SQL gate, probe relevant settings around
-  single direct table projections, so a retained rounded result is inspect-only
+  `Session::describe_columns` for workbench results. Keep the original
+  simple-query RowDescription with the result. Use a later description for type
+  enrichment only when the names, type OIDs and typmods agree. Under the user
+  SQL gate, probe relevant settings around single direct table projections,
+  so a retained rounded result is inspect-only
   even if the settings later change. Ordinary CLI reads keep their current path.
   Where needed, read array element delimiters or extension membership in one
   bounded catalog query. The primary types and raw text result remain usable
@@ -33,12 +35,25 @@
 
 The tree has fixed byte, depth and node ceilings so hostile text cannot drive
 unbounded recursive work in the UI. The server text is preserved for export
-and raw inspection. Source identity uses the existing post-execution
-parse/describe contract, which matches the returned shape and never replays
-the query. It has no claim of observing an intermediate change that had
-already returned to the same state before the guarded UPDATE.
+and raw inspection. Only the original RowDescription supplies the table OID,
+attribute number, type OID and typmod used in the guarded UPDATE. The later
+description never supplies a writable origin. An unavailable or mismatched
+type description leaves the raw value usable. A derived value without an
+original table attribute can still be inspected.
 
 Set `IGNATIUS_TEST_PG_POSTGIS_URI` and `IGNATIUS_TEST_PG_VECTOR_URI` to
 disposable servers with their respective extensions already enabled to run
 the spatial and vector round-trip contracts. When absent, the stock
 PostgreSQL suite reports an explicit skip for each optional fixture.
+
+## Complexity Tracking
+
+The published `tokio-postgres` 0.7.18 library discards origin and type identity
+when parsing simple-query RowDescription. A local patch of the exact published
+crate exposes those fields. This keeps server-rendered text, connection and
+transaction behavior, and the single execution of user SQL. The patch and the
+original crate checksum are documented with the dependency. Release
+verification binds the patched bytes as a repository dependency. The
+published release remains covered by registry advisory and yank checks.
+Remove the patch when a supported upstream release exposes the required
+simple-query metadata.

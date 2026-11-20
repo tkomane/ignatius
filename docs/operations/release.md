@@ -823,6 +823,20 @@ source, build, toolchain and archive identities. The workflow runs
 the built executable's checksum with the checksum observed by the runtime job
 after extraction.
 
+The local `tokio-postgres` 0.7.18 patch appears as a library with
+`ignatius:cargo:source=repository-patch`,
+`ignatius:cargo:source-manifest=vendor/tokio-postgres/Cargo.toml`, and
+`ignatius:cargo:source-tree-sha256`. The digest covers the regular files in the
+package, sorted by slash-separated package-relative path. Each digest input
+line contains the lowercase SHA-256 of one file, two spaces, its relative
+path, and an LF. Both candidate verification commands reconstruct the digest
+from the checked-out source.
+
+CI and release preflight check the patched workspace and use the same pinned
+Cargo Deny tool and policy to check the original crates.io release for
+advisories and yanks. The latter check uses locked Cargo metadata generated
+from a temporary workspace with the registry identity restored.
+
 To verify a downloaded sidecar's binding, use the frozen source checkout and
 first verify the archive manifest and checksums. Then run the following command.
 

@@ -36,7 +36,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
-use tokio_postgres::{AsyncMessage, Client, Socket, config::SslMode as PgSslMode};
+use tokio_postgres::{AsyncMessage, Client, SimpleColumn, Socket, config::SslMode as PgSslMode};
 
 /// What is known about a live session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1702,6 +1702,7 @@ impl Session {
         tokio::pin!(stream);
 
         let mut result_set: Option<ResultSet> = None;
+        let mut original_columns = None;
         let mut rows_affected = None;
 
         while let Some(message) = stream.next().await {
@@ -1713,6 +1714,9 @@ impl Session {
                         row_cap,
                         budget,
                     ));
+                    if query.structure.is_some() {
+                        original_columns = Some(columns);
+                    }
                 }
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
                     let set = result_set.get_or_insert_with(|| {
@@ -1733,17 +1737,16 @@ impl Session {
         // This is an observation boundary, not a causal protocol fence.
         let notices = operation.take_statement();
 
-        // The simple-query protocol gives us faithful text values and column
-        // names, but not type OIDs. Parse/describe is deliberately after the
-        // result has arrived: it does not execute the statement, and a failure
-        // here must never turn a successful query into a failed one.
+        // Keep the original text and column provenance from the simple
+        // query. The separate prepare only enriches the column types, and a
+        // failure here must never turn a successful query into a failed one.
         if !budget.data_is_closed()
             && let Some(set) = result_set
                 .as_mut()
                 .filter(|set| set.is_available() && !set.columns.is_empty())
         {
-            self.describe_columns(sql, set, budget, query.structure)
-                .await;
+            let structure = original_columns.as_deref().zip(query.structure);
+            self.describe_columns(sql, set, budget, structure).await;
         }
 
         operation.hold_unattributed();
@@ -1752,16 +1755,15 @@ impl Session {
 
     /// Describes one already-received result without replaying its SQL.
     ///
-    /// The names are checked as well as the count because a description that is
-    /// accepted against the wrong shape would make a truthful type label into a
-    /// quiet lie. A failed prepare or mismatch is ordinary unavailability for
-    /// the grid, not a query failure.
+    /// Match the count and names, plus the type OID and modifier when the
+    /// original workbench descriptor is available. A failed prepare or
+    /// mismatch leaves the result available as server text.
     async fn describe_columns(
         &self,
         sql: &str,
         set: &mut ResultSet,
         budget: &mut RetentionBudget,
-        edit_settings: Option<super::structured::EditSettings>,
+        structure: Option<(&[SimpleColumn], super::structured::EditSettings)>,
     ) {
         let Ok(statement) = self.client.prepare(sql).await else {
             return;
@@ -1772,6 +1774,13 @@ impl Session {
                 .iter()
                 .zip(&set.columns)
                 .any(|(column, name)| column.name() != name)
+            || structure.is_some_and(|(original, _)| {
+                original.len() != columns.len()
+                    || original.iter().zip(columns).any(|(wire, prepared)| {
+                        wire.type_oid() != prepared.type_().oid()
+                            || wire.type_modifier() != prepared.type_modifier()
+                    })
+            })
         {
             return;
         }
@@ -1790,8 +1799,8 @@ impl Session {
                 .map(|column| Some(column.type_().name().to_owned()))
                 .collect(),
         );
-        if let Some(settings) = edit_settings {
-            super::structured::describe(&self.client, set, columns, budget, settings).await;
+        if let Some((original, before)) = structure {
+            super::structured::describe(&self.client, set, columns, original, budget, before).await;
         }
     }
 

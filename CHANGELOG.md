@@ -15,6 +15,8 @@ source can generate user-facing notes.
 - New: Cell Detail opens a bounded structured tree for JSONB, arrays, ranges,
   and supported PostGIS and pgvector types. Reviewed edits recheck the original
   value, column and primary key before sending a write.
+- Fixed: Cell Detail uses the column identity returned with the original
+  PostgreSQL result when validating reviewed structured edits.
 - Fixed: Cell Detail accepts PostgreSQL array literals with spaces around
   elements and dimension markers. Quoted and escaped spaces remain part of
   the value.
