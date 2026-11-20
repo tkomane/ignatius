@@ -201,9 +201,18 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
                 && line.find(L"[focused]") != std::wstring::npos;
         });
     }, work, "the archived workbench did not open a blank query buffer");
-    renderer_type_text(input, L"select 42 as journey_value from pg_catalog.pg_stat_ssl");
-    renderer_type_text(input, L" where pid=pg_backend_pid() and ssl");
-    renderer_type_text(input, L" and current_setting('transaction_read_only')::bool");
+    constexpr std::wstring_view select = L"select 42 as journey_value from pg_catalog.pg_stat_ssl";
+    constexpr std::wstring_view tls = L" where pid=pg_backend_pid() and ssl";
+    constexpr std::wstring_view read_only = L" and current_setting('transaction_read_only')::bool";
+    renderer_type_text(input, select);
+    renderer_type_text(input, tls);
+    renderer_type_text(input, read_only);
+    const auto caret = L"Editor  line 1, column " + std::to_wstring(select.size() + tls.size() + read_only.size() + 1) + L" ";
+    renderer_wait_for_screen(product, deadline, [&caret](const auto& lines) {
+        return std::any_of(lines.begin(), lines.end(), [&caret](const auto& line) {
+            return line.find(caret) != std::wstring::npos && line.find(L"[modified] [focused]") != std::wstring::npos;
+        });
+    }, work, "the archived workbench did not render the completed query before execution");
     renderer_key(input, 'R', L'r', LEFT_CTRL_PRESSED);
     COORD result_position{};
     renderer_wait_for_screen(product, deadline, [&result_position](const auto& lines) {
