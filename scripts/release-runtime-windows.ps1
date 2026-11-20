@@ -181,6 +181,8 @@ $receipt = [ordered] @{
         read_only_verify_full = $false
         certificate_hostname_refusal_exit = $null
         debug_log_privacy = $false
+        invalid_log_directive_creates_no_log = $false
+        invalid_log_directive_preserves_logs = $false
         fixture_cleanup = $false
     }
     failure_stage = $null
@@ -289,7 +291,8 @@ try {
     $sqlMarker = 'w12-sql-' + [Guid]::NewGuid().ToString('N')
     $rowMarker = 'w12-row-' + [Guid]::NewGuid().ToString('N')
     $query = "SELECT /* $sqlMarker */ '$rowMarker' AS probe, ssl::text AS tls, current_setting('transaction_read_only') AS read_only FROM pg_catalog.pg_stat_ssl WHERE pid = pg_backend_pid()"
-    $verified = Invoke-ProbeProcess $stage $binary @('query', $verifiedUri, '--read-only', '--no-history', '-c', $query, '--format', 'csv') $workRoot $clientEnv
+    $verifiedQuery = @('query', $verifiedUri, '--read-only', '--no-history', '-c', $query, '--format', 'csv')
+    $verified = Invoke-ProbeProcess $stage $binary $verifiedQuery $workRoot $clientEnv
     Assert-Probe ($verified.ExitCode -eq 0) 'Packaged client failed verify-full SELECT'
     $expectedCsv = [string]::Join([char] 10, @('probe,tls,read_only', "$rowMarker,true,on", ''))
     Assert-Probe (($verified.Out -replace '\r\n', [string] [char] 10) -ceq $expectedCsv) 'Packaged client did not prove server-side TLS and read-only state'
@@ -304,6 +307,40 @@ try {
         Assert-Probe (-not $verified.Error.Contains($marker, [StringComparison]::Ordinal)) 'client debug stderr contains a forbidden marker'
     }
     $receipt.checks.debug_log_privacy = $true
+
+    $stage = 'invalid log directive with fresh data'
+    $directiveEnv = $clientEnv.Clone()
+    $directiveEnv.IGNATIUS_LOG = 'tokio_postgres=debug'
+    $directiveEnv.IGNATIUS_CONFIG_DIR = Join-Path $workRoot 'directive-fresh-config'
+    $directiveEnv.IGNATIUS_DATA_DIR = Join-Path $workRoot 'directive-fresh-data'
+    $freshLogDir = Join-Path $directiveEnv.IGNATIUS_DATA_DIR 'logs'
+    $freshResult = Invoke-ProbeProcess $stage $binary $verifiedQuery $workRoot $directiveEnv
+    Assert-Probe ($freshResult.ExitCode -eq 0 -and $freshResult.Error.Length -eq 0 -and
+        ($freshResult.Out -replace '\r\n', [string] [char] 10) -ceq $expectedCsv) 'Invalid log directive affected the fresh verify-full query'
+    Assert-Probe (-not (Test-Path -LiteralPath $freshLogDir)) 'Invalid log directive created a log path'
+    $receipt.checks.invalid_log_directive_creates_no_log = $true
+
+    $stage = 'invalid log directive with existing logs'
+    $directiveEnv.IGNATIUS_CONFIG_DIR = Join-Path $workRoot 'directive-existing-config'
+    $directiveEnv.IGNATIUS_DATA_DIR = Join-Path $workRoot 'directive-existing-data'
+    $existingLogDir = Join-Path $directiveEnv.IGNATIUS_DATA_DIR 'logs'
+    $null = [IO.Directory]::CreateDirectory($existingLogDir)
+    $activeLog = Join-Path $existingLogDir 'ignatius.log'
+    $rotatedLog = Join-Path $existingLogDir 'ignatius.log.1'
+    # Seed past the 5 MiB active threshold so an unintended rotation is observable.
+    [IO.File]::WriteAllText($activeLog, ('x' * (5MB + 1)), [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText($rotatedLog, 'synthetic previous log', [Text.Encoding]::ASCII)
+    $activeHash = (Get-FileHash -LiteralPath $activeLog -Algorithm SHA256).Hash
+    $rotatedHash = (Get-FileHash -LiteralPath $rotatedLog -Algorithm SHA256).Hash
+    $existingResult = Invoke-ProbeProcess $stage $binary $verifiedQuery $workRoot $directiveEnv
+    Assert-Probe ($existingResult.ExitCode -eq 0 -and $existingResult.Error.Length -eq 0 -and
+        ($existingResult.Out -replace '\r\n', [string] [char] 10) -ceq $expectedCsv) 'Invalid log directive affected the existing-log verify-full query'
+    $logNames = @(Get-ChildItem -LiteralPath $existingLogDir -Force -Name)
+    Assert-Probe ($logNames.Count -eq 2 -and 'ignatius.log' -cin $logNames -and
+        'ignatius.log.1' -cin $logNames) 'Invalid log directive changed the log file set'
+    Assert-Probe ((Get-FileHash -LiteralPath $activeLog -Algorithm SHA256).Hash -ceq $activeHash -and
+        (Get-FileHash -LiteralPath $rotatedLog -Algorithm SHA256).Hash -ceq $rotatedHash) 'Invalid log directive changed active or rotated log bytes'
+    $receipt.checks.invalid_log_directive_preserves_logs = $true
 
     $stage = 'numeric certificate hostname mismatch'
     $clientEnv.IGNATIUS_LOG = 'off'
@@ -365,4 +402,4 @@ finally {
 if ($null -ne $failure) {
     throw $failure
 }
-Write-Output 'Verified packaged Windows client TLS, read-only SELECT, hostname refusal and debug log privacy.'
+Write-Output 'Verified packaged Windows client TLS, read-only SELECT, hostname refusal, debug log privacy and invalid log directive refusal.'

@@ -12,6 +12,11 @@ The repository's declared support window is **14 through 18**. Review the
 before a release or support-window change; this declaration does not assert
 which upstream minor version is current.
 
+On 20 November 2026, upstream listed PostgreSQL 14.25 as its final PostgreSQL
+14 release and recorded end of support on 12 November 2026. PostgreSQL 19.0
+was released on 19 November 2026. The declared Ignatius compatibility window
+remains 14 through 18. [PostgreSQL versioning policy](https://www.postgresql.org/support/versioning/)
+
 **Hosted evidence: 14, 15, 16, 17 and 18**, through plain/TLS integration
 contracts on Linux at source `52872ac` in
 [CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318),
