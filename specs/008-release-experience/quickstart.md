@@ -193,11 +193,12 @@ against the three exact archives after aggregation. A record remains blocked
 when any input is blocked, and incomplete aggregate evidence never passes
 `release check`.
 
-The non-publishing workflow performs this sequence after re-verifying each
-downloaded four-file target bundle and its runtime sidecar, then retains an
-exact nine-file aggregate scope. A local command result proves the aggregation
-contract only; it is not hosted-run, platform-runtime, signing, provenance or
-publication evidence.
+The non-publishing workflow re-verifies each downloaded five-file target
+bundle and its runtime sidecar. Its 12-file aggregate consists of three
+archives, the aggregate record, combined manifest, checksum list, three
+runtime sidecars and three CycloneDX inventories. Local checks establish only
+the aggregation contract. Hosted execution and release trust require their
+own evidence.
 
 ## 5. Rehearse installation and recovery
 
