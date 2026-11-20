@@ -465,6 +465,22 @@ fn windows_archive_diagnostic_verifies_retained_bytes_before_execution() {
         .find("./scripts/release-runtime-windows.ps1")
         .expect("Windows runtime probe");
     assert!(archive_verification < extraction && extraction < runtime);
+    let extracted_hash = job
+        .find("$runtime.binary_sha256 -cne $binaryHash")
+        .expect("exact executable binding for the renderer");
+    let renderer = job
+        .find("./tests/support/windows_conpty/Run-RendererCalibration.ps1")
+        .expect("owned Windows Terminal probe");
+    assert!(extraction < extracted_hash && extracted_hash < renderer);
+    assert!(job.contains("inputs.probe == 'terminal-renderer-arm64' && 'windows-11-arm'"));
+    for name in [
+        "baseline.bmp",
+        "ignatius-active.bmp",
+        "ignatius-restored.bmp",
+    ] {
+        assert!(job.contains(&format!("/work/{name}")));
+    }
+    assert!(!job.contains("/work/**"));
 }
 
 #[test]

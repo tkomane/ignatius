@@ -9,6 +9,9 @@ int main() { std::cerr << "W07-064 native host requires actual Windows; no nativ
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #define _WIN32_WINNT 0x0A00
+#ifdef IGNATIUS_RENDERER_CALIBRATION
+#include <winsock2.h>
+#endif
 #include <windows.h>
 #include <sddl.h>
 #include <atomic>
@@ -558,6 +561,12 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (argc == 5 && std::wstring_view(argv[1]) == L"--renderer-actor") {
             return renderer_actor(argv[2], argv[3], argv[4]);
+        }
+        if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-supervise") {
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6]);
+        }
+        if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-actor") {
+            return renderer_actor(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
 #endif
         if (argc == 8 && std::wstring_view(argv[1]) == L"--worker") return worker(argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
