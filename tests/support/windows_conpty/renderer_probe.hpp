@@ -833,17 +833,19 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 const auto index = calibration.observations.size();
                 require(receipt.phases.size() == phase_count && !calibration.stopped
                         && index < renderer_paste_steps.size(), "ordered paste controls follow the six renderer controls");
-                const auto n = renderer_numbers<12>(parts);
+                const auto n = renderer_numbers<14>(parts);
                 const auto& step = renderer_paste_steps[index];
                 const auto& baseline = receipt.phases.front();
                 const auto earlier = calibration.observations.empty() ? prior_qpc
-                    : renderer_stamp(calibration.observations.back()[10], calibration.observations.back()[11]);
-                const auto when = renderer_stamp(n[10], n[11]);
+                    : renderer_stamp(calibration.observations.back()[12], calibration.observations.back()[13]);
+                const auto when = renderer_stamp(n[12], n[13]);
                 require(n[0] == index && n[1] < renderer_paste_status_names.size()
                         && n[2] == renderer_paste_input(baseline.input, step.input_profile)
                         && (n[3] & renderer_guard_vt_mask) == renderer_guard_vt_mask
                         && (!step.main || n[3] == baseline.output) && n[4] == (step.main ? 1U : 0U)
                         && n[5] <= renderer_paste_reply_units && n[6] <= renderer_paste_record_limit
+                        && n[10] <= renderer_paste_ambient_limit
+                        && n[11] <= renderer_paste_ambient_limit - n[10]
                         && n[7] <= 1 && n[8] <= 1 && when >= earlier && when <= ticks(),
                         "bounded native paste observation, input and active buffer");
                 calibration.observations.push_back(n);
@@ -1001,8 +1003,8 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 && receipt.restored_output == receipt.initial_output;
             const auto final_prior = receipt.archive ? receipt.archive->restored_capture_qpc
                 : receipt.guard ? renderer_stamp(receipt.guard->final[18], receipt.guard->final[19])
-                : receipt.paste ? renderer_stamp(receipt.paste->observations.back()[10],
-                                                 receipt.paste->observations.back()[11]) : prior_qpc;
+                : receipt.paste ? renderer_stamp(receipt.paste->observations.back()[12],
+                                                 receipt.paste->observations.back()[13]) : prior_qpc;
             require(receipt.modes_restored && receipt.restore_qpc >= final_prior && receipt.restore_qpc <= ticks(),
                     "renderer restoration receipt proves the original console masks");
             server->ack(work_deadline);

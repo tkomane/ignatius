@@ -8,10 +8,12 @@ constexpr std::wstring_view renderer_paste_prefix = L"\x1b[?2004;";
 constexpr std::wstring_view renderer_paste_query = L"\x1b[?2004$p";
 constexpr std::size_t renderer_paste_reply_units = renderer_paste_prefix.size() + 3;
 constexpr DWORD renderer_paste_record_limit = 48;
+constexpr DWORD renderer_paste_ambient_limit = 16;
 
 struct RendererPasteReply {
     RendererPasteStatus status{RendererPasteStatus::timeout};
     DWORD records{}, characters{}, error{};
+    DWORD ambient_focus{}, ambient_window{};
     bool quiet_before{}, quiet_after{};
 };
 
@@ -39,7 +41,7 @@ DWORD renderer_paste_input(DWORD cooked, unsigned profile) {
 }
 
 struct RendererPasteReceipt {
-    std::vector<std::array<std::uint32_t, 12>> observations;
+    std::vector<std::array<std::uint32_t, 14>> observations;
     bool stopped{}, supported{};
 };
 
@@ -66,15 +68,42 @@ RendererPasteReply renderer_observe_paste(HANDLE input, HANDLE output, Clock::ti
         result.status = RendererPasteStatus::console_error;
         return result;
     };
-    if (remaining(deadline, quiet_ms) < quiet_ms) return result;
-    const auto before = WaitForSingleObject(input, quiet_ms);
     DWORD pending{};
-    if (before == WAIT_FAILED || !GetNumberOfConsoleInputEvents(input, &pending)) return native_error();
-    if (before != WAIT_TIMEOUT || pending != 0) {
+    // Pre-query housekeeping is permitted only before the first request or
+    // after the preceding phase already completed an exact, quiet exchange.
+    while (remaining(deadline, quiet_ms) == quiet_ms) {
+        const auto before = WaitForSingleObject(input, quiet_ms);
+        if (before == WAIT_FAILED || !GetNumberOfConsoleInputEvents(input, &pending)) return native_error();
+        if (before == WAIT_TIMEOUT && pending == 0) {
+            result.quiet_before = true;
+            break;
+        }
+        const DWORD room = renderer_paste_ambient_limit - result.ambient_focus - result.ambient_window;
         result.status = RendererPasteStatus::input_not_quiet;
-        return result;
+        if (pending == 0 || pending > room || (before != WAIT_OBJECT_0 && before != WAIT_TIMEOUT)) return result;
+        std::array<INPUT_RECORD, renderer_paste_ambient_limit + 1> peeked{};
+        DWORD count{};
+        if (!PeekConsoleInputW(input, peeked.data(), room + 1, &count)) return native_error();
+        if (count < pending || count > room) return result;
+        for (DWORD i = 0; i < count; ++i) {
+            const auto type = peeked[i].EventType;
+            if (type != FOCUS_EVENT && type != WINDOW_BUFFER_SIZE_EVENT) return result;
+        }
+        // The actor is the sole reader of this owned FIFO. Read only the
+        // checked prefix so later arrivals remain queued for the next peek.
+        std::array<INPUT_RECORD, renderer_paste_ambient_limit> consumed{};
+        DWORD read{};
+        if (!ReadConsoleInputW(input, consumed.data(), count, &read)) return native_error();
+        if (read != count) return result;
+        for (DWORD i = 0; i < read; ++i) {
+            const auto type = consumed[i].EventType;
+            if (type != peeked[i].EventType) return result;
+            if (type == FOCUS_EVENT) ++result.ambient_focus;
+            else ++result.ambient_window;
+        }
+        result.status = RendererPasteStatus::timeout;
     }
-    result.quiet_before = true;
+    if (!result.quiet_before) return result;
     renderer_paste_write(output, renderer_paste_query);
 
     wchar_t state{};
@@ -163,7 +192,8 @@ void renderer_run_paste(const std::wstring& pipe, const std::wstring& nonce, HAN
         observed << "B " << nonce_text << ' ' << i << ' ' << static_cast<unsigned>(reply.status)
                  << ' ' << actual_input << ' ' << actual_output << ' ' << main
                  << ' ' << reply.characters << ' ' << reply.records
-                 << ' ' << reply.quiet_before << ' ' << reply.quiet_after << ' ' << reply.error;
+                 << ' ' << reply.quiet_before << ' ' << reply.quiet_after << ' ' << reply.error
+                 << ' ' << reply.ambient_focus << ' ' << reply.ambient_window;
         renderer_stamp(observed, ticks());
         send(pipe, observed.str());
         if (reply.status != step.expected || !reply.quiet_before || !reply.quiet_after) {
@@ -199,7 +229,8 @@ void emit_renderer_paste(const RendererPasteReceipt& receipt) {
                   << ",\"quiet_before\":" << (n[7] ? "true" : "false")
                   << ",\"quiet_after\":" << (n[8] ? "true" : "false")
                   << ",\"native_error\":" << n[9]
-                  << ",\"qpc\":" << renderer_stamp(n[10], n[11]) << '}';
+                  << ",\"ambient_focus_before\":" << n[10] << ",\"ambient_window_before\":" << n[11]
+                  << ",\"qpc\":" << renderer_stamp(n[12], n[13]) << '}';
     }
     std::cout << "]}";
 }
