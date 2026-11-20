@@ -4,6 +4,15 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 53: Main packaging rehearsal - 20 November 2026
+
+- The exact main source `bde6711` includes the plan-history lock fix.
+  All 15 rehearsal jobs passed across the three supported archive targets.
+  Independent readback verified all 12 retained files and 33 runtime checks.
+  All repeat comparisons passed, including both clean Windows builds on
+  the same runner.
+  [Packaging evidence](operations/verification.md#main-packaging-rehearsal---20-november-2026)
+
 ## Wave 52: Archived client in Windows 11 ARM64 - 20 November 2026
 
 - A native Windows 11 ARM64 Terminal rendered the retained x64 client under

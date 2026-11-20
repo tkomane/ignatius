@@ -764,15 +764,15 @@ The non-publishing release workflow defines the first archive targets. A target
 is not inferred from the host that verifies it, and a target outside this table
 has no release artefact claim.
 
-The 20 November rehearsal bound source `cec95f6` and build `ci/44631543576-1`.
+The 20 November main rehearsal bound source `bde6711` and build `ci/44655874167-1`.
 Archive and executable checksums, CycloneDX inventories, repeat builds and
 hosted install, rollback and privacy checks passed for all three targets.
-[Exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44631543576)
+[Exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44655874167)
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
 | `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, local archive checks | An earlier downloaded archive passed local verified TLS and the scoped debug privacy probe on macOS arm64. Signed Warp hand use remains open |
-| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | The downloaded archive passed verified TLS and the scoped debug privacy probe on Windows Server 2025 x64. Windows Terminal hand use remains open |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | An earlier downloaded archive passed verified TLS and the scoped debug privacy probe on Windows Server 2025 x64. Windows Terminal hand use remains open |
 | `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, local archive checks | Earlier downloaded archives passed verified TLS, the scoped debug privacy probe and automated xterm use on Ubuntu. Linux desktop hand use remains open |
 
 The earlier macOS archive at `24f1c8e` failed its privacy audit when debug

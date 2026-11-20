@@ -21,9 +21,9 @@ commitment. Each row assumes the ones above it.
 | **G. Homebrew core and Winget** | Days, plus review | Their standards, their timelines | Hard | Everyone | F, plus a user base that justifies it |
 
 **Current distribution is C (public source).** The repository became public
-on 2026-09-11. Post-merge CI and CodeQL passed on `bde6711`, including the
-Linux, macOS and Windows jobs. [CI run](https://github.com/tkomane/ignatius/actions/runs/44655279787)
-[CodeQL run](https://github.com/tkomane/ignatius/actions/runs/44655279818)
+on 2026-09-11. Post-merge CI and CodeQL passed on `3ca6811`, including the
+Linux, macOS and Windows jobs. [CI run](https://github.com/tkomane/ignatius/actions/runs/44656868966)
+[CodeQL run](https://github.com/tkomane/ignatius/actions/runs/44656868960)
 
 The [compatibility matrix](../support/compatibility.md#release-target-matrix)
 records archive and runtime checks and remaining native hand use. Distribution

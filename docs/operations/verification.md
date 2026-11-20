@@ -1,5 +1,22 @@
 # Verification
 
+## Main packaging rehearsal - 20 November 2026
+
+All 15 jobs passed for exact source `bde6711`, which includes the plan-history
+writer lock fix. Build `ci/44655874167-1` covers Apple-silicon macOS, Linux x64,
+and Windows x64. Each extracted target passed eleven checks, including archive
+identity, diagnostics, rollback, and the scoped query and credential privacy
+checks. Independent readback verified all 12 retained files, all three
+CycloneDX 1.5 documents, and every archive and extracted binary SHA-256.
+The downloaded Apple-silicon executable also printed the same source,
+build identity and target on a local arm64 Mac.
+[Rehearsal 44655874167](https://github.com/tkomane/ignatius/actions/runs/44655874167)
+
+Separate Linux and macOS repeat jobs matched byte for byte. The two clean
+Windows builds on one runner also matched. Windows cross-image
+reproducibility, canonical evidence, verified signatures and provenance,
+and exact release authorization remain open.
+
 ## Packaged runtime rehearsal - 20 November 2026
 
 [Rehearsal 44631543576](https://github.com/tkomane/ignatius/actions/runs/44631543576)
@@ -108,6 +125,10 @@ confirmed that all 1,026 marker pixels returned and the 171x133 baseline and
 restored crops were byte-identical. The owned Job emptied and the control
 pipe was quiescent. Cursor visibility on ARM64 and Windows 11 hand use with
 PowerShell 7 remain open.
+
+The combined source `e4afd30` repeated both archive routes successfully.
+[Windows 11 ARM64 run](https://github.com/tkomane/ignatius/actions/runs/44657817133)
+[Windows Server x64 run](https://github.com/tkomane/ignatius/actions/runs/44657814910)
 
 ## Packaged Windows Terminal startup and quit - 20 November 2026
 

@@ -530,7 +530,7 @@ macOS and synthetic-server evidence, separate from the hosted target smoke.
 
 The November rehearsal passed direct packaged runtime privacy checks and
 independent aggregate verification for all three targets.
-[Packaged runtime evidence](../../docs/operations/verification.md#packaged-runtime-rehearsal---20-november-2026)
+[Packaged runtime evidence](../../docs/operations/verification.md#main-packaging-rehearsal---20-november-2026)
 The full quickstart still needs Windows and Linux hand verification. T033
 remains open for that acceptance, the canonical evidence path and live
 supply-chain evidence. T034 is complete for the non-publishing workflow.
