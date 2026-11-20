@@ -505,6 +505,18 @@ fn windows_conpty_diagnostic_preserves_native_assertions_and_evidence_scope() {
         assert!(renderer.contains(&format!("/work/phase-{phase}.bmp")));
     }
     assert!(!renderer.contains("/work/**"));
+    let guard = job_block(&workflow, "renderer-guard");
+    let guard_build = guard
+        .find("tests/support/windows_conpty/Build.ps1")
+        .unwrap();
+    let guard_controls = guard.find("-RunReviewedPrerequisiteControls").unwrap();
+    let guard_renderer = guard.find("-GuardBuildManifest").unwrap();
+    assert!(guard_build < guard_controls && guard_controls < guard_renderer);
+    assert!(
+        guard.contains("'renderer-guard-admission'") && guard.contains("'renderer-guard-matrix'")
+    );
+    assert!(guard.contains("/work/guard-*/guard-restored.bmp"));
+    assert!(!guard.contains("/work/**"));
     let platform = job_block(&workflow, "diagnostic");
     assert!(platform.contains("if: inputs.probe == 'native-controls' || inputs.probe == ''"));
     assert!(platform.contains("runs-on: windows-latest"));

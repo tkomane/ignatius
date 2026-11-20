@@ -568,6 +568,20 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-actor") {
             return renderer_actor(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
+        if (argc == 9 && std::wstring_view(argv[1]) == L"--renderer-guard-supervise") {
+            std::uint32_t bits{};
+            require(w07::number(ascii(argv[8]), bits) && bits <= 7, "owned Guard options");
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], {},
+                RendererGuardCase{argv[6], argv[7], bits});
+        }
+        if (argc == 10 && std::wstring_view(argv[1]) == L"--renderer-guard-actor") {
+            std::uint32_t bits{};
+            const std::wstring qpc = argv[9];
+            require(w07::number(ascii(argv[8]), bits) && bits <= 7 && !qpc.empty() && qpc.size() <= 20
+                    && qpc.find_first_not_of(L"0123456789") == std::wstring::npos, "owned Guard options and deadline");
+            return renderer_actor(argv[2], argv[3], argv[4], {}, argv[6],
+                RendererGuardCase{argv[5], argv[7], bits}, std::stoull(qpc));
+        }
 #endif
         if (argc == 8 && std::wstring_view(argv[1]) == L"--worker") return worker(argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
         if (argc == 8 && std::wstring_view(argv[1]) == L"--probe") { std::uint32_t pid{}; require(w07::number(ascii(argv[7]), pid), "controlled Rust PID"); return probe(argv[2], argv[3], argv[4], argv[5], argv[6], pid); }
