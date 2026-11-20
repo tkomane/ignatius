@@ -8,6 +8,8 @@
 # If you are reading this file be aware that the original Cargo.toml
 # will likely look very different (and much more reasonable).
 # See Cargo.toml.orig for the original contents.
+#
+# Modified by Ignatius to keep the library target and its dependencies.
 
 [package]
 edition = "2024"
@@ -74,15 +76,6 @@ name = "tokio_postgres"
 path = "src/lib.rs"
 test = false
 
-[[test]]
-name = "test"
-path = "tests/test/main.rs"
-
-[[bench]]
-name = "bench"
-path = "benches/bench.rs"
-harness = false
-
 [dependencies.async-trait]
 version = "0.1"
 
@@ -138,97 +131,6 @@ features = ["codec"]
 
 [dependencies.whoami]
 version = "2.0.1"
-
-[dev-dependencies.bit-vec-06]
-version = "0.6"
-package = "bit-vec"
-
-[dev-dependencies.bit-vec-07]
-version = "0.7"
-package = "bit-vec"
-
-[dev-dependencies.bit-vec-08]
-version = "0.8"
-package = "bit-vec"
-
-[dev-dependencies.bit-vec-09]
-version = "0.9"
-package = "bit-vec"
-
-[dev-dependencies.chrono-04]
-version = "0.4"
-default-features = false
-package = "chrono"
-
-[dev-dependencies.criterion]
-version = "0.7"
-
-[dev-dependencies.env_logger]
-version = "0.11"
-
-[dev-dependencies.eui48-1]
-version = "1.0"
-default-features = false
-package = "eui48"
-
-[dev-dependencies.futures-executor]
-version = "0.3"
-
-[dev-dependencies.futures-util]
-version = "0.3"
-features = ["async-await-macro"]
-default-features = false
-
-[dev-dependencies.geo-types-06]
-version = "0.6"
-package = "geo-types"
-
-[dev-dependencies.geo-types-07]
-version = "0.7"
-package = "geo-types"
-
-[dev-dependencies.jiff-01]
-version = "0.1"
-package = "jiff"
-
-[dev-dependencies.jiff-02]
-version = "0.2"
-package = "jiff"
-
-[dev-dependencies.serde_json-1]
-version = "1.0"
-package = "serde_json"
-
-[dev-dependencies.smol_str-01]
-version = "0.1"
-package = "smol_str"
-
-[dev-dependencies.time-02]
-version = "0.2"
-package = "time"
-
-[dev-dependencies.time-03]
-version = "0.3"
-features = ["parsing"]
-package = "time"
-
-[dev-dependencies.tokio]
-version = "1.0"
-features = [
-    "macros",
-    "net",
-    "rt",
-    "rt-multi-thread",
-    "time",
-]
-
-[dev-dependencies.uuid-08]
-version = "0.8"
-package = "uuid"
-
-[dev-dependencies.uuid-1]
-version = "1.0"
-package = "uuid"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies.socket2]
 version = "0.6"
