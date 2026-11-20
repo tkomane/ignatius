@@ -78,6 +78,11 @@ jobs:
             --xtask (Join-Path $env:CARGO_TARGET_DIR "debug/$xtaskName") --target "$env:REPLACEMENT_TARGET" `
             --output (Join-Path $root 'receipt.json')
           if ($LASTEXITCODE -ne 0) { throw 'Archive replacement or rollback failed.' }
+          $report = Get-Content -Raw -LiteralPath (Join-Path $root 'receipt.json') | ConvertFrom-Json
+          if ($report.status -cne 'pass' -or $report.private_runtime_removed -ne $true -or
+              $report.exact_inputs.candidate.target -cne $env:REPLACEMENT_TARGET) {
+            throw 'Expected a matching, complete archive replacement receipt.'
+          }
       - name: Retain the sanitised rehearsal receipt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -329,7 +329,7 @@ def main() -> None:
     ensure(receipt['private_runtime_removed'], 'owned rehearsal state cleaned up')
     with result.open('x', encoding='utf-8') as file:
         json.dump(receipt, file, indent=2)
-        file.write('\\n')
+        file.write('\n')
     print(f'{len(CHECKS)} checks: {receipt["status"]}')
     print(hashlib.sha256(result.read_bytes()).hexdigest())
 
