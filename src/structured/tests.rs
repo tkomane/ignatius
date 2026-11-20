@@ -30,6 +30,35 @@ fn arrays_keep_postgres_subscripts_and_quote_distinctions() {
 }
 
 #[test]
+fn array_input_preserves_literal_whitespace_and_replaces_only_the_element_span() {
+    let kind = Kind::Array { delimiter: b',' };
+    let compact = Tree::parse(kind, "{old}").unwrap();
+    let raw = " \t[0:1] [3] = { { \" kept \" ,  NULL \t, two words  }, \
+               { end\\  , \"NULL\" \t, \\NULL  } } \n";
+    assert_eq!(compact.replace(0, raw).unwrap(), raw);
+
+    let tree = Tree::parse(kind, raw).unwrap();
+    assert_eq!(tree.path(2), "$ / [0] / [1]");
+    assert_eq!(tree.preview(2), r#"" kept ""#);
+    assert_eq!(tree.preview(3), "NULL array element");
+    assert_eq!(tree.preview(4), "two words");
+    assert_eq!(tree.preview(6), "end\\ ");
+    assert_eq!(tree.preview(7), r#""NULL""#);
+    assert_eq!(tree.preview(8), r"\NULL");
+    assert_eq!(
+        tree.replace(6, r#"  "new value"  "#).unwrap(),
+        raw.replacen("end\\ ", r#"  "new value"  "#, 1)
+    );
+    assert_eq!(tree.replace(6, r#""quoted" trailing"#), Err(Error::Invalid));
+    assert_eq!(tree.replace(6, " \t"), Err(Error::Invalid));
+
+    let box_kind = Kind::Array { delimiter: b';' };
+    let boxes = Tree::parse(box_kind, r#"{ "(1,1),(0,0)"  ; (3,3),(2,2) }"#).unwrap();
+    assert_eq!(boxes.nodes.len(), 3);
+    assert_eq!(boxes.preview(2), "(3,3),(2,2)");
+}
+
+#[test]
 fn range_preserves_delimiters_and_distinguishes_unbounded_and_empty() {
     let tree = Tree::parse(Kind::Range, r#"(,"x,y")"#).unwrap();
     assert_eq!(tree.preview(1), "unbounded");
