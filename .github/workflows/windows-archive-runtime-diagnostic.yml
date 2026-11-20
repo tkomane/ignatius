@@ -3,6 +3,15 @@ name: Windows live archive diagnostic
 on:
   workflow_dispatch:
     inputs:
+      probe:
+        description: Select the live TLS check or a Windows Terminal archive diagnostic
+        required: true
+        default: postgres-runtime
+        type: choice
+        options:
+          - postgres-runtime
+          - terminal-renderer
+          - terminal-renderer-arm64
       candidate_run:
         description: Completed non-publishing release run ID on main
         required: true
@@ -23,10 +32,11 @@ permissions:
 
 jobs:
   runtime:
-    name: Verify the retained Windows archive over live TLS
-    runs-on: windows-latest
+    name: Verify the retained Windows archive (${{ inputs.probe }})
+    runs-on: ${{ inputs.probe == 'terminal-renderer-arm64' && 'windows-11-arm' || 'windows-latest' }}
     timeout-minutes: 15
     env:
+      PROBE: ${{ inputs.probe }}
       CANDIDATE_RUN: ${{ inputs.candidate_run }}
       CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
       SOURCE_REVISION: ${{ inputs.source_revision }}
@@ -37,7 +47,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ($env:CANDIDATE_RUN -cnotmatch '\A[1-9][0-9]{0,18}\z' -or
+          if ($env:PROBE -cnotin @('postgres-runtime', 'terminal-renderer', 'terminal-renderer-arm64') -or
+              $env:CANDIDATE_RUN -cnotmatch '\A[1-9][0-9]{0,18}\z' -or
               $env:CANDIDATE_ATTEMPT -cnotmatch '\A[1-9][0-9]{0,3}\z' -or
               $env:SOURCE_REVISION -cnotmatch '\A[0-9a-f]{40}\z') {
             throw "Expected a numeric run and attempt with a full lowercase source revision"
@@ -106,10 +117,26 @@ jobs:
           }
           $unpacked = Join-Path $env:RUNNER_TEMP 'ignatius-windows-unpacked'
           Expand-Archive -LiteralPath $archivePath -DestinationPath $unpacked
-          "IGNATIUS_ARCHIVED_EXE=$(Join-Path $unpacked 'ignatius.exe')" >> $env:GITHUB_ENV
+          $binary = Join-Path $unpacked 'ignatius.exe'
+          if ($env:PROBE -cne 'postgres-runtime') {
+            $runtimePath = Join-Path $candidate 'runtime/x86_64-pc-windows-msvc.json'
+            $runtime = Get-Content -LiteralPath $runtimePath -Raw | ConvertFrom-Json
+            $binaryHash = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($runtime.schema_version -ne 1 -or $runtime.status -cne 'pass' -or
+                $runtime.target -cne 'x86_64-pc-windows-msvc' -or
+                $runtime.source_revision -cne $env:SOURCE_REVISION -or
+                $runtime.build_identity -cne $expectedBuild -or
+                $runtime.archive_name -cne $windowsArchive[0].name -or
+                $runtime.binary_sha256 -cne $binaryHash) {
+              throw 'Windows executable does not match the retained runtime receipt.'
+            }
+            "IGNATIUS_ARCHIVED_SHA256=$binaryHash" >> $env:GITHUB_ENV
+          }
+          "IGNATIUS_ARCHIVED_EXE=$binary" >> $env:GITHUB_ENV
           "IGNATIUS_EXPECTED_BUILD=$expectedBuild" >> $env:GITHUB_ENV
 
       - name: Run native Windows archive TLS and privacy checks
+        if: inputs.probe == 'postgres-runtime'
         shell: pwsh
         run: |
           $receipt = Join-Path $env:RUNNER_TEMP 'ignatius-windows-archive-runtime.json'
@@ -120,3 +147,26 @@ jobs:
           } finally {
             if (Test-Path -LiteralPath $receipt -PathType Leaf) { Get-Content -LiteralPath $receipt }
           }
+
+      - name: Run the archived client in owned portable Windows Terminal
+        if: inputs.probe == 'terminal-renderer' || inputs.probe == 'terminal-renderer-arm64'
+        id: renderer
+        shell: pwsh
+        run: |
+          ./tests/support/windows_conpty/Run-RendererCalibration.ps1 `
+            -ArchivedClient $env:IGNATIUS_ARCHIVED_EXE -ExpectedClientSha256 $env:IGNATIUS_ARCHIVED_SHA256 `
+            -CandidateSource $env:SOURCE_REVISION -CandidateBuild $env:IGNATIUS_EXPECTED_BUILD
+
+      - name: Retain the owned archive rendering and restoration observations
+        if: ${{ always() && steps.renderer.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-terminal-archive-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/build.json
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/renderer-report.json
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/baseline.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-active.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-restored.bmp

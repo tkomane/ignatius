@@ -63,6 +63,29 @@ processes exited zero, the Job emptied and the control pipe was quiescent.
 The controls establish cursor observation in this renderer. The Ignatius
 `TerminalGuard` matrix, W07-064, T055a and Windows 11 hand use remain open.
 
+## Packaged Windows Terminal startup and quit - 20 November 2026
+
+Two hosted Windows Server 2025 x64 sessions opened the exact Windows ZIP
+from `ci/44631543576-1` at candidate source `cec95f6`. They used the
+checksum-pinned portable Windows Terminal 1.25.3131.0, verified the
+archive and extracted executable against the retained evidence, and
+observed the client's displayed Material theme and native alternate screen.
+The client was at a synthetic loopback connection handshake during capture.
+[Run 44652522247](https://github.com/tkomane/ignatius/actions/runs/44652522247) and
+[run 44653421070](https://github.com/tkomane/ignatius/actions/runs/44653421070)
+
+Ctrl+Q returned exit 0. On both runner images the seeded input mode changed
+from 423 to 152 and returned to 423. The output mode returned to 7. Each
+independently downloaded restored crop matched that run's baseline byte for
+byte, including the main-screen marker and visible cursor. The owned Job
+emptied and its control pipe became quiescent. This measures the packaged
+normal-quit path.
+
+The Windows 11 ARM64 run reached the active default desktop and found the
+owned native Terminal window. Windows denied the foreground activation
+request and the archived x64 client was never launched in that attempt.
+Windows 11 hand use remains open. [Run 44653416231](https://github.com/tkomane/ignatius/actions/runs/44653416231)
+
 ## Release inventory rehearsal - 20 November 2026
 
 [Rehearsal 44623448688](https://github.com/tkomane/ignatius/actions/runs/44623448688)
