@@ -36,12 +36,13 @@ UPDATE. Review the SQL and confirm it separately to send it once. Escape
 cancels. The source must be a direct table projection that includes every
 primary-key column. Production-classified and read-only connections refuse
 edits. The UPDATE requires an immediate live primary key, matching source
-column identity and matching observed server value. It also checks
-`extra_float_digits > 0` and, for arrays, `array_nulls = on` so an
-unchanged value is not interpreted under lossy settings. A result retained
-under lossy settings remains inspect-only. If conditions change during
-review, PostgreSQL can report zero rows affected. Run the
-SELECT explicitly to refresh your view. Ignatius never retries an edit.
+column identity from the original query response, and matching observed server
+value. Derived values without an original table attribute are inspect-only.
+The UPDATE also checks `extra_float_digits > 0` and, for arrays,
+`array_nulls = on` so an unchanged value is not interpreted under lossy
+settings. A result retained under lossy settings remains inspect-only.
+If conditions change during review, PostgreSQL can report zero rows affected.
+Run the SELECT explicitly to refresh your view. Ignatius never retries an edit.
 
 Partial replacements keep unedited source text exactly as PostgreSQL sent it.
 PostgreSQL still applies its standard input validation, constraints, dimension

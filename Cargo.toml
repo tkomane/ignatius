@@ -1,5 +1,6 @@
 [workspace]
 members = ["xtask"]
+exclude = ["vendor/tokio-postgres"]
 
 [package]
 name = "ignatius"
@@ -41,7 +42,7 @@ tokio = { version = "1.53.3", features = [
     # awaited with a timeout (ADR-0012, specs/011-cloud-identity).
     "process",
 ] }
-tokio-postgres = { version = "0.7.18", features = [
+tokio-postgres = { version = "=0.7.18", features = [
     "runtime",
     "with-chrono-0_4",
 ] }
@@ -84,6 +85,10 @@ tempfile = "3.24.0"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
 # The CLI contract tests parse machine-format output the way a script would.
 serde_json = { version = "1.0.145", features = ["unbounded_depth"] }
+
+[patch.crates-io]
+# Keep the original RowDescription alongside simple-query text.
+tokio-postgres = { path = "vendor/tokio-postgres" }
 
 [profile.release]
 strip = "debuginfo"

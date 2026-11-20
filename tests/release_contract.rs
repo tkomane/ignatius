@@ -2539,10 +2539,15 @@ fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
     let policy_check = preflight
         .find("\"$install_root/bin/cargo-deny\" check advisories licenses bans sources")
         .expect("source dependency policy check");
+    let registry_advisories = preflight
+        .find(
+            "python3 scripts/check-driver-registry-advisories.py \"$install_root/bin/cargo-deny\"",
+        )
+        .expect("registry driver advisory and yank check");
     let pass_output = preflight
         .find("printf 'sbom_policy=pass\\n' >> \"$GITHUB_OUTPUT\"")
         .expect("source dependency policy pass receipt");
-    assert!(policy_check < pass_output);
+    assert!(policy_check < registry_advisories && registry_advisories < pass_output);
     assert!(
         archive.contains("SBOM_POLICY: ${{ needs.preflight.outputs.sbom_policy }}")
             && archive.contains("\"--policy=$SBOM_POLICY\""),

@@ -6,7 +6,9 @@ const APP: &str = "pkg:cargo/ignatius@0.1.0";
 const TOOL: &str = "pkg:cargo/xtask@0.0.0";
 const CRATE: &str = "pkg:cargo/shared@2.0.0";
 const DEV: &str = "pkg:cargo/dev-only@1.0.0";
+const PATCHED: &str = "pkg:cargo/tokio-postgres@0.7.18";
 const PATH_ID: &str = "path+file:///private/fake/build/source";
+const PATCH_LOCK_ENTRY: &str = "\n[[package]]\nname = \"tokio-postgres\"\nversion = \"0.7.18\"\n";
 
 fn lockfile() -> String {
     format!(
@@ -42,7 +44,7 @@ fn inputs() -> Inputs {
             .iter()
             .map(|&file| (file, DIGEST.into()))
             .collect(),
-        packages: locked_packages(&lockfile()).expect("lockfile fixture"),
+        packages: locked_packages(Path::new("."), &lockfile()).expect("lockfile fixture"),
     }
 }
 
@@ -276,13 +278,195 @@ fn metadata_identity_and_coverage_fail_closed() {
             .contains("outside the locked dependency graph")
     );
     assert!(
-        locked_packages(&lockfile().replace(REGISTRY_SOURCE, "git+https://bad.example/secret"))
-            .is_err()
+        locked_packages(
+            &root,
+            &lockfile().replace(REGISTRY_SOURCE, "git+https://bad.example/secret")
+        )
+        .is_err()
     );
     assert_eq!(
         purl("wasi", "0.11.1+wasi-snapshot-preview1").expect("purl"),
         "pkg:cargo/wasi@0.11.1%2Bwasi-snapshot-preview1"
     );
+}
+
+struct RepositoryPatchFixture(PathBuf);
+
+impl RepositoryPatchFixture {
+    fn new() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "ignatius-sbom-patch-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&root).expect("new unit test directory");
+        let fixture = Self(root);
+        fs::create_dir(fixture.0.join("xtask")).expect("packaging directory");
+        fs::create_dir_all(fixture.0.join("vendor/tokio-postgres/src"))
+            .expect("repository patch directory");
+        fs::write(fixture.0.join("Cargo.toml"), "fixture").expect("product manifest");
+        fs::write(fixture.0.join("xtask/Cargo.toml"), "fixture").expect("packaging manifest");
+        fs::write(
+            fixture.0.join(repository_patch::MANIFEST),
+            "[package]\nname = \"tokio-postgres\"\nversion = \"0.7.18\"\n",
+        )
+        .expect("repository patch manifest");
+        fs::write(
+            fixture.0.join("vendor/tokio-postgres/src/lib.rs"),
+            "pub fn fixture() {}\n",
+        )
+        .expect("repository patch source");
+        fixture
+    }
+
+    fn inputs(&self) -> Inputs {
+        Inputs {
+            packages: locked_packages(&self.0, &(lockfile() + PATCH_LOCK_ENTRY))
+                .expect("approved repository patch in fixture lockfile"),
+            ..inputs()
+        }
+    }
+}
+
+impl Drop for RepositoryPatchFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn repository_patch_binding_uses_source_bytes_without_a_registry_checksum() {
+    let fixture = RepositoryPatchFixture::new();
+    let inputs = fixture.inputs();
+    let mut facts = captured(&self::inputs());
+    assert!(facts.validate(&inputs).is_err());
+    facts.units.insert(
+        PATCHED.into(),
+        BTreeSet::from([Unit {
+            role: Role::Product,
+            kinds: BTreeSet::from(["lib".into()]),
+            features: BTreeSet::new(),
+            opt_level: Role::Product.opt_level().into(),
+        }]),
+    );
+    facts.relations.insert(Relation {
+        from: APP.into(),
+        to: PATCHED.into(),
+        kind: "normal",
+        target: None,
+    });
+
+    let manifest = manifest("aarch64-apple-darwin");
+    let context = Context {
+        inputs: &inputs,
+        manifest: &manifest,
+        archive: 0,
+    };
+    let bytes = render(&context, &facts).expect("repository patch inventory");
+    verify_binding(&context, &bytes).expect("binds the exact tree");
+    let parsed = parse_unique_json_bytes(&bytes).expect("inventory");
+    let component = array(&parsed, "components")
+        .expect("components")
+        .iter()
+        .find(|item| item["bom-ref"] == PATCHED)
+        .expect("repository patch");
+    assert_eq!(component["type"], "library");
+    assert_eq!(component["scope"], "required");
+    assert_eq!(
+        required_property(component, "ignatius:cargo:source").expect("source type"),
+        "repository-patch",
+    );
+    assert_eq!(
+        required_property(component, "ignatius:cargo:source-manifest").expect("manifest"),
+        repository_patch::MANIFEST,
+    );
+    assert!(required_property(component, "ignatius:cargo:crate-sha256").is_err());
+    let digest = required_property(component, "ignatius:cargo:source-tree-sha256").expect("digest");
+    assert_eq!(
+        digest,
+        "055e2ac8f1370e2aee8f4b9d791de0c6533993801abc150307095fb45930f8db",
+    );
+    let second = RepositoryPatchFixture::new();
+    assert_eq!(
+        digest,
+        repository_patch::tree_sha256(&second.0).expect("independent checkout"),
+    );
+    let source = fixture.0.join("vendor/tokio-postgres/src/lib.rs");
+    fs::write(&source, "pub fn changed() {}\n").expect("change fixture input");
+    assert!(
+        verify_binding(
+            &Context {
+                inputs: &fixture.inputs(),
+                ..context
+            },
+            &bytes
+        )
+        .is_err(),
+    );
+}
+
+#[test]
+fn repository_patch_metadata_requires_the_exact_locked_local_identity_and_path() {
+    let fixture = RepositoryPatchFixture::new();
+    let inputs = fixture.inputs();
+    let mut metadata = metadata(&fixture.0);
+    let driver = json!({
+        "id": "opaque-local-driver-id",
+        "name": repository_patch::NAME,
+        "version": repository_patch::VERSION,
+        "source": null,
+        "manifest_path": fixture.0.join(repository_patch::MANIFEST),
+    });
+    metadata["packages"]
+        .as_array_mut()
+        .expect("metadata packages")
+        .push(driver);
+    let parse =
+        |metadata: &Value| Metadata::parse(&fixture.0, &inputs, metadata.to_string().as_bytes());
+    let accepted = parse(&metadata).expect("exact local metadata");
+    assert_eq!(
+        accepted.resolve("opaque-local-driver-id").expect("driver"),
+        PATCHED,
+    );
+    for (field, wrong) in [
+        ("name", json!("unknown-package")),
+        ("version", json!("0.7.19")),
+        ("source", json!(REGISTRY_SOURCE)),
+        ("manifest_path", json!(fixture.0.join("Cargo.toml"))),
+        ("manifest_path", json!(repository_patch::MANIFEST)),
+    ] {
+        let mut mismatched = metadata.clone();
+        mismatched["packages"][3][field] = wrong;
+        assert!(parse(&mismatched).is_err(), "wrong {field} passed");
+    }
+    let mut member = metadata;
+    member["workspace_members"] = json!(["packaging-id", PATH_ID, "opaque-local-driver-id"]);
+    assert!(parse(&member).is_err());
+    for wrong in [
+        PATCH_LOCK_ENTRY.replace(repository_patch::NAME, "unknown-package"),
+        PATCH_LOCK_ENTRY.replace(repository_patch::VERSION, "0.7.19"),
+        format!("{PATCH_LOCK_ENTRY}checksum = \"{DIGEST}\"\n"),
+    ] {
+        assert!(locked_packages(&fixture.0, &(lockfile() + &wrong)).is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn repository_patch_rejects_symlinks_to_files_and_source_directories() {
+    let fixture = RepositoryPatchFixture::new();
+    let source = fixture.0.join("vendor/tokio-postgres/src/lib.rs");
+    fs::remove_file(&source).expect("replace fixture source");
+    std::os::unix::fs::symlink(fixture.0.join("Cargo.toml"), &source).expect("symlink source");
+    assert!(repository_patch::tree_sha256(&fixture.0).is_err());
+    fs::remove_file(&source).expect("remove fixture link");
+    let vendor = fixture.0.join("vendor");
+    let original = fixture.0.join("other");
+    fs::rename(&vendor, &original).expect("move fixture vendor tree");
+    std::os::unix::fs::symlink(&original, &vendor).expect("symlink vendor directory");
+    assert!(repository_patch::tree_sha256(&fixture.0).is_err());
 }
 
 #[test]

@@ -4,7 +4,7 @@ use crate::query::result::{ResultSet, retention_budget::RetentionBudget};
 use crate::structured::{Column, Kind, Origin};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio_postgres::types::{Kind as PgKind, Type};
-use tokio_postgres::{Client, Column as PgColumn};
+use tokio_postgres::{Client, Column as PgColumn, SimpleColumn};
 
 const MAX_CATALOG_TYPES: usize = 128;
 
@@ -42,6 +42,7 @@ pub(super) async fn describe(
     client: &Client,
     set: &mut ResultSet,
     columns: &[PgColumn],
+    original: &[SimpleColumn],
     budget: &mut RetentionBudget,
     before: EditSettings,
 ) {
@@ -57,7 +58,7 @@ pub(super) async fn describe(
     let rows = catalog(client, oids.into_iter().collect()).await;
     if !columns
         .iter()
-        .any(|column| describe_column(column, &rows).is_some())
+        .any(|column| describe_type(column.type_(), &rows).is_some())
         || !budget.admit_structured_columns(columns.len())
     {
         return;
@@ -70,8 +71,10 @@ pub(super) async fn describe(
     set.set_structured_columns(
         columns
             .iter()
-            .map(|column| {
-                let mut described = describe_column(column, &rows)?;
+            .zip(original)
+            .map(|(prepared, wire)| {
+                let mut described =
+                    describe_column(prepared.type_(), &rows, observed_origin(wire))?;
                 if !before.allows(described.kind) || !after.allows(described.kind) {
                     described.origin = None;
                 }
@@ -144,20 +147,24 @@ async fn catalog(client: &Client, oids: Vec<u32>) -> BTreeMap<u32, CatalogType> 
         .collect()
 }
 
-fn describe_column(column: &PgColumn, catalog: &BTreeMap<u32, CatalogType>) -> Option<Column> {
-    let kind = describe_type(column.type_(), catalog)?;
-    let origin = column
-        .table_oid()
-        .zip(column.column_id())
-        .map(|(table, attribute)| Origin {
-            table,
-            attribute,
-            type_oid: column.type_().oid(),
-            typmod: column.type_modifier(),
-        });
+fn observed_origin(column: &SimpleColumn) -> Option<Origin> {
+    Some(Origin {
+        table: column.table_oid()?,
+        attribute: column.column_id().filter(|attribute| *attribute > 0)?,
+        type_oid: column.type_oid(),
+        typmod: column.type_modifier(),
+    })
+}
+
+fn describe_column(
+    type_: &Type,
+    catalog: &BTreeMap<u32, CatalogType>,
+    origin: Option<Origin>,
+) -> Option<Column> {
+    let kind = describe_type(type_, catalog)?;
     // User-defined scalar input/output functions may drop information. Keep
     // inspection and explicit whole-value replacement for those containers.
-    let partial_edit = match base_type(column.type_()).kind() {
+    let partial_edit = match base_type(type_).kind() {
         PgKind::Array(element) | PgKind::Range(element) => {
             Type::from_oid(base_type(element).oid()).is_some()
         }

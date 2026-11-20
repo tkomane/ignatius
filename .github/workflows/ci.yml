@@ -410,6 +410,7 @@ jobs:
           set -euo pipefail
           "$RUNNER_TEMP/cargo-deny/bin/cargo-deny" --locked --workspace --all-features \
             check advisories licenses bans sources
+          python3 scripts/check-driver-registry-advisories.py "$RUNNER_TEMP/cargo-deny/bin/cargo-deny"
 
   secret-scan:
     name: Repository secret scan

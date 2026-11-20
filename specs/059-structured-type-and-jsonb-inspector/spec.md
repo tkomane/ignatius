@@ -48,9 +48,10 @@
   limit and two-step reviewed UPDATE. Structured edits are unavailable on
   production or read-only connections. Result job, source row and selected
   column must be current. At send time the statement matches the retained
-  column's relation, attribute, type and typmod and compares the exact old
-  server text. A missing or changed row/value can affect zero rows and is
-  reported as such. An immediate valid primary key must still match the
+  column's relation, attribute, type and typmod from the original query
+  response and compares the exact old server text. A missing or changed
+  row/value can affect zero rows and is reported as such. An immediate valid
+  primary key must still match the
   reviewed columns. PostgreSQL must use round-trippable float text and enable
   NULL array input for array edits when retaining the writable result and
   when sending the update. A failed edit does not rerun the source

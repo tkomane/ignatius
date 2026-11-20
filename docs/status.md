@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 58: Structured result column identity - 20 November 2026
+
+- Cell Detail uses the table OID, attribute, type OID and type modifier
+  from the original simple-query response when reviewing an edit.
+  The later description supplies type details only when the retained column
+  names, type OIDs and modifiers agree. Derived values without a table
+  attribute remain inspect-only. [Structured cell detail](design/structured-type-inspector.md)
+- The new original-text and reviewed-edit checks passed on PostgreSQL 14.25,
+  15.20, 16.16, 17.12 and 18.7 from macOS arm64. They exercised a direct
+  column with an alias, a derived JSONB value, a guarded edit and lossy
+  output settings. [Reviewed fixture digests](../docker/postgres-images.env)
+- Live typmod and reviewed-edit checks also passed with PostGIS 3.7.0 on
+  PostgreSQL 17.12 and pgvector 0.8.7 on PostgreSQL 18.7.
+- The release inventory binds the modified driver library to its source
+  tree. Cargo Deny 0.20.2 passed the local workspace policy and the
+  crates.io advisory and yank check for the original driver release.
+  [Candidate dependency inventories](operations/release.md#candidate-dependency-inventories)
+
 ## Wave 57: Windows 11 PowerShell workbench - 20 November 2026
 
 - Native Windows Terminal and PowerShell 7.6.10 on Windows 11 ARM64 opened

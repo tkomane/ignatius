@@ -47,3 +47,23 @@ fn custom_arrays_need_catalog_delimiter_for_their_element() {
         Some(Kind::Array { delimiter: b';' })
     );
 }
+
+#[test]
+fn type_enrichment_does_not_supply_missing_origin() {
+    let catalog = BTreeMap::new();
+    let tree = crate::structured::Tree::parse(Kind::Jsonb, r#"{"key":1}"#).unwrap();
+    let derived = describe_column(&Type::JSONB, &catalog, None).unwrap();
+    assert_eq!(derived.kind, Kind::Jsonb);
+    assert_eq!(derived.origin, None);
+    assert_eq!(derived.edit_input(&tree, 0), None);
+
+    let original = Origin {
+        table: 42,
+        attribute: 2,
+        type_oid: Type::JSONB.oid(),
+        typmod: -1,
+    };
+    let direct = describe_column(&Type::JSONB, &catalog, Some(original)).unwrap();
+    assert_eq!(direct.origin, Some(original));
+    assert!(direct.edit_input(&tree, 0).is_some());
+}

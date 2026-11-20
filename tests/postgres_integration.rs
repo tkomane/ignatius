@@ -3545,7 +3545,8 @@ fn structured_jsonb_edit_preserves_precision_and_refuses_changed_value_or_relati
     let created = fx.block_on(fx.session.execute(setup, 10, JobId(5902)));
     assert_eq!(created.status, ExecutionStatus::Succeeded, "{created:?}");
     let source = "SELECT id, payload FROM inspection_test";
-    let plan = stage_structured_edit(&fx, source, 1, 2, "true");
+    let aliased = "SELECT id, payload AS selected FROM inspection_test";
+    let plan = stage_structured_edit(&fx, aliased, 1, 2, "true");
     assert!(!plan.0.contains("123456789012345678901"));
     assert_eq!(run_structured_edit(&fx, &plan), 1);
     assert_eq!(run_structured_edit(&fx, &plan), 0, "stale value guard");
@@ -3595,6 +3596,41 @@ fn structured_jsonb_edit_preserves_precision_and_refuses_changed_value_or_relati
         0,
         "lost unique key refuses both rows"
     );
+}
+
+#[test]
+fn structured_derived_column_preserves_exact_text_and_stays_inspect_only() {
+    use ignatius::app::{
+        message::{Action, Message},
+        update::update,
+    };
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let mut model = open_structured_detail(
+        &fx,
+        r#"SELECT left_value || right_value AS derived
+           FROM (VALUES ('{"value":123456789012345678901.0123456789}'::jsonb, '{}'::jsonb))
+                AS example(left_value, right_value)"#,
+        0,
+    );
+    let result = model.visible_result().unwrap();
+    assert_eq!(result.column_type(0), Some("jsonb"));
+    assert_eq!(
+        result.rows[0][0].raw(),
+        Some(r#"{"value": 123456789012345678901.0123456789}"#)
+    );
+    let screen = ignatius::ui::layout::render_to_string(
+        &model,
+        &ignatius::ui::Keymap::new(),
+        &model.presentation,
+        112,
+        30,
+    );
+    assert!(screen.contains("Cell Detail  r Raw"), "{screen}");
+    assert!(!screen.contains("e Edit"), "{screen}");
+    assert!(update(&mut model, Message::Action(Action::Insert('e'))).is_empty());
+    assert!(model.update_lookup.is_none());
 }
 
 #[test]

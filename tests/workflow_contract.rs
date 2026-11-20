@@ -997,6 +997,7 @@ fn security_tools_have_a_reproducible_bootstrap_and_no_network_at_scan_time() {
         "cargo install --locked --version 0.20.2 --root \"$install_root\" cargo-deny",
         "Cargo verifies the crates.io package checksum",
         "cargo-deny 0.20.2",
+        "python3 scripts/check-driver-registry-advisories.py \"$RUNNER_TEMP/cargo-deny/bin/cargo-deny\"",
         "ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9",
         "git --no-banner --redact --log-opts=--all",
     ] {
