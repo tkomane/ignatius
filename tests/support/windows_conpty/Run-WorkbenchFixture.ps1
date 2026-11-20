@@ -132,10 +132,25 @@ finally {
         }
     }
     if ($startAttempted) {
-        & $pgCtl status -D $cluster | Out-Null
-        if ($LASTEXITCODE -ne 3 -or (Test-Path -LiteralPath $readyFile)) {
-            throw 'PostgreSQL shutdown was not confirmed for the owned cluster.'
+        # pg_ctl status uses exit 3 to confirm shutdown. Read it from the
+        # process handle so the successful workflow does not inherit it.
+        $statusCheck = @{
+            FilePath = $pgCtl
+            ArgumentList = @('status', '-D', ('"' + $cluster + '"'))
+            NoNewWindow = $true
+            PassThru = $true
+            Wait = $true
+        }
+        $status = Start-Process @statusCheck
+        try {
+            if ($status.ExitCode -ne 3 -or (Test-Path -LiteralPath $readyFile)) {
+                throw 'PostgreSQL shutdown was not confirmed for the owned cluster.'
+            }
+        }
+        finally {
+            $status.Dispose()
         }
     }
     Remove-Item -LiteralPath $scratch -Recurse -Force
+    Write-Output 'Owned PostgreSQL fixture removed.'
 }

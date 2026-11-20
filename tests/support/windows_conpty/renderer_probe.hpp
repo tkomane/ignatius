@@ -948,18 +948,20 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
             }
             if (live_shell && parts[0] == "W") {
                 auto& product = *receipt.archive;
-                const auto data = renderer_numbers<3>(parts);
-                const auto observed = renderer_stamp(data[1], data[2]);
+                const auto data = renderer_numbers<5>(parts);
+                const auto observed = renderer_stamp(data[3], data[4]);
                 require(powershell && archived_client && WaitForSingleObject(powershell.value, 0) == WAIT_TIMEOUT
                         && observed >= prior_qpc && observed <= ticks(),
                         "a live workbench observation belongs to the owned shell and archive");
                 if (data[0] == 1) {
                     require(!product.workbench_result && !product.raw_alternate
+                            && data[1] < receipt.columns - 1 && data[2] < receipt.rows
                             && WaitForSingleObject(archived_client.value, 0) == WAIT_TIMEOUT,
                             "live result was completed before capture of the active archive");
-                    product.workbench_result = true;
+                    product.workbench_result = COORD{static_cast<SHORT>(data[1]), static_cast<SHORT>(data[2])};
                 } else {
                     require(data[0] == 2 && product.workbench_result && !product.powershell_prompt
+                            && data[1] == 0 && data[2] == 0
                             && product.restored_capture_qpc > 0 && observed >= product.restored_capture_qpc,
                             "the same shell accepted a command after archive restoration");
                     product.powershell_prompt = true;
@@ -1009,7 +1011,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     require(owned_capture.has_value(), "WGC archive activation follows its baseline capture");
                     owned_capture->restart(work_deadline);
                     renderer_capture_archive_window(*owned_capture, folder / L"ignatius-active.bmp",
-                                                    prior_qpc, work_deadline, window_cursor_calibration, product);
+                        live_shell ? product.acquired_qpc : prior_qpc, work_deadline, window_cursor_calibration, product);
                 } else
 #endif
                 {

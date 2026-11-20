@@ -176,15 +176,16 @@ void renderer_wait_for_screen(const Child& process, Clock::time_point deadline, 
     throw std::runtime_error(failure);
 }
 
-void renderer_shell_stage(const std::wstring& pipe, const std::wstring& nonce, unsigned stage) {
+void renderer_shell_stage(const std::wstring& pipe, const std::wstring& nonce, unsigned stage,
+                          COORD cell = {}) {
     std::ostringstream line;
-    line << "W " << ascii(nonce) << ' ' << stage;
+    line << "W " << ascii(nonce) << ' ' << stage << ' ' << cell.X << ' ' << cell.Y;
     renderer_stamp(line, ticks());
     send(pipe, line.str());
 }
 
-void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline,
-                              const std::wstring& work) {
+COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline,
+                               const std::wstring& work) {
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
         return lines.front().find(L"ig_probe@127.0.0.1:") != std::wstring::npos
             && std::any_of(lines.begin(), lines.end(), [](const auto& line) {
@@ -202,7 +203,8 @@ void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_po
     }, work, "the archived workbench did not open a blank query buffer");
     renderer_type_text(input, L"select 6*7*current_setting('transaction_read_only')::bool::int as journey_value");
     renderer_key(input, 'R', L'r', LEFT_CTRL_PRESSED);
-    renderer_wait_for_screen(product, deadline, [](const auto& lines) {
+    COORD result_position{};
+    renderer_wait_for_screen(product, deadline, [&result_position](const auto& lines) {
         constexpr std::wstring_view name = L"journey_value";
         const auto caption = std::find_if(lines.begin(), lines.end(), [](const auto& line) {
             return line.find(L"Results") != std::wstring::npos && line.find(L"Completed") != std::wstring::npos
@@ -221,11 +223,15 @@ void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_po
             if (rule + 1 == lines.end() || !is_rule(*rule)) continue;
             const auto cell = std::wstring_view(*(rule + 1)).substr(start, name.size());
             const auto first = cell.find_first_not_of(L' ');
-            return first != std::wstring_view::npos && cell.substr(first, 2) == L"42"
-                && cell.find_last_not_of(L' ') == first + 1;
+            if (first == std::wstring_view::npos || cell.substr(first, 2) != L"42"
+                || cell.find_last_not_of(L' ') != first + 1) return false;
+            result_position = {static_cast<SHORT>(start + first),
+                               static_cast<SHORT>((rule + 1) - lines.begin())};
+            return true;
         }
         return false;
     }, work, "the archived workbench did not display the completed PostgreSQL result");
+    return result_position;
 }
 
 void renderer_use_restored_shell(const Child& shell, const std::wstring& work, HANDLE input,

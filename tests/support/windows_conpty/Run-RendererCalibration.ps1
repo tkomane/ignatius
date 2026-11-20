@@ -638,6 +638,7 @@ if ($archiveMode) {
         $live = $facts.archived_client.powershell_workbench
         $observedShellVersion = [IO.File]::ReadAllText((Join-Path $work 'shell-ready'))
         if ($live.native_shell -cne $true -or $live.result_rendered -cne $true -or $live.prompt_executed -cne $true -or
+            @($live.result_ink_pixels).Count -ne 2 -or $live.result_ink_pixels[0] -lt 4 -or $live.result_ink_pixels[1] -lt 4 -or
             $observedShellVersion -cne $build['powershell_version'] -or
             (FileDigest $shell.FullName) -cne $build['powershell_executable_sha256']) {
             throw 'The owned PowerShell workbench did not prove the live result and usable restored prompt.'
