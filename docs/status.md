@@ -4,6 +4,32 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 49: Terminal and packaged runtime verification - 20 November 2026
+
+- [Warp startup run 44641238666](https://github.com/tkomane/ignatius/actions/runs/44641238666)
+  reached the Terms of Service notice in the signed arm64 app on a hosted
+  macOS desktop. Ignatius never started in this run. Stock Warp visual
+  acceptance remains open.
+- [Windows Terminal renderer run 44632416860](https://github.com/tkomane/ignatius/actions/runs/44632416860)
+  passed all six synthetic cursor controls in stock portable Windows Terminal
+  1.25.3131.0 on Windows Server 2025 x64. The main-screen sentinel returned,
+  the original console modes were restored and the owned processes exited
+  zero. Independent pixel readback confirmed all six captures. The Ignatius
+  `TerminalGuard` matrix and Windows 11 hand use remain open.
+- [Main-dispatched rehearsal 44631543576](https://github.com/tkomane/ignatius/actions/runs/44631543576)
+  at candidate source `cec95f6` passed all 15 jobs. Each extracted archive
+  passed eleven runtime checks, including malformed configuration refusal,
+  byte-preserved history after rollback and the debug privacy check on a
+  refused `--plain` connection. All 12 aggregate files were independently
+  verified. [Runtime evidence](operations/verification.md#packaged-runtime-rehearsal---20-november-2026)
+- [Live archive run 44634774028](https://github.com/tkomane/ignatius/actions/runs/44634774028)
+  passed verified TLS, read-only mode, hostname refusal and debug privacy
+  against PostgreSQL 17.11 using the exact Windows archive from that rehearsal.
+- [PR 101](https://github.com/tkomane/ignatius/pull/101) fixed a false
+  plan-history lock contention error reproduced on macOS during concurrent
+  process launches. The guard releases the lock before closing its file.
+  The regression still rejects a second writer while the guard is held.
+
 ## Wave 48: Per-target release inventories - 20 November 2026
 
 - [Rehearsal 44623448688](https://github.com/tkomane/ignatius/actions/runs/44623448688)

@@ -959,9 +959,8 @@ When an advisory is reported:
    - Bump the dependency version in `Cargo.toml` to a patched release.
    - Run `cargo update -p <crate_name>` to update `Cargo.lock`.
    - Run `cargo xtask verify` to ensure tests, formatting, and lints pass.
-   - Re-generate and verify the SBOM:
-     `cargo xtask release sbom generate --lockfile=Cargo.lock --out=release-evidence/ignatius.cdx.json`
-     `cargo xtask release sbom verify --lockfile=Cargo.lock --sbom=release-evidence/ignatius.cdx.json`
+   - Run the [per-target inventory rehearsal](#candidate-dependency-inventories)
+     and verify the retained archive binding.
 
 #### Emergency patch release procedure
 
@@ -972,18 +971,12 @@ When an advisory is reported:
    ```bash
    cargo xtask verify
    ```
-4. Commit the changes and tag the release commit:
-   ```bash
-   git tag -a v0.1.1 -m "Release v0.1.1: patch advisory <ID>"
-   git push origin v0.1.1
-   ```
-5. GitHub Actions (`.github/workflows/release.yml`) executes the release pipeline:
-   - builds deterministic release archives on macOS, Windows, and Linux;
-   - generates CycloneDX SBOM;
-   - signs archives keylessly with Sigstore OIDC;
-   - generates SLSA build provenance;
-   - verifies bundle integrity via `cargo xtask release trust verify`; and
-   - publishes the candidate release only after all trust gates pass.
+4. Run the non-publishing release rehearsal against the exact patched source.
+   It produces archives and CycloneDX inventories for macOS, Windows, and Linux.
+5. Obtain the owner's authorization for the exact tag and release actions.
+   The tag-triggered workflow also stops at candidate preparation. Follow
+   the [trust gates](#before-any-public-release) for signing, provenance,
+   independent verification and publication.
 
 ### Trust-key revocation and rotation rehearsal (W15)
 

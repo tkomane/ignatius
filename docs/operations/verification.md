@@ -1,5 +1,53 @@
 # Verification
 
+## Packaged runtime rehearsal - 20 November 2026
+
+[Rehearsal 44631543576](https://github.com/tkomane/ignatius/actions/runs/44631543576)
+used workflow source `6f89aa3` on main and produced archives from exact
+candidate source `cec95f6` as `ci/44631543576-1`. All 15 jobs passed. Each
+extracted target passed eleven runtime checks, including exact build identity,
+`doctor --json` without synthetic credential disclosure, malformed
+configuration exit 3, byte-preserved `history.jsonl` after rollback, and
+a refused `--plain` connection with piped statements and debug privacy
+checks. The independent download checked all 12 allowlisted paths, all three
+CycloneDX schemas and the archive and extracted executable checksums.
+
+All three repeat comparisons passed. Windows used independent clean build
+outputs on the same runner and rechecked its native tool inputs. Linux and
+macOS used separate jobs for each repeat. Release readiness still depends
+on approved signatures, provenance and authorization.
+
+[Windows archive run 44634774028](https://github.com/tkomane/ignatius/actions/runs/44634774028)
+verified this exact aggregate and ran its extracted Windows binary on
+Windows Server 2025 x64 against PostgreSQL 17.11. It confirmed verified TLS
+and read-only mode, returned exit 6 for a mismatched hostname, passed the
+scoped debug privacy check and cleaned up the owned fixture.
+
+## Warp startup diagnostics - 20 November 2026
+
+[Run 44641238666](https://github.com/tkomane/ignatius/actions/runs/44641238666)
+verified the Apple signature, Gatekeeper assessment and arm64 executable
+slice of Warp `0.2026.11.11.08.17.01`. On the hosted macOS desktop the app
+advanced through setup to the account screen displaying the Terms of Service.
+The window capture and the startup receipt agree. The probe sent no launch
+request for the Ignatius fixture and captured no Ignatius terminal session.
+Stock Warp visual acceptance, cursor appearance and OSC 11 remain open.
+
+## Windows Terminal renderer calibration - 20 November 2026
+
+[Run 44632416860](https://github.com/tkomane/ignatius/actions/runs/44632416860)
+at `30fb090` used checksum-pinned portable Windows Terminal 1.25.3131.0 on
+Windows Server 2025 x64, runner image `20261103.298.1`. The actor used the
+owned profile, and the renderer presented two matching real frames at each
+of six synthetic phases. Independent inspection of each 171x133 crop counted
+171 magenta pixels in the visible cursor cell and zero in the hidden cell.
+The main-screen sentinel appeared before alternate entry and after exit.
+
+The input and output mode masks were restored to 503 and 7. Both owned
+processes exited zero, the Job emptied and the control pipe was quiescent.
+The controls establish cursor observation in this renderer. The Ignatius
+`TerminalGuard` matrix, W07-064, T055a and Windows 11 hand use remain open.
+
 ## Release inventory rehearsal - 20 November 2026
 
 [Rehearsal 44623448688](https://github.com/tkomane/ignatius/actions/runs/44623448688)
@@ -2198,7 +2246,9 @@ Earlier 2026-08-16 runs remain historical evidence for their recorded
 revisions. They do not supersede the later local and hosted evidence or close
 any cross-platform installation, supply-chain or authorization gate.
 
-## What has not been verified
+## Open checks at the 3 September 2026 checkpoint
+
+The latest rehearsal outcomes are recorded at the top of this document.
 
 - **Hosted runtime privacy correction.** The corrected target archives passed
   hosted packaging, reproducibility, aggregation and runtime smoke, but the

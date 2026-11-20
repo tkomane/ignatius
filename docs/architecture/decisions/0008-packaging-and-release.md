@@ -1,6 +1,8 @@
 # ADR-0008: Hand-rolled release workflow first, cargo-dist deferred
 
-- Status: Accepted baseline; trust providers chosen by the owner on 2026-09-30, implementation pending
+- Status: Accepted. The rehearsal implements per-target inventories and
+  trust-sidecar binding. Signing, verified provenance and distribution remain
+  owner-gated.
 - Date: 2026-08-15
 - T031 update: 2026-08-16
 
@@ -36,8 +38,8 @@ into a release claim.
   committed lockfile, declared toolchain file, build configuration and source
   identity. The minimum generation contract uses locked Cargo metadata, the
   repository's supply-chain policy checks, input digests, path
-  normalisation and fail-closed privacy checks. The final machine-readable
-  inventory or SBOM format and its generation owner are not selected here.
+  normalisation and fail-closed privacy checks. Release candidates use the
+  CycloneDX format and per-target generation procedure below.
 - Signature and provenance are separate evidence classes. Each future evidence
   unit must bind to the same product version, source revision, target, exact
   artefact name and declared checksum. Signature verification additionally
@@ -65,24 +67,19 @@ into a release claim.
 - **Deriving the version from git tags.** Rejected outright by principle VIII: it
   makes a rebuild produce a different product version.
 
-## Decision gates
+## Live release gates
 
-The following choices are intentionally unresolved and must remain explicit
-before a live release workflow is enabled:
+The dated trust choices below establish the providers and formats. A live
+release still requires:
 
-- the final dependency-inventory or SBOM format and generation/verification
-  ownership;
-- the signing provider or offline mechanism, verification identity, key
-  custody, rotation, expiry, revocation, failure handling, retention location
-  and independent verification command;
-- the provenance format, builder identity, retention policy and independent
-  verification route; and
-- owner authorization for the live release and distribution route.
+- an approved signing identity, key lifecycle and failure handling policy;
+- an approved provenance builder identity and retention policy;
+- retained candidate evidence with independently verified archive signatures
+  and provenance using the approved identities; and
+- owner authorization for the exact live release and distribution route.
 
-No provider, key service, release host or owner approval is implied by this
-record. Until each applicable gate is resolved, the corresponding evidence
-state is `not-configured` or another explicit blocking state, not an omitted
-field and not a passing claim.
+The candidate record retains an explicit blocking state for each unresolved
+gate.
 
 ## Owner trust choices - 2026-09-30
 
@@ -104,14 +101,15 @@ procedures.
 
 ### Operator trust commands
 
-- **Deterministic CycloneDX SBOM**:
+- **Lockfile inventory**
   ```bash
   cargo xtask release sbom generate --lockfile=Cargo.lock --out=release-evidence/ignatius.cdx.json
   cargo xtask release sbom verify --lockfile=Cargo.lock --sbom=release-evidence/ignatius.cdx.json
   ```
   The generation process derives the component list directly from `Cargo.lock`
   without network or timestamp nondeterminism. Verification enforces byte-exact
-  reproducibility.
+  reproducibility. Release candidates use a per-target inventory bound to the
+  observed compilation and exact archive. [Candidate inventory procedure](../../operations/release.md#candidate-dependency-inventories)
 
 - **Trust bundle sidecar binding verification**:
   ```bash
@@ -178,9 +176,10 @@ Supply-chain governance enforces continuous auditing and fail-closed response:
   code block candidate release readiness immediately.
 - **Emergency patch release**:
   Patches are applied via minimal dependency updates in `Cargo.toml`/`Cargo.lock`,
-  validated with `cargo xtask verify`, recorded in `CHANGELOG.md`, and released
-  by pushing a signed patch tag (e.g. `v0.1.1`) to trigger the automated GitHub
-  Actions release pipeline (`.github/workflows/release.yml`).
+  validated with `cargo xtask verify` and recorded in `CHANGELOG.md`. Rehearse
+  the exact source with the non-publishing workflow. An owner-authorized tag
+  triggers candidate preparation. Obtain approval for the exact signing and
+  publication actions separately.
 
 ## Consequences
 
