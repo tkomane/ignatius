@@ -1,5 +1,64 @@
 # Verification
 
+## Cancellation-fix candidate - 20 November 2026
+
+The three exact archives from `ci/44721590021-1` at
+`5e5712a25e75f08b02df7525b283d7a81ac355c9` passed the 15-job non-publishing
+packaging rehearsal. Independent readback verified the 12-file aggregate,
+CycloneDX and binary bindings, and 33 packaged runtime checks. All three
+repeat-build pairs matched byte for byte. Windows used two isolated build
+outputs on the same runner. Record validation, exact evidence scope and
+manifest verification passed. The release check returned exit 1 with eight
+issues. The detached, untagged record still lacks canonical evidence and
+verified signatures and provenance. [Packaging rehearsal](https://github.com/tkomane/ignatius/actions/runs/44721590021)
+
+Post-merge CI passed all 16 runnable jobs on this source. The scheduled
+fixture-drift job was skipped on the push. CodeQL passed all three jobs.
+[CI](https://github.com/tkomane/ignatius/actions/runs/44721505326) and
+[CodeQL](https://github.com/tkomane/ignatius/actions/runs/44721505143).
+
+| Archive target | Executing environment | Server |
+| --- | --- | --- |
+| `aarch64-apple-darwin` | macOS 27.2.1 arm64 | PostgreSQL 18.7 |
+| `x86_64-unknown-linux-gnu` | Ubuntu 24.04.5 x86-64 emulated on Apple silicon | PostgreSQL 18.7 |
+| `x86_64-pc-windows-msvc` | Hosted Windows Server 2025 x64 | PostgreSQL 17.12 |
+
+Each extracted binary returned a read-only result over `verify-full` and
+rejected a bad certificate name with exit 6 and empty stdout. Scoped debug
+logs contained the value-free statement descriptor. Synthetic SQL, result and
+credential markers stayed out of logs and diagnostics. The owned fixtures and
+client state were removed. GNU ELF readback found an x86-64 interpreter and a
+highest symbol requirement of `GLIBC_2.39`. The exact Linux executable ran
+with glibc 2.39. [Native Windows CLI probe](https://github.com/tkomane/ignatius/actions/runs/44725512752)
+
+| Local receipt | SHA-256 |
+| --- | --- |
+| macOS archive TLS and privacy | `63474d391a1cde7f8ab3d323683a909f8d2c1d3c87a1c7cc387573d1e3c3c8b5` |
+| Linux archive TLS, privacy and ELF requirements | `37dc2e900a59551d53d08db7315625cada148efa31c240518ce86a82b26e4b82` |
+
+The exact macOS and Linux archives each passed two consecutive cancellations
+in owned PTYs against the same PostgreSQL backend. Pending frames stayed clear
+of the earlier confirmation. Both confirmed `Query cancelled by server` after
+PostgreSQL replied, preserved SQLSTATE `57014`, ran a follow-up query on the same
+TLS session and restored terminal modes on exit.
+[Cancellation and archive receipts](https://github.com/tkomane/ignatius/pull/118)
+
+The hosted Warp source renderer at `0b2db6e` showed the exact macOS archive's
+read-only TLS 1.3 result after Ctrl+R. Ctrl+Q restored its shell and terminal
+modes, and removed the PostgreSQL fixture. The recovered prompt showed a
+visible cursor. Signed Warp hand use remains open. On hosted Windows 11 ARM64,
+native Windows Terminal and PowerShell 7 rendered the x64 archive's read-only
+result. Ctrl+Q restored the prompt, cursor and modes. The Windows journey
+exercised a successful query. [Warp renderer](https://github.com/tkomane/ignatius/actions/runs/44727679450)
+and [Windows Terminal renderer](https://github.com/tkomane/ignatius/actions/runs/44725502270).
+
+Native macOS, Linux and Windows each passed 22 checks replacing the exact
+`61425c3` archive and rolling back to the earlier binary. Configuration, saved
+SQL and history were preserved byte for byte. Both deliberate invalid-config
+checks returned exit 3 on each target. Desktop and screen-reader hand use,
+canonical evidence, verified trust sidecars and owner authorization remain
+open. [Hosted rollback](https://github.com/tkomane/ignatius/actions/runs/44728360211)
+
 ## Local release rehearsal and cancellation - 20 November 2026
 
 ### Release quickstart replay

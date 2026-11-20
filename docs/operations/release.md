@@ -29,43 +29,46 @@ requires the approved signing and provenance identities, canonical release
 evidence, independently verified sidecars and owner authorization for the exact
 release. [ADR-0008](../architecture/decisions/0008-packaging-and-release.md#live-release-gates)
 
-## Candidate review - 20 November 2026
+## Current candidate review
 
-Version `0.1.0` was rehearsed from source
-`61425c34097020ecec3ffead0bec7d4251680814` as `ci/44681770913-1`.
-The Actions aggregate is `release-candidate-aggregate-44681770913-1`, artifact
-`14604938129`, scheduled to expire on 27 November 2026 at 07:47:52 SAST. Its
-retained `release-manifest.json` has SHA-256
-`7d0a422997e595810d1e9f16ea99a32d66f726a40380f4a873490f303ef141f1`.
-[Rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913)
+Version `0.1.0` was rehearsed on 20 November 2026 from source
+`5e5712a25e75f08b02df7525b283d7a81ac355c9` as `ci/44721590021-1`.
+The run-scoped Actions aggregate is `release-candidate-aggregate-44721590021-1`,
+artifact `14622777105`, scheduled to expire on 27 November 2026 at 12:57:04 SAST.
+Its retained `release-manifest.json` has SHA-256
+`a7321380ea073b09abd324319f8ca616d7467e6be01f607a704aeac794245908`.
+[Rehearsal](https://github.com/tkomane/ignatius/actions/runs/44721590021) and
+[aggregate](https://github.com/tkomane/ignatius/actions/runs/44721590021/artifacts/14622777105).
 
 | Target | Archive bytes | Archive SHA-256 |
 | --- | ---: | --- |
-| `aarch64-apple-darwin` | 5,874,304 | `d2a60c55b145927f9c4ae5a3229c9929258d9e01e83aff223f5bcf8effc6a02e` |
-| `x86_64-pc-windows-msvc` | 6,373,804 | `f9a52972fe4ca3a911000448224de0bfba097052307bf3b59eb70be1040cadc7` |
-| `x86_64-unknown-linux-gnu` | 6,459,420 | `51425b934bc0bdeff702b31e7085a3fe860ee084d21253e423655f61909e08d4` |
+| `aarch64-apple-darwin` | 5,875,883 | `368bfa594f01567c1daa63ab464f83a2f55ef4d311f94d76157124026a641e2f` |
+| `x86_64-pc-windows-msvc` | 6,375,329 | `538ae8f89471ea4231019c3bbbe28e25050cd3a685e5a87838ea8fd82599980b` |
+| `x86_64-unknown-linux-gnu` | 6,460,605 | `9bc4abb322c1706d5d866ce9c7609080f54e19986d941dca974e68e65d6b5ad2` |
 
 The source includes the structured Cell Detail inspector and guarded edits,
 the local query-plan history, and read-only fleet drift and health comparison.
 Cell Detail validates the original PostgreSQL result column before a reviewed
-write. The source's changelog records the full feature set.
-[Changelog at the rehearsed source](https://github.com/tkomane/ignatius/blob/61425c34097020ecec3ffead0bec7d4251680814/CHANGELOG.md#unreleased)
+write. This revision displays the confirmed cancellation for the current query
+after PostgreSQL replies with SQLSTATE `57014`.
+[Changelog at the rehearsed source](https://github.com/tkomane/ignatius/blob/5e5712a25e75f08b02df7525b283d7a81ac355c9/CHANGELOG.md#unreleased)
+and [cancellation change](https://github.com/tkomane/ignatius/pull/118).
 
-Record validation passed as `blocked`, and manifest verification matched all
-three archives. The 12 retained files include an inventory and a runtime
-receipt per target. Repeat archives matched on all three targets. The two
-Windows builds shared a runner. Each extracted archive passed read-only
-`verify-full` against a disposable server, refused a bad certificate name,
-passed scoped log-privacy checks and rolled back to the exact earlier
-`4e9509c` executable with its state intact. The Linux archive requires
-`GLIBC_2.39` symbols. [Exact target matrix](../support/compatibility.md#release-target-matrix)
-and [runtime evidence](verification.md#live-tls-from-the-packaged-structured-result-build---20-november-2026).
-The measured macOS PTY, xterm and Windows console scenarios met the proposed
-100 ms p95 target within their observed timing boundaries.
-[Interaction measurements](verification.md#archived-release-interaction-timings)
-This archive predates the confirmed cancellation status correction. The local
-fix passed the consecutive PostgreSQL cancellation regression.
-[Cancellation evidence](verification.md#delayed-connection-metadata-and-cancellation)
+All 15 packaging jobs passed. Independent checks verified the 12-file scope,
+three archives, inventory and runtime bindings, and 33 packaged smoke checks.
+All three repeat-build pairs matched byte for byte. The two Windows builds
+used isolated build outputs on one runner.
+[Repeat-build comparison](https://github.com/tkomane/ignatius/actions/runs/44721590021/job/136248887017)
+
+Each extracted archive passed read-only `verify-full` against a disposable
+server, refused a bad certificate name, and passed scoped log-privacy checks.
+All three replaced the exact earlier `61425c3` executable and rolled back to it
+with configuration, saved SQL and history intact. The Linux archive requires
+`GLIBC_2.39`. Exact macOS and Linux archives passed two consecutive cancellations
+and same-session recovery. The hosted Warp source renderer and Windows Terminal
+passed the live query and terminal-restoration journeys.
+[Exact target matrix](../support/compatibility.md#release-target-matrix) and
+[runtime evidence](verification.md#cancellation-fix-candidate---20-november-2026).
 
 For review, verify the exact archive files before first start and use the
 same-path rollback checks with isolated state. The independent cryptographic
@@ -83,6 +86,16 @@ the approved release identities and retention, and exact publication
 authorization are open. [Proposed destination](https://github.com/tkomane/ignatius/releases),
 [release gates](../architecture/decisions/0008-packaging-and-release.md#live-release-gates),
 [pre-publication checks](#before-any-public-release).
+
+## Candidate review - 20 November 2026
+
+The earlier review used `61425c34097020ecec3ffead0bec7d4251680814` and build
+`ci/44681770913-1`. That separate archive set supplies the retained macOS PTY,
+Linux xterm and Windows console interaction measurements and the earlier
+structured-cell evidence. It predates the cancellation status correction.
+[Earlier review](https://github.com/tkomane/ignatius/pull/115),
+[earlier rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913), and
+[interaction measurements](verification.md#archived-release-interaction-timings).
 
 ## Release identity
 
@@ -1162,8 +1175,9 @@ ensure compromised identities cannot publish or validate releases:
 - Finish the naming work in `docs/product/landscape.md`: the name is confirmed,
   but the dated research does not establish trademark clearance or registrar
   availability. Obtain the owner's domain/distribution decision before acting.
-- Verify `SECURITY.md` and the private reporting route. The setting was enabled
-  on 2026-10-25; submission, notification and response handling remain untested.
+- GitHub's repository API confirmed private vulnerability reporting was enabled
+  on 20 November 2026. Submission, notification and response handling remain
+  untested. [Security policy](../../SECURITY.md)
 - Use ADR-0008's selected CycloneDX, Sigstore keyless and GitHub OIDC/SLSA
   mechanisms. Complete the outstanding verification identity, failure/revocation
   handling, retention and independent-verification details, then generate and
