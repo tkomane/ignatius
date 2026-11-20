@@ -324,6 +324,7 @@ RendererWindow find_renderer_window(HANDLE job, const std::wstring& terminal,
 
 struct RendererFit {
     bool measured{}, reposition_requested{}, stable{};
+    bool foreground_requested{}, foreground_api_succeeded{}, foreground_verified{};
     RECT work{}, before{}, requested{}, last_window{}, last_client{};
 };
 
@@ -375,11 +376,19 @@ void fit_renderer_window(const RendererWindow& renderer, HANDLE job, const std::
                          const std::wstring& title, Clock::time_point work_deadline, RendererFit& fit) {
     using namespace renderer_pixels_detail;
     PixelCoordinates coordinates;
-    const auto deadline = (std::min)(work_deadline, Clock::now() + 3s);
+    const auto deadline = (std::min)(work_deadline, Clock::now() + 5s);
+    verify_renderer_window(renderer, job, terminal, title);
+    if (GetForegroundWindow() != renderer.hwnd) {
+        // The hosted desktop may show an owned window without activating it.
+        // Request activation once and retain the real foreground observation.
+        fit.foreground_requested = true;
+        fit.foreground_api_succeeded = SetForegroundWindow(renderer.hwnd) != FALSE;
+    }
     while (GetForegroundWindow() != renderer.hwnd && Clock::now() < deadline)
         Sleep(remaining(deadline, 20));
     verify_renderer_window(renderer, job, terminal, title);
     require_foreground(renderer.hwnd);
+    fit.foreground_verified = true;
     fit.before = fit.last_window = renderer_window_bounds(renderer.hwnd);
     fit.last_client = renderer_client_bounds(renderer.hwnd);
     fit.measured = true;
@@ -525,6 +534,9 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"columns\":" << receipt.columns << ",\"rows\":" << receipt.rows
               << ",\"control_bytes\":" << receipt.control_bytes
               << ",\"fit\":{\"measured\":" << truth(receipt.fit.measured)
+              << ",\"foreground_requested\":" << truth(receipt.fit.foreground_requested)
+              << ",\"foreground_api_succeeded\":" << truth(receipt.fit.foreground_api_succeeded)
+              << ",\"foreground_verified\":" << truth(receipt.fit.foreground_verified)
               << ",\"reposition_requested\":" << truth(receipt.fit.reposition_requested)
               << ",\"stable\":" << truth(receipt.fit.stable)
               << ",\"work_area\":" << renderer_json_rectangle(receipt.fit.work)
