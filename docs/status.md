@@ -4,6 +4,14 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 54: Native Windows paste restoration - 20 November 2026
+
+- All 24 actual Guard cases restored native bracketed paste across normal,
+  error and uncaught-panic paths. Independent readback verified all 72
+  clipboard-free state responses and 72 captured crops. T055a is complete
+  for Windows Terminal and ConPTY automation.
+  [Native paste evidence](operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
+
 ## Wave 53: Main packaging rehearsal - 20 November 2026
 
 - The exact main source `bde6711` includes the plan-history lock fix.
