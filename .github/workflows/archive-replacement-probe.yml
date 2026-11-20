@@ -1,0 +1,87 @@
+name: Exact archive replacement rehearsal
+
+on:
+  push:
+    branches: [codex/archive-replacement-probe]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  replace-archive:
+    name: Replace and roll back ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            python: python3
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            python: python
+    env:
+      REPLACEMENT_TARGET: ${{ matrix.target }}
+      REPLACEMENT_PYTHON: ${{ matrix.python }}
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.1"
+      - name: Download the two successful main rehearsal attempts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_ARCH -cne 'X64') {
+            throw 'The probe requires a fresh hosted x64 runner.'
+          }
+          $probeRoot = Join-Path $env:RUNNER_TEMP "ignatius-archive-pair-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $probeRoot
+          $inputsByRole = [ordered]@{ previous = '44605153852'; candidate = '44655874167' }
+          foreach ($entry in $inputsByRole.GetEnumerator()) {
+            $runId = $entry.Value
+            $runJson = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId/attempts/1"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the pinned rehearsal attempt.' }
+            $run = $runJson | ConvertFrom-Json
+            if ($run.repository.full_name -cne $env:GITHUB_REPOSITORY -or
+                $run.path -cne '.github/workflows/release.yml' -or $run.head_branch -cne 'main' -or
+                $run.event -cne 'workflow_dispatch' -or $run.status -cne 'completed' -or
+                $run.conclusion -cne 'success' -or $run.run_attempt -ne 1 -or $run.id.ToString() -cne $runId) {
+              throw 'The pinned build must be a successful non-publishing rehearsal from this repository.'
+            }
+            gh run download "$runId" --repo "$env:GITHUB_REPOSITORY" --name "release-candidate-aggregate-$runId-1" `
+              --dir (Join-Path $probeRoot $entry.Key)
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the exact aggregate.' }
+          }
+          "IGNATIUS_ARCHIVE_PAIR_ROOT=$probeRoot" >> $env:GITHUB_ENV
+      - name: Verify, replace and roll back the native archives
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $root = $env:IGNATIUS_ARCHIVE_PAIR_ROOT
+          $env:CARGO_TARGET_DIR = Join-Path $root 'rust-target'
+          cargo build --locked -p xtask
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the release record verifier.' }
+          $xtaskName = if ($env:RUNNER_OS -ceq 'Windows') { 'xtask.exe' } else { 'xtask' }
+          & $env:REPLACEMENT_PYTHON tests/support/release_archive_replacement.py `
+            --previous (Join-Path $root 'previous') --candidate (Join-Path $root 'candidate') `
+            --xtask (Join-Path $env:CARGO_TARGET_DIR "debug/$xtaskName") --target "$env:REPLACEMENT_TARGET" `
+            --output (Join-Path $root 'receipt.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Archive replacement or rollback failed.' }
+      - name: Retain the sanitised rehearsal receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archive-replacement-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.IGNATIUS_ARCHIVE_PAIR_ROOT }}/receipt.json
+          if-no-files-found: error
+          retention-days: 7
