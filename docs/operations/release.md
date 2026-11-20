@@ -370,8 +370,15 @@ platform label or extract an archive for another architecture.
 The current release matrix does not define an x86_64 macOS, Windows ARM64,
 Linux ARM64 or Linux musl archive. Those hosts are outside the release claim
 until a target row and evidence are added. `uname -m` is a useful architecture
-check on Unix, and Windows must report an x64 process/OS architecture; neither
-check replaces the exact target and runtime evidence in the release record.
+check on Unix. The Windows target row requires an x64 operating system, since
+an emulated process can report a different architecture. Compare the host
+architecture with the exact target and runtime evidence in the release record.
+
+Check each Unix tool with `command -v`. In PowerShell, check
+`Get-Command Get-FileHash, Expand-Archive -ErrorAction Stop`. If a required
+checksum or extraction tool is missing, restore it through the host's normal
+setup or use a compatible host with those tools before continuing. See the
+structured-manifest alternatives below if `jq` is unavailable.
 
 ### Wrong architecture or missing host runtime
 
@@ -382,11 +389,12 @@ loader failure by trying an archive from another target row.
 - On Apple silicon, `uname -m` must print `arm64`. `Bad CPU type in executable`
   means the selected archive does not match the host. This release matrix has
   no Intel macOS archive.
-- On Linux, `uname -m` must print `x86_64`. `Exec format error` means the binary
-  does not match the host architecture. A message naming `GLIBC_` or a dynamic
-  loader while the file exists means the GNU runtime is absent or too old for
-  that candidate. Retain the exact message and treat that host as unsupported
-  until a compatible target row is built and evidenced.
+- On Linux, `uname -m` must print `x86_64`. For an `Exec format error`, recheck
+  the host and archive targets. If the verified executable exists and the
+  launcher reports `No such file or directory`, check for the ELF interpreter
+  named by `readelf -lW ./ignatius`. For a missing `GLIBC_` version, compare the
+  error with `getconf GNU_LIBC_VERSION`. Record the loader error and use an
+  x86_64 host with a compatible GNU runtime. [Linux execve errors](https://man7.org/linux/man-pages/man2/execve.2.html#ERRORS)
 - On Windows, run
   `[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture` in
   PowerShell and require `X64`. `This app can't run on your PC` or a bad-image
@@ -402,66 +410,94 @@ support evidence.
 ### Verify before extraction
 
 Keep the archive, `SHA256SUMS`, structured manifest and release record together.
-Use the exact basename named by the record, run the platform-native digest
-command from the candidate section, and compare both digest and byte count
-before extracting anything. A checksum match proves archive bytes only. It does
-not prove that the archive is signed, notarised, published or safe for an
-unverified platform.
+Use the exact basename and target named by the record. Each example checks the
+selected archive's checksum and manifest entry before extraction, so a download
+for one target can use the full release-wide `SHA256SUMS` unchanged. A checksum
+match establishes the integrity of the archive bytes. Signing, notarisation
+and platform acceptance have separate evidence.
 
-The standard checksum-list checks are:
+On macOS and Linux, set `archive_path` and `target` to the selected archive
+and its exact target triple. Run the block from the sidecar directory:
 
 ```bash
-# macOS
-shasum -a 256 -c SHA256SUMS
-
-# Linux
-sha256sum --strict --check SHA256SUMS
+(
+  set -eu
+  archive_path='<verified-archive>'
+  target='<target-triple>'
+  name="${archive_path##*/}"
+  expected="$(awk -v name="$name" '
+    substr($0, 65) == "  " name {
+      digest = substr($0, 1, 64)
+      count++
+    }
+    END {
+      if (count != 1 || digest !~ /^[0-9a-f]+$/) exit 1
+      print digest
+    }
+  ' SHA256SUMS)" || {
+    printf 'SHA256SUMS must contain exactly one SHA-256 entry for %s\n' "$name" >&2
+    exit 1
+  }
+  if [ "$(uname -s)" = Darwin ]; then
+    checksum="$(shasum -a 256 < "$archive_path")"
+  else
+    checksum="$(sha256sum < "$archive_path")"
+  fi
+  digest="${checksum%% *}"
+  if [ "$digest" != "$expected" ]; then
+    printf 'SHA-256 mismatch for %s\n' "$name" >&2
+    exit 1
+  fi
+  size="$(wc -c < "$archive_path" | tr -d '[:space:]')"
+  printf 'SHA-256 verified: %s\nBytes: %s\n' "$name" "$size"
+  jq -es --arg name "$name" --arg target "$target" \
+    --arg digest "$digest" --argjson size "$size" '
+    length == 1 and (
+      [.[0].artefacts[] | select(.name == $name or .target == $target)] |
+      length == 1 and .[0].name == $name and .[0].target == $target and
+      .[0].checksum_algorithm == "sha256" and .[0].checksum == $digest and
+      .[0].size_bytes == $size
+    )
+  ' release-manifest.json
+)
 ```
 
-On Windows, compare the one exact basename line and the file length with
-PowerShell rather than accepting a digest copied from a different target:
+On Windows, run this block in PowerShell from the sidecar directory:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 $archive = '<verified-archive>'
+$target = 'x86_64-pc-windows-msvc'
 $name = Split-Path -Leaf $archive
 $lines = @(Get-Content -LiteralPath '.\SHA256SUMS' |
-    Where-Object { $_ -match ('^[0-9a-fA-F]{64}  ' + [regex]::Escape($name) + '$') })
-if ($lines.Count -ne 1) { throw "SHA256SUMS must contain exactly one entry for $name" }
-$expected = ($lines[0] -split '\s+', 2)[0].ToLowerInvariant()
+    Where-Object { $_.Length -gt 64 -and $_.Substring(64) -ceq "  $name" })
+if ($lines.Count -ne 1 -or $lines[0] -cnotmatch '^[0-9a-f]{64}  ') {
+    throw "SHA256SUMS must contain exactly one SHA-256 entry for $name"
+}
+$expected = $lines[0].Substring(0, 64)
 $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
 if ($actual -cne $expected) { throw "SHA-256 mismatch for $name" }
+$bytes = (Get-Item -LiteralPath $archive).Length
 Write-Output "SHA-256 verified: $name"
-Write-Output "Bytes: $((Get-Item -LiteralPath $archive).Length)"
+Write-Output "Bytes: $bytes"
+$manifest = Get-Content -LiteralPath '.\release-manifest.json' -Raw | ConvertFrom-Json
+$entries = @($manifest.artefacts | Where-Object { $_.name -ceq $name -or $_.target -ceq $target })
+if ($entries.Count -ne 1 -or $entries[0].name -cne $name -or $entries[0].target -cne $target -or
+    $entries[0].checksum_algorithm -cne 'sha256' -or
+    $entries[0].checksum -cne $actual -or $entries[0].size_bytes -ne $bytes) {
+    throw "Manifest must contain one matching SHA-256 and byte count for $name"
+}
+Write-Output "Manifest verified: $name"
 ```
 
-The structured manifest must also have exactly one entry for the basename and
-target, with the same lower-case digest and `size_bytes`. Reviewers with `jq`
-can run the following after calculating `digest` and `size` from the exact file:
-
-```bash
-archive_path='<verified-archive>'
-name="${archive_path##*/}"
-target='<target-triple>'
-if command -v shasum >/dev/null 2>&1; then
-  digest="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
-else
-  digest="$(sha256sum -- "$archive_path" | awk '{print $1}')"
-fi
-size="$(wc -c < "$archive_path" | tr -d '[:space:]')"
-jq -e --arg name "$name" --arg target "$target" \
-  --arg digest "$digest" --argjson size "$size" '
-  [.artefacts[] | select(.name == $name and .target == $target
-    and .checksum == $digest and .size_bytes == $size)] | length == 1
-' release-manifest.json
-```
-
+On Unix the structured manifest check succeeds when `jq` prints `true` and
+exits zero. Without `jq`, use a trusted JSON reader to compare the basename,
+target, SHA-256 and byte count with the one matching entry.
 The repository's maintainer-level verifier is the exact
 `cargo --locked xtask release manifest verify` command documented above; it additionally
 rejects malformed or non-canonical sidecars, missing or extra entries and
-identity mismatches. If neither that verifier nor a trusted structured-JSON
-review is available, record only the standard checksum result and do not call
-the candidate's full evidence bundle verified.
+identity mismatches. If the structured manifest check cannot be completed,
+record the checksum result and stop before extraction.
 
 ### macOS and Linux
 
@@ -470,10 +506,10 @@ archive contains the one expected binary at its root. The workflow creates that
 shape and does not include configuration or data files:
 
 ```bash
-stage="$(mktemp -d)"
-tar -xzf "<verified-archive>" -C "$stage"
-test -f "$stage/ignatius"
-"$stage/ignatius" version --verbose
+stage="$(mktemp -d)" &&
+  tar -xzf "<verified-archive>" -C "$stage" &&
+  test -f "$stage/ignatius" &&
+  "$stage/ignatius" version --verbose
 ```
 
 For a per-user installation, keep the binary under a user-owned directory and
