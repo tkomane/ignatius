@@ -658,6 +658,7 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 | Warp Integration on hosted Apple silicon | The source-built renderer captured the archived client and the restored shell. Ctrl+Q exited zero, restored the same PTY modes and preserved the OSC 11 response. See the [native renderer evidence](../operations/verification.md#warp-source-renderer---20-november-2026) |
 | Live terminal resize | The macOS PTY and automated Linux xterm verified compact and minimum-size layouts, then recovered retained results |
 | Windows Terminal, interactive | The archived client restored console modes and main-screen pixels on Windows Server 2025 x64 in Windows Terminal 1.25.3131.0. All 24 standalone Guard cases passed in the same renderer. Native paste and Windows 11 hand use remain open. See the [packaged renderer evidence](../operations/verification.md#packaged-windows-terminal-startup-and-quit---20-november-2026) and the [Guard matrix](../operations/verification.md#native-windows-terminal-guard-matrix---20-november-2026) |
+| Windows Terminal, Windows 11 ARM64 | The native ARM64 renderer displayed the x64 archive under emulation. Ctrl+Q restored the console modes and main-screen pixels. Cursor visibility and PowerShell 7 hand use remain open. See the [window-specific capture evidence](../operations/verification.md#windows-11-arm64-archive-rendering---20-november-2026) |
 | Linux xterm 390 | Automated Xvfb rendering, verified TLS, a separate Unix-socket query, resize and terminal-mode restoration passed on Ubuntu 24.04.5 x86-64. Linux desktop hand use remains open. See the [renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
@@ -763,15 +764,16 @@ The non-publishing release workflow defines the first archive targets. A target
 is not inferred from the host that verifies it, and a target outside this table
 has no release artefact claim.
 
-The current receipts bind source `4cdfa5c` and build `ci/44605153852-1`.
-Archive checksums, repeat builds and hosted install and rollback checks passed
-on all three targets. [Exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44605153852)
+The 20 November rehearsal bound source `cec95f6` and build `ci/44631543576-1`.
+Archive and executable checksums, CycloneDX inventories, repeat builds and
+hosted install, rollback and privacy checks passed for all three targets.
+[Exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44631543576)
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, local archive checks | The downloaded archive passed local verified TLS and the scoped debug privacy probe on macOS arm64. Warp visual hand use remains open |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, local archive checks | An earlier downloaded archive passed local verified TLS and the scoped debug privacy probe on macOS arm64. Signed Warp hand use remains open |
 | `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | The downloaded archive passed verified TLS and the scoped debug privacy probe on Windows Server 2025 x64. Windows Terminal hand use remains open |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, local archive checks | The downloaded archive passed verified TLS, the scoped debug privacy probe and automated xterm use on Ubuntu. Linux desktop hand use remains open |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, local archive checks | Earlier downloaded archives passed verified TLS, the scoped debug privacy probe and automated xterm use on Ubuntu. Linux desktop hand use remains open |
 
 The earlier macOS archive at `24f1c8e` failed its privacy audit when debug
 logging persisted synthetic SQL. The current probes use the newer archive

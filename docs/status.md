@@ -4,6 +4,15 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 52: Archived client in Windows 11 ARM64 - 20 November 2026
+
+- A native Windows 11 ARM64 Terminal rendered the retained x64 client under
+  emulation. Ctrl+Q exited 0 and restored the console masks and byte-identical
+  main-screen crop. The window-specific capture worked while the owned window
+  was unfocused. Cursor visibility on ARM64 and Windows 11 hand use with
+  PowerShell 7 remain open.
+  [Windows 11 evidence](operations/verification.md#windows-11-arm64-archive-rendering---20-november-2026)
+
 ## Wave 51: Native Windows Terminal Guard matrix - 20 November 2026
 
 - The actual non-test library Guard passed 24 normal, error and uncaught-panic
