@@ -763,21 +763,24 @@ The non-publishing release workflow defines the first archive targets. A target
 is not inferred from the host that verifies it, and a target outside this table
 has no release artefact claim.
 
-The 20 November main rehearsal bound source `bde6711` and build `ci/44655874167-1`.
+The 20 November rehearsal bound source `61425c3` and build `ci/44681770913-1`.
 Archive and executable checksums, CycloneDX inventories, repeat builds and
-hosted install, rollback and privacy checks passed for all three targets.
-[Exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44655874167)
+same-path replacement and rollback checks passed for all three targets.
+The two Windows repeat builds shared a runner. Each exact archive passed a
+live verified-TLS query and scoped log-privacy checks.
+[Candidate review](../operations/release.md#candidate-review---20-november-2026)
+and [exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913).
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, local archive checks | An earlier downloaded archive passed local verified TLS and the scoped debug privacy probe on macOS arm64. Signed Warp hand use remains open |
-| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | The exact main archive passed verified TLS and log privacy on Server 2025 x64 against PostgreSQL 17.12. Windows Terminal hand use remains open |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, local archive checks | Earlier downloaded archives passed verified TLS, the scoped debug privacy probe and automated xterm use on Ubuntu. Linux desktop hand use remains open |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, native archive checks | macOS 27.2.1 arm64 verified TLS against PostgreSQL 18.7 and restored an owned PTY after displaying the JSONB inspector. Signed Warp hand use remains open |
+| `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | Windows Server 2025 x64 verified TLS against PostgreSQL 17.12. Native Windows 11 Terminal restored its cursor and console modes after running the same x64 archive under emulation. Windows Terminal hand use remains open |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, emulated archive checks | Ubuntu 24.04.5 x86-64 under emulation verified TLS against PostgreSQL 18.7, a reviewed JSONB edit and xterm restoration. The archive requires `GLIBC_2.39` symbols. Linux desktop hand use remains open |
 
 The earlier macOS archive at `24f1c8e` failed its privacy audit when debug
 logging persisted synthetic SQL. The current probes use the newer archive
 and a separately verified marker. [Earlier run](https://github.com/tkomane/ignatius/actions/runs/33563497933) and
-[current archive probe results](../operations/verification.md#exact-archive-runtime-checks---19-november-2026).
+[current archive probe results](../operations/verification.md#live-tls-from-the-packaged-structured-result-build---20-november-2026).
 
 Evidence classes have distinct meanings:
 

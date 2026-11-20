@@ -34,6 +34,31 @@ restored the original POSIX and seven DEC modes, and returned the same
 604,800 RGB pixels in the compared viewport. These are automated observations.
 Desktop hand use remains open.
 
+### Archived release interaction timings
+
+The `ci/44681770913-1` macOS arm64 executable ran on an Apple M2 Max with
+macOS 27.2.1. It reports rustc 1.97.1. The read-only `verify-full` fixture used
+PostgreSQL 18.7 and 31 synthetic tables. The grid loaded six columns and
+1,050 rows with a configured 1,000-row retention limit. Two wide Unicode
+values used 36 glyphs and 72 terminal cells each.
+
+| macOS owned PTY scenario | Warm-up actions | Measured actions | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Editor insertion and deletion, command palette and schema completion | 24 | 120 | 0.394 ms | 1.422 ms |
+| Grid sort, filter and resize | 21 | 105 | 7.548 ms | 15.090 ms |
+
+The probe timed the input write or resize request to the first new PTY read
+that decoded to the expected changed state. It verified numeric sort order,
+100 filter matches and recovery after resizing from 120x40 to 30x6. The
+pre-test idle interval emitted zero chunks in 150 ms. Both p95 values were
+within the proposed 100 ms target for this measurement boundary. Native
+display timing and hand-use acceptance remain open.
+[Measurement targets](../product/acceptance.md#performance-and-resource-evidence)
+
+The local raw nanosecond samples and per-action statistics are in
+`/private/tmp/ignatius-w12-mac-perf.paW3ogmE/macos-archived-pty-performance-receipt.json`,
+SHA-256 `a7e3bc916aaf6e2d87328c26571baa15c466c6366141f3917bc39d8b9d63bd7f`.
+
 ### Selected archive verification and missing prerequisites
 
 The `ci/44681770913-1` archive installation instructions now verify one selected

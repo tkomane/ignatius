@@ -133,23 +133,11 @@ procedures.
 Consumers verify downloaded release archives without repository dependencies
 using standard ecosystem verifiers:
 
-- **Sigstore keyless verification (cosign)**:
-  ```bash
-  cosign verify-blob \
-    --certificate <archive>.pem \
-    --signature <archive>.sig \
-    --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
-    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-    <archive>
-  ```
-  Or using the unified bundle sidecar:
-  ```bash
-  cosign verify-blob \
-    --bundle <archive>.sigstore.json \
-    --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
-    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-    <archive>
-  ```
+- **Sigstore keyless verification (cosign)**. Use `cosign verify-blob` against
+  the exact archive and signature bundle. Pass the owner-approved workflow
+  certificate identity with `--certificate-identity` and the GitHub Actions
+  OIDC issuer with `--certificate-oidc-issuer`. The approved identity must
+  include the exact workflow reference. [Release operations commands](../../operations/release.md#sigstore-keyless-signature-verification-cosign)
 
 - **SLSA provenance verification**. For a GitHub Artifact Attestations bundle,
   use `gh attestation verify --bundle` with the approved signer workflow,
