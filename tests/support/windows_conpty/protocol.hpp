@@ -84,6 +84,9 @@ inline std::vector<std::string_view> words(std::string_view line, std::size_t bo
     }
     return result;
 }
+// The Guard exit adds 20 numeric fields to the type and nonce. The native
+// headless and calibration routes retain their own existing parser limits.
+inline constexpr std::size_t renderer_guard_word_limit = 22;
 inline std::optional<Observation> parse_observation(std::string_view line, std::string_view nonce) {
     const auto parts = words(line);
     if (parts.size() != 12 || parts[0] != "O" || parts[1] != nonce) return std::nullopt;

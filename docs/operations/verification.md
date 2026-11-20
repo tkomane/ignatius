@@ -61,7 +61,35 @@ The main-screen sentinel appeared before alternate entry and after exit.
 The input and output mode masks were restored to 503 and 7. Both owned
 processes exited zero, the Job emptied and the control pipe was quiescent.
 The controls establish cursor observation in this renderer. The Ignatius
-`TerminalGuard` matrix, W07-064, T055a and Windows 11 hand use remain open.
+`TerminalGuard` matrix used the calibrated renderer in a separate run.
+
+## Native Windows Terminal Guard matrix - 20 November 2026
+
+The standalone safe Rust helper linked the Cargo-selected production library
+at source `c2f48d2` with Rust 1.97.1, MSVC 14.51.36231 and Windows SDK
+10.0.26100.0. Windows Terminal 1.25.3131.0 ran on Windows Server 2025 x64,
+image `20261103.298.1`. The prerequisite no-guard, known-unrestored and
+250 ms owned hung-child controls passed. The renderer passed six cursor
+controls. Each Guard invocation rejected the suspended wrong-Job child,
+waited it and verified both Jobs empty before launch. [Admission run](https://github.com/tkomane/ignatius/actions/runs/44654232164)
+
+The matrix passed all eight option combinations on each of normal return,
+deliberate error and uncaught panic. The process exits were 0, 23 and 101.
+The cooked input mask 423 became raw 416 without mouse or 152 with mouse,
+then returned to 423 with output mask 7. Independent readback verified
+all 72 baseline, acquired and restored crops. Each acquired crop had zero
+of 171 magenta cursor pixels and each restored crop had all 171. The main
+marker disappeared only when alternate screen was selected and always
+returned. The classic cursor query reported error 5 on the sampled
+read-only handles. The rendered crops supplied the cursor evidence.
+[Matrix run 44654761125](https://github.com/tkomane/ignatius/actions/runs/44654761125)
+
+For all eight panic cases, the authenticated restoration checkpoint preceded
+release of the previous hook. Its marker preceded the default panic payload
+in the recovered main buffer. Each normal, error and panic child was waited.
+Each case completed with an empty owned Job and quiescent control pipes.
+This closes W07-064 for the observed automation. Native bracketed-paste state
+and full T055a, Windows 11 hand use and signed release acceptance remain open.
 
 ## Packaged Windows Terminal startup and quit - 20 November 2026
 

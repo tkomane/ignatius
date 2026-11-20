@@ -120,7 +120,7 @@ when the behaviour exists and a test or recorded evidence proves it.
   PTY flags and restoration before previous/default hook details. Follow the
   bounded `plan.md` probe; distinguish this from a full product crash, abort,
   Windows or native visual acceptance.
-- [ ] W07-064 Implement the owned Windows ConPTY observation slice under
+- [x] W07-064 Implement the owned Windows ConPTY observation slice under
   `contracts/windows-conpty-observation.md`: establish native mode/cursor/buffer
   capability and no-guard/known-unrestored/hung-child controls before expanding
   the actual guard normal/error/uncaught-panic option matrix. Use test-only
@@ -203,6 +203,14 @@ The original platform acceptance items T051, T052 and T055a remain open for
 hand evidence or the Windows ConPTY harness. The W07 follow-ups above track
 additional lifecycle findings without relabelling that platform acceptance.
 Current assignments and evidence are carried in `docs/status.md`.
+
+W07-064 evidence on 2026-11-20: the actual standalone Windows guard passed all
+24 return, deliberate-error and uncaught-panic cases, including all eight
+option combinations. The calibrated renderer observed cursor and main-screen
+restoration. Native input masks, the no-guard/known-unrestored/hung-child
+controls and rejected wrong-Job admission all have owned receipts.
+T055a and T051 stay open for bracketed paste and Windows 11 hand use.
+[Windows Guard evidence](../../docs/operations/verification.md#native-windows-terminal-guard-matrix---20-november-2026)
 
 W07-062 evidence on 2026-10-25: the original mouse-enabled panic case failed
 because cleanup reached the prior hook before disabling mouse capture. The

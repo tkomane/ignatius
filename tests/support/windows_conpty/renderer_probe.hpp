@@ -109,8 +109,20 @@ SMALL_RECT renderer_console_viewport(HANDLE output) {
     return screen.srWindow;
 }
 
+#include "renderer_guard.hpp"
+
+Clock::time_point renderer_guard_deadline(std::uint64_t target) {
+    const auto now = ticks();
+    const auto qpc_frequency = frequency();
+    require(target > now && target - now <= qpc_frequency * 20,
+            "positive remaining absolute Guard deadline");
+    return Clock::now() + std::chrono::milliseconds(
+        static_cast<std::int64_t>((target - now) * 1000 / qpc_frequency));
+}
+
 int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const std::wstring& profile,
-                   const std::wstring& archive = {}, const std::wstring& work = {}) {
+                   const std::wstring& archive = {}, const std::wstring& work = {},
+                   const std::optional<RendererGuardCase>& guard = std::nullopt, std::uint64_t guard_qpc = 0) {
     require_renderer_nonce(nonce);
     require(pipe == renderer_pipe_name(nonce), "exact renderer pipe name");
 
@@ -119,7 +131,8 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
     require(attached_count >= 1 && attached_count <= std::size(attached)
             && std::find(attached, attached + attached_count, GetCurrentProcessId()) != attached + attached_count,
             "renderer actor has positive console attachment");
-    const DWORD input_access = archive.empty() ? GENERIC_READ : GENERIC_READ | GENERIC_WRITE;
+    const bool client_mode = !archive.empty() || guard.has_value();
+    const DWORD input_access = client_mode ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
     Handle input(CreateFileW(L"CONIN$", input_access, FILE_SHARE_READ | FILE_SHARE_WRITE,
                              nullptr, OPEN_EXISTING, 0, nullptr));
     Handle output(CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -168,12 +181,12 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
     const auto active_output = baseline_output | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     require(SetConsoleMode(output.value, active_output) != 0, "enable VT on the owned renderer console");
     restore.pending = true;
-    const auto active_input = archive.empty() ? baseline_input : renderer_archive_baseline(baseline_input);
-    if (!archive.empty()) {
-        require(SetConsoleMode(input.value, active_input) != 0, "seed the owned archived-client cooked baseline");
+    const auto active_input = client_mode ? renderer_archive_baseline(baseline_input) : baseline_input;
+    if (client_mode) {
+        require(SetConsoleMode(input.value, active_input) != 0, "seed the owned client cooked baseline");
     }
     const std::wstring sentinel = L"W07-" + nonce;
-    const auto phase_count = archive.empty() ? renderer_stage_count : std::size_t{1};
+    const auto phase_count = client_mode ? std::size_t{1} : renderer_stage_count;
     for (std::size_t phase = 0; phase < phase_count; ++phase) {
         auto payload = renderer_payload(nonce, phase);
         DWORD written{};
@@ -207,9 +220,14 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
 
     if (!archive.empty()) {
         renderer_run_archive(archive, pipe, nonce, work, input.value);
-        // The product's own restore was captured and authenticated above.
-        // Release only the actor's initial baseline setup now.
-        require(SetConsoleMode(input.value, baseline_input) != 0, "release archived-client actor baseline");
+    }
+    if (guard) {
+        renderer_run_guard(guard->executable, guard->mode, guard->bits, pipe, nonce, work, input.value,
+            active_input, active_output, renderer_guard_deadline(guard_qpc));
+    }
+    if (client_mode) {
+        // The client's own restore was captured and authenticated above.
+        require(SetConsoleMode(input.value, baseline_input) != 0, "release the actor's initial baseline");
     }
 
     constexpr auto color_reset_length = static_cast<DWORD>(std::size(renderer_restore_colors) - 1);
@@ -460,6 +478,7 @@ struct RendererReceipt {
     ignatius_renderer_modal::ModalReceipt modal;
     std::vector<RendererPhase> phases;
     std::optional<RendererArchiveReceipt> archive;
+    std::optional<RendererGuardReceipt> guard;
 };
 
 template<std::size_t count>
@@ -472,12 +491,59 @@ std::array<std::uint32_t, count> renderer_numbers(const std::vector<std::string_
     return values;
 }
 
+#include "renderer_guard_supervisor.hpp"
+
 DWORD renderer_active_processes(HANDLE job) {
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
     require(QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting,
                                       static_cast<DWORD>(sizeof(accounting)), nullptr),
             "query exact renderer Job account");
     return accounting.ActiveProcesses;
+}
+
+void renderer_prove_wrong_job(HANDLE expected, const std::wstring& executable, const std::wstring& work,
+                              Clock::time_point deadline, RendererGuardReceipt& guard) {
+    Handle other(CreateJobObjectW(nullptr, nullptr));
+    require(static_cast<bool>(other), "create the isolated incorrect Job control");
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    require(SetInformationJobObject(other.value, JobObjectExtendedLimitInformation,
+                &limits, static_cast<DWORD>(sizeof(limits))), "contain the incorrect Job control");
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    auto child = create(executable, {L"--renderer-unadmitted-control"}, work, &startup, CREATE_NO_WINDOW);
+    try {
+        require(AssignProcessToJobObject(other.value, child.process.value),
+                "assign the suspended control to the separate exact Job");
+        exact_job(child.process.value, other.value);
+        BOOL in_expected = TRUE;
+        require(IsProcessInJob(child.process.value, expected, &in_expected) && !in_expected,
+                "native query is successful and observes the wrong Job");
+        bool rejected = false;
+        try {
+            exact_job(child.process.value, expected);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        require(rejected && WaitForSingleObject(child.process.value, 0) == WAIT_TIMEOUT,
+                "the real admission gate declines the still-suspended wrong-Job control");
+        require(TerminateProcess(child.process.value, 125)
+                && WaitForSingleObject(child.process.value, remaining(deadline, 1000)) == WAIT_OBJECT_0
+                && GetExitCodeProcess(child.process.value, &guard.rejected_exit) && guard.rejected_exit == 125,
+                "terminate and wait for only the positively owned wrong-Job control");
+        while (renderer_active_processes(other.value) != 0 && Clock::now() < deadline) {
+            Sleep(remaining(deadline, 5));
+        }
+        require(renderer_active_processes(other.value) == 0 && renderer_active_processes(expected) == 0,
+                "both owned Jobs are empty after the rejected control");
+        guard.wrong_job_rejected = true;
+    } catch (...) {
+        if (WaitForSingleObject(child.process.value, 0) == WAIT_TIMEOUT) {
+            (void)TerminateProcess(child.process.value, 125);
+            (void)WaitForSingleObject(child.process.value, remaining(deadline, 500));
+        }
+        throw;
+    }
 }
 
 void renderer_wait_job(HANDLE job, bool failed, Clock::time_point deadline, RendererReceipt& receipt) {
@@ -516,8 +582,9 @@ std::string renderer_json_rectangle(const RECT& rect) {
 void emit_renderer_receipt(const RendererReceipt& receipt) {
     const auto truth = [](bool value) { return value ? "true" : "false"; };
     std::cout << "{\"schema\":1,\"case\":\""
-              << (receipt.archive ? "renderer-archive" : "renderer-calibration") << "\",\"native_windows\":true"
-              << ",\"calibration_complete\":" << truth(receipt.passed && !receipt.archive)
+              << (receipt.archive ? "renderer-archive" : receipt.guard ? "renderer-guard" : "renderer-calibration")
+              << "\",\"native_windows\":true"
+              << ",\"calibration_complete\":" << truth(receipt.passed && !receipt.archive && !receipt.guard)
               << ",\"product_acceptance\":false,\"cursor_capability_accepted\":false"
               << ",\"qpc_frequency\":" << frequency()
               << ",\"start_qpc\":" << receipt.start << ",\"end_qpc\":" << receipt.end
@@ -564,6 +631,10 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
         std::cout << ",\"archive_diagnostic_passed\":" << truth(receipt.passed);
         emit_renderer_archive(*receipt.archive);
     }
+    if (receipt.guard) {
+        std::cout << ",\"guard_diagnostic_passed\":" << truth(receipt.passed);
+        emit_renderer_guard(*receipt.guard);
+    }
     std::cout << ",\"phases\":[";
     bool first = true;
     for (const auto& phase : receipt.phases) {
@@ -581,7 +652,8 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
                   << ",\"native_input\":" << phase.input << ",\"native_output\":" << phase.output
                   << ",\"actor_qpc\":" << phase.actor_qpc
                   << ",\"capture_qpc\":" << phase.capture_qpc << ",\"ack_qpc\":" << phase.ack_qpc
-                  << ",\"crop\":\"" << (receipt.archive ? "baseline.bmp" : "phase-" + std::to_string(phase.index) + ".bmp") << '"'
+                  << ",\"crop\":\"" << (receipt.archive || receipt.guard
+                       ? "baseline.bmp" : "phase-" + std::to_string(phase.index) + ".bmp") << '"'
                   << ",\"pixels\":{\"client_width\":" << pixel.client_width
                   << ",\"client_height\":" << pixel.client_height
                   << ",\"cell_width\":" << pixel.cell_width
@@ -599,16 +671,26 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
 }
 
 int renderer_supervise(const std::wstring& terminal, const std::wstring& work, const std::wstring& nonce,
-                       const std::wstring& profile, const std::wstring& archive = {}) {
+                       const std::wstring& profile, const std::wstring& archive = {},
+                       const std::optional<RendererGuardCase>& guard = std::nullopt) {
     RendererReceipt receipt;
     if (!archive.empty()) receipt.archive.emplace();
-    const auto phase_count = receipt.archive ? std::size_t{1} : renderer_stage_count;
+    if (guard) {
+        receipt.guard.emplace();
+        receipt.guard->mode = guard->mode;
+        receipt.guard->option_bits = guard->bits;
+        receipt.guard->expected_exit = renderer_guard_exit(guard->mode);
+    }
+    const bool client_mode = receipt.archive || receipt.guard;
+    const auto phase_count = client_mode ? std::size_t{1} : renderer_stage_count;
     receipt.start = ticks();
     const auto start = Clock::now();
-    const auto deadline = start + 30s;
-    const auto work_deadline = start + 25s;
+    // Leave the outer controller time to reap this process and retain its
+    // bounded receipt before the absolute 25-second Guard limit.
+    const auto deadline = start + (guard ? 24s : 30s);
+    const auto work_deadline = start + (guard ? 20s : 25s);
     std::unique_ptr<Server> server;
-    Handle job, actor, archived_client;
+    Handle job, actor, archived_client, guard_child;
     Child launcher;
     RendererWindow renderer;
     bool observed_all = false;
@@ -628,6 +710,12 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     && std::filesystem::is_regular_file(client),
                     "archived client is an absolute verified executable");
         }
+        if (guard) {
+            const auto child = std::filesystem::path(guard->executable);
+            require(!receipt.archive && guard->bits <= 7 && child.is_absolute()
+                    && same_path(child.filename().wstring(), L"guard-child.exe") && std::filesystem::is_regular_file(child),
+                    "Guard client is the scoped absolute helper from the verified build");
+        }
         const auto title = L"W07Renderer-" + nonce;
         const auto pipe = renderer_pipe_name(nonce);
         const auto nonce_text = ascii(nonce);
@@ -639,6 +727,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
         require(SetInformationJobObject(job.value, JobObjectExtendedLimitInformation,
                                         &limits, static_cast<DWORD>(sizeof(limits))),
                 "set sole-owner renderer Job kill-on-close");
+        if (receipt.guard) renderer_prove_wrong_job(job.value, executable_self, work, work_deadline, *receipt.guard);
         Security security;
         server = std::make_unique<Server>(pipe, security, deadline);
 
@@ -648,10 +737,15 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 "owned renderer profile identity");
         std::vector<std::wstring> arguments{L"-w", L"new", L"new-tab", L"--profile", profile, L"--title", title,
             L"--suppressApplicationTitle", L"--inheritEnvironment", L"--", executable_self,
-            receipt.archive ? L"--renderer-archive-actor" : L"--renderer-actor", pipe, nonce, profile};
+            receipt.archive ? L"--renderer-archive-actor" : receipt.guard ? L"--renderer-guard-actor" : L"--renderer-actor",
+            pipe, nonce, profile};
         if (receipt.archive) {
             arguments.push_back(archive);
             arguments.push_back(work);
+        }
+        if (guard) {
+            arguments.insert(arguments.end(), {guard->executable, work, guard->mode, std::to_wstring(guard->bits),
+                std::to_wstring(receipt.start + 20 * frequency())});
         }
         launcher = create(terminal, std::move(arguments), work, &startup, 0, renderer_environment(folder));
         receipt.launcher_pid = launcher.pid;
@@ -669,7 +763,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
             server->connect(work_deadline);
             const auto pid = server->client();
             const DWORD access = PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE
-                | (receipt.archive ? PROCESS_DUP_HANDLE : 0);
+                | (client_mode ? PROCESS_DUP_HANDLE : 0);
             Handle sender(OpenProcess(access, FALSE, pid));
             require(static_cast<bool>(sender), "open stable renderer actor process");
             exact_job(sender.value, job.value);
@@ -680,7 +774,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     && CompareFileTime(&sender_birth, &launched_birth) >= 0,
                     "exact owned console actor identity");
             const auto line = server->read(work_deadline);
-            const auto parts = w07::words(line);
+            const auto parts = w07::words(line, receipt.guard ? w07::renderer_guard_word_limit : 16);
             require(parts.size() >= 2 && parts[1] == nonce_text, "renderer control nonce and message shape");
 
             if (parts[0] == "R") {
@@ -722,6 +816,29 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
             const auto actor_birth = birth(actor.value);
             require(CompareFileTime(&sender_birth, &actor_birth) == 0, "renderer actor creation identity");
             const auto prior_qpc = receipt.phases.empty() ? receipt.registered : receipt.phases.back().ack_qpc;
+
+            if (receipt.guard && parts[0] == "P") {
+                require(!guard_child && receipt.phases.size() == phase_count && receipt.guard->wrong_job_rejected,
+                        "Guard registration follows the measured baseline and negative ownership control");
+                const auto data = renderer_numbers<5>(parts);
+                guard_child = renderer_register_child(sender.value, job.value, guard->executable, data);
+                receipt.guard->pid = data[0];
+                receipt.guard->owned = true;
+                server->ack(work_deadline);
+                continue;
+            }
+            if (receipt.guard && (parts[0] == "N" || parts[0] == "T")) {
+                require(guard_child && receipt.phases.size() == phase_count, "Guard phase follows owned registration");
+                renderer_guard_accept_phase(*receipt.guard, *server, parts, receipt.phases.front(), renderer,
+                    job.value, guard_child.value, terminal, title, nonce, folder, work_deadline);
+                continue;
+            }
+            if (receipt.guard && parts[0] == "X") {
+                require(guard_child && receipt.phases.size() == phase_count, "Guard exit follows owned registration");
+                renderer_guard_accept_exit(*receipt.guard, *server, parts, receipt.phases.front(),
+                    guard_child.value, work_deadline);
+                continue;
+            }
 
             if (receipt.archive && parts[0] == "P") {
                 require(!archived_client && receipt.phases.size() == phase_count,
@@ -809,7 +926,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         && phase.marker_read == w07::calibration_marker(nonce_text, index).size()
                         && phase.sentinel_read == 4 + nonce.size() && data[4] <= 1
                         && phase.native_main == renderer_main[index]
-                        && phase.input == (receipt.archive ? renderer_archive_baseline(receipt.initial_input) : receipt.initial_input)
+                        && phase.input == (client_mode ? renderer_archive_baseline(receipt.initial_input) : receipt.initial_input)
                         && phase.output == (receipt.initial_output | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
                         && phase.actor_qpc >= prior_qpc && phase.actor_qpc <= ticks(),
                         "renderer native write, marker, buffer and mode evidence");
@@ -817,7 +934,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 verify_renderer_window(renderer, job.value, terminal, title);
                 phase.pixels = observe_renderer_frame(renderer.hwnd, index, renderer_visible[index],
                                                        renderer_main[index], work_deadline,
-                    folder / (receipt.archive ? L"baseline.bmp" : L"phase-" + std::to_wstring(index) + L".bmp"));
+                    folder / (client_mode ? L"baseline.bmp" : L"phase-" + std::to_wstring(index) + L".bmp"));
                 verify_renderer_window(renderer, job.value, terminal, title);
                 phase.capture_qpc = ticks();
                 require(phase.capture_qpc >= phase.actor_qpc && Clock::now() < work_deadline,
@@ -833,13 +950,16 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     "renderer final restoration follows all measured phases");
             require(!receipt.archive || receipt.archive->restored_capture_qpc != 0,
                     "archive final actor cleanup follows product restoration");
+            require(!receipt.guard || receipt.guard->finished,
+                    "Guard final actor cleanup follows measured restoration and child exit");
             const auto data = renderer_numbers<4>(parts);
             receipt.restored_input = data[0];
             receipt.restored_output = data[1];
             receipt.restore_qpc = renderer_stamp(data[2], data[3]);
             receipt.modes_restored = receipt.restored_input == receipt.initial_input
                 && receipt.restored_output == receipt.initial_output;
-            const auto final_prior = receipt.archive ? receipt.archive->restored_capture_qpc : prior_qpc;
+            const auto final_prior = receipt.archive ? receipt.archive->restored_capture_qpc
+                : receipt.guard ? renderer_stamp(receipt.guard->final[18], receipt.guard->final[19]) : prior_qpc;
             require(receipt.modes_restored && receipt.restore_qpc >= final_prior && receipt.restore_qpc <= ticks(),
                     "renderer restoration receipt proves the original console masks");
             server->ack(work_deadline);
@@ -879,6 +999,11 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
             receipt.archive->waited = WaitForSingleObject(archived_client.value, remaining(deadline, 500)) == WAIT_OBJECT_0;
             require(receipt.archive->waited && GetExitCodeProcess(archived_client.value, &receipt.archive->exit_code),
                     "wait for the exact archived product after failure");
+        }
+        if (guard_child && !receipt.guard->exit_waited) {
+            receipt.guard->exit_waited = WaitForSingleObject(guard_child.value, remaining(deadline, 500)) == WAIT_OBJECT_0;
+            require(receipt.guard->exit_waited && GetExitCodeProcess(guard_child.value, &receipt.guard->exit_code),
+                    "wait for the exact Guard process after failure");
         }
         receipt.pipe_quiescent = server && server->quiescent();
         require(receipt.job_empty && receipt.pipe_quiescent, "renderer cleanup completed for Job and control pipe");

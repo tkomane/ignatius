@@ -4,7 +4,9 @@ param(
     [string] $ArchivedClient,
     [string] $ExpectedClientSha256,
     [string] $CandidateSource,
-    [string] $CandidateBuild
+    [string] $CandidateBuild,
+    [string] $GuardBuildManifest,
+    [switch] $GuardMatrix
 )
 
 Set-StrictMode -Version Latest
@@ -41,7 +43,71 @@ function PeArchitecture([string] $Path) {
     }
 }
 
+function Get-GuardFile([string] $Path, [long] $Limit) {
+    if (-not [IO.Path]::IsPathFullyQualified($Path)) {
+        throw 'The Guard input or capture must have an absolute path.'
+    }
+    $file = Get-Item -LiteralPath $Path -Force
+    if ($file -isnot [IO.FileInfo] -or $file.Length -le 0 -or $file.Length -gt $Limit -or
+        ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'The Guard input or capture must be a bounded regular file.'
+    }
+    return $file
+}
+
+function Test-GuardDescendant([string] $Directory, [string] $Path) {
+    if (-not [IO.Path]::IsPathFullyQualified($Directory) -or -not [IO.Path]::IsPathFullyQualified($Path)) {
+        return $false
+    }
+    $relative = [IO.Path]::GetRelativePath($Directory, $Path)
+    return -not [IO.Path]::IsPathRooted($relative) -and $relative -ne '.' -and
+        $relative -notmatch '\A\.\.(?:[\\/]|\z)'
+}
+
+function Assert-GuardInput([string] $Path, [string] $Digest, [long] $Limit = [long]::MaxValue) {
+    $file = Get-GuardFile $Path $Limit
+    if ($Digest -cnotmatch '\A[0-9a-f]{64}\z' -or (FileDigest $file.FullName) -cne $Digest) {
+        throw 'The Guard build input did not match its recorded SHA-256.'
+    }
+}
+
+function Assert-GuardInputs {
+    Assert-GuardInput $guardManifestFile.FullName $guardManifestHash 16MB
+    Assert-GuardInput $guardManifest.library.path $guardManifest.library.sha256
+    Assert-GuardInput $guardChild.path $guardChild.sha256
+    Assert-GuardInput (Join-Path $guardManifest.build_root 'prebuild-inputs.json') $guardManifest.prebuild_manifest_sha256 16MB
+    Assert-GuardInput (Join-Path $env:GITHUB_WORKSPACE 'Cargo.lock') $guardManifest.lock_sha256
+    Assert-GuardInput (Join-Path $PSScriptRoot 'guard_child.rs') $guardSource[0].sha256
+    Assert-GuardInput $compiler.FullName $guardManifest.cl_sha256
+}
+
+function Assert-GuardCapture([IO.FileInfo] $File) {
+    $reader = [IO.BinaryReader]::new($File.OpenRead())
+    try {
+        if ($File.Length -lt 58 -or $reader.ReadUInt16() -ne 0x4D42 -or
+            $reader.ReadUInt32() -ne $File.Length -or $reader.ReadUInt32() -ne 0 -or
+            $reader.ReadUInt32() -ne 54 -or $reader.ReadUInt32() -ne 40) {
+            throw 'The Guard renderer did not produce the bounded BMP header.'
+        }
+        $width = $reader.ReadInt32()
+        $height = -[long]$reader.ReadInt32()
+        if ($width -lt 1 -or $width -gt 1024 -or $height -lt 1 -or $height -gt 768 -or
+            $reader.ReadUInt16() -ne 1 -or $reader.ReadUInt16() -ne 32 -or
+            $reader.ReadUInt32() -ne 0 -or $reader.ReadUInt32() -ne (4 * $width * $height) -or
+            $File.Length -ne (54 + (4 * $width * $height))) {
+            throw 'The Guard renderer BMP dimensions or encoded length did not match.'
+        }
+    }
+    finally {
+        $reader.Dispose()
+    }
+}
+
+$guardMode = $PSBoundParameters.ContainsKey('GuardBuildManifest')
 $archiveMode = $PSBoundParameters.ContainsKey('ArchivedClient')
+if (($guardMode -and $archiveMode) -or ($GuardMatrix -and -not $guardMode)) {
+    throw 'Select either archived-client or Guard mode. The Guard matrix requires its build manifest.'
+}
 if ($archiveMode) {
     if ([string]::IsNullOrWhiteSpace($ArchivedClient) -or -not [IO.Path]::IsPathFullyQualified($ArchivedClient) -or
         $ExpectedClientSha256 -notmatch '\A[0-9a-f]{64}\z' -or $CandidateSource -notmatch '\A[0-9a-f]{40}\z' -or
@@ -88,9 +154,52 @@ if ($desktop.status -cne 'available') {
     throw 'The renderer probe requires the job to have an active input desktop.'
 }
 $revision = (& git -C $env:GITHUB_WORKSPACE rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $revision -cne $env:GITHUB_SHA -or
-    (& git -C $env:GITHUB_WORKSPACE status --porcelain)) {
+$revisionExit = $LASTEXITCODE
+$sourceStatus = @(& git -C $env:GITHUB_WORKSPACE status --porcelain)
+if ($revisionExit -ne 0 -or $LASTEXITCODE -ne 0 -or $revision -cnotmatch '\A[0-9a-f]{40}\z' -or
+    $revision -cne $env:GITHUB_SHA -or $sourceStatus.Count -ne 0) {
     throw 'The renderer probe requires the exact clean dispatch revision.'
+}
+
+if ($guardMode) {
+    . (Join-Path $PSScriptRoot 'Validation.ps1')
+    $guardManifestFile = Get-GuardFile $GuardBuildManifest 16MB
+    if ($guardManifestFile.Name -cne 'build-manifest.json' -or
+        -not (Test-GuardDescendant $env:RUNNER_TEMP $guardManifestFile.FullName)) {
+        throw 'The Guard manifest must come from the owned runner build directory.'
+    }
+    $guardManifestHash = FileDigest $guardManifestFile.FullName
+    $guardManifest = Get-Content -LiteralPath $guardManifestFile.FullName -Raw | ConvertFrom-Json
+    if ((Get-W07Number $guardManifest.schema) -ne 1 -or $guardManifest.scope -cne 'first-capability-controls-only' -or
+        $guardManifest.revision -cne $revision -or $guardManifest.native_executed -isnot [bool] -or
+        $guardManifest.native_executed -or $guardManifest.pre_post_inputs_verified -isnot [bool] -or
+        -not $guardManifest.pre_post_inputs_verified -or $guardManifest.tracked_source_unchanged -isnot [bool] -or
+        -not $guardManifest.tracked_source_unchanged -or @($guardManifest.untracked_status).Count -ne 0 -or
+        $guardManifest.source -ine [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE) -or
+        $guardManifest.build_root -ine $guardManifestFile.DirectoryName -or
+        [string]::IsNullOrWhiteSpace($env:ImageOS) -or [string]::IsNullOrWhiteSpace($env:ImageVersion) -or
+        $guardManifest.runner_image_os -cne $env:ImageOS -or $guardManifest.runner_image_version -cne $env:ImageVersion -or
+        $guardManifest.os_build -ne [Environment]::OSVersion.Version.Build -or
+        $guardManifest.os_description -cne [Runtime.InteropServices.RuntimeInformation]::OSDescription) {
+        throw 'The Guard build must describe this clean dispatch revision and the same hosted runner.'
+    }
+    if ($guardManifest.library.cargo_profile.test -isnot [bool] -or $guardManifest.library.cargo_profile.test -or
+        [IO.Path]::GetFileName($guardManifest.library.path) -cnotmatch '\Alibignatius(?:-[0-9a-f]+)?\.rlib\z' -or
+        -not (Test-GuardDescendant $guardManifest.cargo_target $guardManifest.library.path)) {
+        throw 'The Guard build must record the selected production Ignatius library.'
+    }
+    $guardChildren = @($guardManifest.binaries | Where-Object { [IO.Path]::GetFileName($_.path) -ceq 'guard-child.exe' })
+    $guardSource = @($guardManifest.helper_inputs | Where-Object { [IO.Path]::GetFileName($_.path) -ceq 'guard_child.rs' })
+    if ($guardChildren.Count -ne 1 -or $guardSource.Count -ne 1 -or
+        $guardChildren[0].path -ine (Join-Path $guardManifest.build_root 'guard-child.exe') -or
+        $guardSource[0].path -ine (Join-Path $PSScriptRoot 'guard_child.rs')) {
+        throw 'The Guard manifest must record exactly one owned child and its tracked source.'
+    }
+    $guardChild = $guardChildren[0]
+    Assert-GuardInput $guardChild.path $guardChild.sha256
+    if ((PeArchitecture $guardChild.path) -cne $osArchitecture) {
+        throw 'The Guard child must match the native OS architecture.'
+    }
 }
 
 $root = Join-Path $env:RUNNER_TEMP "ignatius-renderer-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
@@ -133,6 +242,17 @@ $compiler = Get-Item -LiteralPath $compilerPath
 $targetAliases = if ($osArchitecture -eq 'x64') { @('x64', 'amd64') } else { @('arm64') }
 if ($compiler -isnot [IO.FileInfo] -or $env:VSCMD_ARG_TGT_ARCH -notin $targetAliases) {
     throw 'The Visual Studio developer shell did not select the expected compiler target.'
+}
+if ($guardMode) {
+    $rust = (& rustc --version --verbose | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not (Test-W07PinnedRust $rust) -or $rust -cne $guardManifest.rust_verbose -or
+        $compiler.FullName -ine $guardManifest.msbuild_cl_path -or
+        [string]::IsNullOrWhiteSpace($env:VCToolsVersion) -or [string]::IsNullOrWhiteSpace($env:WindowsSDKVersion) -or
+        $env:VCToolsVersion -cne $guardManifest.vc_tools_version -or
+        $env:WindowsSDKVersion -cne $guardManifest.windows_sdk_version) {
+        throw 'The Guard build compiler and SDK must match the current pinned toolchain.'
+    }
+    Assert-GuardInputs
 }
 $probe = Join-Path $root 'renderer-probe.exe'
 Push-Location -LiteralPath $root
@@ -186,8 +306,13 @@ $settingsFile = Join-Path $settings 'settings.json'
 [IO.File]::WriteAllText($settingsFile, (ConvertTo-Json $configuration -Depth 8))
 
 $sourceHashes = [ordered] @{}
-foreach ($source in @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp', 'renderer_modal.hpp', 'renderer_archive.hpp',
-        'Test-Desktop.ps1', 'Run-RendererCalibration.ps1')) {
+$sourceNames = @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp', 'renderer_modal.hpp',
+    'renderer_archive.hpp', 'renderer_guard.hpp', 'renderer_guard_supervisor.hpp',
+    'Test-Desktop.ps1', 'Run-RendererCalibration.ps1')
+if ($guardMode) {
+    $sourceNames += @('guard_child.rs', 'Build.ps1', 'Validation.ps1', 'Run-Controls.ps1')
+}
+foreach ($source in $sourceNames) {
     $sourceHashes[$source] = FileDigest (Join-Path $PSScriptRoot $source)
 }
 $build = [ordered] @{
@@ -227,48 +352,158 @@ reduced-motion = true
     $build['candidate_source'] = $CandidateSource.ToLowerInvariant()
     $build['candidate_build'] = $CandidateBuild
 }
+if ($guardMode) {
+    $build['guard_build_manifest_sha256'] = $guardManifestHash
+    $build['guard_library_sha256'] = $guardManifest.library.sha256
+    $build['guard_child_sha256'] = $guardChild.sha256
+    $build['guard_child_architecture'] = $osArchitecture
+    $build['guard_rust_release'] = '1.97.1'
+    $build['guard_vc_tools_version'] = $guardManifest.vc_tools_version
+    $build['guard_windows_sdk_version'] = $guardManifest.windows_sdk_version
+}
 [IO.File]::WriteAllText((Join-Path $work 'build.json'), ((ConvertTo-Json $build -Depth 6) + "`n"))
 
-$nonce = [Guid]::NewGuid().ToString('N')
-$stdout = Join-Path $root 'renderer.stdout'
-$stderr = Join-Path $root 'renderer.stderr'
+function Invoke-RendererSupervisor([string] $EntryPoint, [string] $Directory, [string] $LogStem, [string[]] $ExtraArgs) {
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $stdout = Join-Path $root "$LogStem.stdout"
+    $stderr = Join-Path $root "$LogStem.stderr"
+    $controllerArgs = @($EntryPoint, ('"' + $terminal.FullName + '"'), ('"' + $Directory + '"'), $nonce, $rendererProfileId)
+    $controllerArgs += $ExtraArgs
+    $bound = if ($EntryPoint -ceq '--renderer-guard-supervise') { 25000 } else { 40000 }
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $controller = Start-Process -FilePath $probe -WorkingDirectory $Directory -NoNewWindow -PassThru `
+        -ArgumentList $controllerArgs -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    try {
+        if (-not $controller.WaitForExit([Math]::Max(0, $bound - [int]$watch.ElapsedMilliseconds))) {
+            if (-not $controller.HasExited) {
+                $controller.Kill()
+                $null = $controller.WaitForExit([Math]::Max(0, $bound - [int]$watch.ElapsedMilliseconds))
+            }
+            throw 'The native renderer helper exceeded its outer deadline.'
+        }
+        $exitCode = $controller.ExitCode
+    }
+    finally {
+        $controller.Dispose()
+    }
+    if ((Get-Item -LiteralPath $stdout).Length -gt 16384 -or
+        (Get-Item -LiteralPath $stderr).Length -gt 49152) {
+        throw 'The native renderer receipt exceeded its size limit.'
+    }
+    $receipt = [IO.File]::ReadAllText($stdout).Trim()
+    if ([string]::IsNullOrWhiteSpace($receipt) -or $receipt.Length -gt 16384) {
+        throw "The native renderer helper did not supply a bounded receipt (exit $exitCode)."
+    }
+    return [pscustomobject]@{ ExitCode = $exitCode; Text = $receipt; Facts = ConvertFrom-Json -InputObject $receipt }
+}
+
+function Invoke-GuardRendererCase([string] $Mode, [int] $Bits, [int] $ExpectedExit) {
+    $label = "guard-$Mode-$Bits"
+    $caseRoot = Join-Path $root $label
+    $null = New-Item -ItemType Directory -Path $caseRoot
+    Assert-GuardInput $guardChild.path $guardChild.sha256
+    $result = Invoke-RendererSupervisor '--renderer-guard-supervise' $caseRoot $label @(
+        ('"' + $guardChild.path + '"'), $Mode, [string]$Bits)
+    $facts = $result.Facts
+    if ($result.ExitCode -ne 0) {
+        if ($facts.schema -eq 1 -and $facts.case -ceq 'renderer-guard' -and
+            $facts.guard.mode -ceq $Mode -and $facts.guard.option_bits -eq $Bits) {
+            $failureRoot = Join-Path $work $label
+            $null = New-Item -ItemType Directory -Path $failureRoot
+            [IO.File]::WriteAllText((Join-Path $failureRoot 'renderer-report.json'), ($result.Text + "`n"))
+        }
+        if ($facts.failure -is [string] -and $facts.failure -cmatch '\A[\x20-\x7E]{1,768}\z') {
+            Write-Host ('Guard runtime diagnostic: ' + $facts.failure)
+        }
+        throw "Windows Terminal Guard $Mode bits $Bits failed (supervisor exit $($result.ExitCode))."
+    }
+    if ((Get-W07Number $facts.schema) -ne 1 -or $facts.case -cne 'renderer-guard' -or
+        $facts.guard.mode -cne $Mode -or (Get-W07Number $facts.guard.option_bits) -ne $Bits -or
+        (Get-W07Number $facts.guard.expected_exit) -ne $ExpectedExit -or
+        (Get-W07Number $facts.guard.exit_code) -ne $ExpectedExit -or
+        -not [string]::IsNullOrEmpty($facts.failure) -or
+        (Get-W07Number $facts.cleanup.job_remaining) -ne 0) {
+        throw 'The Guard receipt did not identify the requested case, expected child exit and cleanup.'
+    }
+    foreach ($flag in @($facts.native_windows, $facts.guard_diagnostic_passed, $facts.guard.owned,
+            $facts.guard.exit_waited, $facts.guard.restored_modes, $facts.guard.wrong_job_rejected,
+            $facts.cleanup.job_empty, $facts.cleanup.pipe_quiescent)) {
+        if ($flag -isnot [bool] -or -not $flag) {
+            throw 'The Guard receipt did not establish all required native observations.'
+        }
+    }
+
+    # Native scratch may also contain owned configuration and non-evidence logs.
+    # Copy only validated file bytes into the separate workflow evidence tree.
+    $captures = @('baseline.bmp', 'guard-acquired.bmp', 'guard-restored.bmp' | ForEach-Object {
+        $file = Get-GuardFile (Join-Path $caseRoot $_) 1MB
+        Assert-GuardCapture $file
+        $file
+    })
+    $caseBytes = [Text.Encoding]::UTF8.GetByteCount($result.Text + "`n") + ($captures | Measure-Object Length -Sum).Sum
+    if ((Get-W07InventoryBytes $work) + $caseBytes -gt 32MB) {
+        throw 'The Guard renderer matrix exceeded its cumulative evidence limit.'
+    }
+    $captureRoot = Join-Path $work $label
+    $null = New-Item -ItemType Directory -Path $captureRoot
+    foreach ($file in $captures) {
+        [IO.File]::Copy($file.FullName, (Join-Path $captureRoot $file.Name))
+    }
+    [IO.File]::WriteAllText((Join-Path $captureRoot 'renderer-report.json'), ($result.Text + "`n"))
+    Write-Output "Guard $Mode bits $Bits passed with child exit $ExpectedExit."
+}
+
+if ($guardMode) {
+    $cases = [ordered]@{ normal = 0; error = 23; panic = 101 }
+    try {
+        $calibrationRoot = Join-Path $root 'guard-calibration'
+        $null = New-Item -ItemType Directory -Path $calibrationRoot
+        $calibration = Invoke-RendererSupervisor '--renderer-supervise' $calibrationRoot 'guard-calibration' @()
+        if ($calibration.ExitCode -ne 0 -or $calibration.Facts.case -cne 'renderer-calibration' -or
+            $calibration.Facts.calibration_complete -ne $true -or @($calibration.Facts.phases).Count -ne 6) {
+            throw 'The renderer must pass its six synthetic cursor controls before the Guard cases.'
+        }
+        $calibrationEvidence = Join-Path $work 'guard-calibration'
+        $null = New-Item -ItemType Directory -Path $calibrationEvidence
+        foreach ($index in 0..5) {
+            $capture = Get-GuardFile (Join-Path $calibrationRoot "phase-$index.bmp") 1MB
+            Assert-GuardCapture $capture
+            [IO.File]::Copy($capture.FullName, (Join-Path $calibrationEvidence $capture.Name))
+        }
+        [IO.File]::WriteAllText((Join-Path $calibrationEvidence 'renderer-report.json'), ($calibration.Text + "`n"))
+        Invoke-GuardRendererCase 'normal' 5 $cases.normal
+        if ($GuardMatrix) {
+            foreach ($mode in $cases.Keys) {
+                foreach ($bits in 0..7) {
+                    if ($mode -cne 'normal' -or $bits -ne 5) {
+                        Invoke-GuardRendererCase $mode $bits $cases[$mode]
+                    }
+                }
+            }
+        }
+    }
+    finally {
+        Assert-GuardInputs
+    }
+    return
+}
+
 $entryPoint = if ($archiveMode) { '--renderer-archive-supervise' } else { '--renderer-supervise' }
-$controllerArgs = @($entryPoint, ('"' + $terminal.FullName + '"'), ('"' + $work + '"'), $nonce, $rendererProfileId)
+$extraArgs = @()
 if ($archiveMode) {
     if ((FileDigest $client.FullName) -cne $clientHash) {
         throw 'The archived client changed before it could be launched.'
     }
-    $controllerArgs += ('"' + $client.FullName + '"')
+    $extraArgs = @('"' + $client.FullName + '"')
 }
-$controller = Start-Process -FilePath $probe -WorkingDirectory $work -NoNewWindow -PassThru `
-    -ArgumentList $controllerArgs `
-    -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-try {
-    if (-not $controller.WaitForExit(40000)) {
-        if (-not $controller.HasExited) {
-            $controller.Kill()
-            $null = $controller.WaitForExit(3000)
-        }
-        throw 'The native renderer helper exceeded its outer deadline.'
-    }
-    $exitCode = $controller.ExitCode
-}
-finally {
-    $controller.Dispose()
-}
-if ((Get-Item -LiteralPath $stdout).Length -gt 16384) {
-    throw 'The native renderer receipt exceeded its size limit.'
-}
-$receipt = [IO.File]::ReadAllText($stdout).Trim()
-if ([string]::IsNullOrWhiteSpace($receipt) -or $receipt.Length -gt 16384) {
-    throw "The native renderer helper did not supply a bounded receipt (exit $exitCode)."
-}
-$facts = ConvertFrom-Json -InputObject $receipt
+$result = Invoke-RendererSupervisor $entryPoint $work 'renderer' $extraArgs
+$receipt = $result.Text
+$facts = $result.Facts
 [IO.File]::WriteAllText((Join-Path $work 'renderer-report.json'), ($receipt + "`n"))
 Write-Output $receipt
-if ($exitCode -ne 0) {
+if ($result.ExitCode -ne 0) {
     $check = if ($archiveMode) { 'archived-client renderer verification' } else { 'renderer calibration' }
-    throw "The Windows Terminal $check failed (exit $exitCode)."
+    throw "The Windows Terminal $check failed (exit $($result.ExitCode))."
 }
 if ($archiveMode) {
     if ($facts.case -cne 'renderer-archive' -or -not $facts.archive_diagnostic_passed -or
