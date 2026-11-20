@@ -46,7 +46,7 @@ jobs:
           }
           $probeRoot = Join-Path $env:RUNNER_TEMP "ignatius-archive-pair-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $null = New-Item -ItemType Directory -Path $probeRoot
-          $inputsByRole = [ordered]@{ previous = '44667989084'; candidate = '44681770913' }
+          $inputsByRole = [ordered]@{ previous = '44681770913'; candidate = '44721590021' }
           foreach ($entry in $inputsByRole.GetEnumerator()) {
             $runId = $entry.Value
             $runJson = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId/attempts/1"
