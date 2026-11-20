@@ -23,7 +23,9 @@ void renderer_guard_accept_phase(RendererGuardReceipt& guard, Server& server,
     require(guard.phases.size() == (restored ? 1U : 0U), "Guard phases are ordered acquired then restored");
     RendererGuardMeasurement phase;
     phase.native = renderer_numbers<14>(fields);
-    const auto& n = phase.native;
+    guard.phases.push_back(phase);
+    auto& sampled = guard.phases.back();
+    const auto& n = sampled.native;
     const auto prior = restored ? guard.phases.front().ack_qpc : baseline.ack_qpc;
     const auto observed = renderer_stamp(n[12], n[13]);
     require(n[0] == expected_index && n[1] == expected_input
@@ -39,15 +41,14 @@ void renderer_guard_accept_phase(RendererGuardReceipt& guard, Server& server,
                 "Guard console viewport is stable");
     }
     verify_renderer_window(renderer, job, terminal, title);
-    phase.pixels = observe_renderer_frame(renderer.hwnd, expected_index, restored, expected_main,
+    sampled.pixels = observe_renderer_frame(renderer.hwnd, expected_index, restored, expected_main,
         deadline, folder / (restored ? L"guard-restored.bmp" : L"guard-acquired.bmp"));
     verify_renderer_window(renderer, job, terminal, title);
-    phase.capture_qpc = ticks();
-    require(phase.capture_qpc >= observed && Clock::now() < deadline,
+    sampled.capture_qpc = ticks();
+    require(sampled.capture_qpc >= observed && Clock::now() < deadline,
             "Guard renderer proof precedes release of this phase");
-    phase.ack_qpc = ticks();
+    sampled.ack_qpc = ticks();
     server.ack(deadline);
-    guard.phases.push_back(phase);
 }
 
 void renderer_guard_accept_exit(RendererGuardReceipt& guard, Server& server,
