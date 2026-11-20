@@ -240,7 +240,8 @@ inline AnchorMatch find_anchor(const Frame& frame) {
 }
 
 inline std::optional<Measurement> measure(const Frame& frame, std::size_t phase,
-                                          bool visible, bool main_expected, const char*& reason) {
+                                          bool visible, bool main_expected, const char*& reason,
+                                          bool observe_cursor = true) {
     const auto anchor_match = find_anchor(frame);
     const Box& anchor = anchor_match.bounds;
     const auto anchor_pixels = anchor_match.count;
@@ -285,20 +286,24 @@ inline std::optional<Measurement> measure(const Frame& frame, std::size_t phase,
         return std::nullopt;
     }
 
-    const auto cursor_pixels = count_color(frame, cursor_box, cursor_color);
-    if (visible) {
-        reason = "expected_magenta_cursor_not_visible";
-        if (!coverage(cursor_pixels, cursor_box.area(), 90)) return std::nullopt;
-    } else {
-        reason = "expected_background_at_hidden_cursor";
-        if (cursor_pixels != 0 ||
-            !coverage(count_color(frame, cursor_box, background_color), cursor_box.area()))
-            return std::nullopt;
+    std::size_t cursor_pixels{}, cursor_area{};
+    if (observe_cursor) {
+        cursor_area = cursor_box.area();
+        cursor_pixels = count_color(frame, cursor_box, cursor_color);
+        if (visible) {
+            reason = "expected_magenta_cursor_not_visible";
+            if (!coverage(cursor_pixels, cursor_area, 90)) return std::nullopt;
+        } else {
+            reason = "expected_background_at_hidden_cursor";
+            if (cursor_pixels != 0 ||
+                !coverage(count_color(frame, cursor_box, background_color), cursor_area))
+                return std::nullopt;
+        }
     }
 
     return Measurement{{frame.width, frame.height, cell_width, cell_height,
         crop.width(), crop.height(), anchor_pixels, phase_pixels, sentinel_pixels,
-        cursor_pixels, cursor_box.area(), 0}, crop};
+        cursor_pixels, cursor_area, 0}, crop};
 }
 
 // Report aggregate color counts about the last owned client buffer only.
