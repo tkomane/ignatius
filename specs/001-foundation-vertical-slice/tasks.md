@@ -75,7 +75,9 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T048 Threat model and data-handling documentation
 - [x] T049 Operations documentation: local development, verification, release
 - [x] T050 CI workflow for macOS, Windows and Linux
-- [ ] T051 Verify by hand on Windows 11 in Windows Terminal with PowerShell 7 (automated Windows 11 ARM64 renderer evidence exists)
+- [ ] T051 Verify by hand on Windows 11 in Windows Terminal with PowerShell 7.
+  [Automated live query and shell restoration](../../docs/operations/verification.md#windows-11-powershell-workbench---20-november-2026)
+  passed on Windows 11 ARM64 with native PowerShell 7.6.10 and the archived x64 client.
 - [ ] T052 Verify on Linux, including the Unix socket path (automated socket evidence exists; full-screen Linux hand use remains unverified)
 - [x] T053 Extend the CI server matrix to PostgreSQL 14 through 18
 - [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8

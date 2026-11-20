@@ -4,6 +4,18 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 57: Windows 11 PowerShell workbench - 20 November 2026
+
+- Native Windows Terminal and PowerShell 7.6.10 on Windows 11 ARM64 opened
+  the exact `4e9509c` candidate archive. Ctrl+R returned one read-only
+  PostgreSQL 17.12 row in the full-screen workbench. Ctrl+Q restored the
+  main screen, console modes and all 171 calibrated cursor pixels. The same
+  PowerShell prompt ran a command, and the owned fixture was removed.
+  [Live workbench evidence](operations/verification.md#windows-11-powershell-workbench---20-november-2026)
+- The x64 renderer control kept its byte-identical restored frame.
+  Windows 11 human hand use remains open.
+  [x64 control](https://github.com/tkomane/ignatius/actions/runs/44674777493)
+
 ## Wave 56: Structured array input - 20 November 2026
 
 - Cell Detail accepts whitespace around PostgreSQL array elements and dimension

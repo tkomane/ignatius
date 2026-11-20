@@ -29,6 +29,10 @@ on:
         description: Calibrate the displayed cursor on the owned Windows 11 ARM64 window
         default: false
         type: boolean
+      powershell_workbench:
+        description: Run a live read-only PostgreSQL query from the owned PowerShell 7 session
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -45,6 +49,7 @@ jobs:
       CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
       SOURCE_REVISION: ${{ inputs.source_revision }}
       WINDOW_CURSOR_CALIBRATION: ${{ inputs.window_cursor_calibration }}
+      POWERSHELL_WORKBENCH: ${{ inputs.powershell_workbench }}
     steps:
       - name: Resolve the completed release run and attempt
         id: candidate
@@ -60,6 +65,10 @@ jobs:
           }
           if ($env:WINDOW_CURSOR_CALIBRATION -ceq 'true' -and $env:PROBE -cne 'terminal-renderer-arm64') {
             throw 'Window cursor calibration requires terminal-renderer-arm64.'
+          }
+          if ($env:POWERSHELL_WORKBENCH -ceq 'true' -and
+              ($env:PROBE -cne 'terminal-renderer-arm64' -or $env:WINDOW_CURSOR_CALIBRATION -cne 'true')) {
+            throw 'The live PowerShell workbench requires terminal-renderer-arm64 and window cursor calibration.'
           }
           $runJson = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN/attempts/$env:CANDIDATE_ATTEMPT"
           if ($LASTEXITCODE -ne 0) { throw "Could not resolve the candidate run attempt" }
@@ -161,10 +170,18 @@ jobs:
         id: renderer
         shell: pwsh
         run: |
-          ./tests/support/windows_conpty/Run-RendererCalibration.ps1 `
-            -ArchivedClient $env:IGNATIUS_ARCHIVED_EXE -ExpectedClientSha256 $env:IGNATIUS_ARCHIVED_SHA256 `
-            -CandidateSource $env:SOURCE_REVISION -CandidateBuild $env:IGNATIUS_EXPECTED_BUILD `
-            -WindowCursorCalibration:($env:WINDOW_CURSOR_CALIBRATION -ceq 'true')
+          $parameters = @{
+            ArchivedClient = $env:IGNATIUS_ARCHIVED_EXE
+            ExpectedClientSha256 = $env:IGNATIUS_ARCHIVED_SHA256
+            CandidateSource = $env:SOURCE_REVISION
+            CandidateBuild = $env:IGNATIUS_EXPECTED_BUILD
+          }
+          if ($env:POWERSHELL_WORKBENCH -ceq 'true') {
+            ./tests/support/windows_conpty/Run-WorkbenchFixture.ps1 @parameters
+          } else {
+            ./tests/support/windows_conpty/Run-RendererCalibration.ps1 @parameters `
+              -WindowCursorCalibration:($env:WINDOW_CURSOR_CALIBRATION -ceq 'true')
+          }
 
       - name: Retain the owned archive rendering and restoration observations
         if: ${{ always() && steps.renderer.outcome != 'skipped' }}
@@ -179,6 +196,7 @@ jobs:
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/baseline.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-active.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-restored.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-failure.txt
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-0.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-1.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-2.bmp

@@ -87,25 +87,27 @@ void renderer_product_quit(HANDLE input) {
             && written == std::size(keys), "send Ctrl+Q to the exact owned ConPTY input");
 }
 
+#include "renderer_archive_shell.hpp"
+
 void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
-                          const std::wstring& nonce, const std::wstring& work, HANDLE input) {
+                          const std::wstring& nonce, const std::wstring& work, HANDLE input,
+                          const std::optional<Child>& shell) {
     const auto nonce_text = ascii(nonce);
     const auto deadline = Clock::now() + 20s;
     RendererLoopback loopback;
-    const auto endpoint = L"postgres://fixture@127.0.0.1:" + loopback.reserve()
-        + L"/renderer_fixture?sslmode=disable&connect_timeout=2";
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    auto client = create(archive, {L"connect", L"--no-history", endpoint}, work, &startup, 0);
+    Child client;
+    if (shell) {
+        client = renderer_start_archive_from_shell(work, shell->process.value, archive, deadline);
+    } else {
+        const auto endpoint = L"postgres://fixture@127.0.0.1:" + loopback.reserve()
+            + L"/renderer_fixture?sslmode=disable&connect_timeout=2";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        client = create(archive, {L"connect", L"--no-history", endpoint}, work, &startup, 0);
+    }
     try {
-        const auto created = birth(client.process.value);
-        const auto handle = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(client.process.value));
-        std::ostringstream register_client;
-        register_client << "P " << nonce_text << ' ' << client.pid;
-        renderer_stamp(register_client, handle);
-        register_client << ' ' << created.dwLowDateTime << ' ' << created.dwHighDateTime;
-        send(pipe, register_client.str());
-        resume(client);
+        renderer_report_process(pipe, nonce, 'P', client);
+        if (!shell) resume(client);
 
         bool active = false;
         DWORD input_mode{}, output_mode{}, observations{}, early_exit{STILL_ACTIVE};
@@ -139,6 +141,10 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
             send(pipe, partial.str());
             throw std::runtime_error("archived client did not reach the native startup checkpoint");
         }
+        if (shell) {
+            const auto cell = renderer_workbench_query(client, input, deadline, work);
+            renderer_shell_stage(pipe, nonce, 1, cell);
+        }
         std::ostringstream acquired;
         acquired << "N " << nonce_text << ' ' << input_mode << ' ' << output_mode;
         renderer_stamp(acquired, ticks());
@@ -159,10 +165,11 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
         after << "T " << nonce_text << ' ' << input_mode << ' ' << output_mode << ' ' << exit_code << ' ' << sentinel;
         renderer_stamp(after, ticks());
         send(pipe, after.str());
+        if (shell) renderer_use_restored_shell(*shell, work, input, deadline, pipe, nonce);
     } catch (...) {
-        // This handle is from the actor's own CreateProcess. The outside Job
-        // owner remains the fallback if termination or the bounded wait fails.
-        if (WaitForSingleObject(client.process.value, 0) == WAIT_TIMEOUT) {
+        // Terminate only the process created directly by this actor. The
+        // supervisor owns cleanup of the PowerShell-launched Job.
+        if (!shell && WaitForSingleObject(client.process.value, 0) == WAIT_TIMEOUT) {
             TerminateProcess(client.process.value, 125);
             WaitForSingleObject(client.process.value, 500);
         }
@@ -173,6 +180,8 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
 struct RendererWindowProof {
     std::array<std::int64_t, 2> compositor_times{};
     bool foreground{};
+    int grid_left{}, grid_top{};
+    int cell_width{}, cell_height{};
 };
 
 struct RendererArchiveReceipt {
@@ -181,6 +190,9 @@ struct RendererArchiveReceipt {
     bool machine_type_fallback{};
     std::uint64_t acquired_qpc{}, acquired_capture_qpc{}, restored_qpc{}, restored_capture_qpc{};
     bool child_owned{}, waited{}, raw_alternate{}, restored_sentinel{}, restored_modes{};
+    bool workbench_expected{}, native_powershell{}, powershell_prompt{};
+    std::optional<COORD> workbench_result;
+    std::array<std::size_t, 2> workbench_ink{};
     int active_width{}, active_height{};
     std::size_t active_surface_pixels{}, active_focus_pixels{};
     DWORD startup_facts{}, startup_last_input{}, startup_last_output{}, startup_early_exit{STILL_ACTIVE};
@@ -204,7 +216,7 @@ Handle renderer_register_child(HANDLE actor, HANDLE job, const std::wstring& exe
     require(GetProcessId(owned.value) == data[0] && created.dwLowDateTime == data[3]
             && created.dwHighDateTime == data[4] && same_path(image(owned.value), executable)
             && WaitForSingleObject(owned.value, 0) == WAIT_TIMEOUT,
-            "authenticate the suspended child executable in the exact renderer Job");
+            "authenticate the child executable in the exact renderer Job");
     return owned;
 }
 
@@ -319,7 +331,11 @@ RendererPixelObservation observe_archive_window_phase(ignatius_wgc::WindowCaptur
         if (previous && renderer_same_window_sample(*previous, frame)
             && same_crop(previous_box, verified->crop) && previous_crop == pixels) {
             write_crop(path, verified->crop, pixels, deadline);
-            proof = {{previous->compositor_time, frame.compositor_time}, frame.foreground};
+            const auto anchor = find_anchor(frame.pixels).bounds;
+            const auto width = verified->facts.cell_width;
+            const auto height = verified->facts.cell_height;
+            proof = {{previous->compositor_time, frame.compositor_time}, frame.foreground,
+                     anchor.left - 9 * width, anchor.top - 7 * height, width, height};
             verified->facts.stable_frames = 2;
             return verified->facts;
         }
@@ -344,8 +360,28 @@ void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const
         const auto surface = count_color(frame.pixels, client, {0x19, 0x1c, 0x22});
         const auto focus = count_color(frame.pixels, client, {0x8a, 0xb4, 0xf8});
         const auto cursor = observe_cursor ? count_color(frame.pixels, client, cursor_color) : 0;
+        std::array<std::size_t, 2> result_ink{};
+        if (receipt.workbench_result) {
+            const auto& grid = receipt.wgc_baseline;
+            const auto& location = *receipt.workbench_result;
+            const int left = grid.grid_left + location.X * grid.cell_width;
+            const int top = grid.grid_top + location.Y * grid.cell_height;
+            for (std::size_t digit = 0; digit < result_ink.size(); ++digit) {
+                const int x = left + static_cast<int>(digit) * grid.cell_width;
+                const Box box{x, top, x + grid.cell_width, top + grid.cell_height};
+                require(inside(box, frame.pixels), "the native result cells map inside the same WGC frame");
+                for (int row = box.top; row < box.bottom; ++row) {
+                    const auto* pixels = frame.pixels.row(row);
+                    for (int column = box.left; column < box.right; ++column) {
+                        const auto& pixel = pixels[column];
+                        if (pixel.r >= 120 && pixel.g >= 120 && pixel.b >= 120) ++result_ink[digit];
+                    }
+                }
+            }
+        }
         const bool verified = surface >= 2048 && focus >= 24 && find_anchor(frame.pixels).count == 0
-            && count_color(frame.pixels, client, sentinel_color) == 0 && cursor == 0;
+            && count_color(frame.pixels, client, sentinel_color) == 0 && cursor == 0
+            && (!receipt.workbench_result || (result_ink[0] >= 4 && result_ink[1] >= 4));
         if (!verified) {
             previous.reset();
             continue;
@@ -356,8 +392,10 @@ void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const
             receipt.active_height = frame.pixels.height;
             receipt.active_surface_pixels = surface;
             receipt.active_focus_pixels = focus;
+            receipt.workbench_ink = result_ink;
             if (observe_cursor) receipt.wgc_active_cursor_pixels = cursor;
-            receipt.wgc_active = {{previous->compositor_time, frame.compositor_time}, frame.foreground};
+            receipt.wgc_active.compositor_times = {previous->compositor_time, frame.compositor_time};
+            receipt.wgc_active.foreground = frame.foreground;
             return;
         }
         previous = std::move(frame);
@@ -401,6 +439,12 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_ca
               << (report_cursor ? std::to_string(receipt.restored_pixels.cursor_area) : "null")
               << ",\"restored_sentinel_pixels\":" << receipt.restored_pixels.sentinel_pixels
               << ",\"restored_stable_frames\":" << receipt.restored_pixels.stable_frames;
+    if (receipt.workbench_expected) {
+        std::cout << ",\"powershell_workbench\":{\"native_shell\":" << truth(receipt.native_powershell)
+                  << ",\"result_rendered\":" << truth(receipt.workbench_result.has_value())
+                  << ",\"result_ink_pixels\":[" << receipt.workbench_ink[0] << ',' << receipt.workbench_ink[1] << ']'
+                  << ",\"prompt_executed\":" << truth(receipt.powershell_prompt) << '}';
+    }
     if (window_cursor_calibration) {
         std::cout << ",\"active_cursor_pixels\":"
                   << (receipt.wgc_active_cursor_pixels ? std::to_string(*receipt.wgc_active_cursor_pixels) : "null");

@@ -18,6 +18,7 @@ int main() { std::cerr << "W07-064 native host requires actual Windows; no nativ
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <iterator>
