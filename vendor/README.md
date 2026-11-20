@@ -13,5 +13,8 @@ the same query that delivered the text so it can validate the origin of a
 reviewed structured edit. The workspace patch applies to the TLS adapter's
 driver dependency as well.
 
+`src/client.rs` also matches the path import to its Unix-only use so the
+repository dependency compiles on Windows with warnings denied.
+
 When a compatible upstream release exposes these fields, remove this copy,
 the Cargo patch and the patch-specific inventory and advisory checks.

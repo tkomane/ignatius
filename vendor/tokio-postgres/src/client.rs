@@ -29,7 +29,8 @@ use std::fmt;
 use std::future;
 #[cfg(feature = "runtime")]
 use std::net::IpAddr;
-#[cfg(feature = "runtime")]
+// Modified by Ignatius to match the Unix-only Addr::Unix variant.
+#[cfg(all(feature = "runtime", unix))]
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
