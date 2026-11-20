@@ -78,8 +78,8 @@ switch -Exact ($osArchitecture) {
     }
     default { throw 'The native Windows OS must be x64 or ARM64.' }
 }
-if ($archiveMode -and $osArchitecture -eq 'x64' -and $clientArchitecture -ne 'x64') {
-    throw 'An x64 Windows host requires an x64 archived client.'
+if ($archiveMode -and $clientArchitecture -ne 'x64') {
+    throw 'Both archive probes require the retained x64 Ignatius executable.'
 }
 
 $desktop = & (Join-Path $PSScriptRoot 'Test-Desktop.ps1') | ConvertFrom-Json
@@ -128,11 +128,16 @@ if ($LASTEXITCODE -ne 0 -or $instances.Count -ne 1) {
     throw "The hosted runner must provide the $osArchitecture MSVC target toolset and x64 compiler host."
 }
 & (Join-Path ($instances[0].Trim()) 'Common7/Tools/Launch-VsDevShell.ps1') -Arch $vcTarget -HostArch amd64 -SkipAutomaticLocation
-$compiler = Get-Command cl.exe -CommandType Application -ErrorAction Stop
+$compilerPath = Join-Path $env:VCToolsInstallDir "bin/HostX64/$osArchitecture/cl.exe"
+$compiler = Get-Item -LiteralPath $compilerPath
+$targetAliases = if ($osArchitecture -eq 'x64') { @('x64', 'amd64') } else { @('arm64') }
+if ($compiler -isnot [IO.FileInfo] -or $env:VSCMD_ARG_TGT_ARCH -notin $targetAliases) {
+    throw 'The Visual Studio developer shell did not select the expected compiler target.'
+}
 $probe = Join-Path $root 'renderer-probe.exe'
 Push-Location -LiteralPath $root
 try {
-    & $compiler.Source /nologo /std:c++17 /permissive- /utf-8 /W4 /WX /EHsc /DUNICODE /D_UNICODE `
+    & $compiler.FullName /nologo /std:c++17 /permissive- /utf-8 /W4 /WX /EHsc /DUNICODE /D_UNICODE `
         /DIGNATIUS_RENDERER_CALIBRATION (Join-Path $PSScriptRoot 'host.cpp') `
         /Fe:renderer-probe.exe /Fo:renderer-probe.obj /link Advapi32.lib User32.lib Gdi32.lib Dwmapi.lib Ws2_32.lib
     if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($probe)) {
@@ -154,8 +159,8 @@ $configuration = [ordered] @{
     disableAnimations = $true
     alwaysOnTop = $true
     centerOnLaunch = $true
-    initialCols = 72
-    initialRows = 20
+    initialCols = if ($archiveMode) { 90 } else { 72 }
+    initialRows = if ($archiveMode) { 27 } else { 20 }
     showTerminalTitleInTitlebar = $true
     windowingBehavior = 'useNew'
     profiles = [ordered] @{
@@ -197,7 +202,7 @@ $build = [ordered] @{
     package_sha256 = $expectedSha256
     settings_sha256 = FileDigest $settingsFile
     profile_id = $rendererProfileId
-    msvc_sha256 = FileDigest $compiler.Source
+    msvc_sha256 = FileDigest $compiler.FullName
     windows_version = [Environment]::OSVersion.Version.ToString()
     os_architecture = $osArchitecture
     image_os = $env:ImageOS
@@ -205,8 +210,20 @@ $build = [ordered] @{
     input_desktop = $desktop
 }
 if ($archiveMode) {
+    $config = Join-Path $work 'config'
+    $null = New-Item -ItemType Directory -Path $config
+    $clientConfig = Join-Path $config 'config.toml'
+    [IO.File]::WriteAllText($clientConfig, @'
+schema_version = 1
+[ui]
+theme = "material"
+color = "always"
+color-depth = "truecolor"
+reduced-motion = true
+'@ + "`n")
     $build['archived_client_sha256'] = $clientHash
     $build['archived_client_architecture'] = $clientArchitecture
+    $build['archived_client_config_sha256'] = FileDigest $clientConfig
     $build['candidate_source'] = $CandidateSource.ToLowerInvariant()
     $build['candidate_build'] = $CandidateBuild
 }

@@ -58,7 +58,7 @@ bool renderer_product_heading(HANDLE output) {
     CONSOLE_SCREEN_BUFFER_INFO surface{};
     require(GetConsoleScreenBufferInfo(output, &surface) != 0, "read product console dimensions");
     const auto columns = surface.srWindow.Right - surface.srWindow.Left + 1;
-    require(columns >= 56 && columns <= 200, "bound the product console heading read");
+    require(columns >= 80 && columns <= 200, "bound the full-layout product heading read");
     std::wstring heading(static_cast<std::size_t>(columns), L'\0');
     renderer_read(output, COORD{surface.srWindow.Left, surface.srWindow.Top}, heading);
     return heading.find(L"Ignatius") != std::wstring::npos;
@@ -78,7 +78,7 @@ void renderer_product_quit(HANDLE input) {
     press.bKeyDown = TRUE;
     press.wRepeatCount = 1;
     press.wVirtualKeyCode = 'Q';
-    press.uChar.UnicodeChar = L'\x11';
+    press.uChar.UnicodeChar = L'q';
     press.dwControlKeyState = LEFT_CTRL_PRESSED;
     keys[1] = keys[0];
     keys[1].Event.KeyEvent.bKeyDown = FALSE;
@@ -108,23 +108,37 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
         resume(client);
 
         bool active = false;
-        DWORD input_mode{}, output_mode{};
+        DWORD input_mode{}, output_mode{}, observations{}, early_exit{STILL_ACTIVE};
         while (Clock::now() < deadline) {
-            require(WaitForSingleObject(client.process.value, 0) == WAIT_TIMEOUT,
-                    "archived client stays alive through renderer acquisition");
+            const auto wait = WaitForSingleObject(client.process.value, 0);
+            if (wait == WAIT_OBJECT_0) {
+                require(GetExitCodeProcess(client.process.value, &early_exit), "read early archived client exit");
+                break;
+            }
+            require(wait == WAIT_TIMEOUT, "observe owned archived client startup");
             if (renderer_product_attached(client.pid)) {
+                observations |= 1;
                 const auto output = renderer_open_output();
                 require(GetConsoleMode(input, &input_mode) && GetConsoleMode(output.value, &output_mode),
                         "read native archive startup modes");
-                if ((input_mode & renderer_cooked_bits) == 0
-                    && !renderer_product_sentinel(output.value, nonce) && renderer_product_heading(output.value)) {
+                const bool raw = (input_mode & renderer_cooked_bits) == 0;
+                const bool alternate = !renderer_product_sentinel(output.value, nonce);
+                const bool heading = renderer_product_heading(output.value);
+                observations |= (raw ? 2U : 0U) | (alternate ? 4U : 0U) | (heading ? 8U : 0U);
+                if (raw && alternate && heading) {
                     active = true;
                     break;
                 }
             }
             Sleep(remaining(deadline, 20));
         }
-        require(active, "archived client rendered its heading in the native raw alternate screen");
+        if (!active) {
+            std::ostringstream partial;
+            partial << "E " << nonce_text << ' ' << observations << ' ' << input_mode << ' '
+                    << output_mode << ' ' << early_exit;
+            send(pipe, partial.str());
+            throw std::runtime_error("archived client did not reach the native startup checkpoint");
+        }
         std::ostringstream acquired;
         acquired << "N " << nonce_text << ' ' << input_mode << ' ' << output_mode;
         renderer_stamp(acquired, ticks());
@@ -159,9 +173,12 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
 struct RendererArchiveReceipt {
     DWORD pid{}, acquired_input{}, acquired_output{}, restored_input{}, restored_output{}, exit_code{STILL_ACTIVE};
     USHORT process_machine{}, native_machine{};
+    bool machine_type_fallback{};
     std::uint64_t acquired_qpc{}, acquired_capture_qpc{}, restored_qpc{}, restored_capture_qpc{};
     bool child_owned{}, waited{}, raw_alternate{}, restored_sentinel{}, restored_modes{};
     int active_width{}, active_height{};
+    std::size_t active_surface_pixels{}, active_focus_pixels{};
+    DWORD startup_facts{}, startup_last_input{}, startup_last_output{}, startup_early_exit{STILL_ACTIVE};
     RendererPixelObservation restored_pixels{};
 };
 
@@ -182,6 +199,15 @@ Handle renderer_register_archive(HANDLE actor, HANDLE job, const std::wstring& a
             "authenticate the suspended archived executable in the exact renderer Job");
     require(IsWow64Process2(owned.value, &receipt.process_machine, &receipt.native_machine) != 0,
             "record the archived process and native OS architectures");
+    if (receipt.native_machine == IMAGE_FILE_MACHINE_ARM64
+        && receipt.process_machine == IMAGE_FILE_MACHINE_UNKNOWN) {
+        PROCESS_MACHINE_INFORMATION machine{};
+        require(GetProcessInformation(owned.value, ProcessMachineTypeInfo, &machine,
+                    static_cast<DWORD>(sizeof(machine))) != 0,
+                "record the machine type of the owned x64 process on ARM64");
+        receipt.process_machine = machine.ProcessMachine;
+        receipt.machine_type_fallback = true;
+    }
     require((receipt.native_machine == IMAGE_FILE_MACHINE_AMD64
                 && receipt.process_machine == IMAGE_FILE_MACHINE_UNKNOWN)
             || (receipt.native_machine == IMAGE_FILE_MACHINE_ARM64
@@ -196,7 +222,7 @@ void renderer_capture_archive(HWND window, const std::filesystem::path& path, Cl
                               RendererArchiveReceipt& receipt) {
     using namespace renderer_pixels_detail;
     PixelCoordinates coordinates;
-    std::optional<RECT> previous_clear;
+    std::optional<RECT> previous_verified;
     while (Clock::now() < deadline) {
         const auto region = visible_client(window);
         const auto frame = capture(region);
@@ -204,20 +230,26 @@ void renderer_capture_archive(HWND window, const std::filesystem::path& path, Cl
         const Box client{0, 0, frame.width, frame.height};
         require(frame.width >= 450 && frame.width <= 1024 && frame.height >= 260 && frame.height <= 768,
                 "owned archive capture size stays bounded");
-        // The physical renderer must leave the measured main-screen pixels.
-        // The native heading and retained image establish what ran.
-        const bool clear = find_anchor(frame).count == 0 && count_color(frame, client, sentinel_color) == 0;
-        if (clear && previous_clear && same_rectangle(*previous_clear, region)) {
+        // The archived client's isolated config forces these Material pane
+        // and focus tokens. Require real foreground pixels as well as the
+        // absence of the calibrated main-screen markers.
+        const auto surface = count_color(frame, client, {0x19, 0x1c, 0x22});
+        const auto focus = count_color(frame, client, {0x8a, 0xb4, 0xf8});
+        const bool verified = surface >= 2048 && focus >= 24
+            && find_anchor(frame).count == 0 && count_color(frame, client, sentinel_color) == 0;
+        if (verified && previous_verified && same_rectangle(*previous_verified, region)) {
             coordinates.restore();
             write_crop(path, client, cropped_pixels(frame, client), deadline);
             receipt.active_width = frame.width;
             receipt.active_height = frame.height;
+            receipt.active_surface_pixels = surface;
+            receipt.active_focus_pixels = focus;
             return;
         }
-        previous_clear = clear ? std::make_optional(region) : std::nullopt;
+        previous_verified = verified ? std::make_optional(region) : std::nullopt;
         Sleep(remaining(deadline, 45));
     }
-    throw std::runtime_error("product renderer did not leave the calibrated main-screen pixels");
+    throw std::runtime_error("product renderer did not display its Material pixels in the alternate screen");
 }
 
 void emit_renderer_archive(const RendererArchiveReceipt& receipt) {
@@ -225,9 +257,16 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt) {
     std::cout << ",\"archived_client\":{\"pid\":" << receipt.pid
               << ",\"owned\":" << truth(receipt.child_owned)
               << ",\"process_machine\":" << receipt.process_machine << ",\"native_machine\":" << receipt.native_machine
+              << ",\"machine_type_fallback\":" << truth(receipt.machine_type_fallback)
               << ",\"acquired_input\":" << receipt.acquired_input << ",\"acquired_output\":" << receipt.acquired_output
               << ",\"native_raw_alternate_heading\":" << truth(receipt.raw_alternate)
               << ",\"active_width\":" << receipt.active_width << ",\"active_height\":" << receipt.active_height
+              << ",\"active_surface_pixels\":" << receipt.active_surface_pixels
+              << ",\"active_focus_pixels\":" << receipt.active_focus_pixels
+              << ",\"startup_facts\":" << receipt.startup_facts
+              << ",\"startup_last_input\":" << receipt.startup_last_input
+              << ",\"startup_last_output\":" << receipt.startup_last_output
+              << ",\"startup_early_exit\":" << receipt.startup_early_exit
               << ",\"acquired_qpc\":" << receipt.acquired_qpc << ",\"acquired_capture_qpc\":" << receipt.acquired_capture_qpc
               << ",\"exit_waited\":" << truth(receipt.waited) << ",\"exit_code\":" << receipt.exit_code
               << ",\"restored_input\":" << receipt.restored_input << ",\"restored_output\":" << receipt.restored_output

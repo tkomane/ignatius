@@ -158,6 +158,8 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
 
     // Registration acknowledgement follows the supervisor's owned window fit.
     const auto viewport = renderer_console_viewport(output.value);
+    require(archive.empty() || (viewport.Right >= 79 && viewport.Bottom >= 23),
+            "archived client viewport can display the full-layout heading");
     DWORD fitted_input{}, fitted_output{};
     require(GetConsoleMode(input.value, &fitted_input) && GetConsoleMode(output.value, &fitted_output)
             && fitted_input == baseline_input && fitted_output == baseline_output,
@@ -684,6 +686,8 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         && data[7] < renderer_profile_states.size()
                         && receipt.registered >= resumed && receipt.registered <= ticks(),
                         "renderer actor registration and viewport bounds");
+                require(!receipt.archive || (receipt.columns >= 80 && receipt.rows >= 24),
+                        "archived client starts with a full-size console");
                 receipt.profile_state = data[7];
                 receipt.actor_pid = pid;
                 actor = std::move(sender);
@@ -714,6 +718,18 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     renderer_numbers<5>(parts), *receipt.archive);
                 server->ack(work_deadline);
                 continue;
+            }
+            if (receipt.archive && parts[0] == "E") {
+                auto& product = *receipt.archive;
+                const auto data = renderer_numbers<4>(parts);
+                require(archived_client && !product.raw_alternate && data[0] <= 15,
+                        "bounded archive startup failure observation");
+                product.startup_facts = data[0];
+                product.startup_last_input = data[1];
+                product.startup_last_output = data[2];
+                product.startup_early_exit = data[3];
+                server->ack(work_deadline);
+                throw std::runtime_error("archived client did not reach the native startup checkpoint");
             }
             if (receipt.archive && parts[0] == "N") {
                 auto& product = *receipt.archive;
