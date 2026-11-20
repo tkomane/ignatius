@@ -142,7 +142,7 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
             throw std::runtime_error("archived client did not reach the native startup checkpoint");
         }
         if (shell) {
-            renderer_workbench_query(client, input, deadline);
+            renderer_workbench_query(client, input, deadline, work);
             renderer_shell_stage(pipe, nonce, 1);
         }
         std::ostringstream acquired;

@@ -150,12 +150,23 @@ std::vector<std::wstring> renderer_console_lines() {
 
 template<class Condition>
 void renderer_wait_for_screen(const Child& process, Clock::time_point deadline, Condition condition,
-                              const char* failure) {
+                              const std::wstring& work, const char* failure) {
+    std::vector<std::wstring> lines;
     while (Clock::now() < deadline) {
         require(WaitForSingleObject(process.process.value, 0) == WAIT_TIMEOUT
                 && renderer_product_attached(process.pid), "only the owned attached process receives diagnostic input");
-        if (condition(renderer_console_lines())) return;
+        lines = renderer_console_lines();
+        if (condition(lines)) return;
         Sleep(remaining(deadline, 30));
+    }
+    // Retain only the last bounded synthetic screen from the owned console.
+    std::ofstream snapshot(std::filesystem::path(work) / L"workbench-failure.txt");
+    snapshot << failure << '\n';
+    for (const auto& line : lines) {
+        for (const wchar_t ch : line) {
+            snapshot.put(ch >= L' ' && ch <= L'~' ? static_cast<char>(ch) : '?');
+        }
+        snapshot.put('\n');
     }
     throw std::runtime_error(failure);
 }
@@ -167,15 +178,16 @@ void renderer_shell_stage(const std::wstring& pipe, const std::wstring& nonce, u
     send(pipe, line.str());
 }
 
-void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline) {
+void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline,
+                              const std::wstring& work) {
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
         return lines.front().find(L"ig_probe@127.0.0.1:") != std::wstring::npos
-            && lines.front().find(L"[READ ONLY]") != std::wstring::npos
             && std::any_of(lines.begin(), lines.end(), [](const auto& line) {
                 return line.find(L"Editor") != std::wstring::npos && line.find(L"[focused]") != std::wstring::npos;
             });
-    }, "the archived workbench did not connect with read-only editor focus");
-    renderer_type_line(input, L"select 6*7 as journey_value", VK_F5);
+    }, work, "the archived workbench did not connect with editor focus");
+    renderer_type_line(input,
+        L"select 6*7*current_setting('transaction_read_only')::bool::int as journey_value", VK_F5);
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
         constexpr std::wstring_view name = L"journey_value";
         const auto caption = std::find_if(lines.begin(), lines.end(), [](const auto& line) {
@@ -199,7 +211,7 @@ void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_po
                 && cell.find_last_not_of(L' ') == first + 1;
         }
         return false;
-    }, "the archived workbench did not display the completed PostgreSQL result");
+    }, work, "the archived workbench did not display the completed PostgreSQL result");
 }
 
 void renderer_use_restored_shell(const Child& shell, const std::wstring& work, HANDLE input,
@@ -211,9 +223,9 @@ void renderer_use_restored_shell(const Child& shell, const std::wstring& work, H
                 [token](const auto& line) { return line.find(token) != std::wstring::npos; });
         };
     };
-    renderer_wait_for_screen(shell, deadline, contains(L"W07-PS> "), "PowerShell did not restore its interactive prompt");
+    renderer_wait_for_screen(shell, deadline, contains(L"W07-PS> "), work, "PowerShell did not restore its interactive prompt");
     renderer_type_line(input, L"Write-Output ('IG_'+'SHELL_RETURNED')", VK_RETURN);
-    renderer_wait_for_screen(shell, deadline, contains(L"IG_SHELL_RETURNED"), "the same PowerShell did not execute its command");
+    renderer_wait_for_screen(shell, deadline, contains(L"IG_SHELL_RETURNED"), work, "the same PowerShell did not execute its command");
     renderer_shell_stage(pipe, nonce, 2);
     renderer_type_line(input, L"exit 0", VK_RETURN);
     DWORD exit_code{};
