@@ -209,6 +209,19 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
         } else {
             failure << "workbench performance probe did not complete\n";
         }
+        try {
+            if (WaitForSingleObject(product.process.value, 0) == WAIT_TIMEOUT
+                && renderer_product_attached(product.pid)) {
+                for (const auto& line : renderer_console_lines()) {
+                    for (const wchar_t ch : line) {
+                        failure.put(ch >= L' ' && ch <= L'~' ? static_cast<char>(ch) : '?');
+                    }
+                    failure.put('\n');
+                }
+            }
+        } catch (const std::runtime_error&) {
+            failure << "The owned console frame could not be read.\n";
+        }
         throw;
     }
 #endif

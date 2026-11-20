@@ -54,10 +54,20 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     };
     const auto original_caret = caret(prefix.size());
     const auto inserted_caret = caret(inserted.size());
-    const auto completion = [](const WorkbenchLines& lines) {
-        return workbench_contains(lines, L"matching candidates")
-            && workbench_contains(lines, L"perf_catalog_01")
-            && workbench_contains(lines, L"Schema snapshot loaded");
+    const auto completion_title = [](const std::wstring& line) {
+        constexpr std::wstring_view title = L" Complete ";
+        constexpr std::wstring_view horizontal_border = L"-\u2500\u2501\u2550";
+        const auto position = line.find(title);
+        return position != std::wstring::npos && position + title.size() < line.size()
+            && horizontal_border.find(line[position + title.size()]) != std::wstring::npos;
+    };
+    const auto completion = [&](const WorkbenchLines& lines) {
+        const auto title = std::find_if(lines.begin(), lines.end(), completion_title);
+        if (title == lines.end()) return false;
+        const auto options_end = title + (std::min)(lines.end() - title, std::ptrdiff_t{6});
+        return std::any_of(title + 1, options_end, [](const auto& line) {
+            return line.find(L"perf_catalog_01") != std::wstring::npos;
+        });
     };
     const auto palette = [](const WorkbenchLines& lines) {
         return workbench_contains(lines, L"Command palette")
@@ -68,7 +78,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
         return workbench_contains(lines, original_caret) && workbench_contains(lines, prefix)
             && !workbench_contains(lines, inserted)
             && !workbench_contains(lines, L"Type to search")
-            && !workbench_contains(lines, L"matching candidates");
+            && std::none_of(lines.begin(), lines.end(), completion_title);
     };
     const auto changed = [&](const WorkbenchLines& lines) {
         return workbench_contains(lines, inserted_caret) && workbench_contains(lines, inserted);
@@ -83,8 +93,10 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     }, "initial performance editor");
     renderer_type_text(input, prefix);
     workbench_observe_until(client, deadline, editor, "performance editor prefix");
-    (void)workbench_time_key(client, input, deadline, VK_SPACE, L' ', LEFT_CTRL_PRESSED,
-                            completion, "loaded synthetic catalogue");
+    require(!completion(workbench_observe(client)), "workbench completion starts closed");
+    renderer_key(input, VK_SPACE, L' ', LEFT_CTRL_PRESSED);
+    workbench_observe_until(client, (std::min)(deadline, Clock::now() + 3s),
+                           completion, "loaded synthetic catalogue");
     (void)workbench_time_key(client, input, deadline, VK_ESCAPE, L'\x1b', 0, editor, "dismiss catalogue warmload");
 
     const auto idle = workbench_observe(client);
