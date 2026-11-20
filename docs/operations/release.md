@@ -63,6 +63,9 @@ and [runtime evidence](verification.md#live-tls-from-the-packaged-structured-res
 The measured macOS PTY, xterm and Windows console scenarios met the proposed
 100 ms p95 target within their observed timing boundaries.
 [Interaction measurements](verification.md#archived-release-interaction-timings)
+This archive predates the confirmed cancellation status correction. The local
+fix passed the consecutive PostgreSQL cancellation regression.
+[Cancellation evidence](verification.md#delayed-connection-metadata-and-cancellation)
 
 For review, verify the exact archive files before first start and use the
 same-path rollback checks with isolated state. The independent cryptographic

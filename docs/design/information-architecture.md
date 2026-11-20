@@ -79,7 +79,9 @@ precision: `rows M-N of Total retained` (qualifying when results are truncated o
 filtered), and explicitly stating `0 rows returned` when a query yields an empty
 set (never misleadingly reporting `rows 0-0`). Truncation is stated in the
 summary, never implied by an absence. When an error is present it replaces this
-pane, because an error is the result.
+pane, because an error is the result. While a new query runs, any retained rows
+from a cancelled query are labelled `Previous result`. A failed transaction
+shows `ROLLBACK` before diagnostic details.
 
 The same pane has a second shape, reached with `Ctrl+K x`: one row down the
 screen, one column per line, with the names aligned. It exists because a grid
@@ -121,8 +123,10 @@ providers use the same shape; provider arguments and tokens are not displayed,
 and opening the surface performs no refresh or network request. The title keeps
 `Esc to close` visible so the inspection state never becomes a trap.
 
-**Footer.** What the client is doing right now (`Ready`, `Running`,
-`Cancellation requested`), the session's search path, and up to six key hints.
+**Footer.** Query status (`Ready`, `Running`, `Cancellation requested` or
+`Query cancelled by server`), transaction state, the session's search path and
+up to six key hints. At narrow widths, `Cancelled` leaves room for the full
+transaction status.
 
 ## Narrow and small
 

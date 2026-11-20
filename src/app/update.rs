@@ -357,9 +357,11 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::CancellationDelivered(_) => Vec::new(),
-        Message::CancellationFailed(diagnostic) => {
-            model.error = Some(*diagnostic);
-            clear_error_location(model);
+        Message::CancellationFailed { job, diagnostic } => {
+            if model.phase == (QueryPhase::CancellationRequested { job }) {
+                model.error = Some(*diagnostic);
+                clear_error_location(model);
+            }
             Vec::new()
         }
         Message::NoticeSourceInstalled { source, session_id } => {

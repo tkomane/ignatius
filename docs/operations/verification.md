@@ -1,5 +1,73 @@
 # Verification
 
+## Local release rehearsal and cancellation - 20 November 2026
+
+### Release quickstart replay
+
+The exact retained release source `61425c3` passed `cargo --locked xtask verify`
+on macOS 27.2.1 arm64 with Rust 1.100.0. All seven gates passed with no skips.
+The workspace ran 2,157 tests in 52 binaries, including 1,696 library tests,
+80 CLI contracts, 72 PostgreSQL integration tests and eight PTY restoration
+tests. The pinned PostgreSQL 18.7 arm64 containers used plain and `verify-full`
+TLS over loopback. The Unix-socket contract executed a query on a separate
+PostgreSQL 18.7 server built from the checked source archive for macOS. That
+server listened only on a private Unix socket. All test servers were stopped
+and the owned Docker containers, volumes and network were removed.
+[PostgreSQL 18.7 source](https://ftp.postgresql.org/pub/source/v18.7/)
+
+An optimized arm64 build identified as `local-rehearsal` reported the same
+source revision. Archiving that executable twice produced identical
+5,889,799-byte archives with SHA-256
+`60daa7c8197c62501d6eae44b6bc22d6f63115ef49747459652f7ad13e6c0ecf`.
+The quickstart validated the local record, generated and verified the manifest
+and checksums, and verified the exact four-file staging scope. The local
+readiness check reported eight blockers and exit 1.
+
+The three separately downloaded `ci/44681770913-1` target bundles matched their
+GitHub transport digests and passed record, manifest, scope and inventory
+verification. The rebuild combined these bundles with three separately verified
+runtime receipts that each recorded 11 passing checks. All 12 files matched
+the retained aggregate byte for byte. The rebuilt aggregate reported `blocked`
+and exit 1.
+The combined manifest SHA-256 was
+`7d0a422997e595810d1e9f16ea99a32d66f726a40380f4a873490f303ef141f1`.
+The exact archive evidence below covers installation, same-version replacement,
+rollback, and live debug-log privacy. T033 still requires hand verification,
+canonical evidence and live trust evidence. T035 remains open.
+[Hosted rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913)
+
+### Delayed connection, metadata and cancellation
+
+The exact `61425c3` macOS archive ran in an owned 120x40 PTY against read-only
+PostgreSQL 18.7 over `verify-full` TLS. A bounded loopback relay delayed server
+replies. The editor drew in 23.389 ms from process fork while the TLS negotiation
+reply was held, and it accepted and drew edits while connection and extension
+metadata replies were pending. The extension row appeared after release.
+
+During a server-observed `PgSleep`, the first frame after Ctrl+C showed
+`Cancellation requested` in 0.285 ms. The same backend was observed idle 24.563 ms
+after input while its reply was still held. A second key sent no additional
+cancel connection within the 120 ms observation window. The server log and the
+expanded diagnostic both reported SQLSTATE `57014`. The archived client showed
+the PostgreSQL diagnostic with a `Cancelled` pane title and omitted the specified
+`Query cancelled by server` status. A follow-up query succeeded on the same TLS
+backend, and the client exited zero and restored its terminal settings exactly.
+These are individual PTY observations.
+
+The optimized local macOS build at `53c6ab2` completed two consecutive
+cancellations on the same read-only TLS session. Each pending frame showed
+`Cancellation requested` while the reply was held, with no leftover
+confirmation from the earlier query. The current confirmation appeared in
+2.463 ms and 2.475 ms from reply release. Both server log events and expanded
+client diagnostics showed SQLSTATE `57014`. The next query succeeded on the
+same session, and exit 0 restored the terminal settings. All owned fixtures
+were removed. The sanitized receipt SHA-256 is
+`2921fa7adf3ac725a05cbaef9a8b2533aeb10eadee6f160f8e75e967ef8f4d54`.
+
+The 117 layout tests passed, including the original diagnostic, stale
+delivery errors, retained rows and `ROLLBACK` at 40x8. A focused split
+diagnostic test also passed. Desktop hand use remains open.
+
 ## Live TLS from the packaged structured-result build - 20 November 2026
 
 The exact archives from `ci/44681770913-1` at `61425c34097020ecec3ffead0bec7d4251680814`

@@ -1,4 +1,6 @@
 use crate::app::model::{Model, QueryPhase};
+use crate::diagnostics::DiagnosticKind;
+use crate::query::result::ExecutionStatus;
 use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
@@ -28,7 +30,24 @@ pub(crate) fn render_footer(
     buf: &mut Buffer,
 ) -> bool {
     let theme = &presentation.theme;
+    let server_cancelled = model.phase == QueryPhase::Idle
+        && model.connection.is_usable()
+        && model
+            .last_execution
+            .as_ref()
+            .filter(|execution| execution.status == ExecutionStatus::Cancelled)
+            .and_then(|execution| execution.error.as_ref())
+            .is_some_and(|error| {
+                // The same diagnostic kind can also describe a local deadline.
+                model.error.as_ref() == Some(error)
+                    && error.kind == DiagnosticKind::Cancelled
+                    && error
+                        .technical
+                        .iter()
+                        .any(|field| field.label == "SQLSTATE" && field.value == "57014")
+            });
     let (status_icon, status_token) = match model.phase {
+        QueryPhase::Idle if server_cancelled => (Icon::Warning, Token::Warning),
         QueryPhase::Idle => (Icon::Success, Token::Muted),
         QueryPhase::Running { .. } => (Icon::Info, Token::Info),
         QueryPhase::CancellationRequested { .. } => (Icon::Warning, Token::Warning),
@@ -41,7 +60,20 @@ pub(crate) fn render_footer(
     } else {
         presentation.icon(status_icon)
     };
-    let mut status = format!(" {leader}{}", model.phase.label());
+    let transaction = model.transaction.label();
+    let mut status = format!(
+        " {leader}{}",
+        if server_cancelled {
+            ExecutionStatus::Cancelled.label()
+        } else {
+            model.phase.label()
+        }
+    );
+    if server_cancelled
+        && display_width(&status) + display_width(transaction) + 2 > usize::from(area.width)
+    {
+        status = format!(" {leader}Cancelled");
+    }
     if let Some(elapsed) = model.running_for.filter(|_| model.phase.is_busy()) {
         status.push_str(&format!(" {:.1}s", elapsed.as_secs_f64()));
     }
@@ -58,7 +90,7 @@ pub(crate) fn render_footer(
         _ => Token::Muted,
     };
     spans.push(Span::styled(
-        format!("{} ", model.transaction.label()),
+        format!("{transaction} "),
         theme.style(transaction_token),
     ));
 
@@ -86,7 +118,7 @@ pub(crate) fn render_footer(
     // from focus and state, while the keymap supplies the exact active key.
     // Stop before the next complete pair would be clipped so every shown hint
     // retains both its key and its meaning in a narrow terminal.
-    let mut used = display_width(&status) + display_width(model.transaction.label()) + 2;
+    let mut used = display_width(&status) + display_width(transaction) + 2;
     if let Some(info) = model
         .connection
         .info()

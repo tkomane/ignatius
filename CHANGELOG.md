@@ -17,6 +17,11 @@ source can generate user-facing notes.
   value, column and primary key before sending a write.
 - Fixed: Cell Detail uses the column identity returned with the original
   PostgreSQL result when validating reviewed structured edits.
+- Fixed: The workbench shows `Query cancelled by server` alongside the
+  PostgreSQL diagnostic. Cancellation delivery errors stay scoped to their
+  original query.
+- Fixed: Results label earlier cancelled rows during a new query and show
+  `ROLLBACK` before failed-transaction details in short panes.
 - Fixed: Cell Detail accepts PostgreSQL array literals with spaces around
   elements and dimension markers. Quoted and escaped spaces remain part of
   the value.
