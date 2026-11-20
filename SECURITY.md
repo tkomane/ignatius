@@ -94,9 +94,11 @@ posture:
 1. **Catalogue revocation**: The candidate record in the release catalogue is immediately
    marked with status `blocked` or `withdrawn`, recording the revocation reason in its
    blockers list.
-2. **Fail-closed verification**: Both `cargo xtask release trust verify` and
-   `cargo xtask release check` refuse revoked, rotated or unverified signing bundles,
-   blocking release readiness across all tooling.
+2. **Fail-closed verification.** `cargo xtask release trust verify` checks that
+   the signature and provenance sidecars bind to the corresponding archives.
+   Apply the approved identities and current revocation policy with independent
+   Sigstore and SLSA verifiers. Record the outcome before running
+   `cargo xtask release check`, which requires verified evidence for readiness.
 3. **Advisory publication**: A private or public security advisory is published
    documenting the affected build identity and revocation details.
 4. **Operator rollback**: Operators are guided to immediately roll back to the last

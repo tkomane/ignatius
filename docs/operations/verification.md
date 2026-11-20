@@ -1,5 +1,25 @@
 # Verification
 
+## Same-path archive replacement and rollback - 20 November 2026
+
+The earlier `4cdfa5c` archive from `ci/44605153852-1` and the corrected
+`bde6711` archive from `ci/44655874167-1` are distinct builds of version
+`0.1.0`. The rehearsal verified each archive digest and executable identity,
+then selected both builds through one isolated install path. The candidate
+refused the synthetic unsupported schema with exit 3. Rollback restored
+the earlier binary, and file and tree digests verified byte-identical
+configuration, saved queries and history.
+[Earlier archive](https://github.com/tkomane/ignatius/actions/runs/44605153852)
+[Corrected archive](https://github.com/tkomane/ignatius/actions/runs/44655874167)
+
+The exact same-path file replacement passed 22 checks each on local macOS
+27.2.1 arm64, hosted Ubuntu 24.04 x64 and hosted Windows Server 2025 x64.
+Both aggregate allowlists, all six archive digests and both diagnostic
+checks per target passed. The isolated state was cleaned up on all three
+platforms. This verifies replacement between source revisions of the same
+product version. Published version upgrade and native hand use remain open.
+[Hosted Linux and Windows run](https://github.com/tkomane/ignatius/actions/runs/44663189704)
+
 ## Main packaging rehearsal - 20 November 2026
 
 All 15 jobs passed for exact source `bde6711`, which includes the plan-history
@@ -146,8 +166,7 @@ Material panes and no main-screen marker. The owned Ctrl+Q event exited 0,
 restored input mask 423 from 152 and kept output mask 7. Independent readback
 confirmed that all 1,026 marker pixels returned and the 171x133 baseline and
 restored crops were byte-identical. The owned Job emptied and the control
-pipe was quiescent. Cursor visibility on ARM64 and Windows 11 hand use with
-PowerShell 7 remain open.
+pipe was quiescent. The later calibration below measured cursor visibility.
 
 The combined source `e4afd30` repeated both archive routes successfully.
 [Windows 11 ARM64 run](https://github.com/tkomane/ignatius/actions/runs/44657817133)
@@ -156,6 +175,22 @@ The combined source `e4afd30` repeated both archive routes successfully.
 The final integration at `51d55c5` also restored a byte-identical main-screen
 crop after running the corrected archive from `ci/44655874167-1`.
 [Corrected archive on Windows 11](https://github.com/tkomane/ignatius/actions/runs/44658843842)
+
+## Calibrated Windows 11 ARM64 cursor restoration - 20 November 2026
+
+Windows Terminal 1.25.3131.0 on the native Windows 11 ARM64 desktop
+(`10.0.26200.0`, image `20261115.219.1`) rendered six shown and hidden
+cursor controls in the same owned window. Independent pixel counts were
+171, 0, 0, 171, 0 and 171. The main-screen marker was present only in
+the main buffer. The window stayed outside the Win32 foreground.
+
+The exact x64 executable from `ci/44655874167-1` ran under emulation.
+Its active alternate-screen frame contained zero pixels of the calibrated
+cursor colour. Ctrl+Q exited zero, restored the console modes and returned
+all 171 cursor pixels. The restored main-screen crop was byte-identical
+to the calibrated baseline. The owned Job emptied and the pipe drained.
+Windows 11 hand use with PowerShell 7 remains open.
+[Calibrated run](https://github.com/tkomane/ignatius/actions/runs/44662840792)
 
 ## Packaged Windows Terminal startup and quit - 20 November 2026
 

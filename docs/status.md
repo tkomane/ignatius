@@ -4,6 +4,19 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 55: Windows 11 cursor and archive replacement - 20 November 2026
+
+- A native Windows 11 ARM64 Terminal resolved all six shown and hidden
+  cursor controls. The archived x64 client hid the calibrated cursor, then
+  restored all 171 pixels and the original main-screen crop after Ctrl+Q.
+  [Cursor evidence](operations/verification.md#calibrated-windows-11-arm64-cursor-restoration---20-november-2026)
+- Two distinct archived builds of version `0.1.0` passed same-path
+  replacement and rollback on macOS arm64, Linux x64 and Windows x64.
+  Each platform passed 22 checks and preserved configuration, saved queries
+  and history. The release quickstart records the remaining hand-use and
+  trust gates.
+  [Archive replacement evidence](operations/verification.md#same-path-archive-replacement-and-rollback---20-november-2026)
+
 ## Wave 54: Native Windows paste restoration - 20 November 2026
 
 - All 24 actual Guard cases restored native bracketed paste across normal,

@@ -25,6 +25,10 @@ on:
         description: Full source revision recorded in the candidate manifest
         required: true
         type: string
+      window_cursor_calibration:
+        description: Calibrate the displayed cursor on the owned Windows 11 ARM64 window
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -40,6 +44,7 @@ jobs:
       CANDIDATE_RUN: ${{ inputs.candidate_run }}
       CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
       SOURCE_REVISION: ${{ inputs.source_revision }}
+      WINDOW_CURSOR_CALIBRATION: ${{ inputs.window_cursor_calibration }}
     steps:
       - name: Resolve the completed release run and attempt
         id: candidate
@@ -52,6 +57,9 @@ jobs:
               $env:CANDIDATE_ATTEMPT -cnotmatch '\A[1-9][0-9]{0,3}\z' -or
               $env:SOURCE_REVISION -cnotmatch '\A[0-9a-f]{40}\z') {
             throw "Expected a numeric run and attempt with a full lowercase source revision"
+          }
+          if ($env:WINDOW_CURSOR_CALIBRATION -ceq 'true' -and $env:PROBE -cne 'terminal-renderer-arm64') {
+            throw 'Window cursor calibration requires terminal-renderer-arm64.'
           }
           $runJson = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN/attempts/$env:CANDIDATE_ATTEMPT"
           if ($LASTEXITCODE -ne 0) { throw "Could not resolve the candidate run attempt" }
@@ -155,7 +163,8 @@ jobs:
         run: |
           ./tests/support/windows_conpty/Run-RendererCalibration.ps1 `
             -ArchivedClient $env:IGNATIUS_ARCHIVED_EXE -ExpectedClientSha256 $env:IGNATIUS_ARCHIVED_SHA256 `
-            -CandidateSource $env:SOURCE_REVISION -CandidateBuild $env:IGNATIUS_EXPECTED_BUILD
+            -CandidateSource $env:SOURCE_REVISION -CandidateBuild $env:IGNATIUS_EXPECTED_BUILD `
+            -WindowCursorCalibration:($env:WINDOW_CURSOR_CALIBRATION -ceq 'true')
 
       - name: Retain the owned archive rendering and restoration observations
         if: ${{ always() && steps.renderer.outcome != 'skipped' }}
@@ -170,3 +179,8 @@ jobs:
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/baseline.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-active.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-restored.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-0.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-1.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-2.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-3.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/cursor-phase-4.bmp

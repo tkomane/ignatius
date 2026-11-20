@@ -644,7 +644,8 @@ The integrated manual source passed full local verification on 25 October 2026:
 1,497 harness cases, actual PostgreSQL 18.6 plain/TLS and styled-buffer review.
 The local macOS socket case is skipped. Published `d92c416` in draft PR35 passed
 hosted Linux/macOS/Windows, pinned/MSRV and PG14/18 plain/TLS plus a real Linux
-socket. Fresh main-targeted CodeQL and native hand use remain pending.
+socket. Main-targeted CodeQL subsequently passed at `354fc82`.
+[CodeQL run](https://github.com/tkomane/ignatius/actions/runs/44660626847)
 T057 corrects the existing ignored `[ui] color` startup/doctor route. The final
 gate includes that correction; actual owned macOS PTY startup/quit probes show
 configured never emitting no painted SGRs, with explicit always/NO_COLOR controls.
@@ -658,7 +659,7 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 | Warp Integration on hosted Apple silicon | The source-built renderer captured the archived client and the restored shell. Ctrl+Q exited zero, restored the same PTY modes and preserved the OSC 11 response. See the [native renderer evidence](../operations/verification.md#warp-source-renderer---20-november-2026) |
 | Live terminal resize | The macOS PTY and automated Linux xterm verified compact and minimum-size layouts, then recovered retained results |
 | Windows Terminal, interactive | The archived client restored console modes and main-screen pixels on Windows Server 2025 x64 in Windows Terminal 1.25.3131.0. All 24 standalone Guard cases restored the native modes, cursor, paste state and main screen. See the [packaged renderer evidence](../operations/verification.md#packaged-windows-terminal-startup-and-quit---20-november-2026) and the [paste-observed Guard matrix](../operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026) |
-| Windows Terminal, Windows 11 ARM64 | The native ARM64 renderer displayed the x64 archive under emulation. Ctrl+Q restored the console modes and main-screen pixels. Cursor visibility and PowerShell 7 hand use remain open. See the [window-specific capture evidence](../operations/verification.md#windows-11-arm64-archive-rendering---20-november-2026) |
+| Windows Terminal, Windows 11 ARM64 | The native ARM64 renderer displayed the x64 archive under emulation and resolved all six cursor controls. Ctrl+Q restored console modes, the main-screen crop and every cursor pixel. PowerShell 7 hand use remains open. See the [calibrated window capture](../operations/verification.md#calibrated-windows-11-arm64-cursor-restoration---20-november-2026) |
 | Linux xterm 390 | Automated Xvfb rendering, verified TLS, a separate Unix-socket query, resize and terminal-mode restoration passed on Ubuntu 24.04.5 x86-64. Linux desktop hand use remains open. See the [renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
@@ -739,9 +740,9 @@ read/write safety contract:
 
 | Platform | Status |
 | --- | --- |
-| macOS on Apple silicon | At `ffb86a1`, local full verification and styled Buffer inspection passed; hosted macOS 26 arm64 tests/startup passed with Rust 1.97.1, including all three T055 regressions. Native visual/full hand-use acceptance remains open. |
-| Windows, GitHub `windows-latest` runner | At `ffb86a1`, Windows Server 2025 build/tests/startup/refusal passed, including all three T055 Buffer regressions. Windows 11/Windows Terminal hand use and full ConPTY restoration remain open; separate PR33's cursor-sensor diagnostic does not close them. |
-| Linux, GitHub `ubuntu-latest` runner | At `ffb86a1`, hosted build/tests/startup, PG14/18 plain/verified-TLS and the real Unix-socket contract passed. Prior `54056c2` separately covers all five PostgreSQL majors. Full-screen hand use and release installation remain open. |
+| macOS on Apple silicon | Hosted tests and the source-built Warp renderer passed. Two exact archived builds replaced one another and rolled back in an isolated install path. Signed Warp hand use remains open. |
+| Windows, GitHub `windows-latest` runner | Windows Server 2025 build/tests/startup/refusal passed. Native Windows Terminal and ConPTY restoration passed all 24 Guard cases. Windows 11 hand use remains open. |
+| Linux, GitHub `ubuntu-latest` runner | Hosted tests, PostgreSQL 14-18 and the Unix-socket contract passed. The archived x64 client also passed automated install and rollback. Desktop hand use remains open. |
 | Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
 
