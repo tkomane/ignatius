@@ -1,5 +1,31 @@
 # Verification
 
+## Windows 11 PowerShell workbench - 20 November 2026
+
+The exact x64 executable from `ci/44667989084-1` at `4e9509c` ran under
+emulation in native Windows Terminal 1.25.3131.0 on Windows 11 ARM64.
+The runner reported build `10.0.26200.0` and image `20261112.217.1`.
+The owned console used native PowerShell 7.6.10 without user profiles or
+history. The diagnostic matched the candidate manifest and executable SHA-256
+before launch. [Candidate run](https://github.com/tkomane/ignatius/actions/runs/44667989084)
+
+Ctrl+K = opened a fresh editor buffer. Ctrl+R executed a read-only query
+against a disposable loopback PostgreSQL 17.12 cluster. The native console
+reported `Completed`, one row, the `journey_value` column and `42`. The query
+returned that value only with the connected session in read-only mode.
+The calibrated cells contained 38 and 31 bright pixels in the retained
+bitmap. Independent visual inspection read the same result and a displayed
+elapsed time of 7 ms. [Native PowerShell run](https://github.com/tkomane/ignatius/actions/runs/44674774423)
+
+Ctrl+Q exited zero, restored the console masks and returned all 171
+calibrated cursor pixels. The restored crop matched the baseline byte for
+byte. The original PowerShell prompt executed a synthetic command and
+exited zero. The owned Job emptied, the control pipe drained, and the
+PostgreSQL cluster stopped and was removed. The x64 renderer regression
+control retained the exact candidate identity and a byte-identical restored
+crop. Human hand use remains open under T051.
+[x64 regression run](https://github.com/tkomane/ignatius/actions/runs/44674777493)
+
 ## Same-path archive replacement and rollback - 20 November 2026
 
 The earlier `4cdfa5c` archive from `ci/44605153852-1` and the corrected
