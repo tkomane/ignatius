@@ -184,6 +184,10 @@ void renderer_shell_stage(const std::wstring& pipe, const std::wstring& nonce, u
     send(pipe, line.str());
 }
 
+#ifdef IGNATIUS_WORKBENCH_PERF
+#include "renderer_workbench_perf.hpp"
+#endif
+
 COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline,
                                const std::wstring& work) {
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
@@ -192,6 +196,22 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
                 return line.find(L"Editor") != std::wstring::npos && line.find(L"[focused]") != std::wstring::npos;
             });
     }, work, "the archived workbench did not connect with editor focus");
+
+#ifdef IGNATIUS_WORKBENCH_PERF
+    try {
+        renderer_workbench_performance(product, input, deadline, work);
+    } catch (const std::runtime_error& error) {
+        const std::string_view detail(error.what());
+        std::ofstream failure(std::filesystem::path(work) / L"workbench-failure.txt");
+        if (detail.size() <= 192 && detail.starts_with("workbench ")
+            && std::all_of(detail.begin(), detail.end(), [](char ch) { return ch >= 32 && ch <= 126; })) {
+            failure << detail << '\n';
+        } else {
+            failure << "workbench performance probe did not complete\n";
+        }
+        throw;
+    }
+#endif
 
     renderer_key(input, 'K', L'k', LEFT_CTRL_PRESSED);
     renderer_type_text(input, L"=");

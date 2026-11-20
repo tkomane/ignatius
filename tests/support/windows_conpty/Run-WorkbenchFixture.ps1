@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)] [string] $ArchivedClient,
     [Parameter(Mandatory)] [string] $ExpectedClientSha256,
     [Parameter(Mandatory)] [string] $CandidateSource,
-    [Parameter(Mandatory)] [string] $CandidateBuild
+    [Parameter(Mandatory)] [string] $CandidateBuild,
+    [switch] $WorkbenchPerformance
 )
 
 Set-StrictMode -Version Latest
@@ -15,6 +16,10 @@ if (-not $IsWindows -or [Environment]::OSVersion.Version.Build -lt 22000 -or
     [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64' -or
     -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
     throw 'The workbench fixture requires the owned Windows 11 ARM64 runner.'
+}
+if ($WorkbenchPerformance -and ($CandidateBuild -cne 'ci/44681770913-1' -or
+    $CandidateSource -cne '61425c34097020ecec3ffead0bec7d4251680814')) {
+    throw 'The workbench timings require the exact retained candidate.'
 }
 
 $scratch = Join-Path $env:RUNNER_TEMP ('ignatius-workbench-' + [Guid]::NewGuid().ToString('N'))
@@ -165,6 +170,35 @@ try {
         if ($LASTEXITCODE -ne 0 -or $identity -cne '170012|on|true') {
             throw 'The owned PostgreSQL fixture did not confirm PostgreSQL 17.12, verified TLS and read-only mode.'
         }
+        if ($WorkbenchPerformance) {
+            # Seed only this newly created loopback cluster. The client connections retain the read-only default.
+            $catalogue = @'
+BEGIN READ WRITE;
+CREATE SCHEMA perf_aux;
+DO $$
+DECLARE ns text;
+BEGIN
+  FOREACH ns IN ARRAY ARRAY['public', 'perf_aux'] LOOP
+    FOR n IN 1..15 LOOP
+      EXECUTE format(
+        'CREATE TABLE %I.%I (c0 int,c1 text,c2 text,c3 text,c4 text,c5 text,c6 text,c7 text,c8 text,c9 text)',
+        ns, 'perf_catalog_' || lpad(n::text, 2, '0'));
+    END LOOP;
+  END LOOP;
+END $$;
+COMMIT;
+'@
+            & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -v ON_ERROR_STOP=1 -c $catalogue
+            if ($LASTEXITCODE -ne 0) { throw 'Could not seed the owned synthetic catalogue.' }
+            $shape = & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -c @'
+SELECT count(DISTINCT table_schema), count(DISTINCT (table_schema, table_name)), count(*)
+FROM information_schema.columns
+WHERE table_schema IN ('public', 'perf_aux') AND table_name ~ '^perf_catalog_[0-9]{2}$'
+'@
+            if ($LASTEXITCODE -ne 0 -or $shape -cne '2|30|300') {
+                throw 'Expected two schemas, 30 synthetic tables and 300 columns.'
+            }
+        }
     }
     finally {
         $env:PGSSLROOTCERT = $rootBefore
@@ -184,6 +218,7 @@ try {
         WindowCursorCalibration = $true
         WorkbenchPort = $port
         WorkbenchCa = $caPath
+        WorkbenchPerformance = $WorkbenchPerformance
     }
     & (Join-Path $PSScriptRoot 'Run-RendererCalibration.ps1') @journey
 }

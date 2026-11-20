@@ -8,6 +8,7 @@ param(
     [switch] $WindowCursorCalibration,
     [ValidateRange(0, 65535)] [int] $WorkbenchPort,
     [string] $WorkbenchCa,
+    [switch] $WorkbenchPerformance,
     [string] $GuardBuildManifest,
     [switch] $GuardMatrix,
     [switch] $GuardPaste,
@@ -161,6 +162,10 @@ $liveWorkbench = $WorkbenchPort -gt 0
 if ($liveWorkbench -ne (-not [string]::IsNullOrWhiteSpace($WorkbenchCa))) {
     throw 'The live workbench requires an owned loopback port and CA certificate.'
 }
+if ($WorkbenchPerformance -and (-not $liveWorkbench -or -not $WindowCursorCalibration -or
+    $CandidateBuild -cne 'ci/44681770913-1' -or $CandidateSource -cne '61425c34097020ecec3ffead0bec7d4251680814')) {
+    throw 'The workbench timings require the exact archived client in the owned Windows 11 ARM64 session.'
+}
 if ($liveWorkbench) {
     $shell = Get-Item -LiteralPath (Join-Path $PSHOME 'pwsh.exe')
     if (-not $WindowCursorCalibration -or $PSVersionTable.PSVersion.Major -ne 7 -or
@@ -306,6 +311,9 @@ if ($windowCapture) {
     $captureCompileOptions = @('/DIGNATIUS_RENDERER_WINDOW_CAPTURE', "/I$cppwinrt")
     $captureLibraries = @('WindowsApp.lib', 'D3D11.lib')
 }
+if ($WorkbenchPerformance) {
+    $captureCompileOptions += '/DIGNATIUS_WORKBENCH_PERF'
+}
 $probe = Join-Path $root 'renderer-probe.exe'
 Push-Location -LiteralPath $root
 try {
@@ -364,6 +372,9 @@ $sourceNames = @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_pr
 if ($liveWorkbench) {
     $sourceNames += @('Run-WorkbenchFixture.ps1', 'Workbench-Shell.ps1')
 }
+if ($WorkbenchPerformance) {
+    $sourceNames += 'renderer_workbench_perf.hpp'
+}
 if ($guardMode) {
     $sourceNames += @('guard_child.rs', 'Build.ps1', 'Validation.ps1', 'Run-Controls.ps1')
 }
@@ -421,6 +432,14 @@ if ($liveWorkbench) {
     $build['powershell_executable_sha256'] = FileDigest $shell.FullName
     $build['powershell_version'] = "$($PSVersionTable.PSVersion)"
     $build['powershell_architecture'] = 'arm64'
+}
+if ($WorkbenchPerformance) {
+    $build['workbench_performance_fixture'] = @{
+        postgresql_version = '17.12'
+        schemas = 2
+        tables = 30
+        columns_per_table = 10
+    }
 }
 if ($archiveMode) {
     $config = Join-Path $work 'config'
@@ -711,4 +730,34 @@ if ($archiveMode) {
             throw "The archived-client renderer did not retain $name."
         }
     }
+}
+
+if ($WorkbenchPerformance) {
+    $control = Get-Item -LiteralPath (Join-Path $work 'workbench-performance.pending')
+    if ($control -isnot [IO.FileInfo] -or $control.Length -le 0 -or $control.Length -gt 16384 -or
+        ($control.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Expected one bounded regular performance receipt from the owned actor.'
+    }
+    $timing = [IO.File]::ReadAllText($control.FullName) | ConvertFrom-Json
+    $actions = @('editor_insert', 'editor_backspace', 'palette_open', 'palette_close', 'completion_open', 'completion_close')
+    if ($timing.schema_version -ne 1 -or $timing.scope -cne 'native console screen-buffer timing' -or
+        $timing.qpc_frequency -le 0 -or $timing.warmup_actions -ne 24 -or $timing.measured_actions -ne 120 -or
+        $timing.idle_unchanged -cne $true -or $timing.catalogue_loaded -cne $true -or
+        $timing.viewport_columns -lt 80 -or $timing.viewport_columns -gt 200 -or
+        $timing.viewport_rows -lt 24 -or $timing.viewport_rows -gt 80 -or
+        @($timing.samples.PSObject.Properties.Name).Count -ne $actions.Count) {
+        throw 'The timing receipt did not identify the expected console, warm-up and measured actions.'
+    }
+    foreach ($action in $actions) {
+        $ticks = @($timing.samples.$action)
+        if ($ticks.Count -ne 20 -or @($ticks | Where-Object {
+                $_ -isnot [long] -or $_ -le 0 -or $_ -ge (2 * $timing.qpc_frequency)
+            }).Count -ne 0) {
+            throw "Invalid native QPC samples for $action."
+        }
+    }
+    $performancePath = Join-Path $work 'workbench-performance.json'
+    [IO.File]::Move($control.FullName, $performancePath)
+    $build['workbench_performance_report_sha256'] = FileDigest $performancePath
+    [IO.File]::WriteAllText((Join-Path $work 'build.json'), ((ConvertTo-Json $build -Depth 6) + "`n"))
 }
