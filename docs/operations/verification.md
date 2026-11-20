@@ -1,5 +1,76 @@
 # Verification
 
+## Live TLS from the packaged structured-result build - 20 November 2026
+
+The exact archives from `ci/44681770913-1` at `61425c34097020ecec3ffead0bec7d4251680814`
+matched the retained manifest, packaged runtime receipts and CycloneDX
+executable digests. The manifest SHA-256 is
+`7d0a422997e595810d1e9f16ea99a32d66f726a40380f4a873490f303ef141f1`.
+[Candidate rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913)
+
+| Archive target | Executing environment | Server |
+| --- | --- | --- |
+| `aarch64-apple-darwin` | Native macOS 27.2.1 arm64 | PostgreSQL 18.7 |
+| `x86_64-unknown-linux-gnu` | Ubuntu 24.04.5 x86-64 emulated on Apple silicon | PostgreSQL 18.7 |
+| `x86_64-pc-windows-msvc` | Hosted Windows Server 2025 x64 | PostgreSQL 17.12 |
+
+Each extracted binary returned a read-only row over `verify-full`. The
+server confirmed that TLS was in use. Connecting by numeric address to the
+same DNS-only certificate returned exit 6 and empty result output. All three
+debug probes found the value-free statement descriptor and kept synthetic
+SQL, result and password markers out of their scoped logs and diagnostics.
+The owned database fixtures were removed. [Hosted Windows TLS run](https://github.com/tkomane/ignatius/actions/runs/44686665152)
+
+On macOS, a script-owned 120x38 PTY displayed a live JSONB result and its
+Cell Detail tree. Ctrl+Q exited zero and restored POSIX terminal modes, the
+cursor and the alternate screen.
+
+In isolated xterm 390 at 116x30, the exact Linux executable displayed the
+verified TLS connection, a structured JSONB cell and its exact raw text.
+The reviewed edit of the aliased column displayed one affected row and
+retained the previous result snapshot. An independent server query confirmed
+the new value and the untouched number's full precision. Ctrl+Q exited zero,
+restored the original POSIX and seven DEC modes, and returned the same
+604,800 RGB pixels in the compared viewport. These are automated observations.
+Desktop hand use remains open.
+
+### Same-path replacement and rollback of the structured-result build
+
+The isolated install path switched from `4e9509c` (`ci/44667989084-1`) to
+`61425c3` (`ci/44681770913-1`) and back to the exact earlier executable.
+Both carried product version `0.1.0`. Independently read receipts confirmed
+22 checks per target on macOS arm64 and hosted Linux and Windows x64. The
+candidate returned exit 3 for an intentionally unsupported configuration.
+The restored executable validated the original configuration, and the
+configuration, saved SQL and history matched their original digests.
+Both archive bundles passed their 12-file allowlists, manifest checks and
+executable identity checks. All isolated installs and test state were removed.
+[Earlier archive](https://github.com/tkomane/ignatius/actions/runs/44667989084)
+[Hosted replacement and rollback](https://github.com/tkomane/ignatius/actions/runs/44688287801)
+
+### Native Windows 11 workbench over verified TLS
+
+The retained x64 archive from `ci/44681770913-1` ran under emulation inside
+native Windows Terminal 1.25.3131.0 and PowerShell 7.6.10 on Windows 11 ARM64
+(build `10.0.26200.0`, runner image `20261115.219.1`). The owned
+PostgreSQL 17.12 cluster used a fresh
+DNS-only certificate for localhost. The exact app connected with
+`verify-full` and rendered `journey_value = 42` at 90x27. Its query could
+return that row only when PostgreSQL reported TLS and read-only mode for that
+same session. The downloaded frame showed one completed row in 5 ms.
+[Native Windows 11 run](https://github.com/tkomane/ignatius/actions/runs/44688841441)
+
+Ctrl+Q exited zero and restored the console modes, all 171 calibrated cursor
+pixels and the byte-identical main-screen crop. The original PowerShell
+prompt ran a command and exited zero. The owned Job and control pipe
+emptied, and the fixture was removed. Independent readback matched the
+binary SHA-256, all six cursor controls and the result and restoration captures.
+The first attempt on the same archive reached the editor with TLS but did not
+execute the typed query. The passing diagnostic waits for the final editor
+caret before sending Ctrl+R once. Windows 11 hand use remains T051.
+[First attempt](https://github.com/tkomane/ignatius/actions/runs/44687572408)
+[x64 renderer control](https://github.com/tkomane/ignatius/actions/runs/44687567971)
+
 ## Windows 11 PowerShell workbench - 20 November 2026
 
 The exact x64 executable from `ci/44667989084-1` at `4e9509c` ran under

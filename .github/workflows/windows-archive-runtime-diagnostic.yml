@@ -30,7 +30,7 @@ on:
         default: false
         type: boolean
       powershell_workbench:
-        description: Run a live read-only PostgreSQL query from the owned PowerShell 7 session
+        description: Run a live read-only PostgreSQL verify-full query from the owned PowerShell 7 session
         default: false
         type: boolean
 

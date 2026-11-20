@@ -4,6 +4,26 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 60: Live TLS from release archives - 20 November 2026
+
+- All three exact `61425c3` archives returned a read-only PostgreSQL result
+  over `verify-full`, refused the wrong certificate name with exit 6,
+  passed the scoped debug privacy check, and removed their disposable fixtures.
+  [Live archive evidence](operations/verification.md#live-tls-from-the-packaged-structured-result-build---20-november-2026)
+- The same macOS archive rendered the JSONB inspector in a local owned PTY.
+  The Linux archive rendered and completed a reviewed JSONB edit in isolated
+  xterm, with full precision confirmed on the server. Both restored their
+  terminal state after Ctrl+Q.
+- A replacement and rollback between the exact `4e9509c` and `61425c3`
+  archives passed 22 checks each on macOS arm64 and hosted Linux and
+  Windows x64. The restored build retained configuration, saved queries
+  and history byte for byte.
+  [Replacement evidence](operations/verification.md#same-path-replacement-and-rollback-of-the-structured-result-build)
+- Native Windows 11 Terminal with PowerShell 7 displayed a read-only
+  PostgreSQL 17.12 query from the same archive over `verify-full`. Ctrl+Q
+  restored the cursor, console modes and original prompt. Hand use stays
+  open. [Windows 11 evidence](operations/verification.md#native-windows-11-workbench-over-verified-tls)
+
 ## Wave 59: Packaged structured results and terminal evidence - 20 November 2026
 
 - The non-publishing rehearsal for `61425c3` passed all 15 jobs. Independent
