@@ -213,7 +213,8 @@ void renderer_shell_stage(const std::wstring& pipe, const std::wstring& nonce, u
 #endif
 
 COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_point deadline,
-                               const std::wstring& work) {
+                               const std::wstring& work, [[maybe_unused]] const std::wstring& pipe,
+                               [[maybe_unused]] const std::wstring& nonce) {
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
         return lines.front().find(L"ig_probe@localhost:") != std::wstring::npos
             && std::any_of(lines.begin(), lines.end(), [](const auto& line) {
@@ -224,7 +225,7 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
 #ifdef IGNATIUS_WORKBENCH_PERF
     try {
 #ifdef IGNATIUS_WORKBENCH_GRID
-        renderer_workbench_grid(product, input, deadline, work);
+        renderer_workbench_grid(product, input, deadline, work, pipe, nonce);
 #else
         renderer_workbench_performance(product, input, deadline, work);
 #endif

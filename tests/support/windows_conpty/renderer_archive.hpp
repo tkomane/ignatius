@@ -142,7 +142,7 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
             throw std::runtime_error("archived client did not reach the native startup checkpoint");
         }
         if (shell) {
-            const auto cell = renderer_workbench_query(client, input, deadline, work);
+            const auto cell = renderer_workbench_query(client, input, deadline, work, pipe, nonce);
             renderer_shell_stage(pipe, nonce, 1, cell);
         }
         std::ostringstream acquired;
@@ -184,6 +184,14 @@ struct RendererWindowProof {
     int cell_width{}, cell_height{};
 };
 
+#ifdef IGNATIUS_WORKBENCH_GRID
+struct RendererGridWitness {
+    std::uint64_t console_verified_qpc{};
+    std::int64_t fence_100ns{}, compositor_100ns{};
+    int width{}, height{};
+};
+#endif
+
 struct RendererArchiveReceipt {
     DWORD pid{}, acquired_input{}, acquired_output{}, restored_input{}, restored_output{}, exit_code{STILL_ACTIVE};
     USHORT process_machine{}, native_machine{};
@@ -200,6 +208,9 @@ struct RendererArchiveReceipt {
     bool wgc_software_device{};
     std::optional<std::size_t> wgc_active_cursor_pixels;
     RendererWindowProof wgc_baseline{}, wgc_active{}, wgc_restored{};
+#ifdef IGNATIUS_WORKBENCH_GRID
+    std::optional<RendererGridWitness> grid_witness;
+#endif
 };
 
 Handle renderer_register_child(HANDLE actor, HANDLE job, const std::wstring& executable,
@@ -347,6 +358,75 @@ RendererPixelObservation observe_archive_window_phase(ignatius_wgc::WindowCaptur
     throw std::runtime_error("owned WGC window did not display the required stable phase");
 }
 
+#ifdef IGNATIUS_WORKBENCH_GRID
+RendererGridWitness renderer_capture_grid_witness(ignatius_wgc::WindowCapture& capture,
+    const std::filesystem::path& path, const std::array<std::uint32_t, 9>& cells,
+    std::uint64_t console_qpc, const RendererWindowProof& grid, Clock::time_point deadline) {
+    using namespace renderer_pixels_detail;
+    // The actor specifies the Result title, matching status, header, and first
+    // data rows, then the status text, row_code and wide_a column positions.
+    require(cells[0] >= 6 && cells[0] < cells[1] && cells[1] < cells[2] && cells[2] < cells[3]
+            && cells[3] <= 24 && cells[4] >= 1 && cells[4] <= 59 && cells[5] >= 1
+            && cells[5] < cells[6] && cells[5] <= 81 && cells[6] <= 81
+            && grid.cell_width > 0 && grid.cell_height > 0, "bounded retained grid witness cells");
+    const int title = static_cast<int>(cells[0]), status = static_cast<int>(cells[1]);
+    const int header = static_cast<int>(cells[2]), first = static_cast<int>(cells[3]);
+    const int match = static_cast<int>(cells[4]), code = static_cast<int>(cells[5]);
+    const int wide = static_cast<int>(cells[6]);
+    const auto box = [&](int x, int y, int columns, int rows = 1) {
+        return Box{grid.grid_left + x * grid.cell_width, grid.grid_top + y * grid.cell_height,
+            grid.grid_left + (x + columns) * grid.cell_width, grid.grid_top + (y + rows) * grid.cell_height};
+    };
+    const auto crop = box(0, title, 90, 26 - title);
+    require(crop.area() <= 350000, "bounded Results-only WGC crop");
+    const auto fence = renderer_capture_fence(console_qpc);
+    capture.restart(deadline);
+    while (Clock::now() < deadline) {
+        const auto frame = renderer_window_frame(capture, deadline, fence);
+        require(!frame.foreground && inside(crop, frame.pixels), "retained grid stays inside the owned inactive window");
+        const auto ink = [](const Pixel& pixel) { return pixel.r >= 100 && pixel.g >= 110 && pixel.b >= 100; };
+        const auto ink_pixels = [&](const Box& area) {
+            std::size_t total{};
+            for (int y = area.top; y < area.bottom; ++y) {
+                const auto* row = frame.pixels.row(y);
+                total += static_cast<std::size_t>(std::count_if(row + area.left, row + area.right, ink));
+            }
+            return total;
+        };
+        const auto text_anchor = [&](int x, int y) {
+            int painted{};
+            for (int i = 0; i < 8; ++i) {
+                if (ink_pixels(box(x + i, y, 1)) >= 2) ++painted;
+            }
+            return painted >= 6;
+        };
+        const auto wide_pair = [&](int y) {
+            const auto a = box(wide, y, 2);
+            const auto b = box(wide + 2, y, 2);
+            std::size_t difference{};
+            for (int row = a.top; row < a.bottom; ++row) {
+                const auto* pixels = frame.pixels.row(row);
+                for (int x = 0; x < a.width(); ++x) {
+                    if (ink(pixels[a.left + x]) != ink(pixels[b.left + x])) ++difference;
+                }
+            }
+            // Visible glyph strokes must differ. Identical missing-character
+            // boxes or a flat background do not establish a wide visual cell.
+            return ink_pixels(a) >= 4 && ink_pixels(b) >= 4 && difference >= 4;
+        };
+        const auto matching_digits = std::all_of(renderer_grid_filter_digits.begin(),
+            renderer_grid_filter_digits.end(), [&](int digit) { return ink_pixels(box(match + digit, status, 1)) >= 4; });
+        if (matching_digits && text_anchor(match, status) && text_anchor(code, header)
+            && wide_pair(first) && wide_pair(first + 1)
+            && count_color(frame.pixels, crop, {0x19, 0x1c, 0x22}) >= 512) {
+            write_crop(path, crop, cropped_pixels(frame.pixels, crop), deadline);
+            return {console_qpc, fence, frame.compositor_time, crop.width(), crop.height()};
+        }
+    }
+    throw std::runtime_error("post-input WGC frame did not show the retained-grid text and wide-cell anchors");
+}
+#endif
+
 void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const std::filesystem::path& path,
                                      std::uint64_t prior_qpc, Clock::time_point deadline,
                                      bool observe_cursor, RendererArchiveReceipt& receipt) {
@@ -445,6 +525,14 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_ca
                   << ",\"result_ink_pixels\":[" << receipt.workbench_ink[0] << ',' << receipt.workbench_ink[1] << ']'
                   << ",\"prompt_executed\":" << truth(receipt.powershell_prompt) << '}';
     }
+#ifdef IGNATIUS_WORKBENCH_GRID
+    if (receipt.grid_witness) {
+        const auto& witness = *receipt.grid_witness;
+        std::cout << ",\"filtered_grid_witness\":{\"console_verified_qpc\":" << witness.console_verified_qpc
+                  << ",\"fence_100ns\":" << witness.fence_100ns << ",\"compositor_100ns\":" << witness.compositor_100ns
+                  << ",\"width\":" << witness.width << ",\"height\":" << witness.height << '}';
+    }
+#endif
     if (window_cursor_calibration) {
         std::cout << ",\"active_cursor_pixels\":"
                   << (receipt.wgc_active_cursor_pixels ? std::to_string(*receipt.wgc_active_cursor_pixels) : "null");

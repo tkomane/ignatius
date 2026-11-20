@@ -946,6 +946,28 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 server->ack(work_deadline);
                 continue;
             }
+#if defined(IGNATIUS_WORKBENCH_GRID) && defined(IGNATIUS_RENDERER_WINDOW_CAPTURE)
+            if (live_shell && parts[0] == "G") {
+                auto& product = *receipt.archive;
+                const auto data = renderer_numbers<9>(parts);
+                const auto observed = renderer_stamp(data[7], data[8]);
+                require(window_cursor_calibration && owned_capture && powershell && archived_client
+                        && receipt.columns == 90 && receipt.rows == 27
+                        && !product.grid_witness && !product.workbench_result && !product.raw_alternate
+                        && WaitForSingleObject(powershell.value, 0) == WAIT_TIMEOUT
+                        && WaitForSingleObject(archived_client.value, 0) == WAIT_TIMEOUT
+                        && same_path(image(archived_client.value), archive) && observed >= prior_qpc && observed <= ticks(),
+                        "one native filtered-grid observation from the authenticated live archive");
+                exact_job(archived_client.value, job.value);
+                verify_renderer_window(renderer, job.value, terminal, title);
+                const auto grid_deadline = (std::min)(work_deadline, Clock::now() + 2s);
+                product.grid_witness = renderer_capture_grid_witness(*owned_capture,
+                    folder / L"workbench-filtered-grid.pending", data, observed, product.wgc_baseline, grid_deadline);
+                verify_renderer_window(renderer, job.value, terminal, title);
+                server->ack(work_deadline);
+                continue;
+            }
+#endif
             if (live_shell && parts[0] == "W") {
                 auto& product = *receipt.archive;
                 const auto data = renderer_numbers<5>(parts);
@@ -954,6 +976,10 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         && observed >= prior_qpc && observed <= ticks(),
                         "a live workbench observation belongs to the owned shell and archive");
                 if (data[0] == 1) {
+#ifdef IGNATIUS_WORKBENCH_GRID
+                    require(product.grid_witness && observed >= product.grid_witness->console_verified_qpc,
+                            "existing TLS result follows the filtered-grid witness");
+#endif
                     require(!product.workbench_result && !product.raw_alternate
                             && data[1] < receipt.columns - 1 && data[2] < receipt.rows
                             && WaitForSingleObject(archived_client.value, 0) == WAIT_TIMEOUT,

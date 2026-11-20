@@ -1,8 +1,9 @@
 // Test-only retained-grid timing over the already authenticated archive console.
 enum class WorkbenchGridOrder { server, ascending, descending };
+constexpr std::array<int, 3> renderer_grid_filter_digits{9, 17, 19};
 
 struct WorkbenchGridHeader {
-    std::size_t row{}, code{}, key{}, bucket{}, wide{};
+    std::size_t row{}, code{}, key{}, bucket{}, wide{}, results_row{};
 };
 
 std::optional<WorkbenchGridHeader> workbench_grid_header(const WorkbenchLines& lines) {
@@ -20,7 +21,7 @@ std::optional<WorkbenchGridHeader> workbench_grid_header(const WorkbenchLines& l
         const auto wide = row->find(L"wide_a");
         if (code < key && key < bucket && bucket < wide && wide != std::wstring::npos) {
             return WorkbenchGridHeader{static_cast<std::size_t>(row - lines.begin()),
-                code, key, bucket, wide};
+                code, key, bucket, wide, static_cast<std::size_t>(results - lines.begin())};
         }
     }
     return std::nullopt;
@@ -123,7 +124,7 @@ std::vector<INPUT_RECORD> workbench_grid_key(wchar_t character, bool chord = fal
 }
 
 void renderer_workbench_grid(const Child& client, HANDLE input, Clock::time_point archive_deadline,
-                             const std::wstring& work) {
+                             const std::wstring& work, const std::wstring& pipe, const std::wstring& nonce) {
     const auto work_deadline = archive_deadline - 6s;
     require(Clock::now() < work_deadline, "leave six seconds for the existing workbench query and quit");
     const auto editor_focused = [](const WorkbenchLines& lines) {
@@ -239,6 +240,41 @@ void renderer_workbench_grid(const Child& client, HANDLE input, Clock::time_poin
         open_sort(deadline);
         retain(2, workbench_time_key(client, input, deadline, VK_RETURN, L'\r', 0, state(server), names[2]));
     }
+
+    // Keep the exact filtered grid displayed until the authenticated supervisor
+    // acknowledges one post-input WGC frame. No witness work enters the samples.
+    const auto unfiltered = workbench_observe(client);
+    const auto witness_deadline = (std::min)(work_deadline, Clock::now() + 3s);
+    renderer_send_keys(input, workbench_grid_key(L'f', true));
+    workbench_observe_until(client, witness_deadline, [](const auto& lines) {
+        return workbench_contains(lines, L"[filter:");
+    }, "open the filter for the retained grid witness");
+    renderer_send_keys(input, hash_key);
+    workbench_observe_until(client, witness_deadline, state(server, true), "exact filtered grid witness");
+    const auto filtered = workbench_observe(client);
+    const auto heading = workbench_grid_header(filtered);
+    require(heading && workbench_grid_state(filtered, server, true), "coherent native grid before its WGC witness");
+    static constexpr std::wstring_view matching = L"matching 100 of 1000 retained rows";
+    const auto status = std::find_if(filtered.begin() + static_cast<std::ptrdiff_t>(heading->results_row),
+        filtered.end(), [](const auto& line) { return line.find(matching) != std::wstring::npos; });
+    const auto first = std::find_if(filtered.begin() + static_cast<std::ptrdiff_t>(heading->row + 1),
+        filtered.end(), [&](const auto& line) { return line.substr(heading->code, 3) == L"row"; });
+    require(status != filtered.end() && first != filtered.end() && std::next(first) != filtered.end()
+        && std::next(first)->substr(heading->code, 3) == L"row", "fixed status and data cells for the grid witness");
+    const auto status_row = static_cast<std::size_t>(status - filtered.begin());
+    const auto status_column = status->find(matching);
+    for (const int digit : renderer_grid_filter_digits) {
+        require(unfiltered.at(status_row).at(status_column + static_cast<std::size_t>(digit)) == L' ',
+                "the unfiltered grid lacks the three matching-count digit anchors");
+    }
+    std::ostringstream witness;
+    witness << "G " << ascii(nonce) << ' ' << heading->results_row << ' ' << status_row
+            << ' ' << heading->row << ' ' << (first - filtered.begin()) << ' ' << status_column
+            << ' ' << heading->code << ' ' << heading->wide;
+    renderer_stamp(witness, ticks());
+    send(pipe, witness.str());
+    renderer_key(input, VK_ESCAPE, L'\x1b');
+    workbench_observe_until(client, work_deadline, state(server), "clear the witness filter before TLS proof");
 
     renderer_key(input, VK_TAB, L'\t');
     workbench_observe_until(client, work_deadline, editor_focused, "restore the focused Editor before TLS proof");
