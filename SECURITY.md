@@ -22,8 +22,8 @@ reproduction, and coordinate the fix and affected verification. Keep the report
 and any accidentally supplied data private. Public disclosure, release timing
 and changes to access or reporting controls require the owner's decision.
 The acknowledgement and assessment targets above do not promise a resolution
-date. The reporting setting was confirmed enabled on 25 October 2026;
-submission and notification handling have not been tested by sending a report.
+date. GitHub's repository API confirmed the reporting setting was enabled on
+20 November 2026. Submission and notification handling remain untested.
 
 ## What this project protects
 

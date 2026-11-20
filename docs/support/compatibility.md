@@ -656,10 +656,10 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 | --- | --- |
 | macOS, in a pseudo-terminal | Verified: full-screen render, Ctrl+R executed a query, Ctrl+Q restored the terminal, with the exact escape sequences captured |
 | Warp on macOS, interactive | A native SIGTERM run restored the POSIX terminal settings. The hosted signed app reached its first-run agreement. Visual hand use, cursor appearance and OSC 11 response remain open. See the [startup diagnostic](../operations/verification.md#warp-startup-diagnostics---20-november-2026) |
-| Warp Integration on hosted Apple silicon | The source-built renderer captured the archived client and the restored shell. Ctrl+Q exited zero, restored the same PTY modes and preserved the OSC 11 response. See the [native renderer evidence](../operations/verification.md#warp-source-renderer---20-november-2026) |
+| Warp Integration on hosted Apple silicon | The source-built renderer displayed the `5e5712a` archive's live read-only result over `verify-full` TLS. Ctrl+Q restored the shell and PTY modes. The recovered prompt showed a cursor, and the OSC 11 response matched before and after. [Renderer evidence](../operations/verification.md#cancellation-fix-candidate---20-november-2026) |
 | Live terminal resize | The macOS PTY and automated Linux xterm verified compact and minimum-size layouts, then recovered retained results |
 | Windows Terminal, Windows Server 2025 x64 | The archived client restored console modes and main-screen pixels in Windows Terminal 1.25.3131.0. All 24 standalone Guard cases restored the native modes, cursor, paste state and main screen. [Packaged renderer evidence](../operations/verification.md#packaged-windows-terminal-startup-and-quit---20-november-2026) and [native Guard matrix](../operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026) |
-| Windows Terminal, Windows 11 ARM64 | Native Windows Terminal 1.25.3131.0 and PowerShell 7.6.10 ran the archived x64 client under emulation. The automated workbench returned a row over `verify-full` from loopback PostgreSQL 17.12 with server-confirmed TLS and read-only mode. Ctrl+Q restored console modes, the main-screen crop and all 171 calibrated cursor pixels. The same PowerShell prompt ran a command. PowerShell 7 hand use remains open. [Verified-TLS workbench journey](../operations/verification.md#native-windows-11-workbench-over-verified-tls) and [cursor calibration](../operations/verification.md#calibrated-windows-11-arm64-cursor-restoration---20-november-2026) |
+| Windows Terminal, Windows 11 ARM64 | Native Windows Terminal 1.25.3131.0 and PowerShell 7.6.10 ran the `5e5712a` x64 archive under emulation. The workbench returned a read-only `verify-full` result against loopback PostgreSQL 17.12. Ctrl+Q restored console modes, the main-screen crop, all 171 calibrated cursor pixels and the same PowerShell prompt. PowerShell 7 hand use remains open. [Current workbench evidence](../operations/verification.md#cancellation-fix-candidate---20-november-2026) and [cursor calibration](../operations/verification.md#calibrated-windows-11-arm64-cursor-restoration---20-november-2026) |
 | Linux xterm 390 | On Ubuntu 24.04.5 x86-64 under Xvfb, the automated renderer displayed PostgreSQL 18.7 query results over verified TLS and over a separate Unix socket. Both runs verified resize recovery and terminal restoration. Linux desktop hand use remains open. [Renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
@@ -763,24 +763,24 @@ The non-publishing release workflow defines the first archive targets. A target
 is not inferred from the host that verifies it, and a target outside this table
 has no release artefact claim.
 
-The 20 November rehearsal bound source `61425c3` and build `ci/44681770913-1`.
+The 20 November rehearsal bound source `5e5712a` and build `ci/44721590021-1`.
 Archive and executable checksums, CycloneDX inventories, repeat builds and
 same-path replacement and rollback checks passed for all three targets.
 The two Windows repeat builds shared a runner. Each exact archive passed a
-live verified-TLS query and scoped log-privacy checks.
-[Candidate review](../operations/release.md#candidate-review---20-november-2026)
-and [exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913).
+live verified-TLS query, hostname refusal and scoped log-privacy checks.
+[Candidate review](../operations/release.md#current-candidate-review)
+and [exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/44721590021).
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, native archive checks | macOS 27.2.1 arm64 verified TLS against PostgreSQL 18.7 and restored an owned PTY after displaying the JSONB inspector. Signed Warp hand use remains open |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, native archive checks | macOS 27.2.1 arm64 verified TLS and cancellation recovery against PostgreSQL 18.7. A separate hosted Warp source renderer displayed a live result and restored the shell. Signed Warp hand use remains open |
 | `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | Windows Server 2025 x64 verified TLS against PostgreSQL 17.12. Native Windows 11 Terminal restored its cursor and console modes after running the same x64 archive under emulation. Windows Terminal hand use remains open |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, emulated archive checks | Ubuntu 24.04.5 x86-64 under emulation verified TLS against PostgreSQL 18.7, a reviewed JSONB edit and xterm restoration. The archive requires `GLIBC_2.39` symbols. Linux desktop hand use remains open |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, emulated live archive checks | Ubuntu 24.04.5 x86-64 under emulation verified TLS, consecutive cancellations and PTY restoration against PostgreSQL 18.7. The archive requires `GLIBC_2.39` symbols. Linux desktop hand use remains open |
 
 The earlier macOS archive at `24f1c8e` failed its privacy audit when debug
 logging persisted synthetic SQL. The current probes use the newer archive
 and a separately verified marker. [Earlier run](https://github.com/tkomane/ignatius/actions/runs/33563497933) and
-[current archive probe results](../operations/verification.md#live-tls-from-the-packaged-structured-result-build---20-november-2026).
+[current archive probe results](../operations/verification.md#cancellation-fix-candidate---20-november-2026).
 
 Evidence classes have distinct meanings:
 
