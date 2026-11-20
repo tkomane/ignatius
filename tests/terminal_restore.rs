@@ -4,8 +4,9 @@
 //! They cannot prove that the binary actually emits them, in order, when a
 //! person quits it. This runs the real client under a pty and reads the bytes.
 //!
-//! Unix only. The Windows equivalent needs ConPTY and is tracked as open work in
-//! `docs/status.md`; skipping is reported rather than passed over.
+//! These tests use Unix PTYs. The Windows ConPTY and Terminal renderer harness
+//! lives under `tests/support/windows_conpty/`. See `docs/operations/verification.md`
+//! for native Windows and Linux renderer evidence.
 
 // Tests report skips to the developer running them; that is what stderr is for.
 #![allow(clippy::print_stderr)]

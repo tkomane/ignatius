@@ -78,7 +78,10 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [ ] T051 Verify by hand on Windows 11 in Windows Terminal with PowerShell 7.
   [Automated live query and shell restoration](../../docs/operations/verification.md#windows-11-powershell-workbench---20-november-2026)
   passed on Windows 11 ARM64 with native PowerShell 7.6.10 and the archived x64 client.
-- [ ] T052 Verify on Linux, including the Unix socket path (automated socket evidence exists; full-screen Linux hand use remains unverified)
+- [ ] T052 Verify on Linux, including the Unix socket path.
+  [Automated xterm evidence](../../docs/operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026)
+  covers live PostgreSQL 18.7 over verified TLS and a separate Unix socket,
+  with resize recovery and terminal restoration. Linux desktop hand use remains open.
 - [x] T053 Extend the CI server matrix to PostgreSQL 14 through 18
 - [x] T054 Subprocess-level evidence for exit codes 5, 6 and 8
 - [x] T055 Automated terminal-restoration test in CI (pty on Unix)
@@ -302,8 +305,8 @@ Rust 1.97.1, with zero skips. A separate actual Rust 1.90.0 locked/offline
 workspace/all-targets/all-features check also passed. Exact source, build,
 fixture and log identities are in
 [verification](../../docs/operations/verification.md#frozen-postgresql-and-linux-acceptance---2026-10-25).
-T052 remains open for Linux full-screen hand use, and T055a remains open for
-native Windows ConPTY. This does not verify subsequent UI changes.
+At that revision, Linux full-screen hand use and native Windows ConPTY evidence
+were still open. Linux hand use remains T052. The later T055a result appears above.
 
 W07-059 evidence on 2026-10-25: a real synthetic child-environment probe first
 failed with inherited logging and all 18 supported PostgreSQL environment

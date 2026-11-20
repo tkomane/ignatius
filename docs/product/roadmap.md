@@ -33,12 +33,17 @@ actions and `p50 = 3.85 ms`, `p95 = 4.10 ms` across 100 1,000-row wide-Unicode
 grid interactions. Detailed source-bound results remain in
 [verification](../operations/verification.md).
 
-W07 retains the failed alternate-cursor sensor capability in its strict,
-explicitly dispatched diagnostic workflow. Normal Windows product CI is
-mandatory; its success does not close W07-064/T055a/T051. A faithful observation
-seam and admitted native matrix remain prerequisites for terminal restoration
-acceptance. Windows 11/Windows Terminal, Warp hand use and live cloud-provider
-account evidence remain separate work.
+W07-064 and 001 T055a are complete for automated Windows Terminal and ConPTY
+restoration. The 24-case Guard matrix on Windows Server 2025 x64 observed
+the original console modes, cursor, bracketed paste and main screen after
+every exit. [Windows restoration evidence](../operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
+
+The automated Windows 11 ARM64 PowerShell workbench and Linux xterm journeys
+also restored terminal state after live PostgreSQL queries. Hand use in
+Windows Terminal, Linux desktop terminals and Warp remains open under W08.
+Live cloud-provider account evidence remains separate work.
+[Windows 11 journey](../operations/verification.md#windows-11-powershell-workbench---20-november-2026)
+[Linux xterm journeys](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026)
 
 W11 may examine historical owner-clone release/inventory prototypes retained in
 the pre-cleanup recovery bundle, but their existence does not adopt an older
@@ -64,15 +69,14 @@ also passed hosted platform/MSRV, PG14/18 plain/TLS and real-socket gates; nativ
 hand-use remains separate. W10-013's execution-wide retained-data contract is
 accepted at published `54056c2`: local 1,431 outer cases/112 styled buffers,
 all five PostgreSQL majors plain/TLS, actual socket, pinned/MSRV/platform and
-CodeQL checks. W07's published `65cf237` repeats three native Windows ConPTY
-control passes and completes separate cursor calibration. The retained sensor
-tracks native setters/main VT but not alternate VT; the original cursor
-capability still fails. Faithful alternate cursor observation is required before
-the option/path matrix. The strict experiment is now explicitly dispatched via
-`windows-conpty-diagnostic.yml`; routine CI retains all platform product suites.
-Full Windows restoration and hand use remain open. CLI cancellation and complete
-resource acceptance remain separate. Keep these
-partial slices distinct from completion of Feature 025 or release readiness.
+CodeQL checks. In October 2026, W07's published `65cf237` repeated three native
+Windows ConPTY control passes and completed a separate cursor calibration.
+The sensor tracked native setters and main-screen VT. Its alternate-screen
+cursor result stayed constant, leaving the matrix blocked at that stage. The
+experiment moved to the explicitly dispatched
+`windows-conpty-diagnostic.yml` workflow while routine CI retained all platform
+product suites. CLI cancellation and complete resource acceptance remain
+separate from these results.
 **024 Explicit retained-result refresh** remains part of the integrated feature
 chain; the later experience work preserves its source-bound, deliberate action.
 

@@ -10,10 +10,13 @@
 - [x] T005 Verify parser, reducer, ASCII rendering and synthetic live UPDATE
   behavior, including stale state and optional extension behavior (FR-5907).
 - [x] T006 Update the user guide and release/status records alongside source.
-- [ ] T007 Bind reviewed structured edits to column metadata from the original
+- [x] T007 Bind reviewed structured edits to column metadata from the original
   simple query. Verify the patched driver's dependency inventory and the
   original text and edit contracts on the supported PostgreSQL matrix
   (FR-5901, FR-5905 through FR-5907).
 
 Evidence from the integrated source is recorded in
 [Wave 43](../../docs/status.md#wave-43-milestone-15-and-readiness-checks---19-november-2026).
+The original-query and archive inventory checks are recorded in
+[Wave 58](../../docs/status.md#wave-58-structured-result-column-identity---20-november-2026)
+and [Wave 59](../../docs/status.md#wave-59-packaged-structured-results-and-terminal-evidence---20-november-2026).

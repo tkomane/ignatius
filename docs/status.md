@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 59: Packaged structured results and terminal evidence - 20 November 2026
+
+- The non-publishing rehearsal for `61425c3` passed all 15 jobs. Independent
+  readback verified the 12 retained files, three archive and executable
+  checksums, and 33 runtime checks. Repeat archives matched byte for byte on
+  all three targets. Both Windows repeats used the same runner.
+  [Release rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913)
+- All three CycloneDX inventories bound to the exact archive manifest and
+  matched the independently computed SHA-256 of the 41 vendored driver files,
+  `a4bcba905d56cd5badd76d2bcc8d5616b7c8a7b3591ae3aa66d407331fa84e94`.
+  The readiness check returned blocked for the untagged candidate with
+  incomplete canonical evidence, signature and provenance.
+  [Inventory procedure](operations/release.md#candidate-dependency-inventories)
+- Plain mode T034 now references the completed 24-case native ConPTY
+  restoration matrix. The current platform documents link to the Windows 11
+  PowerShell workbench and Linux xterm receipts. Terminal and screen-reader
+  hand use remain open. [ConPTY evidence](operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
+
 ## Wave 58: Structured result column identity - 20 November 2026
 
 - Cell Detail uses the table OID, attribute, type OID and type modifier
@@ -21,6 +39,14 @@ before trusting anything else.
   tree. Cargo Deny 0.20.2 passed the local workspace policy and the
   crates.io advisory and yank check for the original driver release.
   [Candidate dependency inventories](operations/release.md#candidate-dependency-inventories)
+- The full local verifier passed with plain and TLS PostgreSQL 18.7. The
+  local Unix socket fixture was unset. PR 111 passed all 17 runnable checks
+  before merging as `61425c3`. On that revision, main CI passed all 16
+  runnable jobs, including the Unix socket test, and all three CodeQL
+  languages passed. The scheduled fixture-drift
+  check skipped. [PR 111](https://github.com/tkomane/ignatius/pull/111),
+  [CI](https://github.com/tkomane/ignatius/actions/runs/44681718143)
+  and [CodeQL](https://github.com/tkomane/ignatius/actions/runs/44681718146).
 
 ## Wave 57: Windows 11 PowerShell workbench - 20 November 2026
 

@@ -212,9 +212,9 @@ proves the mechanism, never a vendor integration by itself.
 
 ## W07 - Automate terminal restoration on all primary targets
 
-**Outcomes:** O4, O6. **Primary files:** `tests/terminal_restore.rs`, existing
-terminal tests/helpers, `src/ui/terminal.rs`, CI; verify actual filenames before
-editing. Owns 001 T055a and related REL-001 evidence.
+**Outcomes:** O4, O6. **Primary files:** `tests/terminal_restore.rs`,
+`tests/support/windows_conpty/`, `src/ui/terminal.rs` and the platform workflows.
+Owns 001 T055a and related REL-001 evidence.
 
 Add a Windows-native ConPTY acceptance harness with a narrowly scoped test
 boundary. Exercise normal quit, startup failure after acquisition, cancellation,
@@ -241,13 +241,20 @@ faithful observation seam is required before matrix admission; no product defect
 or installed-source cause is established. Feature025 T055's independently
 reproduced Results selection defect proceeds on a sibling branch before custom
 themes, without changing this Windows gate.
-Integration on 26 October isolates this still-failing experiment in the
-explicitly dispatched `windows-conpty-diagnostic.yml` workflow. Its native
-assertions and evidence allowlist remain strict; routine CI continues all three
-platform product suites. This integration does not admit the full matrix or
-turn an unsupported sensor into a pass.
-Keep W07/T055a and Windows 11/Windows Terminal hand use open; see the
-[dated verification record](../operations/verification.md).
+On 26 October 2026 the experiment moved to the explicitly dispatched
+`windows-conpty-diagnostic.yml` workflow with its native assertions and evidence
+allowlist. Matrix admission was still open at that point. Routine CI continued
+the product suites on all three platforms.
+
+On 20 November 2026 the calibrated Windows Terminal renderer and native
+bracketed-paste query verified console modes, cursor, paste state and the main
+screen for all 24 actual Guard cases on Windows Server 2025 x64. This completed
+W07-064 and 001 T055a for the automated Windows restoration scope. The archived
+client also ran a read-only query in native Windows Terminal with PowerShell
+7.6.10 on Windows 11 ARM64 and returned to the same PowerShell prompt.
+Windows 11 hand use remains open under 001 T051 and W08.
+[Guard matrix](../operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
+[Windows 11 workbench](../operations/verification.md#windows-11-powershell-workbench---20-november-2026)
 
 ## W08 - Verify terminals, accessibility and core journeys by hand
 

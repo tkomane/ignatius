@@ -70,8 +70,11 @@ tests and 33 PostgreSQL integration tests, plus formatting and lints.
 
 ## Evidence boundary
 
-These commands prove automated stream, parser, safety and server behaviour on
-the local macOS development environment. They do not prove a person has used
-VoiceOver or NVDA, opened the full-screen client in Windows Terminal or Linux,
-or exercised the Windows ConPTY restoration path. Those remain explicit
-release follow-up actions.
+These commands verify stream, parser, safety and server behaviour on the
+local macOS development environment. The shared Foundation T055a matrix
+separately verified Windows Terminal and ConPTY restoration for T034.
+[Native restoration evidence](../../docs/operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
+
+VoiceOver and NVDA hand use and the full-screen and plain-mode terminal
+journeys on Windows and Linux, including `TERM=dumb`, remain open under
+T032 and T033.

@@ -123,7 +123,12 @@ verification gaps without claiming more than has been proven.
 - [x] T031 [US3] Add a plain-mode failed-transaction transcript test in `tests/cli_contract.rs`
 - [ ] T032 [P] Hand-verify plain mode with a screen reader on macOS and Windows, recording the exact environment in `docs/support/compatibility.md`
 - [ ] T033 [P] Open and use the full-screen and plain clients on Windows Terminal and a Linux terminal, including `TERM=dumb`, in `docs/operations/verification.md`
-- [ ] T034 Implement and evidence ConPTY terminal restoration for Windows in `tests/terminal_restore.rs` and `docs/status.md`
+- [x] T034 Implement and evidence Windows ConPTY terminal restoration. The
+  shared Foundation T055a harness in `tests/support/windows_conpty/` observed
+  the actual Guard restore native input and output modes, cursor, bracketed
+  paste and the main screen across all 24 normal, error and uncaught-panic cases.
+  [Native matrix](../../docs/operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
+  and [status](../../docs/status.md#wave-54-native-windows-paste-restoration---20-november-2026).
 - [x] T035 Update the authoritative current-state entry in `docs/status.md` after the plain-mode slice was committed
 
 Partial T033 evidence on 2026-08-16: the pinned Rust 1.97.1 Linux container
