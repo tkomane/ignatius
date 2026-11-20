@@ -473,6 +473,9 @@ fn windows_archive_diagnostic_verifies_retained_bytes_before_execution() {
         .expect("owned Windows Terminal probe");
     assert!(extraction < extracted_hash && extracted_hash < renderer);
     assert!(job.contains("inputs.probe == 'terminal-renderer-arm64' && 'windows-11-arm'"));
+    assert!(workflow.contains("window_cursor_calibration:"));
+    assert!(job.contains("$env:PROBE -cne 'terminal-renderer-arm64'"));
+    assert!(job.contains("-WindowCursorCalibration:($env:WINDOW_CURSOR_CALIBRATION -ceq 'true')"));
     for name in [
         "baseline.bmp",
         "ignatius-active.bmp",
@@ -480,6 +483,10 @@ fn windows_archive_diagnostic_verifies_retained_bytes_before_execution() {
     ] {
         assert!(job.contains(&format!("/work/{name}")));
     }
+    for phase in 0..5 {
+        assert!(job.contains(&format!("/work/cursor-phase-{phase}.bmp")));
+    }
+    assert!(!job.contains("/work/cursor-phase-*.bmp"));
     assert!(!job.contains("/work/**"));
 }
 

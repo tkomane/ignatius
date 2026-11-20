@@ -186,6 +186,7 @@ struct RendererArchiveReceipt {
     DWORD startup_facts{}, startup_last_input{}, startup_last_output{}, startup_early_exit{STILL_ACTIVE};
     RendererPixelObservation restored_pixels{};
     bool wgc_software_device{};
+    std::optional<std::size_t> wgc_active_cursor_pixels;
     RendererWindowProof wgc_baseline{}, wgc_active{}, wgc_restored{};
 };
 
@@ -296,9 +297,9 @@ std::int64_t renderer_capture_fence(std::uint64_t prior_qpc) {
     return ignatius_wgc::qpc_to_100ns(prior_qpc, frequency());
 }
 
-RendererPixelObservation observe_archive_main_window(ignatius_wgc::WindowCapture& capture,
+RendererPixelObservation observe_archive_window_phase(ignatius_wgc::WindowCapture& capture,
     const std::filesystem::path& path, std::uint64_t prior_qpc, Clock::time_point deadline,
-    RendererWindowProof& proof) {
+    std::size_t phase, bool observe_cursor, RendererWindowProof& proof) {
     using namespace renderer_pixels_detail;
     const auto fence = renderer_capture_fence(prior_qpc);
     std::optional<RendererWindowFrame> previous;
@@ -306,8 +307,10 @@ RendererPixelObservation observe_archive_main_window(ignatius_wgc::WindowCapture
     Box previous_box{};
     while (Clock::now() < deadline) {
         auto frame = renderer_window_frame(capture, deadline, fence);
+        require(!observe_cursor || !frame.foreground, "window cursor calibration samples an inactive HWND");
         const char* reason = nullptr;
-        auto verified = measure(frame.pixels, 0, false, true, reason, false);
+        auto verified = measure(frame.pixels, phase, renderer_visible[phase], renderer_main[phase], reason,
+                                observe_cursor);
         if (!verified) {
             previous.reset();
             continue;
@@ -325,22 +328,24 @@ RendererPixelObservation observe_archive_main_window(ignatius_wgc::WindowCapture
         previous_crop = std::move(pixels);
         capture.restart(deadline);
     }
-    throw std::runtime_error("owned WGC window did not display the stable main sentinel");
+    throw std::runtime_error("owned WGC window did not display the required stable phase");
 }
 
 void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const std::filesystem::path& path,
                                      std::uint64_t prior_qpc, Clock::time_point deadline,
-                                     RendererArchiveReceipt& receipt) {
+                                     bool observe_cursor, RendererArchiveReceipt& receipt) {
     using namespace renderer_pixels_detail;
     const auto fence = renderer_capture_fence(prior_qpc);
     std::optional<RendererWindowFrame> previous;
     while (Clock::now() < deadline) {
         auto frame = renderer_window_frame(capture, deadline, fence);
+        require(!observe_cursor || !frame.foreground, "archive cursor measurement samples an inactive HWND");
         const Box client{0, 0, frame.pixels.width, frame.pixels.height};
         const auto surface = count_color(frame.pixels, client, {0x19, 0x1c, 0x22});
         const auto focus = count_color(frame.pixels, client, {0x8a, 0xb4, 0xf8});
+        const auto cursor = observe_cursor ? count_color(frame.pixels, client, cursor_color) : 0;
         const bool verified = surface >= 2048 && focus >= 24 && find_anchor(frame.pixels).count == 0
-            && count_color(frame.pixels, client, sentinel_color) == 0;
+            && count_color(frame.pixels, client, sentinel_color) == 0 && cursor == 0;
         if (!verified) {
             previous.reset();
             continue;
@@ -351,18 +356,26 @@ void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const
             receipt.active_height = frame.pixels.height;
             receipt.active_surface_pixels = surface;
             receipt.active_focus_pixels = focus;
+            if (observe_cursor) receipt.wgc_active_cursor_pixels = cursor;
             receipt.wgc_active = {{previous->compositor_time, frame.compositor_time}, frame.foreground};
             return;
         }
         previous = std::move(frame);
         capture.restart(deadline);
     }
-    throw std::runtime_error("owned WGC window did not display positive Material alternate frames");
+    throw std::runtime_error("owned WGC window did not display the required Material alternate frames");
 }
 #endif
 
-void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_capture) {
+void emit_renderer_window_proof(const RendererWindowProof& proof) {
+    std::cout << "{\"compositor_100ns\":[" << proof.compositor_times[0] << ',' << proof.compositor_times[1]
+              << "],\"foreground\":"
+              << (!proof.compositor_times[1] ? "null" : proof.foreground ? "true" : "false") << '}';
+}
+
+void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_capture, bool window_cursor_calibration) {
     const auto truth = [](bool value) { return value ? "true" : "false"; };
+    const bool report_cursor = !window_capture || window_cursor_calibration;
     std::cout << ",\"archived_client\":{\"pid\":" << receipt.pid
               << ",\"owned\":" << truth(receipt.child_owned)
               << ",\"process_machine\":" << receipt.process_machine << ",\"native_machine\":" << receipt.native_machine
@@ -383,17 +396,20 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_ca
               << ",\"restored_native_sentinel\":" << truth(receipt.restored_sentinel)
               << ",\"restored_qpc\":" << receipt.restored_qpc << ",\"restored_capture_qpc\":" << receipt.restored_capture_qpc
               << ",\"restored_cursor_pixels\":"
-              << (window_capture ? "null" : std::to_string(receipt.restored_pixels.cursor_pixels))
+              << (report_cursor ? std::to_string(receipt.restored_pixels.cursor_pixels) : "null")
               << ",\"restored_cursor_area\":"
-              << (window_capture ? "null" : std::to_string(receipt.restored_pixels.cursor_area))
+              << (report_cursor ? std::to_string(receipt.restored_pixels.cursor_area) : "null")
               << ",\"restored_sentinel_pixels\":" << receipt.restored_pixels.sentinel_pixels
               << ",\"restored_stable_frames\":" << receipt.restored_pixels.stable_frames;
+    if (window_cursor_calibration) {
+        std::cout << ",\"active_cursor_pixels\":"
+                  << (receipt.wgc_active_cursor_pixels ? std::to_string(*receipt.wgc_active_cursor_pixels) : "null");
+    }
     if (window_capture) {
         std::cout << ",\"window_capture\":{\"software_d3d\":" << truth(receipt.wgc_software_device);
         const auto sample = [&](const char* phase, const RendererWindowProof& proof) {
-            std::cout << ",\"" << phase << "\":{\"compositor_100ns\":[" << proof.compositor_times[0]
-                      << ',' << proof.compositor_times[1] << "],\"foreground\":"
-                      << (proof.compositor_times[1] ? truth(proof.foreground) : "null") << '}';
+            std::cout << ",\"" << phase << "\":";
+            emit_renderer_window_proof(proof);
         };
         sample("baseline", receipt.wgc_baseline);
         sample("active", receipt.wgc_active);

@@ -5,6 +5,7 @@ param(
     [string] $ExpectedClientSha256,
     [string] $CandidateSource,
     [string] $CandidateBuild,
+    [switch] $WindowCursorCalibration,
     [string] $GuardBuildManifest,
     [switch] $GuardMatrix,
     [switch] $GuardPaste,
@@ -151,6 +152,9 @@ if ($archiveMode -and $clientArchitecture -ne 'x64') {
     throw 'Both archive probes require the retained x64 Ignatius executable.'
 }
 $windowCapture = $archiveMode -and $osArchitecture -ceq 'arm64'
+if ($WindowCursorCalibration -and -not $windowCapture) {
+    throw 'Window cursor calibration requires the owned Windows 11 ARM64 archive route.'
+}
 
 $desktop = & (Join-Path $PSScriptRoot 'Test-Desktop.ps1') | ConvertFrom-Json
 Write-Output (ConvertTo-Json -InputObject $desktop -Compress)
@@ -375,6 +379,7 @@ $build = [ordered] @{
 if ($windowCapture) {
     $build['capture_backend'] = 'wgc-owned-window'
     $build['windows_sdk_version'] = $sdkVersion
+    $build['window_cursor_calibration'] = [bool]$WindowCursorCalibration
 }
 if ($archiveMode) {
     $config = Join-Path $work 'config'
@@ -575,6 +580,7 @@ if ($archiveMode) {
         throw 'The archived client changed before it could be launched.'
     }
     $extraArgs = @('"' + $client.FullName + '"')
+    if ($WindowCursorCalibration) { $extraArgs += 'cursor-calibration' }
 }
 $result = Invoke-RendererSupervisor $entryPoint $work 'renderer' $extraArgs
 $receipt = $result.Text
@@ -600,21 +606,50 @@ if ($archiveMode) {
         throw 'The archived-client renderer did not establish its declared native observations.'
     }
     if ($windowCapture) {
-        if ($facts.capture_backend -cne 'wgc-owned-window' -or $facts.cursor_scope -cne 'unmeasured' -or
-            $facts.cursor_capability_accepted -or $facts.fit.foreground_requested -or
-            $null -ne $facts.archived_client.restored_cursor_pixels) {
+        $expectedScope = if ($WindowCursorCalibration) { 'calibrated-window' } else { 'unmeasured' }
+        if ($facts.capture_backend -cne 'wgc-owned-window' -or $facts.cursor_scope -cne $expectedScope -or
+            $facts.cursor_capability_accepted -or $facts.fit.foreground_requested) {
             throw 'The ARM64 archive did not observe through its window-only capture route.'
         }
-        $windowFacts = $facts.archived_client.window_capture
+        $product = $facts.archived_client
+        $windowFacts = $product.window_capture
         foreach ($capturePhase in @('baseline', 'active', 'restored')) {
             $extract = $windowFacts.$capturePhase
             if (@($extract.compositor_100ns).Count -ne 2 -or $extract.compositor_100ns[0] -le 0 -or
-                $extract.compositor_100ns[1] -lt $extract.compositor_100ns[0] -or $extract.foreground -isnot [bool]) {
+                $extract.compositor_100ns[1] -lt $extract.compositor_100ns[0] -or $extract.foreground -isnot [bool] -or
+                ($WindowCursorCalibration -and $extract.foreground)) {
                 throw "The ARM64 archive did not capture two owned window samples for $capturePhase."
             }
         }
+        if ($WindowCursorCalibration) {
+            $visibility = @($true, $false, $false, $true, $false, $true)
+            $mainScreen = @($true, $true, $false, $false, $false, $true)
+            if (@($facts.phases).Count -ne 6 -or $null -eq $product.active_cursor_pixels -or
+                $product.active_cursor_pixels -ne 0 -or $product.restored_cursor_area -le 0 -or
+                ($product.restored_cursor_pixels * 100) -lt (90 * $product.restored_cursor_area)) {
+                throw 'The archive did not demonstrate the calibrated hidden and restored cursor states.'
+            }
+            foreach ($index in 0..5) {
+                $phase = $facts.phases[$index]
+                $pixel = $phase.pixels
+                $capture = $phase.window_capture
+                if ($phase.index -ne $index -or $phase.expected_visible -ne $visibility[$index] -or
+                    $phase.native_main -ne $mainScreen[$index] -or $pixel.stable_frames -ne 2 -or
+                    $pixel.cursor_area -le 0 -or $null -eq $pixel.cursor -or
+                    ($visibility[$index] -and ($pixel.cursor * 100) -lt (90 * $pixel.cursor_area)) -or
+                    (-not $visibility[$index] -and $pixel.cursor -ne 0) -or
+                    @($capture.compositor_100ns).Count -ne 2 -or $capture.compositor_100ns[0] -le 0 -or
+                    $capture.compositor_100ns[1] -lt $capture.compositor_100ns[0] -or $capture.foreground -cne $false) {
+                    throw "The owned window did not pass cursor calibration phase $index."
+                }
+            }
+        } elseif ($null -ne $product.restored_cursor_pixels) {
+            throw 'The content-only ARM64 archive must leave the cursor unmeasured.'
+        }
     }
-    foreach ($name in @('baseline.bmp', 'ignatius-active.bmp', 'ignatius-restored.bmp')) {
+    $captureNames = @('baseline.bmp', 'ignatius-active.bmp', 'ignatius-restored.bmp')
+    if ($WindowCursorCalibration) { $captureNames += @(0..4 | ForEach-Object { "cursor-phase-$_.bmp" }) }
+    foreach ($name in $captureNames) {
         $capture = Get-Item -LiteralPath (Join-Path $work $name)
         if ($capture -isnot [IO.FileInfo] -or $capture.Length -le 0 -or
             ($capture.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
