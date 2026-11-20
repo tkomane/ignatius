@@ -406,10 +406,14 @@ RendererGridWitness renderer_capture_grid_witness(ignatius_wgc::WindowCapture& c
             }
             return total;
         };
-        const auto text_anchor = [&](int x, int y) {
+        const auto status_ink_pixels = [&](const Box& area) {
+            // The owned Material profile draws this status row with DIM.
+            return count_color(frame.pixels, area, {0x4d, 0x51, 0x59});
+        };
+        const auto text_anchor = [&](int x, int y, const auto& count_ink) {
             int painted{};
             for (int i = 0; i < 8; ++i) {
-                if (ink_pixels(box(x + i, y, 1)) >= 2) ++painted;
+                if (count_ink(box(x + i, y, 1)) >= 2) ++painted;
             }
             return painted >= 6;
         };
@@ -428,11 +432,14 @@ RendererGridWitness renderer_capture_grid_witness(ignatius_wgc::WindowCapture& c
             return ink_pixels(a) >= 4 && ink_pixels(b) >= 4 && difference >= 4;
         };
         const auto matching_digits = std::all_of(renderer_grid_filter_digits.begin(),
-            renderer_grid_filter_digits.end(), [&](int digit) { return ink_pixels(box(match + digit, status, 1)) >= 4; });
+            renderer_grid_filter_digits.end(), [&](int digit) {
+                return status_ink_pixels(box(match + digit, status, 1)) >= 4;
+            });
         // Failed-frame mask bits: digits, matching text, header, wide row 1,
         // wide row 2, Material surface.
-        const std::array<bool, 6> anchors{matching_digits, text_anchor(match, status), text_anchor(code, header),
-            wide_pair(first), wide_pair(first + 1), count_color(frame.pixels, crop, {0x19, 0x1c, 0x22}) >= 512};
+        const std::array<bool, 6> anchors{matching_digits, text_anchor(match, status, status_ink_pixels),
+            text_anchor(code, header, ink_pixels), wide_pair(first), wide_pair(first + 1),
+            count_color(frame.pixels, crop, {0x19, 0x1c, 0x22}) >= 512};
         unsigned mask{};
         for (std::size_t bit = 0; bit < anchors.size(); ++bit) {
             if (anchors[bit]) mask |= 1U << bit;
