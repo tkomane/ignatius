@@ -22,6 +22,16 @@ $hash = 'a2cd8a774389347b70be7748ac4a37ef43cb6ee539c5fc3e85ae264b15e4a04c'
 $download = Join-Path $scratch 'postgresql-17.12-1-windows-x64-binaries.zip'
 $pgBin = Join-Path $scratch 'pgsql/bin'
 $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
+$startAttempted = $false
+
+function Confirm-ClusterOwner {
+    $owner = [IO.File]::ReadAllLines($readyFile)
+    if ($owner.Length -lt 2 -or $owner[0] -cnotmatch '\A[1-9][0-9]*\z' -or
+        -not [IO.Path]::IsPathFullyQualified($owner[1]) -or
+        [IO.Path]::GetFullPath($owner[1]) -ine [IO.Path]::GetFullPath($cluster)) {
+        throw 'The PostgreSQL PID record must identify the owned cluster.'
+    }
+}
 
 try {
     # EDB publishes the reviewed hash next to the official portable ZIP.
@@ -75,6 +85,7 @@ try {
         RedirectStandardOutput = Join-Path $scratch 'pgctl.out'
         RedirectStandardError = Join-Path $scratch 'pgctl.err'
     }
+    $startAttempted = $true
     $start = Start-Process @serverStart
     try {
         if (-not $start.WaitForExit(30000)) {
@@ -90,7 +101,9 @@ try {
         $start.Dispose()
     }
 
-    $identity = & (Join-Path $pgBin 'psql.exe') -XqAt -h 127.0.0.1 -p $port -U ig_probe -d postgres -c "SELECT current_setting('server_version_num'), current_setting('transaction_read_only')"
+    Confirm-ClusterOwner
+    $fixtureUri = "postgres://ig_probe@127.0.0.1:$port/postgres?sslmode=disable&connect_timeout=5"
+    $identity = & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -c "SELECT current_setting('server_version_num'), current_setting('transaction_read_only')"
     if ($LASTEXITCODE -ne 0 -or $identity -cne '170012|on') {
         throw 'The owned PostgreSQL fixture did not report the expected read-only posture.'
     }
@@ -111,10 +124,17 @@ try {
     & (Join-Path $PSScriptRoot 'Run-RendererCalibration.ps1') @journey
 }
 finally {
-    if (Test-Path -LiteralPath $readyFile -PathType Leaf) {
+    if ($startAttempted -and (Test-Path -LiteralPath $readyFile -PathType Leaf)) {
+        Confirm-ClusterOwner
         & $pgCtl stop -D $cluster -m fast -w -t 25 | Out-Null
         if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $readyFile)) {
             throw 'Could not confirm the owned PostgreSQL fixture stopped.'
+        }
+    }
+    if ($startAttempted) {
+        & $pgCtl status -D $cluster | Out-Null
+        if ($LASTEXITCODE -ne 3 -or (Test-Path -LiteralPath $readyFile)) {
+            throw 'PostgreSQL shutdown was not confirmed for the owned cluster.'
         }
     }
     Remove-Item -LiteralPath $scratch -Recurse -Force

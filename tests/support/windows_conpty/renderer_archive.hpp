@@ -167,9 +167,9 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
         send(pipe, after.str());
         if (shell) renderer_use_restored_shell(*shell, work, input, deadline, pipe, nonce);
     } catch (...) {
-        // This handle is from the actor's own CreateProcess. The outside Job
-        // owner remains the fallback if termination or the bounded wait fails.
-        if (WaitForSingleObject(client.process.value, 0) == WAIT_TIMEOUT) {
+        // Terminate only the process created directly by this actor. The
+        // supervisor owns cleanup of the PowerShell-launched Job.
+        if (!shell && WaitForSingleObject(client.process.value, 0) == WAIT_TIMEOUT) {
             TerminateProcess(client.process.value, 125);
             WaitForSingleObject(client.process.value, 500);
         }

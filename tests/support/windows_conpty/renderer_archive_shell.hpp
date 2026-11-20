@@ -88,7 +88,7 @@ Child renderer_start_archive_from_shell(const std::wstring& work, HANDLE shell, 
             "owned PowerShell published one native product handle");
     HANDLE raw{};
     require(DuplicateHandle(shell, reinterpret_cast<HANDLE>(inherited), GetCurrentProcess(), &raw,
-                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | PROCESS_TERMINATE, FALSE, 0) != 0,
+                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, 0) != 0,
             "duplicate the archived process handle directly from the owned shell");
     Child product{Handle(raw), {}, pid};
     require(GetProcessId(product.process.value) == pid && same_path(image(product.process.value), archive)
