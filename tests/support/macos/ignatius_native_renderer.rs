@@ -6,7 +6,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::Value;
 use warp::integration_testing::terminal::{
-    assert_active_block_received_precmd, assert_alt_screen_output,
+    assert_active_block_received_precmd, assert_alt_grid_active, assert_alt_screen_output,
     assert_command_executed_for_single_terminal_in_tab, run_alt_grid_program,
     wait_until_bootstrapped_single_pane_for_tab,
 };
@@ -20,6 +20,9 @@ use crate::Builder;
 const TEST_NAME: &str = "test_ignatius_native_renderer_restore";
 const ACTIVE: &str = "ignatius-active.png";
 const RESTORED: &str = "ignatius-restored.png";
+const SOURCE_REVISION: &str = "5e5712a25e75f08b02df7525b283d7a81ac355c9";
+const BUILD_IDENTITY: &str = "ci/44721590021-1";
+const RESULT_MARKER: &str = "warp_live_ok";
 
 fn canonical_env_path(name: &str) -> PathBuf {
     let path = PathBuf::from(std::env::var_os(name).expect("required fixture path"));
@@ -51,8 +54,16 @@ fn receipt(path: &Path) -> Option<Value> {
         .flatten()
 }
 
+fn live_fixture(value: &Value) -> bool {
+    value["server_version_num"].as_u64() == Some(180_007)
+        && value["client_tls_verified"].as_bool() == Some(true)
+        && value["source_revision"].as_str() == Some(SOURCE_REVISION)
+        && value["build_identity"].as_str() == Some(BUILD_IDENTITY)
+}
+
 fn ready(value: &Value, nonce: &str) -> bool {
     value["schema"].as_u64() == Some(1)
+        && live_fixture(value)
         && value["nonce"].as_str() == Some(nonce)
         && value["window_title"].as_str() == Some(format!("W07Warp-{nonce}").as_str())
         && value["guard_active"].as_bool() == Some(true)
@@ -132,25 +143,81 @@ pub fn test_ignatius_native_renderer_restore() -> Builder {
     let active_check = active_path.clone();
     let runtime_check = runtime_path.clone();
     let active_artifacts = artifacts.clone();
+    let runtime_during_query = runtime_path.clone();
 
-    let capture_active =
-        TestStep::new("Verify Ignatius raw mode and capture the native active frame")
-            .set_timeout(Duration::from_secs(12))
-            .add_named_assertion("authenticated raw-mode receipt", move |_, _| {
-                if runtime_check.exists() {
-                    return AssertionOutcome::immediate_failure(
-                        "Ignatius ended before the active capture".into(),
-                    );
-                }
-                if receipt(&active_check).is_some_and(|data| ready(&data, &nonce_for_active)) {
-                    AssertionOutcome::Success
-                } else {
-                    AssertionOutcome::failure("waiting for the Ignatius raw-mode receipt".into())
-                }
-            })
+    let verify_ready =
+        TestStep::new("Verify the owned archive is ready on the synthetic TLS session")
+            .set_timeout(Duration::from_secs(25))
+            .add_named_assertion(
+                "authenticated raw-mode and verified TLS receipt",
+                move |_, _| {
+                    if runtime_check.exists() {
+                        return AssertionOutcome::immediate_failure(
+                            "Ignatius ended before the active capture".into(),
+                        );
+                    }
+                    if receipt(&active_check).is_some_and(|data| ready(&data, &nonce_for_active)) {
+                        AssertionOutcome::Success
+                    } else {
+                        AssertionOutcome::failure(
+                            "waiting for the Ignatius raw-mode and TLS receipt".into(),
+                        )
+                    }
+                },
+            )
             .add_named_assertion(
                 "Ignatius branding in the alternate screen",
-                assert_alt_screen_output(Regex::new("(?i)\\bignatius\\b").unwrap(), 0, 0),
+                assert_alt_screen_output(Regex::new(r"(?i)\bignatius\b").unwrap(), 0, 0),
+            )
+            .add_named_assertion(
+                "the preloaded fixture query or table is visible",
+                assert_alt_screen_output(Regex::new(r"\bwarp_acceptance\b").unwrap(), 0, 0),
+            )
+            .add_named_assertion(
+                "the active alternate screen has no fixture result yet",
+                |app, window_id| {
+                    terminal_view(app, window_id, 0, 0).read(app, |view, _| {
+                        let model = view.model.lock();
+                        if !model.is_alt_screen_active() {
+                            return AssertionOutcome::failure(
+                                "waiting for the active alternate screen".into(),
+                            );
+                        }
+                        if model
+                            .alt_screen()
+                            .output_to_string()
+                            .contains(RESULT_MARKER)
+                        {
+                            return AssertionOutcome::immediate_failure(
+                                "the fixture result was visible before Ctrl+R".into(),
+                            );
+                        }
+                        AssertionOutcome::Success
+                    })
+                },
+            );
+    let capture_active =
+        TestStep::new("Run the live query with Ctrl+R and capture its native result")
+            .set_timeout(Duration::from_secs(12))
+            .with_event(Event::KeyDown {
+                keystroke: Keystroke::parse("ctrl-r").expect("Ctrl+R"),
+                chars: "\u{12}".into(),
+                details: KeyEventDetails::default(),
+                is_composing: false,
+            })
+            .add_named_assertion("the owned archive is still running", move |_, _| {
+                if runtime_during_query.exists() {
+                    AssertionOutcome::immediate_failure(
+                        "Ignatius ended before the result capture".into(),
+                    )
+                } else {
+                    AssertionOutcome::Success
+                }
+            })
+            .add_assertion(assert_alt_grid_active(0, 0, true))
+            .add_named_assertion(
+                "the read-only TLS query returned its exact marker in the alternate screen",
+                assert_alt_screen_output(Regex::new(r"\bwarp_live_ok\b").unwrap(), 0, 0),
             )
             .with_take_screenshot(ACTIVE);
     let verify_active = TestStep::new("Require the native active frame before sending Ctrl+Q")
@@ -169,18 +236,26 @@ pub fn test_ignatius_native_renderer_restore() -> Builder {
             is_composing: false,
         });
 
+    let mut steps = run_alt_grid_program(
+        &command,
+        0,
+        0,
+        quit,
+        vec![verify_ready, capture_active, verify_active],
+    )
+    .into_iter();
+    let launch = steps
+        .next()
+        .expect("launch step for the owned fixture")
+        .set_timeout(Duration::from_secs(25));
+
     Builder::new()
         .with_real_display()
-        .with_timeout(Duration::from_secs(75))
+        .with_timeout(Duration::from_secs(100))
         .with_setup(|utils| utils.set_env("WARP_SHELL_PATH", Some("/bin/zsh")))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_steps(run_alt_grid_program(
-            &command,
-            0,
-            0,
-            quit,
-            vec![capture_active, verify_active],
-        ))
+        .with_step(launch)
+        .with_steps(steps.collect())
         .with_step(
             TestStep::new("Confirm the original PTY modes and shell recovered")
                 .set_timeout(Duration::from_secs(15))
@@ -191,12 +266,14 @@ pub fn test_ignatius_native_renderer_restore() -> Builder {
                     if receipt(&active_path).is_some_and(|active| {
                         ready(&active, &nonce)
                             && done["schema"].as_u64() == Some(1)
+                            && live_fixture(&done)
                             && done["nonce"].as_str() == Some(nonce.as_str())
                             && done["pty"] == active["pty"]
                             && done["result"].as_str() == Some("passed")
                             && done["guard_active"].as_bool() == Some(true)
                             && done["modes_restored"].as_bool() == Some(true)
                             && done["quit_completed"].as_bool() == Some(true)
+                            && done["fixture_removed"].as_bool() == Some(true)
                             && done["exit_code"].as_i64() == Some(0)
                     }) {
                         AssertionOutcome::Success

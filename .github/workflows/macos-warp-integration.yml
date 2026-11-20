@@ -11,14 +11,16 @@ permissions:
 jobs:
   renderer:
     runs-on: macos-26
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       WARP_SOURCE_SHA: 0b2db6e0bf3fa3c19f4c1a94899eb67c634a6973
+      CANDIDATE_RUN: '44721590021'
+      CANDIDATE_SHA: 5e5712a25e75f08b02df7525b283d7a81ac355c9
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Stage the exact Ignatius archive and synthetic fixture
+      - name: Resolve the successful non-publishing candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -28,10 +30,48 @@ jobs:
           test "$(uname -m)" = arm64
           test "$GITHUB_EVENT_NAME:$GITHUB_REF" = push:refs/heads/codex/warp-integration-check
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          archive_root="$(mktemp -d "$RUNNER_TEMP/ignatius-source-archive.XXXXXXXX")"
-          gh run download 44627234677 --repo "$GITHUB_REPOSITORY" \
-            --name release-candidate-aggregate-44627234677-1 --dir "$archive_root"
-          python3 tests/support/macos/prepare_warp_source_fixture.py "$archive_root"
+          identity="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN/attempts/1" \
+            --jq '[.id, .run_attempt, .head_sha, .head_branch, .path, .event, .status, .conclusion] | join(":")')"
+          test "$identity" = "$CANDIDATE_RUN:1:$CANDIDATE_SHA:main:.github/workflows/release.yml:workflow_dispatch:completed:success"
+      - name: Download the verified candidate aggregate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.CANDIDATE_RUN }}
+          name: release-candidate-aggregate-44721590021-1
+          path: ${{ runner.temp }}/ignatius-warp-candidate
+          digest-mismatch: error
+      - name: Build pinned PostgreSQL 18.7 for the loopback TLS fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl_prefix="$(brew --prefix openssl@3)"
+          if [ ! -x "$openssl_prefix/bin/openssl" ]; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install openssl@3
+          fi
+          test -x "$openssl_prefix/bin/openssl"
+          build_root="$(mktemp -d "$RUNNER_TEMP/ignatius-warp-pg-build.XXXXXXXX")"
+          install_root="$(mktemp -d "$RUNNER_TEMP/ignatius-warp-pg-bin.XXXXXXXX")"
+          trap 'rm -rf -- "$build_root"' EXIT
+          cd "$build_root"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 10 --max-time 60 --retry 2 --output postgresql-18.7.tar.bz2 \
+            https://ftp.postgresql.org/pub/source/v18.7/postgresql-18.7.tar.bz2
+          printf '%s\n' '441dfae4280cae3e0425e5f876f80559fb0731c140f1aae22b3e5a54d0411bfd  postgresql-18.7.tar.bz2' \
+            | shasum -a 256 -c -
+          tar -xjf postgresql-18.7.tar.bz2
+          cd postgresql-18.7
+          CPPFLAGS="-I$openssl_prefix/include" LDFLAGS="-L$openssl_prefix/lib" CC=clang \
+            ./configure --prefix="$install_root" --with-ssl=openssl --without-icu --without-readline > configure.log 2>&1 \
+            || { tail -n 50 configure.log; exit 1; }
+          make -s -j4 > build.log 2>&1 || { tail -n 50 build.log; exit 1; }
+          make -s install > install.log 2>&1 || { tail -n 50 install.log; exit 1; }
+          test "$("$install_root/bin/postgres" --version)" = 'postgres (PostgreSQL) 18.7'
+          echo "IGNATIUS_WARP_PGBIN=$install_root/bin" >> "$GITHUB_ENV"
+          echo "IGNATIUS_WARP_OPENSSL=$openssl_prefix/bin/openssl" >> "$GITHUB_ENV"
+      - name: Stage the bound arm64 archive and synthetic fixture wrapper
+        shell: bash
+        run: python3 tests/support/macos/prepare_warp_source_fixture.py "$RUNNER_TEMP/ignatius-warp-candidate"
       - name: Check out pinned Warp source and configure the native build
         shell: bash
         run: |
@@ -74,6 +114,7 @@ jobs:
         with:
           name: ignatius-warp-open-source-renderer-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/candidate.json
             ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/state/active.json
             ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/state/runtime.json
             ${{ env.IGNATIUS_WARP_FIXTURE_ROOT }}/capture/test_ignatius_native_renderer_restore/*/ignatius-active.png
