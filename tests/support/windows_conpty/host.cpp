@@ -580,8 +580,12 @@ int wmain(int argc, wchar_t** argv) {
             return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
 #ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
-        if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-window-supervise") {
-            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6], std::nullopt, true);
+        if ((argc == 7 || argc == 8) && std::wstring_view(argv[1]) == L"--renderer-archive-window-supervise") {
+            require(argc == 7 || std::wstring_view(argv[7]) == L"cursor-calibration", "owned window cursor selector");
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6], std::nullopt, true, false, argc == 8);
+        }
+        if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-window-actor") {
+            return renderer_actor(argv[2], argv[3], argv[4], argv[5], argv[6], std::nullopt, 0, false, true);
         }
 #endif
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-actor") {

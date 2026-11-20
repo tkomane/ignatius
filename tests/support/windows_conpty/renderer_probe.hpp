@@ -6,6 +6,7 @@ constexpr std::array<const char*, renderer_stage_count> renderer_stage_names{
 };
 constexpr std::array<bool, renderer_stage_count> renderer_visible{true, false, false, true, false, true};
 constexpr std::array<bool, renderer_stage_count> renderer_main{true, true, false, false, false, true};
+constexpr auto renderer_final_phase = renderer_stage_count - 1;
 constexpr std::array<const char*, 4> renderer_profile_states{"missing", "zero", "different", "matched"};
 constexpr wchar_t renderer_restore_colors[] = L"\x1b]111\x1b\\\x1b]112\x1b\\";
 
@@ -61,6 +62,12 @@ std::wstring renderer_payload(const std::wstring& nonce, std::size_t phase) {
     payload += L"\x1b]12;rgb:ff/00/ff\x1b\\\x1b[8;20H\x1b[?12l\x1b[2 q";
     payload += renderer_visible[phase] ? L"\x1b[?25h" : L"\x1b[?25l";
     return payload;
+}
+
+std::wstring renderer_crop_name(std::size_t phase, bool client, bool window_cursor_calibration) {
+    if (window_cursor_calibration && phase < renderer_final_phase)
+        return L"cursor-phase-" + std::to_wstring(phase) + L".bmp";
+    return client ? L"baseline.bmp" : L"phase-" + std::to_wstring(phase) + L".bmp";
 }
 
 void renderer_stamp(std::ostringstream& line, std::uint64_t timestamp) {
@@ -123,7 +130,7 @@ Clock::time_point renderer_guard_deadline(std::uint64_t target) {
 int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const std::wstring& profile,
                    const std::wstring& archive = {}, const std::wstring& work = {},
                    const std::optional<RendererGuardCase>& guard = std::nullopt, std::uint64_t guard_qpc = 0,
-                   bool paste = false) {
+                   bool paste = false, bool window_cursor_calibration = false) {
     require_renderer_nonce(nonce);
     require(pipe == renderer_pipe_name(nonce), "exact renderer pipe name");
 
@@ -188,7 +195,7 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
         require(SetConsoleMode(input.value, active_input) != 0, "seed the owned client cooked baseline");
     }
     const std::wstring sentinel = L"W07-" + nonce;
-    const auto phase_count = client_mode ? std::size_t{1} : renderer_stage_count;
+    const auto phase_count = client_mode && !window_cursor_calibration ? std::size_t{1} : renderer_stage_count;
     for (std::size_t phase = 0; phase < phase_count; ++phase) {
         auto payload = renderer_payload(nonce, phase);
         DWORD written{};
@@ -474,11 +481,12 @@ struct RendererPhase {
     bool native_main{};
     std::uint64_t actor_qpc{}, capture_qpc{}, ack_qpc{};
     RendererPixelObservation pixels{};
+    RendererWindowProof window_proof{};
 };
 
 struct RendererReceipt {
     bool passed{}, launcher_owned{}, actor_waited{}, launcher_waited{}, renderer_waited{};
-    bool job_empty{}, pipe_quiescent{}, cleanup_forced{}, modes_restored{}, window_capture{};
+    bool job_empty{}, pipe_quiescent{}, cleanup_forced{}, modes_restored{}, window_capture{}, window_cursor_calibration{};
     DWORD launcher_pid{}, actor_pid{}, renderer_pid{}, launcher_exit{STILL_ACTIVE}, actor_exit{STILL_ACTIVE};
     DWORD initial_input{}, initial_output{}, restored_input{}, restored_output{}, associated_consoles{};
     DWORD columns{}, rows{}, job_remaining{}, profile_state{};
@@ -592,6 +600,9 @@ std::string renderer_json_rectangle(const RECT& rect) {
 
 void emit_renderer_receipt(const RendererReceipt& receipt) {
     const auto truth = [](bool value) { return value ? "true" : "false"; };
+    const bool report_cursor = !receipt.window_capture || receipt.window_cursor_calibration;
+    const char* window_cursor_scope = receipt.window_cursor_calibration && receipt.passed
+        ? "calibrated-window" : "unmeasured";
     std::cout << "{\"schema\":1,\"case\":\""
               << (receipt.archive ? "renderer-archive" : receipt.guard ? "renderer-guard"
                                  : receipt.paste ? "renderer-paste-calibration" : "renderer-calibration")
@@ -600,7 +611,7 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"product_acceptance\":false,\"cursor_capability_accepted\":false"
               << ",\"capture_backend\":\"" << (receipt.window_capture ? "wgc-owned-window" : "gdi-owned-client") << '"'
               << ",\"cursor_scope\":\""
-              << (receipt.window_capture ? "unmeasured" : receipt.archive ? "focused-main"
+              << (receipt.window_capture ? window_cursor_scope : receipt.archive ? "focused-main"
                   : receipt.guard ? "focused-guard" : "focused-controls") << '"'
               << ",\"qpc_frequency\":" << frequency()
               << ",\"start_qpc\":" << receipt.start << ",\"end_qpc\":" << receipt.end
@@ -645,7 +656,7 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
               << ",\"pipe_quiescent\":" << truth(receipt.pipe_quiescent) << '}';
     if (receipt.archive) {
         std::cout << ",\"archive_diagnostic_passed\":" << truth(receipt.passed);
-        emit_renderer_archive(*receipt.archive, receipt.window_capture);
+        emit_renderer_archive(*receipt.archive, receipt.window_capture, receipt.window_cursor_calibration);
     }
     if (receipt.guard) {
         std::cout << ",\"guard_diagnostic_passed\":" << truth(receipt.passed);
@@ -660,7 +671,7 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
         const auto& pixel = phase.pixels;
         std::cout << "{\"index\":" << phase.index
                   << ",\"name\":\"" << renderer_stage_names[phase.index] << '"'
-                  << ",\"expected_visible\":" << (receipt.window_capture ? "null" : truth(renderer_visible[phase.index]))
+                  << ",\"expected_visible\":" << (report_cursor ? truth(renderer_visible[phase.index]) : "null")
                   << ",\"expected_main\":" << truth(renderer_main[phase.index])
                   << ",\"native_main\":" << truth(phase.native_main)
                   << ",\"native_written\":" << phase.written
@@ -669,8 +680,13 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
                   << ",\"native_input\":" << phase.input << ",\"native_output\":" << phase.output
                   << ",\"actor_qpc\":" << phase.actor_qpc
                   << ",\"capture_qpc\":" << phase.capture_qpc << ",\"ack_qpc\":" << phase.ack_qpc
-                  << ",\"crop\":\"" << (receipt.archive || receipt.guard
-                       ? "baseline.bmp" : "phase-" + std::to_string(phase.index) + ".bmp") << '"'
+                  << ",\"crop\":\"" << ascii(renderer_crop_name(phase.index, receipt.archive || receipt.guard,
+                                                               receipt.window_cursor_calibration)) << '"';
+        if (receipt.window_cursor_calibration) {
+            std::cout << ",\"window_capture\":";
+            emit_renderer_window_proof(phase.window_proof);
+        }
+        std::cout
                   << ",\"pixels\":{\"client_width\":" << pixel.client_width
                   << ",\"client_height\":" << pixel.client_height
                   << ",\"cell_width\":" << pixel.cell_width
@@ -680,8 +696,8 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
                   << ",\"anchor\":" << pixel.anchor_pixels
                   << ",\"phase\":" << pixel.phase_pixels
                   << ",\"sentinel\":" << pixel.sentinel_pixels
-                  << ",\"cursor\":" << (receipt.window_capture ? "null" : std::to_string(pixel.cursor_pixels))
-                  << ",\"cursor_area\":" << (receipt.window_capture ? "null" : std::to_string(pixel.cursor_area))
+                  << ",\"cursor\":" << (report_cursor ? std::to_string(pixel.cursor_pixels) : "null")
+                  << ",\"cursor_area\":" << (report_cursor ? std::to_string(pixel.cursor_area) : "null")
                   << ",\"stable_frames\":" << pixel.stable_frames << "}}";
     }
     std::cout << "]}\n";
@@ -690,10 +706,11 @@ void emit_renderer_receipt(const RendererReceipt& receipt) {
 int renderer_supervise(const std::wstring& terminal, const std::wstring& work, const std::wstring& nonce,
                        const std::wstring& profile, const std::wstring& archive = {},
                        const std::optional<RendererGuardCase>& guard = std::nullopt,
-                       bool window_capture = false, bool paste = false) {
+                       bool window_capture = false, bool paste = false, bool window_cursor_calibration = false) {
     RendererReceipt receipt;
     if (!archive.empty()) receipt.archive.emplace();
     receipt.window_capture = window_capture;
+    receipt.window_cursor_calibration = window_cursor_calibration;
     if (paste) receipt.paste.emplace();
     if (guard) {
         receipt.guard.emplace();
@@ -703,7 +720,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
         receipt.guard->expected_exit = renderer_guard_exit(guard->mode);
     }
     const bool client_mode = receipt.archive || receipt.guard;
-    const auto phase_count = client_mode ? std::size_t{1} : renderer_stage_count;
+    const auto phase_count = client_mode && !window_cursor_calibration ? std::size_t{1} : renderer_stage_count;
     receipt.start = ticks();
     const auto start = Clock::now();
     // Leave the outer controller time to reap this process and retain its
@@ -720,6 +737,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
     bool observed_all = false;
     try {
         require(!window_capture || receipt.archive.has_value(), "WGC requires the owned archive route");
+        require(!window_cursor_calibration || window_capture, "window cursor calibration requires WGC");
 #ifndef IGNATIUS_RENDERER_WINDOW_CAPTURE
         require(!window_capture, "WGC is not compiled in this renderer helper");
 #endif
@@ -765,7 +783,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 "owned renderer profile identity");
         std::vector<std::wstring> arguments{L"-w", L"new", L"new-tab", L"--profile", profile, L"--title", title,
             L"--suppressApplicationTitle", L"--inheritEnvironment", L"--", executable_self,
-            receipt.archive ? L"--renderer-archive-actor"
+            receipt.archive ? (window_cursor_calibration ? L"--renderer-archive-window-actor" : L"--renderer-archive-actor")
                 : guard ? (guard->paste ? L"--renderer-guard-paste-actor" : L"--renderer-guard-actor")
                 : paste ? L"--renderer-paste-actor" : L"--renderer-actor", pipe, nonce, profile};
         if (receipt.archive) {
@@ -943,7 +961,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     require(owned_capture.has_value(), "WGC archive activation follows its baseline capture");
                     owned_capture->restart(work_deadline);
                     renderer_capture_archive_window(*owned_capture, folder / L"ignatius-active.bmp",
-                                                    prior_qpc, work_deadline, product);
+                                                    prior_qpc, work_deadline, window_cursor_calibration, product);
                 } else
 #endif
                 {
@@ -967,7 +985,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 product.restored_output = data[1];
                 product.restored_sentinel = data[3] == 1;
                 product.restored_qpc = renderer_stamp(data[4], data[5]);
-                const auto& baseline = receipt.phases.front();
+                const auto& baseline = receipt.phases.back();
                 product.restored_modes = product.restored_input == baseline.input
                     && product.restored_output == baseline.output;
                 require(product.restored_sentinel && product.restored_modes
@@ -978,8 +996,9 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 if (window_capture) {
                     require(owned_capture.has_value(), "WGC archive restoration follows its baseline capture");
                     owned_capture->restart(work_deadline);
-                    product.restored_pixels = observe_archive_main_window(*owned_capture, folder / L"ignatius-restored.bmp",
-                        product.acquired_capture_qpc, work_deadline, product.wgc_restored);
+                    product.restored_pixels = observe_archive_window_phase(*owned_capture, folder / L"ignatius-restored.bmp",
+                        product.acquired_capture_qpc, work_deadline, baseline.index, window_cursor_calibration,
+                        product.wgc_restored);
                     owned_capture->close();
                 } else
 #endif
@@ -1016,21 +1035,27 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                         "renderer native write, marker, buffer and mode evidence");
 
                 verify_renderer_window(renderer, job.value, terminal, title);
+                const auto crop = folder / renderer_crop_name(index, client_mode, window_cursor_calibration);
 #ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
                 if (window_capture) {
-                    require(index == 0 && receipt.archive && !owned_capture, "WGC captures exactly one archive baseline");
-                    owned_capture.emplace(renderer.hwnd, renderer.process.value, [&] {
-                        verify_renderer_window(renderer, job.value, terminal, title);
-                    }, work_deadline);
-                    receipt.archive->wgc_software_device = owned_capture->uses_software_device();
-                    phase.pixels = observe_archive_main_window(*owned_capture, folder / L"baseline.bmp",
-                        prior_qpc, work_deadline, receipt.archive->wgc_baseline);
+                    require(receipt.archive.has_value(), "WGC measures the owned archive console");
+                    if (index == 0) {
+                        owned_capture.emplace(renderer.hwnd, renderer.process.value, [&] {
+                            verify_renderer_window(renderer, job.value, terminal, title);
+                        }, work_deadline);
+                        receipt.archive->wgc_software_device = owned_capture->uses_software_device();
+                    } else {
+                        require(owned_capture.has_value(), "WGC phase follows its first capture");
+                        owned_capture->restart(work_deadline);
+                    }
+                    phase.pixels = observe_archive_window_phase(*owned_capture, crop, prior_qpc, work_deadline,
+                        index, window_cursor_calibration, phase.window_proof);
+                    if (index + 1 == phase_count) receipt.archive->wgc_baseline = phase.window_proof;
                 } else
 #endif
                 {
                     phase.pixels = observe_renderer_frame(renderer.hwnd, index, renderer_visible[index],
-                        renderer_main[index], work_deadline,
-                        folder / (client_mode ? L"baseline.bmp" : L"phase-" + std::to_wstring(index) + L".bmp"));
+                        renderer_main[index], work_deadline, crop);
                 }
                 verify_renderer_window(renderer, job.value, terminal, title);
                 phase.capture_qpc = ticks();
