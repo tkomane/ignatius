@@ -4,6 +4,17 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 50: Archived Windows client rendering - 20 November 2026
+
+- The retained x64 binary from `ci/44631543576-1` rendered and exited cleanly
+  on two Windows Server 2025 x64 runner images in Windows Terminal 1.25.3131.0.
+  Both returned the original native console modes and a byte-identical
+  main-screen marker and cursor crop after Ctrl+Q.
+  [Packaged renderer evidence](operations/verification.md#packaged-windows-terminal-startup-and-quit---20-november-2026)
+- The Windows 11 ARM64 desktop denied foreground activation of the owned
+  Terminal window before Ignatius launch.
+  [Windows 11 attempt](https://github.com/tkomane/ignatius/actions/runs/44653416231)
+
 ## Wave 49: Terminal and packaged runtime verification - 20 November 2026
 
 - The open-source Warp Integration renderer ran the exact archived Ignatius
