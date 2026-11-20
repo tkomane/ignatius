@@ -486,7 +486,12 @@ pub enum Message {
     /// The cancellation request was delivered to the server.
     CancellationDelivered(JobId),
     /// The cancellation request could not be delivered.
-    CancellationFailed(Box<Diagnostic>),
+    CancellationFailed {
+        /// The query for which cancellation was requested.
+        job: JobId,
+        /// The delivery failure reported by the cancellation connection.
+        diagnostic: Box<Diagnostic>,
+    },
     /// A physical source was installed for this captured generation.
     NoticeSourceInstalled {
         /// Fixed runtime route.

@@ -2140,6 +2140,116 @@ fn cancellation_is_worded_as_requested_until_the_server_answers() {
 }
 
 #[test]
+fn server_confirmed_cancellation_keeps_status_and_diagnostics_visible() {
+    use crate::app::{Message, update};
+    use crate::diagnostics::{Diagnostic, DiagnosticKind};
+    use crate::query::result::TransactionState;
+
+    let mut model = connected_model(Environment::Local);
+    let job = JobId(1);
+    model.phase = QueryPhase::CancellationRequested { job };
+    let keymap = Keymap::new();
+    let ascii = presentation(ThemeChoice::Dark, false, GlyphTier::Ascii);
+    let delivery_error = Diagnostic::new(
+        DiagnosticKind::Connection,
+        "could not send the cancellation request",
+        "sending a cancellation request",
+    );
+    update(&mut model, Message::CancellationDelivered(job));
+    let pending = render_to_string(&model, &keymap, &ascii, 100, 30);
+    assert!(pending.contains("Cancellation requested"));
+    assert!(!pending.contains("Query cancelled by server"));
+    update(
+        &mut model,
+        Message::CancellationFailed {
+            job: JobId(0),
+            diagnostic: Box::new(delivery_error.clone()),
+        },
+    );
+    assert!(model.error.is_none());
+
+    update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            notice_report: crate::query::result::NoticeReport::default(),
+            job,
+            statements: Vec::new(),
+            status: ExecutionStatus::Cancelled,
+            elapsed: Duration::from_millis(20),
+            error: Some(
+                Diagnostic::new(
+                    DiagnosticKind::Cancelled,
+                    "canceling statement due to user request",
+                    "running statement 1",
+                )
+                .technical("SQLSTATE", "57014"),
+            ),
+            transaction: TransactionState::Autocommit,
+        })),
+    );
+    update(
+        &mut model,
+        Message::CancellationFailed {
+            job,
+            diagnostic: Box::new(delivery_error),
+        },
+    );
+
+    let text = render_to_string(&model, &keymap, &ascii, 100, 30);
+    assert!(
+        text.lines()
+            .last()
+            .unwrap()
+            .contains("Query cancelled by server Autocommit"),
+        "{text}"
+    );
+    assert!(text.contains("canceling statement due to user request"));
+    assert!(!text.contains("could not send the cancellation request"));
+    assert!(!text.contains("57014"));
+    model.error_expanded = true;
+    let text = render_to_string(&model, &keymap, &ascii, 100, 30);
+    assert!(text.contains("57014"));
+
+    model.transaction = TransactionState::Failed;
+    let narrow = render_to_string(&model, &keymap, &ascii, 40, 8);
+    assert!(
+        narrow
+            .lines()
+            .last()
+            .unwrap()
+            .contains("Cancelled Transaction failed"),
+        "{narrow}"
+    );
+}
+
+#[test]
+fn only_a_confirmed_query_changes_the_footer_cancellation_status() {
+    use crate::diagnostics::{Diagnostic, DiagnosticKind};
+
+    let mut model = connected_model(Environment::Local);
+    model.error = Some(Diagnostic::new(
+        DiagnosticKind::Cancelled,
+        "the local operation exceeded its deadline",
+        "waiting on a local operation",
+    ));
+    let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+    assert!(text.contains("the local operation exceeded its deadline"));
+    assert!(!text.contains("Query cancelled by server"));
+
+    model.error = Some(
+        Diagnostic::new(
+            DiagnosticKind::Cancelled,
+            "the server cancelled catalogue loading",
+            "loading the catalogue",
+        )
+        .technical("SQLSTATE", "57014"),
+    );
+    let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
+    assert!(text.contains("the server cancelled catalogue loading"));
+    assert!(!text.contains("Query cancelled by server"));
+}
+
+#[test]
 fn the_editor_shows_line_numbers_and_a_visible_cursor() {
     let mut model = connected_model(Environment::Local);
     model.editor.set_text("SELECT 1\nFROM orders");

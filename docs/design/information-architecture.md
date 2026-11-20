@@ -121,8 +121,10 @@ providers use the same shape; provider arguments and tokens are not displayed,
 and opening the surface performs no refresh or network request. The title keeps
 `Esc to close` visible so the inspection state never becomes a trap.
 
-**Footer.** What the client is doing right now (`Ready`, `Running`,
-`Cancellation requested`), the session's search path, and up to six key hints.
+**Footer.** Query status (`Ready`, `Running`, `Cancellation requested` or
+`Query cancelled by server`), transaction state, the session's search path and
+up to six key hints. At narrow widths, `Cancelled` leaves room for the full
+transaction status.
 
 ## Narrow and small
 

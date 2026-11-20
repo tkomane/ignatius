@@ -2318,7 +2318,10 @@ fn spawn_cancel(
                 }
                 let _ = tx.send(connection_message(
                     scope.request,
-                    Message::CancellationFailed(Box::new(diagnostic)),
+                    Message::CancellationFailed {
+                        job,
+                        diagnostic: Box::new(diagnostic),
+                    },
                 ));
             }
         }

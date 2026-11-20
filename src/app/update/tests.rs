@@ -2017,7 +2017,10 @@ fn split_fresh_diagnostics_and_failed_transactions_remain_visible() {
             ),
             (
                 "cancellation",
-                Message::CancellationFailed(Box::new(diagnostic.clone())),
+                Message::CancellationFailed {
+                    job,
+                    diagnostic: Box::new(diagnostic.clone()),
+                },
             ),
             (
                 "export",
@@ -2032,6 +2035,12 @@ fn split_fresh_diagnostics_and_failed_transactions_remain_visible() {
             let mut model = base.clone();
             model.focus = focus;
             split_key(&mut model, 'z');
+            if matches!(&message, Message::CancellationFailed { .. }) {
+                assert_eq!(
+                    update(&mut model, Message::Action(Action::Cancel)),
+                    vec![Effect::Cancel { job }]
+                );
+            }
             update(&mut model, message);
             assert!(
                 split_frame(&model).contains(&diagnostic.headline),
