@@ -76,8 +76,9 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T049 Operations documentation: local development, verification, release
 - [x] T050 CI workflow for macOS, Windows and Linux
 - [ ] T051 Verify by hand on Windows 11 in Windows Terminal with PowerShell 7.
-  [Automated live query and shell restoration](../../docs/operations/verification.md#windows-11-powershell-workbench---20-november-2026)
-  passed on Windows 11 ARM64 with native PowerShell 7.6.10 and the archived x64 client.
+  The archived x64 client passed the automated verified-TLS query and shell
+  restoration on Windows 11 ARM64 with native PowerShell 7.6.10.
+  [Workstation evidence](../../docs/operations/verification.md#native-windows-11-workbench-over-verified-tls)
 - [ ] T052 Verify on Linux, including the Unix socket path.
   [Automated xterm evidence](../../docs/operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026)
   covers live PostgreSQL 18.7 over verified TLS and a separate Unix socket,
