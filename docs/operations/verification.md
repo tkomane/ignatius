@@ -34,6 +34,33 @@ restored the original POSIX and seven DEC modes, and returned the same
 604,800 RGB pixels in the compared viewport. These are automated observations.
 Desktop hand use remains open.
 
+### Selected archive verification and missing prerequisites
+
+The `ci/44681770913-1` archive installation instructions now verify one selected
+archive against the unchanged three-target `SHA256SUMS` and manifest. On
+macOS 27.2.1 arm64, the old batch checksum reported success for the selected
+archive and exited 1 for the other two absent files. The revised Bash example
+verified the selected archive, then the extraction example printed the exact
+candidate identity. An isolated process with no `tar` reported exit 127
+before extraction. The manifest had no Intel macOS target.
+
+On the same Mac, PowerShell 7.5.4 verified the selected Windows ZIP when it
+was the only archive present. Both examples refused a missing or duplicate
+checksum entry, changed archive bytes, an incorrect manifest target, size,
+digest or algorithm, competing manifest rows and multiple JSON documents.
+The GNU checksum branch verified the selected Linux archive in Ubuntu 24.04
+x86-64 under Docker emulation. The host's `jq` checked its manifest entry. The
+native Windows x64 and Windows 11 ARM64 diagnostic receipts identify the
+same x64 executable. The manifest has no native Windows ARM64 target.
+
+GNU `readelf` reported interpreter `/lib64/ld-linux-x86-64.so.2` and a
+`GLIBC_2.39` symbol requirement for this Linux archive. The exact executable
+started on the Ubuntu control with glibc 2.39. In a network-disabled scratch
+image containing the same executable and lacking the interpreter, Docker's
+x86-64 emulator reported `failed to open elf at /lib64/ld-linux-x86-64.so.2`
+and exited 133 before Ignatius started. The owned containers and scratch
+image were removed. [Archive instructions](release.md#verify-before-extraction)
+
 ### Same-path replacement and rollback of the structured-result build
 
 The isolated install path switched from `4e9509c` (`ci/44667989084-1`) to

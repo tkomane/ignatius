@@ -4,6 +4,16 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 61 - Selected archive installation preflight - 20 November 2026
+
+- The release guide now verifies one exact archive against the release-wide
+  checksum list and manifest. The revised examples accepted the exact
+  `61425c3` archives and refused wrong bytes, targets and duplicate entries.
+- The macOS missing-tool probe stopped before extraction. The exact Linux
+  archive started with glibc 2.39 and failed before Ignatius started when its
+  ELF interpreter was absent.
+  [Preflight evidence](operations/verification.md#selected-archive-verification-and-missing-prerequisites)
+
 ## Wave 60: Live TLS from release archives - 20 November 2026
 
 - All three exact `61425c3` archives returned a read-only PostgreSQL result
