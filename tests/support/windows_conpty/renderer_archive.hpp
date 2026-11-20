@@ -186,7 +186,7 @@ struct RendererWindowProof {
 
 #ifdef IGNATIUS_WORKBENCH_GRID
 struct RendererGridWitness {
-    std::uint64_t console_verified_qpc{};
+    std::uint64_t filter_input_qpc{}, console_verified_qpc{};
     std::int64_t fence_100ns{}, compositor_100ns{};
     int width{}, height{};
 };
@@ -360,8 +360,9 @@ RendererPixelObservation observe_archive_window_phase(ignatius_wgc::WindowCaptur
 
 #ifdef IGNATIUS_WORKBENCH_GRID
 RendererGridWitness renderer_capture_grid_witness(ignatius_wgc::WindowCapture& capture,
-    const std::filesystem::path& path, const std::array<std::uint32_t, 9>& cells,
-    std::uint64_t console_qpc, const RendererWindowProof& grid, Clock::time_point deadline) {
+    const std::filesystem::path& path, const std::array<std::uint32_t, 11>& cells,
+    std::uint64_t filter_input_qpc, std::uint64_t console_qpc, const RendererWindowProof& grid,
+    Clock::time_point deadline) {
     using namespace renderer_pixels_detail;
     // The actor specifies the Result title, matching status, header, and first
     // data rows, then the status text, row_code and wide_a column positions.
@@ -379,10 +380,22 @@ RendererGridWitness renderer_capture_grid_witness(ignatius_wgc::WindowCapture& c
     };
     const auto crop = box(0, title, 90, 26 - title);
     require(crop.area() <= 350000, "bounded Results-only WGC crop");
-    const auto fence = renderer_capture_fence(console_qpc);
-    capture.restart(deadline);
-    while (Clock::now() < deadline) {
-        const auto frame = renderer_window_frame(capture, deadline, fence);
+    const auto fence = renderer_capture_fence(filter_input_qpc);
+    // Reserve time within the existing deadline to retain at most one
+    // eligible Results-only crop if the pixel predicates never pass.
+    const auto sample_deadline = deadline - 200ms;
+    capture.restart(sample_deadline);
+    std::optional<RendererWindowFrame> rejected;
+    unsigned rejected_anchors{};
+    while (Clock::now() < sample_deadline) {
+        std::optional<RendererWindowFrame> sample;
+        try {
+            sample.emplace(renderer_window_frame(capture, sample_deadline, fence));
+        } catch (const std::runtime_error& error) {
+            if (std::string_view(error.what()) != "WGC deadline expired") throw;
+            break;
+        }
+        auto& frame = *sample;
         require(!frame.foreground && inside(crop, frame.pixels), "retained grid stays inside the owned inactive window");
         const auto ink = [](const Pixel& pixel) { return pixel.r >= 100 && pixel.g >= 110 && pixel.b >= 100; };
         const auto ink_pixels = [&](const Box& area) {
@@ -416,14 +429,29 @@ RendererGridWitness renderer_capture_grid_witness(ignatius_wgc::WindowCapture& c
         };
         const auto matching_digits = std::all_of(renderer_grid_filter_digits.begin(),
             renderer_grid_filter_digits.end(), [&](int digit) { return ink_pixels(box(match + digit, status, 1)) >= 4; });
-        if (matching_digits && text_anchor(match, status) && text_anchor(code, header)
-            && wide_pair(first) && wide_pair(first + 1)
-            && count_color(frame.pixels, crop, {0x19, 0x1c, 0x22}) >= 512) {
-            write_crop(path, crop, cropped_pixels(frame.pixels, crop), deadline);
-            return {console_qpc, fence, frame.compositor_time, crop.width(), crop.height()};
+        // Failed-frame mask bits: digits, matching text, header, wide row 1,
+        // wide row 2, Material surface.
+        const std::array<bool, 6> anchors{matching_digits, text_anchor(match, status), text_anchor(code, header),
+            wide_pair(first), wide_pair(first + 1), count_color(frame.pixels, crop, {0x19, 0x1c, 0x22}) >= 512};
+        unsigned mask{};
+        for (std::size_t bit = 0; bit < anchors.size(); ++bit) {
+            if (anchors[bit]) mask |= 1U << bit;
         }
+        if (mask == 0x3f) {
+            write_crop(path, crop, cropped_pixels(frame.pixels, crop), deadline);
+            return {filter_input_qpc, console_qpc, fence, frame.compositor_time, crop.width(), crop.height()};
+        }
+        rejected = std::move(frame);
+        rejected_anchors = mask;
     }
-    throw std::runtime_error("post-input WGC frame did not show the retained-grid text and wide-cell anchors");
+    const auto stamps = " input_qpc=" + std::to_string(filter_input_qpc)
+        + " console_verified_qpc=" + std::to_string(console_qpc) + " fence_100ns=" + std::to_string(fence);
+    if (!rejected) throw std::runtime_error("filtered grid received no WGC frame past the input fence" + stamps);
+    write_crop(path.parent_path() / L"workbench-filtered-grid-diagnostic.bmp", crop,
+        cropped_pixels(rejected->pixels, crop), deadline);
+    throw std::runtime_error("filtered grid WGC frame failed anchor checks" + stamps
+        + " frame_100ns=" + std::to_string(rejected->compositor_time)
+        + " anchor_mask=" + std::to_string(rejected_anchors));
 }
 #endif
 
@@ -528,7 +556,8 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_ca
 #ifdef IGNATIUS_WORKBENCH_GRID
     if (receipt.grid_witness) {
         const auto& witness = *receipt.grid_witness;
-        std::cout << ",\"filtered_grid_witness\":{\"console_verified_qpc\":" << witness.console_verified_qpc
+        std::cout << ",\"filtered_grid_witness\":{\"filter_input_qpc\":" << witness.filter_input_qpc
+                  << ",\"console_verified_qpc\":" << witness.console_verified_qpc
                   << ",\"fence_100ns\":" << witness.fence_100ns << ",\"compositor_100ns\":" << witness.compositor_100ns
                   << ",\"width\":" << witness.width << ",\"height\":" << witness.height << '}';
     }

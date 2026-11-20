@@ -949,20 +949,23 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
 #if defined(IGNATIUS_WORKBENCH_GRID) && defined(IGNATIUS_RENDERER_WINDOW_CAPTURE)
             if (live_shell && parts[0] == "G") {
                 auto& product = *receipt.archive;
-                const auto data = renderer_numbers<9>(parts);
-                const auto observed = renderer_stamp(data[7], data[8]);
+                const auto data = renderer_numbers<11>(parts);
+                const auto filter_input = renderer_stamp(data[7], data[8]);
+                const auto observed = renderer_stamp(data[9], data[10]);
                 require(window_cursor_calibration && owned_capture && powershell && archived_client
                         && receipt.columns == 90 && receipt.rows == 27
                         && !product.grid_witness && !product.workbench_result && !product.raw_alternate
                         && WaitForSingleObject(powershell.value, 0) == WAIT_TIMEOUT
                         && WaitForSingleObject(archived_client.value, 0) == WAIT_TIMEOUT
-                        && same_path(image(archived_client.value), archive) && observed >= prior_qpc && observed <= ticks(),
+                        && same_path(image(archived_client.value), archive)
+                        && filter_input >= prior_qpc && observed > filter_input && observed <= ticks(),
                         "one native filtered-grid observation from the authenticated live archive");
                 exact_job(archived_client.value, job.value);
                 verify_renderer_window(renderer, job.value, terminal, title);
                 const auto grid_deadline = (std::min)(work_deadline, Clock::now() + 2s);
                 product.grid_witness = renderer_capture_grid_witness(*owned_capture,
-                    folder / L"workbench-filtered-grid.pending", data, observed, product.wgc_baseline, grid_deadline);
+                    folder / L"workbench-filtered-grid.pending", data, filter_input, observed,
+                    product.wgc_baseline, grid_deadline);
                 verify_renderer_window(renderer, job.value, terminal, title);
                 server->ack(work_deadline);
                 continue;

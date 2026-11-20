@@ -216,6 +216,7 @@ jobs:
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-performance.json
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-grid-performance.json
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-filtered-grid.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-filtered-grid-diagnostic.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/baseline.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-active.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-restored.bmp

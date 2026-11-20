@@ -249,6 +249,7 @@ void renderer_workbench_grid(const Child& client, HANDLE input, Clock::time_poin
     workbench_observe_until(client, witness_deadline, [](const auto& lines) {
         return workbench_contains(lines, L"[filter:");
     }, "open the filter for the retained grid witness");
+    const auto filter_input_qpc = ticks();
     renderer_send_keys(input, hash_key);
     workbench_observe_until(client, witness_deadline, state(server, true), "exact filtered grid witness");
     const auto filtered = workbench_observe(client);
@@ -271,6 +272,7 @@ void renderer_workbench_grid(const Child& client, HANDLE input, Clock::time_poin
     witness << "G " << ascii(nonce) << ' ' << heading->results_row << ' ' << status_row
             << ' ' << heading->row << ' ' << (first - filtered.begin()) << ' ' << status_column
             << ' ' << heading->code << ' ' << heading->wide;
+    renderer_stamp(witness, filter_input_qpc);
     renderer_stamp(witness, ticks());
     send(pipe, witness.str());
     renderer_key(input, VK_ESCAPE, L'\x1b');

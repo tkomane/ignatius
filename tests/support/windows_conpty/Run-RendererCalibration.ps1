@@ -804,7 +804,8 @@ if ($WorkbenchPerformance) {
         $witness = $facts.archived_client.filtered_grid_witness
         $limits = $facts.phases[-1].pixels
         if ($null -eq $witness -or $facts.qpc_frequency -le 0 -or
-            $witness.console_verified_qpc -le $facts.phases[-1].actor_qpc -or
+            $witness.filter_input_qpc -le $facts.phases[-1].actor_qpc -or
+            $witness.console_verified_qpc -le $witness.filter_input_qpc -or
             $witness.console_verified_qpc -ge $facts.archived_client.acquired_qpc -or
             $witness.compositor_100ns -le $witness.fence_100ns -or
             $limits.cell_height -le 0 -or $witness.width -ne (90 * $limits.cell_width) -or
@@ -812,7 +813,7 @@ if ($WorkbenchPerformance) {
             ($witness.width * $witness.height) -gt 350000) {
             throw 'Expected an owned post-input WGC crop of the verified retained grid before the TLS query.'
         }
-        $fence = [Math]::Floor(([decimal] $witness.console_verified_qpc * 10000000) / [decimal] $facts.qpc_frequency)
+        $fence = [Math]::Floor(([decimal] $witness.filter_input_qpc * 10000000) / [decimal] $facts.qpc_frequency)
         $crop = Get-Item -LiteralPath (Join-Path $work 'workbench-filtered-grid.pending')
         if ($witness.fence_100ns -ne $fence -or $crop -isnot [IO.FileInfo] -or
             ($crop.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
