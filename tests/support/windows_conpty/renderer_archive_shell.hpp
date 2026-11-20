@@ -144,12 +144,36 @@ std::vector<std::wstring> renderer_console_lines() {
     const auto height = viewport.Bottom - viewport.Top + 1;
     require(width >= 80 && width <= 200 && height >= 24 && height <= 80,
             "bounded full-screen workbench observation");
+#ifdef IGNATIUS_WORKBENCH_GRID
+    std::vector<CHAR_INFO> cells(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    auto observed = viewport;
+    const COORD size{static_cast<SHORT>(width), static_cast<SHORT>(height)};
+    if (!ReadConsoleOutputW(output.value, cells.data(), size, {0, 0}, &observed)) {
+        throw std::runtime_error("workbench console cell read failed, Win32 error "
+                                 + std::to_string(GetLastError()));
+    }
+    require(observed.Left == viewport.Left && observed.Right == viewport.Right
+            && observed.Top == viewport.Top && observed.Bottom == viewport.Bottom,
+            "workbench console cell read returned a clipped viewport");
+    // Keep one entry for every screen column, including a wide character's trailing cell.
+    const auto columns = static_cast<std::size_t>(width);
+    std::vector<std::wstring> lines(static_cast<std::size_t>(height), std::wstring(columns, L' '));
+    for (std::size_t row = 0; row < lines.size(); ++row) {
+        for (std::size_t column = 0; column < columns; ++column) {
+            const auto& cell = cells[row * columns + column];
+            if (!(cell.Attributes & COMMON_LVB_TRAILING_BYTE) && cell.Char.UnicodeChar != L'\0') {
+                lines[row][column] = cell.Char.UnicodeChar;
+            }
+        }
+    }
+#else
     std::vector<std::wstring> lines;
     for (SHORT row = viewport.Top; row <= viewport.Bottom; ++row) {
         std::wstring line(static_cast<std::size_t>(width), L'\0');
         renderer_read(output.value, {viewport.Left, row}, line);
         lines.push_back(std::move(line));
     }
+#endif
     return lines;
 }
 
@@ -207,7 +231,7 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
     } catch (const std::runtime_error& error) {
         const std::string_view detail(error.what());
         std::ofstream failure(std::filesystem::path(work) / L"workbench-failure.txt");
-        if (detail.size() <= 192 && detail.starts_with("workbench ")
+        if (detail.size() <= 192 && (detail.starts_with("workbench ") || detail.starts_with("grid "))
             && std::all_of(detail.begin(), detail.end(), [](char ch) { return ch >= 32 && ch <= 126; })) {
             failure << detail << '\n';
         } else {
