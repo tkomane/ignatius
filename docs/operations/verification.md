@@ -131,8 +131,18 @@ read, including polling. The raw receipt SHA-256 is
 `3d98e6dcc6f0424a714ba373bab3d8ae0bb192eb8ea399cf9ba34ce0717ee0aa`.
 The same run verified the read-only TLS result and restored the main-screen
 pixels, 171 cursor pixels, console modes and the original PowerShell prompt.
-Windows compositor timing, desktop hand use and screen-reader hand use
-remain open. [Windows grid run and receipts](https://github.com/tkomane/ignatius/actions/runs/44708743953)
+[Windows grid run and receipts](https://github.com/tkomane/ignatius/actions/runs/44708743953)
+
+A repeat on the same Windows runner image measured 31.207 ms p50 and
+47.708 ms p95 over 105 actions after 21 warm-ups. The maximum was 47.927 ms.
+After timing, Windows Graphics Capture sampled one 810x285 Results crop
+after the filter key. The image showed 100 matches, five source rows and
+both CJK glyphs in the wide column. The BMP SHA-256 is
+`bb296422aa35267e58271bcbe9691daafcb33c70a6766951c5495d2c7b818217`.
+The same run again verified the live TLS result, 171 restored cursor pixels,
+the original PowerShell prompt and owned-job cleanup. Per-action compositor
+timing, desktop hand use and screen-reader hand use remain open.
+[Windows grid repeat and capture](https://github.com/tkomane/ignatius/actions/runs/44712917157)
 
 ### Selected archive verification and missing prerequisites
 
