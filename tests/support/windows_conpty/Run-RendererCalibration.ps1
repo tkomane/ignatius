@@ -147,6 +147,7 @@ switch -Exact ($osArchitecture) {
 if ($archiveMode -and $clientArchitecture -ne 'x64') {
     throw 'Both archive probes require the retained x64 Ignatius executable.'
 }
+$windowCapture = $archiveMode -and $osArchitecture -ceq 'arm64'
 
 $desktop = & (Join-Path $PSScriptRoot 'Test-Desktop.ps1') | ConvertFrom-Json
 Write-Output (ConvertTo-Json -InputObject $desktop -Compress)
@@ -254,12 +255,29 @@ if ($guardMode) {
     }
     Assert-GuardInputs
 }
+$captureCompileOptions = @()
+$captureLibraries = @()
+$languageStandard = if ($windowCapture) { '/std:c++20' } else { '/std:c++17' }
+if ($windowCapture) {
+    $sdkVersion = $env:WindowsSDKVersion.TrimEnd([char[]]'\/')
+    $sdkIncludes = Join-Path $env:WindowsSdkDir "Include/$sdkVersion"
+    $cppwinrt = Join-Path $sdkIncludes 'cppwinrt'
+    $interopHeaders = @($env:INCLUDE -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { Join-Path $_ 'windows.graphics.capture.interop.h' } |
+        Where-Object { [IO.File]::Exists($_) })
+    if (-not [IO.File]::Exists((Join-Path $cppwinrt 'winrt/Windows.Graphics.Capture.h')) -or
+        $interopHeaders.Count -eq 0) {
+        throw 'The installed Windows SDK must provide desktop window capture and C++/WinRT projection headers.'
+    }
+    $captureCompileOptions = @('/DIGNATIUS_RENDERER_WINDOW_CAPTURE', "/I$cppwinrt")
+    $captureLibraries = @('WindowsApp.lib', 'D3D11.lib')
+}
 $probe = Join-Path $root 'renderer-probe.exe'
 Push-Location -LiteralPath $root
 try {
-    & $compiler.FullName /nologo /std:c++17 /permissive- /utf-8 /W4 /WX /EHsc /DUNICODE /D_UNICODE `
-        /DIGNATIUS_RENDERER_CALIBRATION (Join-Path $PSScriptRoot 'host.cpp') `
-        /Fe:renderer-probe.exe /Fo:renderer-probe.obj /link Advapi32.lib User32.lib Gdi32.lib Dwmapi.lib Ws2_32.lib
+    & $compiler.FullName /nologo $languageStandard /permissive- /utf-8 /W4 /WX /EHsc /DUNICODE /D_UNICODE `
+        /DIGNATIUS_RENDERER_CALIBRATION @captureCompileOptions (Join-Path $PSScriptRoot 'host.cpp') `
+        /Fe:renderer-probe.exe /Fo:renderer-probe.obj /link Advapi32.lib User32.lib Gdi32.lib Dwmapi.lib Ws2_32.lib @captureLibraries
     if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($probe)) {
         throw 'Could not compile the native renderer calibration helper.'
     }
@@ -315,6 +333,9 @@ if ($guardMode) {
 foreach ($source in $sourceNames) {
     $sourceHashes[$source] = FileDigest (Join-Path $PSScriptRoot $source)
 }
+if ($windowCapture) {
+    $sourceHashes['owned_window_capture.hpp'] = FileDigest (Join-Path $PSScriptRoot 'owned_window_capture.hpp')
+}
 $build = [ordered] @{
     schema_version = 1
     source_revision = $revision
@@ -333,6 +354,10 @@ $build = [ordered] @{
     image_os = $env:ImageOS
     image_version = $env:ImageVersion
     input_desktop = $desktop
+}
+if ($windowCapture) {
+    $build['capture_backend'] = 'wgc-owned-window'
+    $build['windows_sdk_version'] = $sdkVersion
 }
 if ($archiveMode) {
     $config = Join-Path $work 'config'
@@ -488,7 +513,8 @@ if ($guardMode) {
     return
 }
 
-$entryPoint = if ($archiveMode) { '--renderer-archive-supervise' } else { '--renderer-supervise' }
+$entryPoint = if ($windowCapture) { '--renderer-archive-window-supervise' }
+    elseif ($archiveMode) { '--renderer-archive-supervise' } else { '--renderer-supervise' }
 $extraArgs = @()
 if ($archiveMode) {
     if ((FileDigest $client.FullName) -cne $clientHash) {
@@ -511,6 +537,21 @@ if ($archiveMode) {
         $facts.archived_client.exit_code -ne 0 -or -not $facts.archived_client.restored_modes -or
         -not $facts.cleanup.job_empty -or -not $facts.cleanup.pipe_quiescent) {
         throw 'The archived-client renderer did not establish its declared native observations.'
+    }
+    if ($windowCapture) {
+        if ($facts.capture_backend -cne 'wgc-owned-window' -or $facts.cursor_scope -cne 'unmeasured' -or
+            $facts.cursor_capability_accepted -or $facts.fit.foreground_requested -or
+            $null -ne $facts.archived_client.restored_cursor_pixels) {
+            throw 'The ARM64 archive did not observe through its window-only capture route.'
+        }
+        $windowFacts = $facts.archived_client.window_capture
+        foreach ($capturePhase in @('baseline', 'active', 'restored')) {
+            $extract = $windowFacts.$capturePhase
+            if (@($extract.compositor_100ns).Count -ne 2 -or $extract.compositor_100ns[0] -le 0 -or
+                $extract.compositor_100ns[1] -lt $extract.compositor_100ns[0] -or $extract.foreground -isnot [bool]) {
+                throw "The ARM64 archive did not capture two owned window samples for $capturePhase."
+            }
+        }
     }
     foreach ($name in @('baseline.bmp', 'ignatius-active.bmp', 'ignatius-restored.bmp')) {
         $capture = Get-Item -LiteralPath (Join-Path $work $name)

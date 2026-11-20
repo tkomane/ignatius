@@ -522,21 +522,20 @@ checks passed. This run remains a blocked, non-publishing rehearsal; the
 runtime sidecars do not exercise a database query or the direct logging privacy
 audit.
 
-The current source revision `259ac76de6477719b8a3515777f3623b24237dd6` also
+The September source revision `259ac76de6477719b8a3515777f3623b24237dd6` also
 passed the pre-push `cargo --locked xtask verify` gate with formatting, lints,
 515 unit/layout tests, 39 CLI contract tests and 38 PostgreSQL integration tests
 against disposable PostgreSQL 18.4 services, with no skips. This is local
 macOS and synthetic-server evidence, separate from the hosted target smoke.
 
-T033 remains open because the full quickstart still lacks Windows/Linux hand
-verification, direct runtime privacy review of the corrected binaries, the
-canonical evidence path and the remaining supply-chain evidence. T034 is
-complete: the non-publishing workflow succeeded and
-`docs/operations/release.md` records both the rehearsal authorization and its
-explicit publication exclusions. T035 stays open: the roadmap still says `In
-planning`, and the status record does not call the candidate complete or ready.
-Those completion claims remain forbidden until every accepted release
-criterion has evidence.
+The November rehearsal passed direct packaged runtime privacy checks and
+independent aggregate verification for all three targets.
+[Packaged runtime evidence](../../docs/operations/verification.md#main-packaging-rehearsal---20-november-2026)
+The full quickstart still needs Windows and Linux hand verification. T033
+remains open for that acceptance, the canonical evidence path and live
+supply-chain evidence. T034 is complete for the non-publishing workflow.
+T035 remains open until the release criteria have evidence and the roadmap
+can record their completion.
 
 ## Dependencies and execution order
 

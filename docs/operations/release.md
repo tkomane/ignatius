@@ -20,17 +20,16 @@ commitment. Each row assumes the ones above it.
 | **F. Homebrew tap and Scoop** | Half a day each | A manifest update per release, forever | Yes: delete the tap | macOS and Windows users who expect a package manager | D, and a release cadence you can sustain |
 | **G. Homebrew core and Winget** | Days, plus review | Their standards, their timelines | Hard | Everyone | F, plus a user base that justifies it |
 
-**Current state: C, entered on 2026-09-11 without its prerequisite being met.**
-The repository was made public to restore CI after the private Actions quota was
-exhausted. C expects green CI on all three platforms, and Windows is currently
-red on the active branch, so D onwards remains blocked. Publishing source before
-Windows and Linux have ever been run would invite issues about platforms nobody
-has tested, which is the fastest way to spend a weekend on someone else's
-environment.
+**Current distribution is C (public source).** The repository became public
+on 2026-09-11. Post-merge CI and CodeQL passed on `3ca6811`, including the
+Linux, macOS and Windows jobs. [CI run](https://github.com/tkomane/ignatius/actions/runs/44656868966)
+[CodeQL run](https://github.com/tkomane/ignatius/actions/runs/44656868960)
 
-D onwards should wait for a real 0.1.0 with the compatibility matrix filled in.
-E in particular is one-way: a published crates.io version can be yanked but never
-removed, so the name and the first public API arrive together and permanently.
+The [compatibility matrix](../support/compatibility.md#release-target-matrix)
+records archive and runtime checks and remaining native hand use. Distribution
+requires the approved signing and provenance identities, canonical release
+evidence, independently verified sidecars and owner authorization for the exact
+release. [ADR-0008](../architecture/decisions/0008-packaging-and-release.md#live-release-gates)
 
 ## Release identity
 

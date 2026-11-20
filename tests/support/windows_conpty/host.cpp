@@ -28,6 +28,12 @@ int main() { std::cerr << "W07-064 native host requires actual Windows; no nativ
 #ifdef IGNATIUS_RENDERER_CALIBRATION
 #include "renderer_modal.hpp"
 #endif
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+#if !defined(_M_ARM64)
+#error The Windows Graphics Capture archive probe requires an ARM64 native helper
+#endif
+#include "owned_window_capture.hpp"
+#endif
 using namespace std::chrono_literals;
 namespace {
 struct Handle {
@@ -494,10 +500,18 @@ int supervise(w07::Case kind, const std::wstring& guard, const std::wstring& non
             }
             if (parts[0] == "H") {
                 r.ready_ack = true; r.ready = ticks();
-                // This is a direct wait on the stable, acknowledged child, not
-                // a detached PID timer or a sleep used to infer readiness.
-                require(WaitForSingleObject(guard_process.value, 250) == WAIT_TIMEOUT, "acknowledged owned child remained hung for 250 ms");
-                require(ticks() - r.ready >= frequency() / 4, "monotonic positive hang interval"); r.deadline_elapsed = true;
+                // A Windows wait timeout can return before the high-resolution
+                // clock measures the full interval. Keep waiting on the same child.
+                const auto hang_window_end = Clock::now() + 250ms;
+                require(hang_window_end < work_deadline, "owned hang interval fits the work deadline");
+                for (auto now = Clock::now(); now < hang_window_end; now = Clock::now()) {
+                    const auto interval = std::chrono::ceil<std::chrono::milliseconds>(hang_window_end - now);
+                    require(WaitForSingleObject(guard_process.value, static_cast<DWORD>(interval.count())) == WAIT_TIMEOUT,
+                            "acknowledged owned child remained hung");
+                }
+                require(Clock::now() < work_deadline && WaitForSingleObject(guard_process.value, 0) == WAIT_TIMEOUT
+                        && ticks() - r.ready >= frequency() / 4, "monotonic positive hang interval");
+                r.deadline_elapsed = true;
                 exact_job(guard_process.value, job.value); require(TerminateProcess(guard_process.value, 124) != 0, "terminate stable owned hung guard"); r.terminated = true; r.killed = ticks();
                 require(WaitForSingleObject(guard_process.value, remaining(outer, 1000)) == WAIT_OBJECT_0, "wait owned hung guard"); r.guard_waited = true; r.waited = ticks(); phase_deadline = work_deadline;
             }
@@ -565,6 +579,11 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-supervise") {
             return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
+#ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
+        if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-window-supervise") {
+            return renderer_supervise(argv[2], argv[3], argv[4], argv[5], argv[6], std::nullopt, true);
+        }
+#endif
         if (argc == 7 && std::wstring_view(argv[1]) == L"--renderer-archive-actor") {
             return renderer_actor(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
