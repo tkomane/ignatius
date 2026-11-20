@@ -95,6 +95,8 @@ struct Frame {
 // Include this header at global scope, in a desktop TU that defines NOMINMAX.
 // Use the installed Windows SDK cppwinrt include directory and link
 // WindowsApp.lib, D3D11.lib, Dwmapi.lib, and User32.lib.
+// Define the standard coroutine feature before the SDK projection selects it.
+#include <coroutine>
 #include <windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>

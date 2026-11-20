@@ -137,6 +137,7 @@ if ($compiler -isnot [IO.FileInfo] -or $env:VSCMD_ARG_TGT_ARCH -notin $targetAli
 }
 $captureCompileOptions = @()
 $captureLibraries = @()
+$languageStandard = if ($windowCapture) { '/std:c++20' } else { '/std:c++17' }
 if ($windowCapture) {
     $sdkVersion = $env:WindowsSDKVersion.TrimEnd([char[]]'\/')
     $sdkIncludes = Join-Path $env:WindowsSdkDir "Include/$sdkVersion"
@@ -154,7 +155,7 @@ if ($windowCapture) {
 $probe = Join-Path $root 'renderer-probe.exe'
 Push-Location -LiteralPath $root
 try {
-    & $compiler.FullName /nologo /std:c++17 /permissive- /utf-8 /W4 /WX /EHsc /DUNICODE /D_UNICODE `
+    & $compiler.FullName /nologo $languageStandard /permissive- /utf-8 /W4 /WX /EHsc /DUNICODE /D_UNICODE `
         /DIGNATIUS_RENDERER_CALIBRATION @captureCompileOptions (Join-Path $PSScriptRoot 'host.cpp') `
         /Fe:renderer-probe.exe /Fo:renderer-probe.obj /link Advapi32.lib User32.lib Gdi32.lib Dwmapi.lib Ws2_32.lib @captureLibraries
     if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($probe)) {
@@ -312,7 +313,7 @@ if ($archiveMode) {
         foreach ($capturePhase in @('baseline', 'active', 'restored')) {
             $extract = $windowFacts.$capturePhase
             if (@($extract.compositor_100ns).Count -ne 2 -or $extract.compositor_100ns[0] -le 0 -or
-                $extract.compositor_100ns[1] -le 0 -or $extract.foreground -isnot [bool]) {
+                $extract.compositor_100ns[1] -lt $extract.compositor_100ns[0] -or $extract.foreground -isnot [bool]) {
                 throw "The ARM64 archive did not capture two owned window samples for $capturePhase."
             }
         }

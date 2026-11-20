@@ -283,7 +283,7 @@ RendererWindowFrame renderer_window_frame(ignatius_wgc::WindowCapture& capture, 
 
 bool renderer_same_window_sample(const RendererWindowFrame& first, const RendererWindowFrame& second) {
     return first.generation == second.generation && first.bounds == second.bounds
-        && first.foreground == second.foreground;
+        && first.foreground == second.foreground && first.compositor_time <= second.compositor_time;
 }
 
 std::int64_t renderer_capture_fence(std::uint64_t prior_qpc) {
@@ -302,7 +302,10 @@ RendererPixelObservation observe_archive_main_window(ignatius_wgc::WindowCapture
         auto frame = renderer_window_frame(capture, deadline, fence);
         const char* reason = nullptr;
         auto verified = measure(frame.pixels, 0, false, true, reason, false);
-        if (!verified) continue;
+        if (!verified) {
+            previous.reset();
+            continue;
+        }
         auto pixels = cropped_pixels(frame.pixels, verified->crop);
         if (previous && renderer_same_window_sample(*previous, frame)
             && same_crop(previous_box, verified->crop) && previous_crop == pixels) {
@@ -332,7 +335,10 @@ void renderer_capture_archive_window(ignatius_wgc::WindowCapture& capture, const
         const auto focus = count_color(frame.pixels, client, {0x8a, 0xb4, 0xf8});
         const bool verified = surface >= 2048 && focus >= 24 && find_anchor(frame.pixels).count == 0
             && count_color(frame.pixels, client, sentinel_color) == 0;
-        if (!verified) continue;
+        if (!verified) {
+            previous.reset();
+            continue;
+        }
         if (previous && renderer_same_window_sample(*previous, frame)) {
             write_crop(path, client, cropped_pixels(frame.pixels, client), deadline);
             receipt.active_width = frame.pixels.width;
