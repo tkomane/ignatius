@@ -6,6 +6,37 @@ DWORD renderer_guard_exit(const std::wstring& mode) {
     return 101;
 }
 
+void renderer_guard_accept_paste(RendererGuardReceipt& guard, Server& server,
+        const std::vector<std::string_view>& fields, const RendererPhase& baseline,
+        HANDLE child, HANDLE job, Clock::time_point deadline) {
+    const auto count = guard.paste_observations.size();
+    require(guard.paste_required && count < 3, "only the explicit Guard paste case may send three observations");
+    const bool acquired = count == 1;
+    const bool alternate = (guard.option_bits & renderer_guard_alternate_bit) != 0;
+    const bool main = !acquired || !alternate;
+    if (count == 0) {
+        require(!child && !guard.owned && guard.phases.empty(), "Guard paste baseline precedes child launch");
+    } else {
+        require(child && guard.owned && GetProcessId(child) == guard.pid && WaitForSingleObject(child, 0) == WAIT_TIMEOUT
+                && guard.phases.size() == count - 1, "Guard paste follows the authenticated held phase sequence");
+        exact_job(child, job);
+    }
+    const auto n = renderer_numbers<14>(fields);
+    const auto phase = acquired ? (alternate ? 2U : 1U) : (count == 0 ? 0U : 5U);
+    const auto input = acquired ? renderer_paste_input(baseline.input, guard.option_bits & renderer_guard_mouse_bit ? 2 : 1)
+        : baseline.input;
+    const auto prior = count == 2 ? guard.phases.back().ack_qpc : baseline.ack_qpc;
+    const auto observed = renderer_stamp(n[12], n[13]);
+    require(n[0] == phase && renderer_paste_bounded(n) && n[2] == input && n[4] == (main ? 1U : 0U)
+            && (n[3] & renderer_guard_vt_mask) == renderer_guard_vt_mask && (!main || n[3] == baseline.output)
+            && observed >= prior && observed <= ticks(), "bounded Guard paste state tied to the native console phase");
+    guard.paste_observations.push_back(n);
+    const auto expected = acquired && (guard.option_bits & renderer_guard_paste_bit) != 0
+        ? RendererPasteStatus::enabled : RendererPasteStatus::reset;
+    require(renderer_paste_exact(n, expected), "exact renderer paste state and quiet input for this Guard phase");
+    server.ack(deadline);
+}
+
 void renderer_guard_accept_phase(RendererGuardReceipt& guard, Server& server,
         const std::vector<std::string_view>& fields, const RendererPhase& baseline,
         const RendererWindow& renderer, HANDLE job, HANDLE child,
@@ -36,6 +67,14 @@ void renderer_guard_accept_phase(RendererGuardReceipt& guard, Server& server,
             && n[9] == w07::calibration_marker(ascii(nonce), expected_index).size()
             && n[10] >= 56 && n[10] <= 200 && n[11] >= 10 && n[11] <= 80
             && observed >= prior && observed <= ticks(), "bounded actual Guard native observation");
+    if (guard.paste_required) {
+        require(guard.paste_observations.size() == (restored ? 3U : 2U),
+                "the held Guard phase supplied its authenticated paste state before renderer capture");
+        const auto& paste = guard.paste_observations.back();
+        require(paste[0] == n[0] && paste[2] == n[1] && paste[3] == n[2] && paste[4] == n[3]
+                && renderer_stamp(paste[12], paste[13]) >= observed,
+                "the Guard query follows the native content fence in the same held phase");
+    }
     if (restored) {
         require(n[10] == guard.phases.front().native[10] && n[11] == guard.phases.front().native[11],
                 "Guard console viewport is stable");
@@ -54,7 +93,9 @@ void renderer_guard_accept_phase(RendererGuardReceipt& guard, Server& server,
 void renderer_guard_accept_exit(RendererGuardReceipt& guard, Server& server,
         const std::vector<std::string_view>& fields, const RendererPhase& baseline,
         HANDLE child, Clock::time_point deadline) {
-    require(guard.owned && !guard.finished && guard.phases.size() == 2, "Guard exit follows both native phases");
+    require(guard.owned && !guard.finished && guard.phases.size() == 2
+            && (!guard.paste_required || guard.paste_observations.size() == 3),
+            "Guard exit follows both native phases and any required paste observations");
     guard.final = renderer_numbers<20>(fields);
     const auto& n = guard.final;
     guard.exit_waited = WaitForSingleObject(child, 0) == WAIT_OBJECT_0;
@@ -90,7 +131,13 @@ void emit_renderer_guard(const RendererGuardReceipt& guard) {
               << ",\"restored_modes\":" << truth(guard.restored_modes)
               << ",\"wrong_job_rejected\":" << truth(guard.wrong_job_rejected)
               << ",\"wrong_job_control_exit\":" << guard.rejected_exit
-              << ",\"paste_state\":\"open-not-measured\",\"phases\":[";
+              << ",\"paste_state\":\"" << (guard.paste_required
+                     ? (guard.finished ? "verified-native" : "incomplete") : "open-not-measured") << '"';
+    if (guard.paste_required) {
+        std::cout << ",\"paste_observations\":";
+        emit_renderer_paste_observations(guard.paste_observations);
+    }
+    std::cout << ",\"phases\":[";
     for (std::size_t i = 0; i < guard.phases.size(); ++i) {
         if (i > 0) std::cout << ',';
         const auto& p = guard.phases[i];

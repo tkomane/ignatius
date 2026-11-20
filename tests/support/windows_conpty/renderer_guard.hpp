@@ -3,12 +3,16 @@
 constexpr DWORD renderer_guard_vt_mask = ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
 constexpr DWORD renderer_guard_mouse_mask = ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
 constexpr unsigned renderer_guard_mouse_bit = 1;
+constexpr unsigned renderer_guard_paste_bit = 2;
 constexpr unsigned renderer_guard_alternate_bit = 4;
+
+#include "renderer_paste.hpp"
 
 struct RendererGuardCase {
     std::wstring executable;
     std::wstring mode;
     unsigned bits{};
+    bool paste{};
 };
 
 struct RendererGuardMeasurement {
@@ -22,6 +26,8 @@ struct RendererGuardReceipt {
     unsigned option_bits{};
     DWORD pid{}, expected_exit{}, exit_code{STILL_ACTIVE}, rejected_exit{STILL_ACTIVE};
     bool owned{}, exit_waited{}, restored_modes{}, finished{}, wrong_job_rejected{};
+    bool paste_required{};
+    std::vector<RendererPasteObservation> paste_observations;
     std::vector<RendererGuardMeasurement> phases;
     std::array<std::uint32_t, 20> final{};
 };
@@ -127,10 +133,25 @@ RendererGuardMarkers renderer_guard_markers(HANDLE output, Clock::time_point dea
             renderer_guard_token(text, L"W07_RENDERER_HOOK_FAILED")};
 }
 
+void renderer_guard_observe_paste(const std::wstring& pipe, const std::wstring& nonce, HANDLE input,
+                                  std::size_t phase, DWORD expected_input, DWORD expected_output, bool main,
+                                  Clock::time_point deadline) {
+    Handle output(CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              nullptr, OPEN_EXISTING, 0, nullptr));
+    require(static_cast<bool>(output), "select the active owned Guard paste query output");
+    const auto reply = renderer_observe_paste(input, output.value, deadline);
+    DWORD after_input{}, after_output{};
+    require(GetConsoleMode(input, &after_input) && GetConsoleMode(output.value, &after_output)
+            && after_input == expected_input && after_output == expected_output
+            && renderer_product_sentinel(output.value, nonce) == main,
+            "the Guard paste observation preserves the held native console phase");
+    renderer_send_paste(pipe, ascii(nonce), 'Q', phase, reply, after_input, after_output, main);
+}
+
 void renderer_run_guard(const std::wstring& guard_exe, const std::wstring& scenario, unsigned bits,
                         const std::wstring& outer_pipe, const std::wstring& nonce, const std::wstring& work,
                         HANDLE input, DWORD seeded_input, DWORD seeded_output,
-                        Clock::time_point work_deadline) {
+                        Clock::time_point work_deadline, bool paste) {
     const bool panic = scenario == L"panic";
     const bool error = scenario == L"error";
     require(panic || error || scenario == L"normal", "exact guard scenario");
@@ -148,6 +169,7 @@ void renderer_run_guard(const std::wstring& guard_exe, const std::wstring& scena
             && renderer_product_sentinel(baseline.value, nonce), "observe the untouched guard seed before spawn");
 
     const auto phase_deadline = (std::min)(work_deadline, Clock::now() + 20s);
+    if (paste) renderer_guard_observe_paste(outer_pipe, nonce, input, 0, seeded_input, seeded_output, true, phase_deadline);
     const std::wstring inner_pipe = LR"(\\.\pipe\ignatius-w07-renderer-guard-)" + nonce;
     Security security;
     std::optional<Server> inner(std::in_place, inner_pipe, security, work_deadline);
@@ -184,6 +206,8 @@ void renderer_run_guard(const std::wstring& guard_exe, const std::wstring& scena
                     "exact inner guard nonce and phase order");
             const auto observation = renderer_guard_phase(nonce, phase, input,
                                                           restored ? seeded_input : raw_input, seeded_output, fitted);
+            if (paste) renderer_guard_observe_paste(outer_pipe, nonce, input, phase, observation.input,
+                                                   observation.output, observation.main_sentinel, phase_deadline);
             if (restored) {
                 const auto output = renderer_open_output();
                 before_clear = renderer_guard_markers(output.value, phase_deadline).clear();
