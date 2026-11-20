@@ -182,21 +182,27 @@ struct RendererArchiveReceipt {
     RendererPixelObservation restored_pixels{};
 };
 
-Handle renderer_register_archive(HANDLE actor, HANDLE job, const std::wstring& archive,
-                                 const std::array<std::uint32_t, 5>& data, RendererArchiveReceipt& receipt) {
+Handle renderer_register_child(HANDLE actor, HANDLE job, const std::wstring& executable,
+                               const std::array<std::uint32_t, 5>& data) {
     const auto reported_handle = renderer_stamp(data[1], data[2]);
     HANDLE copied{};
     require(data[0] != 0 && reported_handle != 0
             && DuplicateHandle(actor, reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(reported_handle)),
                                GetCurrentProcess(), &copied, PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-                               FALSE, 0) != 0, "duplicate the actor's exact archived client handle");
+                               FALSE, 0) != 0, "duplicate the actor's exact suspended child handle");
     Handle owned(copied);
     exact_job(owned.value, job);
     const auto created = birth(owned.value);
     require(GetProcessId(owned.value) == data[0] && created.dwLowDateTime == data[3]
-            && created.dwHighDateTime == data[4] && same_path(image(owned.value), archive)
+            && created.dwHighDateTime == data[4] && same_path(image(owned.value), executable)
             && WaitForSingleObject(owned.value, 0) == WAIT_TIMEOUT,
-            "authenticate the suspended archived executable in the exact renderer Job");
+            "authenticate the suspended child executable in the exact renderer Job");
+    return owned;
+}
+
+Handle renderer_register_archive(HANDLE actor, HANDLE job, const std::wstring& archive,
+                                 const std::array<std::uint32_t, 5>& data, RendererArchiveReceipt& receipt) {
+    auto owned = renderer_register_child(actor, job, archive, data);
     require(IsWow64Process2(owned.value, &receipt.process_machine, &receipt.native_machine) != 0,
             "record the archived process and native OS architectures");
     if (receipt.native_machine == IMAGE_FILE_MACHINE_ARM64

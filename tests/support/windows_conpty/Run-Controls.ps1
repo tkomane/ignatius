@@ -1,16 +1,21 @@
-# Reviewed first controls or one cursor diagnostic only. Root inspects frozen inputs first.
+# Reviewed native controls or one cursor diagnostic. Root inspects frozen inputs first.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $BuildManifest,
     [Parameter(Mandatory)] [string] $EvidenceRoot,
     [switch] $RunReviewedCapabilityControls,
-    [switch] $RunReviewedCursorDiagnostic
+    [switch] $RunReviewedCursorDiagnostic,
+    [switch] $RunReviewedPrerequisiteControls
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Actual Windows is required; parser/local compilation are not native runtime evidence' }
 . (Join-Path $PSScriptRoot 'Validation.ps1')
-Assert-W07Selection ([bool]$RunReviewedCapabilityControls) ([bool]$RunReviewedCursorDiagnostic)
+if ($RunReviewedPrerequisiteControls) {
+    Assert-W07 (-not $RunReviewedCapabilityControls -and -not $RunReviewedCursorDiagnostic) 'select exactly one reviewed native run'
+} else {
+    Assert-W07Selection ([bool]$RunReviewedCapabilityControls) ([bool]$RunReviewedCursorDiagnostic)
+}
 $manifestPath = (Resolve-Path -LiteralPath $BuildManifest).Path
 $manifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
@@ -151,8 +156,14 @@ if ($RunReviewedCursorDiagnostic) {
     $summary.product_acceptance=$false
     $summary.cursor_capability_accepted=$false
 }
-$cases=if ($RunReviewedCursorDiagnostic) { @('cursor-routing') } else { @('no-guard','known-unrestored','hung-child','capability') }
-$expectedCases=if ($RunReviewedCursorDiagnostic) { 1 } else { 4 }
+if ($RunReviewedPrerequisiteControls) {
+    $summary.scope='renderer-guard-prerequisite-controls'
+    $summary.product_acceptance=$false
+}
+$cases = if ($RunReviewedCursorDiagnostic) { @('cursor-routing') }
+    elseif ($RunReviewedPrerequisiteControls) { @('no-guard','known-unrestored','hung-child') }
+    else { @('no-guard','known-unrestored','hung-child','capability') }
+$expectedCases = @($cases).Count
 try {
     Assert-Inputs
     foreach ($case in $cases) {
@@ -176,4 +187,5 @@ if ($summary.stop -or $summary.cases.Count -ne $expectedCases -or -not $summary.
     throw 'Capability/control run incomplete or failed; inspect retained bounded evidence'
 }
 if ($RunReviewedCursorDiagnostic) { Write-Output 'Cursor routing diagnostic completed; product/cursor capability acceptance remains false.' }
+elseif ($RunReviewedPrerequisiteControls) { Write-Output 'The no-guard, known-unrestored and owned hung-child controls passed.' }
 else { Write-Output 'Four actual Windows capability/control children passed. Paste/full matrix/Windows 11 hand use remain open.' }

@@ -14,6 +14,8 @@ on:
           - native-controls
           - renderer-desktop
           - renderer-cursor
+          - renderer-guard-admission
+          - renderer-guard-matrix
 
 permissions:
   contents: read
@@ -79,6 +81,76 @@ jobs:
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/phase-3.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/phase-4.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/phase-5.bmp
+
+  renderer-guard:
+    name: Observe actual Guard restoration in Windows Terminal
+    if: inputs.probe == 'renderer-guard-admission' || inputs.probe == 'renderer-guard-matrix'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      WINDOWS_GUARD_PROBE: ${{ inputs.probe }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Fetch the locked dependency inputs
+        run: cargo fetch --locked
+      - name: Build the selected Guard library consumer and prove prerequisites
+        id: guard-build
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $instances = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          if ($LASTEXITCODE -ne 0 -or $instances.Count -ne 1) { throw 'One installed x64 MSVC toolset is required.' }
+          & (Join-Path ($instances[0].Trim()) 'Common7/Tools/Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          $root = Join-Path $env:RUNNER_TEMP "ignatius-conpty-${env:GITHUB_RUN_ID}-${env:GITHUB_RUN_ATTEMPT}"
+          $build = Join-Path $root 'build'
+          $cargoHome = if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cargo' } else { [IO.Path]::GetFullPath($env:CARGO_HOME) }
+          $cargoTarget = Join-Path $env:GITHUB_WORKSPACE 'target'
+          ./tests/support/windows_conpty/Build.ps1 -SourceRoot $env:GITHUB_WORKSPACE -BuildRoot $build `
+            -CargoHome $cargoHome -CargoTarget $cargoTarget -ExpectedRevision $env:GITHUB_SHA
+          $buildManifest = Join-Path $build 'build-manifest.json'
+          ./tests/support/windows_conpty/Run-Controls.ps1 -BuildManifest $buildManifest `
+            -EvidenceRoot (Join-Path $root 'guard-controls') -RunReviewedPrerequisiteControls
+          "WINDOWS_GUARD_BUILD_MANIFEST=$buildManifest" >> $env:GITHUB_ENV
+      - name: Calibrate and observe the owned Guard in portable Windows Terminal
+        id: guard
+        shell: pwsh
+        run: |
+          ./tests/support/windows_conpty/Run-RendererCalibration.ps1 -GuardBuildManifest $env:WINDOWS_GUARD_BUILD_MANIFEST `
+            -GuardMatrix:($env:WINDOWS_GUARD_PROBE -ceq 'renderer-guard-matrix')
+      - name: Retain allowlisted Guard renderer observations
+        if: ${{ always() && steps.guard-build.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-terminal-guard-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/build-manifest.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/build/prebuild-inputs.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/guard-controls/summary.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/guard-controls/capture-manifest.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/guard-controls/*/controller.json
+            ${{ runner.temp }}/ignatius-conpty-${{ github.run_id }}-${{ github.run_attempt }}/guard-controls/*/supervisor.stdout.bin
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/build.json
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/renderer-report.json
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/phase-0.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/phase-1.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/phase-2.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/phase-3.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/phase-4.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-calibration/phase-5.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-*/renderer-report.json
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-*/baseline.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-*/guard-acquired.bmp
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/guard-*/guard-restored.bmp
 
   diagnostic:
     if: inputs.probe == 'native-controls' || inputs.probe == ''
