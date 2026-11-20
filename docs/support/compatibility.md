@@ -658,9 +658,9 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 | Warp on macOS, interactive | A native SIGTERM run restored the POSIX terminal settings. The hosted signed app reached its first-run agreement. Visual hand use, cursor appearance and OSC 11 response remain open. See the [startup diagnostic](../operations/verification.md#warp-startup-diagnostics---20-november-2026) |
 | Warp Integration on hosted Apple silicon | The source-built renderer captured the archived client and the restored shell. Ctrl+Q exited zero, restored the same PTY modes and preserved the OSC 11 response. See the [native renderer evidence](../operations/verification.md#warp-source-renderer---20-november-2026) |
 | Live terminal resize | The macOS PTY and automated Linux xterm verified compact and minimum-size layouts, then recovered retained results |
-| Windows Terminal, interactive | The archived client restored console modes and main-screen pixels on Windows Server 2025 x64 in Windows Terminal 1.25.3131.0. All 24 standalone Guard cases restored the native modes, cursor, paste state and main screen. See the [packaged renderer evidence](../operations/verification.md#packaged-windows-terminal-startup-and-quit---20-november-2026) and the [paste-observed Guard matrix](../operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026) |
-| Windows Terminal, Windows 11 ARM64 | The native ARM64 renderer displayed the x64 archive under emulation and resolved all six cursor controls. Ctrl+Q restored console modes, the main-screen crop and every cursor pixel. PowerShell 7 hand use remains open. See the [calibrated window capture](../operations/verification.md#calibrated-windows-11-arm64-cursor-restoration---20-november-2026) |
-| Linux xterm 390 | Automated Xvfb rendering, verified TLS, a separate Unix-socket query, resize and terminal-mode restoration passed on Ubuntu 24.04.5 x86-64. Linux desktop hand use remains open. See the [renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |
+| Windows Terminal, Windows Server 2025 x64 | The archived client restored console modes and main-screen pixels in Windows Terminal 1.25.3131.0. All 24 standalone Guard cases restored the native modes, cursor, paste state and main screen. [Packaged renderer evidence](../operations/verification.md#packaged-windows-terminal-startup-and-quit---20-november-2026) and [native Guard matrix](../operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026) |
+| Windows Terminal, Windows 11 ARM64 | The native Windows Terminal 1.25.3131.0 and PowerShell 7.6.10 ran the archived x64 client under emulation. The automated workbench returned one read-only row from plain loopback PostgreSQL 17.12. Ctrl+Q restored console modes, the main-screen crop and all 171 calibrated cursor pixels. The same PowerShell prompt ran a command. PowerShell 7 hand use remains open. [Workbench journey](../operations/verification.md#windows-11-powershell-workbench---20-november-2026) and [cursor calibration](../operations/verification.md#calibrated-windows-11-arm64-cursor-restoration---20-november-2026) |
+| Linux xterm 390 | On Ubuntu 24.04.5 x86-64 under Xvfb, the automated renderer displayed PostgreSQL 18.7 query results over verified TLS and over a separate Unix socket. Both runs verified resize recovery and terminal restoration. Linux desktop hand use remains open. [Renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |
 | `TERM=dumb` | Use `--plain`, which is a full client with no full-screen interface. The full-screen client refuses and says so |
 | Not a terminal (piped) | Full-screen client refuses; `query` works normally |
 
@@ -684,14 +684,12 @@ full uncaught product crash and Windows ConPTY acceptance. Crash details may
 contain sensitive information and cannot prove a database write outcome.
 
 At published `7d167a9` on 25 October 2026, the owned Windows ConPTY no-guard,
-known-unrestored and acknowledged hung-child controls passed. Actual Guard
-raw/mouse and alternate-buffer observations are partial evidence; its acquired
-cursor-visibility assertion failed. At `65cf237`, separate cursor calibration
-completed: native setters/main VT are observable but this retained sensor does
-not track alternate-VT visibility. The original capability still fails; the full
-option/path matrix and Windows 11/Windows Terminal hand use remain open. These results do
-not upgrade full Windows restoration or release acceptance; see the
-[dated verification record](../operations/verification.md).
+known-unrestored and acknowledged hung-child controls passed. The initial
+Guard test observed raw/mouse and alternate-buffer transitions, then failed
+the acquired cursor-visibility assertion. The separate `65cf237` calibration
+observed native setters and main-screen VT. Its alternate-screen cursor
+reading stayed constant. Matrix admission remained open at that stage.
+[Initial ConPTY diagnostic](../operations/verification.md#w07-064-first-windows-capability-harness---2026-10-25)
 
 ## Themes and M12-M14 CLI subcommands
 
