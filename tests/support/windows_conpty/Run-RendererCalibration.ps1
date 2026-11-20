@@ -9,6 +9,7 @@ param(
     [ValidateRange(0, 65535)] [int] $WorkbenchPort,
     [string] $WorkbenchCa,
     [switch] $WorkbenchPerformance,
+    [switch] $WorkbenchGrid,
     [string] $GuardBuildManifest,
     [switch] $GuardMatrix,
     [switch] $GuardPaste,
@@ -166,6 +167,9 @@ if ($WorkbenchPerformance -and (-not $liveWorkbench -or -not $WindowCursorCalibr
     $CandidateBuild -cne 'ci/44681770913-1' -or $CandidateSource -cne '61425c34097020ecec3ffead0bec7d4251680814')) {
     throw 'The workbench timings require the exact archived client in the owned Windows 11 ARM64 session.'
 }
+if ($WorkbenchGrid -and -not $WorkbenchPerformance) {
+    throw 'Retained-grid timing requires the exact workbench performance mode.'
+}
 if ($liveWorkbench) {
     $shell = Get-Item -LiteralPath (Join-Path $PSHOME 'pwsh.exe')
     if (-not $WindowCursorCalibration -or $PSVersionTable.PSVersion.Major -ne 7 -or
@@ -314,6 +318,9 @@ if ($windowCapture) {
 if ($WorkbenchPerformance) {
     $captureCompileOptions += '/DIGNATIUS_WORKBENCH_PERF'
 }
+if ($WorkbenchGrid) {
+    $captureCompileOptions += '/DIGNATIUS_WORKBENCH_GRID'
+}
 $probe = Join-Path $root 'renderer-probe.exe'
 Push-Location -LiteralPath $root
 try {
@@ -374,6 +381,9 @@ if ($liveWorkbench) {
 }
 if ($WorkbenchPerformance) {
     $sourceNames += 'renderer_workbench_perf.hpp'
+}
+if ($WorkbenchGrid) {
+    $sourceNames += 'renderer_workbench_grid.hpp'
 }
 if ($guardMode) {
     $sourceNames += @('guard_child.rs', 'Build.ps1', 'Validation.ps1', 'Run-Controls.ps1')
@@ -441,6 +451,16 @@ if ($WorkbenchPerformance) {
         columns_per_table = 10
     }
 }
+if ($WorkbenchGrid) {
+    $build['workbench_grid_fixture'] = @{
+        returned_rows = 1050
+        retained_rows = 1000
+        source_columns = 6
+        first_wide_column_glyphs = 24
+        first_wide_column_cells = 48
+        filter_matches = 100
+    }
+}
 if ($archiveMode) {
     $config = Join-Path $work 'config'
     $null = New-Item -ItemType Directory -Path $config
@@ -455,6 +475,9 @@ reduced-motion = true
 '@
     if ($liveWorkbench) {
         $clientConfigText += "`ncompletion = false"
+    }
+    if ($WorkbenchGrid) {
+        $clientConfigText += "`n[query]`nmax-buffered-rows = 1000"
     }
     [IO.File]::WriteAllText($clientConfig, $clientConfigText + "`n")
     $build['archived_client_sha256'] = $clientHash
@@ -739,26 +762,48 @@ if ($WorkbenchPerformance) {
         throw 'Expected one bounded regular performance receipt from the owned actor.'
     }
     $timing = [IO.File]::ReadAllText($control.FullName) | ConvertFrom-Json
-    $actions = @('editor_insert', 'editor_backspace', 'palette_open', 'palette_close', 'completion_open', 'completion_close')
-    if ($timing.schema_version -ne 1 -or $timing.scope -cne 'native console screen-buffer timing' -or
-        $timing.completion_key -cne 'Ctrl+Space' -or
-        $timing.qpc_frequency -le 0 -or $timing.warmup_actions -ne 24 -or $timing.measured_actions -ne 120 -or
+    if ($WorkbenchGrid) {
+        $actions = @('sort_ascending', 'sort_descending', 'sort_server', 'filter_apply', 'filter_clear',
+            'column_widen', 'column_narrow')
+        $scope = 'native retained grid console screen-buffer timing'
+        $samplesPerAction = 15
+        $warmupCount = 21
+        if ($timing.viewport_columns -ne 90 -or $timing.viewport_rows -ne 27 -or
+            $timing.rows_retained -ne 1000 -or $timing.rows_returned -ne 1050 -or $timing.source_columns -ne 6 -or
+            $timing.filter_matches -ne 100 -or $timing.sort_column_width_step -ne 2 -or
+            $timing.wide_glyphs_verified -cne $true -or $timing.source_row_numbers_verified -cne $true) {
+            throw 'Retained-grid cardinality, width or source-row observations did not match the fixture.'
+        }
+    } else {
+        $actions = @('editor_insert', 'editor_backspace', 'palette_open', 'palette_close', 'completion_open', 'completion_close')
+        $scope = 'native console screen-buffer timing'
+        $samplesPerAction = 20
+        $warmupCount = 24
+        if ($timing.completion_key -cne 'Ctrl+Space' -or
+            $timing.viewport_columns -lt 80 -or $timing.viewport_columns -gt 200 -or
+            $timing.viewport_rows -lt 24 -or $timing.viewport_rows -gt 80) {
+            throw 'The timing receipt did not identify the expected editor controls.'
+        }
+    }
+    if ($timing.schema_version -ne 1 -or $timing.scope -cne $scope -or
+        $timing.qpc_frequency -le 0 -or $timing.warmup_actions -ne $warmupCount -or
+        $timing.measured_actions -ne ($actions.Count * $samplesPerAction) -or
         $timing.idle_unchanged -cne $true -or $timing.catalogue_loaded -cne $true -or
-        $timing.viewport_columns -lt 80 -or $timing.viewport_columns -gt 200 -or
-        $timing.viewport_rows -lt 24 -or $timing.viewport_rows -gt 80 -or
         @($timing.samples.PSObject.Properties.Name).Count -ne $actions.Count) {
         throw 'The timing receipt did not identify the expected console, warm-up and measured actions.'
     }
     foreach ($action in $actions) {
         $ticks = @($timing.samples.$action)
-        if ($ticks.Count -ne 20 -or @($ticks | Where-Object {
+        if ($ticks.Count -ne $samplesPerAction -or @($ticks | Where-Object {
                 $_ -isnot [long] -or $_ -le 0 -or $_ -ge (2 * $timing.qpc_frequency)
             }).Count -ne 0) {
             throw "Invalid native QPC samples for $action."
         }
     }
-    $performancePath = Join-Path $work 'workbench-performance.json'
+    $reportName = if ($WorkbenchGrid) { 'workbench-grid-performance.json' } else { 'workbench-performance.json' }
+    $digestName = if ($WorkbenchGrid) { 'workbench_grid_performance_report_sha256' } else { 'workbench_performance_report_sha256' }
+    $performancePath = Join-Path $work $reportName
     [IO.File]::Move($control.FullName, $performancePath)
-    $build['workbench_performance_report_sha256'] = FileDigest $performancePath
+    $build[$digestName] = FileDigest $performancePath
     [IO.File]::WriteAllText((Join-Path $work 'build.json'), ((ConvertTo-Json $build -Depth 6) + "`n"))
 }

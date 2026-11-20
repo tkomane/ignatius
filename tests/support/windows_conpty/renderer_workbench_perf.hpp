@@ -26,14 +26,12 @@ std::uint64_t workbench_observe_until(const Child& client, Clock::time_point dea
 }
 
 template<class Predicate>
-std::uint64_t workbench_time_key(const Child& client, HANDLE input, Clock::time_point deadline,
-                                 WORD key, wchar_t character, DWORD modifiers,
-                                 Predicate expected, const char* action) {
+std::uint64_t workbench_time_input(const Child& client, HANDLE input, Clock::time_point deadline,
+                                   const std::vector<INPUT_RECORD>& records,
+                                   Predicate expected, const char* action) {
     if (expected(workbench_observe(client))) {
         throw std::runtime_error(std::string("workbench state already satisfied: ") + action);
     }
-    std::vector<INPUT_RECORD> records;
-    renderer_add_key(records, key, character, modifiers);
     require(Clock::now() < deadline, "workbench timing input is within its budget");
     const auto sample_deadline = (std::min)(deadline, Clock::now() + 1s);
     const auto start = ticks();
@@ -42,6 +40,19 @@ std::uint64_t workbench_time_key(const Child& client, HANDLE input, Clock::time_
     require(end > start, "monotonic workbench action timing");
     return end - start;
 }
+
+template<class Predicate>
+std::uint64_t workbench_time_key(const Child& client, HANDLE input, Clock::time_point deadline,
+                                 WORD key, wchar_t character, DWORD modifiers,
+                                 Predicate expected, const char* action) {
+    std::vector<INPUT_RECORD> records;
+    renderer_add_key(records, key, character, modifiers);
+    return workbench_time_input(client, input, deadline, records, expected, action);
+}
+
+#ifdef IGNATIUS_WORKBENCH_GRID
+#include "renderer_workbench_grid.hpp"
+#else
 
 void renderer_workbench_performance(const Child& client, HANDLE input,
                                     Clock::time_point archive_deadline, const std::wstring& work) {
@@ -156,3 +167,4 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     receipt.close();
     require(static_cast<bool>(receipt), "write the bounded owned workbench timing receipt");
 }
+#endif

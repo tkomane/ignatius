@@ -37,6 +37,10 @@ on:
         description: Time local workbench inputs in the native console for candidate ci/44681770913-1
         default: false
         type: boolean
+      workbench_grid:
+        description: Use the retained-row grid timings within the exact workbench performance route
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -55,6 +59,7 @@ jobs:
       WINDOW_CURSOR_CALIBRATION: ${{ inputs.window_cursor_calibration }}
       POWERSHELL_WORKBENCH: ${{ inputs.powershell_workbench }}
       WORKBENCH_PERFORMANCE: ${{ inputs.workbench_performance }}
+      WORKBENCH_GRID: ${{ inputs.workbench_grid }}
     steps:
       - name: Resolve the completed release run and attempt
         id: candidate
@@ -79,6 +84,9 @@ jobs:
               ($env:POWERSHELL_WORKBENCH -cne 'true' -or $env:CANDIDATE_RUN -cne '44681770913' -or
               $env:CANDIDATE_ATTEMPT -cne '1' -or $env:SOURCE_REVISION -cne '61425c34097020ecec3ffead0bec7d4251680814')) {
             throw 'The workbench timings require the exact retained candidate and native PowerShell workbench.'
+          }
+          if ($env:WORKBENCH_GRID -ceq 'true' -and $env:WORKBENCH_PERFORMANCE -cne 'true') {
+            throw 'Retained-grid timing requires the exact workbench performance mode.'
           }
           $runJson = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN/attempts/$env:CANDIDATE_ATTEMPT"
           if ($LASTEXITCODE -ne 0) { throw "Could not resolve the candidate run attempt" }
@@ -188,7 +196,8 @@ jobs:
           }
           if ($env:POWERSHELL_WORKBENCH -ceq 'true') {
             ./tests/support/windows_conpty/Run-WorkbenchFixture.ps1 @parameters `
-              -WorkbenchPerformance:($env:WORKBENCH_PERFORMANCE -ceq 'true')
+              -WorkbenchPerformance:($env:WORKBENCH_PERFORMANCE -ceq 'true') `
+              -WorkbenchGrid:($env:WORKBENCH_GRID -ceq 'true')
           } else {
             ./tests/support/windows_conpty/Run-RendererCalibration.ps1 @parameters `
               -WindowCursorCalibration:($env:WINDOW_CURSOR_CALIBRATION -ceq 'true')
@@ -205,6 +214,7 @@ jobs:
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/build.json
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/renderer-report.json
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-performance.json
+            ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/workbench-grid-performance.json
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/baseline.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-active.bmp
             ${{ runner.temp }}/ignatius-renderer-${{ github.run_id }}-${{ github.run_attempt }}/work/ignatius-restored.bmp

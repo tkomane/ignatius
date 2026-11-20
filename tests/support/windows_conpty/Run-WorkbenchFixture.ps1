@@ -7,7 +7,8 @@ param(
     [Parameter(Mandatory)] [string] $ExpectedClientSha256,
     [Parameter(Mandatory)] [string] $CandidateSource,
     [Parameter(Mandatory)] [string] $CandidateBuild,
-    [switch] $WorkbenchPerformance
+    [switch] $WorkbenchPerformance,
+    [switch] $WorkbenchGrid
 )
 
 Set-StrictMode -Version Latest
@@ -20,6 +21,9 @@ if (-not $IsWindows -or [Environment]::OSVersion.Version.Build -lt 22000 -or
 if ($WorkbenchPerformance -and ($CandidateBuild -cne 'ci/44681770913-1' -or
     $CandidateSource -cne '61425c34097020ecec3ffead0bec7d4251680814')) {
     throw 'The workbench timings require the exact retained candidate.'
+}
+if ($WorkbenchGrid -and -not $WorkbenchPerformance) {
+    throw 'Retained-grid timing requires the exact workbench performance mode.'
 }
 
 $scratch = Join-Path $env:RUNNER_TEMP ('ignatius-workbench-' + [Guid]::NewGuid().ToString('N'))
@@ -199,6 +203,31 @@ WHERE table_schema IN ('public', 'perf_aux') AND table_name ~ '^perf_catalog_[0-
                 throw 'Expected two schemas, 30 synthetic tables and 300 columns.'
             }
         }
+        if ($WorkbenchGrid) {
+            $grid = @'
+BEGIN READ WRITE;
+CREATE TABLE public.perf_grid AS
+SELECT i AS source_id, 'row' || lpad(i::text, 4, '0') AS row_code,
+       (613*i) % 1000 AS sort_key,
+       CASE WHEN i % 10 = 1 THEN 'hit#' ELSE 'other' END AS bucket,
+       repeat(chr(30028) || chr(34920), 12) AS wide_a,
+       repeat(chr(26684) || chr(23376), 12) AS wide_b,
+       CASE i % 3 WHEN 1 THEN NULL WHEN 2 THEN '' ELSE 'NULL' END AS nullable
+FROM generate_series(1, 1050) AS i;
+COMMIT;
+'@
+            & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -v ON_ERROR_STOP=1 -c $grid
+            if ($LASTEXITCODE -ne 0) { throw 'Could not seed the owned synthetic grid.' }
+            $shape = & (Join-Path $pgBin 'psql.exe') -XwqAt $fixtureUri -c @'
+SELECT count(*), min(char_length(wide_a)), max(octet_length(wide_a)),
+       count(*) FILTER (WHERE source_id <= 1000 AND bucket = 'hit#'),
+       current_setting('transaction_read_only')
+FROM public.perf_grid
+'@
+            if ($LASTEXITCODE -ne 0 -or $shape -cne '1050|24|72|100|on') {
+                throw 'The owned grid did not have the expected rows, wide values and read-only mode.'
+            }
+        }
     }
     finally {
         $env:PGSSLROOTCERT = $rootBefore
@@ -219,6 +248,7 @@ WHERE table_schema IN ('public', 'perf_aux') AND table_name ~ '^perf_catalog_[0-
         WorkbenchPort = $port
         WorkbenchCa = $caPath
         WorkbenchPerformance = $WorkbenchPerformance
+        WorkbenchGrid = $WorkbenchGrid
     }
     & (Join-Path $PSScriptRoot 'Run-RendererCalibration.ps1') @journey
 }

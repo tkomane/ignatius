@@ -199,7 +199,11 @@ COORD renderer_workbench_query(const Child& product, HANDLE input, Clock::time_p
 
 #ifdef IGNATIUS_WORKBENCH_PERF
     try {
+#ifdef IGNATIUS_WORKBENCH_GRID
+        renderer_workbench_grid(product, input, deadline, work);
+#else
         renderer_workbench_performance(product, input, deadline, work);
+#endif
     } catch (const std::runtime_error& error) {
         const std::string_view detail(error.what());
         std::ofstream failure(std::filesystem::path(work) / L"workbench-failure.txt");
