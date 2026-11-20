@@ -114,8 +114,25 @@ is `a51fc2361d702b8c28d87254c9bdef30d561dad3e5e1fa3a96e8ee6ce2ea728b`.
 The same client returned the server-confirmed read-only TLS result `42`.
 It exited zero and restored the console modes, all 171 calibrated cursor
 pixels and the byte-identical main-screen capture. The original PowerShell
-prompt ran a command and the owned job emptied. Windows grid and compositor
-timing, and desktop and screen-reader hand use, remain open.
+prompt ran a command and the owned job emptied.
+
+The same Windows archive completed the retained-grid probe on runner
+image `20261115.219.1` with the same Windows build, Terminal, PowerShell and
+PostgreSQL versions. At 90x27 the six-column query returned 1,050 rows and
+retained 1,000. The probe verified 100 filter matches, the source row numbers
+and numeric sort order of the whole visible range, and the fixture's 24 CJK
+characters in the first wide column's 48 console cells. Widening and narrowing
+the selected sort column moved the following headers by two cells each way.
+
+After 21 warm-ups, 105 grid actions measured 31.118 ms p50 and 47.403 ms
+p95. One filter application took 119.757 ms. QPC measured from before
+`WriteConsoleInputW` to the first matching `ReadConsoleOutputW` buffer
+read, including polling. The raw receipt SHA-256 is
+`3d98e6dcc6f0424a714ba373bab3d8ae0bb192eb8ea399cf9ba34ce0717ee0aa`.
+The same run verified the read-only TLS result and restored the main-screen
+pixels, 171 cursor pixels, console modes and the original PowerShell prompt.
+Windows compositor timing, desktop hand use and screen-reader hand use
+remain open. [Windows grid run and receipts](https://github.com/tkomane/ignatius/actions/runs/44708743953)
 
 ### Selected archive verification and missing prerequisites
 
