@@ -15,6 +15,16 @@ launch, during acquisition and after restoration. Failed or unsupported
 replies stop the run.
 [Native paste evidence](../../../docs/operations/verification.md#native-windows-bracketed-paste-restoration---20-november-2026)
 
+The archive diagnostic accepts `powershell_workbench=true` with
+`terminal-renderer-arm64` and `window_cursor_calibration=true`. It uses
+the verified Windows archive and native PowerShell 7 inside the owned
+Windows 11 ARM64 Terminal. F5 sends a read-only query to a disposable
+loopback PostgreSQL 17.12 fixture. The probe reads the completed row and
+elapsed time from the active console and captures that frame. It verifies
+the calibrated cursor and console modes after Ctrl+Q, then runs a command
+in the same PowerShell prompt. This is automated evidence for the
+foundation journey. Human hand use remains a separate T051 check.
+
 This is the separate cursor-calibration review candidate, based on exact source
 `7d167a96103030914d12cda0e7f6ae2c5c903b84`. The original four capability/control
 paths and their acceptance assertions are preserved. It changes no product source,

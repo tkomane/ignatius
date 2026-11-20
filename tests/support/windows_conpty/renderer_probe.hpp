@@ -186,6 +186,13 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
     require(GetConsoleMode(input.value, &fitted_input) && GetConsoleMode(output.value, &fitted_output)
             && fitted_input == baseline_input && fitted_output == baseline_output,
             "renderer resize preserves the untouched console modes");
+    std::optional<Child> shell;
+    if (!archive.empty()) {
+        if (const auto scenario = renderer_shell_config(work)) {
+            require(window_cursor_calibration, "the live shell uses the calibrated native archive route");
+            shell = renderer_start_shell(*scenario, archive, pipe, nonce, work);
+        }
+    }
     RendererModeRestorer restore{output.value, baseline_output};
     const auto active_output = baseline_output | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     require(SetConsoleMode(output.value, active_output) != 0, "enable VT on the owned renderer console");
@@ -228,7 +235,7 @@ int renderer_actor(const std::wstring& pipe, const std::wstring& nonce, const st
     }
 
     if (!archive.empty()) {
-        renderer_run_archive(archive, pipe, nonce, work, input.value);
+        renderer_run_archive(archive, pipe, nonce, work, input.value, shell);
     }
     if (guard) {
         renderer_run_guard(guard->executable, guard->mode, guard->bits, pipe, nonce, work, input.value,
@@ -728,7 +735,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
     const auto deadline = start + (guard || paste ? 24s : 30s);
     const auto work_deadline = start + (guard || paste ? 20s : 25s);
     std::unique_ptr<Server> server;
-    Handle job, actor, archived_client, guard_child;
+    Handle job, actor, archived_client, powershell, guard_child;
     Child launcher;
     RendererWindow renderer;
 #ifdef IGNATIUS_RENDERER_WINDOW_CAPTURE
@@ -755,6 +762,11 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
             require(client.is_absolute() && same_path(client.filename().wstring(), L"ignatius.exe")
                     && std::filesystem::is_regular_file(client),
                     "archived client is an absolute verified executable");
+        }
+        const auto live_shell = receipt.archive ? renderer_shell_config(folder) : std::nullopt;
+        if (live_shell) {
+            require(window_cursor_calibration, "the live shell requires the calibrated native window");
+            receipt.archive->workbench_expected = true;
         }
         if (guard) {
             const auto child = std::filesystem::path(guard->executable);
@@ -921,9 +933,44 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 continue;
             }
 
+            if (live_shell && parts[0] == "H") {
+                require(!powershell && !archived_client && receipt.phases.empty(),
+                        "the scoped shell registers before archive launch or baseline capture");
+                powershell = renderer_register_child(sender.value, job.value, live_shell->executable,
+                    renderer_numbers<5>(parts));
+                USHORT process_machine{}, native_machine{};
+                require(IsWow64Process2(powershell.value, &process_machine, &native_machine)
+                        && process_machine == IMAGE_FILE_MACHINE_UNKNOWN && native_machine == IMAGE_FILE_MACHINE_ARM64,
+                        "the scoped PowerShell process is native ARM64");
+                receipt.archive->native_powershell = true;
+                server->ack(work_deadline);
+                continue;
+            }
+            if (live_shell && parts[0] == "W") {
+                auto& product = *receipt.archive;
+                const auto data = renderer_numbers<3>(parts);
+                const auto observed = renderer_stamp(data[1], data[2]);
+                require(powershell && archived_client && WaitForSingleObject(powershell.value, 0) == WAIT_TIMEOUT
+                        && observed >= prior_qpc && observed <= ticks(),
+                        "a live workbench observation belongs to the owned shell and archive");
+                if (data[0] == 1) {
+                    require(!product.workbench_result && !product.raw_alternate
+                            && WaitForSingleObject(archived_client.value, 0) == WAIT_TIMEOUT,
+                            "live result was completed before capture of the active archive");
+                    product.workbench_result = true;
+                } else {
+                    require(data[0] == 2 && product.workbench_result && !product.powershell_prompt
+                            && product.restored_capture_qpc > 0 && observed >= product.restored_capture_qpc,
+                            "the same shell accepted a command after archive restoration");
+                    product.powershell_prompt = true;
+                }
+                server->ack(work_deadline);
+                continue;
+            }
             if (receipt.archive && parts[0] == "P") {
                 require(!archived_client && receipt.phases.size() == phase_count,
                         "archived client starts after the measured baseline");
+                require(!live_shell || powershell, "the live archive belongs to its owned PowerShell session");
                 archived_client = renderer_register_archive(sender.value, job.value, archive,
                     renderer_numbers<5>(parts), *receipt.archive);
                 server->ack(work_deadline);
@@ -945,6 +992,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                 auto& product = *receipt.archive;
                 const auto data = renderer_numbers<4>(parts);
                 require(archived_client && !product.raw_alternate
+                        && (!live_shell || product.workbench_result)
                         && WaitForSingleObject(archived_client.value, 0) == WAIT_TIMEOUT,
                         "archived product is still executing in the owned console");
                 product.acquired_input = data[0];
@@ -1072,6 +1120,13 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     "renderer final restoration follows all measured phases");
             require(!receipt.archive || receipt.archive->restored_capture_qpc != 0,
                     "archive final actor cleanup follows product restoration");
+            if (live_shell) {
+                DWORD shell_exit{};
+                require(receipt.archive->powershell_prompt && powershell
+                        && WaitForSingleObject(powershell.value, 0) == WAIT_OBJECT_0
+                        && GetExitCodeProcess(powershell.value, &shell_exit) && shell_exit == 0,
+                        "the responsive PowerShell process exited zero before actor cleanup");
+            }
             require(!receipt.guard || receipt.guard->finished,
                     "Guard final actor cleanup follows measured restoration and child exit");
             require(!receipt.paste || receipt.paste->supported || receipt.paste->stopped,

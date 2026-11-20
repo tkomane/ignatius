@@ -6,6 +6,7 @@ param(
     [string] $CandidateSource,
     [string] $CandidateBuild,
     [switch] $WindowCursorCalibration,
+    [ValidateRange(0, 65535)] [int] $WorkbenchPort,
     [string] $GuardBuildManifest,
     [switch] $GuardMatrix,
     [switch] $GuardPaste,
@@ -154,6 +155,14 @@ if ($archiveMode -and $clientArchitecture -ne 'x64') {
 $windowCapture = $archiveMode -and $osArchitecture -ceq 'arm64'
 if ($WindowCursorCalibration -and -not $windowCapture) {
     throw 'Window cursor calibration requires the owned Windows 11 ARM64 archive route.'
+}
+$liveWorkbench = $WorkbenchPort -gt 0
+if ($liveWorkbench) {
+    $shell = Get-Item -LiteralPath (Join-Path $PSHOME 'pwsh.exe')
+    if (-not $WindowCursorCalibration -or $PSVersionTable.PSVersion.Major -ne 7 -or
+        $shell.FullName -cnotmatch '\A[\x20-\x7E]{1,512}\z' -or (PeArchitecture $shell.FullName) -cne 'arm64') {
+        throw 'The live workbench requires native PowerShell 7 and the calibrated Windows 11 window.'
+    }
 }
 
 $desktop = & (Join-Path $PSScriptRoot 'Test-Desktop.ps1') | ConvertFrom-Json
@@ -346,8 +355,11 @@ $settingsFile = Join-Path $settings 'settings.json'
 
 $sourceHashes = [ordered] @{}
 $sourceNames = @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp', 'renderer_modal.hpp',
-    'renderer_archive.hpp', 'renderer_guard.hpp', 'renderer_guard_supervisor.hpp', 'renderer_paste.hpp',
+    'renderer_archive.hpp', 'renderer_archive_shell.hpp', 'renderer_guard.hpp', 'renderer_guard_supervisor.hpp', 'renderer_paste.hpp',
     'Test-Desktop.ps1', 'Run-RendererCalibration.ps1')
+if ($liveWorkbench) {
+    $sourceNames += @('Run-WorkbenchFixture.ps1', 'Workbench-Shell.ps1')
+}
 if ($guardMode) {
     $sourceNames += @('guard_child.rs', 'Build.ps1', 'Validation.ps1', 'Run-Controls.ps1')
 }
@@ -381,18 +393,35 @@ if ($windowCapture) {
     $build['windows_sdk_version'] = $sdkVersion
     $build['window_cursor_calibration'] = [bool]$WindowCursorCalibration
 }
+if ($liveWorkbench) {
+    $script = Join-Path $work 'Workbench-Shell.ps1'
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Workbench-Shell.ps1') -Destination $script
+    if ((FileDigest $script) -cne $sourceHashes['Workbench-Shell.ps1']) {
+        throw 'The owned PowerShell script differs from its tracked source.'
+    }
+    [IO.File]::WriteAllLines((Join-Path $work 'shell-request'), [string[]] @(
+        $shell.FullName, $WorkbenchPort.ToString([Globalization.CultureInfo]::InvariantCulture)
+    ), [Text.Encoding]::ASCII)
+    $build['powershell_executable_sha256'] = FileDigest $shell.FullName
+    $build['powershell_version'] = "$($PSVersionTable.PSVersion)"
+    $build['powershell_architecture'] = 'arm64'
+}
 if ($archiveMode) {
     $config = Join-Path $work 'config'
     $null = New-Item -ItemType Directory -Path $config
     $clientConfig = Join-Path $config 'config.toml'
-    [IO.File]::WriteAllText($clientConfig, @'
+    $clientConfigText = @'
 schema_version = 1
 [ui]
 theme = "material"
 color = "always"
 color-depth = "truecolor"
 reduced-motion = true
-'@ + "`n")
+'@
+    if ($liveWorkbench) {
+        $clientConfigText += "`ncompletion = false"
+    }
+    [IO.File]::WriteAllText($clientConfig, $clientConfigText + "`n")
     $build['archived_client_sha256'] = $clientHash
     $build['archived_client_architecture'] = $clientArchitecture
     $build['archived_client_config_sha256'] = FileDigest $clientConfig
@@ -604,6 +633,15 @@ if ($archiveMode) {
         $facts.archived_client.exit_code -ne 0 -or -not $facts.archived_client.restored_modes -or
         -not $facts.cleanup.job_empty -or -not $facts.cleanup.pipe_quiescent) {
         throw 'The archived-client renderer did not establish its declared native observations.'
+    }
+    if ($liveWorkbench) {
+        $live = $facts.archived_client.powershell_workbench
+        $observedShellVersion = [IO.File]::ReadAllText((Join-Path $work 'shell-ready'))
+        if ($live.native_shell -cne $true -or $live.result_rendered -cne $true -or $live.prompt_executed -cne $true -or
+            $observedShellVersion -cne $build['powershell_version'] -or
+            (FileDigest $shell.FullName) -cne $build['powershell_executable_sha256']) {
+            throw 'The owned PowerShell workbench did not prove the live result and usable restored prompt.'
+        }
     }
     if ($windowCapture) {
         $expectedScope = if ($WindowCursorCalibration) { 'calibrated-window' } else { 'unmeasured' }

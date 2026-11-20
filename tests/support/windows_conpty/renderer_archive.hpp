@@ -87,25 +87,27 @@ void renderer_product_quit(HANDLE input) {
             && written == std::size(keys), "send Ctrl+Q to the exact owned ConPTY input");
 }
 
+#include "renderer_archive_shell.hpp"
+
 void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
-                          const std::wstring& nonce, const std::wstring& work, HANDLE input) {
+                          const std::wstring& nonce, const std::wstring& work, HANDLE input,
+                          const std::optional<Child>& shell) {
     const auto nonce_text = ascii(nonce);
     const auto deadline = Clock::now() + 20s;
     RendererLoopback loopback;
-    const auto endpoint = L"postgres://fixture@127.0.0.1:" + loopback.reserve()
-        + L"/renderer_fixture?sslmode=disable&connect_timeout=2";
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    auto client = create(archive, {L"connect", L"--no-history", endpoint}, work, &startup, 0);
+    Child client;
+    if (shell) {
+        client = renderer_start_archive_from_shell(work, shell->process.value, archive, deadline);
+    } else {
+        const auto endpoint = L"postgres://fixture@127.0.0.1:" + loopback.reserve()
+            + L"/renderer_fixture?sslmode=disable&connect_timeout=2";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        client = create(archive, {L"connect", L"--no-history", endpoint}, work, &startup, 0);
+    }
     try {
-        const auto created = birth(client.process.value);
-        const auto handle = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(client.process.value));
-        std::ostringstream register_client;
-        register_client << "P " << nonce_text << ' ' << client.pid;
-        renderer_stamp(register_client, handle);
-        register_client << ' ' << created.dwLowDateTime << ' ' << created.dwHighDateTime;
-        send(pipe, register_client.str());
-        resume(client);
+        renderer_report_process(pipe, nonce, 'P', client);
+        if (!shell) resume(client);
 
         bool active = false;
         DWORD input_mode{}, output_mode{}, observations{}, early_exit{STILL_ACTIVE};
@@ -139,6 +141,10 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
             send(pipe, partial.str());
             throw std::runtime_error("archived client did not reach the native startup checkpoint");
         }
+        if (shell) {
+            renderer_workbench_query(client, input, deadline);
+            renderer_shell_stage(pipe, nonce, 1);
+        }
         std::ostringstream acquired;
         acquired << "N " << nonce_text << ' ' << input_mode << ' ' << output_mode;
         renderer_stamp(acquired, ticks());
@@ -159,6 +165,7 @@ void renderer_run_archive(const std::wstring& archive, const std::wstring& pipe,
         after << "T " << nonce_text << ' ' << input_mode << ' ' << output_mode << ' ' << exit_code << ' ' << sentinel;
         renderer_stamp(after, ticks());
         send(pipe, after.str());
+        if (shell) renderer_use_restored_shell(*shell, work, input, deadline, pipe, nonce);
     } catch (...) {
         // This handle is from the actor's own CreateProcess. The outside Job
         // owner remains the fallback if termination or the bounded wait fails.
@@ -181,6 +188,7 @@ struct RendererArchiveReceipt {
     bool machine_type_fallback{};
     std::uint64_t acquired_qpc{}, acquired_capture_qpc{}, restored_qpc{}, restored_capture_qpc{};
     bool child_owned{}, waited{}, raw_alternate{}, restored_sentinel{}, restored_modes{};
+    bool workbench_expected{}, native_powershell{}, workbench_result{}, powershell_prompt{};
     int active_width{}, active_height{};
     std::size_t active_surface_pixels{}, active_focus_pixels{};
     DWORD startup_facts{}, startup_last_input{}, startup_last_output{}, startup_early_exit{STILL_ACTIVE};
@@ -204,7 +212,7 @@ Handle renderer_register_child(HANDLE actor, HANDLE job, const std::wstring& exe
     require(GetProcessId(owned.value) == data[0] && created.dwLowDateTime == data[3]
             && created.dwHighDateTime == data[4] && same_path(image(owned.value), executable)
             && WaitForSingleObject(owned.value, 0) == WAIT_TIMEOUT,
-            "authenticate the suspended child executable in the exact renderer Job");
+            "authenticate the child executable in the exact renderer Job");
     return owned;
 }
 
@@ -401,6 +409,11 @@ void emit_renderer_archive(const RendererArchiveReceipt& receipt, bool window_ca
               << (report_cursor ? std::to_string(receipt.restored_pixels.cursor_area) : "null")
               << ",\"restored_sentinel_pixels\":" << receipt.restored_pixels.sentinel_pixels
               << ",\"restored_stable_frames\":" << receipt.restored_pixels.stable_frames;
+    if (receipt.workbench_expected) {
+        std::cout << ",\"powershell_workbench\":{\"native_shell\":" << truth(receipt.native_powershell)
+                  << ",\"result_rendered\":" << truth(receipt.workbench_result)
+                  << ",\"prompt_executed\":" << truth(receipt.powershell_prompt) << '}';
+    }
     if (window_cursor_calibration) {
         std::cout << ",\"active_cursor_pixels\":"
                   << (receipt.wgc_active_cursor_pixels ? std::to_string(*receipt.wgc_active_cursor_pixels) : "null");
