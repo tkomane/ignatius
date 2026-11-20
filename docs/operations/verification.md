@@ -34,6 +34,89 @@ restored the original POSIX and seven DEC modes, and returned the same
 604,800 RGB pixels in the compared viewport. These are automated observations.
 Desktop hand use remains open.
 
+### Archived release interaction timings
+
+The `ci/44681770913-1` macOS arm64 executable ran on an Apple M2 Max with
+macOS 27.2.1. It reports rustc 1.97.1. The read-only `verify-full` fixture used
+PostgreSQL 18.7 and 31 synthetic tables. The grid loaded six columns and
+1,050 rows with a configured 1,000-row retention limit. Two wide Unicode
+values used 36 glyphs and 72 terminal cells each.
+
+| macOS owned PTY scenario | Warm-up actions | Measured actions | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Editor insertion and deletion, command palette and schema completion | 24 | 120 | 0.394 ms | 1.422 ms |
+| Grid sort, filter and resize | 21 | 105 | 7.548 ms | 15.090 ms |
+
+The probe timed the input write or resize request to the first new PTY read
+that decoded to the expected changed state. It verified numeric sort order,
+100 filter matches and recovery after resizing from 120x40 to 30x6. The
+pre-test idle interval emitted zero chunks in 150 ms. Both p95 values were
+within the proposed 100 ms target for this measurement boundary. Native
+display timing and hand-use acceptance remain open.
+[Measurement targets](../product/acceptance.md#performance-and-resource-evidence)
+
+The local raw nanosecond samples and per-action statistics are in
+`/private/tmp/ignatius-w12-mac-perf.paW3ogmE/macos-archived-pty-performance-receipt.json`,
+SHA-256 `a7e3bc916aaf6e2d87328c26571baa15c466c6366141f3917bc39d8b9d63bd7f`.
+
+The same release's Linux x86-64 executable ran in xterm 390 under Xvfb on
+emulated Ubuntu 24.04. The read-only PostgreSQL 18.7 fixture loaded 30
+ten-column tables, 10 views and 20 routines. After 21 reference and 21
+warm-up actions, 105 editor, palette, completion, help and focus actions
+measured 78.208 ms p50 and 85.964 ms p95 at 120x40. The measurement ran
+from before XTEST injection through the first matching framebuffer capture
+and decode. Injection and observation remained in the measurement. The
+capture-only p95 was 50.718 ms, and the injection process p95 was 37.669 ms.
+
+Each target frame differed from its predecessor by over 768 bits. Matching
+allowed up to 192 differing bits to accommodate observed palette-edge
+variation. The viewed reference captures showed schema completion and
+filtered palette results. The client exited zero, and terminal settings
+were restored byte for byte. The owned fixtures and image were removed.
+
+The local Linux samples are in
+`/private/tmp/ignatius-w10-xterm.xj67h_al/output/editor-final/samples.csv`,
+SHA-256 `abc6d7e51db6fb3025e03a33853c7e0511b868fd616e8e2671963dd2bca197a5`.
+
+The Linux grid exercise used the same xterm measurement boundary. The
+six-column query returned 1,050 rows with 1,000 retained and 100 matching
+the filter.
+The probe verified row and sort-key identity for ascending, descending and
+server order. Resizing 120x40 to 30x6 and back restored the filtered grid.
+The first font showed placeholder boxes. The repeated fixture used
+WenQuanYi Micro Hei Mono (`fonts-wqy-microhei` `0.2.0-beta-3.1`) in the
+disposable image and displayed the CJK glyphs in the wide cell.
+
+After seven reference and 21 warm-up actions, 105 measured grid actions
+had p50 75.245 ms and p95 83.660 ms. Two server-order restorations exceeded
+100 ms, with a maximum of 158.861 ms. The client exited zero and restored
+the original terminal settings. The fixture and image were removed.
+The local samples are in
+`/private/tmp/ignatius-w10-linux-grid.M27IIT0r/output/grid-cjk/samples.csv`,
+SHA-256 `af7867ac0b4f9de0152cfd99c3063a66819d4df25d13066c09124173604b1095`.
+
+The exact Windows x64 archive ran under emulation in native Windows Terminal
+1.25.3131.0 and PowerShell 7.6.10 on Windows 11 ARM64 (build `10.0.26200.0`,
+image `20261112.217.1`). The read-only PostgreSQL 17.12 fixture had two
+schemas and 30 ten-column tables. At 90x27, the probe waited for the fixture
+schema and table count to appear, then verified completion with the default
+Ctrl+Space. The earlier palette snapshot was taken before the connection
+enabled that command. [Readiness evidence](https://github.com/tkomane/ignatius/actions/runs/44701383153)
+
+Across 120 actions after 24 warm-ups, native console timings were 14.985 ms
+p50 and 15.441 ms p95, with a 15.769 ms maximum. QPC measured from before
+`WriteConsoleInputW` to the first matching screen-buffer read, including
+polling. The groups covered editor insertion and backspace, palette open
+and close, and schema completion open and close. The raw receipt's SHA-256
+is `a51fc2361d702b8c28d87254c9bdef30d561dad3e5e1fa3a96e8ee6ce2ea728b`.
+[Windows timing run and receipt](https://github.com/tkomane/ignatius/actions/runs/44702492388)
+
+The same client returned the server-confirmed read-only TLS result `42`.
+It exited zero and restored the console modes, all 171 calibrated cursor
+pixels and the byte-identical main-screen capture. The original PowerShell
+prompt ran a command and the owned job emptied. Windows grid and compositor
+timing, and desktop and screen-reader hand use, remain open.
+
 ### Selected archive verification and missing prerequisites
 
 The `ci/44681770913-1` archive installation instructions now verify one selected

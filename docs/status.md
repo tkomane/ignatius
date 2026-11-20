@@ -4,6 +4,33 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 62 - Release candidate review - 20 November 2026
+
+- The release review and support matrix now use `61425c3` and the three exact
+  `ci/44681770913-1` archives. The record validated as `blocked`. All three
+  archive checksums and manifest entries verified independently. The Actions
+  aggregate is scheduled to expire on 27 November 2026 at 07:47:52 SAST.
+  [Candidate review](operations/release.md#candidate-review---20-november-2026)
+- The signature example requires an exact approved workflow identity. The
+  provenance examples require the approved signer or builder and source inputs.
+  Shell checks exercised the examples with synthetic values and confirmed that
+  missing approval inputs stopped before verifier invocation. Verified trust
+  sidecars and exact release authorization are open.
+- The exact macOS archive measured 1.422 ms editor, palette and completion
+  p95 over 120 warmed actions and 15.090 ms grid p95 over 105. Timing ended
+  when the owned PTY showed the expected state. Native display timing and
+  hand use remain open. [Interaction timings](operations/verification.md#archived-release-interaction-timings)
+- Emulated Ubuntu x86-64 with xterm measured 85.964 ms local-action p95 and
+  83.660 ms grid p95 with 105 warmed actions each. Both measurements include
+  input injection and framebuffer observation. Two server-order restorations
+  in the grid run took more than 100 ms.
+  [Linux timing method](operations/verification.md#archived-release-interaction-timings)
+- Windows 11 ARM64 measured 15.441 ms console-buffer p95 across 120 warmed
+  local actions on the emulated x64 archive, including default Ctrl+Space.
+  The live TLS query and cursor restoration passed afterward. Windows grid
+  timing and hand use remain open.
+  [Native Windows timing run](https://github.com/tkomane/ignatius/actions/runs/44702492388)
+
 ## Wave 61 - Selected archive installation preflight - 20 November 2026
 
 - The release guide now verifies one exact archive against the release-wide

@@ -21,15 +21,65 @@ commitment. Each row assumes the ones above it.
 | **G. Homebrew core and Winget** | Days, plus review | Their standards, their timelines | Hard | Everyone | F, plus a user base that justifies it |
 
 **Current distribution is C (public source).** The repository became public
-on 2026-09-11. Post-merge CI and CodeQL passed on `3ca6811`, including the
-Linux, macOS and Windows jobs. [CI run](https://github.com/tkomane/ignatius/actions/runs/44656868966)
-[CodeQL run](https://github.com/tkomane/ignatius/actions/runs/44656868960)
+on 2026-09-11. [Current verification status](../status.md)
 
 The [compatibility matrix](../support/compatibility.md#release-target-matrix)
 records archive and runtime checks and remaining native hand use. Distribution
 requires the approved signing and provenance identities, canonical release
 evidence, independently verified sidecars and owner authorization for the exact
 release. [ADR-0008](../architecture/decisions/0008-packaging-and-release.md#live-release-gates)
+
+## Candidate review - 20 November 2026
+
+Version `0.1.0` was rehearsed from source
+`61425c34097020ecec3ffead0bec7d4251680814` as `ci/44681770913-1`.
+The Actions aggregate is `release-candidate-aggregate-44681770913-1`, artifact
+`14604938129`, scheduled to expire on 27 November 2026 at 07:47:52 SAST. Its
+retained `release-manifest.json` has SHA-256
+`7d0a422997e595810d1e9f16ea99a32d66f726a40380f4a873490f303ef141f1`.
+[Rehearsal](https://github.com/tkomane/ignatius/actions/runs/44681770913)
+
+| Target | Archive bytes | Archive SHA-256 |
+| --- | ---: | --- |
+| `aarch64-apple-darwin` | 5,874,304 | `d2a60c55b145927f9c4ae5a3229c9929258d9e01e83aff223f5bcf8effc6a02e` |
+| `x86_64-pc-windows-msvc` | 6,373,804 | `f9a52972fe4ca3a911000448224de0bfba097052307bf3b59eb70be1040cadc7` |
+| `x86_64-unknown-linux-gnu` | 6,459,420 | `51425b934bc0bdeff702b31e7085a3fe860ee084d21253e423655f61909e08d4` |
+
+The source includes the structured Cell Detail inspector and guarded edits,
+the local query-plan history, and read-only fleet drift and health comparison.
+Cell Detail validates the original PostgreSQL result column before a reviewed
+write. The source's changelog records the full feature set.
+[Changelog at the rehearsed source](https://github.com/tkomane/ignatius/blob/61425c34097020ecec3ffead0bec7d4251680814/CHANGELOG.md#unreleased)
+
+Record validation passed as `blocked`, and manifest verification matched all
+three archives. The 12 retained files include an inventory and a runtime
+receipt per target. Repeat archives matched on all three targets. The two
+Windows builds shared a runner. Each extracted archive passed read-only
+`verify-full` against a disposable server, refused a bad certificate name,
+passed scoped log-privacy checks and rolled back to the exact earlier
+`4e9509c` executable with its state intact. The Linux archive requires
+`GLIBC_2.39` symbols. [Exact target matrix](../support/compatibility.md#release-target-matrix)
+and [runtime evidence](verification.md#live-tls-from-the-packaged-structured-result-build---20-november-2026).
+The measured macOS PTY, xterm and Windows console scenarios met the proposed
+100 ms p95 target within their observed timing boundaries.
+[Interaction measurements](verification.md#archived-release-interaction-timings)
+
+For review, verify the exact archive files before first start and use the
+same-path rollback checks with isolated state. The independent cryptographic
+checks need the approved signer and builder identities and trust sidecars.
+[Manifest verifier](#verification-rules), [installation and first start](#platform-installation-and-first-start),
+[configuration preservation and rollback](#configuration-data-preservation-and-rollback),
+[independent verification commands](#independent-cryptographic-verification).
+
+**Decision pending.** The proposed destination is GitHub Releases for the three
+archives, their checksums, trust sidecars and reviewed notes.
+Readiness failed with exit 1 and eight issues covering the untagged detached
+record, incomplete canonical evidence, non-publishable state and absent
+verified signature and provenance. Terminal and screen-reader hand use,
+the approved release identities and retention, and exact publication
+authorization are open. [Proposed destination](https://github.com/tkomane/ignatius/releases),
+[release gates](../architecture/decisions/0008-packaging-and-release.md#live-release-gates),
+[pre-publication checks](#before-any-public-release).
 
 ## Release identity
 
@@ -926,38 +976,39 @@ official standalone verifiers.
 
 #### Sigstore keyless signature verification (cosign)
 
-Verify the archive signature against the repository workflow identity:
+Set `APPROVED_SIGNER_IDENTITY` to the exact certificate identity from the
+owner-approved trust decision for this release. It must include the workflow
+reference. Pass the GitHub Actions OIDC issuer with that identity.
+[Cosign verification options](https://docs.sigstore.dev/cosign/verifying/verify/)
 
 ```bash
 # Verification using individual signature and certificate sidecars:
-cosign verify-blob \
-  --certificate <archive>.pem \
-  --signature <archive>.sig \
-  --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  <archive>
+cosign verify-blob "$ARCHIVE" \
+  --certificate "$ARCHIVE.pem" \
+  --signature "$ARCHIVE.sig" \
+  --certificate-identity "${APPROVED_SIGNER_IDENTITY:?Set the approved workflow identity}" \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
 # Verification using the Sigstore bundle sidecar:
-cosign verify-blob \
-  --bundle <archive>.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/tkomane/ignatius/\.github/workflows/release\.yml@refs/tags/v.*' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  <archive>
+cosign verify-blob "$ARCHIVE" \
+  --bundle "$ARCHIVE.sigstore.json" \
+  --certificate-identity "${APPROVED_SIGNER_IDENTITY:?Set the approved workflow identity}" \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
 #### SLSA provenance verification
 
 For provenance produced by GitHub Artifact Attestations, pass the retained
-Sigstore bundle and the approved signer workflow, source ref, and source
+Sigstore bundle, the approved signer workflow and source ref, and the source
 revision from the release record. [GitHub Actions attestation output](https://github.com/actions/attest#outputs), [GitHub CLI verification](https://cli.github.com/manual/gh_attestation_verify).
 
 ```bash
 gh attestation verify "$ARCHIVE" \
   --bundle "$PROVENANCE_SIDECAR" \
   --repo tkomane/ignatius \
-  --signer-workflow "$APPROVED_SIGNER_WORKFLOW" \
-  --source-ref "$APPROVED_SOURCE_REF" \
-  --source-digest "$SOURCE_REVISION" \
+  --signer-workflow "${APPROVED_SIGNER_WORKFLOW:?Set the approved signer workflow}" \
+  --source-ref "${APPROVED_SOURCE_REF:?Set the approved source ref}" \
+  --source-digest "${SOURCE_REVISION:?Set the release source revision}" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
@@ -968,9 +1019,9 @@ revision in the verified output to the release record. [SLSA verifier](https://g
 ```bash
 slsa-verifier verify-artifact "$ARCHIVE" \
   --provenance-path "$PROVENANCE_SIDECAR" \
-  --builder-id "$APPROVED_BUILDER_ID" \
+  --builder-id "${APPROVED_BUILDER_ID:?Set the approved builder identity}" \
   --source-uri github.com/tkomane/ignatius \
-  --source-tag "$APPROVED_VERSION_TAG" \
+  --source-tag "${APPROVED_VERSION_TAG:?Set the approved release tag}" \
   --print-provenance
 ```
 
