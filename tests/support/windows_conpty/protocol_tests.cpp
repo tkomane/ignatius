@@ -67,6 +67,10 @@ int main() {
     check(!calibration_transition(bad_calibration.stages,6,7),"constant alternate sensor must report no transition");
     check(calibration_transition(calibration.stages,1,2)&&calibration_transition(calibration.stages,3,4)&&calibration_transition(calibration.stages,6,7),"three independently observed transitions");
     check(words("1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17").empty(),"legacy token bound remains16");
+    const std::string guard_exit = "X nonce 101 423 7 1 1 1 100 901 931 0 0 1 400 0 401 0 403 0 409 0";
+    check(words(guard_exit).empty(),"Guard exit does not extend the legacy parser bound");
+    check(words(guard_exit,renderer_guard_word_limit).size()==22,"Guard exit admits all 20 native fields");
+    check(words(guard_exit+" 1",renderer_guard_word_limit).empty(),"Guard parser refuses surplus fields");
     check(words(std::string(100,'x'),32).size()==1,"diagnostic parser remains bounded");
     const auto d="D nonce 0 1 0 1 0 1 0 1 0 0 0 0 1 0 45 45 1 0 423 7 25 1 1 1 20 0 9 9";
     check(parse_calibration_stage(d,"nonce",42).has_value(),"typed diagnostic stage parses");

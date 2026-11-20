@@ -685,7 +685,9 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
     const auto phase_count = client_mode ? std::size_t{1} : renderer_stage_count;
     receipt.start = ticks();
     const auto start = Clock::now();
-    const auto deadline = start + (guard ? 25s : 30s);
+    // Leave the outer controller time to reap this process and retain its
+    // bounded receipt before the absolute 25-second Guard limit.
+    const auto deadline = start + (guard ? 24s : 30s);
     const auto work_deadline = start + (guard ? 20s : 25s);
     std::unique_ptr<Server> server;
     Handle job, actor, archived_client, guard_child;
@@ -772,7 +774,7 @@ int renderer_supervise(const std::wstring& terminal, const std::wstring& work, c
                     && CompareFileTime(&sender_birth, &launched_birth) >= 0,
                     "exact owned console actor identity");
             const auto line = server->read(work_deadline);
-            const auto parts = w07::words(line);
+            const auto parts = w07::words(line, receipt.guard ? w07::renderer_guard_word_limit : 16);
             require(parts.size() >= 2 && parts[1] == nonce_text, "renderer control nonce and message shape");
 
             if (parts[0] == "R") {
