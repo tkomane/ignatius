@@ -4,6 +4,19 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 56: Structured array input - 20 November 2026
+
+- Cell Detail accepts whitespace around PostgreSQL array elements and dimension
+  markers. Quoted and escaped whitespace remains in the element, and an
+  element edit preserves the source bytes outside that element.
+  [Structured cell detail](design/structured-type-inspector.md)
+- The reviewed whole-array edit passed on the disposable PostgreSQL 14.25,
+  15.20, 16.16, 17.12 and 18.7 fixtures on macOS arm64. The check confirms
+  the lower bound, quoted whitespace, SQL NULL, text `"NULL"` and interior
+  whitespace after the update.
+- `cargo --locked xtask verify` passed on macOS arm64 with PostgreSQL 18.7
+  plain and TLS. The local Unix-socket fixture was unset.
+
 ## Wave 55: Windows 11 cursor and archive replacement - 20 November 2026
 
 - A native Windows 11 ARM64 Terminal resolved all six shown and hidden

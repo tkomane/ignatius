@@ -3636,6 +3636,28 @@ fn structured_array_and_range_edits_keep_subscripts_nulls_and_open_bound() {
             Some("t"),
         ]
     );
+
+    let literal = r#"[0:3] = { " kept " , NULL , "NULL" , two words  }"#;
+    let plan = stage_structured_edit(&fx, source, 1, 0, literal);
+    assert_eq!(run_structured_edit(&fx, &plan), 1);
+    let result = fx.block_on(fx.session.execute(
+        "SELECT array_lower(members, 1), members[0], members[1], members[2], members[3] \
+         FROM inspection_native",
+        10,
+        JobId(5912),
+    ));
+    assert_eq!(result.status, ExecutionStatus::Succeeded, "{result:?}");
+    let row = &result.statements[0].result_set.as_ref().unwrap().rows[0];
+    assert_eq!(
+        row.iter().map(Cell::raw).collect::<Vec<_>>(),
+        [
+            Some("0"),
+            Some(" kept "),
+            None,
+            Some("NULL"),
+            Some("two words")
+        ]
+    );
 }
 
 fn extension_fixture(variable: &str, extension: &str) -> Option<(Fixture, String)> {

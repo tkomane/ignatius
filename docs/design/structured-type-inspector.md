@@ -12,6 +12,9 @@ tree names the selected node. Shortened labels or previews end in an ellipsis.
 - PostgreSQL arrays show the real subscripts, including non-one lower bounds.
   An unquoted NULL array element is distinct from the text `"NULL"`. Enter
   one PostgreSQL array element or replace the whole array at the root.
+  Whitespace around elements and dimension markers is optional. To keep
+  leading or trailing whitespace in a value, quote the element or escape
+  the whitespace with a backslash.
 - Ranges show empty ranges, inclusive/exclusive bounds and unbounded ends.
   Leave an endpoint replacement empty to make it unbounded. Select the root
   to replace the whole range and choose its brackets.

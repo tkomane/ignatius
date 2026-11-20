@@ -15,6 +15,9 @@ source can generate user-facing notes.
 - New: Cell Detail opens a bounded structured tree for JSONB, arrays, ranges,
   and supported PostGIS and pgvector types. Reviewed edits recheck the original
   value, column and primary key before sending a write.
+- Fixed: Cell Detail accepts PostgreSQL array literals with spaces around
+  elements and dimension markers. Quoted and escaped spaces remain part of
+  the value.
 - New: `ignatius plan-history` records local query plan and latency changes
   across schema revisions with a private, bounded catalog.
 - New: `ignatius fleet` compares schema, installed extensions and selected

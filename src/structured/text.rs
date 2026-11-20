@@ -11,22 +11,26 @@ pub(super) fn parse(tree: &mut Tree<'_>, kind: Kind, raw: &str) -> Parsed<()> {
         }
         Kind::Array { delimiter } => {
             let mut bounds = Vec::new();
+            text.array_whitespace();
             while text.peek() == Some(b'[') {
                 text.take(b'[')?;
                 if bounds.len() == super::MAX_DEPTH {
                     return Err(Error::Limit);
                 }
-                let (start, end) = text.until(b':')?;
-                let lower = integer(&raw[start..end])?;
                 let (start, end) = text.until(b']')?;
-                let upper = integer(&raw[start..end])?;
+                let (lower, upper) = match raw[start..end].split_once(':') {
+                    Some((lower, upper)) => (integer(lower)?, integer(upper)?),
+                    None => (1, integer(&raw[start..end])?),
+                };
                 if lower > upper {
                     return Err(Error::Invalid);
                 }
                 bounds.push((lower, upper));
+                text.array_whitespace();
             }
             if !bounds.is_empty() {
                 text.take(b'=')?;
+                text.array_whitespace();
             }
             array(tree, &mut text, root, delimiter, &bounds)?;
         }
@@ -55,11 +59,11 @@ pub(super) fn validate_input(input: Input, raw: &str) -> Parsed<()> {
         Input::Json => json_syntax(raw),
         Input::Coordinate => coordinate(raw),
         Input::ArrayElement(delimiter) => {
-            text.pg_token(&[delimiter, b'}'], false, false)?;
+            text.array_element(delimiter)?;
             (text.next == raw.len()).then_some(()).ok_or(Error::Invalid)
         }
         Input::RangeBound => {
-            text.pg_token(b",)]", true, true)?;
+            text.range_bound(b",)]")?;
             (text.next == raw.len()).then_some(()).ok_or(Error::Invalid)
         }
     }
@@ -134,7 +138,7 @@ fn array(
     bounds: &[(i32, i32)],
 ) -> Parsed<()> {
     text.take(b'{')?;
-    text.whitespace();
+    text.array_whitespace();
     let lower = bounds.first().map_or(1, |(lower, _)| *lower);
     let mut count = 0_i32;
     if text.peek() != Some(b'}') {
@@ -144,7 +148,7 @@ fn array(
             if text.peek() == Some(b'{') {
                 array(tree, text, child, delimiter, bounds.get(1..).unwrap_or(&[]))?;
             } else {
-                let span = text.pg_token(&[delimiter, b'}'], false, false)?;
+                let span = text.array_element(delimiter)?;
                 if text.raw[span.clone()].eq_ignore_ascii_case("NULL") {
                     tree.summarize(child, "NULL array element");
                 }
@@ -155,11 +159,11 @@ fn array(
                 break;
             }
             text.next += 1;
-            text.whitespace();
+            text.array_whitespace();
         }
     }
     text.take(b'}')?;
-    text.whitespace();
+    text.array_whitespace();
     if let Some((_, upper)) = bounds.first()
         && upper
             .checked_sub(lower)
@@ -187,9 +191,9 @@ fn parse_range(tree: &mut Tree<'_>, text: &mut Text<'_>, node: usize) -> Parsed<
         return Err(Error::Invalid);
     }
     text.next += 1;
-    let lower = text.pg_token(b",", true, true)?;
+    let lower = text.range_bound(b",")?;
     text.take(b',')?;
-    let upper = text.pg_token(b")]", true, true)?;
+    let upper = text.range_bound(b")]")?;
     let upper_suffix = text.peek().ok_or(Error::Invalid)?;
     text.next += 1;
     for (name, inclusive, span) in [
@@ -286,6 +290,10 @@ fn integer(raw: &str) -> Parsed<i32> {
     raw.trim().parse().map_err(|_| Error::Invalid)
 }
 
+fn is_array_whitespace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c')
+}
+
 struct Text<'a> {
     raw: &'a str,
     next: usize,
@@ -298,6 +306,12 @@ impl Text<'_> {
 
     fn whitespace(&mut self) {
         while matches!(self.peek(), Some(b' ' | b'\n' | b'\r' | b'\t')) {
+            self.next += 1;
+        }
+    }
+
+    fn array_whitespace(&mut self) {
+        while self.peek().is_some_and(is_array_whitespace) {
             self.next += 1;
         }
     }
@@ -347,10 +361,46 @@ impl Text<'_> {
         }
     }
 
-    fn pg_token(&mut self, end: &[u8], range: bool, empty: bool) -> Parsed<Range<usize>> {
+    fn array_element(&mut self, delimiter: u8) -> Parsed<Range<usize>> {
+        self.array_whitespace();
+        let start = self.next;
+        let terminators = [delimiter, b'}'];
+        if self.peek() == Some(b'"') {
+            let span = self.quoted(b'"', false)?;
+            self.array_whitespace();
+            return if self.peek().is_none_or(|byte| terminators.contains(&byte)) {
+                Ok(span)
+            } else {
+                Err(Error::Invalid)
+            };
+        }
+
+        // Keep interior and escaped whitespace in the source span. Any
+        // ordinary trailing whitespace belongs to the surrounding array.
+        let mut end = start;
+        while let Some(byte) = self.peek().filter(|byte| !terminators.contains(byte)) {
+            self.next += 1;
+            match byte {
+                b'"' | b'{' => return Err(Error::Invalid),
+                b'\\' => {
+                    self.peek().ok_or(Error::Invalid)?;
+                    self.next += 1;
+                }
+                byte if is_array_whitespace(byte) => continue,
+                _ => {}
+            }
+            end = self.next;
+        }
+        if end == start {
+            return Err(Error::Invalid);
+        }
+        Ok(start..end)
+    }
+
+    fn range_bound(&mut self, end: &[u8]) -> Parsed<Range<usize>> {
         let start = self.next;
         if self.peek() == Some(b'"') {
-            let span = self.quoted(b'"', range)?;
+            let span = self.quoted(b'"', true)?;
             return if self.peek().is_none_or(|byte| end.contains(&byte)) {
                 Ok(span)
             } else {
@@ -360,7 +410,6 @@ impl Text<'_> {
         while let Some(byte) = self.peek().filter(|byte| !end.contains(byte)) {
             match byte {
                 b'"' => return Err(Error::Invalid),
-                b'{' | b'}' if !range => return Err(Error::Invalid),
                 b'\\' => {
                     self.next += 1;
                     self.peek().ok_or(Error::Invalid)?;
@@ -368,9 +417,6 @@ impl Text<'_> {
                 _ => {}
             }
             self.next += 1;
-        }
-        if !empty && self.next == start {
-            return Err(Error::Invalid);
         }
         Ok(start..self.next)
     }
