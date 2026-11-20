@@ -118,7 +118,7 @@ void renderer_add_key(std::vector<INPUT_RECORD>& keys, WORD virtual_key, wchar_t
     keys.push_back(record);
 }
 
-void renderer_type_line(HANDLE input, std::wstring_view text, WORD submit) {
+void renderer_type_text(HANDLE input, std::wstring_view text) {
     require(!text.empty() && text.size() <= 80, "bounded synthetic console command");
     std::vector<INPUT_RECORD> keys;
     for (const wchar_t ch : text) {
@@ -126,7 +126,12 @@ void renderer_type_line(HANDLE input, std::wstring_view text, WORD submit) {
         require(mapped != -1 && HIBYTE(mapped) <= 1, "synthetic key uses the current Latin layout");
         renderer_add_key(keys, LOBYTE(mapped), ch, HIBYTE(mapped) == 1 ? SHIFT_PRESSED : 0);
     }
-    renderer_add_key(keys, submit, submit == VK_RETURN ? L'\r' : L'\0');
+    renderer_send_keys(input, keys);
+}
+
+void renderer_key(HANDLE input, WORD virtual_key, wchar_t character, DWORD state = 0) {
+    std::vector<INPUT_RECORD> keys;
+    renderer_add_key(keys, virtual_key, character, state);
     renderer_send_keys(input, keys);
 }
 
@@ -186,8 +191,17 @@ void renderer_workbench_query(const Child& product, HANDLE input, Clock::time_po
                 return line.find(L"Editor") != std::wstring::npos && line.find(L"[focused]") != std::wstring::npos;
             });
     }, work, "the archived workbench did not connect with editor focus");
-    renderer_type_line(input,
-        L"select 6*7*current_setting('transaction_read_only')::bool::int as journey_value", VK_F5);
+
+    renderer_key(input, 'K', L'k', LEFT_CTRL_PRESSED);
+    renderer_type_text(input, L"=");
+    renderer_wait_for_screen(product, deadline, [](const auto& lines) {
+        return std::any_of(lines.begin(), lines.end(), [](const auto& line) {
+            return line.find(L"Editor  line 1, column 1 ") != std::wstring::npos
+                && line.find(L"[focused]") != std::wstring::npos;
+        });
+    }, work, "the archived workbench did not open a blank query buffer");
+    renderer_type_text(input, L"select 6*7*current_setting('transaction_read_only')::bool::int as journey_value");
+    renderer_key(input, 'R', L'r', LEFT_CTRL_PRESSED);
     renderer_wait_for_screen(product, deadline, [](const auto& lines) {
         constexpr std::wstring_view name = L"journey_value";
         const auto caption = std::find_if(lines.begin(), lines.end(), [](const auto& line) {
@@ -224,10 +238,12 @@ void renderer_use_restored_shell(const Child& shell, const std::wstring& work, H
         };
     };
     renderer_wait_for_screen(shell, deadline, contains(L"W07-PS> "), work, "PowerShell did not restore its interactive prompt");
-    renderer_type_line(input, L"Write-Output ('IG_'+'SHELL_RETURNED')", VK_RETURN);
+    renderer_type_text(input, L"Write-Output ('IG_'+'SHELL_RETURNED')");
+    renderer_key(input, VK_RETURN, L'\r');
     renderer_wait_for_screen(shell, deadline, contains(L"IG_SHELL_RETURNED"), work, "the same PowerShell did not execute its command");
     renderer_shell_stage(pipe, nonce, 2);
-    renderer_type_line(input, L"exit 0", VK_RETURN);
+    renderer_type_text(input, L"exit 0");
+    renderer_key(input, VK_RETURN, L'\r');
     DWORD exit_code{};
     require(WaitForSingleObject(shell.process.value, remaining(deadline, 20000)) == WAIT_OBJECT_0
             && GetExitCodeProcess(shell.process.value, &exit_code) && exit_code == 0,

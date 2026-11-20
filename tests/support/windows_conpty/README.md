@@ -18,7 +18,8 @@ replies stop the run.
 The archive diagnostic accepts `powershell_workbench=true` with
 `terminal-renderer-arm64` and `window_cursor_calibration=true`. It uses
 the verified Windows archive and native PowerShell 7 inside the owned
-Windows 11 ARM64 Terminal. F5 sends a read-only query to a disposable
+Windows 11 ARM64 Terminal. Ctrl+K = opens a fresh editor buffer, then
+Ctrl+R sends the read-only query to a disposable
 loopback PostgreSQL 17.12 fixture. The probe reads the completed row and
 elapsed time from the active console and captures that frame. It verifies
 the calibrated cursor and console modes after Ctrl+Q, then runs a command
