@@ -6,7 +6,9 @@ param(
     [string] $CandidateSource,
     [string] $CandidateBuild,
     [string] $GuardBuildManifest,
-    [switch] $GuardMatrix
+    [switch] $GuardMatrix,
+    [switch] $GuardPaste,
+    [switch] $PasteCalibration
 )
 
 Set-StrictMode -Version Latest
@@ -105,8 +107,9 @@ function Assert-GuardCapture([IO.FileInfo] $File) {
 
 $guardMode = $PSBoundParameters.ContainsKey('GuardBuildManifest')
 $archiveMode = $PSBoundParameters.ContainsKey('ArchivedClient')
-if (($guardMode -and $archiveMode) -or ($GuardMatrix -and -not $guardMode)) {
-    throw 'Select either archived-client or Guard mode. The Guard matrix requires its build manifest.'
+if (($guardMode -and $archiveMode) -or ($GuardMatrix -and -not $guardMode) -or
+    ($GuardPaste -and -not $GuardMatrix) -or ($PasteCalibration -and ($guardMode -or $archiveMode))) {
+    throw 'Select archived-client, Guard, or paste calibration. Guard paste requires the full Guard matrix and its build manifest.'
 }
 if ($archiveMode) {
     if ([string]::IsNullOrWhiteSpace($ArchivedClient) -or -not [IO.Path]::IsPathFullyQualified($ArchivedClient) -or
@@ -228,6 +231,20 @@ if ($terminalArchitecture -cne $osArchitecture) {
     throw 'The portable Windows Terminal binary must match the native OS architecture.'
 }
 $portable = $terminal.DirectoryName
+$openConsoleIdentity = $null
+if ($PasteCalibration -or $GuardPaste) {
+    foreach ($member in @('OpenConsole.exe', "$osArchitecture/OpenConsole.exe")) {
+        $candidate = Join-Path $portable $member
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $console = Get-GuardFile $candidate 32MB
+            if ((PeArchitecture $console.FullName) -cne $osArchitecture) {
+                throw 'The packaged OpenConsole architecture must match the native OS.'
+            }
+            $openConsoleIdentity = [ordered]@{ member = $member; sha256 = FileDigest $console.FullName }
+            break
+        }
+    }
+}
 $null = New-Item -ItemType File -Path (Join-Path $portable '.portable')
 $settings = Join-Path $portable 'settings'
 $null = New-Item -ItemType Directory -Path $settings
@@ -325,7 +342,7 @@ $settingsFile = Join-Path $settings 'settings.json'
 
 $sourceHashes = [ordered] @{}
 $sourceNames = @('host.cpp', 'protocol.hpp', 'renderer_pixels.hpp', 'renderer_probe.hpp', 'renderer_modal.hpp',
-    'renderer_archive.hpp', 'renderer_guard.hpp', 'renderer_guard_supervisor.hpp',
+    'renderer_archive.hpp', 'renderer_guard.hpp', 'renderer_guard_supervisor.hpp', 'renderer_paste.hpp',
     'Test-Desktop.ps1', 'Run-RendererCalibration.ps1')
 if ($guardMode) {
     $sourceNames += @('guard_child.rs', 'Build.ps1', 'Validation.ps1', 'Run-Controls.ps1')
@@ -386,6 +403,12 @@ if ($guardMode) {
     $build['guard_vc_tools_version'] = $guardManifest.vc_tools_version
     $build['guard_windows_sdk_version'] = $guardManifest.windows_sdk_version
 }
+if ($PasteCalibration -or $GuardPaste) {
+    $build['open_console_package_member'] = $openConsoleIdentity
+}
+if ($GuardPaste) {
+    $build['guard_paste_required'] = $true
+}
 [IO.File]::WriteAllText((Join-Path $work 'build.json'), ((ConvertTo-Json $build -Depth 6) + "`n"))
 
 function Invoke-RendererSupervisor([string] $EntryPoint, [string] $Directory, [string] $LogStem, [string[]] $ExtraArgs) {
@@ -394,7 +417,8 @@ function Invoke-RendererSupervisor([string] $EntryPoint, [string] $Directory, [s
     $stderr = Join-Path $root "$LogStem.stderr"
     $controllerArgs = @($EntryPoint, ('"' + $terminal.FullName + '"'), ('"' + $Directory + '"'), $nonce, $rendererProfileId)
     $controllerArgs += $ExtraArgs
-    $bound = if ($EntryPoint -ceq '--renderer-guard-supervise') { 25000 } else { 40000 }
+    $boundedCases = @('--renderer-guard-supervise', '--renderer-guard-paste-supervise', '--renderer-paste-supervise')
+    $bound = if ($EntryPoint -cin $boundedCases) { 25000 } else { 40000 }
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $controller = Start-Process -FilePath $probe -WorkingDirectory $Directory -NoNewWindow -PassThru `
         -ArgumentList $controllerArgs -RedirectStandardOutput $stdout -RedirectStandardError $stderr
@@ -427,7 +451,8 @@ function Invoke-GuardRendererCase([string] $Mode, [int] $Bits, [int] $ExpectedEx
     $caseRoot = Join-Path $root $label
     $null = New-Item -ItemType Directory -Path $caseRoot
     Assert-GuardInput $guardChild.path $guardChild.sha256
-    $result = Invoke-RendererSupervisor '--renderer-guard-supervise' $caseRoot $label @(
+    $entry = if ($GuardPaste) { '--renderer-guard-paste-supervise' } else { '--renderer-guard-supervise' }
+    $result = Invoke-RendererSupervisor $entry $caseRoot $label @(
         ('"' + $guardChild.path + '"'), $Mode, [string]$Bits)
     $facts = $result.Facts
     if ($result.ExitCode -ne 0) {
@@ -458,6 +483,26 @@ function Invoke-GuardRendererCase([string] $Mode, [int] $Bits, [int] $ExpectedEx
         }
     }
 
+    if ($GuardPaste) {
+        $observations = @($facts.guard.paste_observations)
+        $active = if ($Bits -band 2) { 'enabled' } else { 'reset' }
+        $phase = if ($Bits -band 4) { 2 } else { 1 }
+        if ($facts.guard.paste_state -cne 'verified-native' -or $observations.Count -ne 3) {
+            throw 'The Guard receipt must contain exactly three verified native paste observations.'
+        }
+        $expectedReply = @('reset', $active, 'reset')
+        $expectedPhase = @(0, $phase, 5)
+        foreach ($index in 0..2) {
+            $sample = $observations[$index]
+            if ((Get-W07Number $sample.index) -ne $expectedPhase[$index] -or $sample.reply -cne $expectedReply[$index] -or
+                (Get-W07Number $sample.reply_units) -ne 11 -or (Get-W07Number $sample.native_error) -ne 0 -or
+                $sample.quiet_before -isnot [bool] -or -not $sample.quiet_before -or
+                $sample.quiet_after -isnot [bool] -or -not $sample.quiet_after) {
+                throw 'Native paste was not quiet and exact at every Guard phase.'
+            }
+        }
+    }
+
     # Native scratch may also contain owned configuration and non-evidence logs.
     # Copy only validated file bytes into the separate workflow evidence tree.
     $captures = @('baseline.bmp', 'guard-acquired.bmp', 'guard-restored.bmp' | ForEach-Object {
@@ -483,9 +528,15 @@ if ($guardMode) {
     try {
         $calibrationRoot = Join-Path $root 'guard-calibration'
         $null = New-Item -ItemType Directory -Path $calibrationRoot
-        $calibration = Invoke-RendererSupervisor '--renderer-supervise' $calibrationRoot 'guard-calibration' @()
-        if ($calibration.ExitCode -ne 0 -or $calibration.Facts.case -cne 'renderer-calibration' -or
-            $calibration.Facts.calibration_complete -ne $true -or @($calibration.Facts.phases).Count -ne 6) {
+        $calibrationEntry = if ($GuardPaste) { '--renderer-paste-supervise' } else { '--renderer-supervise' }
+        $calibration = Invoke-RendererSupervisor $calibrationEntry $calibrationRoot 'guard-calibration' @()
+        $calibrationAccepted = if ($GuardPaste) {
+            $calibration.Facts.case -ceq 'renderer-paste-calibration' -and $calibration.Facts.paste_calibration.supported -eq $true -and
+                @($calibration.Facts.paste_calibration.observations).Count -eq 7
+        } else {
+            $calibration.Facts.case -ceq 'renderer-calibration' -and $calibration.Facts.calibration_complete -eq $true
+        }
+        if ($calibration.ExitCode -ne 0 -or -not $calibrationAccepted -or @($calibration.Facts.phases).Count -ne 6) {
             throw 'The renderer must pass its six synthetic cursor controls before the Guard cases.'
         }
         $calibrationEvidence = Join-Path $work 'guard-calibration'
@@ -496,11 +547,12 @@ if ($guardMode) {
             [IO.File]::Copy($capture.FullName, (Join-Path $calibrationEvidence $capture.Name))
         }
         [IO.File]::WriteAllText((Join-Path $calibrationEvidence 'renderer-report.json'), ($calibration.Text + "`n"))
-        Invoke-GuardRendererCase 'normal' 5 $cases.normal
+        $firstBits = if ($GuardPaste) { 7 } else { 5 }
+        Invoke-GuardRendererCase 'normal' $firstBits $cases.normal
         if ($GuardMatrix) {
             foreach ($mode in $cases.Keys) {
                 foreach ($bits in 0..7) {
-                    if ($mode -cne 'normal' -or $bits -ne 5) {
+                    if ($mode -cne 'normal' -or $bits -ne $firstBits) {
                         Invoke-GuardRendererCase $mode $bits $cases[$mode]
                     }
                 }
@@ -514,7 +566,9 @@ if ($guardMode) {
 }
 
 $entryPoint = if ($windowCapture) { '--renderer-archive-window-supervise' }
-    elseif ($archiveMode) { '--renderer-archive-supervise' } else { '--renderer-supervise' }
+    elseif ($archiveMode) { '--renderer-archive-supervise' }
+    elseif ($PasteCalibration) { '--renderer-paste-supervise' }
+    else { '--renderer-supervise' }
 $extraArgs = @()
 if ($archiveMode) {
     if ((FileDigest $client.FullName) -cne $clientHash) {
@@ -528,8 +582,15 @@ $facts = $result.Facts
 [IO.File]::WriteAllText((Join-Path $work 'renderer-report.json'), ($receipt + "`n"))
 Write-Output $receipt
 if ($result.ExitCode -ne 0) {
-    $check = if ($archiveMode) { 'archived-client renderer verification' } else { 'renderer calibration' }
+    $check = if ($archiveMode) { 'archived-client renderer verification' }
+        elseif ($PasteCalibration) { 'paste-state calibration' }
+        else { 'renderer calibration' }
     throw "The Windows Terminal $check failed (exit $($result.ExitCode))."
+}
+if ($PasteCalibration -and ($facts.case -cne 'renderer-paste-calibration' -or
+    $facts.paste_calibration.supported -ne $true -or @($facts.paste_calibration.observations).Count -ne 7 -or
+    -not $facts.native_windows -or -not $facts.cleanup.job_empty -or -not $facts.cleanup.pipe_quiescent)) {
+    throw 'The native paste calibration did not establish all owned state transitions and cleanup.'
 }
 if ($archiveMode) {
     if ($facts.case -cne 'renderer-archive' -or -not $facts.archive_diagnostic_passed -or

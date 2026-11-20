@@ -14,8 +14,10 @@ on:
           - native-controls
           - renderer-desktop
           - renderer-cursor
+          - renderer-paste
           - renderer-guard-admission
           - renderer-guard-matrix
+          - renderer-guard-paste-matrix
 
 permissions:
   contents: read
@@ -53,10 +55,12 @@ jobs:
           }
 
   renderer-cursor:
-    name: Calibrate cursor observations in Windows Terminal
-    if: inputs.probe == 'renderer-cursor'
+    name: Calibrate ${{ inputs.probe == 'renderer-paste' && 'paste' || 'cursor' }} observations in Windows Terminal
+    if: inputs.probe == 'renderer-cursor' || inputs.probe == 'renderer-paste'
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      WINDOWS_RENDERER_PROBE: ${{ inputs.probe }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,7 +68,7 @@ jobs:
       - name: Run the owned portable Windows Terminal probe
         id: renderer
         shell: pwsh
-        run: ./tests/support/windows_conpty/Run-RendererCalibration.ps1
+        run: ./tests/support/windows_conpty/Run-RendererCalibration.ps1 -PasteCalibration:($env:WINDOWS_RENDERER_PROBE -ceq 'renderer-paste')
       - name: Retain only synthetic renderer observations
         if: ${{ always() && steps.renderer.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -84,7 +88,7 @@ jobs:
 
   renderer-guard:
     name: Observe actual Guard restoration in Windows Terminal
-    if: inputs.probe == 'renderer-guard-admission' || inputs.probe == 'renderer-guard-matrix'
+    if: inputs.probe == 'renderer-guard-admission' || inputs.probe == 'renderer-guard-matrix' || inputs.probe == 'renderer-guard-paste-matrix'
     runs-on: windows-latest
     timeout-minutes: 25
     env:
@@ -124,7 +128,8 @@ jobs:
         shell: pwsh
         run: |
           ./tests/support/windows_conpty/Run-RendererCalibration.ps1 -GuardBuildManifest $env:WINDOWS_GUARD_BUILD_MANIFEST `
-            -GuardMatrix:($env:WINDOWS_GUARD_PROBE -ceq 'renderer-guard-matrix')
+            -GuardMatrix:($env:WINDOWS_GUARD_PROBE -cin @('renderer-guard-matrix','renderer-guard-paste-matrix')) `
+            -GuardPaste:($env:WINDOWS_GUARD_PROBE -ceq 'renderer-guard-paste-matrix')
       - name: Retain allowlisted Guard renderer observations
         if: ${{ always() && steps.guard-build.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

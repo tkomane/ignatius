@@ -17,6 +17,12 @@ Windows builds on one runner also matched. Windows cross-image
 reproducibility, canonical evidence, verified signatures and provenance,
 and exact release authorization remain open.
 
+The exact Windows executable from that rehearsal passed verified TLS and a
+read-only query against disposable PostgreSQL 17.12 on Server 2025 x64.
+It returned exit 6 for a mismatched certificate hostname, passed the scoped
+debug privacy check and cleaned up its fixture.
+[Live archive run](https://github.com/tkomane/ignatius/actions/runs/44658370457)
+
 ## Packaged runtime rehearsal - 20 November 2026
 
 [Rehearsal 44631543576](https://github.com/tkomane/ignatius/actions/runs/44631543576)
@@ -105,8 +111,25 @@ For all eight panic cases, the authenticated restoration checkpoint preceded
 release of the previous hook. Its marker preceded the default panic payload
 in the recovered main buffer. Each normal, error and panic child was waited.
 Each case completed with an empty owned Job and quiescent control pipes.
-This closes W07-064 for the observed automation. Native bracketed-paste state
-and full T055a, Windows 11 hand use and signed release acceptance remain open.
+This closes W07-064 for the observed automation. The initial matrix left
+native bracketed paste unmeasured.
+
+## Native Windows bracketed-paste restoration - 20 November 2026
+
+At source `ca42a09`, Windows Terminal 1.25.3131.0 on Windows Server 2025 x64
+reported the actual mode 2004 state through its console input queue. Seven
+clipboard-free observations covered reset and enabled on main and alternate
+screens. The same-host run then observed the actual standalone
+`TerminalGuard` before launch, while it held each acquired mode, and after
+restoration. [Native state matrix](https://github.com/tkomane/ignatius/actions/runs/44658465741)
+
+Independent readback verified all 72 paste responses and 72 rendered crops.
+Paste was reset at every baseline, enabled only in the 12 cases that requested
+it and reset at all 24 exits. For the eight uncaught panics, the restored
+mode reply and renderer checkpoint preceded release of the previous hook.
+The original console modes, cursor and main-screen content also returned.
+This completes T055a for automated Windows Terminal and ConPTY restoration.
+Windows 11 PowerShell 7 hand use remains open.
 
 ## Windows 11 ARM64 archive rendering - 20 November 2026
 
@@ -129,6 +152,10 @@ PowerShell 7 remain open.
 The combined source `e4afd30` repeated both archive routes successfully.
 [Windows 11 ARM64 run](https://github.com/tkomane/ignatius/actions/runs/44657817133)
 [Windows Server x64 run](https://github.com/tkomane/ignatius/actions/runs/44657814910)
+
+The final integration at `51d55c5` also restored a byte-identical main-screen
+crop after running the corrected archive from `ci/44655874167-1`.
+[Corrected archive on Windows 11](https://github.com/tkomane/ignatius/actions/runs/44658843842)
 
 ## Packaged Windows Terminal startup and quit - 20 November 2026
 
