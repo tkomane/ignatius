@@ -2,7 +2,7 @@
 
 **Created** 2026-11-19
 **Milestone** M15
-**Status** Implemented locally
+**Status** Implemented in [PR #94](https://github.com/tkomane/ignatius/pull/94)
 
 ## User journeys
 

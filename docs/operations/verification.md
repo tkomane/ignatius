@@ -17,6 +17,11 @@ fixture-drift job was skipped on the push. CodeQL passed all three jobs.
 [CI](https://github.com/tkomane/ignatius/actions/runs/44721505326) and
 [CodeQL](https://github.com/tkomane/ignatius/actions/runs/44721505143).
 
+The 16 November scheduled fixture check reported five moved upstream tags.
+On 20 November, the exact fixture comparison script from `57fb82e` ran
+locally against the live registry. All five current tags matched the reviewed
+digests, and the script exited 0. [Earlier scheduled run](https://github.com/tkomane/ignatius/actions/runs/43857039275/job/133263858315)
+
 | Archive target | Executing environment | Server |
 | --- | --- | --- |
 | `aarch64-apple-darwin` | macOS 27.2.1 arm64 | PostgreSQL 18.7 |
@@ -35,6 +40,22 @@ with glibc 2.39. [Native Windows CLI probe](https://github.com/tkomane/ignatius/
 | --- | --- |
 | macOS archive TLS and privacy | `63474d391a1cde7f8ab3d323683a909f8d2c1d3c87a1c7cc387573d1e3c3c8b5` |
 | Linux archive TLS, privacy and ELF requirements | `37dc2e900a59551d53d08db7315625cada148efa31c240518ce86a82b26e4b82` |
+| macOS invalid logging directive | `0b8bcf76e9242ed9cf0f55bb11f65f1b9430f2390aa7845572a5c388e7fa46e4` |
+| Linux missing loader and invalid logging directive | `97aa48e39bbda09ff1d7901c25b48502b97508edb7b21ebb03c40597df227b01` |
+
+All three exact archives rejected the invalid
+`IGNATIUS_LOG=tokio_postgres=debug` directive. Fresh runs left the log path
+absent. Runs with existing logs preserved the oversized active log and its
+rotated copy. The macOS and Windows read-only TLS queries and the Linux
+identity command still exited 0. Valid `debug` logging created the expected
+scoped log in each positive control. The Windows replay used PostgreSQL 17.11
+on the hosted x64 runner. [Native Windows logging probe](https://github.com/tkomane/ignatius/actions/runs/44737304745)
+
+The exact Linux executable also started on pinned Ubuntu with glibc 2.39.
+In a separate network-disabled container containing the same executable and
+no ELF interpreter, Docker Desktop's x86-64 emulator returned exit 133 and
+named `/lib64/ld-linux-x86-64.so.2` before any Ignatius output. The owned
+containers, image and temporary state were removed.
 
 The exact macOS and Linux archives each passed two consecutive cancellations
 in owned PTYs against the same PostgreSQL backend. Pending frames stayed clear
