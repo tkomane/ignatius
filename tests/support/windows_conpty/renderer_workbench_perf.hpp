@@ -94,7 +94,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     renderer_type_text(input, prefix);
     workbench_observe_until(client, deadline, editor, "performance editor prefix");
     require(!completion(workbench_observe(client)), "workbench completion starts closed");
-    renderer_key(input, VK_SPACE, L' ', LEFT_CTRL_PRESSED);
+    renderer_key(input, VK_F8, L'\0', 0);
     workbench_observe_until(client, (std::min)(deadline, Clock::now() + 3s),
                            completion, "loaded synthetic catalogue");
     (void)workbench_time_key(client, input, deadline, VK_ESCAPE, L'\x1b', 0, editor, "dismiss catalogue warmload");
@@ -121,7 +121,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
         measure(1, VK_BACK, L'\b', 0, editor);
         measure(2, 'P', L'p', LEFT_CTRL_PRESSED, palette);
         measure(3, VK_ESCAPE, L'\x1b', 0, editor);
-        measure(4, VK_SPACE, L' ', LEFT_CTRL_PRESSED, completion);
+        measure(4, VK_F8, L'\0', 0, completion);
         measure(5, VK_ESCAPE, L'\x1b', 0, editor);
     }
 
@@ -129,6 +129,7 @@ void renderer_workbench_performance(const Child& client, HANDLE input,
     // Windows Terminal restoration assertions also pass.
     std::ofstream receipt(std::filesystem::path(work) / L"workbench-performance.pending");
     receipt << "{\"schema_version\":1,\"scope\":\"native console screen-buffer timing\","
+            << "\"completion_key\":\"F8\","
             << "\"warmup_actions\":" << warmup * names.size()
             << ",\"measured_actions\":" << cycles * names.size()
             << ",\"idle_unchanged\":true,\"catalogue_loaded\":true,\"qpc_frequency\":" << frequency()

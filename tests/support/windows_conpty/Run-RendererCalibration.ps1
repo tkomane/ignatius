@@ -456,6 +456,13 @@ reduced-motion = true
     if ($liveWorkbench) {
         $clientConfigText += "`ncompletion = false"
     }
+    if ($WorkbenchPerformance) {
+        $clientConfigText += @'
+
+[keys]
+complete = ["ctrl+space", "f8"]
+'@
+    }
     [IO.File]::WriteAllText($clientConfig, $clientConfigText + "`n")
     $build['archived_client_sha256'] = $clientHash
     $build['archived_client_architecture'] = $clientArchitecture
@@ -741,6 +748,7 @@ if ($WorkbenchPerformance) {
     $timing = [IO.File]::ReadAllText($control.FullName) | ConvertFrom-Json
     $actions = @('editor_insert', 'editor_backspace', 'palette_open', 'palette_close', 'completion_open', 'completion_close')
     if ($timing.schema_version -ne 1 -or $timing.scope -cne 'native console screen-buffer timing' -or
+        $timing.completion_key -cne 'F8' -or
         $timing.qpc_frequency -le 0 -or $timing.warmup_actions -ne 24 -or $timing.measured_actions -ne 120 -or
         $timing.idle_unchanged -cne $true -or $timing.catalogue_loaded -cne $true -or
         $timing.viewport_columns -lt 80 -or $timing.viewport_columns -gt 200 -or
