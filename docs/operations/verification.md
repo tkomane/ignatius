@@ -59,6 +59,25 @@ The local raw nanosecond samples and per-action statistics are in
 `/private/tmp/ignatius-w12-mac-perf.paW3ogmE/macos-archived-pty-performance-receipt.json`,
 SHA-256 `a7e3bc916aaf6e2d87328c26571baa15c466c6366141f3917bc39d8b9d63bd7f`.
 
+The same release's Linux x86-64 executable ran in xterm 390 under Xvfb on
+emulated Ubuntu 24.04. The read-only PostgreSQL 18.7 fixture loaded 30
+ten-column tables, 10 views and 20 routines. After 21 reference and 21
+warm-up actions, 105 editor, palette, completion, help and focus actions
+measured 78.208 ms p50 and 85.964 ms p95 at 120x40. The measurement ran
+from before XTEST injection through the first matching framebuffer capture
+and decode. Injection and observation remained in the measurement. The
+capture-only p95 was 50.718 ms, and the injection process p95 was 37.669 ms.
+
+Each target frame differed from its predecessor by over 768 bits. Matching
+allowed up to 192 differing bits to accommodate observed palette-edge
+variation. The viewed reference captures showed schema completion and
+filtered palette results. The client exited zero, and terminal settings
+were restored byte for byte. The owned fixtures and image were removed.
+
+The local Linux samples are in
+`/private/tmp/ignatius-w10-xterm.xj67h_al/output/editor-final/samples.csv`,
+SHA-256 `abc6d7e51db6fb3025e03a33853c7e0511b868fd616e8e2671963dd2bca197a5`.
+
 ### Selected archive verification and missing prerequisites
 
 The `ci/44681770913-1` archive installation instructions now verify one selected

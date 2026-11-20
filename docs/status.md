@@ -20,6 +20,9 @@ before trusting anything else.
   p95 over 120 warmed actions and 15.090 ms grid p95 over 105. Timing ended
   when the owned PTY showed the expected state. Native display timing and
   hand use remain open. [Interaction timings](operations/verification.md#archived-release-interaction-timings)
+- Emulated Ubuntu x86-64 with xterm measured 85.964 ms p95 across 105 warmed
+  local actions, including key injection and framebuffer observation.
+  [Linux timing method](operations/verification.md#archived-release-interaction-timings)
 
 ## Wave 61 - Selected archive installation preflight - 20 November 2026
 
