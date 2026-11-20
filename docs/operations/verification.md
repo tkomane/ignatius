@@ -33,6 +33,21 @@ The window capture and the startup receipt agree. The probe sent no launch
 request for the Ignatius fixture and captured no Ignatius terminal session.
 Stock Warp visual acceptance, cursor appearance and OSC 11 remain open.
 
+## Warp source renderer - 20 November 2026
+
+The native Warp Integration harness at `0b2db6e` built on the hosted
+`macos-26` arm64 image and ran the exact Ignatius executable from the
+`d4642d0` release archive. Its temporary home and test identity were isolated.
+The harness rendered the client's alternate screen and returned to the shell
+after sending Ctrl+Q. [Renderer run 44642684577](https://github.com/tkomane/ignatius/actions/runs/44642684577)
+
+Two retained 1024x674 frames show the client and the restored shell. The
+independently downloaded receipts matched the run nonce and PTY, confirmed
+raw input during startup, exit 0 and exact restoration of the original POSIX
+modes. Warp answered OSC 11 with `0505/0505/0505` before launch and after quit.
+The client was waiting on a synthetic loopback endpoint during capture.
+Signed Warp hand use and its cursor and OSC 11 checks remain open.
+
 ## Windows Terminal renderer calibration - 20 November 2026
 
 [Run 44632416860](https://github.com/tkomane/ignatius/actions/runs/44632416860)

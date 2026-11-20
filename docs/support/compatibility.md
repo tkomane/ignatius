@@ -655,6 +655,7 @@ configured never emitting no painted SGRs, with explicit always/NO_COLOR control
 | --- | --- |
 | macOS, in a pseudo-terminal | Verified: full-screen render, Ctrl+R executed a query, Ctrl+Q restored the terminal, with the exact escape sequences captured |
 | Warp on macOS, interactive | A native SIGTERM run restored the POSIX terminal settings. The hosted signed app reached its first-run agreement. Visual hand use, cursor appearance and OSC 11 response remain open. See the [startup diagnostic](../operations/verification.md#warp-startup-diagnostics---20-november-2026) |
+| Warp Integration on hosted Apple silicon | The source-built renderer captured the archived client and the restored shell. Ctrl+Q exited zero, restored the same PTY modes and preserved the OSC 11 response. See the [native renderer evidence](../operations/verification.md#warp-source-renderer---20-november-2026) |
 | Live terminal resize | The macOS PTY and automated Linux xterm verified compact and minimum-size layouts, then recovered retained results |
 | Windows Terminal, interactive | CI builds and tests pass. Six synthetic cursor controls passed on Windows Server 2025 x64 in Windows Terminal 1.25.3131.0. Full-screen use on Windows 11 remains open |
 | Linux xterm 390 | Automated Xvfb rendering, verified TLS, a separate Unix-socket query, resize and terminal-mode restoration passed on Ubuntu 24.04.5 x86-64. Linux desktop hand use remains open. See the [renderer evidence and resize-gravity limit](../operations/verification.md#linux-xterm-renderer-and-restoration---19-november-2026) |

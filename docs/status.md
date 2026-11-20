@@ -6,6 +6,11 @@ before trusting anything else.
 
 ## Wave 49: Terminal and packaged runtime verification - 20 November 2026
 
+- The open-source Warp Integration renderer ran the exact archived Ignatius
+  binary on hosted Apple silicon. Native captures show alternate-screen
+  startup and the shell after Ctrl+Q. The original terminal modes returned,
+  the client exited zero and OSC 11 returned the same colour before and after.
+  [Warp source renderer run 44642684577](https://github.com/tkomane/ignatius/actions/runs/44642684577)
 - [Warp startup run 44641238666](https://github.com/tkomane/ignatius/actions/runs/44641238666)
   reached the Terms of Service notice in the signed arm64 app on a hosted
   macOS desktop. Ignatius never started in this run. Stock Warp visual
