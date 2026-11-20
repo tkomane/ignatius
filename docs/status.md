@@ -27,9 +27,14 @@ before trusting anything else.
   [Linux timing method](operations/verification.md#archived-release-interaction-timings)
 - Windows 11 ARM64 measured 15.441 ms console-buffer p95 across 120 warmed
   local actions on the emulated x64 archive, including default Ctrl+Space.
-  The live TLS query and cursor restoration passed afterward. Windows grid
-  timing and hand use remain open.
+  The live TLS query and cursor restoration passed afterward.
   [Native Windows timing run](https://github.com/tkomane/ignatius/actions/runs/44702492388)
+- The same Windows archive measured 47.403 ms console-buffer p95 across 105
+  warmed grid actions at 90x27 with 1,000 retained rows. One filter application
+  took 119.757 ms. The read-only TLS query and PowerShell prompt restoration
+  passed again. Windows compositor timing and desktop hand use remain
+  open.
+  [Windows grid run](https://github.com/tkomane/ignatius/actions/runs/44708743953)
 
 ## Wave 61 - Selected archive installation preflight - 20 November 2026
 
