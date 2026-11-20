@@ -4,6 +4,27 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 63 - Release quickstart and cancellation - 20 November 2026
+
+- The full verifier at the retained candidate source `61425c3` passed 2,157
+  cases with no skipped gates, including plain, verified TLS and native
+  Unix-socket PostgreSQL 18.7. The disposable fixtures were cleaned up.
+- The local arm64 packaging quickstart passed its record, checksum and scope
+  checks. Independent aggregation from the three hosted target bundles matched
+  all 12 retained files. T033 and T035 remain open for hand use, canonical
+  evidence and verified release trust.
+  [Release quickstart evidence](operations/verification.md#release-quickstart-replay)
+- An owned macOS PTY verified that the exact retained archive drew and accepted
+  edits during delayed connection and metadata replies. PostgreSQL confirmed
+  the cancellation with SQLSTATE `57014`. The archive showed the diagnostic
+  and omitted the specified confirmed status.
+  [Delayed PostgreSQL evidence](operations/verification.md#delayed-connection-metadata-and-cancellation)
+- An optimized build at `53c6ab2` displayed the correct pending and confirmed
+  wording for two consecutive PostgreSQL cancellations. The diagnostic and
+  recovery query passed. The layout suite verified earlier result labelling
+  and visible `ROLLBACK` guidance at 40x8.
+  [Cancellation regression](operations/verification.md#delayed-connection-metadata-and-cancellation)
+
 ## Wave 62 - Release candidate review - 20 November 2026
 
 - The release review and support matrix now use `61425c3` and the three exact

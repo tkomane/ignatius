@@ -535,6 +535,14 @@ Two distinct archived builds then passed same-path replacement and rollback
 on all three targets. The isolated rehearsal used two source revisions of
 product version `0.1.0`.
 [Archive replacement evidence](../../docs/operations/verification.md#same-path-archive-replacement-and-rollback---20-november-2026)
+
+The 20 November local quickstart replay at exact candidate source `61425c3`
+passed the full verifier with 2,157 cases and no skips, including PostgreSQL
+18.7 plain, verified TLS and a native Unix socket. Local archive validation and
+an independent byte-identical reconstruction of the 12-file hosted aggregate
+passed. Readiness remained blocked.
+[Quickstart replay](../../docs/operations/verification.md#release-quickstart-replay)
+
 The full quickstart still needs Windows and Linux hand verification. T033
 remains open for that acceptance, the canonical evidence path and live
 supply-chain evidence. T034 is complete for the non-publishing workflow.
