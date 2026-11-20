@@ -78,6 +78,23 @@ The local Linux samples are in
 `/private/tmp/ignatius-w10-xterm.xj67h_al/output/editor-final/samples.csv`,
 SHA-256 `abc6d7e51db6fb3025e03a33853c7e0511b868fd616e8e2671963dd2bca197a5`.
 
+The Linux grid exercise used the same xterm measurement boundary. The
+six-column query returned 1,050 rows with 1,000 retained and 100 matching
+the filter.
+The probe verified row and sort-key identity for ascending, descending and
+server order. Resizing 120x40 to 30x6 and back restored the filtered grid.
+The first font showed placeholder boxes. The repeated fixture used
+WenQuanYi Micro Hei Mono (`fonts-wqy-microhei` `0.2.0-beta-3.1`) in the
+disposable image and displayed the CJK glyphs in the wide cell.
+
+After seven reference and 21 warm-up actions, 105 measured grid actions
+had p50 75.245 ms and p95 83.660 ms. Two server-order restorations exceeded
+100 ms, with a maximum of 158.861 ms. The client exited zero and restored
+the original terminal settings. The fixture and image were removed.
+The local samples are in
+`/private/tmp/ignatius-w10-linux-grid.M27IIT0r/output/grid-cjk/samples.csv`,
+SHA-256 `af7867ac0b4f9de0152cfd99c3063a66819d4df25d13066c09124173604b1095`.
+
 ### Selected archive verification and missing prerequisites
 
 The `ci/44681770913-1` archive installation instructions now verify one selected

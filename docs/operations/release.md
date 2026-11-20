@@ -60,6 +60,9 @@ passed scoped log-privacy checks and rolled back to the exact earlier
 `4e9509c` executable with its state intact. The Linux archive requires
 `GLIBC_2.39` symbols. [Exact target matrix](../support/compatibility.md#release-target-matrix)
 and [runtime evidence](verification.md#live-tls-from-the-packaged-structured-result-build---20-november-2026).
+The macOS and Linux archives met the proposed 100 ms p95 target in the
+measured PTY and xterm scenarios.
+[Interaction measurements](verification.md#archived-release-interaction-timings)
 
 For review, verify the exact archive files before first start and use the
 same-path rollback checks with isolated state. The independent cryptographic
