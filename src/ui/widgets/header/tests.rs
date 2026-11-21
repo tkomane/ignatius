@@ -534,3 +534,49 @@ fn header_separates_left_posture_and_right_telemetry_when_width_permits() {
         "empty right telemetry should omit separator: {text_quiet}"
     );
 }
+
+#[test]
+fn header_brand_badge_uses_rail_keycap_and_padded_capsules_across_depths() {
+    use ratatui::style::{Color, Modifier};
+
+    let mut model = connected_model(crate::connection::Environment::Production);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.read_only = true;
+    }
+    model.transaction = crate::query::result::TransactionState::Open;
+
+    let pres = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 120, 1);
+    let mut buf = Buffer::empty(area);
+    render_header(&model, &pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+
+    assert!(text.contains("Ignatius:"), "{text}");
+    assert!(text.contains(" [PROD] "), "{text}");
+    assert!(text.contains(" [READ ONLY] "), "{text}");
+    assert!(text.contains(" [TX ACTIVE] "), "{text}");
+
+    let brand_col = text[..text.find("Ignatius:").unwrap()].chars().count() as u16;
+    let keycap = crate::ui::widgets::rail_keycap(&pres.theme, Token::Header);
+    assert_eq!(buf[(brand_col, 0)].fg, keycap.fg.unwrap());
+    assert_eq!(buf[(brand_col, 0)].bg, keycap.bg.unwrap());
+    assert!(buf[(brand_col, 0)].modifier.contains(Modifier::BOLD));
+
+    for (tier, depth) in [
+        (GlyphTier::Ascii, ColorDepth::Basic16),
+        (GlyphTier::Ascii, ColorDepth::None),
+    ] {
+        let low = presentation(tier, depth);
+        let mut low_buf = Buffer::empty(area);
+        render_header(&model, &low, area, &mut low_buf);
+        let low_text = buffer_to_string(&low_buf);
+        assert!(low_text.is_ascii(), "{depth:?}: {low_text:?}");
+        assert!(low_text.contains("Ignatius:"), "{low_text}");
+        assert!(low_text.contains(" [PROD] "), "{low_text}");
+        let col = low_text[..low_text.find("Ignatius:").unwrap()]
+            .chars()
+            .count() as u16;
+        assert_eq!(low_buf[(col, 0)].bg, Color::Reset);
+        assert_eq!(low_buf[(0, 0)].bg, Color::Reset);
+    }
+}

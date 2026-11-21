@@ -493,3 +493,72 @@ fn saved_query_preview_pane_highlights_sql_syntax_and_styles_headers() {
         "WHERE must have SyntaxKeyword foreground"
     );
 }
+
+#[test]
+fn palette_spotlight_strip_split_title_and_preview_gutter_across_depths() {
+    let long_label = "very_long_saved_query_title_that_must_not_touch_the_vertical_divider";
+    let saved_pal = Palette::over_saved_queries(vec![PaletteEntry {
+        label: long_label.into(),
+        detail:
+            "SELECT column_alpha, column_beta, column_gamma FROM public.very_long_relation_name;"
+                .into(),
+        group: "Saved",
+        command: PaletteCommand::Open(long_label.into()),
+    }]);
+
+    let p = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let mut buf = Buffer::empty(AREA);
+    render_palette(&saved_pal, &p, AREA, &mut buf);
+
+    let box_area = super::palette_box(&saved_pal, &p, AREA);
+    let inner_width = box_area.width - 2;
+    let preview_width = inner_width * 60 / 100;
+    let list_width = inner_width - preview_width;
+    let divider_x = box_area.x + 1 + list_width;
+    let search_y = box_area.y + 1;
+    let row0_y = box_area.y + 2;
+
+    let spotlight_bg = p.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    for x in (box_area.x + 1)..(box_area.x + box_area.width - 1) {
+        assert_eq!(
+            buf[(x, search_y)].bg,
+            spotlight_bg,
+            "Spotlight search strip at x={x} must carry SurfaceAlt background"
+        );
+    }
+
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("1 match"), "{text}");
+    assert_eq!(buf[(divider_x, row0_y)].symbol(), "\u{2502}");
+    // Selected item text stays at least 1 cell away from divider_x while Selection bg fills up to divider_x.
+    assert_eq!(buf[(divider_x - 1, row0_y)].symbol(), " ");
+    assert_eq!(
+        buf[(divider_x - 1, row0_y)].bg,
+        p.theme.style(Token::Selection).bg.unwrap()
+    );
+    // Wrapped SQL preview keeps 1-cell breathing gutter immediately right of divider_x.
+    for row in row0_y..(box_area.y + box_area.height - 1) {
+        assert_eq!(
+            buf[(divider_x + 1, row)].symbol(),
+            " ",
+            "preview gutter cell right of divider on row {row} must stay blank"
+        );
+    }
+
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut low_buf = Buffer::empty(AREA);
+        render_palette(&saved_pal, &low, AREA, &mut low_buf);
+        assert!(buffer_to_string(&low_buf).is_ascii(), "{depth:?}");
+        assert_eq!(low_buf[(box_area.x + 2, search_y)].bg, Color::Reset);
+        assert_eq!(low_buf[(divider_x, row0_y)].symbol(), "|");
+    }
+}

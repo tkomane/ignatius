@@ -301,8 +301,8 @@ fn density_every_overlay_family_respects_preferred_margin_and_tiny_bounds() {
             let area = Rect::new(0, 0, 80, 80);
             let buffer = rendered_buffer(&model, &p, 80, 80);
             let background = p.theme.surface(Token::SurfaceOverlay).bg.unwrap();
-            let cells: Vec<(u16, u16)> = (0..80)
-                .flat_map(|y| (0..80).map(move |x| (x, y)))
+            let cells: Vec<(u16, u16)> = (1..area.height.saturating_sub(1))
+                .flat_map(|y| (0..area.width).map(move |x| (x, y)))
                 .filter(|(x, y)| buffer[(*x, *y)].bg == background)
                 .collect();
             assert!(!cells.is_empty(), "{name}");
@@ -2202,7 +2202,7 @@ fn server_confirmed_cancellation_keeps_status_and_diagnostics_visible() {
         text.lines()
             .last()
             .unwrap()
-            .contains("Query cancelled by server Autocommit"),
+            .contains("Query cancelled by server | Autocommit"),
         "{text}"
     );
     assert!(text.contains("canceling statement due to user request"));
@@ -2220,7 +2220,7 @@ fn server_confirmed_cancellation_keeps_status_and_diagnostics_visible() {
             .lines()
             .last()
             .unwrap()
-            .contains("Cancelled Transaction failed"),
+            .contains("Cancelled|Transaction failed"),
         "{narrow}"
     );
     assert!(narrow.contains("ROLLBACK"), "{narrow}");
@@ -3853,7 +3853,7 @@ fn retention_inner_minimum_split_shows_complete_limited_cue_or_whole_summary() {
                     .join(" ");
                 assert!(rows.contains("Data limited in 1 result set(s)"), "{text}");
             }
-            assert!(text.contains("Ready Autocommit"), "{text}");
+            assert!(text.contains("Ready | Autocommit"), "{text}");
             assert!(text.contains("Limited sets: 1"), "{text}");
             assert_eq!(model.retained_data_loss, before);
             assert_eq!(
@@ -3893,7 +3893,7 @@ fn retention_inner_minimum_unavailable_view_defers_counts_without_partial_fact()
             );
             assert_eq!(model.retained_data_loss, before);
             assert_eq!(model.visible_result().unwrap().rows_seen, 7);
-            assert!(text.contains("Ready Autocommit"), "{text}");
+            assert!(text.contains("Ready | Autocommit"), "{text}");
         }
     }
 }

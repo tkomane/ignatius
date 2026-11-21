@@ -388,3 +388,113 @@ fn editor_renders_cursorline_and_cursorlinenr_when_focused_and_unfocused() {
         "unfocused editor must not paint cursorline stripe"
     );
 }
+
+#[test]
+fn objects_title_breadcrumbs_and_column_details_truncate_cleanly_at_narrow_width() {
+    use crate::app::tree::MetadataPayload;
+    use crate::postgres::{ColumnInfo, ObjectSummary};
+    use ratatui::style::Color;
+
+    let mut model = Model::new(100);
+    update(&mut model, Message::Connected(session()));
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema("public", 1)]))),
+    );
+    model.tree.selected = 1; // Tables group
+    let (req_objs, path_objs, _) = model.tree.expand_selected().expect("expand tables");
+    model.tree.apply(
+        req_objs,
+        &path_objs,
+        MetadataPayload::Objects(vec![ObjectSummary {
+            schema: "public".into(),
+            name: "very_long_orders_table".into(),
+            kind: ObjectKind::Table,
+            readable: true,
+            detail: Some("4 rows".into()),
+        }]),
+    );
+    model.tree.selected = 2; // Table row
+    let (req_cols, path_cols, _) = model.tree.expand_selected().expect("expand columns");
+    model.tree.apply(
+        req_cols,
+        &path_cols,
+        MetadataPayload::Relation {
+            columns: vec![
+                ColumnInfo {
+                    name: "primary_identifier".into(),
+                    data_type: "integer".into(),
+                    nullable: false,
+                    primary_key: true,
+                    default: None,
+                },
+                ColumnInfo {
+                    name: "customer_comment".into(),
+                    data_type: "text".into(),
+                    nullable: false,
+                    primary_key: false,
+                    default: None,
+                },
+            ],
+            indexes: Vec::new(),
+        },
+    );
+    model.tree.selected = 4; // First column so full breadcrumb path exceeds 34 cols
+
+    let area = Rect::new(0, 0, 34, 12);
+    for (tier, depth, expected_ellipsis) in [
+        (GlyphTier::Unicode, ColorDepth::TrueColor, "\u{2026}"),
+        (GlyphTier::Ascii, ColorDepth::Basic16, "..."),
+        (GlyphTier::Ascii, ColorDepth::None, "..."),
+    ] {
+        let pres = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(tier),
+            false,
+        );
+        let mut buf = Buffer::empty(area);
+        render_objects(&model, &Keymap::new(), &pres, area, &mut buf);
+        let text = buffer_to_string(&buf);
+        let top_row = text.lines().next().unwrap();
+        assert_eq!(top_row.chars().count(), 34, "{top_row}");
+        assert!(
+            top_row.contains(expected_ellipsis),
+            "long breadcrumb title must truncate cleanly with {expected_ellipsis}: {top_row}"
+        );
+        assert!(
+            !text.contains("primary k") && !text.contains("not nu"),
+            "column constraints must truncate cleanly instead of mid-word clipping:\n{text}"
+        );
+        if tier == GlyphTier::Ascii {
+            assert!(text.is_ascii(), "{depth:?}: {text:?}");
+            assert_eq!(buf[(1, 1)].bg, Color::Reset);
+        }
+    }
+
+    // Empty connected pane at compact 40x8 in ASCII + ColorDepth::None stays strictly ASCII.
+    let empty_model = {
+        let mut m = Model::new(100);
+        m.connection = ConnectionState::Connected(session());
+        m
+    };
+    let ascii_none = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let compact = Rect::new(0, 0, 40, 8);
+    let mut empty_buf = Buffer::empty(compact);
+    render_objects(
+        &empty_model,
+        &Keymap::new(),
+        &ascii_none,
+        compact,
+        &mut empty_buf,
+    );
+    let empty_text = buffer_to_string(&empty_buf);
+    assert!(empty_text.is_ascii(), "{empty_text:?}");
+    assert!(
+        empty_text.contains("No object rows are loaded yet."),
+        "{empty_text}"
+    );
+}

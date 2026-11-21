@@ -1,4 +1,7 @@
-use super::{action_key_label, input_cursor, overlay_block, pane_block, syntax_token};
+use super::{
+    action_key_label, hairline_rule, input_cursor, modal_recessed_pill, overlay_block, pane_block,
+    syntax_token,
+};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -3236,40 +3239,42 @@ pub(crate) fn render_query_performance(
         Token::Warning
     };
 
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("HIT RATIO: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{hit_ratio:.1}%"),
-            theme.style(hit_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("TRACKED: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{tracked_count}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("CALLS: ", theme.style(Token::Muted)),
-        Span::styled(format!("{total_calls}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("EXEC TIME: ", theme.style(Token::Muted)),
-        Span::styled(
-            crate::perf::format_duration_ms(total_time_ms),
-            theme.style(Token::Text),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("SORT: ", theme.style(Token::Muted)),
-        Span::styled(
-            state.sort_order.display_name(),
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "HIT RATIO: ",
+        format!("{hit_ratio:.1}%"),
+        hit_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TRACKED: ",
+        format!("{tracked_count}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "CALLS: ",
+        format!("{total_calls}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "EXEC TIME: ",
+        crate::perf::format_duration_ms(total_time_ms),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "SORT: ",
+        state.sort_order.display_name().to_owned(),
+        Token::Focus,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
     // Body: check if extension unavailable
@@ -3642,78 +3647,66 @@ pub(crate) fn render_index_advisor(
         Token::Warning
     };
 
-    // Hardware Capsules Bar
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("HEALTH: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{health_score}%"),
-            theme.style(score_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("RECLAIMABLE: ", theme.style(Token::Muted)),
-        Span::styled(
-            reclaimable_str,
-            theme.style(Token::Success).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("REDUNDANT: ", theme.style(Token::Muted)),
-        Span::styled(format!("{redundant_cnt}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("BLOATED: ", theme.style(Token::Muted)),
-        Span::styled(format!("{bloated_cnt}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("UNINDEXED FK: ", theme.style(Token::Muted)),
-        Span::styled(format!("{unindexed_cnt}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("HYPOPG: ", theme.style(Token::Muted)),
-        Span::styled(
-            if hypo_ready { "ENABLED" } else { "ABSENT" },
-            theme.style(if hypo_ready {
-                Token::Success
-            } else {
-                Token::Muted
-            }),
-        ),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "HEALTH: ",
+        format!("{health_score}%"),
+        score_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "RECLAIMABLE: ",
+        reclaimable_str,
+        Token::Success,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "REDUNDANT: ",
+        format!("{redundant_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "BLOATED: ",
+        format!("{bloated_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "UNINDEXED FK: ",
+        format!("{unindexed_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "HYPOPG: ",
+        if hypo_ready { "ENABLED" } else { "ABSENT" }.to_owned(),
+        if hypo_ready {
+            Token::Success
+        } else {
+            Token::Text
+        },
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    // Tab Selectors
-    let tab_spans = vec![
-        Span::styled(
-            format!(" [1] Redundant ({redundant_cnt}) "),
-            if state.active_tab == 0 {
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
-            } else {
-                theme.style(Token::Muted)
-            },
-        ),
-        Span::styled(" │ ", theme.style(Token::Border)),
-        Span::styled(
-            format!(" [2] B-Tree Bloat ({bloated_cnt}) "),
-            if state.active_tab == 1 {
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
-            } else {
-                theme.style(Token::Muted)
-            },
-        ),
-        Span::styled(" │ ", theme.style(Token::Border)),
-        Span::styled(
-            format!(" [3] Unindexed Foreign Keys ({unindexed_cnt}) "),
-            if state.active_tab == 2 {
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
-            } else {
-                theme.style(Token::Muted)
-            },
-        ),
-    ];
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let redundant_tab = format!(" [1] Redundant ({redundant_cnt}) ");
+    let bloat_tab = format!(" [2] B-Tree Bloat ({bloated_cnt}) ");
+    let fk_tab = format!(" [3] Unindexed Foreign Keys ({unindexed_cnt}) ");
+    render_overlay_tabs(
+        &[&redundant_tab, &bloat_tab, &fk_tab],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     // Body Workspace
     if state.loading {
@@ -4128,81 +4121,68 @@ pub(crate) fn render_wal_observability(
         Token::Warning
     };
 
-    // Dieter Rams status capsules
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("COMMITS: ", theme.style(Token::Muted)),
-        Span::styled(format!("{commits_cnt}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("ROLLBACK: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{rollbacks_cnt} ({rollback_pct:.2}%)"),
-            theme.style(rollback_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("WAL WRITE: ", theme.style(Token::Muted)),
-        Span::styled(wal_str, theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("CHECKPOINTS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{timed_pct:.1}% TIMED"),
-            theme.style(checkpoint_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("MAX XID AGE: ", theme.style(Token::Muted)),
-        Span::styled(format!("{max_xid}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("STANDBYS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{standby_cnt}"),
-            theme.style(if standby_cnt > 0 {
-                Token::Success
-            } else {
-                Token::Muted
-            }),
-        ),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "COMMITS: ",
+        format!("{commits_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ROLLBACK: ",
+        format!("{rollbacks_cnt} ({rollback_pct:.2}%)"),
+        rollback_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "WAL WRITE: ",
+        wal_str,
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "CHECKPOINTS: ",
+        format!("{timed_pct:.1}% TIMED"),
+        checkpoint_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "MAX XID AGE: ",
+        format!("{max_xid}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "STANDBYS: ",
+        format!("{standby_cnt}"),
+        if standby_cnt > 0 {
+            Token::Success
+        } else {
+            Token::Text
+        },
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    // Tab Selectors
-    let tab_spans = vec![
-        Span::styled(
-            " [1] Checkpoints & WAL ",
-            if state.active_tab == 0 {
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
-            } else {
-                theme.style(Token::Muted)
-            },
-        ),
-        Span::styled(" │ ", theme.style(Token::Border)),
-        Span::styled(
-            format!(
-                " [2] Transactions & XID Freeze ({}) ",
-                report_opt.map_or(0, |r| r.databases.len())
-            ),
-            if state.active_tab == 1 {
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
-            } else {
-                theme.style(Token::Muted)
-            },
-        ),
-        Span::styled(" │ ", theme.style(Token::Border)),
-        Span::styled(
-            format!(" [3] Replication & Standbys ({standby_cnt}) "),
-            if state.active_tab == 2 {
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD)
-            } else {
-                theme.style(Token::Muted)
-            },
-        ),
-    ];
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let xid_tab = format!(
+        " [2] Transactions & XID Freeze ({}) ",
+        report_opt.map_or(0, |r| r.databases.len())
+    );
+    let standby_tab = format!(" [3] Replication & Standbys ({standby_cnt}) ");
+    render_overlay_tabs(
+        &[" [1] Checkpoints & WAL ", &xid_tab, &standby_tab],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     // Body Workspace
     if state.loading {
@@ -4869,74 +4849,73 @@ pub(crate) fn render_connection_pool(
         Token::Danger
     };
 
-    // Dieter Rams hardware capsules
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("MODE: ", theme.style(Token::Muted)),
-        Span::styled(
-            if is_pgbouncer {
-                "PgBouncer"
-            } else {
-                "Direct PostgreSQL"
-            },
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("SATURATION: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{saturation:.1}% ({total_conns}/{max_conns})"),
-            theme.style(sat_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("HEADROOM: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{headroom}"),
-            theme.style(headroom_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("ACTIVE: ", theme.style(Token::Muted)),
-        Span::styled(format!("{active_conns}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("IDLE: ", theme.style(Token::Muted)),
-        Span::styled(format!("{idle_conns}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("WAIT QUEUE: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{wait_clients_cnt}"),
-            theme.style(queue_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("POOLS: ", theme.style(Token::Muted)),
-        Span::styled(format!("{pools_cnt}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "MODE: ",
+        if is_pgbouncer {
+            "PgBouncer"
+        } else {
+            "Direct PostgreSQL"
+        }
+        .to_owned(),
+        Token::Focus,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "SATURATION: ",
+        format!("{saturation:.1}% ({total_conns}/{max_conns})"),
+        sat_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "HEADROOM: ",
+        format!("{headroom}"),
+        headroom_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ACTIVE: ",
+        format!("{active_conns}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "IDLE: ",
+        format!("{idle_conns}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "WAIT QUEUE: ",
+        format!("{wait_clients_cnt}"),
+        queue_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "POOLS: ",
+        format!("{pools_cnt}"),
+        Token::Text,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    // Tab Bar
-    let tab_titles = [
-        format!(" [1] Pool Allocations & Queues ({pools_cnt}) "),
-        " [2] Server Connections & Saturation ".to_string(),
-        format!(" [3] Client Wait Forensics ({wait_clients_cnt}) "),
-    ];
-    let mut tab_spans = Vec::new();
-    for (i, t) in tab_titles.iter().enumerate() {
-        if i == state.active_tab {
-            tab_spans.push(Span::styled(
-                t,
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
-        }
-        tab_spans.push(Span::raw(" "));
-    }
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let tab_1 = format!(" [1] Pool Allocations & Queues ({pools_cnt}) ");
+    let tab_3 = format!(" [3] Client Wait Forensics ({wait_clients_cnt}) ");
+    render_overlay_tabs(
+        &[&tab_1, " [2] Server Connections & Saturation ", &tab_3],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     if state.loading {
         let loading_p = Paragraph::new(Line::from(vec![Span::styled(
@@ -5375,54 +5354,47 @@ pub(crate) fn render_data_masking(
         Token::Success
     };
 
-    // Dieter Rams hardware capsules
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("CANDIDATES: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{candidates_cnt}"),
-            theme.style(cand_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("POLICIES: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{policies_cnt} tables"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("VIEW PREFIX: ", theme.style(Token::Muted)),
-        Span::styled(
-            &state.view_prefix,
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("ENGINE: ", theme.style(Token::Muted)),
-        Span::styled("Virtual Views Overlay", theme.style(Token::Success)),
-        Span::styled("] ", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "CANDIDATES: ",
+        format!("{candidates_cnt}"),
+        cand_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "POLICIES: ",
+        format!("{policies_cnt} tables"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "VIEW PREFIX: ",
+        state.view_prefix.clone(),
+        Token::Focus,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ENGINE: ",
+        "Virtual Views Overlay".to_owned(),
+        Token::Success,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    // Tab Bar
-    let tab_titles = [
-        format!(" [1] Sensitive Columns & Rules ({candidates_cnt}) "),
-        format!(" [2] Generated Masked Views SQL ({policies_cnt}) "),
-    ];
-    let mut tab_spans = Vec::new();
-    for (i, t) in tab_titles.iter().enumerate() {
-        if i == state.active_tab {
-            tab_spans.push(Span::styled(
-                t,
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
-        }
-        tab_spans.push(Span::raw(" "));
-    }
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let tab_1 = format!(" [1] Sensitive Columns & Rules ({candidates_cnt}) ");
+    let tab_2 = format!(" [2] Generated Masked Views SQL ({policies_cnt}) ");
+    render_overlay_tabs(
+        &[&tab_1, &tab_2],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     if state.loading {
         let loading_p = Paragraph::new(Line::from(vec![Span::styled(
@@ -5667,69 +5639,62 @@ pub(crate) fn render_data_sync(
 
     let trunc_label = if state.truncate { "ENABLED" } else { "OFF" };
 
-    // Dieter Rams hardware capsules
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("TABLES: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{tables_cnt}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("TOPOLOGY: ", theme.style(Token::Muted)),
-        Span::styled(
-            cycle_label,
-            theme.style(cycle_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("MODE: ", theme.style(Token::Muted)),
-        Span::styled(
-            mode_label,
-            theme.style(mode_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("TRUNCATE: ", theme.style(Token::Muted)),
-        Span::styled(
-            trunc_label,
-            theme.style(if state.truncate {
-                Token::Warning
-            } else {
-                Token::Muted
-            }),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("PROTOCOL: ", theme.style(Token::Muted)),
-        Span::styled("Binary COPY Stream", theme.style(Token::Focus)),
-        Span::styled("] ", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TABLES: ",
+        format!("{tables_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TOPOLOGY: ",
+        cycle_label.to_owned(),
+        cycle_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "MODE: ",
+        mode_label.to_owned(),
+        mode_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TRUNCATE: ",
+        trunc_label.to_owned(),
+        if state.truncate {
+            Token::Warning
+        } else {
+            Token::Text
+        },
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "PROTOCOL: ",
+        "Binary COPY Stream".to_owned(),
+        Token::Focus,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    // Tab Bar
     let report_tables_cnt = state
         .sync_report
         .as_ref()
         .map_or(0, |r| r.table_progress.len());
-    let tab_titles = [
-        format!(" [1] Dependency Graph & Sync Plan ({tables_cnt}) "),
-        format!(" [2] Live Transfer Telemetry ({report_tables_cnt}) "),
-    ];
-    let mut tab_spans = Vec::new();
-    for (i, t) in tab_titles.iter().enumerate() {
-        if i == state.active_tab {
-            tab_spans.push(Span::styled(
-                t,
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
-        }
-        tab_spans.push(Span::raw(" "));
-    }
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let tab_1 = format!(" [1] Dependency Graph & Sync Plan ({tables_cnt}) ");
+    let tab_2 = format!(" [2] Live Transfer Telemetry ({report_tables_cnt}) ");
+    render_overlay_tabs(
+        &[&tab_1, &tab_2],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     if state.loading {
         let loading_p = Paragraph::new(Line::from(vec![Span::styled(
@@ -6008,62 +5973,55 @@ pub(crate) fn render_synthetic_seed(
     let tables_cnt = state.tables.len();
     let total_rows = state.report.as_ref().map_or(0, |r| r.total_rows);
 
-    // Dieter Rams hardware status capsules
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("TABLES: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{tables_cnt}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("ROWS/TABLE: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{}", state.rows_per_table),
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("PRNG SEED: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{}", state.seed),
-            theme.style(Token::Success).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("TOTAL ROWS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{total_rows}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("INTEGRITY: ", theme.style(Token::Muted)),
-        Span::styled("DAG Parent Keys", theme.style(Token::Focus)),
-        Span::styled("] ", theme.style(Token::Border)),
-    ];
+    let mut capsules = Vec::new();
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TABLES: ",
+        format!("{tables_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ROWS/TABLE: ",
+        format!("{}", state.rows_per_table),
+        Token::Focus,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "PRNG SEED: ",
+        format!("{}", state.seed),
+        Token::Success,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TOTAL ROWS: ",
+        format!("{total_rows}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "INTEGRITY: ",
+        "DAG Parent Keys".to_owned(),
+        Token::Focus,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    // Tab Bar
     let preview_cnt = state.report.as_ref().map_or(0, |r| r.tables.len());
-    let tab_titles = [
-        format!(" [1] Table Generator Strategies ({tables_cnt}) "),
-        format!(" [2] Generated Fixture Preview ({preview_cnt}) "),
-    ];
-    let mut tab_spans = Vec::new();
-    for (i, t) in tab_titles.iter().enumerate() {
-        if i == state.active_tab {
-            tab_spans.push(Span::styled(
-                t,
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            tab_spans.push(Span::styled(t, theme.style(Token::Muted)));
-        }
-        tab_spans.push(Span::raw(" "));
-    }
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let tab_1 = format!(" [1] Table Generator Strategies ({tables_cnt}) ");
+    let tab_2 = format!(" [2] Generated Fixture Preview ({preview_cnt}) ");
+    render_overlay_tabs(
+        &[&tab_1, &tab_2],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     if state.loading {
         let loading_p = Paragraph::new(Line::from(vec![Span::styled(
@@ -6355,26 +6313,23 @@ pub(crate) fn render_snippet_library(
     let total_count = state.library.total_count();
 
     // Dieter Rams hardware status capsules
-    let mut capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("SNIPPETS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{}/{}", filtered.len(), total_count),
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("CATEGORY: ", theme.style(Token::Muted)),
-        Span::styled(
-            state.library.category_filter.label(),
-            theme.style(Token::Info).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-    ];
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "SNIPPETS: ",
+        format!("{}/{}", filtered.len(), total_count),
+        Token::Focus,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "CATEGORY: ",
+        state.library.category_filter.label().to_owned(),
+        Token::Info,
+    );
 
     if let Some(selected) = state.library.selected_snippet() {
-        capsules.push(Span::styled("[", theme.style(Token::Border)));
-        capsules.push(Span::styled("SCOPE: ", theme.style(Token::Muted)));
         let scope_label = if selected.is_builtin {
             "BUILT-IN"
         } else {
@@ -6385,11 +6340,13 @@ pub(crate) fn render_snippet_library(
         } else {
             Token::Focus
         };
-        capsules.push(Span::styled(
-            scope_label,
-            theme.style(scope_token).add_modifier(Modifier::BOLD),
-        ));
-        capsules.push(Span::styled("] ", theme.style(Token::Border)));
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "SCOPE: ",
+            scope_label.to_owned(),
+            scope_token,
+        );
     }
 
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
@@ -6679,30 +6636,38 @@ pub(crate) fn render_lint_findings(
     } else {
         Token::Success
     };
-    let capsules = vec![
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("FINDINGS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{}", state.findings.len()),
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("ERRORS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{errors}"),
-            theme.style(error_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("WARNINGS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{warnings}"),
-            theme.style(warning_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "FINDINGS: ",
+        format!("{}", state.findings.len()),
+        Token::Focus,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ERRORS: ",
+        format!("{errors}"),
+        error_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "WARNINGS: ",
+        format!("{warnings}"),
+        warning_token,
+    );
     Paragraph::new(Line::from(capsules)).render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+    Paragraph::new(Line::from(Span::styled(
+        hairline_rule(presentation).repeat(usize::from(inner.width)),
+        theme.style(Token::Border),
+    )))
+    .style(theme.surface(Token::SurfaceOverlay))
+    .render(
+        Rect::new(inner.x, inner.y.saturating_add(1), inner.width, 1),
+        buf,
+    );
 
     let footer_area = Rect::new(
         inner.x,
@@ -6801,29 +6766,17 @@ pub(crate) fn render_lint_findings(
         Paragraph::new(lines).render(body_area, buf);
     }
 
-    Paragraph::new(Line::from(vec![
-        Span::styled(
-            "[Enter] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Jump  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[r] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Re-lint  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[j/k] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Move  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[Esc] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Close", theme.style(Token::Muted)),
-    ]))
-    .render(footer_area, buf);
+    render_footer_hints(
+        &[
+            ("[Enter]", "Jump"),
+            ("[r]", "Re-lint"),
+            ("[j/k]", "Move"),
+            ("[Esc]", "Close"),
+        ],
+        presentation,
+        footer_area,
+        buf,
+    );
 }
 
 fn format_optional_wal_bytes(bytes: Option<i64>) -> String {
@@ -6884,6 +6837,13 @@ fn modal_inner_layout(
         ])
         .split(inner);
 
+    Paragraph::new(Line::from(Span::styled(
+        hairline_rule(presentation).repeat(usize::from(chunks[2].width)),
+        presentation.theme.style(Token::Border),
+    )))
+    .style(presentation.theme.surface(Token::SurfaceOverlay))
+    .render(chunks[2], buf);
+
     Some((chunks[0], chunks[1], chunks[3], chunks[4], chunks[5]))
 }
 
@@ -6920,54 +6880,55 @@ pub(crate) fn render_logical_replication(
         Token::Success
     };
 
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("SLOTS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{slots_cnt}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("INACTIVE: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{inactive_cnt}"),
-            theme.style(risk_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("MAX WAL: ", theme.style(Token::Muted)),
-        Span::styled(max_retained, theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("PUBS: ", theme.style(Token::Muted)),
-        Span::styled(format!("{pubs_cnt}"), theme.style(Token::Text)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("SUBS: ", theme.style(Token::Muted)),
-        Span::styled(format!("{subs_cnt}"), theme.style(Token::Text)),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "SLOTS: ",
+        format!("{slots_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "INACTIVE: ",
+        format!("{inactive_cnt}"),
+        risk_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "MAX WAL: ",
+        max_retained,
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "PUBS: ",
+        format!("{pubs_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "SUBS: ",
+        format!("{subs_cnt}"),
+        Token::Text,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    let tab_labels = [
-        format!(" [1] Slots ({slots_cnt}) "),
-        format!(" [2] Publications ({pubs_cnt}) "),
-        format!(" [3] Subscriptions ({subs_cnt}) "),
-    ];
-    let mut tab_spans = Vec::new();
-    for (idx, label) in tab_labels.iter().enumerate() {
-        if idx > 0 {
-            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
-        }
-        let style = if idx == state.active_tab {
-            super::header::capsule_style(presentation, Token::Focus)
-        } else {
-            theme.style(Token::Muted)
-        };
-        tab_spans.push(Span::styled(label.clone(), style));
-    }
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    let tab_1 = format!(" [1] Slots ({slots_cnt}) ");
+    let tab_2 = format!(" [2] Publications ({pubs_cnt}) ");
+    let tab_3 = format!(" [3] Subscriptions ({subs_cnt}) ");
+    render_overlay_tabs(
+        &[&tab_1, &tab_2, &tab_3],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     let body_width = usize::from(body_area.width);
     let body_rows = usize::from(body_area.height).saturating_sub(1);
@@ -7415,50 +7376,50 @@ pub(crate) fn render_cluster_config(
         Token::Success
     };
 
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("MODIFIED: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{non_default_cnt}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("RESTART: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{pending_restart_cnt}"),
-            theme
-                .style(if pending_restart_cnt > 0 {
-                    Token::Warning
-                } else {
-                    Token::Success
-                })
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("HBA RISKS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{hba_warn_cnt}"),
-            theme.style(hba_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("EXT UPGRADES: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{ext_upgrade_cnt}"),
-            theme.style(if ext_upgrade_cnt > 0 {
-                Token::Warning
-            } else {
-                Token::Success
-            }),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("FOREIGN SERVERS: ", theme.style(Token::Muted)),
-        Span::styled(format!("{servers_cnt}"), theme.style(Token::Text)),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "MODIFIED: ",
+        format!("{non_default_cnt}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "RESTART: ",
+        format!("{pending_restart_cnt}"),
+        if pending_restart_cnt > 0 {
+            Token::Warning
+        } else {
+            Token::Success
+        },
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "HBA RISKS: ",
+        format!("{hba_warn_cnt}"),
+        hba_token,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "EXT UPGRADES: ",
+        format!("{ext_upgrade_cnt}"),
+        if ext_upgrade_cnt > 0 {
+            Token::Warning
+        } else {
+            Token::Success
+        },
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "FOREIGN SERVERS: ",
+        format!("{servers_cnt}"),
+        Token::Text,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
     let tab_labels = [
@@ -7476,29 +7437,29 @@ pub(crate) fn render_cluster_config(
         let style = if idx == state.active_tab {
             super::header::capsule_style(presentation, Token::Focus)
         } else {
-            theme.style(Token::Muted)
+            theme.style(Token::Text)
         };
         tab_spans.push(Span::styled(label.clone(), style));
     }
     tab_spans.push(Span::raw("  "));
     let modified_badge = if state.modified_only {
-        "[m] Modified-only: ON"
+        " [m] Modified-only: ON "
     } else {
-        "[m] Modified-only: OFF"
+        " [m] Modified-only: OFF "
     };
     tab_spans.push(Span::styled(
         modified_badge,
         if state.modified_only {
             super::header::capsule_style(presentation, Token::Warning)
         } else {
-            theme.style(Token::Muted)
+            modal_recessed_pill(theme, Token::Text)
         },
     ));
     if !state.filter_text.is_empty() {
         tab_spans.push(Span::raw("  "));
         tab_spans.push(Span::styled(
-            format!("[Filter: {}]", sanitize_for_display(&state.filter_text)),
-            theme.style(Token::Info),
+            format!(" [Filter: {}] ", sanitize_for_display(&state.filter_text)),
+            modal_recessed_pill(theme, Token::Info),
         ));
     }
     Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
@@ -8065,36 +8026,33 @@ pub(crate) fn render_data_browser(
     };
     let table_label = sanitize_for_display(&format!("{}.{}", state.schema, state.table));
 
-    let capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("TABLE: ", theme.style(Token::Muted)),
-        Span::styled(
-            table_label,
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("PK: ", theme.style(Token::Muted)),
-        Span::styled(pk_label, theme.style(Token::Info)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("ROWS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{rows_count}"),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("SORT: ", theme.style(Token::Muted)),
-        Span::styled(sort_label, theme.style(Token::Focus)),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled(
-            page_badge,
-            theme.style(page_token).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("]", theme.style(Token::Border)),
-    ];
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "TABLE: ",
+        table_label,
+        Token::Text,
+    );
+    push_kv_capsule(&mut capsules, presentation, "PK: ", pk_label, Token::Info);
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ROWS: ",
+        format!("{rows_count}"),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "SORT: ",
+        sort_label,
+        Token::Focus,
+    );
+    capsules.push(Span::styled(
+        format!(" [{page_badge}] "),
+        modal_recessed_pill(theme, page_token),
+    ));
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
     let active_col_name = page_opt
@@ -8108,24 +8066,24 @@ pub(crate) fn render_data_browser(
         ),
         Span::raw("  "),
         Span::styled(
-            format!("[PAGE SIZE: {}]", state.request.effective_page_size()),
-            theme.style(Token::Muted),
+            format!(" [PAGE SIZE: {}] ", state.request.effective_page_size()),
+            modal_recessed_pill(theme, Token::Text),
         ),
         Span::raw("  "),
         Span::styled(
             if page_opt.is_some_and(|p| p.has_prev) {
-                "[PREV: YES]"
+                " [PREV: YES] "
             } else {
-                "[PREV: NO]"
+                " [PREV: NO] "
             },
-            theme.style(Token::Muted),
+            modal_recessed_pill(theme, Token::Text),
         ),
     ];
     if let Some(filter) = &state.request.filter_predicate {
         tab_spans.push(Span::raw("  "));
         tab_spans.push(Span::styled(
-            format!("[FILTER: {}]", sanitize_for_display(filter)),
-            theme.style(Token::Info),
+            format!(" [FILTER: {}] ", sanitize_for_display(filter)),
+            modal_recessed_pill(theme, Token::Info),
         ));
     }
     Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
@@ -8405,7 +8363,8 @@ pub(crate) fn render_plan_diff(
     let report_opt = state.report.as_ref();
     let single_opt = state.baseline.as_ref().or(state.candidate.as_ref());
 
-    let capsules = if let Some(report) = report_opt {
+    let mut capsules = vec![Span::raw(" ")];
+    if let Some(report) = report_opt {
         let (verdict_label, verdict_token) = match report.verdict {
             crate::plandiff::DiffVerdict::Improvement => ("IMPROVEMENT", Token::Success),
             crate::plandiff::DiffVerdict::Regression => ("REGRESSION", Token::Danger),
@@ -8426,100 +8385,89 @@ pub(crate) fn render_plan_diff(
             report.shared_hit_delta, report.shared_read_delta
         );
         let wal_delta = format_signed_bytes(report.wal_bytes_delta);
-        vec![
-            Span::styled(" [", theme.style(Token::Border)),
-            Span::styled(
-                verdict_label,
-                theme.style(verdict_token).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("COST: ", theme.style(Token::Muted)),
-            Span::styled(cost_delta, theme.style(Token::Text)),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("TIME: ", theme.style(Token::Muted)),
-            Span::styled(time_delta, theme.style(Token::Text)),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("HIT/READ: ", theme.style(Token::Muted)),
-            Span::styled(buf_delta, theme.style(Token::Info)),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("WAL: ", theme.style(Token::Muted)),
-            Span::styled(wal_delta, theme.style(Token::Text)),
-            Span::styled("]", theme.style(Token::Border)),
-        ]
+        capsules.push(Span::styled(
+            format!(" [{verdict_label}] "),
+            modal_recessed_pill(theme, verdict_token),
+        ));
+        capsules.push(Span::raw(" "));
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "COST: ",
+            cost_delta,
+            Token::Text,
+        );
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "TIME: ",
+            time_delta,
+            Token::Text,
+        );
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "HIT/READ: ",
+            buf_delta,
+            Token::Info,
+        );
+        push_kv_capsule(&mut capsules, presentation, "WAL: ", wal_delta, Token::Text);
     } else if let Some(snap) = single_opt {
         let time_str = snap
             .execution_time_ms
             .map_or_else(|| "n/a".to_owned(), |ms| format!("{ms:.2}ms"));
         let wal_str = crate::telemetry::format_bytes(snap.wal_bytes);
-        vec![
-            Span::styled(" [", theme.style(Token::Border)),
-            Span::styled(
-                "SINGLE PLAN",
-                theme.style(Token::Muted).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("COST: ", theme.style(Token::Muted)),
-            Span::styled(format!("{:.2}", snap.total_cost), theme.style(Token::Text)),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("TIME: ", theme.style(Token::Muted)),
-            Span::styled(time_str, theme.style(Token::Text)),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("HIT/READ: ", theme.style(Token::Muted)),
-            Span::styled(
-                format!("{}/{}", snap.shared_hit_blocks, snap.shared_read_blocks),
-                theme.style(Token::Info),
-            ),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[", theme.style(Token::Border)),
-            Span::styled("WAL: ", theme.style(Token::Muted)),
-            Span::styled(wal_str, theme.style(Token::Text)),
-            Span::styled("]", theme.style(Token::Border)),
-        ]
+        capsules.push(Span::styled(
+            " [SINGLE PLAN] ",
+            modal_recessed_pill(theme, Token::Text),
+        ));
+        capsules.push(Span::raw(" "));
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "COST: ",
+            format!("{:.2}", snap.total_cost),
+            Token::Text,
+        );
+        push_kv_capsule(&mut capsules, presentation, "TIME: ", time_str, Token::Text);
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "HIT/READ: ",
+            format!("{}/{}", snap.shared_hit_blocks, snap.shared_read_blocks),
+            Token::Info,
+        );
+        push_kv_capsule(&mut capsules, presentation, "WAL: ", wal_str, Token::Text);
     } else {
-        vec![
-            Span::styled(" [", theme.style(Token::Border)),
-            Span::styled("UNCHANGED", theme.style(Token::Muted)),
-            Span::styled("] ", theme.style(Token::Border)),
-            Span::styled("[NO PLANS CAPTURED]", theme.style(Token::Muted)),
-        ]
-    };
+        capsules.push(Span::styled(
+            " [UNCHANGED] ",
+            modal_recessed_pill(theme, Token::Text),
+        ));
+        capsules.push(Span::raw(" "));
+        capsules.push(Span::styled(
+            " [NO PLANS CAPTURED] ",
+            modal_recessed_pill(theme, Token::Text),
+        ));
+    }
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    let tab_labels = [
-        " [1] Summary & Diff ",
-        " [2] Nodes ",
-        " [3] Buffers / WAL / Settings ",
-    ];
-    let mut tab_spans = Vec::new();
-    for (idx, label) in tab_labels.iter().enumerate() {
-        if idx > 0 {
-            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
-        }
-        let style = if idx == state.active_tab {
-            super::header::capsule_style(presentation, Token::Focus)
-        } else {
-            theme.style(Token::Muted)
-        };
-        tab_spans.push(Span::styled(*label, style));
-    }
-    tab_spans.push(Span::raw("  "));
     let (mode_label, mode_token) = if state.analyze_mode {
         ("[MODE: ANALYZE+BUFFERS+WAL]", Token::Warning)
     } else {
         ("[MODE: ESTIMATE]", Token::Info)
     };
-    tab_spans.push(Span::styled(
-        mode_label,
-        super::header::capsule_style(presentation, mode_token),
-    ));
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    render_overlay_tabs(
+        &[
+            " [1] Summary & Diff ",
+            " [2] Nodes ",
+            " [3] Buffers / WAL / Settings ",
+        ],
+        state.active_tab,
+        Some((mode_label.to_owned(), mode_token)),
+        presentation,
+        tab_area,
+        buf,
+    );
 
     let body_width = usize::from(body_area.width);
     let selection_style = theme.style(Token::Selection);
@@ -9239,56 +9187,48 @@ pub(crate) fn render_result_analytics(
     };
 
     let analytics = &state.analytics;
-    let mut capsules = vec![
-        Span::styled(" [", theme.style(Token::Border)),
-        Span::styled("ROWS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{}/{}", analytics.row_count, analytics.rows_seen),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-        Span::styled("[", theme.style(Token::Border)),
-        Span::styled("COLUMNS: ", theme.style(Token::Muted)),
-        Span::styled(
-            format!("{}", analytics.column_count),
-            theme.style(Token::Text).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("] ", theme.style(Token::Border)),
-    ];
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ROWS: ",
+        format!("{}/{}", analytics.row_count, analytics.rows_seen),
+        Token::Text,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "COLUMNS: ",
+        format!("{}", analytics.column_count),
+        Token::Text,
+    );
     if analytics.truncated {
-        capsules.push(Span::styled("[", theme.style(Token::Border)));
         capsules.push(Span::styled(
-            "TRUNCATED",
-            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+            " [TRUNCATED] ",
+            modal_recessed_pill(theme, Token::Warning),
         ));
-        capsules.push(Span::styled("] ", theme.style(Token::Border)));
+        capsules.push(Span::raw(" "));
     }
-    capsules.push(Span::styled("[", theme.style(Token::Border)));
-    capsules.push(Span::styled("PROFILE: ", theme.style(Token::Muted)));
-    capsules.push(Span::styled(
-        "ZERO-QUERY",
-        theme.style(Token::Success).add_modifier(Modifier::BOLD),
-    ));
-    capsules.push(Span::styled("]", theme.style(Token::Border)));
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "PROFILE: ",
+        "ZERO-QUERY".to_owned(),
+        Token::Success,
+    );
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
-    let tab_labels = [
-        " [1] Column Profiles & Sparklines ",
-        " [2] Top Values & Detail ",
-    ];
-    let mut tab_spans = Vec::new();
-    for (idx, label) in tab_labels.iter().enumerate() {
-        if idx > 0 {
-            tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
-        }
-        let style = if idx == state.active_tab {
-            super::header::capsule_style(presentation, Token::Focus)
-        } else {
-            theme.style(Token::Muted)
-        };
-        tab_spans.push(Span::styled(*label, style));
-    }
-    Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
+    render_overlay_tabs(
+        &[
+            " [1] Column Profiles & Sparklines ",
+            " [2] Top Values & Detail ",
+        ],
+        state.active_tab,
+        None,
+        presentation,
+        tab_area,
+        buf,
+    );
 
     let body_width = usize::from(body_area.width);
     let body_rows = usize::from(body_area.height).saturating_sub(1);
@@ -9659,13 +9599,12 @@ fn push_kv_capsule(
     value_token: Token,
 ) {
     let theme = &presentation.theme;
-    spans.push(Span::styled("[", theme.style(Token::Border)));
-    spans.push(Span::styled(label.to_owned(), theme.style(Token::Muted)));
-    spans.push(Span::styled(
-        value,
-        theme.style(value_token).add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::styled("] ", theme.style(Token::Border)));
+    let mut label_style = modal_recessed_pill(theme, Token::Text);
+    label_style.add_modifier.remove(Modifier::BOLD);
+    spans.push(Span::styled(format!(" [{label}"), label_style));
+    spans.push(Span::styled(value, modal_recessed_pill(theme, value_token)));
+    spans.push(Span::styled("] ", label_style));
+    spans.push(Span::raw(" "));
 }
 
 fn push_pill_capsule(
@@ -9675,7 +9614,7 @@ fn push_pill_capsule(
     token: Token,
 ) {
     spans.push(Span::styled(
-        text,
+        format!(" {text} "),
         super::header::capsule_style(presentation, token),
     ));
     spans.push(Span::raw(" "));
@@ -9698,16 +9637,18 @@ fn render_overlay_tabs(
         let style = if idx == active_tab {
             super::header::capsule_style(presentation, Token::Focus)
         } else {
-            theme.style(Token::Muted)
+            theme.style(Token::Text)
         };
         tab_spans.push(Span::styled((*label).to_owned(), style));
     }
     if let Some((badge, token)) = trailing {
         tab_spans.push(Span::raw("  "));
-        tab_spans.push(Span::styled(
-            badge,
-            super::header::capsule_style(presentation, token),
-        ));
+        let style = if token == Token::Muted {
+            modal_recessed_pill(theme, Token::Text)
+        } else {
+            super::header::capsule_style(presentation, token)
+        };
+        tab_spans.push(Span::styled(format!(" {badge} "), style));
     }
     Paragraph::new(Line::from(tab_spans)).render(area, buf);
 }
@@ -9720,14 +9661,12 @@ fn render_footer_hints(
 ) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
+    let keycap = modal_recessed_pill(theme, Token::Focus);
     let mut segments = Vec::with_capacity(hints.len() * 2);
     for (idx, (key, desc)) in hints.iter().enumerate() {
-        segments.push((
-            format!("{key} "),
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ));
-        let suffix = if idx + 1 < hints.len() { "  " } else { "" };
-        segments.push((format!("{desc}{suffix}"), theme.style(Token::Muted)));
+        segments.push((format!(" {key} "), keycap));
+        let suffix = if idx + 1 < hints.len() { " " } else { "" };
+        segments.push((format!("{desc}{suffix}"), theme.style(Token::Text)));
     }
     Paragraph::new(bounded_row(
         segments,

@@ -508,10 +508,18 @@ fn footer_uses_tonal_key_pills_and_ascii_or_unicode_hint_separators() {
         .find("Ctrl+R")
         .unwrap_or_else(|| panic!("Ctrl+R hint missing: {text_unicode}"));
     let run_col = text_unicode[..run_pos].chars().count() as u16;
-    let expected_pill = p_unicode.theme.pill(Token::Focus);
+    let expected_pill = crate::ui::widgets::rail_keycap(&p_unicode.theme, Token::Focus);
     assert_eq!(buf_unicode[(run_col, 0)].fg, expected_pill.fg.unwrap());
     assert_eq!(buf_unicode[(run_col, 0)].bg, expected_pill.bg.unwrap());
     assert!(buf_unicode[(run_col, 0)].modifier.contains(Modifier::BOLD));
+    assert!(
+        text_unicode.contains("\u{2502} Autocommit \u{2502}"),
+        "Unicode footer should use vertical dividers between status, tx, and search path: {text_unicode}"
+    );
+    assert!(
+        run_col > 60,
+        "wide footer should right-align shortcut hints, found Ctrl+R at col {run_col}: {text_unicode}"
+    );
 
     // ASCII + NO_COLOR: uses plain ASCII pipe separator, zero ANSI/Unicode, bold keys
     let p_ascii = presentation(ThemeChoice::Material, false, GlyphTier::Ascii);
@@ -537,4 +545,39 @@ fn footer_uses_tonal_key_pills_and_ascii_or_unicode_hint_separators() {
             .modifier
             .contains(Modifier::BOLD)
     );
+}
+
+#[test]
+fn compact_footer_at_forty_by_eight_keeps_divider_and_non_color_parity() {
+    use crate::query::result::TransactionState;
+    use crate::ui::theme::ColorDepth;
+    use ratatui::style::Color;
+
+    let mut model = Model::new(100);
+    model.size = (40, 8);
+    model.transaction = TransactionState::Open;
+    let keymap = Keymap::new();
+    let area = Rect::new(0, 0, 40, 1);
+
+    for (tier, color, depth, divider) in [
+        (GlyphTier::Unicode, true, ColorDepth::TrueColor, "\u{2502}"),
+        (GlyphTier::Ascii, true, ColorDepth::Basic16, "|"),
+        (GlyphTier::Ascii, false, ColorDepth::None, "|"),
+    ] {
+        let pres = Presentation::new(
+            Theme::new(ThemeChoice::Dark, color).with_depth(depth),
+            Glyphs::new(tier),
+            false,
+        );
+        let mut buf = Buffer::empty(area);
+        render_footer(&model, &keymap, &pres, area, &mut buf);
+        let line = crate::ui::layout::buffer_to_string(&buf);
+        assert!(line.contains("Ready"), "{depth:?}: {line}");
+        assert!(line.contains("In transaction"), "{depth:?}: {line}");
+        assert!(line.contains(divider), "{depth:?}: {line}");
+        if tier == GlyphTier::Ascii {
+            assert!(line.is_ascii(), "{depth:?}: {line:?}");
+            assert_eq!(buf[(0, 0)].bg, Color::Reset);
+        }
+    }
 }

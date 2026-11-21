@@ -1,6 +1,8 @@
 pub(super) mod view;
 
-use super::{action_key_label, overlay_block, pane_block, syntax_token};
+use super::{
+    action_key_label, hairline_rule, overlay_block, pane_block, pane_block_line, syntax_token,
+};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -107,9 +109,10 @@ pub(crate) fn render_completion(
     let max_width = bounds.width;
     let desired_width = u16::try_from(name_width + 44).unwrap_or(max_width);
     let width = desired_width.clamp(28, 78).min(max_width);
-    let desired_height = u16::try_from(menu.result.candidates.len() + 7).unwrap_or(16);
     let max_height = bounds.height;
-    let height = desired_height.clamp(5, 20).min(max_height);
+    let use_rules = max_height >= 7;
+    let desired_height = u16::try_from(menu.result.candidates.len() + 7).unwrap_or(20);
+    let height = desired_height.clamp(5, 22).min(max_height);
 
     let right = bounds.right();
     let left_limit = right.saturating_sub(width).max(bounds.x);
@@ -127,9 +130,19 @@ pub(crate) fn render_completion(
     let content_width = width.saturating_sub(2) as usize;
     let label_width = name_width.min(content_width.saturating_sub(8));
     let mut lines = vec![Line::from(Span::styled(
-        sanitize_for_display(&menu.result.scope.label()),
+        truncate_to_width(
+            &sanitize_for_display(&menu.result.scope.label()),
+            content_width,
+            unicode,
+        ),
         presentation.theme.style(Token::Muted),
     ))];
+    if use_rules {
+        lines.push(Line::from(Span::styled(
+            hairline_rule(presentation).repeat(content_width),
+            presentation.theme.style(Token::Border),
+        )));
+    }
     for (index, candidate) in menu.result.candidates.iter().enumerate() {
         let marker = if index == menu.selected {
             if unicode { "▸" } else { ">" }
@@ -182,33 +195,42 @@ pub(crate) fn render_completion(
             presentation.theme.style(Token::Warning),
         )));
     }
+    if use_rules {
+        lines.push(Line::from(Span::styled(
+            hairline_rule(presentation).repeat(content_width),
+            presentation.theme.style(Token::Border),
+        )));
+    }
+    let summary_sep = if unicode { " \u{00b7} " } else { " | " };
+    let catalog_summary = format!(
+        "Showing {} of {} ({} avail){summary_sep}{}",
+        menu.result.candidates.len(),
+        menu.result.matching_count,
+        menu.result.total_count,
+        sanitize_for_display(&model.completion.catalog.message()),
+    );
     lines.push(Line::from(Span::styled(
-        format!(
-            "Showing {} of {} matching candidates ({} available).",
-            menu.result.candidates.len(),
-            menu.result.matching_count,
-            menu.result.total_count
-        ),
+        truncate_to_width(&catalog_summary, content_width, unicode),
         presentation.theme.style(Token::Muted),
     )));
     lines.push(Line::from(Span::styled(
-        sanitize_for_display(&model.completion.catalog.message()),
-        presentation.theme.style(Token::Info),
-    )));
-    lines.push(Line::from(Span::styled(
-        "Enter accepts, Esc cancels, Up/Down moves.",
+        truncate_to_width(
+            "Enter accepts, Esc cancels, Up/Down moves.",
+            content_width,
+            unicode,
+        ),
         presentation.theme.style(Token::Muted),
     )));
 
     Paragraph::new(lines)
         .block(overlay_block(" Complete ".to_owned(), presentation))
-        .wrap(Wrap { trim: true })
         .render(popup, buf);
 
     if menu.selected < menu.result.candidates.len() {
+        let candidate_offset = 2 + u16::from(use_rules);
         let sel_y = popup
             .y
-            .saturating_add(2)
+            .saturating_add(candidate_offset)
             .saturating_add(u16::try_from(menu.selected).unwrap_or(0));
         if sel_y < popup.bottom().saturating_sub(1) {
             let sel_style = presentation.theme.style(Token::Selection);
@@ -677,16 +699,18 @@ fn render_editor_buffer_pane(
         } else if in_statement {
             marker
         } else {
-            " "
+            presentation.glyphs.column_rule()
         };
         let line_marker_token = if error_line {
             Token::Danger
-        } else {
+        } else if in_statement {
             Token::Focus
+        } else {
+            Token::Border
         };
         let line_number_style = if on_cursor_line {
             if focused {
-                theme.on_stripe(Token::Focus)
+                theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD)
             } else {
                 theme.style(Token::Header)
             }
@@ -801,33 +825,52 @@ pub(crate) fn render_editor(
     let tab_bar_visible =
         has_tab_bar_state && after_recovery_est > 2 && area.width.saturating_sub(2) >= 10;
 
-    let mut title = format!(
-        " {}Editor  line {line}, column {column} ",
-        presentation.icon(Icon::Editor)
-    );
+    let mut title_spans = Vec::new();
     if model.splits.zoomed && focused {
-        title.insert_str(0, " (zoomed)");
+        title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
+    let primary_style = if focused {
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+    } else {
+        theme.style(Token::Header)
+    };
+    title_spans.push(Span::styled(
+        format!("{}Editor", presentation.icon(Icon::Editor)),
+        primary_style,
+    ));
+    title_spans.push(Span::styled(
+        format!("  line {line}, column {column}"),
+        theme.style(Token::Muted),
+    ));
     if !tab_bar_visible {
         if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
-            title.push_str(&format!("[SPLIT: {}] ", model.buffers.split_mode.label()));
+            title_spans.push(Span::styled(
+                format!("  [SPLIT: {}]", model.buffers.split_mode.label()),
+                theme.style(Token::Info).add_modifier(Modifier::BOLD),
+            ));
         }
         if model.buffers.count() > 1 {
-            title.push_str(&format!(
-                "[BUFFERS: {}/{}] ",
-                model.buffers.count(),
-                crate::buffer::MAX_EDITOR_BUFFERS
+            title_spans.push(Span::styled(
+                format!(
+                    "  [BUFFERS: {}/{}]",
+                    model.buffers.count(),
+                    crate::buffer::MAX_EDITOR_BUFFERS
+                ),
+                theme.style(Token::Muted),
             ));
         }
     }
     if model.editor.is_modified() {
-        title.push_str("[modified] ");
+        title_spans.push(Span::styled("  [modified]", theme.style(Token::Warning)));
     }
     if focused {
-        title.push_str("[focused] ");
+        title_spans.push(Span::styled(
+            "  [focused]",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
     }
 
-    let block = pane_block(title, focused, presentation);
+    let block = pane_block_line(Line::from(title_spans), focused, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
