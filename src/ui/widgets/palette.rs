@@ -1,6 +1,6 @@
-use super::{input_cursor, overlay_block, syntax_token};
+use super::{input_cursor, overlay_block, overlay_block_line, syntax_token};
 use crate::app::model::Model;
-use crate::query::value::{display_width, sanitize_for_display};
+use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
 use crate::ui::layout::{OverlayAnchor, overlay_box};
@@ -131,6 +131,148 @@ fn highlight_sql_line(source: &str, theme: &Theme) -> Vec<Span<'static>> {
     spans
 }
 
+fn palette_title_line(
+    palette: &crate::app::palette::Palette,
+    presentation: &Presentation,
+) -> Line<'static> {
+    let theme = &presentation.theme;
+    let raw = palette.purpose.title().trim();
+    let (primary, instructions) = raw.split_once("  ").unwrap_or((raw, ""));
+    let icon = presentation.icon(Icon::KeyColumn);
+    let mut spans = vec![Span::styled(
+        format!("{icon}{primary}"),
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+    )];
+    if !instructions.is_empty() {
+        spans.push(Span::styled(
+            format!("  {instructions}"),
+            theme.style(Token::Muted),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn render_spotlight_input(
+    palette: &crate::app::palette::Palette,
+    match_count: usize,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let prompt = if presentation.glyphs.is_ascii() {
+        " > "
+    } else {
+        " \u{2315} "
+    };
+    let count_label = format!("{match_count} match(es)");
+    let count_width = display_width(&count_label);
+    let prompt_width = display_width(prompt);
+    let right_pad = usize::from(area.width >= 20);
+    let query_budget =
+        usize::from(area.width).saturating_sub(prompt_width + 1 + count_width + 2 + right_pad);
+    let clean_query = sanitize_for_display(&palette.query);
+    let shown_query = if display_width(&clean_query) <= query_budget {
+        clean_query
+    } else {
+        truncate_to_width(&clean_query, query_budget, unicode)
+    };
+    let left_width = prompt_width + display_width(&shown_query) + 1;
+    let mut spans = vec![
+        Span::styled(
+            prompt,
+            theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(shown_query, theme.on_stripe(Token::Text)),
+        Span::styled(input_cursor(presentation), theme.on_stripe(Token::Focus)),
+    ];
+    let total_width = usize::from(area.width);
+    if left_width + 2 + count_width + right_pad <= total_width {
+        let gap = total_width - left_width - count_width - right_pad;
+        spans.push(Span::styled(" ".repeat(gap), theme.stripe()));
+        spans.push(Span::styled(count_label, theme.on_stripe(Token::Muted)));
+        if right_pad == 1 {
+            spans.push(Span::styled(" ", theme.stripe()));
+        }
+    } else if left_width + 2 + count_width <= total_width {
+        spans.push(Span::styled(
+            format!("  {count_label}"),
+            theme.on_stripe(Token::Muted),
+        ));
+    }
+    Paragraph::new(Line::from(spans))
+        .style(theme.stripe())
+        .render(area, buf);
+}
+
+fn build_palette_match_line(
+    entry: &crate::app::palette::PaletteEntry,
+    selected: bool,
+    show_detail: bool,
+    text_budget: usize,
+    row_width_target: usize,
+    unicode: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    let selection = if selected {
+        theme.style(Token::Selection)
+    } else {
+        Style::default()
+    };
+    let group_raw = format!(" {:<8}", entry.group);
+    let group_str = truncate_to_width(&group_raw, text_budget, unicode);
+    let mut used = display_width(&group_str);
+    let mut spans = vec![Span::styled(
+        group_str,
+        theme.style(Token::Muted).patch(selection),
+    )];
+
+    let label_budget = text_budget.saturating_sub(used);
+    if label_budget > 0 {
+        let label_str =
+            truncate_to_width(&sanitize_for_display(&entry.label), label_budget, unicode);
+        used += display_width(&label_str);
+        spans.push(Span::styled(
+            label_str,
+            if selected {
+                theme.style(Token::Selection)
+            } else {
+                theme.style(Token::Text)
+            }
+            .patch(selection),
+        ));
+    }
+
+    if show_detail && !entry.detail.is_empty() {
+        let detail_budget = text_budget.saturating_sub(used + 2);
+        if detail_budget >= 3 {
+            let detail_str =
+                truncate_to_width(&sanitize_for_display(&entry.detail), detail_budget, unicode);
+            used += 2 + display_width(&detail_str);
+            spans.push(Span::styled(
+                format!("  {detail_str}"),
+                theme.style(Token::Muted).patch(selection),
+            ));
+        }
+    }
+
+    if selected && used < row_width_target {
+        spans.push(Span::styled(
+            " ".repeat(row_width_target - used),
+            theme.style(Token::Selection),
+        ));
+    }
+    let mut line = Line::from(spans);
+    if selected {
+        line = line.style(theme.style(Token::Selection));
+    }
+    line
+}
+
 pub(crate) fn render_palette(
     palette: &crate::app::palette::Palette,
     presentation: &Presentation,
@@ -138,8 +280,12 @@ pub(crate) fn render_palette(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
     let palette_area = palette_box(palette, presentation, area);
     ratatui::widgets::Clear.render(palette_area, buf);
+
+    let block = overlay_block_line(palette_title_line(palette, presentation), presentation);
+    block.render(palette_area, buf);
 
     let inner = Rect {
         x: palette_area.x.saturating_add(1),
@@ -147,6 +293,9 @@ pub(crate) fn render_palette(
         width: palette_area.width.saturating_sub(2),
         height: palette_area.height.saturating_sub(2),
     };
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
 
     let show_preview =
         palette.supports_preview() && area.width >= crate::ui::MIN_COLUMNS && inner.width >= 56;
@@ -168,75 +317,45 @@ pub(crate) fn render_palette(
         })
         .unwrap_or_default();
 
-    if !show_preview {
-        let mut lines = vec![Line::from(vec![
-            Span::styled(
-                format!(" {}", presentation.icon(Icon::Focus)),
-                theme.style(Token::Focus),
-            ),
-            Span::styled(
-                sanitize_for_display(&palette.query),
-                theme.style(Token::Text),
-            ),
-            Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-            Span::styled(
-                format!("   {} match(es)", matches.len()),
-                theme.style(Token::Muted),
-            ),
-        ])];
+    render_spotlight_input(
+        palette,
+        matches.len(),
+        presentation,
+        Rect::new(inner.x, inner.y, inner.width, 1),
+        buf,
+    );
 
-        lines.extend(note_lines.iter().map(|note| {
-            Line::from(Span::styled(
-                format!(" {}", sanitize_for_display(note)),
-                theme.style(Token::Muted),
-            ))
-        }));
+    if !show_preview {
+        let body_area = Rect::new(
+            inner.x,
+            inner.y.saturating_add(1),
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
+        let mut lines: Vec<Line<'static>> = note_lines
+            .iter()
+            .map(|note| {
+                Line::from(Span::styled(
+                    format!(" {}", sanitize_for_display(note)),
+                    theme.style(Token::Muted),
+                ))
+            })
+            .collect();
 
         let visible = visible_rows(palette, presentation, area);
         let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
+        let target_width = usize::from(inner.width);
+        let text_budget = target_width.saturating_sub(1).max(1);
         for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
-            let selected = index == palette.selected;
-            let selection = if selected {
-                theme.style(Token::Selection)
-            } else {
-                Style::default()
-            };
-            let mut spans = vec![
-                Span::styled(
-                    format!(" {:<8}", entry.group),
-                    theme.style(Token::Muted).patch(selection),
-                ),
-                Span::styled(
-                    sanitize_for_display(&entry.label),
-                    if selected {
-                        theme.style(Token::Selection)
-                    } else {
-                        theme.style(Token::Text)
-                    }
-                    .patch(selection),
-                ),
-            ];
-            if !entry.detail.is_empty() {
-                spans.push(Span::styled(
-                    format!("  {}", sanitize_for_display(&entry.detail)),
-                    theme.style(Token::Muted).patch(selection),
-                ));
-            }
-            if selected {
-                let target_width = inner.width as usize;
-                let row_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
-                if row_width < target_width {
-                    spans.push(Span::styled(
-                        " ".repeat(target_width - row_width),
-                        theme.style(Token::Selection),
-                    ));
-                }
-            }
-            let mut line = Line::from(spans);
-            if selected {
-                line = line.style(theme.style(Token::Selection));
-            }
-            lines.push(line);
+            lines.push(build_palette_match_line(
+                entry,
+                index == palette.selected,
+                true,
+                text_budget,
+                target_width,
+                unicode,
+                theme,
+            ));
         }
 
         if palette.loading {
@@ -258,34 +377,10 @@ pub(crate) fn render_palette(
         }
 
         Paragraph::new(lines)
-            .block(overlay_block(
-                palette.purpose.title().to_owned(),
-                presentation,
-            ))
-            .render(palette_area, buf);
+            .style(theme.surface(Token::SurfaceOverlay))
+            .render(body_area, buf);
         return;
     }
-
-    // Preview-bearing layout
-    let block = overlay_block(palette.purpose.title().to_owned(), presentation);
-    block.render(palette_area, buf);
-
-    let input_line = Line::from(vec![
-        Span::styled(
-            format!(" {}", presentation.icon(Icon::Focus)),
-            theme.style(Token::Focus),
-        ),
-        Span::styled(
-            sanitize_for_display(&palette.query),
-            theme.style(Token::Text),
-        ),
-        Span::styled(input_cursor(presentation), theme.style(Token::Focus)),
-        Span::styled(
-            format!("   {} match(es)", matches.len()),
-            theme.style(Token::Muted),
-        ),
-    ]);
-    Paragraph::new(input_line).render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
 
     let mut top_offset = 1u16;
     for note in &note_lines {
@@ -332,8 +427,8 @@ pub(crate) fn render_palette(
     let preview_width = inner.width * 60 / 100;
     let list_width = inner.width.saturating_sub(preview_width);
     let divider_x = inner.x + list_width;
-    let preview_x = divider_x + 1;
-    let preview_w = inner.width.saturating_sub(list_width + 1);
+    let preview_x = divider_x + 2;
+    let preview_w = inner.width.saturating_sub(list_width + 2);
 
     let divider_glyph = presentation.glyphs.column_rule();
     let divider_style = theme
@@ -348,49 +443,18 @@ pub(crate) fn render_palette(
     let visible = visible_rows(palette, presentation, area);
     let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
     let mut match_lines = Vec::new();
+    let target_width = usize::from(list_width);
+    let text_budget = target_width.saturating_sub(1).max(1);
     for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
-        let selected = index == palette.selected;
-        let selection = if selected {
-            theme.style(Token::Selection)
-        } else {
-            Style::default()
-        };
-        let mut spans = vec![
-            Span::styled(
-                format!(" {:<8}", entry.group),
-                theme.style(Token::Muted).patch(selection),
-            ),
-            Span::styled(
-                sanitize_for_display(&entry.label),
-                if selected {
-                    theme.style(Token::Selection)
-                } else {
-                    theme.style(Token::Text)
-                }
-                .patch(selection),
-            ),
-        ];
-        if !entry.detail.is_empty() && !show_preview {
-            spans.push(Span::styled(
-                format!("  {}", sanitize_for_display(&entry.detail)),
-                theme.style(Token::Muted).patch(selection),
-            ));
-        }
-        if selected {
-            let target_width = list_width as usize;
-            let row_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
-            if row_width < target_width {
-                spans.push(Span::styled(
-                    " ".repeat(target_width - row_width),
-                    theme.style(Token::Selection),
-                ));
-            }
-        }
-        let mut line = Line::from(spans);
-        if selected {
-            line = line.style(theme.style(Token::Selection));
-        }
-        match_lines.push(line);
+        match_lines.push(build_palette_match_line(
+            entry,
+            index == palette.selected,
+            false,
+            text_budget,
+            target_width,
+            unicode,
+            theme,
+        ));
     }
 
     if palette.loading {
@@ -416,10 +480,10 @@ pub(crate) fn render_palette(
         for raw_line in preview_raw {
             if raw_line == "SQL:" {
                 in_sql_block = true;
-                preview_lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(raw_line, theme.style(Token::Header)),
-                ]));
+                preview_lines.push(Line::from(Span::styled(
+                    raw_line,
+                    theme.style(Token::Header),
+                )));
                 continue;
             }
             if in_sql_block && !raw_line.starts_with("  ") {
@@ -427,39 +491,31 @@ pub(crate) fn render_palette(
             }
 
             if in_sql_block {
-                let mut line_spans = vec![Span::raw(" ")];
-                line_spans.extend(highlight_sql_line(&raw_line, theme));
-                preview_lines.push(Line::from(line_spans));
+                preview_lines.push(Line::from(highlight_sql_line(&raw_line, theme)));
             } else if let Some((key, val)) = raw_line.split_once(": ") {
                 if key == "SQL" {
-                    let mut line_spans = vec![
-                        Span::raw(" "),
-                        Span::styled(format!("{key}: "), theme.style(Token::Header)),
-                    ];
+                    let mut line_spans =
+                        vec![Span::styled(format!("{key}: "), theme.style(Token::Header))];
                     line_spans.extend(highlight_sql_line(val, theme));
                     preview_lines.push(Line::from(line_spans));
                 } else {
                     preview_lines.push(Line::from(vec![
-                        Span::raw(" "),
                         Span::styled(format!("{key}: "), theme.style(Token::Header)),
                         Span::styled(val.to_owned(), theme.style(Token::Text)),
                     ]));
                 }
             } else if raw_line.ends_with(':') {
-                preview_lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(raw_line, theme.style(Token::Header)),
-                ]));
+                preview_lines.push(Line::from(Span::styled(
+                    raw_line,
+                    theme.style(Token::Header),
+                )));
             } else if raw_line == "No matching entry selected." {
-                preview_lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(raw_line, theme.style(Token::Muted)),
-                ]));
+                preview_lines.push(Line::from(Span::styled(
+                    raw_line,
+                    theme.style(Token::Muted),
+                )));
             } else {
-                preview_lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(raw_line, theme.style(Token::Text)),
-                ]));
+                preview_lines.push(Line::from(Span::styled(raw_line, theme.style(Token::Text))));
             }
         }
         let preview_area = Rect::new(preview_x, content_y, preview_w, content_height);

@@ -495,6 +495,10 @@ pub enum ThemeChoice {
     FieldIndustrial,
     /// Google Material Design 3 tonal dark surfaces with blue, cyan, and sage accents.
     Material,
+    /// Warm obsidian-espresso dark surfaces with terracotta, gold, and slate accents.
+    Atelier,
+    /// Warm archival rag-paper light surfaces with Sienna, Prussian, and forest ink accents.
+    Paper,
 }
 
 impl ThemeChoice {
@@ -505,6 +509,8 @@ impl ThemeChoice {
         "high-contrast",
         "field-industrial",
         "material",
+        "atelier",
+        "paper",
     ];
 
     /// Canonical kebab-case configuration name for this built-in palette.
@@ -516,6 +522,8 @@ impl ThemeChoice {
             Self::HighContrast => "high-contrast",
             Self::FieldIndustrial => "field-industrial",
             Self::Material => "material",
+            Self::Atelier => "atelier",
+            Self::Paper => "paper",
         }
     }
 
@@ -528,6 +536,8 @@ impl ThemeChoice {
             "high-contrast" => Some(Self::HighContrast),
             "field-industrial" => Some(Self::FieldIndustrial),
             "material" => Some(Self::Material),
+            "atelier" => Some(Self::Atelier),
+            "paper" => Some(Self::Paper),
             _ => None,
         }
     }

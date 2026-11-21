@@ -20,6 +20,10 @@ pub enum ThemeSelection {
     FieldIndustrial,
     /// Google Material Design 3 tonal dark surfaces with blue, cyan, and sage accents.
     Material,
+    /// Warm obsidian-espresso dark surfaces with terracotta, gold, and slate accents.
+    Atelier,
+    /// Warm archival rag-paper light surfaces with Sienna, Prussian, and forest ink accents.
+    Paper,
     /// The validated custom definition.
     Custom,
     /// Automatic palette selection resolved from terminal background luminance.
@@ -27,7 +31,7 @@ pub enum ThemeSelection {
 }
 
 impl ThemeSelection {
-    /// Identity of one of the five built-in palettes.
+    /// Identity of one of the seven built-in palettes.
     #[must_use]
     pub const fn from_builtin(choice: ThemeChoice) -> Self {
         match choice {
@@ -36,6 +40,8 @@ impl ThemeSelection {
             ThemeChoice::HighContrast => Self::HighContrast,
             ThemeChoice::FieldIndustrial => Self::FieldIndustrial,
             ThemeChoice::Material => Self::Material,
+            ThemeChoice::Atelier => Self::Atelier,
+            ThemeChoice::Paper => Self::Paper,
         }
     }
 
@@ -46,6 +52,8 @@ impl ThemeSelection {
             Self::HighContrast => Some(ThemeChoice::HighContrast),
             Self::FieldIndustrial => Some(ThemeChoice::FieldIndustrial),
             Self::Material => Some(ThemeChoice::Material),
+            Self::Atelier => Some(ThemeChoice::Atelier),
+            Self::Paper => Some(ThemeChoice::Paper),
             Self::Custom => None,
         }
     }
@@ -194,6 +202,8 @@ fn lower_selection(value: Option<&toml::Value>) -> Result<ThemeSelection, ThemeR
         "high-contrast" => Ok(ThemeSelection::HighContrast),
         "field-industrial" => Ok(ThemeSelection::FieldIndustrial),
         "material" => Ok(ThemeSelection::Material),
+        "atelier" => Ok(ThemeSelection::Atelier),
+        "paper" => Ok(ThemeSelection::Paper),
         "custom" => Ok(ThemeSelection::Custom),
         "auto" => Ok(ThemeSelection::Auto),
         other => Err(ThemeRefusal::new(format!(
@@ -388,7 +398,13 @@ impl ValidatedThemes {
             ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => {
                 ActivePalette::Builtin(ThemeChoice::Material)
             }
-            ActivePalette::Builtin(ThemeChoice::Material) => match &self.custom {
+            ActivePalette::Builtin(ThemeChoice::Material) => {
+                ActivePalette::Builtin(ThemeChoice::Atelier)
+            }
+            ActivePalette::Builtin(ThemeChoice::Atelier) => {
+                ActivePalette::Builtin(ThemeChoice::Paper)
+            }
+            ActivePalette::Builtin(ThemeChoice::Paper) => match &self.custom {
                 Some(custom) => ActivePalette::Custom(custom.clone()),
                 None => ActivePalette::Builtin(ThemeChoice::Dark),
             },

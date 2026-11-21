@@ -1,13 +1,13 @@
-use super::{action_key_label, input_cursor, pane_block};
+use super::{action_key_label, hairline_rule, input_cursor, inset_empty_area, pane_block_line};
 use crate::app::model::{Focus, Model};
-use crate::query::value::sanitize_for_display;
+use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::Presentation;
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -42,37 +42,15 @@ pub(crate) fn render_objects(
 ) {
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Objects;
+    let unicode = !presentation.glyphs.is_ascii();
 
     // The title doubles as a breadcrumb, so the path to the selected object is
     // visible without a second row of interface.
-    let mut title = format!(" {}Objects ", presentation.icon(Icon::Database));
-    if let Some(row) = model.tree.selected_row() {
-        let separator = if presentation.glyphs.is_ascii() {
-            " > "
-        } else {
-            " \u{203a} "
-        };
-        let mut trail = Vec::new();
-        for depth in 0..=row.depth {
-            let ancestor = &row.path[..=depth];
-            if let Some(node) = model.tree.node(ancestor) {
-                trail.push(node.label());
-            }
-        }
-        title = format!(
-            " {}{} ",
-            presentation.icon(Icon::Database),
-            trail.join(separator)
-        );
-    }
-    if focused {
-        title.push_str("[focused] ");
-    }
-    if model.splits.zoomed && focused {
-        title.insert_str(0, " (zoomed)");
-    }
-
-    let block = pane_block(title, focused, presentation);
+    let block = pane_block_line(
+        objects_title_line(model, presentation, focused, area.width),
+        focused,
+        presentation,
+    );
     let inner = block.inner(area);
     block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
@@ -148,129 +126,7 @@ pub(crate) fn render_objects(
     }
 
     if rows.is_empty() {
-        let mut empty_lines: Vec<Line<'static>> = Vec::new();
-        if model.tree.filter.is_empty() {
-            if model.connection.is_usable() {
-                let reload_key = action_key_label(keymap, &crate::app::Action::ReloadObjects);
-                empty_lines.push(Line::from(vec![
-                    Span::styled(
-                        presentation.glyphs.prefix(Icon::Database),
-                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("No object rows are loaded yet.", theme.style(Token::Header)),
-                ]));
-                empty_lines.push(Line::from(Span::styled(
-                    "Schemas, tables, and views populate here once loaded.",
-                    theme.style(Token::Muted),
-                )));
-                if body.height >= 5 {
-                    empty_lines.push(Line::raw(""));
-                }
-                empty_lines.push(Line::from(vec![
-                    Span::styled(reload_key, theme.pill(Token::Focus)),
-                    Span::styled(" Reload the object tree.", theme.style(Token::Text)),
-                ]));
-            } else if matches!(
-                model.connection,
-                crate::app::model::ConnectionState::Connecting { .. }
-            ) {
-                empty_lines.push(Line::from(vec![
-                    Span::styled(
-                        presentation.glyphs.prefix(Icon::Info),
-                        theme.style(Token::Info).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Object tree unavailable until connected.",
-                        theme.style(Token::Header),
-                    ),
-                ]));
-                empty_lines.push(Line::from(Span::styled(
-                    "The connection is being established.",
-                    theme.style(Token::Muted),
-                )));
-            } else if model.connection_profiles.is_empty() {
-                // Nothing to pick from, so the one next action is outside the
-                // client: name the configuration route and the command-line
-                // route rather than offering a key that would open nothing.
-                empty_lines.push(Line::from(vec![
-                    Span::styled(
-                        presentation.glyphs.prefix(Icon::Warning),
-                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Object tree unavailable until connected.",
-                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                empty_lines.push(Line::from(Span::styled(
-                    "Add a profile in config.toml or pass a connection target when starting.",
-                    theme.style(Token::Muted),
-                )));
-            } else {
-                // The picker is the configured route; use its existing key and
-                // wording rather than inventing a second description.
-                empty_lines.push(Line::from(vec![
-                    Span::styled(
-                        presentation.glyphs.prefix(Icon::Warning),
-                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "Object tree unavailable until connected.",
-                        theme.style(Token::Warning).add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                empty_lines.push(Line::from(Span::styled(
-                    "Object names appear after reload.",
-                    theme.style(Token::Muted),
-                )));
-                if body.height >= 5 {
-                    empty_lines.push(Line::raw(""));
-                }
-                if let Some((key, label)) =
-                    keymap.contextual_hint(&crate::app::Action::OpenConnectionPicker)
-                {
-                    empty_lines.push(Line::from(vec![
-                        Span::styled(key, theme.pill(Token::Focus)),
-                        Span::styled(format!(" {label}."), theme.style(Token::Text)),
-                    ]));
-                } else {
-                    empty_lines.push(Line::from(Span::styled(
-                        "Open the command palette to choose a connection.",
-                        theme.style(Token::Info),
-                    )));
-                }
-            }
-        } else {
-            empty_lines.push(Line::from(vec![
-                Span::styled(
-                    presentation.glyphs.prefix(Icon::Index),
-                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("No object matches this filter.", theme.style(Token::Header)),
-            ]));
-            empty_lines.push(Line::from(Span::styled(
-                format!("Searched {:?}.", sanitize_for_display(&model.tree.filter)),
-                theme.style(Token::Muted),
-            )));
-            if body.height >= 5 {
-                empty_lines.push(Line::raw(""));
-            }
-            empty_lines.push(Line::from(vec![
-                Span::styled(
-                    action_key_label(keymap, &crate::app::Action::Dismiss),
-                    theme.pill(Token::Focus),
-                ),
-                Span::styled(" or ", theme.style(Token::Muted)),
-                Span::styled(
-                    action_key_label(keymap, &crate::app::Action::StartFilter),
-                    theme.pill(Token::Focus),
-                ),
-                Span::styled(" clears the filter.", theme.style(Token::Muted)),
-            ]));
-        }
-        Paragraph::new(empty_lines)
-            .wrap(Wrap { trim: true })
-            .render(body, buf);
+        render_empty_objects(model, keymap, presentation, body, buf);
         return;
     }
 
@@ -281,6 +137,7 @@ pub(crate) fn render_objects(
         .saturating_sub(visible.saturating_sub(1))
         .min(rows.len().saturating_sub(1));
 
+    let max_row_width = usize::from(body.width);
     let mut selected_y = None;
 
     for (screen_row, (index, row)) in rows
@@ -320,24 +177,20 @@ pub(crate) fn render_objects(
                 spans.push(Span::styled(icon, selection_style));
             }
 
-            spans.push(Span::styled(
-                sanitize_for_display(&row.label),
-                selection_style,
-            ));
+            let prefix_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+            let label_budget = max_row_width.saturating_sub(prefix_width);
+            let label = truncate_to_width(&sanitize_for_display(&row.label), label_budget, unicode);
+            spans.push(Span::styled(label, selection_style));
 
-            if row.loading && !presentation.reduced_motion {
-                spans.push(Span::styled(
-                    format!(" {}", presentation.glyphs.spinner(model.frame)),
-                    selection_style,
-                ));
-            } else if row.loading {
-                spans.push(Span::styled(" loading", selection_style));
-            } else if let Some(detail) = &row.detail {
-                spans.push(Span::styled(
-                    format!("  {}", sanitize_for_display(detail)),
-                    selection_style,
-                ));
-            }
+            push_bounded_row_detail(
+                &mut spans,
+                row,
+                max_row_width,
+                unicode,
+                model,
+                presentation,
+                selection_style,
+            );
 
             let line = Line::from(spans).style(selection_style);
             lines.push(line);
@@ -361,6 +214,9 @@ pub(crate) fn render_objects(
             spans.push(Span::styled("  ", theme.style(Token::Muted)));
         }
 
+        let prefix_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+        let remaining_after_prefix = max_row_width.saturating_sub(prefix_width);
+
         match &row.row_kind {
             crate::app::tree::RowKind::Schema { usable } => {
                 let (icon_token, label_token) = if *usable {
@@ -368,20 +224,22 @@ pub(crate) fn render_objects(
                 } else {
                     (Token::Muted, Token::Muted)
                 };
-                let icon = presentation.icon(Icon::Schema);
-                if !icon.is_empty() {
-                    spans.push(Span::styled(icon, theme.style(icon_token)));
-                }
-                spans.push(Span::styled(
-                    sanitize_for_display(&row.label),
-                    theme.style(label_token),
-                ));
+                let budget = push_icon_and_budget(
+                    &mut spans,
+                    presentation.icon(Icon::Schema),
+                    theme.style(icon_token),
+                    remaining_after_prefix,
+                );
+                let label = truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                spans.push(Span::styled(label, theme.style(label_token)));
             }
             crate::app::tree::RowKind::Group(kind) => {
-                let icon = presentation.icon(group_icon(*kind));
-                if !icon.is_empty() {
-                    spans.push(Span::styled(icon, theme.style(Token::Info)));
-                }
+                let budget = push_icon_and_budget(
+                    &mut spans,
+                    presentation.icon(group_icon(*kind)),
+                    theme.style(Token::Info),
+                    remaining_after_prefix,
+                );
                 if let Some(crate::app::tree::Node {
                     kind:
                         crate::app::tree::NodeKind::Group {
@@ -392,56 +250,55 @@ pub(crate) fn render_objects(
                     ..
                 }) = node
                 {
-                    spans.push(Span::styled(group_kind.plural(), theme.style(Token::Text)));
-                    spans.push(Span::styled(
-                        format!(" ({count})"),
-                        theme.style(Token::Muted),
-                    ));
+                    let count_str = format!(" ({count})");
+                    let name_budget = budget.saturating_sub(display_width(&count_str));
+                    let plural = truncate_to_width(group_kind.plural(), name_budget, unicode);
+                    spans.push(Span::styled(plural, theme.style(Token::Text)));
+                    spans.push(Span::styled(count_str, theme.style(Token::Muted)));
                 } else {
-                    spans.push(Span::styled(
-                        sanitize_for_display(&row.label),
-                        theme.style(Token::Text),
-                    ));
+                    let label =
+                        truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                    spans.push(Span::styled(label, theme.style(Token::Text)));
                 }
             }
             crate::app::tree::RowKind::Object { kind, readable } => match kind {
                 crate::postgres::ObjectKind::Index => {
-                    let icon = presentation.icon(Icon::Index);
-                    if !icon.is_empty() {
-                        spans.push(Span::styled(icon, theme.style(Token::Info)));
-                    }
-                    spans.push(Span::styled(
-                        sanitize_for_display(&row.label),
-                        theme.style(Token::Muted),
-                    ));
+                    let budget = push_icon_and_budget(
+                        &mut spans,
+                        presentation.icon(Icon::Index),
+                        theme.style(Token::Info),
+                        remaining_after_prefix,
+                    );
+                    let label =
+                        truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                    spans.push(Span::styled(label, theme.style(Token::Muted)));
                 }
                 crate::postgres::ObjectKind::Extension => {
-                    let icon = presentation.icon(Icon::Extension);
-                    if !icon.is_empty() {
-                        spans.push(Span::styled(icon, theme.style(Token::Success)));
-                    }
-                    spans.push(Span::styled(
-                        sanitize_for_display(&row.label),
-                        theme.style(Token::Text),
-                    ));
+                    let budget = push_icon_and_budget(
+                        &mut spans,
+                        presentation.icon(Icon::Extension),
+                        theme.style(Token::Success),
+                        remaining_after_prefix,
+                    );
+                    let label =
+                        truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                    spans.push(Span::styled(label, theme.style(Token::Text)));
                 }
                 _ => {
-                    let icon = presentation.icon(group_icon(*kind));
-                    if !icon.is_empty() {
-                        spans.push(Span::styled(
-                            icon,
-                            theme.style(object_semantic_token(*kind)),
-                        ));
-                    }
+                    let budget = push_icon_and_budget(
+                        &mut spans,
+                        presentation.icon(group_icon(*kind)),
+                        theme.style(object_semantic_token(*kind)),
+                        remaining_after_prefix,
+                    );
                     let label_token = if *readable {
                         Token::Text
                     } else {
                         Token::Warning
                     };
-                    spans.push(Span::styled(
-                        sanitize_for_display(&row.label),
-                        theme.style(label_token),
-                    ));
+                    let label =
+                        truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                    spans.push(Span::styled(label, theme.style(label_token)));
                 }
             },
             crate::app::tree::RowKind::Column { primary_key, .. } => {
@@ -455,39 +312,41 @@ pub(crate) fn render_objects(
                 } else {
                     (Token::Muted, Token::Muted)
                 };
-                if !icon.is_empty() {
-                    spans.push(Span::styled(icon, theme.style(icon_token)));
-                }
-                spans.push(Span::styled(
-                    sanitize_for_display(&row.label),
-                    theme.style(label_token),
-                ));
+                let budget = push_icon_and_budget(
+                    &mut spans,
+                    icon,
+                    theme.style(icon_token),
+                    remaining_after_prefix,
+                );
+                let label = truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                spans.push(Span::styled(label, theme.style(label_token)));
             }
             crate::app::tree::RowKind::Message => {
-                let icon = presentation.icon(Icon::Info);
-                if !icon.is_empty() {
-                    spans.push(Span::styled(icon, theme.style(Token::Muted)));
-                }
-                spans.push(Span::styled(
-                    sanitize_for_display(&row.label),
+                let budget = push_icon_and_budget(
+                    &mut spans,
+                    presentation.icon(Icon::Info),
                     theme.style(Token::Muted),
-                ));
+                    remaining_after_prefix,
+                );
+                let label = truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
+                spans.push(Span::styled(label, theme.style(Token::Muted)));
             }
         }
 
-        if row.loading && !presentation.reduced_motion {
-            spans.push(Span::styled(
-                format!(" {}", presentation.glyphs.spinner(model.frame)),
-                theme.style(Token::Info),
-            ));
-        } else if row.loading {
-            spans.push(Span::styled(" loading", theme.style(Token::Muted)));
-        } else if let Some(detail) = &row.detail {
-            spans.push(Span::styled(
-                format!("  {}", sanitize_for_display(detail)),
-                theme.style(Token::Muted),
-            ));
-        }
+        let detail_style = if row.loading && !presentation.reduced_motion {
+            theme.style(Token::Info)
+        } else {
+            theme.style(Token::Muted)
+        };
+        push_bounded_row_detail(
+            &mut spans,
+            row,
+            max_row_width,
+            unicode,
+            model,
+            presentation,
+            detail_style,
+        );
 
         let line = Line::from(spans);
         lines.push(line);
@@ -501,6 +360,377 @@ pub(crate) fn render_objects(
             buf[(x, sy)].set_style(selection_style);
         }
     }
+}
+
+fn objects_title_line(
+    model: &Model,
+    presentation: &Presentation,
+    focused: bool,
+    area_width: u16,
+) -> Line<'static> {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let pad = usize::from(presentation.spacing().title_padding) * 2;
+    let leader_w = usize::from(focused) * 2;
+    let zoomed = model.splits.zoomed && focused;
+    let zoomed_w = if zoomed { 9 } else { 0 };
+    let focused_w = if focused { 10 } else { 0 };
+    let avail = usize::from(area_width).saturating_sub(2 + pad + leader_w + zoomed_w + focused_w);
+
+    let mut spans = Vec::new();
+    if zoomed {
+        spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
+    }
+    let primary_style = if focused {
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+    } else {
+        theme.style(Token::Header)
+    };
+    let icon = presentation.icon(Icon::View);
+
+    if let Some(row) = model.tree.selected_row() {
+        let separator = if unicode { " \u{203a} " } else { " > " };
+        let mut trail = Vec::new();
+        for depth in 0..=row.depth {
+            let ancestor = &row.path[..=depth];
+            if let Some(node) = model.tree.node(ancestor) {
+                trail.push(sanitize_for_display(&node.label()));
+            }
+        }
+        let raw_path = if trail.is_empty() {
+            "Objects".to_owned()
+        } else {
+            trail.join(separator)
+        };
+        let full_crumb = format!("{icon}{raw_path}");
+        let truncated = truncate_to_width(&full_crumb, avail, unicode);
+        let used = display_width(&truncated);
+        if let Some(pos) = truncated.rfind(separator) {
+            let prefix_end = pos + separator.len();
+            spans.push(Span::styled(
+                truncated[..prefix_end].to_owned(),
+                theme.style(Token::Muted),
+            ));
+            spans.push(Span::styled(
+                truncated[prefix_end..].to_owned(),
+                primary_style,
+            ));
+        } else {
+            spans.push(Span::styled(truncated, primary_style));
+        }
+        let rem = avail.saturating_sub(used);
+        if !model.tree.filter.is_empty() && rem >= 8 {
+            let hint = truncate_to_width(
+                &format!("  filter: {}", sanitize_for_display(&model.tree.filter)),
+                rem,
+                unicode,
+            );
+            spans.push(Span::styled(hint, theme.style(Token::Muted)));
+        }
+    } else {
+        let base = truncate_to_width(&format!("{icon}Objects"), avail, unicode);
+        let used = display_width(&base);
+        spans.push(Span::styled(base, primary_style));
+        let rem = avail.saturating_sub(used);
+        if !model.tree.filter.is_empty() && rem >= 8 {
+            let hint = truncate_to_width(
+                &format!("  filter: {}", sanitize_for_display(&model.tree.filter)),
+                rem,
+                unicode,
+            );
+            spans.push(Span::styled(hint, theme.style(Token::Muted)));
+        } else if !model.tree.roots.is_empty() && rem >= 10 {
+            let count = model.tree.roots.len();
+            let noun = if count == 1 { "schema" } else { "schemas" };
+            let hint = truncate_to_width(&format!("  {count} {noun}"), rem, unicode);
+            spans.push(Span::styled(hint, theme.style(Token::Muted)));
+        }
+    }
+
+    if focused {
+        spans.push(Span::styled(
+            " [focused]",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn push_icon_and_budget(
+    spans: &mut Vec<Span<'static>>,
+    icon: String,
+    icon_style: Style,
+    remaining: usize,
+) -> usize {
+    let icon_w = display_width(&icon);
+    if !icon.is_empty() {
+        spans.push(Span::styled(icon, icon_style));
+    }
+    remaining.saturating_sub(icon_w)
+}
+
+fn push_bounded_row_detail(
+    spans: &mut Vec<Span<'static>>,
+    row: &crate::app::tree::TreeRow,
+    max_width: usize,
+    unicode: bool,
+    model: &Model,
+    presentation: &Presentation,
+    style: Style,
+) {
+    let used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+    let remaining = max_width.saturating_sub(used);
+    if row.loading && !presentation.reduced_motion {
+        let suffix = format!(" {}", presentation.glyphs.spinner(model.frame));
+        if display_width(&suffix) <= remaining {
+            spans.push(Span::styled(suffix, style));
+        }
+    } else if row.loading {
+        if remaining >= 8 {
+            spans.push(Span::styled(" loading", style));
+        }
+    } else if let Some(detail) = &row.detail {
+        let detail_budget = remaining.saturating_sub(2);
+        let min_budget = if unicode { 3 } else { 5 };
+        if detail_budget >= min_budget {
+            let clean = sanitize_for_display(detail);
+            let clipped = truncate_to_width(&clean, detail_budget, unicode);
+            spans.push(Span::styled(format!("  {clipped}"), style));
+        }
+    }
+}
+
+fn render_empty_objects(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    body: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let empty_area = if body.width >= 36 {
+        inset_empty_area(body)
+    } else {
+        let top_pad = u16::from(body.height >= 7);
+        let left_pad = u16::from(body.width >= 4);
+        Rect::new(
+            body.x + left_pad,
+            body.y + top_pad,
+            body.width.saturating_sub(left_pad),
+            body.height.saturating_sub(top_pad),
+        )
+    };
+    let keycap = theme.keycap(Token::Focus);
+    let rule_width = usize::from(empty_area.width).min(28);
+    let avail_width = usize::from(empty_area.width);
+
+    let mut prose_lines: Vec<Line<'static>> = Vec::new();
+    let mut hint_lines: Vec<Line<'static>> = Vec::new();
+
+    if model.tree.filter.is_empty() {
+        if model.connection.is_usable() {
+            let reload_key = action_key_label(keymap, &crate::app::Action::ReloadObjects);
+            let headline = "No object rows are loaded yet.";
+            let prefix = presentation.glyphs.prefix(Icon::Database);
+            let mut head_spans = Vec::new();
+            if !prefix.is_empty() && display_width(&prefix) + display_width(headline) <= avail_width
+            {
+                head_spans.push(Span::styled(
+                    prefix,
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ));
+            }
+            head_spans.push(Span::styled(headline, theme.style(Token::Header)));
+            prose_lines.push(Line::from(head_spans));
+            prose_lines.push(Line::from(Span::styled(
+                "Schemas, tables, and views populate here once loaded.",
+                theme.style(Token::Muted),
+            )));
+            hint_lines.push(Line::from(vec![
+                Span::styled(format!(" {reload_key} "), keycap),
+                Span::styled("Reload the object tree.", theme.style(Token::Text)),
+            ]));
+            if empty_area.height >= 8 {
+                let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
+                let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
+                let filter_key = action_key_label(keymap, &crate::app::Action::StartFilter);
+                hint_lines.push(Line::from(vec![
+                    Span::styled(format!(" {palette_key} "), keycap),
+                    Span::styled("Command palette", theme.style(Token::Muted)),
+                ]));
+                hint_lines.push(Line::from(vec![
+                    Span::styled(format!(" {run_key} "), keycap),
+                    Span::styled("Execute query", theme.style(Token::Muted)),
+                ]));
+                hint_lines.push(Line::from(vec![
+                    Span::styled(format!(" {filter_key} "), keycap),
+                    Span::styled("Filter objects", theme.style(Token::Muted)),
+                ]));
+            }
+        } else if matches!(
+            model.connection,
+            crate::app::model::ConnectionState::Connecting { .. }
+        ) {
+            prose_lines.push(Line::from(vec![
+                Span::styled(
+                    presentation.glyphs.prefix(Icon::Info),
+                    theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Object tree unavailable until connected.",
+                    theme.style(Token::Header),
+                ),
+            ]));
+            prose_lines.push(Line::from(Span::styled(
+                "The connection is being established.",
+                theme.style(Token::Muted),
+            )));
+        } else if model.connection_profiles.is_empty() {
+            // Nothing to pick from, so the one next action is outside the
+            // client: name the configuration route and the command-line
+            // route rather than offering a key that would open nothing.
+            prose_lines.push(Line::from(vec![
+                Span::styled(
+                    presentation.glyphs.prefix(Icon::Warning),
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Object tree unavailable until connected.",
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            prose_lines.push(Line::from(Span::styled(
+                "Add a profile in config.toml or pass a connection target when starting.",
+                theme.style(Token::Muted),
+            )));
+        } else {
+            // The picker is the configured route; use its existing key and
+            // wording rather than inventing a second description.
+            prose_lines.push(Line::from(vec![
+                Span::styled(
+                    presentation.glyphs.prefix(Icon::Warning),
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Object tree unavailable until connected.",
+                    theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            prose_lines.push(Line::from(Span::styled(
+                "Object names appear after reload.",
+                theme.style(Token::Muted),
+            )));
+            if let Some((key, label)) =
+                keymap.contextual_hint(&crate::app::Action::OpenConnectionPicker)
+            {
+                hint_lines.push(Line::from(vec![
+                    Span::styled(format!(" {key} "), keycap),
+                    Span::styled(format!("{label}."), theme.style(Token::Text)),
+                ]));
+            } else {
+                hint_lines.push(Line::from(Span::styled(
+                    "Open the command palette to choose a connection.",
+                    theme.style(Token::Info),
+                )));
+            }
+        }
+    } else {
+        let headline = "No object matches this filter.";
+        let prefix = presentation.glyphs.prefix(Icon::Index);
+        let mut head_spans = Vec::new();
+        if !prefix.is_empty() && display_width(&prefix) + display_width(headline) <= avail_width {
+            head_spans.push(Span::styled(
+                prefix,
+                theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+            ));
+        }
+        head_spans.push(Span::styled(headline, theme.style(Token::Header)));
+        prose_lines.push(Line::from(head_spans));
+        prose_lines.push(Line::from(Span::styled(
+            format!("Searched {:?}.", sanitize_for_display(&model.tree.filter)),
+            theme.style(Token::Muted),
+        )));
+        hint_lines.push(Line::from(vec![
+            Span::styled(
+                format!(
+                    " {} ",
+                    action_key_label(keymap, &crate::app::Action::Dismiss)
+                ),
+                keycap,
+            ),
+            Span::styled(" or", theme.style(Token::Muted)),
+            Span::styled(
+                format!(
+                    " {} ",
+                    action_key_label(keymap, &crate::app::Action::StartFilter)
+                ),
+                keycap,
+            ),
+            Span::styled("clears the filter.", theme.style(Token::Muted)),
+        ]));
+    }
+
+    if hint_lines.is_empty() {
+        Paragraph::new(prose_lines)
+            .wrap(Wrap { trim: true })
+            .render(empty_area, buf);
+        return;
+    }
+
+    let measured = wrapped_line_count(&prose_lines, empty_area.width);
+    let prose = Paragraph::new(prose_lines).wrap(Wrap { trim: true });
+    let separator_rows = u16::from(empty_area.height >= 6);
+    let hints_height = u16::try_from(hint_lines.len())
+        .unwrap_or(u16::MAX)
+        .min(empty_area.height);
+    let max_prose = empty_area
+        .height
+        .saturating_sub(hints_height + separator_rows);
+    let gap = u16::from(separator_rows > 0 && measured.saturating_add(1) <= max_prose);
+    let prose_height = measured.saturating_add(gap).min(max_prose);
+    let [prose_rect, sep_rect, hints_rect] = Layout::vertical([
+        Constraint::Length(prose_height),
+        Constraint::Length(separator_rows),
+        Constraint::Length(hints_height),
+    ])
+    .areas(empty_area);
+
+    prose.render(prose_rect, buf);
+    if separator_rows > 0 && rule_width > 0 {
+        Paragraph::new(Line::from(Span::styled(
+            hairline_rule(presentation).repeat(rule_width),
+            theme.style(Token::Border),
+        )))
+        .render(sep_rect, buf);
+    }
+    Paragraph::new(hint_lines).render(hints_rect, buf);
+}
+
+fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
+    let cols = usize::from(width.max(1));
+    let mut rows = 0usize;
+    for line in lines {
+        let mut current = 0usize;
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        if text.trim().is_empty() {
+            rows += 1;
+            continue;
+        }
+        rows += 1;
+        for word in text.split_whitespace() {
+            let word_w = display_width(word).max(1);
+            if current == 0 {
+                rows += (word_w - 1) / cols;
+                current = ((word_w - 1) % cols) + 1;
+            } else if current + 1 + word_w <= cols {
+                current += 1 + word_w;
+            } else {
+                rows += 1 + (word_w - 1) / cols;
+                current = ((word_w - 1) % cols) + 1;
+            }
+        }
+    }
+    u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
 /// The icon for a tree row. Icons are supplementary: the label already carries

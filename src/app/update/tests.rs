@@ -92,6 +92,8 @@ fn manual_theme_cycle_preserves_the_complete_model_including_busy_sessions() {
                     ThemeChoice::HighContrast,
                     ThemeChoice::FieldIndustrial,
                     ThemeChoice::Material,
+                    ThemeChoice::Atelier,
+                    ThemeChoice::Paper,
                     ThemeChoice::Dark,
                 ] {
                     let before = format!("{model:?}");
@@ -262,6 +264,8 @@ fn manual_theme_custom_cycle_preserves_state_and_discovery_during_queries() {
             ThemeSelection::HighContrast,
             ThemeSelection::FieldIndustrial,
             ThemeSelection::Material,
+            ThemeSelection::Atelier,
+            ThemeSelection::Paper,
             ThemeSelection::Custom,
         ] {
             let previous = model.presentation.theme.clone();

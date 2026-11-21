@@ -114,29 +114,41 @@ fn manual_theme_refusals_are_exact_before_terminal_connection_or_migration_write
 
 #[test]
 fn manual_theme_valid_custom_roundtrips_without_serializing_the_cache() {
-    for selection in ["dark", "light", "high-contrast", "custom", "auto"] {
-        let dir = tempfile::tempdir().unwrap();
-        let source = format!(
-            "schema_version = 1\n[ui]\ntheme = \"{selection}\"\n[theme]\nextends = \"light\"\n"
-        );
-        std::fs::write(dir.path().join("config.toml"), &source).unwrap();
-        let output = run(dir.path(), &["config", "validate"]);
-        assert_eq!(output.status.code(), Some(0), "{output:?}");
-        let output = run(dir.path(), &["config", "show"]);
-        assert_eq!(output.status.code(), Some(0), "{output:?}");
-        let config: toml::Value =
-            toml::from_str(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
-        assert_eq!(config["ui"]["theme"].as_str(), Some(selection));
-        assert_eq!(
-            config["theme"].as_table().unwrap().len(),
-            1,
-            "only the explicit extends is serialized"
-        );
-        assert_eq!(config["theme"]["extends"].as_str(), Some("light"));
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
-            source
-        );
+    for selection in [
+        "dark",
+        "light",
+        "high-contrast",
+        "field-industrial",
+        "material",
+        "atelier",
+        "paper",
+        "custom",
+        "auto",
+    ] {
+        for base in ["light", "atelier", "paper"] {
+            let dir = tempfile::tempdir().unwrap();
+            let source = format!(
+                "schema_version = 1\n[ui]\ntheme = \"{selection}\"\n[theme]\nextends = \"{base}\"\n"
+            );
+            std::fs::write(dir.path().join("config.toml"), &source).unwrap();
+            let output = run(dir.path(), &["config", "validate"]);
+            assert_eq!(output.status.code(), Some(0), "{output:?}");
+            let output = run(dir.path(), &["config", "show"]);
+            assert_eq!(output.status.code(), Some(0), "{output:?}");
+            let config: toml::Value =
+                toml::from_str(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+            assert_eq!(config["ui"]["theme"].as_str(), Some(selection));
+            assert_eq!(
+                config["theme"].as_table().unwrap().len(),
+                1,
+                "only the explicit extends is serialized"
+            );
+            assert_eq!(config["theme"]["extends"].as_str(), Some(base));
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
+                source
+            );
+        }
     }
 }
 

@@ -4,6 +4,35 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 65 - Milestone 16 editorial TUI polish, Atelier and Paper themes - 21 November 2026
+
+- Feature `062` (`specs/062-editorial-tui-aesthetic-and-atelier-themes/`) added
+  curated built-in themes `atelier` (warm obsidian-espresso dark) and `paper`
+  (warm archival rag-paper light) across `src/config/schema.rs`, `src/ui/theme.rs`,
+  `src/ui/theme/custom.rs`, and `src/diagnostics/doctor.rs`, with all non-border
+  tokens verified at `>= 4.5:1` contrast across all 4 surfaces and `>= 11.7:1`
+  for primary ink.
+- Unified badge hierarchy on `Theme::keycap` (`SurfaceOverlay` elevation on
+  `SurfaceAlt` rails) and `Theme::recessed_pill` (non-dimmed `SurfaceAlt` pills
+  inside `SurfaceOverlay` modals), and refined editorial chrome across
+  `header.rs`, `footer.rs`, `objects.rs`, `editor.rs`, `results.rs`, `palette.rs`,
+  and `overlays.rs` (including width-aware `render_capsule_bar`, hairline modal
+  dividers, full-width Spotlight palette input bars, and right-aligned wide
+  footer hint rails).
+- Rendered and visually inspected all 14 2x HiDPI showcase screenshots in
+  `docs/assets/screenshots/` (adding `workbench-atelier.png` and
+  `workbench-paper.png`, framing `error-diagnostics.png`, and fixing
+  `schema-snapshot.png` `[INFO: 1]` right-edge clipping via `render_capsule_bar`).
+- Verified locally on macOS arm64 (`rustc 1.100.0`) against live PostgreSQL
+  18.7 plain and TLS fixtures: `cargo --locked xtask verify` passed (`2,171`
+  tests across `53` suites including `1,710` lib tests; `0` failed; `1`
+  Unix-socket integration skip with `IGNATIUS_TEST_PG_SOCKET_URI` unset),
+  standalone contract tests passed (`23` doc + `88` release + `4` theme + `16`
+  workflow = `131` passed), `actionlint` passed, `diff -u AGENTS.md CLAUDE.md`
+  matched byte-for-byte, and sidecar-test/dash checks passed.
+- Open Wave 64 human Warp/VoiceOver/NVDA, Windows 11, Linux desktop, and
+  ADR-0008 owner signing/provenance/publication gates remain unchanged and open.
+
 ## Wave 64 - P3 Warp acceptance, PR 121 and ADR-0008 review - 21 November 2026
 
 - The exact `ci/44721590021-1` (`5e5712a`) `aarch64-apple-darwin` archive

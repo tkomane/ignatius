@@ -699,7 +699,7 @@ reading stayed constant. Matrix admission remained open at that stage.
 ## Themes and M12-M14 CLI subcommands
 
 Built-in themes accept `"dark"`, `"light"`, `"high-contrast"`, `"field-industrial"`,
-`"material"`, or `"auto"` (with optional `[theme]` color token overrides in
+`"material"`, `"atelier"`, `"paper"`, or `"auto"` (with optional `[theme]` color token overrides in
 config):
 
 - `field-industrial`: dark matte slate surface palette with amber/orange signal
@@ -707,6 +707,14 @@ config):
 - `material`: Google Material Design 3 Tonal Dark palette with blue primary, cyan
   secondary, and sage semantic tokens meeting WCAG contrast thresholds across
   all four surface tiers.
+- `atelier`: warm obsidian-espresso editorial dark palette (`#121110` / `#1A1816` /
+  `#23201D` / `#2D2925`) with terracotta focus (`#E8835C`), dusty steel
+  selection (`#9BB5C9`), and gold amber accents, WCAG-verified across all four
+  surface tiers.
+- `paper`: warm archival rag-paper editorial light palette (`#ECE6DA` / `#F7F3EB` /
+  `#E4DDD0` / `#DDD5C5`) with carbon ink (`#1E1B18`), Sienna focus (`#9E3418`),
+  and Prussian slate selection (`#244B73`), WCAG-verified across all four surface
+  tiers.
 
 Non-interactive M12-M14 subcommands (`ignatius replication`, `cluster`, `browse`,
 `plan-diff`, `analytics`, `bench`, `snapshot`, `runbook`) follow the repository

@@ -32,13 +32,15 @@ pub(crate) fn render_header(
     let environment = model.environment();
     let mut left_spans: Vec<Span<'static>> = Vec::new();
 
-    // 1. Product name
+    // 1. Product badge (elevated keycap over uniform SurfaceAlt rail)
     let brand = presentation.icon(Icon::Brand);
     let name = crate::branding::PRODUCT_NAME;
+    left_spans.push(Span::raw(" "));
     left_spans.push(Span::styled(
         format!(" {brand}{name}: "),
-        theme.pill(Token::Focus),
+        theme.keycap(Token::Header),
     ));
+    left_spans.push(Span::raw(" "));
 
     // 2. Connection state / target
     match &model.connection {
@@ -72,7 +74,7 @@ pub(crate) fn render_header(
                     presentation.icon(Icon::Database),
                     model.connection.label()
                 ),
-                theme.style(Token::Text),
+                theme.on_stripe(Token::Text),
             ));
         }
     }
@@ -82,7 +84,7 @@ pub(crate) fn render_header(
         left_spans.push(Span::raw("  "));
         left_spans.push(Span::styled(
             format!("failed during {}", step.label()),
-            theme.style(Token::Danger),
+            theme.on_stripe(Token::Danger),
         ));
     }
 
@@ -95,7 +97,7 @@ pub(crate) fn render_header(
                 presentation.icon(Icon::Info),
                 sanitize_for_display(provider)
             ),
-            theme.style(Token::Info),
+            theme.on_stripe(Token::Info),
         ));
     }
 
@@ -111,25 +113,27 @@ pub(crate) fn render_header(
         Token::EnvironmentNonProduction
     };
 
-    let env_style = if environment.is_production() || matches!(environment, Environment::Staging) {
-        capsule_style(presentation, env_token)
+    if environment.is_production() || matches!(environment, Environment::Staging) {
+        left_spans.push(Span::raw(" "));
+        left_spans.push(Span::styled(
+            format!(" [{}] ", environment.label()),
+            capsule_style(presentation, env_token),
+        ));
     } else {
-        theme.style(env_token)
-    };
-
-    left_spans.push(Span::raw("  "));
-    left_spans.push(Span::styled(
-        format!("[{}]", environment.label()),
-        env_style,
-    ));
+        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::styled(
+            format!("[{}]", environment.label()),
+            theme.on_stripe(env_token),
+        ));
+    }
 
     // Read-only capsule
     if let Some(info) = model.connection.info()
         && info.read_only
     {
-        left_spans.push(Span::raw("  "));
+        left_spans.push(Span::raw(" "));
         left_spans.push(Span::styled(
-            "[READ ONLY]",
+            " [READ ONLY] ",
             capsule_style(presentation, Token::Info),
         ));
     }
@@ -139,7 +143,7 @@ pub(crate) fn render_header(
         left_spans.push(Span::raw("  "));
         left_spans.push(Span::styled(
             format!("{}[history off]", presentation.icon(Icon::Info)),
-            theme.style(Token::Info),
+            theme.on_stripe(Token::Info),
         ));
     } else if matches!(
         model.metadata_link,
@@ -152,13 +156,13 @@ pub(crate) fn render_header(
                 presentation.icon(Icon::Info),
                 model.metadata_link.label()
             ),
-            theme.style(Token::Info),
+            theme.on_stripe(Token::Info),
         ));
     } else if model.history_note.is_some() {
         left_spans.push(Span::raw("  "));
         left_spans.push(Span::styled(
             format!("{}[not in history]", presentation.icon(Icon::Info)),
-            theme.style(Token::Info),
+            theme.on_stripe(Token::Info),
         ));
     }
 
@@ -169,13 +173,13 @@ pub(crate) fn render_header(
     match model.transaction {
         TransactionState::Open => {
             right_spans.push(Span::styled(
-                "[TX ACTIVE]",
+                " [TX ACTIVE] ",
                 capsule_style(presentation, Token::TransactionActive),
             ));
         }
         TransactionState::Failed => {
             right_spans.push(Span::styled(
-                "[TX FAILED]",
+                " [TX FAILED] ",
                 capsule_style(presentation, Token::TransactionFailed),
             ));
         }
@@ -185,14 +189,17 @@ pub(crate) fn render_header(
     // Active watch loop capsule
     if let Some(watch) = &model.watch {
         if !right_spans.is_empty() {
-            right_spans.push(Span::raw("  "));
+            right_spans.push(Span::raw(" "));
         }
         right_spans.push(Span::styled(
-            format!("[WATCH: {}s #{}]", watch.interval_secs, watch.iteration),
+            format!(" [WATCH: {}s #{}] ", watch.interval_secs, watch.iteration),
             capsule_style(presentation, Token::Focus),
         ));
         right_spans.push(Span::raw(" "));
-        right_spans.push(Span::styled("(\\watch stop)", theme.style(Token::Muted)));
+        right_spans.push(Span::styled(
+            "(\\watch stop)",
+            theme.on_stripe(Token::Muted),
+        ));
     }
 
     // Running / completed elapsed indicator
@@ -209,7 +216,7 @@ pub(crate) fn render_header(
         if !right_spans.is_empty() {
             right_spans.push(Span::raw("  "));
         }
-        right_spans.push(Span::styled(text, theme.style(Token::Info)));
+        right_spans.push(Span::styled(text, theme.on_stripe(Token::Info)));
     } else if let Some(d) = model.last_elapsed {
         let show = match model.timing_display {
             TimingDisplay::Off => false,
@@ -227,7 +234,7 @@ pub(crate) fn render_header(
             if !right_spans.is_empty() {
                 right_spans.push(Span::raw("  "));
             }
-            right_spans.push(Span::styled(text, theme.style(Token::Muted)));
+            right_spans.push(Span::styled(text, theme.on_stripe(Token::Muted)));
         }
     }
 
@@ -236,20 +243,32 @@ pub(crate) fn render_header(
         if !right_spans.is_empty() {
             right_spans.push(Span::raw("  "));
         }
-        right_spans.push(Span::styled("[MUTED]", theme.style(Token::Muted)));
+        right_spans.push(Span::styled("[MUTED]", theme.on_stripe(Token::Muted)));
+    }
+
+    let right_starts_padded = right_spans
+        .first()
+        .is_some_and(|s| s.content.starts_with(' '));
+    if !right_spans.is_empty() {
+        right_spans.push(Span::raw(" "));
     }
 
     let left_width: usize = left_spans.iter().map(|s| display_width(&s.content)).sum();
     let right_width: usize = right_spans.iter().map(|s| display_width(&s.content)).sum();
     let total_width = usize::from(area.width);
-    let separator = presentation.glyphs.separator();
+    let raw_separator = presentation.glyphs.separator();
+    let separator = if right_starts_padded {
+        raw_separator.trim_end()
+    } else {
+        raw_separator
+    };
     let separator_width = display_width(separator);
 
     if !right_spans.is_empty() && left_width + 2 + right_width <= total_width {
         let use_separator = left_width + separator_width + right_width <= total_width;
         let (final_right, right_total_width) = if use_separator {
             let mut with_sep = Vec::with_capacity(right_spans.len() + 1);
-            with_sep.push(Span::styled(separator, theme.style(Token::Border)));
+            with_sep.push(Span::styled(separator, theme.on_stripe(Token::Border)));
             with_sep.extend(right_spans);
             (with_sep, (separator_width + right_width) as u16)
         } else {
@@ -267,7 +286,7 @@ pub(crate) fn render_header(
     } else if !right_spans.is_empty() && left_width + 2 < total_width {
         let mut combined = left_spans;
         if left_width + separator_width < total_width {
-            combined.push(Span::styled(separator, theme.style(Token::Border)));
+            combined.push(Span::styled(separator, theme.on_stripe(Token::Border)));
         } else {
             combined.push(Span::raw("  "));
         }

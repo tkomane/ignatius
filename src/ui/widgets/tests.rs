@@ -236,6 +236,8 @@ fn overlay_interiors_carry_the_overlay_surface_at_truecolor_and_256() {
         let presentation = presentation_at(depth);
         let overlay = surface_background(&presentation, Token::SurfaceOverlay)
             .expect("a painted overlay surface");
+        let spotlight = surface_background(&presentation, Token::SurfaceAlt)
+            .expect("a painted spotlight search strip surface");
         let selection =
             surface_background(&presentation, Token::Selection).expect("a selection surface");
 
@@ -248,10 +250,19 @@ fn overlay_interiors_carry_the_overlay_surface_at_truecolor_and_256() {
         let mut buf = Buffer::empty(area);
         render_palette(&palette, &presentation, area, &mut buf);
         let box_area = palette_area(area);
-        assert_theme_surfaced(&buf, inner(box_area), &[overlay, selection], "palette");
+        assert_theme_surfaced(
+            &buf,
+            inner(box_area),
+            &[overlay, spotlight, selection],
+            "palette",
+        );
         assert!(
             count_background(&buf, inner(box_area), overlay) > 0,
             "{depth:?}: the palette interior carried no overlay surface"
+        );
+        assert!(
+            count_background(&buf, inner(box_area), spotlight) > 0,
+            "{depth:?}: the palette input row carried no recessed spotlight surface"
         );
 
         let prompt = PasswordPrompt::new("orders", "the server asked");

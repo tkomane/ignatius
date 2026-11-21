@@ -131,9 +131,14 @@ fn completion_menu_renders_full_width_selection_and_kind_colored_candidates() {
         .expect("popup top-right corner");
 
     let sel_bg = pres.theme.style(Token::Selection).bg.unwrap();
+    let border_fg = pres.theme.color(Token::Border).unwrap();
 
-    // Candidate 0 (SELECT, selected) is on row popup_y + 2
-    let sel_y = popup_y + 2;
+    // Top hairline rule separates scope header on popup_y + 1 from candidate rows.
+    assert_eq!(buf[(popup_left + 1, popup_y + 2)].symbol(), "\u{2500}");
+    assert_eq!(buf[(popup_left + 1, popup_y + 2)].fg, border_fg);
+
+    // Candidate 0 (SELECT, selected) is on row popup_y + 3
+    let sel_y = popup_y + 3;
     for x in (popup_left + 1)..popup_right {
         assert_eq!(
             buf[(x, sel_y)].bg,
@@ -142,8 +147,8 @@ fn completion_menu_renders_full_width_selection_and_kind_colored_candidates() {
         );
     }
 
-    // Candidate 1 (users, Table, unselected) is on row popup_y + 3
-    let table_y = popup_y + 3;
+    // Candidate 1 (users, Table, unselected) is on row popup_y + 4
+    let table_y = popup_y + 4;
     let info_fg = pres.theme.color(Token::Info).unwrap();
     let muted_fg = pres.theme.color(Token::Muted).unwrap();
 
@@ -180,8 +185,8 @@ fn completion_menu_renders_full_width_selection_and_kind_colored_candidates() {
         "detail suffix must use Token::Muted foreground"
     );
 
-    // Candidate 2 (now, Function, unselected) is on row popup_y + 4 -> Token::SyntaxNumber
-    let fn_y = popup_y + 4;
+    // Candidate 2 (now, Function, unselected) is on row popup_y + 5 -> Token::SyntaxNumber
+    let fn_y = popup_y + 5;
     let number_fg = pres.theme.color(Token::SyntaxNumber).unwrap();
     let now_x = ((popup_left + 1)..popup_right)
         .find(|&x| {
@@ -198,8 +203,8 @@ fn completion_menu_renders_full_width_selection_and_kind_colored_candidates() {
         "Function candidate prefix must use Token::SyntaxNumber foreground"
     );
 
-    // Candidate 3 (id, Column, unselected) is on row popup_y + 5 -> Token::Text
-    let col_y = popup_y + 5;
+    // Candidate 3 (id, Column, unselected) is on row popup_y + 6 -> Token::Text
+    let col_y = popup_y + 6;
     let text_fg = pres.theme.color(Token::Text).unwrap();
     let id_x = ((popup_left + 1)..popup_right)
         .find(|&x| {
@@ -216,8 +221,8 @@ fn completion_menu_renders_full_width_selection_and_kind_colored_candidates() {
         "Column candidate prefix must use Token::Text foreground"
     );
 
-    // Candidate 4 (cte_data, Cte, unselected) is on row popup_y + 6 -> Token::Focus
-    let cte_y = popup_y + 6;
+    // Candidate 4 (cte_data, Cte, unselected) is on row popup_y + 7 -> Token::Focus
+    let cte_y = popup_y + 7;
     let focus_fg = pres.theme.color(Token::Focus).unwrap();
     let cte_x = ((popup_left + 1)..popup_right)
         .find(|&x| {
@@ -233,6 +238,10 @@ fn completion_menu_renders_full_width_selection_and_kind_colored_candidates() {
         focus_fg,
         "CTE candidate prefix must use Token::Focus foreground"
     );
+
+    // Bottom hairline rule separates candidates from footer hints/count.
+    assert_eq!(buf[(popup_left + 1, popup_y + 8)].symbol(), "\u{2500}");
+    assert_eq!(buf[(popup_left + 1, popup_y + 8)].fg, border_fg);
 
     // 2. ColorDepth::Basic16 and ColorDepth::None leave selected background as Reset
     for depth in [ColorDepth::Basic16, ColorDepth::None] {
@@ -749,6 +758,60 @@ fn split_secondary_pane_renders_badge_when_buffer_has_sql_text() {
         assert!(
             text.contains("SELECT 'alpha';"),
             "non-empty secondary SQL text must remain visible:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn editor_split_header_vertical_gutter_rule_and_completion_ascii_parity() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.focus = crate::app::model::Focus::Editor;
+    model.editor.set_text("SELECT 1;\nSELECT 2;");
+    model.editor.set_position(1, 1);
+    model.completion.menu = Some(CompletionMenu::new(test_completion_result(), true));
+
+    let area = Rect::new(0, 0, 80, 20);
+    let unicode = presentation(ColorDepth::TrueColor);
+    let mut ubuf = Buffer::empty(area);
+    render_editor(&model, &Keymap::new(), &unicode, area, &mut ubuf);
+    render_completion(&model, &unicode, area, &mut ubuf);
+
+    let rows = rendered_rows(&ubuf, area);
+    assert!(
+        rows[0].contains('\u{258d}'),
+        "focus accent leader missing: {}",
+        rows[0]
+    );
+    assert!(rows[0].contains("Editor"), "{}", rows[0]);
+    assert!(rows[0].contains("line 1, column 1"), "{}", rows[0]);
+    assert_eq!(ubuf[(2, 1)].fg, unicode.theme.color(Token::Focus).unwrap());
+    assert_eq!(
+        ubuf[(2, 2)].fg,
+        unicode.theme.color(Token::Muted).unwrap(),
+        "inactive line number must use Token::Muted"
+    );
+    assert_eq!(ubuf[(4, 2)].symbol(), "\u{2502}");
+    assert_eq!(ubuf[(4, 2)].fg, unicode.theme.color(Token::Border).unwrap());
+
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let ascii = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut abuf = Buffer::empty(area);
+        render_editor(&model, &Keymap::new(), &ascii, area, &mut abuf);
+        render_completion(&model, &ascii, area, &mut abuf);
+        let arows = rendered_rows(&abuf, area);
+        let joined = arows.join("\n");
+        assert!(joined.is_ascii(), "{depth:?}: {joined:?}");
+        assert!(arows[0].contains("> Editor"), "{}", arows[0]);
+        assert_eq!(abuf[(4, 2)].symbol(), "|");
+        assert_eq!(abuf[(4, 2)].bg, Color::Reset);
+        assert!(
+            joined.contains("----"),
+            "ASCII completion rules must use dashes: {joined}"
         );
     }
 }

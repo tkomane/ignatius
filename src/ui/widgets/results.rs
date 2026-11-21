@@ -1,5 +1,7 @@
 use super::overlays::render_plan;
-use super::{action_key_label, input_cursor, overlay_block, pane_block};
+use super::{
+    action_key_label, hairline_rule, input_cursor, inset_empty_area, overlay_block, pane_block_line,
+};
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
 use crate::query::result::ExecutionStatus;
@@ -11,7 +13,7 @@ use crate::ui::keymap::Keymap;
 use crate::ui::layout::{Presentation, inspector_box, inspector_viewport};
 use crate::ui::theme::{Theme, Token};
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
@@ -144,19 +146,23 @@ pub(crate) fn render_results(
     // A failed transaction is not an ordinary error: nothing else will run until
     // it ends, so the way out is shown rather than left to be remembered.
     if model.transaction == crate::query::result::TransactionState::Failed {
-        let block = pane_block(
-            format!(
-                " {}{}Transaction failed ",
-                if model.splits.zoomed && focused {
-                    "(zoomed) "
-                } else {
-                    ""
-                },
-                presentation.icon(Icon::Warning)
-            ),
-            focused,
-            presentation,
-        );
+        let mut title_spans = Vec::new();
+        if model.splits.zoomed && focused {
+            title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
+        }
+        title_spans.push(Span::styled(
+            format!("{}Transaction failed", presentation.icon(Icon::Warning)),
+            theme
+                .style(Token::TransactionFailed)
+                .add_modifier(Modifier::BOLD),
+        ));
+        if focused {
+            title_spans.push(Span::styled(
+                "  [focused]",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+        }
+        let block = pane_block_line(Line::from(title_spans), focused, presentation);
         let inner = block.inner(area);
         block.render(area, buf);
         let mut lines = vec![
@@ -226,40 +232,59 @@ pub(crate) fn render_results(
     } else {
         execution.status.label().to_owned()
     };
-    let mut title = format!(
-        " {}Results  {}  {} ",
-        presentation.icon(Icon::Rows),
-        status,
-        summary
-    );
+    let mut title_spans = Vec::new();
     if model.splits.zoomed && focused {
-        title.insert_str(0, " (zoomed)");
+        title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
+    let primary_style = if focused {
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+    } else {
+        theme.style(Token::Header)
+    };
+    title_spans.push(Span::styled(
+        format!("{}Results", presentation.icon(Icon::Rows)),
+        primary_style,
+    ));
+    title_spans.push(Span::styled(
+        format!("  {status}  {summary}"),
+        theme.style(Token::Muted),
+    ));
     // What the filter admits is stated in full: how many match, of how many are
     // held, of how many the server sent. Collapsing those into one number is
     // the lie this pane exists not to tell.
     if !model.result_filter.trim().is_empty() {
-        if model.visible_result().is_some_and(|set| set.is_truncated()) {
-            title.push_str("[filtered retained rows] ");
+        let filter_tag = if model.visible_result().is_some_and(|set| set.is_truncated()) {
+            "  [filtered retained rows]".to_owned()
         } else {
-            title.push_str(&format!("[{}] ", model.result_window_label()));
-        }
+            format!("  [{}]", model.result_window_label())
+        };
+        title_spans.push(Span::styled(filter_tag, theme.style(Token::Info)));
     }
     if model.result_filtering {
-        title.push_str(&format!(
-            "[filter: {}{}] ",
-            sanitize_for_display(&model.result_filter),
-            input_cursor(presentation)
+        title_spans.push(Span::styled(
+            format!(
+                "  [filter: {}{}]",
+                sanitize_for_display(&model.result_filter),
+                input_cursor(presentation)
+            ),
+            theme.style(Token::Focus),
         ));
     }
     if focused {
-        title.push_str(&format!(
-            "[focused] [{} grid controls] ",
-            action_key_label(keymap, &crate::app::Action::OpenResultControls)
+        title_spans.push(Span::styled(
+            "  [focused]",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+        title_spans.push(Span::styled(
+            format!(
+                " [{} grid controls]",
+                action_key_label(keymap, &crate::app::Action::OpenResultControls)
+            ),
+            theme.style(Token::Muted),
         ));
     }
 
-    let block = pane_block(title, focused, presentation);
+    let block = pane_block_line(Line::from(title_spans), focused, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
 
@@ -671,21 +696,31 @@ fn render_results_placeholder(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let block = pane_block(
-        format!(
-            " {}{}Results ",
-            if model.splits.zoomed && focused {
-                "(zoomed) "
-            } else {
-                ""
-            },
-            presentation.icon(Icon::Rows)
-        ),
-        focused,
-        presentation,
-    );
+    let mut title_spans = Vec::new();
+    if model.splits.zoomed && focused {
+        title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
+    }
+    let primary_style = if focused {
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+    } else {
+        theme.style(Token::Header)
+    };
+    title_spans.push(Span::styled(
+        format!("{}Results", presentation.icon(Icon::Rows)),
+        primary_style,
+    ));
+    if focused {
+        title_spans.push(Span::styled(
+            "  [focused]",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+    }
+    let block = pane_block_line(Line::from(title_spans), focused, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
 
     // While a query is in flight this is where the activity indicator lives, so
     // the user is looking at the place the answer will appear.
@@ -694,12 +729,15 @@ fn render_results_placeholder(
         return;
     }
 
+    let empty_area = inset_empty_area(inner);
+    let keycap = theme.keycap(Token::Focus);
     let ctx = crate::app::discovery::context(model);
     let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
-    let mut lines = Vec::new();
+    let mut prose_lines = Vec::new();
+    let mut hint_lines = Vec::new();
     match ctx.connection {
         crate::app::discovery::ConnectionPosture::Disconnected => {
-            lines.push(Line::from(vec![
+            prose_lines.push(Line::from(vec![
                 Span::styled(
                     presentation.glyphs.prefix(Icon::Warning),
                     theme.style(Token::Warning).add_modifier(Modifier::BOLD),
@@ -709,51 +747,48 @@ fn render_results_placeholder(
                     theme.style(Token::Warning).add_modifier(Modifier::BOLD),
                 ),
             ]));
-            lines.push(Line::from(Span::styled(
+            prose_lines.push(Line::from(Span::styled(
                 "Connect before running SQL. Results appear here after a query.",
                 theme.style(Token::Muted),
             )));
         }
         crate::app::discovery::ConnectionPosture::Connecting => {
-            lines.push(Line::from(vec![
+            prose_lines.push(Line::from(vec![
                 Span::styled(
                     presentation.glyphs.prefix(Icon::Info),
                     theme.style(Token::Info).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("Waiting for the connection.", theme.style(Token::Header)),
             ]));
-            lines.push(Line::from(Span::styled(
+            prose_lines.push(Line::from(Span::styled(
                 "Results will appear here after a query finishes.",
                 theme.style(Token::Muted),
             )));
         }
         crate::app::discovery::ConnectionPosture::Connected => {
             let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
-            lines.push(Line::from(vec![
+            prose_lines.push(Line::from(vec![
                 Span::styled(
                     presentation.glyphs.prefix(Icon::Info),
                     theme.style(Token::Focus).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("No query has run yet.", theme.style(Token::Header)),
             ]));
-            lines.push(Line::from(Span::styled(
+            prose_lines.push(Line::from(Span::styled(
                 "Write SQL in the editor to inspect rows, types, and query plans.",
                 theme.style(Token::Muted),
             )));
-            if inner.height >= 6 {
-                lines.push(Line::raw(""));
-            }
-            lines.push(Line::from(vec![
-                Span::styled(run_key, theme.pill(Token::Focus)),
+            hint_lines.push(Line::from(vec![
+                Span::styled(format!(" {run_key} "), keycap),
                 Span::styled(
-                    " Run the buffer after entering SQL.",
+                    "Run the buffer after entering SQL.",
                     theme.style(Token::Text),
                 ),
             ]));
         }
         crate::app::discovery::ConnectionPosture::Lost
         | crate::app::discovery::ConnectionPosture::Failed => {
-            lines.push(Line::from(vec![
+            prose_lines.push(Line::from(vec![
                 Span::styled(
                     presentation.glyphs.prefix(Icon::Warning),
                     theme.style(Token::Danger).add_modifier(Modifier::BOLD),
@@ -763,43 +798,66 @@ fn render_results_placeholder(
                     theme.style(Token::Danger).add_modifier(Modifier::BOLD),
                 ),
             ]));
-            lines.push(Line::from(Span::styled(
+            prose_lines.push(Line::from(Span::styled(
                 "Reconnect before running SQL. Existing results remain a snapshot.",
                 theme.style(Token::Muted),
             )));
         }
     }
     if let Some(notice) = &model.clipboard_notice {
-        lines.push(Line::from(Span::styled(
+        prose_lines.push(Line::from(Span::styled(
             notice.message(),
             theme.style(Token::Warning),
         )));
     }
     if let Some(notice) = &model.cell_update_notice {
-        lines.push(Line::from(Span::styled(
+        prose_lines.push(Line::from(Span::styled(
             sanitize_for_display(notice),
             theme.style(Token::Warning),
         )));
     }
     if let Some(notice) = &model.refresh_notice {
-        lines.push(Line::from(Span::styled(
+        prose_lines.push(Line::from(Span::styled(
             sanitize_for_display(notice),
             theme.style(Token::Info),
         )));
     }
-    if inner.height >= 6 && ctx.connection != crate::app::discovery::ConnectionPosture::Connected {
-        lines.push(Line::raw(""));
-    }
-    lines.push(Line::from(vec![
-        Span::styled(palette_key, theme.pill(Token::Focus)),
+    hint_lines.push(Line::from(vec![
+        Span::styled(format!(" {palette_key} "), keycap),
         Span::styled(
-            " Command palette shows safe next actions.",
+            "Command palette shows safe next actions.",
             theme.style(Token::Muted),
         ),
     ]));
-    Paragraph::new(lines)
+
+    let separator_rows = u16::from(empty_area.height >= 6);
+    let hints_height = u16::try_from(hint_lines.len())
+        .unwrap_or(u16::MAX)
+        .min(empty_area.height);
+    let prose_height = empty_area
+        .height
+        .saturating_sub(hints_height + separator_rows);
+    let [prose_rect, sep_rect, hints_rect] = Layout::vertical([
+        Constraint::Length(prose_height),
+        Constraint::Length(separator_rows),
+        Constraint::Length(hints_height),
+    ])
+    .areas(empty_area);
+
+    Paragraph::new(prose_lines)
         .wrap(Wrap { trim: true })
-        .render(inner, buf);
+        .render(prose_rect, buf);
+    if separator_rows > 0 {
+        let rule_width = usize::from(empty_area.width).min(48);
+        if rule_width > 0 {
+            Paragraph::new(Line::from(Span::styled(
+                hairline_rule(presentation).repeat(rule_width),
+                theme.style(Token::Border),
+            )))
+            .render(sep_rect, buf);
+        }
+    }
+    Paragraph::new(hint_lines).render(hints_rect, buf);
 }
 
 /// The activity indicator: a moving frame, a word, and an honest elapsed time.
@@ -1054,7 +1112,7 @@ fn render_grid(
     }
 
     let mut header_spans = vec![Span::styled(
-        format!("{}{padding}", " ".repeat(gutter)),
+        format!("{:>gutter$}{padding}", "#"),
         theme.on_stripe(Token::Muted),
     )];
     for (position, index) in window.iter().enumerate() {
@@ -1082,6 +1140,13 @@ fn render_grid(
         header_spans.push(Span::styled(
             format!("{}{padding}", pad_to_width(&text, width)),
             header_style,
+        ));
+    }
+    let header_width: usize = header_spans.iter().map(|s| display_width(&s.content)).sum();
+    if header_width < grid_width {
+        header_spans.push(Span::styled(
+            " ".repeat(grid_width - header_width),
+            theme.stripe(),
         ));
     }
     lines.push(Line::from(header_spans).style(theme.stripe()));
@@ -1114,11 +1179,7 @@ fn render_grid(
         lines.push(Line::from(type_spans));
     }
 
-    let rule_char = if presentation.glyphs.is_ascii() {
-        "-"
-    } else {
-        "\u{2500}"
-    };
+    let rule_char = hairline_rule(presentation);
     lines.push(Line::from(Span::styled(
         rule_char.repeat(grid_width),
         theme.style(Token::Border),
@@ -1132,10 +1193,23 @@ fn render_grid(
         let selected = focused && position == model.selected_row;
         let striped = position % 2 == 1;
 
-        let mut spans = vec![Span::styled(
-            format!("{:>gutter$}{padding}", source + 1),
-            cell_style(theme, Token::Muted, selected, striped),
-        )];
+        let mut spans = if selected {
+            vec![Span::styled(
+                format!("{:>gutter$}{padding}", source + 1),
+                theme.style(Token::Selection),
+            )]
+        } else {
+            vec![
+                Span::styled(
+                    format!("{:>gutter$}", source + 1),
+                    theme.on_stripe(Token::Muted),
+                ),
+                Span::styled(
+                    padding.clone(),
+                    cell_style(theme, Token::Muted, false, striped),
+                ),
+            ]
+        };
 
         for (column_position, index) in window.iter().enumerate() {
             if column_position > 0 {
@@ -1174,6 +1248,21 @@ fn render_grid(
                 padded,
                 cell_style(theme, token, selected, striped),
             ));
+        }
+
+        let row_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+        if row_width < grid_width {
+            if selected {
+                spans.push(Span::styled(
+                    " ".repeat(grid_width - row_width),
+                    theme.style(Token::Selection),
+                ));
+            } else if striped {
+                spans.push(Span::styled(
+                    " ".repeat(grid_width - row_width),
+                    theme.stripe(),
+                ));
+            }
         }
 
         let mut line = Line::from(spans);
@@ -1333,20 +1422,15 @@ pub(crate) fn render_error(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
-    let block = pane_block(
-        format!(
-            " {}{}{} ",
-            if model.splits.zoomed && model.focus == Focus::Results {
-                "(zoomed) "
-            } else {
-                ""
-            },
-            presentation.icon(Icon::Error),
-            error.kind.label()
-        ),
-        false,
-        presentation,
-    );
+    let mut title_spans = Vec::new();
+    if model.splits.zoomed && model.focus == Focus::Results {
+        title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
+    }
+    title_spans.push(Span::styled(
+        format!("{}{}", presentation.icon(Icon::Error), error.kind.label()),
+        theme.style(Token::Danger).add_modifier(Modifier::BOLD),
+    ));
+    let block = pane_block_line(Line::from(title_spans), false, presentation);
 
     let mut lines = vec![
         Line::from(Span::styled(

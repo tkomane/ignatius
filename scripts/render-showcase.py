@@ -148,10 +148,15 @@ def main():
     parser.add_argument("--font-dir", type=Path, required=True)
     parser.add_argument("--fallback-font", type=Path, required=True)
     args = parser.parse_args()
+    def resolve_font(style: str) -> Path:
+        for family in ("JetBrainsMonoNerdFontMono", "JetBrainsMonoNLNerdFont"):
+            candidate = args.font_dir / f"{family}-{style}.ttf"
+            if candidate.exists():
+                return candidate
+        return args.font_dir / f"JetBrainsMonoNerdFontMono-{style}.ttf"
+
     fonts = {
-        (bold, italic): ImageFont.truetype(
-            args.font_dir / f"JetBrainsMonoNerdFontMono-{style}.ttf", FONT_SIZE
-        )
+        (bold, italic): ImageFont.truetype(resolve_font(style), FONT_SIZE)
         for bold, italic, style in [
             (False, False, "Regular"),
             (True, False, "Bold"),

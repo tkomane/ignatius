@@ -361,3 +361,48 @@ fn material_theme_choice_round_trips_labels_and_parses() {
             .contains("choice = \"material\"")
     );
 }
+
+#[test]
+fn atelier_and_paper_theme_choices_round_trip_labels_and_parse() {
+    #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+    struct ChoiceBox {
+        choice: ThemeChoice,
+    }
+
+    for (name, expected_choice, expected_selection) in [
+        ("atelier", ThemeChoice::Atelier, ThemeSelection::Atelier),
+        ("paper", ThemeChoice::Paper, ThemeSelection::Paper),
+    ] {
+        assert!(ThemeChoice::ACCEPTED.contains(&name));
+        assert_eq!(expected_choice.label(), name);
+        assert_eq!(ThemeChoice::parse(name), Some(expected_choice));
+
+        let config: Config = toml::from_str(&format!("[ui]\ntheme = \"{name}\"\n")).expect("parse");
+        assert_eq!(config.ui.theme, expected_selection);
+        let serialized = toml::to_string(&config).expect("serialize");
+        assert!(
+            serialized.contains(&format!("theme = \"{name}\"")),
+            "{serialized}"
+        );
+
+        let parsed: ChoiceBox =
+            toml::from_str(&format!("choice = \"{name}\"")).expect("parse choice");
+        assert_eq!(parsed.choice, expected_choice);
+        assert!(
+            toml::to_string(&parsed)
+                .expect("serialize choice")
+                .contains(&format!("choice = \"{name}\""))
+        );
+    }
+
+    for bad in [
+        "Atelier",
+        "Paper",
+        " atelier ",
+        " paper ",
+        "ATELIER",
+        "PAPER",
+    ] {
+        assert_eq!(ThemeChoice::parse(bad), None, "{bad:?}");
+    }
+}

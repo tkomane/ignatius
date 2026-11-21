@@ -959,6 +959,21 @@ fn schema_snapshot_overlay_renders_drift_pills_tables_and_themes() {
         );
     }
 
+    // At 112x32 showcase width, render_capsule_bar compacts outer padding so every capsule fits cleanly.
+    let showcase_area = Rect::new(0, 0, 112, 32);
+    let rich = Presentation::new(
+        Theme::new(ThemeChoice::FieldIndustrial, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let mut showcase_buf = Buffer::empty(showcase_area);
+    render_schema_snapshot(&state, &rich, showcase_area, &mut showcase_buf);
+    let showcase_text = buffer_to_string(&showcase_buf);
+    assert!(
+        showcase_text.contains(expected_info.as_str()),
+        "{expected_info:?} was clipped at 112x32:\n{showcase_text}"
+    );
+
     // Switch to Tab 2 (Catalog Tables) and verify Material + Dark TrueColor full-width selection bar.
     state.set_tab(1);
     state.move_selection(1);
@@ -1118,4 +1133,88 @@ fn new_overlays_block_panes_and_render_through_layout() {
     assert_eq!(region_at(&model, area, 10, 10), None);
     let bench_text = render_to_string(&model, &keymap, &pres, area.width, area.height);
     assert!(bench_text.contains("[BENCHMARK]"), "{bench_text}");
+}
+
+#[test]
+fn overlay_chrome_recessed_pills_hairline_rule_and_footer_keycaps_across_depths() {
+    use crate::ui::theme::Token;
+    use ratatui::style::Modifier;
+
+    let state = crate::app::model::LintFindingsState::new(
+        crate::lint::lint_source(None, "DELETE FROM orders;\nSELECT id FROM a, b;").findings,
+    );
+    let area = Rect::new(0, 0, 100, 30);
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    render_lint_findings(&state, &pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+
+    let overlay_bg = pres.theme.surface(Token::SurfaceOverlay).bg.unwrap();
+    let recessed_bg = pres.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    let focus_fg = pres.theme.color(Token::Focus).unwrap();
+
+    // Recessed badge "[FINDINGS: 2]" uses SurfaceAlt bg, non-DIM label, and 1-cell overlay gap before "[ERRORS: 1]".
+    let findings_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("[FINDINGS: 2]")
+        })
+        .expect("findings capsule row");
+    let line: String = (0..area.width)
+        .map(|x| buf[(x, findings_y)].symbol())
+        .collect();
+    let findings_col = line[..line.find("[FINDINGS: 2]").unwrap()].chars().count() as u16;
+    assert_eq!(buf[(findings_col, findings_y)].bg, recessed_bg);
+    assert!(
+        !buf[(findings_col, findings_y)]
+            .modifier
+            .contains(Modifier::DIM),
+        "recessed capsule label must never use DIM"
+    );
+    let after_findings = col_after(&line, "[FINDINGS: 2] ");
+    assert_eq!(
+        buf[(after_findings, findings_y)].bg,
+        overlay_bg,
+        "1-cell gap between adjacent pills must keep SurfaceOverlay bg"
+    );
+
+    // Hairline rule row sits cleanly in the modal interior using Unicode horizontal bar.
+    assert!(text.contains("\u{2500}\u{2500}\u{2500}"), "{text}");
+
+    // Footer hint "[Enter]" uses Theme::recessed_pill(Token::Focus).
+    let footer_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("[Enter] Jump")
+        })
+        .expect("footer hints row");
+    let footer_line: String = (0..area.width)
+        .map(|x| buf[(x, footer_y)].symbol())
+        .collect();
+    let enter_col = footer_line[..footer_line.find("[Enter]").unwrap()]
+        .chars()
+        .count() as u16;
+    assert_eq!(buf[(enter_col, footer_y)].bg, recessed_bg);
+    assert_eq!(buf[(enter_col, footer_y)].fg, focus_fg);
+    assert!(buf[(enter_col, footer_y)].modifier.contains(Modifier::BOLD));
+
+    // Basic16 & ColorDepth::None / ASCII stay unpainted and strictly ASCII.
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut low_buf = Buffer::empty(area);
+        render_lint_findings(&state, &low, area, &mut low_buf);
+        let low_text = buffer_to_string(&low_buf);
+        assert!(low_text.is_ascii(), "{depth:?}: {low_text:?}");
+        assert!(low_text.contains("---"), "{low_text}");
+        assert_eq!(low_buf[(findings_col, findings_y)].bg, Color::Reset);
+        assert_eq!(low_buf[(enter_col, footer_y)].bg, Color::Reset);
+    }
 }

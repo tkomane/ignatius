@@ -125,14 +125,32 @@ warning = "#FDD663"                # Material warm amber warning
 danger = "#F28B82"                 # Material coral alert
 ```
 
-`ui.theme` accepts `dark`, `light`, `high-contrast`, `field-industrial`, `material`, `custom` and `auto`. When
+### The Atelier & Paper Gallery Presets (Built-in & Custom Override)
+
+Enable curated obsidian-espresso dark (`atelier`) or archival rag-paper light (`paper`) via `ui.theme`:
+
+```toml
+[ui]
+theme = "atelier" # or "paper"
+```
+
+Key surface and accent tokens:
+
+| Preset | `surface` / `surface-pane` / `surface-alt` / `surface-overlay` | `text` / `header` / `muted` | `focus` / `selection` / `warning` / `danger` |
+| --- | --- | --- | --- |
+| `atelier` | `#121110` / `#1A1816` / `#23201D` / `#2D2925` | `#EDE7DC` / `#F7F2E8` / `#ABA295` | `#E8835C` / `#9BB5C9` / `#E6B85C` / `#EA827C` |
+| `paper` | `#ECE6DA` / `#F7F3EB` / `#E4DDD0` / `#DDD5C5` | `#1E1B18` / `#141210` / `#4D463E` | `#9E3418` / `#244B73` / `#734500` / `#991B20` |
+
+Both presets guarantee `>= 4.5:1` contrast across every non-border foreground token on all four surface tiers (`>= 11.7:1` for primary `text`/`header` on base surfaces).
+
+`ui.theme` accepts `dark`, `light`, `high-contrast`, `field-industrial`, `material`, `atelier`, `paper`, `custom` and `auto`. When
 `ui.theme = "auto"`, startup probes the terminal background luminance over OSC 11
 within a 100 ms deadline before entering the alternate screen, selecting `light`
 when WCAG relative luminance is at least 0.5 and falling back to `dark` without
 hanging when unanswered. An absent
 definition adds no custom palette to the session cycle. An empty `[theme]`
 inherits dark and still has Custom identity. `extends` defaults to dark and
-accepts any of the built-in palettes (`dark`, `light`, `high-contrast`, `field-industrial`, `material`). Partial definitions inherit every omitted
+accepts any of the built-in palettes (`dark`, `light`, `high-contrast`, `field-industrial`, `material`, `atelier`, `paper`). Partial definitions inherit every omitted
 token. An inactive definition is validated too.
 
 Keys are exact and case-sensitive. Colours are `#` followed by six ASCII hex
@@ -157,10 +175,10 @@ an optional `[keys] switch-theme = "alt+f12"` binding uses the same action.
 
 The interface organizes visual hierarchy into four painted elevation levels:
 
-- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light, `#111318` on Material).
-- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light, `#191c22` on Material).
-- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light, `#22262e` on Material).
-- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, and confirmation prompts (`#292e42` on Dark, `#dce0e8` on Light, `#2b303a` on Material).
+- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light, `#111318` on Material, `#121110` on Atelier, `#ece6da` on Paper).
+- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light, `#191c22` on Material, `#1a1816` on Atelier, `#f7f3eb` on Paper).
+- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, recessed modal badges, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light, `#22262e` on Material, `#23201d` on Atelier, `#e4ddd0` on Paper).
+- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, confirmation prompts, and elevated rail keycaps (`#292e42` on Dark, `#dce0e8` on Light, `#2b303a` on Material, `#2d2925` on Atelier, `#ddd5c5` on Paper).
 
 Overlays employ Clear-then-block painting: every overlay paints a `Clear` widget
 over its bounding rectangle before rendering its block surface and contents. This
@@ -178,9 +196,7 @@ These styles use a token as a background rather than a foreground:
 - **Capsules**, for the production marker. The token becomes the background and
   the surface becomes the text. Contrast is the same pair the palette tests
   already hold to a threshold, so a capsule cannot drift into illegibility.
-- **Pills (`Theme::pill(token)`)**, for prominent inverted badges such as the
-  header brand mark, using the token as a background with the base Surface colour
-  as the foreground text.
+- **Pills (`Theme::pill(token)`)**, **Keycaps (`Theme::keycap(token)`)**, and **Recessed Modal Pills (`Theme::recessed_pill(token)`)**: `pill` provides `SurfaceAlt`-backed foreground emphasis; `keycap` elevates header brand badges, footer key hints, and empty-state starter keys onto `SurfaceOverlay` over `SurfaceAlt` rails (`Basic16` bold foreground, `None` modifier-only without inversion); `recessed_pill` places bold, non-dimmed tokens onto `SurfaceAlt` inside `SurfaceOverlay` modals so secondary metadata badges remain crisp across both dark and light palettes.
 - **Stripes**, for alternating result rows. Text on a striped row is held to the
   same contrast thresholds as text on the main surface, by its own test.
 - **Selection**, with Surface ink on Selection fill at truecolor and `Indexed256`

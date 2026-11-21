@@ -723,3 +723,83 @@ fn structured_cell_detail_renders_selection_and_path_in_ascii() {
     assert!(actual.contains("Server text"), "{actual}");
     assert!(actual.contains(r#"{"x":[null,2]}"#), "{actual}");
 }
+
+#[test]
+fn results_header_row_fills_grid_width_gutter_uses_muted_and_empty_hints_stay_crisp() {
+    let model = model_with(
+        &["id", "note"],
+        &[
+            vec![Cell::Text("1".into()), Cell::Text("ok".into())],
+            vec![Cell::Text("2".into()), Cell::Text("no".into())],
+        ],
+    );
+    let area = Rect::new(0, 0, 60, 14);
+
+    let pres = presentation_at(ColorDepth::TrueColor);
+    let buf = render(&model, &pres, area);
+    let stripe_bg = pres.theme.stripe().bg.unwrap();
+    let muted_fg = pres.theme.color(Token::Muted).unwrap();
+    let text = buffer_to_string(&buf);
+    assert!(text.lines().next().unwrap().contains('\u{258d}'), "{text}");
+    assert!(text.contains("Results"), "{text}");
+
+    // Column header row is at inside.y + 3 = y 4: active column `id` carries
+    // Selection bg while gutter `#`, unselected `note` column, and trailing full-width
+    // fill across grid_width carry SurfaceAlt stripe_bg.
+    let col_header_y = 4;
+    let header_line: String = (0..area.width)
+        .map(|x| buf[(x, col_header_y)].symbol())
+        .collect();
+    let hash_x = header_line[..header_line.find('#').unwrap()]
+        .chars()
+        .count() as u16;
+    let id_x = header_line[..header_line.find("id").unwrap()]
+        .chars()
+        .count() as u16;
+    let note_x = header_line[..header_line.find("note").unwrap()]
+        .chars()
+        .count() as u16;
+    let selection_bg = pres.theme.style(Token::Selection).bg.unwrap();
+
+    assert_eq!(buf[(hash_x, col_header_y)].bg, stripe_bg);
+    assert_eq!(buf[(id_x, col_header_y)].bg, selection_bg);
+    assert_eq!(buf[(note_x, col_header_y)].bg, stripe_bg);
+    for x in (1..id_x).chain((note_x - 2)..59) {
+        assert_eq!(
+            buf[(x, col_header_y)].bg,
+            stripe_bg,
+            "column header cell x={x} must carry SurfaceAlt stripe across full grid_width"
+        );
+    }
+    // Unselected row 2 (inside.y + 6 = y 7) keeps SurfaceAlt gutter and Muted line number.
+    assert_eq!(buf[(hash_x, 7)].bg, stripe_bg);
+    assert_eq!(buf[(hash_x, 7)].fg, muted_fg);
+
+    // Basic16 & ColorDepth::None / ASCII stay unpainted and strictly ASCII.
+    for (tier, depth) in [
+        (GlyphTier::Ascii, ColorDepth::Basic16),
+        (GlyphTier::Ascii, ColorDepth::None),
+    ] {
+        let low = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(tier),
+            false,
+        );
+        let low_buf = render(&model, &low, area);
+        assert_eq!(low_buf[(50, col_header_y)].bg, Color::Reset);
+        assert!(buffer_to_string(&low_buf).is_ascii());
+    }
+
+    // Empty state renders hairline rule and Theme::keycap hints cleanly in 40x8 ASCII.
+    let empty_model = Model::new(100);
+    let ascii_none = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let empty_buf = render(&empty_model, &ascii_none, Rect::new(0, 0, 40, 8));
+    let empty_text = buffer_to_string(&empty_buf);
+    assert!(empty_text.is_ascii(), "{empty_text:?}");
+    assert!(empty_text.contains("Connection required."), "{empty_text}");
+    assert!(empty_text.contains("---"), "{empty_text}");
+}

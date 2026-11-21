@@ -31,7 +31,8 @@ use crate::ui::keymap::Keymap;
 use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
 use crate::ui::theme::Token;
 use ratatui::layout::Rect;
-use ratatui::text::Span;
+use ratatui::style::Modifier;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Block;
 
 /// A visible text cursor that belongs to the selected glyph tier.
@@ -62,6 +63,27 @@ pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> To
         Kind::Plain => Token::Text,
     }
 }
+/// Horizontal hairline rule glyph for the active tier.
+pub(crate) const fn hairline_rule(presentation: &Presentation) -> &'static str {
+    if presentation.glyphs.is_ascii() {
+        "-"
+    } else {
+        "\u{2500}"
+    }
+}
+
+/// Insets an empty-state rectangle with calm breathing room when wide/tall enough.
+pub(crate) const fn inset_empty_area(area: Rect) -> Rect {
+    let h_pad = if area.width >= 10 { 1 } else { 0 };
+    let v_pad = if area.height >= 7 { 1 } else { 0 };
+    Rect {
+        x: area.x.saturating_add(h_pad),
+        y: area.y.saturating_add(v_pad),
+        width: area.width.saturating_sub(h_pad.saturating_mul(2)),
+        height: area.height.saturating_sub(v_pad),
+    }
+}
+
 /// The shared bordered block behind a pane.
 ///
 /// It carries the pane elevation as its fill, so every pane interior is painted
@@ -77,6 +99,32 @@ pub(crate) fn pane_block(
         .style(presentation.theme.surface(Token::SurfacePane))
 }
 
+/// The shared bordered block behind a pane with a multi-span editorial title.
+pub(crate) fn pane_block_line(
+    title: Line<'static>,
+    focused: bool,
+    presentation: &Presentation,
+) -> Block<'static> {
+    let mut spans = Vec::with_capacity(title.spans.len() + 1);
+    if focused {
+        let leader = if presentation.glyphs.is_ascii() {
+            "> "
+        } else {
+            "\u{258d} "
+        };
+        spans.push(Span::styled(
+            leader,
+            presentation
+                .theme
+                .style(Token::Focus)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans.extend(title.spans);
+    bordered_line_block(Line::from(spans), focused, presentation)
+        .style(presentation.theme.surface(Token::SurfacePane))
+}
+
 /// The shared bordered block behind an overlay.
 ///
 /// An overlay is one elevation above a pane, so it paints the overlay surface.
@@ -85,6 +133,36 @@ pub(crate) fn pane_block(
 pub(crate) fn overlay_block(title: String, presentation: &Presentation) -> Block<'static> {
     bordered_block(title, true, presentation)
         .style(presentation.theme.surface(Token::SurfaceOverlay))
+}
+
+/// The shared bordered block behind an overlay with a multi-span title.
+pub(crate) fn overlay_block_line(
+    title: Line<'static>,
+    presentation: &Presentation,
+) -> Block<'static> {
+    bordered_line_block(title, true, presentation)
+        .style(presentation.theme.surface(Token::SurfaceOverlay))
+}
+
+fn bordered_line_block(
+    title: Line<'static>,
+    focused: bool,
+    presentation: &Presentation,
+) -> Block<'static> {
+    let theme = &presentation.theme;
+    let padding = " ".repeat(usize::from(presentation.spacing().title_padding));
+    let mut spans = Vec::with_capacity(title.spans.len() + 2);
+    if !padding.is_empty() {
+        spans.push(Span::raw(padding.clone()));
+    }
+    spans.extend(title.spans);
+    if !padding.is_empty() {
+        spans.push(Span::raw(padding));
+    }
+    Block::bordered()
+        .border_set(presentation.glyphs.borders(focused))
+        .border_style(theme.style(if focused { Token::Focus } else { Token::Border }))
+        .title(Line::from(spans))
 }
 
 /// The border, title and focus styling shared by panes and overlays.

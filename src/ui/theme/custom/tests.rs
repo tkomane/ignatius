@@ -189,6 +189,8 @@ fn catalog_cycles_three_or_four_and_rejects_mismatched_custom_without_mutation()
         ThemeSelection::HighContrast,
         ThemeSelection::FieldIndustrial,
         ThemeSelection::Material,
+        ThemeSelection::Atelier,
+        ThemeSelection::Paper,
         ThemeSelection::Dark,
     ] {
         active = base.cycle(&active).unwrap();
@@ -202,7 +204,11 @@ fn catalog_cycles_three_or_four_and_rejects_mismatched_custom_without_mutation()
     let before = catalog.selected_theme(true, ColorDepth::Indexed256);
     let material = catalog.cycle(&before).unwrap();
     assert_eq!(material.selection(), ThemeSelection::Material);
-    let custom = catalog.cycle(&material).unwrap();
+    let atelier = catalog.cycle(&material).unwrap();
+    assert_eq!(atelier.selection(), ThemeSelection::Atelier);
+    let paper = catalog.cycle(&atelier).unwrap();
+    assert_eq!(paper.selection(), ThemeSelection::Paper);
+    let custom = catalog.cycle(&paper).unwrap();
     assert_eq!(custom.selection(), ThemeSelection::Custom);
     assert!(base.cycle(&custom).is_err());
     assert_eq!(custom.selection(), ThemeSelection::Custom);
@@ -285,6 +291,8 @@ fn every_override_lowers_in_canonical_slot_and_every_matrix_role_is_validated() 
         ThemeChoice::HighContrast,
         ThemeChoice::FieldIndustrial,
         ThemeChoice::Material,
+        ThemeChoice::Atelier,
+        ThemeChoice::Paper,
     ] {
         let theme = Theme::new(base, true);
         for token in Token::ALL {
@@ -663,5 +671,38 @@ fn material_builtin_selection_and_extends_resolve_cleanly() {
             custom.rgb(*token),
             Theme::new(ThemeChoice::Material, true).rgb(*token)
         );
+    }
+}
+
+#[test]
+fn atelier_and_paper_builtin_selections_and_extends_resolve_cleanly() {
+    for (name, choice, expected_selection) in [
+        ("atelier", ThemeChoice::Atelier, ThemeSelection::Atelier),
+        ("paper", ThemeChoice::Paper, ThemeSelection::Paper),
+    ] {
+        let (selection, definition) = lower(&format!("[ui]\ntheme = \"{name}\"\n")).unwrap();
+        assert_eq!(selection, expected_selection);
+        assert!(definition.is_none());
+        let catalog = ValidatedThemes::resolve(selection, definition.as_ref()).unwrap();
+        let active = catalog.selected_theme(true, ColorDepth::TrueColor);
+        assert_eq!(active.selection(), expected_selection);
+        assert_eq!(
+            active.rgb(Token::Focus),
+            Theme::new(choice, true).rgb(Token::Focus)
+        );
+
+        let (selection, definition) = lower(&format!(
+            "[ui]\ntheme = \"custom\"\n[theme]\nextends = \"{name}\"\n"
+        ))
+        .unwrap();
+        assert_eq!(selection, ThemeSelection::Custom);
+        let definition = definition.expect("definition present");
+        assert_eq!(definition.base(), choice);
+        let catalog = ValidatedThemes::resolve(selection, Some(&definition)).unwrap();
+        let custom = catalog.selected_theme(true, ColorDepth::TrueColor);
+        assert_eq!(custom.selection(), ThemeSelection::Custom);
+        for token in Token::ALL {
+            assert_eq!(custom.rgb(*token), Theme::new(choice, true).rgb(*token));
+        }
     }
 }

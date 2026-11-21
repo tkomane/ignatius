@@ -60,6 +60,16 @@ pub(crate) fn render_footer(
     } else {
         presentation.icon(status_icon)
     };
+    let divider = if usize::from(area.width) <= 44 {
+        if presentation.glyphs.is_ascii() {
+            "|"
+        } else {
+            "\u{2502}"
+        }
+    } else {
+        presentation.glyphs.separator()
+    };
+    let divider_width = display_width(divider);
     let transaction = model.transaction.label();
     let mut status = format!(
         " {leader}{}",
@@ -70,17 +80,15 @@ pub(crate) fn render_footer(
         }
     );
     if server_cancelled
-        && display_width(&status) + display_width(transaction) + 2 > usize::from(area.width)
+        && display_width(&status) + display_width(transaction) + divider_width + 1
+            > usize::from(area.width)
     {
         status = format!(" {leader}Cancelled");
     }
     if let Some(elapsed) = model.running_for.filter(|_| model.phase.is_busy()) {
         status.push_str(&format!(" {:.1}s", elapsed.as_secs_f64()));
     }
-    let mut spans = vec![Span::styled(
-        format!("{status} "),
-        theme.style(status_token),
-    )];
+    let mut spans = vec![Span::styled(status, theme.on_stripe(status_token))];
 
     // The transaction state is the one thing a user can be wrong about at real
     // cost, so it sits next to the status rather than behind a panel.
@@ -89,9 +97,10 @@ pub(crate) fn render_footer(
         crate::query::result::TransactionState::Open => Token::TransactionActive,
         _ => Token::Muted,
     };
+    spans.push(Span::styled(divider, theme.on_stripe(Token::Border)));
     spans.push(Span::styled(
-        format!("{transaction} "),
-        theme.style(transaction_token),
+        transaction.to_owned(),
+        theme.on_stripe(transaction_token),
     ));
 
     let showing_transient_notice = model.retained_data_loss.limited_sets > 0
@@ -104,13 +113,14 @@ pub(crate) fn render_footer(
         .info()
         .filter(|_| !showing_transient_notice)
     {
+        spans.push(Span::styled(divider, theme.on_stripe(Token::Border)));
         spans.push(Span::styled(
             format!(
-                "{}{} ",
+                "{}{}",
                 presentation.icon(Icon::SearchPath),
                 info.search_path
             ),
-            theme.style(Token::Muted),
+            theme.on_stripe(Token::Muted),
         ));
     }
 
@@ -118,14 +128,7 @@ pub(crate) fn render_footer(
     // from focus and state, while the keymap supplies the exact active key.
     // Stop before the next complete pair would be clipped so every shown hint
     // retains both its key and its meaning in a narrow terminal.
-    let mut used = display_width(&status) + display_width(transaction) + 2;
-    if let Some(info) = model
-        .connection
-        .info()
-        .filter(|_| !showing_transient_notice)
-    {
-        used += display_width(&info.search_path) + 2;
-    }
+    let mut used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
 
     if let Some(badge) =
         crate::ui::notices::badge(model, usize::from(area.width).saturating_sub(used + 1))
@@ -133,7 +136,7 @@ pub(crate) fn render_footer(
         used += display_width(&badge) + 1;
         spans.push(Span::styled(
             format!(" {badge}"),
-            theme.style(Token::Warning),
+            theme.on_stripe(Token::Warning),
         ));
     }
 
@@ -143,7 +146,7 @@ pub(crate) fn render_footer(
             used += display_width(&badge) + 1;
             spans.push(Span::styled(
                 format!(" {badge}"),
-                theme.style(Token::Warning),
+                theme.on_stripe(Token::Warning),
             ));
         }
     }
@@ -157,7 +160,7 @@ pub(crate) fn render_footer(
         if let Some(wording) = wording {
             spans.push(Span::styled(
                 format!(" {wording}"),
-                theme.style(Token::Info),
+                theme.on_stripe(Token::Info),
             ));
         }
         Paragraph::new(Line::from(spans))
@@ -189,7 +192,7 @@ pub(crate) fn render_footer(
             truncate_to_width(compact, remaining, !presentation.glyphs.is_ascii())
         };
         if !message.is_empty() {
-            spans.push(Span::styled(format!(" {message}"), theme.style(token)));
+            spans.push(Span::styled(format!(" {message}"), theme.on_stripe(token)));
         }
         Paragraph::new(Line::from(spans))
             .style(theme.surface(Token::SurfaceAlt))
@@ -220,7 +223,7 @@ pub(crate) fn render_footer(
             truncate_to_width(compact, remaining, !presentation.glyphs.is_ascii())
         };
         if !message.is_empty() {
-            spans.push(Span::styled(format!(" {message}"), theme.style(token)));
+            spans.push(Span::styled(format!(" {message}"), theme.on_stripe(token)));
         }
         Paragraph::new(Line::from(spans))
             .style(theme.surface(Token::SurfaceAlt))
@@ -243,18 +246,22 @@ pub(crate) fn render_footer(
         if !message.is_empty() {
             spans.push(Span::styled(
                 format!(" {message}"),
-                theme.style(Token::Warning),
+                theme.on_stripe(Token::Warning),
             ));
         }
     }
 
-    let mut used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+    let used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
     let separator = if presentation.glyphs.is_ascii() {
         " | "
     } else {
         " \u{00b7} "
     };
     let separator_width = display_width(separator);
+    let keycap_style = theme.keycap(Token::Focus);
+    let label_style = theme.on_stripe(Token::Text);
+    let mut hint_spans: Vec<Span<'static>> = Vec::new();
+    let mut hints_width = 0usize;
     let mut hints_rendered = 0usize;
 
     for action in crate::app::discovery::hint_actions_for(model, presentation)
@@ -266,25 +273,43 @@ pub(crate) fn render_footer(
         };
         let key_width = display_width(&key);
         let label_width = display_width(label);
-        if hints_rendered == 0 {
-            let segment_width = key_width + label_width + 3;
-            if used.saturating_add(segment_width) > usize::from(area.width) {
-                break;
-            }
-            spans.push(Span::styled(format!(" {key} "), theme.pill(Token::Focus)));
-            spans.push(Span::styled(label, theme.style(Token::Muted)));
-            used += key_width + label_width + 2;
+        let pair_width = key_width + 2 + label_width;
+        let added_width = if hints_rendered == 0 {
+            pair_width
         } else {
-            let segment_width = separator_width + key_width + 1 + label_width;
-            if used.saturating_add(segment_width) > usize::from(area.width) {
-                break;
-            }
-            spans.push(Span::styled(separator, theme.style(Token::Border)));
-            spans.push(Span::styled(format!("{key} "), theme.pill(Token::Focus)));
-            spans.push(Span::styled(label, theme.style(Token::Muted)));
-            used += segment_width;
+            separator_width + pair_width
+        };
+        if used
+            .saturating_add(1)
+            .saturating_add(hints_width)
+            .saturating_add(added_width)
+            > usize::from(area.width)
+        {
+            break;
         }
+        if hints_rendered > 0 {
+            hint_spans.push(Span::styled(separator, theme.on_stripe(Token::Border)));
+        }
+        hint_spans.push(Span::styled(format!(" {key} "), keycap_style));
+        hint_spans.push(Span::styled(label, label_style));
+        hints_width += added_width;
         hints_rendered += 1;
+    }
+
+    if hints_rendered > 0 {
+        let total_width = usize::from(area.width);
+        if used + hints_width + 2 <= total_width {
+            let right_pad = usize::from(used + hints_width + 3 <= total_width);
+            let gap = total_width - used - hints_width - right_pad;
+            spans.push(Span::raw(" ".repeat(gap)));
+            spans.extend(hint_spans);
+            if right_pad == 1 {
+                spans.push(Span::raw(" "));
+            }
+        } else {
+            spans.push(Span::raw(" "));
+            spans.extend(hint_spans);
+        }
     }
 
     Paragraph::new(Line::from(spans))

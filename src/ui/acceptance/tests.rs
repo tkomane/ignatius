@@ -1513,6 +1513,24 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
             "Run the buffer after entering SQL.",
         ],
     );
+    let atelier = showcase_base_model(ThemeChoice::Atelier);
+    check_showcase_scene(
+        writer.as_mut(),
+        &atelier,
+        "workbench-atelier",
+        "Atelier Editorial Dark",
+        "Obsidian-espresso editorial palette with terracotta and gold accents",
+        &["[PROD]", "Ada Lovelace", "[null]"],
+    );
+    let paper = showcase_development_model(ThemeChoice::Paper);
+    check_showcase_scene(
+        writer.as_mut(),
+        &paper,
+        "workbench-paper",
+        "Archival Rag Paper",
+        "Warm editorial paper palette with Sienna and Prussian ink accents",
+        &["[DEV]", "Ada Lovelace", "[null]"],
+    );
 }
 
 fn showcase_bench_scene(writer: Option<&mut impl Write>) {
@@ -1933,6 +1951,7 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     model
         .editor
         .set_text("SELECT id, custmer_id, amount_cents FROM public.orders WHERE status = 'paid';");
+    model.editor.set_cursor(11);
     model.error_location = Some(crate::query::error_location::ErrorLocation {
         cursor: 11,
         token: Some(11..21),

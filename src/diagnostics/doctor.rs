@@ -274,6 +274,8 @@ pub fn environment_report(
                 crate::ui::theme::ThemeSelection::HighContrast => "high-contrast",
                 crate::ui::theme::ThemeSelection::FieldIndustrial => "field-industrial",
                 crate::ui::theme::ThemeSelection::Material => "material",
+                crate::ui::theme::ThemeSelection::Atelier => "atelier",
+                crate::ui::theme::ThemeSelection::Paper => "paper",
                 crate::ui::theme::ThemeSelection::Custom => "custom",
                 crate::ui::theme::ThemeSelection::Auto => "auto",
             };

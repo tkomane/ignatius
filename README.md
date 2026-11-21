@@ -16,7 +16,7 @@ the PostgreSQL client you can point at production
 [![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-336791?logo=postgresql&logoColor=white)](docs/support/compatibility.md)
 [![pgAdmin 4 Parity](https://img.shields.io/badge/pgadmin%204%20parity-M6--M14%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/architecture/pgadmin-parity-plan.md)
 [![Observability](https://img.shields.io/badge/observability-M7--M14%20perf%20%26%20ops-ff6a00?logo=speedtest&logoColor=white)](docs/product/roadmap.md)
-[![Design](https://img.shields.io/badge/design-field%20industrial%20%2F%20material%203-fbbf24?logo=color&logoColor=black)](docs/design/theme-tokens.md)
+[![Design](https://img.shields.io/badge/design-atelier%20%2F%20paper%20%2F%20material%203-e8835c?logo=color&logoColor=black)](docs/design/theme-tokens.md)
 [![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-brightgreen)](docs/security/data-handling.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -26,8 +26,8 @@ the PostgreSQL client you can point at production
 <p align="center">
   <a href="#quickstart-try-ignatius-in-60-seconds"><strong>Quickstart</strong></a> &bull;
   <a href="#visual-tour"><strong>Visual Tour</strong></a> &bull;
-  <a href="#field-industrial-theme--design-philosophy"><strong>Field Industrial &amp; Material 3 Design</strong></a> &bull;
-  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M14)</strong></a> &bull;
+  <a href="#field-industrial-theme--design-philosophy"><strong>Editorial Atelier, Paper &amp; Material 3 Design</strong></a> &bull;
+  <a href="#roadmap-full-pgadmin-replacement-parity-m6"><strong>pgAdmin Parity (M6-M16)</strong></a> &bull;
   <a href="#two-key-chord-menu-ctrlk"><strong>Keymap & Chords</strong></a> &bull;
   <a href="#non-interactive-cli-scripting--streaming-export"><strong>CLI Scripting</strong></a>
 </p>
@@ -37,7 +37,7 @@ the PostgreSQL client you can point at production
 ---
 
 <p align="center">
-  <img src="docs/assets/screenshots/workbench-field-industrial.png" alt="Ignatius workbench in Field Industrial with the object tree, SQL editor, and results grid" width="94%" />
+  <img src="docs/assets/screenshots/workbench-atelier.png" alt="Ignatius workbench in Atelier Editorial Dark with the object tree, SQL editor, and results grid" width="94%" />
 </p>
 
 A keyboard-first, mouse-fluent terminal workbench and scriptable CLI for PostgreSQL built in Rust (`ratatui` + `tokio-postgres`). Inspired by modern developer terminal tools like OpenCode, Lazygit, Harlequin, Neo-tree, Telescope.nvim, Blink.cmp, and Trouble.nvim, Ignatius delivers a calm, truthful, GUI-grade experience right inside your terminal. No telemetry, no user accounts, and no cloud intermediaries in the loop.
@@ -50,7 +50,7 @@ Ignatius ends that compromise. Everything a developer expects from a modern visu
 
 | Pillar | How Ignatius Delivers It |
 | --- | --- |
-| **4-Tier Surface Architecture & Adaptive Themes** | Five built-in palettes: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, and Google Material 3 Tonal `material`, plus `[theme]` `custom` overrides and `OSC 11` background detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
+| **4-Tier Surface Architecture & Adaptive Themes** | Seven built-in palettes: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, Google Material 3 Tonal `material`, warm obsidian-espresso `atelier`, and archival rag-paper `paper`, plus `[theme]` `custom` overrides and `OSC 11` background detection (`ui.theme = "auto"`), degrading cleanly through `TrueColor`, `Indexed256`, and `Basic16`. |
 | **Truthful Results Grid** | `NULL` (`[null]`), empty string (`""`), and literal `"NULL"` (`"NULL"`) are always visually and copy-distinct. JSON/JSONB values, arrays, numeric right-alignment, sort indicators, row numbers, and horizontal/vertical scrolling work out of the box. |
 | **Safety by Construction** | Production profiles (`environment = "prod"`) and read-only profiles (`read-only = true`) show distinct header badges. Destructive statements (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`) open a confirmation in production. Reviewed cell edits (`Ctrl+K u`) show the primary-key target before execution and are refused on read-only connections. |
 | **Schema-Aware Editor & Overlays** | Multi-line SQL editor with active `CursorLine` & `CursorLineNr`, 1 MiB bounded bracketed paste, schema-aware `Ctrl+Space` completion popup, 80%x75% Command Palette (`Ctrl+P`) with 40%/60% list-and-SQL preview split, interactive `EXPLAIN` / `EXPLAIN ANALYZE` Plan Explorer (`Ctrl+K l` / `Ctrl+K a`), and layered PostgreSQL diagnostics (`SQLSTATE`, statement line/column, token pinning, likely cause, and next step). |
@@ -79,7 +79,12 @@ Ignatius is designed under the philosophy that developer tools should feel like 
   - **Header Group Delimiter**: A crisp border-toned separator (`|` in ASCII mode, vertical bar in Unicode mode) divides connection posture capsules on the left from active transaction, watch, and elapsed timing telemetry on the right.
   - **Footer Hint Pills**: Contextual keybindings render inside `Theme::pill(Token::Focus)` capsules with subtle separators, preserving complete key/label pairs and dropping whole hints cleanly at narrow terminal widths.
   - **Structured Empty States**: Disconnected, waiting, empty-result, and empty-filter panes in Objects and Results present bold icon/headline anchors, muted guidance, and `Theme::pill(Token::Focus)` starter key capsules.
-  - **Aligned `ignatius doctor` Output**: Plain health diagnostics align under `STATUS  CHECK  DETAIL` rules and report the resolved configuration theme (`dark`, `light`, `high-contrast`, `field-industrial`, `material`, `custom`, or `auto`).
+  - **Aligned `ignatius doctor` Output**: Plain health diagnostics align under `STATUS  CHECK  DETAIL` rules and report the resolved configuration theme (`dark`, `light`, `high-contrast`, `field-industrial`, `material`, `atelier`, `paper`, `custom`, or `auto`).
+
+### Editorial Gallery Themes (`atelier` & `paper`) & Tactile Chrome
+- **Atelier Editorial Dark (`[ui] theme = "atelier"`)**: Warm obsidian-espresso 4-tier surfaces (`#121110`, `#1A1816`, `#23201D`, `#2D2925`) with cream ink typography (`#EDE7DC` / `#F7F2E8`), terracotta focus (`#E8835C`), dusty steel selection (`#9BB5C9`), sage success (`#7EC49B`), antique gold warnings (`#E6B85C`), and warm coral alerts (`#EA827C`).
+- **Archival Rag Paper (`[ui] theme = "paper"`)**: Tactile editorial paper light theme (`#ECE6DA`, `#F7F3EB`, `#E4DDD0`, `#DDD5C5`) with carbon ink (`#1E1B18` / `#141210`), Sienna focus (`#9E3418`), Prussian slate selection (`#244B73`), and deep mineral syntax tones.
+- **Tactile Keycaps & Recessed Modal Pills**: Rail hints and the header brand pill use `Theme::keycap` (`SurfaceOverlay` elevation over `SurfaceAlt` rails) with right-aligned footer shortcuts when space permits, while secondary modal metrics use `Theme::recessed_pill` (non-dimmed `SurfaceAlt` pills inside `SurfaceOverlay` dialogs) with hairline tab/body dividers, full-width Spotlight palette input strips, and word-safe tree metadata truncation.
 
 ---
 
@@ -218,7 +223,15 @@ Ignatius makes quick data edits safe, transparent, and auditable:
 - **Explicit Modal Review**: The modal displays the proposed SQL, new value, and primary key `WHERE` predicates in full. Pressing `Enter` executes the single update, while `Esc` cancels without side-effects.
 - **Production Protection**: The write guard blocks ad-hoc cell updates in production profiles (`environment = "prod"`) and read-only sessions (`--read-only`), preventing accidental mutations.
 
-### Adaptive Dark, Light, High-Contrast, Field Industrial & Material Tonal Themes
+### Adaptive Dark, Light, High-Contrast, Field Industrial, Material Tonal, Atelier & Paper Themes
+
+#### Atelier Editorial Dark
+
+![Atelier Editorial Dark workbench with terracotta focus, warm obsidian surfaces, and elevated keycaps](docs/assets/screenshots/workbench-atelier.png)
+
+#### Archival Rag Paper
+
+![Archival Rag Paper workbench in warm light rag-paper tones with Sienna and Prussian accents](docs/assets/screenshots/workbench-paper.png)
 
 #### Material 3 Tonal
 
@@ -233,8 +246,8 @@ Ignatius makes quick data edits safe, transparent, and auditable:
 ![Ignatius Light Theme](docs/assets/screenshots/workbench-light.png)
 
 Built on a 4-tier painted surface system (`Surface`, `SurfaceAlt`, `SurfacePane`, `SurfaceOverlay`):
-- **Five Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, and Google Material 3 Tonal Dark `material`.
-- **Runtime Theme Cycling**: Open the Command Palette (`Ctrl+P` -> "Switch theme") or configure `[keys] switch-theme = "..."` to instantly cycle `dark -> light -> high-contrast -> field-industrial -> material -> custom?` without reconnecting or re-running SQL.
+- **Seven Built-in Palettes**: TokyoNight-inspired `dark`, Catppuccin Latte-inspired `light`, WCAG AAA `high-contrast`, Dieter Rams `field-industrial`, Google Material 3 Tonal Dark `material`, obsidian-espresso `atelier`, and archival rag-paper `paper`.
+- **Runtime Theme Cycling**: Open the Command Palette (`Ctrl+P` -> "Switch theme") or configure `[keys] switch-theme = "..."` to instantly cycle `dark -> light -> high-contrast -> field-industrial -> material -> atelier -> paper -> custom?` without reconnecting or re-running SQL.
 - **Terminal Integration**: Supports automatic background luminance detection via `OSC 11` queries (`ui.theme = "auto"`), and user-defined color overrides in `[theme]`.
 
 ### Benchmarks, Schema Drift & SQL Runbooks
@@ -303,7 +316,7 @@ PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' docker/dev.env)" \
 - Navigate cells with the arrow keys (`Up`, `Down`, `Left`, `Right`). Press `Enter` (or `Ctrl+K i`) to inspect any value in the Cell Detail viewer.
 - On a single-table result row with a primary key, press `Ctrl+K u` to preview a reviewed `UPDATE` statement.
 - Press `Ctrl+P` to open the Command Palette with live 60% SQL preview.
-- In the Command Palette (`Ctrl+P`), select **Switch theme** to cycle between `dark`, `light`, `high-contrast`, `field-industrial`, and `material` themes.
+- In the Command Palette (`Ctrl+P`), select **Switch theme** to cycle between `dark`, `light`, `high-contrast`, `field-industrial`, `material`, `atelier`, and `paper` themes.
 - Press `Ctrl+K l` to inspect the visual EXPLAIN query plan.
 
 ### 4. Tear Down
@@ -337,7 +350,7 @@ Connection profiles and client preferences live in `~/.config/ignatius/config.to
 
 ```toml
 [ui]
-theme = "auto"              # "dark", "light", "high-contrast", "field-industrial", "material", "custom", or "auto" (OSC 11)
+theme = "auto"              # "dark", "light", "high-contrast", "field-industrial", "material", "atelier", "paper", "custom", or "auto" (OSC 11)
 mouse = true                # enable mouse clicks, drags, and scrolling
 density = "comfortable"     # "comfortable" or "compact"
 reduced-motion = false      # set true to disable animations
@@ -861,6 +874,8 @@ Milestone 7 elevates Ignatius from a functional database administration workbenc
   - [Structured Type Inspector](docs/design/structured-type-inspector.md) extends Cell Detail with a tree, exact raw text and reviewed edits on eligible cells.
   - [Query Plan History](docs/design/query-plan-history.md) compares local estimates and explicit latency measurements across schema revisions.
   - `ignatius fleet` compares named environments using read-only catalog queries and reports drift and unavailable evidence.
+- **Milestone 16: Editorial High-Art TUI Aesthetic, Atelier & Paper Themes (`062`) [COMPLETED]**:
+  - `062-editorial-tui-aesthetic-and-atelier-themes` [Implemented]: Curated warm obsidian-espresso `atelier` dark and archival rag-paper `paper` built-in themes (`>= 4.5:1` across all 4 surfaces), `Theme::keycap` elevated rail keycaps, `Theme::recessed_pill` high-contrast modal pills, right-aligned footer hint rail, Spotlight command palette input bar, hairline modal rules, width-aware modal capsule bars, and 14 2x HiDPI showcase renders.
 
 ---
 

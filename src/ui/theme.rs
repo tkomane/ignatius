@@ -418,6 +418,8 @@ impl Theme {
             ActivePalette::Builtin(ThemeChoice::HighContrast) => high_contrast(token),
             ActivePalette::Builtin(ThemeChoice::FieldIndustrial) => field_industrial(token),
             ActivePalette::Builtin(ThemeChoice::Material) => material(token),
+            ActivePalette::Builtin(ThemeChoice::Atelier) => atelier(token),
+            ActivePalette::Builtin(ThemeChoice::Paper) => paper(token),
             ActivePalette::Custom(palette) => palette.colors[token.index()],
         }
     }
@@ -621,6 +623,58 @@ const fn material(token: Token) -> Rgb {
     }
 }
 
+const fn atelier(token: Token) -> Rgb {
+    // Warm obsidian-espresso dark surfaces with terracotta, antique gold, and slate accents.
+    match token {
+        Token::Surface => Rgb(0x12, 0x11, 0x10),
+        Token::SurfacePane => Rgb(0x1a, 0x18, 0x16),
+        Token::SurfaceAlt => Rgb(0x23, 0x20, 0x1d),
+        Token::SurfaceOverlay => Rgb(0x2d, 0x29, 0x25),
+        Token::Text => Rgb(0xed, 0xe7, 0xdc),
+        Token::Header => Rgb(0xf7, 0xf2, 0xe8),
+        Token::Muted | Token::EnvironmentNonProduction => Rgb(0xab, 0xa2, 0x95),
+        Token::NullValue => Rgb(0xa6, 0x9d, 0x90),
+        Token::Border => Rgb(0x4e, 0x47, 0x40),
+        Token::Focus => Rgb(0xe8, 0x83, 0x5c),
+        Token::Selection => Rgb(0x9b, 0xb5, 0xc9),
+        Token::Success => Rgb(0x7e, 0xc4, 0x9b),
+        Token::Warning | Token::TransactionActive => Rgb(0xe6, 0xb8, 0x5c),
+        Token::Danger | Token::TransactionFailed => Rgb(0xea, 0x82, 0x7c),
+        Token::EnvironmentProduction => Rgb(0xf0, 0x8a, 0x84),
+        Token::Info => Rgb(0x80, 0xc1, 0xd4),
+        Token::SyntaxKeyword => Rgb(0xd4, 0x9c, 0xe0),
+        Token::SyntaxLiteral => Rgb(0x94, 0xcc, 0x8a),
+        Token::SyntaxNumber => Rgb(0xeb, 0xbf, 0x72),
+        Token::SyntaxComment => Rgb(0xa8, 0x9f, 0x92),
+        Token::SyntaxIdentifier => Rgb(0x88, 0xc7, 0xdc),
+    }
+}
+
+const fn paper(token: Token) -> Rgb {
+    // Warm archival rag-paper light surfaces with Sienna, Prussian, and forest ink accents.
+    match token {
+        Token::Surface => Rgb(0xec, 0xe6, 0xda),
+        Token::SurfacePane => Rgb(0xf7, 0xf3, 0xeb),
+        Token::SurfaceAlt => Rgb(0xe4, 0xdd, 0xd0),
+        Token::SurfaceOverlay => Rgb(0xdd, 0xd5, 0xc5),
+        Token::Text => Rgb(0x1e, 0x1b, 0x18),
+        Token::Header => Rgb(0x14, 0x12, 0x10),
+        Token::Muted | Token::EnvironmentNonProduction => Rgb(0x4d, 0x46, 0x3e),
+        Token::NullValue => Rgb(0x50, 0x49, 0x40),
+        Token::Border => Rgb(0xb0, 0xa6, 0x98),
+        Token::Focus => Rgb(0x9e, 0x34, 0x18),
+        Token::Selection => Rgb(0x24, 0x4b, 0x73),
+        Token::Success => Rgb(0x17, 0x5b, 0x3b),
+        Token::Warning | Token::TransactionActive | Token::SyntaxNumber => Rgb(0x73, 0x45, 0x00),
+        Token::Danger | Token::TransactionFailed => Rgb(0x99, 0x1b, 0x20),
+        Token::EnvironmentProduction => Rgb(0x8d, 0x14, 0x1b),
+        Token::Info | Token::SyntaxIdentifier => Rgb(0x12, 0x50, 0x67),
+        Token::SyntaxKeyword => Rgb(0x65, 0x26, 0x6b),
+        Token::SyntaxLiteral => Rgb(0x18, 0x59, 0x38),
+        Token::SyntaxComment => Rgb(0x4f, 0x48, 0x3f),
+    }
+}
+
 impl Theme {
     /// A filled capsule: the token as a background, the surface as the text.
     ///
@@ -678,11 +732,32 @@ impl Theme {
     /// paint surfaces) with bold `token` foreground.
     #[must_use]
     pub fn pill(&self, token: Token) -> Style {
+        self.surface_badge(token, Token::SurfaceAlt, false)
+    }
+
+    /// An elevated keycap badge for chrome rails: `SurfaceOverlay` background
+    /// (at depths that paint surfaces) with bold `token` foreground.
+    #[must_use]
+    pub fn keycap(&self, token: Token) -> Style {
+        self.surface_badge(token, Token::SurfaceOverlay, false)
+    }
+
+    /// A recessed badge for `SurfaceOverlay` modals: `SurfaceAlt` background
+    /// (at depths that paint surfaces) with bold, non-dimmed `token` foreground.
+    #[must_use]
+    pub fn recessed_pill(&self, token: Token) -> Style {
+        self.surface_badge(token, Token::SurfaceAlt, true)
+    }
+
+    fn surface_badge(&self, token: Token, surface_token: Token, strip_dim: bool) -> Style {
         let mut style = self.style(token);
+        if strip_dim {
+            style.add_modifier.remove(Modifier::DIM);
+        }
         if self.color && self.depth != ColorDepth::None {
             style = style.add_modifier(Modifier::BOLD);
         }
-        if let Some(bg) = self.surface(Token::SurfaceAlt).bg {
+        if let Some(bg) = self.surface(surface_token).bg {
             style = style.bg(bg);
         }
         style
@@ -706,6 +781,12 @@ impl Theme {
             }
             ActivePalette::Builtin(ThemeChoice::Material) => {
                 (Rgb(0x8A, 0xB4, 0xF8), Rgb(0x78, 0xD9, 0xEC))
+            }
+            ActivePalette::Builtin(ThemeChoice::Atelier) => {
+                (Rgb(0xE8, 0x83, 0x5C), Rgb(0xE6, 0xB8, 0x5C))
+            }
+            ActivePalette::Builtin(ThemeChoice::Paper) => {
+                (Rgb(0x9E, 0x34, 0x18), Rgb(0x24, 0x4B, 0x73))
             }
             ActivePalette::Custom(_) => (self.rgb(Token::SyntaxKeyword), self.rgb(Token::Info)),
         }
