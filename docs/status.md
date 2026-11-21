@@ -1,8 +1,36 @@
 # Status
 
-**Updated: 2026-11-20.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-21.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 64 - P3 Warp acceptance, PR 121 and ADR-0008 review - 21 November 2026
+
+- The exact `ci/44721590021-1` (`5e5712a`) `aarch64-apple-darwin` archive
+  verified against `release-manifest.json` (`a7321380...`) and ran inside
+  installed `/Applications/Warp.app` (`0.2026.11.11.08.17.01`, `116x30`) via
+  temporary launch configuration (cleaned up afterward). Direct OSC 11 returned
+  `\x1b]11;rgb:0000/1313/1919\x07` (`#001319`, luminance `0.005359` -> `dark`),
+  `ignatius doctor --json` (`ui.theme = "auto"`) passed (`11 ok`), live
+  `verify-full` PG 18.7 `--plain` journey passed with zero ANSI bytes, and
+  full-screen runs (`auto`, `NO_COLOR=1`, `--ascii`, `ui.mouse = false`)
+  restored `stty -g` and OSC 11 byte for byte after `SIGTERM`. Under `TERM=dumb`
+  on a real Warp TTY, `5e5712a` suppressed color rather than refusing
+  full-screen entry (piped `!is_terminal` refused with exit 2); `compatibility.md`
+  was reconciled. VoiceOver was inactive (`voiceOverOnOffKey` absent), and human
+  Warp, Windows 11, Linux desktop, and screen-reader auditory reviews remain
+  open. [Warp acceptance evidence](operations/verification.md#installed-warp-acceptance-pr-121-and-adr-0008---21-november-2026)
+- Dependabot PR #121 (`7248fcde20ed88f0470a52534667fb86b5acac54`, `Cargo.lock`-only:
+  `bytes 1.12.2`, `clap 4.6.8`, `clap_complete 4.6.12`, `clap_derive 4.6.8`,
+  `syn 3.0.10`, `zeroize 1.9.2`) passed all 17 runnable hosted CI/CodeQL checks,
+  local `cargo --locked xtask verify` against PG 18.7 plain/TLS (`2,159`
+  executed + `1` Unix-socket skip), `127` contract tests, and CycloneDX 1.5 SBOM
+  `generate`/`verify` (`328` crates), and squash-merged into `main` as
+  `9cc6d7e0d6e7f2cc4d04daa17421d9a5c882a35f` (post-merge CI `44940180107` and
+  CodeQL `44940180103` passed).
+- Re-checking `ci/44721590021-1` confirmed `cargo --locked xtask release check`
+  exits `1` with 8 open ADR-0008 blockers; `008 T033` and `T035` remain open
+  with an owner release decision checklist in [release operations](operations/release.md#owner-release-decision-checklist-adr-0008).
 
 ## Wave 63 - Release quickstart and cancellation - 20 November 2026
 

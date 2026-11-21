@@ -1,5 +1,87 @@
 # Verification
 
+## Installed Warp acceptance, PR 121 and ADR-0008 - 21 November 2026
+
+An isolated macOS 27.2.1 (`26B131`, arm64) run exercised the signed
+`ci/44721590021-1` archive (`ignatius-0.1.0-aarch64-apple-darwin.tar.gz`,
+`5,875,883` bytes, SHA-256
+`368bfa594f01567c1daa63ab464f83a2f55ef4d311f94d76157124026a641e2f`; extracted
+binary `14,729,520` bytes, SHA-256
+`71c5169a53f16abc8b41fc905f4ea9b7b0e97bc774db779872222a7b61817ca9`, source
+`5e5712a25e75f08b02df7525b283d7a81ac355c9`) inside the installed
+`/Applications/Warp.app` (`dev.warp.Warp-Stable`, `0.2026.11.11.08.17.01`) via
+a temporary launch configuration (`warp://launch/ignatius-p3-acceptance`, removed
+after the run; macOS `AXIsProcessTrusted` and
+`CGPreflightScreenCaptureAccess` remained `false`).
+
+- **Installed Warp metadata and OSC 11.** Inside the real Warp PTY (`116x30`,
+  `TERM=xterm-256color`, `TERM_PROGRAM=WarpTerminal`,
+  `TERM_PROGRAM_VERSION=v0.2026.11.11.08.17.stable_01`, `COLORTERM=truecolor`),
+  a direct raw-mode `/dev/tty` OSC 11 probe returned
+  `\x1b]11;rgb:0000/1313/1919\x07` in `21.8 ms` (`#001319`, WCAG relative
+  luminance `0.005359` -> `dark`). With isolated configuration (`ui.theme =
+  "auto"`), `ignatius doctor --json` exited `0` (`11 ok, 0 warn, 0 fail, 1
+  skipped`), emitted OSC 11, and reported `answered rgb(0, 19, 25); using dark`
+  and `truecolor, source COLORTERM`.
+- **Installed Warp `--plain` verified-TLS journey.** Against disposable
+  PostgreSQL 18.7 over `verify-full` TLS (`localhost:55433`, `--environment
+  production`), the `5e5712a` binary completed connect (`[PROD] [read-write]`,
+  `TLSv1.3 using TLS_AES_256_GCM_SHA384`), `orders` and `rendering_cases`
+  (`sql_null -> [null]`, `empty_string`, `literal_null -> NULL`), error
+  `42P01`, `pg_sleep(30)` `Ctrl+C` cancellation (`SQLSTATE 57014`, `Query
+  cancelled by server`) plus recovery query, and aborted-transaction `25P02` +
+  `ROLLBACK` recovery with `0` ANSI escape bytes across `3,157` PTY bytes. CSV
+  export (`--format csv --output`) exited `0` with `3` data rows, `0` ANSI
+  bytes, and SHA-256
+  `832c915a9b37ecfcbb17f18b4c308fe0530b2b42b552aa812f3715590e05ef53`, and the
+  temporary export file was removed.
+- **Installed Warp full-screen restoration matrix and `TERM=dumb` finding.**
+  Isolated full-screen runs with `ui.theme = "auto"`, `NO_COLOR=1`, `--ascii`,
+  and `ui.mouse = false` ran over `verify-full` TLS for ~`2.05 s`, showed
+  `[PROD]`, exited `0` on `SIGTERM`, emitted reverse-order cleanup sequences
+  (`ui.mouse = false` skipped mouse enable/disable), and restored both
+  `stty -g` and OSC 11 (`\x1b]11;rgb:0000/1313/1919\x07`) byte for byte.
+  With `TERM=dumb` on a real Warp TTY (`is_terminal == true`), `5e5712a`
+  suppressed color (`0` SGR color sequences) and entered the alternate screen
+  until `SIGTERM` (exit `0`, terminal modes and OSC 11 restored), whereas piped
+  (`!is_terminal`) execution exited `2` (`Usage error: the interactive client
+  needs a terminal`).
+- **Accessibility and `--plain` separate-stream audit.** VoiceOver was observed
+  read-only as inactive (`voiceOverOnOffKey` absent; settings unchanged). A
+  separate-stream `--plain --environment production` pipe run against
+  PostgreSQL 18.7 `verify-full` exited `0` (`stdout`: `877` bytes / `24` lines;
+  `stderr`: `2,662` bytes / `56` lines; `0` `0x1b` bytes or disallowed control
+  characters), verifying `rendering_cases` (`escape_attack` escaped as
+  printable `\x1B[2J...`), `42P01`, `57014` cancellation, and `ROLLBACK`
+  recovery. Human VoiceOver/NVDA auditory review, human interactive keyboard/mouse
+  visual hand use in signed Warp, Windows 11 Terminal hand use (`001 T051`),
+  and Linux desktop/WSL hand use (`001 T052`, `007 T032`/`T033`) remain open.
+- **Local receipts (sanitized, outside repository):**
+  - Combined Warp and `--plain` audit receipt SHA-256:
+    `8a34d17c5c0552bd0a228208fa3b143716d229ed29439cb65d5cf49a5c2b5fb1`
+  - Raw Warp session receipt SHA-256:
+    `c0620b783bc1fc44eddf94d6293203cb53854ce96a7c8fced56477909bbe3eb3`
+  - Plain audit receipt SHA-256:
+    `f75ab037e268155e933319621fe9145cf8656bcad89e6bc2d9e0d3d4ef68db6d`
+
+- **Dependabot PR 121 and ADR-0008 readiness.** PR 121 (`7248fcde20ed88f0470a52534667fb86b5acac54`,
+  `Cargo.lock`-only updates for `bytes 1.12.2`, `clap 4.6.8`, `clap_complete 4.6.12`,
+  `clap_derive 4.6.8`, `syn 3.0.10`, and `zeroize 1.9.2`) passed all 17 runnable
+  hosted CI + CodeQL checks, local `cargo --locked xtask verify` on macOS arm64
+  with `rustc 1.100.0` against disposable PG 18.7 plain/TLS fixtures (`2,159`
+  executed tests across 52 binaries + `1` Unix-socket skip because
+  `IGNATIUS_TEST_PG_SOCKET_URI` was unset), `127` focused contract tests
+  (`documentation_matches_the_build`, `release_contract`, `workflow_contract`),
+  CycloneDX 1.5 SBOM `generate`/`verify` (`328` crates, SHA-256
+  `c8022bbaadb2fb691ee6da073910fa5b29402671b85ac217492ceba9cc0119b3`), and
+  `zeroize 1.9.2` `SecretString` audit before squash-merging as `9cc6d7e0d6e7f2cc4d04daa17421d9a5c882a35f`
+  (post-merge CI `44940180107` and CodeQL `44940180103` passed). Because
+  PR 121 changes `Cargo.lock`, any new candidate built from post-PR 121 `main`
+  must be rebuilt, archived, and re-verified rather than reusing `5e5712a`
+  bytes. Re-checking `ci/44721590021-1` under `cargo --locked xtask release check`
+  confirmed exit `1` with the 8 ADR-0008 blockers still open; `008 T033` and
+  `T035` remain open.
+
 ## Cancellation-fix candidate - 20 November 2026
 
 The three exact archives from `ci/44721590021-1` at

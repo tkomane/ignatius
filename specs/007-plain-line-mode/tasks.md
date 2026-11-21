@@ -137,6 +137,18 @@ strengthens automated Linux evidence for the full-screen refusal, `TERM=dumb`
 plain-mode and terminal lifecycle paths, but it is not hand use of a Linux
 terminal and does not close the Windows or screen-reader gates.
 
+Partial T032/T033 evidence on 2026-11-21: the `5e5712a` archive (`ci/44721590021-1`)
+completed a live verified-TLS PostgreSQL 18.7 `--plain --environment production`
+journey (connect, NULL/`[null]` distinction, SQLSTATE `42P01`, `pg_sleep`
+SIGINT `57014` cancellation, CSV export, and `25P02`/`ROLLBACK` recovery) inside
+installed `/Applications/Warp.app` (`0.2026.11.11.08.17.01`) and in a
+separate-stream pipe audit with zero ANSI escapes or disallowed control bytes.
+VoiceOver was read-only inactive; human VoiceOver/NVDA auditory review, Windows
+Terminal hand use, and Linux desktop hand use remain open, so T032 and T033 stay
+unchecked. Note also that `5e5712a` suppresses color on a `TERM=dumb` real TTY
+rather than refusing full-screen entry (exit 2 refusal applies when `!is_terminal`).
+[Warp and plain transcript evidence](../../docs/operations/verification.md#installed-warp-acceptance-pr-121-and-adr-0008---21-november-2026).
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

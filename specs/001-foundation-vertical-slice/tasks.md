@@ -205,8 +205,11 @@ are independent of one another.
 
 ## Status
 
-T051 and T052 remain open for Windows 11 and Linux hand use. T055a covers
-the automated Windows Terminal and ConPTY restoration cases.
+T051 and T052 remain open for Windows 11 and Linux hand use (installed Warp
+interactive human hand use also remains open after the 21 November 2026
+installed-Warp OSC 11, `--plain` TLS, and `SIGTERM` restoration acceptance
+run; see [Warp acceptance](../../docs/operations/verification.md#installed-warp-acceptance-pr-121-and-adr-0008---21-november-2026)).
+T055a covers the automated Windows Terminal and ConPTY restoration cases.
 Current assignments and evidence are carried in `docs/status.md`.
 
 T055a evidence on 2026-11-20: the actual standalone Guard restored raw input,
