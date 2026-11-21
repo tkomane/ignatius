@@ -543,11 +543,16 @@ an independent byte-identical reconstruction of the 12-file hosted aggregate
 passed. Readiness remained blocked.
 [Quickstart replay](../../docs/operations/verification.md#release-quickstart-replay)
 
-The full quickstart still needs Windows and Linux hand verification. T033
-remains open for that acceptance, the canonical evidence path and live
-supply-chain evidence. T034 is complete for the non-publishing workflow.
-T035 remains open until the release criteria have evidence and the roadmap
-can record their completion.
+The full quickstart still needs Windows and Linux hand verification, human signed
+Warp hand use, and VoiceOver/NVDA auditory review. On 21 November 2026,
+installed Warp OSC 11, `--plain` TLS, and `SIGTERM` restoration checks passed
+on `ci/44721590021-1` (`5e5712a`), `cargo --locked xtask release check`
+re-confirmed exit `1` with 8 open ADR-0008 blockers, and Dependabot PR #121
+(`9cc6d7e0`) updated `Cargo.lock` (requiring fresh archive builds for any
+candidate taken from newer `main`). T033 remains open for hand acceptance, the
+canonical evidence path, and live supply-chain evidence. T034 is complete for
+the non-publishing workflow. T035 remains open until the release criteria have
+evidence and the roadmap can record their completion.
 
 ## Dependencies and execution order
 

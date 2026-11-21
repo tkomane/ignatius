@@ -81,11 +81,42 @@ checks need the approved signer and builder identities and trust sidecars.
 archives, their checksums, trust sidecars and reviewed notes.
 Readiness failed with exit 1 and eight issues covering the untagged detached
 record, incomplete canonical evidence, non-publishable state and absent
-verified signature and provenance. Terminal and screen-reader hand use,
-the approved release identities and retention, and exact publication
-authorization are open. [Proposed destination](https://github.com/tkomane/ignatius/releases),
+verified signature and provenance. Note that Dependabot PR #121 merged into
+`main` at `9cc6d7e0d6e7f2cc4d04daa17421d9a5c882a35f`, updating `Cargo.lock`
+after `5e5712a`; any release candidate selected from current `main` must
+rebuild and re-verify fresh archives rather than reusing `ci/44721590021-1`.
+Human terminal and screen-reader hand use, the approved release identities and
+retention, and exact publication authorization remain open.
+[Proposed destination](https://github.com/tkomane/ignatius/releases),
 [release gates](../architecture/decisions/0008-packaging-and-release.md#live-release-gates),
 [pre-publication checks](#before-any-public-release).
+
+### Owner release decision checklist (ADR-0008)
+
+Before any tag, signing, attestation, or public release operation can proceed:
+
+1. **Frozen source revision and tag.** Approve the exact clean commit on `main`
+   and version tag (for example `v0.1.0`), plus the matching `CHANGELOG.md`
+   heading (`notes_reference.entry`) so `release-notes/validate.sh` passes on
+   the generated aggregate record.
+2. **Approved signing and provenance identities.** Record the exact Sigstore
+   keyless `--certificate-identity` workflow ref (`https://token.actions.githubusercontent.com`),
+   SLSA `--signer-workflow` / `--builder-id`, and rotation, expiry,
+   revocation, and outage policies.
+3. **Canonical evidence promotion and retention.** Approve promoting or mapping
+   the workflow upload bundle into `release-evidence/runs/<run>/<target>/` and
+   the permanent evidence retention boundary (replacing 7-day Actions storage).
+4. **Independent trust-sidecar generation and verification.** Run signing and
+   SLSA attestation generation in the authorized workflow and independently
+   verify `<archive>.sigstore.json` and `<archive>.intoto.jsonl` with `cosign
+   verify-blob` and `gh attestation verify` / `slsa-verifier verify-artifact`.
+5. **Remaining platform and governance closures.** Complete human hand use on
+   signed Warp (`macOS`), Windows 11 Terminal (`001 T051`), Linux desktop
+   (`001 T052`), and human VoiceOver/NVDA auditory review (`007 T032`/`T033`),
+   plus trademark/domain confirmation and `SECURITY.md` reporting test.
+6. **Explicit publication authorization.** Record owner approval naming exact
+   product version, source revision, target set, artefact destination, and
+   `authorization_reference` so `cargo --locked xtask release check` exits `0`.
 
 ## Candidate review - 20 November 2026
 
