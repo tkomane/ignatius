@@ -4,13 +4,15 @@ const READABLE: f64 = 4.5;
 const LARGE_OR_SECONDARY: f64 = 3.0;
 const HIGH_CONTRAST_MINIMUM: f64 = 7.0;
 
-fn themes() -> [Theme; 5] {
+fn themes() -> [Theme; 7] {
     [
         Theme::new(ThemeChoice::Dark, true),
         Theme::new(ThemeChoice::Light, true),
         Theme::new(ThemeChoice::HighContrast, true),
         Theme::new(ThemeChoice::FieldIndustrial, true),
         Theme::new(ThemeChoice::Material, true),
+        Theme::new(ThemeChoice::Atelier, true),
+        Theme::new(ThemeChoice::Paper, true),
     ]
 }
 
@@ -391,6 +393,8 @@ fn basic_16_emits_family_foregrounds_and_paints_no_surface() {
         ThemeChoice::HighContrast,
         ThemeChoice::FieldIndustrial,
         ThemeChoice::Material,
+        ThemeChoice::Atelier,
+        ThemeChoice::Paper,
     ] {
         let theme = Theme::new(choice, true).with_depth(ColorDepth::Basic16);
         for token in Token::ALL {
@@ -942,4 +946,184 @@ fn material_surfaces_capsules_and_quantization_preserve_distinction() {
     assert_eq!(indexed.banner_ramp(59).len(), 59);
     let basic = material.with_depth(ColorDepth::Basic16);
     assert_eq!(basic.banner_ramp(59).len(), 59);
+}
+
+#[test]
+fn atelier_and_paper_surfaces_contrast_capsules_and_quantization() {
+    let atelier = Theme::new(ThemeChoice::Atelier, true);
+    assert_eq!(atelier.rgb(Token::Surface), Rgb(0x12, 0x11, 0x10));
+    assert_eq!(atelier.rgb(Token::SurfacePane), Rgb(0x1a, 0x18, 0x16));
+    assert_eq!(atelier.rgb(Token::SurfaceAlt), Rgb(0x23, 0x20, 0x1d));
+    assert_eq!(atelier.rgb(Token::SurfaceOverlay), Rgb(0x2d, 0x29, 0x25));
+    assert_eq!(atelier.rgb(Token::Focus), Rgb(0xe8, 0x83, 0x5c));
+    assert_eq!(
+        atelier.banner_anchors(),
+        (Rgb(0xe8, 0x83, 0x5c), Rgb(0xe6, 0xb8, 0x5c))
+    );
+    assert!(atelier.background().luminance() < 0.05);
+
+    let paper = Theme::new(ThemeChoice::Paper, true);
+    assert_eq!(paper.rgb(Token::Surface), Rgb(0xec, 0xe6, 0xda));
+    assert_eq!(paper.rgb(Token::SurfacePane), Rgb(0xf7, 0xf3, 0xeb));
+    assert_eq!(paper.rgb(Token::SurfaceAlt), Rgb(0xe4, 0xdd, 0xd0));
+    assert_eq!(paper.rgb(Token::SurfaceOverlay), Rgb(0xdd, 0xd5, 0xc5));
+    assert_eq!(paper.rgb(Token::Focus), Rgb(0x9e, 0x34, 0x18));
+    assert_eq!(
+        paper.banner_anchors(),
+        (Rgb(0x9e, 0x34, 0x18), Rgb(0x24, 0x4b, 0x73))
+    );
+    assert!(paper.background().luminance() > 0.7);
+
+    for theme in [&atelier, &paper] {
+        let tiers = surfaces(theme);
+        for (i, left) in tiers.iter().enumerate() {
+            for (j, right) in tiers.iter().enumerate() {
+                if i != j {
+                    assert_ne!(left, right, "surface tiers {i} and {j} must be distinct");
+                }
+            }
+            assert_ne!(
+                theme.rgb(Token::Border),
+                *left,
+                "border must remain distinct from surface tier {i}"
+            );
+        }
+
+        // Verify >= 4.5:1 across ALL 4 surfaces for every non-surface, non-border token,
+        // and >= 7.0:1 for primary Text and Header.
+        for token in Token::ALL {
+            if SURFACE_TOKENS.contains(token) || *token == Token::Border {
+                continue;
+            }
+            for surface in tiers {
+                let ratio = theme.rgb(*token).contrast(surface);
+                assert!(
+                    ratio >= READABLE,
+                    "{:?}/{token:?} contrast {ratio:.3} below {READABLE}",
+                    theme.selection()
+                );
+                if matches!(token, Token::Text | Token::Header) {
+                    assert!(
+                        ratio >= HIGH_CONTRAST_MINIMUM,
+                        "{:?}/{token:?} primary contrast {ratio:.3} below {HIGH_CONTRAST_MINIMUM}",
+                        theme.selection()
+                    );
+                }
+            }
+        }
+
+        for token in [
+            Token::Focus,
+            Token::EnvironmentProduction,
+            Token::Info,
+            Token::TransactionActive,
+            Token::TransactionFailed,
+        ] {
+            let capsule = theme.capsule(token);
+            assert!(capsule.bg.is_some(), "{token:?} capsule must paint a fill");
+            assert!(
+                capsule.fg.is_some(),
+                "{token:?} capsule must paint foreground"
+            );
+        }
+
+        for token in Token::ALL {
+            let idx = quantize_256(theme.rgb(*token));
+            assert!((16..=255).contains(&idx), "{token:?} quantized to {idx}");
+        }
+
+        let indexed = theme.clone().with_depth(ColorDepth::Indexed256);
+        assert_eq!(indexed.banner_ramp(59).len(), 59);
+        let basic = theme.clone().with_depth(ColorDepth::Basic16);
+        assert_eq!(basic.banner_ramp(59).len(), 59);
+    }
+}
+
+#[test]
+fn keycap_and_recessed_pill_respect_all_depths_and_strip_dim() {
+    for choice in [ThemeChoice::Dark, ThemeChoice::Atelier, ThemeChoice::Paper] {
+        // TrueColor
+        let tc = Theme::new(choice, true).with_depth(ColorDepth::TrueColor);
+        let keycap = tc.keycap(Token::Focus);
+        assert_eq!(keycap.fg, Some(tc.rgb(Token::Focus).into()));
+        assert_eq!(keycap.bg, Some(tc.rgb(Token::SurfaceOverlay).into()));
+        assert!(keycap.add_modifier.contains(Modifier::BOLD));
+
+        let pill = tc.recessed_pill(Token::Muted);
+        assert_eq!(pill.fg, Some(tc.rgb(Token::Muted).into()));
+        assert_eq!(pill.bg, Some(tc.rgb(Token::SurfaceAlt).into()));
+        assert!(pill.add_modifier.contains(Modifier::BOLD));
+        assert!(!pill.add_modifier.contains(Modifier::DIM));
+
+        // Indexed256
+        let idx = Theme::new(choice, true).with_depth(ColorDepth::Indexed256);
+        let keycap_idx = idx.keycap(Token::Header);
+        assert_eq!(
+            keycap_idx.fg,
+            Some(Color::Indexed(quantize_256(idx.rgb(Token::Header))))
+        );
+        assert_eq!(
+            keycap_idx.bg,
+            Some(Color::Indexed(quantize_256(idx.rgb(Token::SurfaceOverlay))))
+        );
+        assert!(keycap_idx.add_modifier.contains(Modifier::BOLD));
+
+        let pill_idx = idx.recessed_pill(Token::NullValue);
+        assert_eq!(
+            pill_idx.fg,
+            Some(Color::Indexed(quantize_256(idx.rgb(Token::NullValue))))
+        );
+        assert_eq!(
+            pill_idx.bg,
+            Some(Color::Indexed(quantize_256(idx.rgb(Token::SurfaceAlt))))
+        );
+        assert!(pill_idx.add_modifier.contains(Modifier::BOLD));
+        assert!(!pill_idx.add_modifier.contains(Modifier::DIM));
+
+        // Basic16
+        let b16 = Theme::new(choice, true).with_depth(ColorDepth::Basic16);
+        let keycap_16 = b16.keycap(Token::Focus);
+        assert_eq!(
+            keycap_16.fg,
+            Some(Color::Indexed(basic_16(Token::Focus, &b16)))
+        );
+        assert!(keycap_16.bg.is_none());
+        assert!(keycap_16.add_modifier.contains(Modifier::BOLD));
+
+        let pill_16 = b16.recessed_pill(Token::Muted);
+        assert_eq!(
+            pill_16.fg,
+            Some(Color::Indexed(basic_16(Token::Muted, &b16)))
+        );
+        assert!(pill_16.bg.is_none());
+        assert!(pill_16.add_modifier.contains(Modifier::BOLD));
+        assert!(!pill_16.add_modifier.contains(Modifier::DIM));
+
+        // ColorDepth::None and color = false
+        for plain in [
+            Theme::new(choice, true).with_depth(ColorDepth::None),
+            Theme::new(choice, false).with_depth(ColorDepth::TrueColor),
+        ] {
+            let keycap_plain = plain.keycap(Token::Focus);
+            assert!(keycap_plain.fg.is_none());
+            assert!(keycap_plain.bg.is_none());
+            assert!(keycap_plain.add_modifier.contains(Modifier::BOLD));
+            assert!(!keycap_plain.add_modifier.contains(Modifier::REVERSED));
+
+            let keycap_info = plain.keycap(Token::Info);
+            assert!(keycap_info.fg.is_none());
+            assert!(keycap_info.bg.is_none());
+
+            let pill_muted = plain.recessed_pill(Token::Muted);
+            assert!(pill_muted.fg.is_none());
+            assert!(pill_muted.bg.is_none());
+            assert!(!pill_muted.add_modifier.contains(Modifier::DIM));
+
+            let pill_focus = plain.recessed_pill(Token::Focus);
+            assert!(pill_focus.fg.is_none());
+            assert!(pill_focus.bg.is_none());
+            assert!(pill_focus.add_modifier.contains(Modifier::BOLD));
+            assert!(!pill_focus.add_modifier.contains(Modifier::DIM));
+        }
+    }
 }
