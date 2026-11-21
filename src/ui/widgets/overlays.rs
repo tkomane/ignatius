@@ -3274,7 +3274,7 @@ pub(crate) fn render_query_performance(
         state.sort_order.display_name().to_owned(),
         Token::Focus,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     // Body: check if extension unavailable
     if let Some(snapshot) = snapshot_opt {
@@ -3693,7 +3693,7 @@ pub(crate) fn render_index_advisor(
             Token::Text
         },
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let redundant_tab = format!(" [1] Redundant ({redundant_cnt}) ");
     let bloat_tab = format!(" [2] B-Tree Bloat ({bloated_cnt}) ");
@@ -4167,7 +4167,7 @@ pub(crate) fn render_wal_observability(
             Token::Text
         },
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let xid_tab = format!(
         " [2] Transactions & XID Freeze ({}) ",
@@ -4903,7 +4903,7 @@ pub(crate) fn render_connection_pool(
         format!("{pools_cnt}"),
         Token::Text,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let tab_1 = format!(" [1] Pool Allocations & Queues ({pools_cnt}) ");
     let tab_3 = format!(" [3] Client Wait Forensics ({wait_clients_cnt}) ");
@@ -5382,7 +5382,7 @@ pub(crate) fn render_data_masking(
         "Virtual Views Overlay".to_owned(),
         Token::Success,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let tab_1 = format!(" [1] Sensitive Columns & Rules ({candidates_cnt}) ");
     let tab_2 = format!(" [2] Generated Masked Views SQL ({policies_cnt}) ");
@@ -5678,7 +5678,7 @@ pub(crate) fn render_data_sync(
         "Binary COPY Stream".to_owned(),
         Token::Focus,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let report_tables_cnt = state
         .sync_report
@@ -6008,7 +6008,7 @@ pub(crate) fn render_synthetic_seed(
         "DAG Parent Keys".to_owned(),
         Token::Focus,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let preview_cnt = state.report.as_ref().map_or(0, |r| r.tables.len());
     let tab_1 = format!(" [1] Table Generator Strategies ({tables_cnt}) ");
@@ -6348,7 +6348,7 @@ pub(crate) fn render_snippet_library(
         );
     }
 
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     // Split body into left (list) and right (preview)
     let body_split = Layout::default()
@@ -6657,7 +6657,7 @@ pub(crate) fn render_lint_findings(
         format!("{warnings}"),
         warning_token,
     );
-    Paragraph::new(Line::from(capsules)).render(Rect::new(inner.x, inner.y, inner.width, 1), buf);
+    render_capsule_bar(capsules, Rect::new(inner.x, inner.y, inner.width, 1), buf);
     Paragraph::new(Line::from(Span::styled(
         hairline_rule(presentation).repeat(usize::from(inner.width)),
         theme.style(Token::Border),
@@ -6915,7 +6915,7 @@ pub(crate) fn render_logical_replication(
         format!("{subs_cnt}"),
         Token::Text,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let tab_1 = format!(" [1] Slots ({slots_cnt}) ");
     let tab_2 = format!(" [2] Publications ({pubs_cnt}) ");
@@ -7419,7 +7419,7 @@ pub(crate) fn render_cluster_config(
         format!("{servers_cnt}"),
         Token::Text,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let tab_labels = [
         format!(" [1] Settings ({}) ", settings_rows.len()),
@@ -8052,7 +8052,7 @@ pub(crate) fn render_data_browser(
         format!(" [{page_badge}] "),
         theme.recessed_pill(page_token),
     ));
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let active_col_name = page_opt
         .and_then(|p| p.columns.get(state.selected_col))
@@ -8448,7 +8448,7 @@ pub(crate) fn render_plan_diff(
             theme.recessed_pill(Token::Text),
         ));
     }
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let (mode_label, mode_token) = if state.analyze_mode {
         ("[MODE: ANALYZE+BUFFERS+WAL]", Token::Warning)
@@ -9215,7 +9215,7 @@ pub(crate) fn render_result_analytics(
         "ZERO-QUERY".to_owned(),
         Token::Success,
     );
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     render_overlay_tabs(
         &[
@@ -9619,6 +9619,29 @@ fn push_pill_capsule(
     spans.push(Span::raw(" "));
 }
 
+fn render_capsule_bar(capsules: Vec<Span<'static>>, area: Rect, buf: &mut Buffer) {
+    let total_width: usize = capsules.iter().map(|s| display_width(&s.content)).sum();
+    let max_width = usize::from(area.width);
+    let fitted = if total_width <= max_width {
+        capsules
+    } else {
+        capsules
+            .into_iter()
+            .map(|mut span| {
+                if span.content.starts_with(" [") {
+                    span.content = span.content[1..].to_owned().into();
+                }
+                if span.content.ends_with("] ") {
+                    let end = span.content.len() - 1;
+                    span.content = span.content[..end].to_owned().into();
+                }
+                span
+            })
+            .collect()
+    };
+    Paragraph::new(Line::from(fitted)).render(area, buf);
+}
+
 fn render_overlay_tabs(
     labels: &[&str],
     active_tab: usize,
@@ -9801,7 +9824,7 @@ pub(crate) fn render_query_bench(
             );
         }
     }
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     render_overlay_tabs(
         &[" [1] Summary & A/B Compare ", " [2] Latency Samples "],
@@ -10440,7 +10463,7 @@ pub(crate) fn render_schema_snapshot(
             Token::Info,
         );
     }
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     let baseline_badge = if state.baseline.is_some() {
         ("[BASELINE: PINNED]".to_owned(), Token::Success)
@@ -10971,7 +10994,7 @@ pub(crate) fn render_sql_runbook(
             Token::Warning,
         );
     }
-    Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
+    render_capsule_bar(capsules, capsule_area, buf);
 
     render_overlay_tabs(
         &[" [1] Notebook Cells ", " [2] Safety Dry-Run Plan "],

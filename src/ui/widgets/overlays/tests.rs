@@ -959,6 +959,21 @@ fn schema_snapshot_overlay_renders_drift_pills_tables_and_themes() {
         );
     }
 
+    // At 112x32 showcase width, render_capsule_bar compacts outer padding so every capsule fits cleanly.
+    let showcase_area = Rect::new(0, 0, 112, 32);
+    let rich = Presentation::new(
+        Theme::new(ThemeChoice::FieldIndustrial, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let mut showcase_buf = Buffer::empty(showcase_area);
+    render_schema_snapshot(&state, &rich, showcase_area, &mut showcase_buf);
+    let showcase_text = buffer_to_string(&showcase_buf);
+    assert!(
+        showcase_text.contains(expected_info.as_str()),
+        "{expected_info:?} was clipped at 112x32:\n{showcase_text}"
+    );
+
     // Switch to Tab 2 (Catalog Tables) and verify Material + Dark TrueColor full-width selection bar.
     state.set_tab(1);
     state.move_selection(1);

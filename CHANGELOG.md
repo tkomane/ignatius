@@ -8,6 +8,19 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Built-in `atelier` (warm obsidian-espresso editorial dark) and `paper`
+  (warm archival rag-paper editorial light) palettes via `ui.theme` and
+  `[theme] extends`, WCAG-verified (`>= 4.5:1` across all 4 surface elevations)
+  and integrated into `SwitchTheme` cycling and `ignatius doctor`.
+- Improved: Editorial TUI craft across the workbench and modal dialogs via
+  `Theme::keycap` elevated rail keycaps, `Theme::recessed_pill` non-dimmed
+  recessed modal badges, right-aligned wide footer hint rails, split multi-span
+  pane titles with ellipsis-safe tree truncation, full-width `SurfaceAlt`
+  Spotlight command palette input bars, hairline modal tab/body dividers,
+  width-aware modal capsule bars (`render_capsule_bar`), and 14 2x HiDPI showcase
+  captures (`workbench-atelier.png`, `workbench-paper.png`, and framed
+  `error-diagnostics.png`).
+
 - Improved: The release rehearsal verifies and retains a CycloneDX inventory
   for each packaged target's observed Rust build inputs.
 - Fixed: Release trust preflight accepts SLSA v1 provenance in DSSE and

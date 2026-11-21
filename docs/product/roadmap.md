@@ -134,6 +134,7 @@ below; broadening the feature list does not move a milestone forward.
 | M13 Live Data CRUD, Plan Diff & Analytics | Keyset-paginated data browser with reviewed multi-row CRUD, `EXPLAIN (BUFFERS, WAL)` A/B plan diffing, and result sparklines/Parquet export | W16 (Features 053-055) | Table data browser with reviewed INSERT/DELETE/batch UPDATE, baseline plan diffing, terminal histograms/sparklines, HTML/Parquet export |
 | M14 Query Benchmarks, Schema Snapshots & Runbooks | Multi-iteration A/B query latency benchmarking, canonical SHA-256 schema snapshots with drift CI gates, Markdown SQL runbooks, and Material Tonal polish | W16 (Features 056-058) | Rollback-safe warmup/measured benchmark engine with regression gates, zero-row `pg_catalog` snapshot diffing, Markdown/`-- @cell` runbooks with write guards, built-in `material` theme |
 | M15 Structured Values, Plan History & Fleet Health | Inspect structured cells, track query plan regressions and compare named environments | W16 (Features 059-061) | Reviewed typed edits, digest-only local plan history and bounded read-only fleet comparisons |
+| M16 Editorial High-Art TUI Aesthetic & Themes | Curated Obsidian/Paper gallery palettes, elevated rail keycaps, recessed modal badges, and editorial chrome typography | W16 (Feature 062) | WCAG-verified `atelier` and `paper` themes, `Theme::keycap` / `Theme::recessed_pill`, right-aligned footer hints, Spotlight palette input strip, 14 2x showcase PNGs |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -225,6 +226,16 @@ M15 has three source specifications and their accompanying evidence tasks.
 - [061 Multi-Target Environment Diff and Fleet Health](../../specs/061-multi-target-environment-diff-and-fleet-health/spec.md)
   compares one baseline and up to three candidate profiles with read-only probes.
 
+M16 (`062-editorial-tui-aesthetic-and-atelier-themes`) is delivered in source as
+of 2026-11-21:
+
+- [062 Editorial TUI Aesthetic & Atelier/Paper Themes](../../specs/062-editorial-tui-aesthetic-and-atelier-themes/spec.md)
+  adds the WCAG-verified `atelier` dark and `paper` light built-in themes,
+  `Theme::keycap` and `Theme::recessed_pill` elevation styles, refined editorial
+  pane headers, footer hint alignment, Spotlight command palette strip, hairline
+  modal separators, width-aware modal capsule bars, and updated 2x showcase
+  visuals.
+
 ```mermaid
 flowchart LR
     %% Planning dependencies, not a runtime deployment.
@@ -247,6 +258,7 @@ flowchart LR
     M12 --> M13["M13 Live CRUD, Plan Diff & Analytics (053-055)"]
     M13 --> M14["M14 Benchmarks, Snapshots & Runbooks (056-058)"]
     M14 --> M15["M15 Structured Values, Plan History & Fleet Health (059-061)"]
+    M15 --> M16["M16 Editorial TUI Aesthetic & Atelier/Paper Themes (062)"]
 ```
 
 ## Start here
