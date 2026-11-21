@@ -1,7 +1,6 @@
 use super::overlays::render_plan;
 use super::{
-    action_key_label, hairline_rule, input_cursor, inset_empty_area, overlay_block,
-    pane_block_line, rail_keycap,
+    action_key_label, hairline_rule, input_cursor, inset_empty_area, overlay_block, pane_block_line,
 };
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
@@ -731,7 +730,7 @@ fn render_results_placeholder(
     }
 
     let empty_area = inset_empty_area(inner);
-    let keycap = rail_keycap(theme, Token::Focus);
+    let keycap = theme.keycap(Token::Focus);
     let ctx = crate::app::discovery::context(model);
     let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
     let mut prose_lines = Vec::new();

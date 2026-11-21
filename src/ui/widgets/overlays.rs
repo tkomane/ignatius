@@ -1,6 +1,5 @@
 use super::{
-    action_key_label, hairline_rule, input_cursor, modal_recessed_pill, overlay_block, pane_block,
-    syntax_token,
+    action_key_label, hairline_rule, input_cursor, overlay_block, pane_block, syntax_token,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -7452,14 +7451,14 @@ pub(crate) fn render_cluster_config(
         if state.modified_only {
             super::header::capsule_style(presentation, Token::Warning)
         } else {
-            modal_recessed_pill(theme, Token::Text)
+            theme.recessed_pill(Token::Text)
         },
     ));
     if !state.filter_text.is_empty() {
         tab_spans.push(Span::raw("  "));
         tab_spans.push(Span::styled(
             format!(" [Filter: {}] ", sanitize_for_display(&state.filter_text)),
-            modal_recessed_pill(theme, Token::Info),
+            theme.recessed_pill(Token::Info),
         ));
     }
     Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
@@ -8051,7 +8050,7 @@ pub(crate) fn render_data_browser(
     );
     capsules.push(Span::styled(
         format!(" [{page_badge}] "),
-        modal_recessed_pill(theme, page_token),
+        theme.recessed_pill(page_token),
     ));
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
 
@@ -8067,7 +8066,7 @@ pub(crate) fn render_data_browser(
         Span::raw("  "),
         Span::styled(
             format!(" [PAGE SIZE: {}] ", state.request.effective_page_size()),
-            modal_recessed_pill(theme, Token::Text),
+            theme.recessed_pill(Token::Text),
         ),
         Span::raw("  "),
         Span::styled(
@@ -8076,14 +8075,14 @@ pub(crate) fn render_data_browser(
             } else {
                 " [PREV: NO] "
             },
-            modal_recessed_pill(theme, Token::Text),
+            theme.recessed_pill(Token::Text),
         ),
     ];
     if let Some(filter) = &state.request.filter_predicate {
         tab_spans.push(Span::raw("  "));
         tab_spans.push(Span::styled(
             format!(" [FILTER: {}] ", sanitize_for_display(filter)),
-            modal_recessed_pill(theme, Token::Info),
+            theme.recessed_pill(Token::Info),
         ));
     }
     Paragraph::new(Line::from(tab_spans)).render(tab_area, buf);
@@ -8387,7 +8386,7 @@ pub(crate) fn render_plan_diff(
         let wal_delta = format_signed_bytes(report.wal_bytes_delta);
         capsules.push(Span::styled(
             format!(" [{verdict_label}] "),
-            modal_recessed_pill(theme, verdict_token),
+            theme.recessed_pill(verdict_token),
         ));
         capsules.push(Span::raw(" "));
         push_kv_capsule(
@@ -8419,7 +8418,7 @@ pub(crate) fn render_plan_diff(
         let wal_str = crate::telemetry::format_bytes(snap.wal_bytes);
         capsules.push(Span::styled(
             " [SINGLE PLAN] ",
-            modal_recessed_pill(theme, Token::Text),
+            theme.recessed_pill(Token::Text),
         ));
         capsules.push(Span::raw(" "));
         push_kv_capsule(
@@ -8441,12 +8440,12 @@ pub(crate) fn render_plan_diff(
     } else {
         capsules.push(Span::styled(
             " [UNCHANGED] ",
-            modal_recessed_pill(theme, Token::Text),
+            theme.recessed_pill(Token::Text),
         ));
         capsules.push(Span::raw(" "));
         capsules.push(Span::styled(
             " [NO PLANS CAPTURED] ",
-            modal_recessed_pill(theme, Token::Text),
+            theme.recessed_pill(Token::Text),
         ));
     }
     Paragraph::new(Line::from(capsules)).render(capsule_area, buf);
@@ -9205,7 +9204,7 @@ pub(crate) fn render_result_analytics(
     if analytics.truncated {
         capsules.push(Span::styled(
             " [TRUNCATED] ",
-            modal_recessed_pill(theme, Token::Warning),
+            theme.recessed_pill(Token::Warning),
         ));
         capsules.push(Span::raw(" "));
     }
@@ -9599,10 +9598,10 @@ fn push_kv_capsule(
     value_token: Token,
 ) {
     let theme = &presentation.theme;
-    let mut label_style = modal_recessed_pill(theme, Token::Text);
+    let mut label_style = theme.recessed_pill(Token::Text);
     label_style.add_modifier.remove(Modifier::BOLD);
     spans.push(Span::styled(format!(" [{label}"), label_style));
-    spans.push(Span::styled(value, modal_recessed_pill(theme, value_token)));
+    spans.push(Span::styled(value, theme.recessed_pill(value_token)));
     spans.push(Span::styled("] ", label_style));
     spans.push(Span::raw(" "));
 }
@@ -9644,7 +9643,7 @@ fn render_overlay_tabs(
     if let Some((badge, token)) = trailing {
         tab_spans.push(Span::raw("  "));
         let style = if token == Token::Muted {
-            modal_recessed_pill(theme, Token::Text)
+            theme.recessed_pill(Token::Text)
         } else {
             super::header::capsule_style(presentation, token)
         };
@@ -9661,7 +9660,7 @@ fn render_footer_hints(
 ) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
-    let keycap = modal_recessed_pill(theme, Token::Focus);
+    let keycap = theme.recessed_pill(Token::Focus);
     let mut segments = Vec::with_capacity(hints.len() * 2);
     for (idx, (key, desc)) in hints.iter().enumerate() {
         segments.push((format!(" {key} "), keycap));

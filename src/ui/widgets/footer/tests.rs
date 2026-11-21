@@ -508,7 +508,7 @@ fn footer_uses_tonal_key_pills_and_ascii_or_unicode_hint_separators() {
         .find("Ctrl+R")
         .unwrap_or_else(|| panic!("Ctrl+R hint missing: {text_unicode}"));
     let run_col = text_unicode[..run_pos].chars().count() as u16;
-    let expected_pill = crate::ui::widgets::rail_keycap(&p_unicode.theme, Token::Focus);
+    let expected_pill = p_unicode.theme.keycap(Token::Focus);
     assert_eq!(buf_unicode[(run_col, 0)].fg, expected_pill.fg.unwrap());
     assert_eq!(buf_unicode[(run_col, 0)].bg, expected_pill.bg.unwrap());
     assert!(buf_unicode[(run_col, 0)].modifier.contains(Modifier::BOLD));

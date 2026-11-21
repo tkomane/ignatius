@@ -258,7 +258,7 @@ pub(crate) fn render_footer(
         " \u{00b7} "
     };
     let separator_width = display_width(separator);
-    let keycap_style = super::rail_keycap(theme, Token::Focus);
+    let keycap_style = theme.keycap(Token::Focus);
     let label_style = theme.on_stripe(Token::Text);
     let mut hint_spans: Vec<Span<'static>> = Vec::new();
     let mut hints_width = 0usize;

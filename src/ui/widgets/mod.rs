@@ -29,9 +29,9 @@ pub(crate) use results::{render_error, render_inspector, render_results};
 use crate::app::model::{Focus, Model};
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
-use crate::ui::theme::{ColorDepth, Theme, Token};
+use crate::ui::theme::Token;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Block;
 
@@ -63,38 +63,6 @@ pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> To
         Kind::Plain => Token::Text,
     }
 }
-/// Elevated keycap style for header/footer rails and empty-state starter badges.
-///
-/// Paints bold foreground `token` over `SurfaceOverlay` at depths that paint
-/// surfaces; falls back to bold foreground (`Basic16`) or bold reversed-free
-/// modifier-only emphasis (`ColorDepth::None` / `NO_COLOR`).
-pub(crate) fn rail_keycap(theme: &Theme, token: Token) -> Style {
-    surface_keycap(theme, token, Token::SurfaceOverlay)
-}
-
-/// Recessed pill style inside `SurfaceOverlay` modals.
-///
-/// Paints bold non-`DIM` `token` over `SurfaceAlt` at depths that paint
-/// surfaces, preserving crisp contrast over dark and light modal surfaces.
-pub(crate) fn modal_recessed_pill(theme: &Theme, token: Token) -> Style {
-    surface_keycap(theme, token, Token::SurfaceAlt)
-}
-
-fn surface_keycap(theme: &Theme, token: Token, bg_token: Token) -> Style {
-    let mut style = theme.style(token);
-    style
-        .add_modifier
-        .remove(Modifier::DIM | Modifier::REVERSED);
-    style = style.add_modifier(Modifier::BOLD);
-    if theme.color
-        && theme.depth != ColorDepth::None
-        && let Some(bg) = theme.surface(bg_token).bg
-    {
-        style = style.bg(bg);
-    }
-    style
-}
-
 /// Horizontal hairline rule glyph for the active tier.
 pub(crate) const fn hairline_rule(presentation: &Presentation) -> &'static str {
     if presentation.glyphs.is_ascii() {

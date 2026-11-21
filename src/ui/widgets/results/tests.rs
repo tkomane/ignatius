@@ -790,7 +790,7 @@ fn results_header_row_fills_grid_width_gutter_uses_muted_and_empty_hints_stay_cr
         assert!(buffer_to_string(&low_buf).is_ascii());
     }
 
-    // Empty state renders hairline rule and rail_keycap hints cleanly in 40x8 ASCII.
+    // Empty state renders hairline rule and Theme::keycap hints cleanly in 40x8 ASCII.
     let empty_model = Model::new(100);
     let ascii_none = Presentation::new(
         Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),

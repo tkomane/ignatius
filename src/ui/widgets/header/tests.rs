@@ -536,7 +536,7 @@ fn header_separates_left_posture_and_right_telemetry_when_width_permits() {
 }
 
 #[test]
-fn header_brand_badge_uses_rail_keycap_and_padded_capsules_across_depths() {
+fn header_brand_badge_uses_theme_keycap_and_padded_capsules_across_depths() {
     use ratatui::style::{Color, Modifier};
 
     let mut model = connected_model(crate::connection::Environment::Production);
@@ -557,7 +557,7 @@ fn header_brand_badge_uses_rail_keycap_and_padded_capsules_across_depths() {
     assert!(text.contains(" [TX ACTIVE] "), "{text}");
 
     let brand_col = text[..text.find("Ignatius:").unwrap()].chars().count() as u16;
-    let keycap = crate::ui::widgets::rail_keycap(&pres.theme, Token::Header);
+    let keycap = pres.theme.keycap(Token::Header);
     assert_eq!(buf[(brand_col, 0)].fg, keycap.fg.unwrap());
     assert_eq!(buf[(brand_col, 0)].bg, keycap.bg.unwrap());
     assert!(buf[(brand_col, 0)].modifier.contains(Modifier::BOLD));

@@ -1,6 +1,4 @@
-use super::{
-    action_key_label, hairline_rule, input_cursor, inset_empty_area, pane_block_line, rail_keycap,
-};
+use super::{action_key_label, hairline_rule, input_cursor, inset_empty_area, pane_block_line};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -522,7 +520,7 @@ fn render_empty_objects(
             body.height.saturating_sub(top_pad),
         )
     };
-    let keycap = rail_keycap(theme, Token::Focus);
+    let keycap = theme.keycap(Token::Focus);
     let rule_width = usize::from(empty_area.width).min(28);
     let avail_width = usize::from(empty_area.width);
 

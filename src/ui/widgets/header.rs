@@ -38,7 +38,7 @@ pub(crate) fn render_header(
     left_spans.push(Span::raw(" "));
     left_spans.push(Span::styled(
         format!(" {brand}{name}: "),
-        super::rail_keycap(theme, Token::Header),
+        theme.keycap(Token::Header),
     ));
     left_spans.push(Span::raw(" "));
 

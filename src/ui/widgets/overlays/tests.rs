@@ -1168,7 +1168,7 @@ fn overlay_chrome_recessed_pills_hairline_rule_and_footer_keycaps_across_depths(
     // Hairline rule row sits cleanly in the modal interior using Unicode horizontal bar.
     assert!(text.contains("\u{2500}\u{2500}\u{2500}"), "{text}");
 
-    // Footer hint "[Enter]" uses modal_recessed_pill(Token::Focus).
+    // Footer hint "[Enter]" uses Theme::recessed_pill(Token::Focus).
     let footer_y = (0..area.height)
         .find(|&y| {
             (0..area.width)
