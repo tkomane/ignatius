@@ -4430,8 +4430,9 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
         return Vec::new();
     };
     if let Some(refusal) = rollback_off_refusal(model, config.rollback, &base_sql, &cand_sql) {
+        // A run that is already in flight keeps its loading state, so its
+        // results still arrive under the mode they actually ran with.
         if let Some(bench) = &mut model.query_bench {
-            bench.loading = false;
             bench.status_message = Some(refusal);
         }
         return Vec::new();
@@ -4490,13 +4491,11 @@ fn rollback_off_refusal(
     if rollback {
         return None;
     }
-    let place = if model.environment().is_production() {
-        "on a production connection"
-    } else if model.connection.info().is_some_and(|info| info.read_only) {
-        "in a read-only session"
-    } else {
+    let production = model.environment().is_production();
+    let read_only = model.connection.info().is_some_and(|info| info.read_only);
+    if !production && !read_only {
         return None;
-    };
+    }
     let impact = [baseline, candidate]
         .iter()
         .map(|sql| crate::query::classify_all(&statements::split(sql)))
@@ -4505,10 +4504,16 @@ fn rollback_off_refusal(
     if impact == crate::query::Impact::Read {
         return None;
     }
-    Some(format!(
-        "Refused: with rollback off this benchmark would commit a {} statement on every run {place}. Nothing was sent. Press m to turn rollback back on.",
-        impact.label().to_lowercase()
-    ))
+    let label = impact.label();
+    Some(if production {
+        format!(
+            "Refused: this benchmark {label} (by its keywords, which is advisory), and with rollback off every run would commit it on a production connection. Nothing was sent. Press m to turn rollback back on."
+        )
+    } else {
+        format!(
+            "Refused: this benchmark {label} (by its keywords, which is advisory), and the session is read-only, so the server would reject it. Nothing was sent."
+        )
+    })
 }
 
 /// Handles input while the query latency benchmark overlay is open.
@@ -4545,6 +4550,15 @@ fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
         // a separate, deliberate `r`.
         Action::Insert('m' | 'M') => {
             if let Some(bench) = &mut model.query_bench {
+                // Switching while a run is in flight would label its results
+                // with a mode they did not run under.
+                if bench.loading {
+                    bench.status_message = Some(
+                        "A benchmark is running. Switch rollback mode after it finishes."
+                            .to_owned(),
+                    );
+                    return Vec::new();
+                }
                 bench.config.rollback = !bench.config.rollback;
                 bench.status_message = Some(if bench.config.rollback {
                     "Rollback on: every run is rolled back. Press r to run.".to_owned()

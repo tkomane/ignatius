@@ -12497,7 +12497,7 @@ fn bench_model(environment: Environment, read_only: bool, sql: &str) -> Model {
 fn rollback_off_benchmark_writes_are_refused_on_production_and_read_only_sessions() {
     for (environment, read_only, place) in [
         (Environment::Production, false, "on a production connection"),
-        (Environment::Development, true, "in a read-only session"),
+        (Environment::Development, true, "the session is read-only"),
     ] {
         for sql in [
             "UPDATE orders SET value = 0;",
@@ -12507,15 +12507,19 @@ fn rollback_off_benchmark_writes_are_refused_on_production_and_read_only_session
         ] {
             let mut model = bench_model(environment.clone(), read_only, sql);
             update(&mut model, Message::Action(Action::QueryBench));
+            finish_bench_runs(&mut model);
             update(&mut model, Message::Action(Action::Insert('m')));
             let effects = update(&mut model, Message::Action(Action::Insert('r')));
             assert!(effects.is_empty(), "{sql} must not run {place}");
             let bench = model.query_bench.as_ref().expect("bench overlay open");
             assert!(!bench.loading, "{sql}: a refused run is not loading");
             let status = bench.status_message.as_deref().unwrap_or_default();
-            assert!(status.contains("Refused"), "{sql}: {status}");
+            assert!(
+                status.starts_with("Refused: this benchmark "),
+                "{sql}: {status}"
+            );
             assert!(status.contains(place), "{sql}: {status}");
-            assert!(status.contains("Nothing was sent"), "{sql}: {status}");
+            assert!(status.contains("Nothing was sent."), "{sql}: {status}");
         }
     }
 }
@@ -12524,6 +12528,7 @@ fn rollback_off_benchmark_writes_are_refused_on_production_and_read_only_session
 fn rollback_off_benchmarks_still_run_reads_on_production_and_writes_elsewhere() {
     let mut reads = bench_model(Environment::Production, false, "SELECT * FROM orders;");
     update(&mut reads, Message::Action(Action::QueryBench));
+    finish_bench_runs(&mut reads);
     update(&mut reads, Message::Action(Action::Insert('m')));
     assert_eq!(
         update(&mut reads, Message::Action(Action::Insert('r'))).len(),
@@ -12537,6 +12542,7 @@ fn rollback_off_benchmarks_still_run_reads_on_production_and_writes_elsewhere() 
         "UPDATE orders SET value = 0;",
     );
     update(&mut writes, Message::Action(Action::QueryBench));
+    finish_bench_runs(&mut writes);
     update(&mut writes, Message::Action(Action::Insert('m')));
     assert_eq!(
         update(&mut writes, Message::Action(Action::Insert('r'))).len(),
@@ -12558,4 +12564,45 @@ fn explain_analyze_of_a_write_needs_the_production_confirmation() {
         .as_ref()
         .expect("the run waits for confirmation");
     assert!(pending.impact.needs_typed_confirmation());
+}
+
+/// Reports every run the open benchmark dispatched, so it is no longer loading.
+fn finish_bench_runs(model: &mut Model) {
+    let request = model.query_bench_request;
+    for target in [
+        crate::app::message::BenchTarget::Baseline,
+        crate::app::message::BenchTarget::Candidate,
+    ] {
+        update(
+            model,
+            Message::QueryBenchLoaded {
+                request,
+                target,
+                result: Box::new(Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "fixture run",
+                    "benchmark",
+                ))),
+            },
+        );
+    }
+    if let Some(bench) = &mut model.query_bench {
+        bench.loading = false;
+    }
+}
+
+#[test]
+fn rollback_mode_cannot_switch_while_a_run_is_in_flight() {
+    let mut model = bench_model(Environment::Development, false, "SELECT 1;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
+    assert!(update(&mut model, Message::Action(Action::Insert('m'))).is_empty());
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(bench.config.rollback, "the mode is unchanged during a run");
+    assert!(
+        bench
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("after it finishes"))
+    );
 }

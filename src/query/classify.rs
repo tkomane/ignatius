@@ -86,15 +86,17 @@ pub fn classify(statement: &Statement) -> Impact {
 
     // EXPLAIN only plans, unless ANALYZE makes it execute the statement it
     // describes: `EXPLAIN ANALYZE DELETE ...` deletes. Then the statement's
-    // own impact applies, so the production confirmation cannot be stepped
-    // around by putting EXPLAIN ANALYZE in front of a write.
+    // own impact applies. Anything the parser cannot read with confidence is
+    // treated as a write, as for any unrecognised statement.
     if first == "explain" {
-        return explain_analyzed_target(&statement.text).map_or(Impact::Read, |target| {
-            classify(&Statement {
+        return match explain_target(&statement.text) {
+            ExplainTarget::PlanOnly => Impact::Read,
+            ExplainTarget::Executes(target) => classify(&Statement {
                 text: target,
                 ..statement.clone()
-            })
-        });
+            }),
+            ExplainTarget::Unclear => Impact::Write,
+        };
     }
 
     match first {
@@ -154,45 +156,151 @@ fn leading_words(text: &str) -> Vec<String> {
     words
 }
 
-/// The statement an `EXPLAIN` will execute, when its options include ANALYZE.
-///
-/// Both forms PostgreSQL accepts are read: the legacy words
+/// What an `EXPLAIN` will do with the statement it describes.
+enum ExplainTarget {
+    /// Plain `EXPLAIN`: the statement is planned, never executed.
+    PlanOnly,
+    /// `EXPLAIN ANALYZE`: this statement is executed.
+    Executes(String),
+    /// Syntax the parser cannot read with confidence.
+    Unclear,
+}
+
+/// Options that only change how a plan is shown, never whether the statement
+/// runs. Anything else in the option list, except an ANALYZE switched off, is
+/// read as executing, so an unknown or oddly quoted option fails safe.
+const PLAN_ONLY_OPTIONS: [&str; 11] = [
+    "verbose",
+    "costs",
+    "settings",
+    "generic_plan",
+    "buffers",
+    "serialize",
+    "wal",
+    "timing",
+    "summary",
+    "memory",
+    "format",
+];
+
+/// Reads both forms PostgreSQL accepts: the legacy words
 /// (`EXPLAIN ANALYZE VERBOSE ...`) and the parenthesised option list
-/// (`EXPLAIN (ANALYZE, BUFFERS) ...`), where `ANALYZE false`, `off` or `0`
-/// turns execution back off. Plain `EXPLAIN` returns `None`: it only plans.
-fn explain_analyzed_target(text: &str) -> Option<String> {
-    let cleaned = crate::query::statements::strip_comments(text);
-    let rest = cleaned.trim_start();
-    // The caller has already seen `explain` as the first word.
-    let rest = rest.get("explain".len()..)?.trim_start();
+/// (`EXPLAIN (ANALYZE, BUFFERS) ...`), where `ANALYZE false`, `off`, `no` or
+/// `0` turns execution back off. Comments count as whitespace, as they do for
+/// the server, so `EXPLAIN ANALYZE/* note */DELETE` is still read correctly.
+fn explain_target(text: &str) -> ExplainTarget {
+    let spaced = comments_as_spaces(text);
+    let Some(rest) = spaced.trim_start().get("explain".len()..) else {
+        return ExplainTarget::Unclear;
+    };
+    let rest = rest.trim_start();
 
     if let Some(options) = rest.strip_prefix('(') {
-        let close = options.find(')')?;
+        let Some(close) = options.find(')') else {
+            return ExplainTarget::Unclear;
+        };
         let (list, tail) = options.split_at(close);
-        let analyze = list.split(',').any(|option| {
-            let mut parts = option.split_whitespace();
-            let name = parts.next().unwrap_or_default().to_lowercase();
-            let value = parts.next().map(str::to_lowercase);
-            matches!(name.as_str(), "analyze" | "analyse")
-                && !matches!(value.as_deref(), Some("false" | "off" | "0"))
-        });
-        return analyze.then(|| tail[1..].trim_start().to_owned());
+        let mut executes = false;
+        for option in list.split(',') {
+            let option = option.trim();
+            let name_len = option
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(option.len());
+            let name = option[..name_len].to_ascii_lowercase();
+            let value = option[name_len..]
+                .trim()
+                .trim_matches(|c| c == '\'' || c == '"')
+                .to_ascii_lowercase();
+            if matches!(name.as_str(), "analyze" | "analyse") {
+                if !matches!(value.as_str(), "false" | "off" | "no" | "0") {
+                    executes = true;
+                }
+            } else if name.is_empty() || !PLAN_ONLY_OPTIONS.contains(&name.as_str()) {
+                // A quoted, unicode-escaped or unknown option name.
+                executes = true;
+            }
+        }
+        return if executes {
+            target_of(&tail[1..])
+        } else {
+            ExplainTarget::PlanOnly
+        };
     }
 
     let mut analyze = false;
     let mut remainder = rest;
     loop {
         let end = remainder
-            .find(char::is_whitespace)
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
             .unwrap_or(remainder.len());
-        match remainder[..end].to_lowercase().as_str() {
+        match remainder[..end].to_ascii_lowercase().as_str() {
             "analyze" | "analyse" => analyze = true,
             "verbose" => {}
             _ => break,
         }
         remainder = remainder[end..].trim_start();
     }
-    analyze.then(|| remainder.to_owned())
+    if analyze {
+        target_of(remainder)
+    } else {
+        ExplainTarget::PlanOnly
+    }
+}
+
+/// The executed statement, unless it is another EXPLAIN, which PostgreSQL
+/// rejects and which would otherwise make classification recurse.
+fn target_of(remainder: &str) -> ExplainTarget {
+    // A parenthesised query, `EXPLAIN ANALYZE (SELECT ...)`, is judged by
+    // what is inside the parentheses.
+    let target = remainder.trim_start_matches(|c: char| c == '(' || c.is_whitespace());
+    if target
+        .get(.."explain".len())
+        .is_some_and(|word| word.eq_ignore_ascii_case("explain"))
+    {
+        ExplainTarget::Unclear
+    } else {
+        ExplainTarget::Executes(target.to_owned())
+    }
+}
+
+/// The text with every comment replaced by one space, as the server's lexer
+/// treats it. Line comments keep their newline; block comments nest.
+fn comments_as_spaces(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, chars.peek()) {
+            ('-', Some('-')) => {
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+                out.push(' ');
+                out.push('\n');
+            }
+            ('/', Some('*')) => {
+                chars.next();
+                let mut depth = 1usize;
+                let mut previous = '\0';
+                while depth > 0 {
+                    let Some(next) = chars.next() else { break };
+                    if previous == '/' && next == '*' {
+                        depth += 1;
+                        previous = '\0';
+                    } else if previous == '*' && next == '/' {
+                        depth -= 1;
+                        previous = '\0';
+                    } else {
+                        previous = next;
+                    }
+                }
+                out.push(' ');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Whether a keyword appears as a whole word.
