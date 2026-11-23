@@ -196,6 +196,18 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.transaction = crate::query::result::TransactionState::Unknown;
                 model.focus = Focus::Results;
             }
+            // A benchmark run's report never arrives after the connection
+            // is gone, so the overlay stops waiting for it and says why.
+            if let Some(bench) = &mut model.query_bench
+                && bench.loading
+            {
+                bench.loading = false;
+                bench.queued_candidate = None;
+                bench.status_message = Some(
+                    "The connection was lost during the benchmark; its outcome is unknown."
+                        .to_owned(),
+                );
+            }
             model.phase = QueryPhase::Idle;
             model.running_for = None;
             model.transaction = crate::query::result::TransactionState::Unknown;
@@ -4606,6 +4618,22 @@ fn rollback_off_refusal(
 /// Handles input while the query latency benchmark overlay is open.
 fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
     match action {
+        // A run cannot be cancelled yet, so the overlay stays while one is in
+        // flight: closed, it would leave a run nobody can see, and anything
+        // started behind it would wait on the session unseen.
+        Action::Dismiss | Action::QueryBench
+            if model
+                .query_bench
+                .as_ref()
+                .is_some_and(|bench| bench.loading) =>
+        {
+            if let Some(bench) = &mut model.query_bench {
+                bench.status_message = Some(
+                    "A benchmark is running and cannot be cancelled yet. This closes after its last run, or quit Ignatius to stop it."
+                        .to_owned(),
+                );
+            }
+        }
         Action::Dismiss | Action::QueryBench => {
             model.query_bench = None;
         }

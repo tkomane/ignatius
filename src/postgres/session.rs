@@ -375,13 +375,60 @@ impl Session {
     }
 
     /// Captures an extended `EXPLAIN (BUFFERS, WAL, SETTINGS, FORMAT JSON)` snapshot.
+    ///
+    /// With `analyze`, the statement runs inside `BEGIN` and `ROLLBACK`, so it
+    /// holds the session's SQL gate like a benchmark does and refuses to start
+    /// unless the server reports the session outside a transaction block.
     pub async fn explain_extended(
         &self,
         sql: &str,
         analyze: bool,
         label: &str,
     ) -> Result<crate::plandiff::PlanSnapshot, Diagnostic> {
-        crate::postgres::plandiff::explain_extended(&self.client, sql, analyze, label).await
+        if !analyze {
+            return crate::postgres::plandiff::explain_extended(&self.client, sql, false, label)
+                .await;
+        }
+        let _gate = self.user_sql_gate.lock().await;
+        self.require_autocommit("the analysed plan comparison", "comparing analysed plans")
+            .await?;
+        crate::postgres::plandiff::explain_extended(&self.client, sql, true, label).await
+    }
+
+    /// Refuses unless the server reports the session outside a transaction.
+    ///
+    /// Called with the SQL gate held, before work that brackets itself in
+    /// `BEGIN` and `ROLLBACK`: inside a user's transaction that `ROLLBACK`
+    /// would end the transaction and discard its work.
+    async fn require_autocommit(&self, what: &str, task: &str) -> Result<(), Diagnostic> {
+        use crate::query::result::TransactionState;
+        match self.transaction_state().await {
+            TransactionState::Autocommit => Ok(()),
+            TransactionState::Unknown if self.is_closed() => Err(Diagnostic::new(
+                DiagnosticKind::Connection,
+                format!("{what} did not start, because the connection is closed"),
+                task,
+            )
+            .next_action("reconnect, then try again; nothing was sent")),
+            TransactionState::Unknown => Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                format!("{what} did not start, because the session's transaction state could not be read"),
+                task,
+            )
+            .next_action("try again; nothing was sent")),
+            state => Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                format!("{what} did not start, because the session is not outside a transaction"),
+                task,
+            )
+            .likely_cause(format!(
+                "the server reports the session's transaction state as: {}",
+                state.label()
+            ))
+            .next_action(
+                "end the transaction in the workbench, then try again; nothing was sent",
+            )),
+        }
     }
 
     /// Executes warmup and measured iterations of one SQL statement and returns benchmark statistics.
@@ -399,21 +446,8 @@ impl Session {
         label: &str,
     ) -> Result<crate::bench::BenchStats, Diagnostic> {
         let _gate = self.user_sql_gate.lock().await;
-        let state = self.transaction_state().await;
-        if state != crate::query::result::TransactionState::Autocommit {
-            return Err(Diagnostic::new(
-                DiagnosticKind::Query,
-                "the benchmark did not start, because the session is not outside a transaction",
-                "starting a query benchmark",
-            )
-            .likely_cause(format!(
-                "the server reports the session's transaction state as: {}",
-                state.label()
-            ))
-            .next_action(
-                "end the transaction in the workbench, then run the benchmark again; no benchmark statement was sent",
-            ));
-        }
+        self.require_autocommit("the benchmark", "starting a query benchmark")
+            .await?;
         crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await
     }
 

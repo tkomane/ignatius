@@ -363,10 +363,11 @@ length, so workbench statements, `\watch` iterations and other benchmarks wait
 for it rather than landing between its `BEGIN` and `ROLLBACK`, and it waits for
 them. Before its first `BEGIN` the session asks the server whether it is inside
 a transaction, and the benchmark refuses to start if it is, because its
-rollback would end that transaction. Closing the overlay does not stop a run
-already sent. A workbench Cancel pressed while a statement waits behind a
-benchmark cancels whatever the server is running at that moment, which may be
-the benchmark.
+rollback would end that transaction. A running benchmark cannot be cancelled
+yet, so its overlay stays open until the run reports (quitting Ignatius stops
+it), and nothing can be left running unseen behind a closed overlay. An
+analysed plan comparison (`EXPLAIN ANALYZE` in plan diff) takes the session the
+same way and refuses to start inside a transaction for the same reason.
 
 `--read-only` is the real control: it asks the server to refuse writes for the
 session, and PostgreSQL enforces it.

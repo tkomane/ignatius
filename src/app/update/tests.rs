@@ -11789,7 +11789,21 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
         Effect::RunQueryBench { config, .. } if !config.rollback
     ));
 
-    // Escape closes overlay.
+    // While that run is in flight the overlay stays, and says why.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    let bench = model
+        .query_bench
+        .as_ref()
+        .expect("overlay stays during a run");
+    assert!(
+        bench
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("cannot be cancelled yet"))
+    );
+
+    // Escape closes the overlay once the run has reported.
+    finish_bench_runs(&mut model);
     let _ = update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.query_bench.is_none());
 }
@@ -12711,6 +12725,7 @@ fn a_reopened_benchmark_never_shows_an_earlier_overlays_report() {
     model.editor.set_text("SELECT 1;");
     update(&mut model, Message::Action(Action::QueryBench));
     let first = model.query_bench_request;
+    finish_bench_runs(&mut model);
     update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.query_bench.is_none());
 
@@ -12779,15 +12794,41 @@ fn query_b_is_not_run_when_the_connection_went_away() {
         after_a.is_empty(),
         "B is never sent without a ready connection"
     );
-    if let Some(bench) = model.query_bench.as_ref() {
-        assert!(!bench.loading);
-        assert!(
-            bench
-                .status_message
-                .as_deref()
-                .is_some_and(|status| status.contains("Query B was not run"))
-        );
-    }
+    let bench = model.query_bench.as_ref().expect("the overlay stays open");
+    assert!(
+        !bench.loading,
+        "nothing is left waiting on a lost connection"
+    );
+    assert!(bench.queued_candidate.is_none());
+}
+
+#[test]
+fn a_lost_connection_ends_the_benchmark_wait_and_refuses_new_runs() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    assert_eq!(
+        update(&mut model, Message::Action(Action::QueryBench)).len(),
+        1
+    );
+    update(&mut model, Message::ConnectionLost);
+    let bench = model.query_bench.as_ref().expect("the overlay stays open");
+    assert!(!bench.loading);
+    assert!(
+        bench.status_message.as_deref().is_some_and(|status| status
+            .contains("connection was lost")
+            && status.contains("unknown"))
+    );
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .and_then(|bench| bench.status_message.as_deref())
+            .is_some_and(|status| status.starts_with("Not connected"))
+    );
+    // With nothing in flight the overlay closes normally.
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.query_bench.is_none());
 }
 
 #[test]

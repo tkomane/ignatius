@@ -11,7 +11,7 @@ use ignatius::bench::BenchConfig;
 use ignatius::config::Config;
 use ignatius::connection::{ConnectionArgs, EnvSnapshot, resolve};
 use ignatius::postgres::{Session, session};
-use ignatius::query::result::{ExecutionStatus, JobId};
+use ignatius::query::result::{ExecutionStatus, JobId, TransactionState};
 use std::time::Duration;
 
 async fn fixture() -> Option<Session> {
@@ -87,10 +87,90 @@ async fn a_benchmark_runs_in_autocommit_and_leaves_the_session_there() {
         .expect("a read benchmarks in autocommit");
     assert_eq!(stats.samples.len(), 2);
 
-    // A transaction can still be opened and closed afterwards: the
-    // benchmark left nothing open behind it.
-    let begun = session.execute("BEGIN", 10, JobId(9110)).await;
-    assert_eq!(begun.status, ExecutionStatus::Succeeded);
-    let ended = session.execute("ROLLBACK", 10, JobId(9111)).await;
-    assert_eq!(ended.status, ExecutionStatus::Succeeded);
+    // The benchmark left nothing open behind it.
+    let after = session.execute("SELECT 1", 10, JobId(9110)).await;
+    assert_eq!(after.status, ExecutionStatus::Succeeded);
+    assert_eq!(after.transaction, TransactionState::Autocommit);
+}
+
+#[tokio::test]
+async fn workbench_work_waits_for_a_running_benchmark_instead_of_landing_inside_it() {
+    let Some(session) = fixture().await else {
+        return;
+    };
+    let session = std::sync::Arc::new(session);
+    let bench_session = std::sync::Arc::clone(&session);
+    let bench = tokio::spawn(async move {
+        bench_session
+            .run_benchmark(
+                "SELECT pg_sleep(0.1)",
+                &BenchConfig::new(0, 5, true),
+                "Baseline (A)",
+            )
+            .await
+    });
+    // Land in the middle of the benchmark's BEGIN/ROLLBACK iterations.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let created = session
+        .execute(
+            "CREATE TEMP TABLE bench_gate_probe (id int)",
+            10,
+            JobId(9120),
+        )
+        .await;
+    assert_eq!(created.status, ExecutionStatus::Succeeded);
+    bench
+        .await
+        .expect("benchmark task joins")
+        .expect("the read benchmark completes");
+
+    // Without the gate the benchmark's ROLLBACK would have discarded this.
+    let survived = session
+        .execute("SELECT count(*) FROM bench_gate_probe", 10, JobId(9121))
+        .await;
+    assert_eq!(
+        survived.status,
+        ExecutionStatus::Succeeded,
+        "the workbench statement ran outside the benchmark's transaction"
+    );
+}
+
+#[tokio::test]
+async fn an_analysed_plan_comparison_refuses_to_end_an_open_transaction() {
+    let Some(session) = fixture().await else {
+        return;
+    };
+    assert_eq!(
+        session.execute("BEGIN", 10, JobId(9130)).await.status,
+        ExecutionStatus::Succeeded
+    );
+    assert_eq!(
+        session
+            .execute(
+                "CREATE TEMP TABLE plan_guard_marker (id int)",
+                10,
+                JobId(9131)
+            )
+            .await
+            .status,
+        ExecutionStatus::Succeeded
+    );
+    let refused = session
+        .explain_extended("SELECT 1", true, "Baseline (A)")
+        .await
+        .expect_err("an analysed plan inside a transaction would end it");
+    assert!(
+        refused.headline.contains("not outside a transaction"),
+        "{}",
+        refused.headline
+    );
+    let still_there = session
+        .execute("SELECT count(*) FROM plan_guard_marker", 10, JobId(9132))
+        .await;
+    assert_eq!(still_there.status, ExecutionStatus::Succeeded);
+    assert_eq!(still_there.transaction, TransactionState::Open);
+    assert_eq!(
+        session.execute("ROLLBACK", 10, JobId(9133)).await.status,
+        ExecutionStatus::Succeeded
+    );
 }
