@@ -44,18 +44,18 @@ Many engineers explore in a friendly tool and fall back to `psql` when the datab
   <img src="docs/assets/screenshots/workbench-overview.png" alt="The full workbench: a header naming the role, host and database with its environment marker, above the object tree, editor and results panes." width="92%" />
 </p>
 
-The header answers the questions you should not have to ask. Which role, host and database. Whether this is production, because you declared it, not because a host name looked important. Whether the session is read-only, and whether a transaction is open or has failed. For the careful question, **Connection details** in the palette says how the connection is really protected, read back from PostgreSQL itself, so `require` and `verify-full` are never described alike, and an answer the server will not give is shown as unknown. Switch colour off and every marker is still a word: `[PROD]`, `[READ ONLY]`, `[TX FAILED]`. When the terminal is narrow, decoration gives way first; those words stay.
+The header answers the questions you should not have to ask. Which role, host and database. Whether this is production, because you declared it, not because a host name looked important. Whether the session is read-only, and whether a transaction is open or has failed. For the careful question, **Connection and auth details** in the palette says how the connection is really protected, read back from PostgreSQL itself, so `require` and `verify-full` are never described alike, and an answer the server will not give is shown as unknown. Switch colour off and every marker is still a word: `[PROD]`, `[READ ONLY]`, `[TX FAILED]`. When the terminal is narrow, decoration gives way first; those words stay.
 
 ### The answer, as it is
 
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/run-and-settle-still.png" />
-    <img src="docs/assets/motion/run-and-settle.png" alt="A statement running in the atelier theme: a short comet travels back and forth beside the word Running and the elapsed time, then the rows arrive and the word Completed settles from green to its resting colour." width="92%" />
+    <img src="docs/assets/motion/run-and-settle.png" alt="A statement running in the atelier theme: a short comet moves along a track under the word Running and the elapsed time, then the rows arrive and the word Completed settles from green to its resting colour." width="92%" />
   </picture>
 </p>
 
-While a statement runs, a small comet travels back and forth beside the word `Running` and the elapsed time. It never arrives anywhere, because PostgreSQL reports no progress for a running statement and Ignatius will not invent one. When the rows land, the word `Completed` glows briefly and settles, so even an identical rerun is visibly new. A NULL reads `[null]`, an empty string stays empty, and the text `NULL` stays text.
+While a statement runs, a small comet travels back and forth on a track under the word `Running` and the elapsed time. It never arrives anywhere, because PostgreSQL reports no progress for an ordinary query and Ignatius will not invent one. When the rows land, the word `Completed` glows briefly and settles, so even an identical rerun is visibly new. A NULL reads `[null]`, an empty string stays empty, and the text `NULL` stays text.
 
 <p align="center">
   <picture>
@@ -73,7 +73,7 @@ Press `Ctrl+C` and the status reads `Cancellation requested` until the server co
     <td align="center" width="50%">
       <img src="docs/assets/screenshots/error-diagnostics.png" alt="A query error naming a misspelled column and marking it with a caret in the statement, followed by a likely cause, a next step and the SQLSTATE code." />
       <br />
-      <sub>An error points, and never guesses.</sub>
+      <sub>An error points at the token the server named.</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/assets/screenshots/reviewed-update.png" alt="A review showing the exact bound UPDATE generated from a selected cell, with the note that nothing has been sent yet." />
@@ -83,7 +83,7 @@ Press `Ctrl+C` and the status reads `Cancellation requested` until the server co
   </tr>
 </table>
 
-When the server's error position maps to the statement you sent, Ignatius marks the token, names a likely cause and a next step, and keeps the technical fields one key away. Editing a cell produces the exact `UPDATE` for you to read before anything leaves the client, and it is refused on production and read-only sessions. On a production connection, statements that write wait for confirmation, and destructive ones ask you to type the database name. Benchmarks roll back every run by default. These checks read SQL keywords and are advisory; `--read-only`, which PostgreSQL itself enforces, is the real control.
+When the server's error position maps to the statement you sent, Ignatius marks the token, names a likely cause and a next step, and keeps the technical fields one key away. Editing a cell produces the exact `UPDATE` for you to read before anything leaves the client, and it is refused on production and read-only sessions. On a production connection, statements you run from the editor that write wait for confirmation, and destructive ones ask you to type the database name. These checks read SQL keywords and are advisory; `--read-only`, which PostgreSQL itself enforces, is the real control.
 
 ### Everything is a few keys away
 
@@ -98,11 +98,11 @@ When the server's error position maps to the statement you sent, Ignatius marks 
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/theme-curtain-still.png" />
-    <img src="docs/assets/motion/theme-curtain.png" alt="Cycling through the dark, atelier, paper and material themes: each new palette sweeps across the panes from left to right in about a third of a second, while the header and footer change at once." width="92%" />
+    <img src="docs/assets/motion/theme-curtain.png" alt="Switching between the dark, atelier, paper and material themes: each new palette sweeps across the panes from left to right in about a third of a second, while the header and footer change at once." width="92%" />
   </picture>
 </p>
 
-Seven built-in themes, from the warm dark of `atelier` to the archival light of `paper`, switch from the palette without reconnecting, and `ui.theme = "auto"` asks your terminal whether its background is light or dark. A new palette sweeps across the panes in about a third of a second; the header and footer change first, so a safety marker is never split between two themes. Every text colour in every built-in theme meets 4.5:1 contrast against every surface, and tests hold it there. Icons are optional and never carry meaning alone. Motion is brief, never the only signal, never plays over a confirmation, and is gone entirely with `ui.reduced-motion = true`.
+Seven built-in themes, from the warm dark of `atelier` to the archival light of `paper`, switch from the palette without reconnecting, and `ui.theme = "auto"` asks your terminal whether its background is light or dark. A new palette sweeps across the panes in about a third of a second; the header and footer change first, so a safety marker is never split between two themes. Text in every built-in theme meets 4.5:1 contrast against every surface, and tests hold it there; the ink behind an open dialog is deliberately quieter. Icons are optional and never carry meaning alone. Motion is brief, never the only signal, never plays over a confirmation, and is gone entirely with `ui.reduced-motion = true`.
 
 <details>
 <summary>All themes</summary>
@@ -180,7 +180,7 @@ Seven built-in themes, from the warm dark of `atelier` to the archival light of 
 
 </details>
 
-Every image and animation here is drawn from the interface's own widget buffers over synthetic data. Nothing is mocked up, and no frame is tweened.
+Every image and animation here is rendered from the interface's own widget buffers over synthetic data, inside a drawn window frame. No frame is tweened.
 
 ---
 
@@ -316,8 +316,8 @@ In order: the connection string, `PGPASSWORD`, a `.pgpass` file, then a masked p
 
 - **Nothing goes anywhere else.** No telemetry, no update check, no account and no sync. Ignatius opens network connections only to the databases you point it at.
 - **Result rows are never stored** unless you export them.
-- **History records the SQL that ran, never what came back**, and skips any statement that mentions something like a password or token. Pause it with `Ctrl+K v` or `--no-history`, or turn it off with `history.enabled = false`.
-- **Unsaved buffers survive a crash**, unless history is off for that session, in which case nothing is kept. The recovery journal holds editor text only, and you decide what happens to it:
+- **History records the SQL that ran, never what came back**, and skips any statement that mentions something like a password or token. Pause it with `Ctrl+K v`, skip it for one session with `--no-history`, or turn it off with `history.enabled = false`.
+- **Unsaved buffers survive a crash**, unless the session started with `--no-history` or `history.enabled = false`, in which case nothing is kept; pausing with `Ctrl+K v` stops history but not the journal. The recovery journal holds editor text only, and you decide what happens to it:
 
 ```bash
 ignatius recovery status

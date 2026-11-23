@@ -4,7 +4,7 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
-## Wave 68 - Living surfaces, supply-chain audit and a quieter README - 23 November 2026
+## Wave 68 - Living surfaces, supply-chain audit and a quieter README - 23 and 24 November 2026
 
 Feature 063 (`063-living-surfaces-and-truthful-motion`, milestone M17) was
 specified, built by parallel agents in isolated worktrees, independently
@@ -50,7 +50,11 @@ reviewed per pull request, and merged on hosted green CI.
   the wrong gated statement, retry after a failed cancel, A's failure masked by
   B's report, Cancel routing in the plan-diff overlay); the remaining work is
   listed in #132.
-- **Found and not fixed:** plan-diff `EXPLAIN ANALYZE` inside an open workbench
+- **Found and not fixed:** the built-in theme tests pin status inks (Focus,
+  Success, Warning, Danger, Info, environment and transaction) at 3.0:1 for
+  `dark`, `light`, `field-industrial` and `material`, while Principle XI says
+  every non-border token is pinned at 4.5:1 (the current values all clear 4.5:1;
+  the tests are weaker than the principle). Plan-diff `EXPLAIN ANALYZE` inside an open workbench
   transaction ends that transaction (its own BEGIN/ROLLBACK bracket); the spec
   025 `presentation.md` quiet-chrome text predates the new header yield order;
   the plan explorer's attention marker scores inclusive time and so usually

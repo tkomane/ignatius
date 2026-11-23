@@ -238,7 +238,7 @@ of 2026-11-21:
   visuals.
 
 M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
-2026-11-23:
+2026-11-24 (#131, #133, #134, #135):
 
 - [063 Living Surfaces and Truthful Motion](../../specs/063-living-surfaces-and-truthful-motion/spec.md)
   adds a pure motion core with a separate 33 ms cadence that runs only while a
@@ -249,6 +249,8 @@ M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
   width, and deterministic animated captures rendered from real widget buffers.
   The focus sweep and overlay arrival fade were specified and then cut after
   design review, because they fired too often to earn their motion.
+  The benchmark overlay's unguarded `m` re-run, found during review, is still
+  on `main` and continues in #132.
 
 ```mermaid
 flowchart LR

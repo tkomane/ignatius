@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/063-living-surfaces-core` (core), then per-wave branches
 **Created**: 2026-11-23
-**Status**: Delivered on 2026-11-23 (PRs #131, #133, #134 and the Wave 3 showcase). Benchmark safety found during review continues in #132.
+**Status**: Delivered. Waves 1 and 2 merged on 2026-11-23 (#131, #133, #134); the Wave 3 showcase merged with #135 on 2026-11-24. The unguarded benchmark `m` re-run found during review is still on `main` and continues in #132.
 **Milestone**: M17 - Living Surfaces
 
 ## Problem Statement

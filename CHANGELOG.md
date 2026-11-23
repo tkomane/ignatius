@@ -17,7 +17,8 @@ source can generate user-facing notes.
 - New: The Results status word of a complete, successful result settles from
   the success colour to its resting colour over about half a second, so an
   identical rerun is visibly new. Failed, cancelled and truncated outcomes keep
-  their colours, and lower colour depths stay still.
+  their colours; 16-colour and colour-off terminals stay still, and
+  256-colour terminals change once at the midpoint.
 - Improved: The running indicator is a heartbeat comet that travels back and
   forth and never fills, so it can no longer read as progress, and turns amber
   while cancellation is requested.

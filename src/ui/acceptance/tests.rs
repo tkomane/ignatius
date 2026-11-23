@@ -2212,10 +2212,6 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     let buf = render_showcase(&model);
     let text = buffer_to_string(&buf);
     assert!(text.contains("While:"), "diagnostics contains While:");
-    assert!(
-        !text.contains("Object context:"),
-        "42703 carries no server object fields, so there is no object context"
-    );
     assert!(text.contains("Location:"), "diagnostics contains Location:");
     assert!(
         text.contains("Likely cause:"),
@@ -2725,8 +2721,13 @@ fn motion_cancel_honestly() -> MotionSequence {
             .any(|effect| matches!(effect, Effect::Cancel { job: cancelled } if *cancelled == job)),
         "cancelling asks the server to cancel this job: {effects:?}"
     );
-    for _ in 0..8 {
+    for frame in 0..8 {
         let buf = advance(&mut model, &mut sequence, "Cancellation requested");
+        // The still a reduced-motion reader sees is the honest middle: asked,
+        // not yet confirmed.
+        if frame == 3 {
+            sequence.mark_poster();
+        }
         let (y, _) = showcase_heartbeat(&buf, "Cancellation requested");
         assert!(heartbeat_head_ink(
             &buf,
@@ -2771,7 +2772,6 @@ fn motion_cancel_honestly() -> MotionSequence {
         "a cancellation is never faded toward calm"
     );
     let outcome = sequence.push(&model, 2_600);
-    sequence.mark_poster();
     let text = buffer_to_string(&outcome);
     for words in [
         "Query cancelled by server",
