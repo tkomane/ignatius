@@ -72,8 +72,8 @@ No new mandatory binding or configuration name is introduced.
 
 The palette's **Session / Switch theme** entry is always available, including
 without a direct key and while a query is running or cancellation is pending.
-It cycles dark, light, high-contrast, field-industrial, material, custom when a validated `[theme]` exists,
-then dark. The choice lasts for the session; it does not write configuration,
+It cycles dark, light, high-contrast, field-industrial, material, atelier, paper, custom when a
+validated `[theme]` exists, then dark. The choice lasts for the session; it does not write configuration,
 reconnect or repeat SQL. Configure the optional `switch-theme` action under
 `[keys]`; the single palette row lists the active aliases. Direct keys preserve
 prompts, reviews, filters, help, inspectors, palettes and pending chord prefixes.
