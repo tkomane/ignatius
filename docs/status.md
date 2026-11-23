@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## GitHub CI recovery and release hardening - 23 November 2026
+
+- The weekly CI comparison found moved Docker Official Image indexes for
+  PostgreSQL 16, 17 and 18. PR #127 refreshes the three reviewed indexes.
+  Both the amd64 and arm64 child manifest digests match their earlier pins.
+  The exact comparison shell matched all five reviewed indexes against the
+  live registry. [Failed scheduled comparison](https://github.com/tkomane/ignatius/actions/runs/45177525315)
+  and [pin review and hosted checks](https://github.com/tkomane/ignatius/pull/127).
+- PR #126 put PostgreSQL 14 through 18 plain and verified-TLS contracts on every
+  pull request, added a manual opt-in for the weekly drift check, and separated
+  scheduled, manual and push concurrency. All 16 runnable CI jobs and all
+  three CodeQL analyses passed before merge.
+  [Hosted CI](https://github.com/tkomane/ignatius/actions/runs/45196955442)
+  and [CodeQL](https://github.com/tkomane/ignatius/actions/runs/45196955365).
+- The pin branch passed the full macOS arm64 verifier using disposable
+  PostgreSQL 18.7 plain and verified-TLS fixtures and a separate native 18.7
+  Unix socket. Live arm64 Docker probes also covered seeded plain and
+  verified-TLS queries and certificate name rejection on 16.16, 17.12 and 18.7.
+- The disposable Compose fixtures bind both development ports to IPv4 loopback.
+  CI checks the resolved bindings. GNU release archives, repeat builds and
+  extracted-binary smoke tests use Ubuntu 24.04. Release preflight audits the
+  locked workspace with all features and waits for the final PostgreSQL server
+  before the Unix socket test. A new hosted release-candidate rehearsal and
+  ADR-0008 release authorization remain open.
+
 ## Wave 66 - Editorial iconography, harmonized Atelier/Paper craft, Studio showcase and adaptive SVG branding - 23 November 2026
 
 - Upgraded `GlyphTier::Nerd` in `src/ui/glyphs.rs` to pair the PostgreSQL Devicon

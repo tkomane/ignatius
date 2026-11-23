@@ -2670,11 +2670,10 @@ removed before repository code runs, and Cargo commands that consume
 dependencies use the committed lockfile. Dependency auditing, repository secret
 scanning and release-evidence scanning are independent blocking jobs.
 
-Pull requests run PostgreSQL coverage on the oldest and newest supported majors.
-Pushes to `main`, manual runs and the weekly scheduled run cover every supported
-major from 14 through 18. A separate PostgreSQL 18 fixture exposes a real Unix
-socket to the Linux runner. The cross-platform suite uses Cargo auto-discovery,
-so a newly added contract runs by default.
+At the time, pull requests covered the oldest and newest supported PostgreSQL
+majors. Pushes to `main`, manual runs and the weekly schedule covered all five.
+A separate PostgreSQL 18 fixture exposed a real Unix socket to the Linux
+runner. The cross-platform suite used Cargo auto-discovery.
 
 **Hosted readback on 2026-09-04:**
 [main CI run 33720098318](https://github.com/tkomane/ignatius/actions/runs/33720098318)
