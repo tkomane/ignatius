@@ -6,12 +6,24 @@ fallback), subpixel vector box-drawing, luminous DIM blending, and Apple/
 Anthropic/Google-inspired editorial macOS window chrome over theme-matched
 ambient studio mats.
 
-From the repository root, export the actual UI buffer:
+From the repository root, export the actual UI buffers. One test run writes
+`showcase.jsonl` (the fourteen stills) and `motion.jsonl` (the animated
+sequences, each frame a real buffer at an explicit motion time):
 
     IGNATIUS_SHOWCASE_CAPTURE_DIR=/private/tmp/ignatius-showcase \
-        cargo test --locked --lib workbench_showcase_scenes_preserve_elevated_chrome_and_overlays
+        cargo --locked test --lib -- workbench_showcase motion_showcase
+
+Render the stills, then the motion. The motion run writes no stills because
+`motion.jsonl` holds only sequence frames; each sequence becomes a looping
+animated PNG, `<sequence>.png`, and a still poster, `<sequence>-still.png`,
+under `docs/assets/motion`:
+
     python3 scripts/render-showcase.py /private/tmp/ignatius-showcase/showcase.jsonl \
-        docs/assets/screenshots --font-dir "$HOME/Library/Fonts" --fallback-font /System/Library/Fonts/Menlo.ttc
+        docs/assets/screenshots --font-dir "$HOME/Library/Fonts" \
+        --fallback-font /System/Library/Fonts/Menlo.ttc
+    python3 scripts/render-showcase.py /private/tmp/ignatius-showcase/motion.jsonl \
+        docs/assets/screenshots --motion-output docs/assets/motion \
+        --font-dir "$HOME/Library/Fonts" --fallback-font /System/Library/Fonts/Menlo.ttc
 """
 
 import argparse
@@ -21,7 +33,7 @@ import math
 from pathlib import Path
 import re
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, PngImagePlugin
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, PngImagePlugin
 
 
 SCALE = 2
@@ -484,6 +496,23 @@ def render_scene(scene, fonts, chrome_fonts, mask, frame_spec=None):
     # 3. Rounded floating terminal window interior
     win_layer = Image.new("RGB", (canvas_w, canvas_h), surface_bg)
     w_draw = ImageDraw.Draw(win_layer)
+    buf_x0 = wx0 + WIN_PAD_X
+    buf_y0 = wy0 + TITLEBAR_H + WIN_PAD_Y
+    if curtain := scene.get("curtain_padding"):
+        # While a theme curtain runs, the padding is painted the way the
+        # curtain paints the panes: around the header and footer rails it
+        # takes the incoming theme in the first frame, like the rails, and
+        # beside the sweeping body each side keeps the outgoing surface until
+        # the hard edge has passed that side's outermost column.
+        incoming = color(curtain["incoming"], surface_bg)
+        outgoing = color(curtain["outgoing"], surface_bg)
+        column = int(curtain["column"])
+        top, bottom = (buf_y0 + row * CELL_HEIGHT for row in curtain["body_rows"])
+        w_draw.rectangle((wx0, wy0, wx1, wy1), fill=incoming)
+        if column <= 0:
+            w_draw.rectangle((wx0, top, buf_x0 - 1, bottom - 1), fill=outgoing)
+        if column < cols:
+            w_draw.rectangle((buf_x0 + buf_w, top, wx1, bottom - 1), fill=outgoing)
     # Titlebar header background (upper strip, masked to window radius below)
     w_draw.rectangle((wx0, wy0, wx1, wy0 + TITLEBAR_H - 1), fill=spec["title_bg"])
     w_draw.line((wx0, wy0 + TITLEBAR_H, wx1, wy0 + TITLEBAR_H), fill=spec["divider"], width=SCALE)
@@ -516,8 +545,6 @@ def render_scene(scene, fonts, chrome_fonts, mask, frame_spec=None):
     )
 
     # Paint live Ratatui buffer inside the padded window viewport
-    buf_x0 = wx0 + WIN_PAD_X
-    buf_y0 = wy0 + TITLEBAR_H + WIN_PAD_Y
     draw_buffer(win_layer, scene, mask, buf_x0, buf_y0)
 
     # Composite rounded window onto studio mat
@@ -550,6 +577,26 @@ def render_scene(scene, fonts, chrome_fonts, mask, frame_spec=None):
     return composed, meta
 
 
+def delta_frames(images):
+    """Encode each frame as only the pixels that changed since the last one.
+
+    The first frame is whole and opaque. Every later frame is transparent
+    except where a pixel differs from the frame before it, and is composited
+    over the canvas, so a decoder reproduces each rendered frame exactly
+    while unchanged regions cost almost nothing to store.
+    """
+    frames = [images[0].convert("RGBA")]
+    for previous, current in zip(images, images[1:]):
+        r, g, b = ImageChops.difference(current, previous).split()
+        changed = ImageChops.lighter(ImageChops.lighter(r, g), b).point(
+            lambda value: 255 if value else 0
+        )
+        frame = Image.new("RGBA", current.size, (0, 0, 0, 0))
+        frame.paste(current, (0, 0), changed)
+        frames.append(frame)
+    return frames
+
+
 def render_sequence(name, frames, fonts, chrome_fonts, mask, out_dir):
     """Assemble one captured sequence into an animated PNG and a still poster.
 
@@ -578,12 +625,15 @@ def render_sequence(name, frames, fonts, chrome_fonts, mask, out_dir):
         if scene.get("poster"):
             poster = (image, meta)
     out_dir.mkdir(parents=True, exist_ok=True)
-    images[0].save(
+    encoded = delta_frames(images)
+    encoded[0].save(
         out_dir / f"{name}.png",
         save_all=True,
-        append_images=images[1:],
+        append_images=encoded[1:],
         duration=durations,
         loop=0,
+        disposal=PngImagePlugin.Disposal.OP_NONE,
+        blend=PngImagePlugin.Blend.OP_OVER,
         optimize=True,
     )
     still, meta = poster or (images[-1], render_scene(frames[-1], fonts, chrome_fonts, mask, frame_spec=spec)[1])
