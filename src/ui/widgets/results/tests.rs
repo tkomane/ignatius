@@ -952,3 +952,117 @@ fn render_error_preserves_caret_column_and_styles_code_strip() {
         assert_eq!(lbuf[(token_col as u16, sql_y)].bg, Color::Reset);
     }
 }
+
+/// The two toolbar lines, read from the painted buffer: the rows directly
+/// under the pane's top border.
+fn toolbar_lines(buf: &Buffer, area: Rect) -> (String, String) {
+    let row = |y: u16| -> String {
+        (area.x + 1..area.x + area.width - 1)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    (row(area.y + 1), row(area.y + 2))
+}
+
+fn sortable_model() -> Model {
+    let mut model = model_with(
+        &["id", "amount"],
+        &[
+            vec![Cell::Text("1".into()), Cell::Text("30".into())],
+            vec![Cell::Text("2".into()), Cell::Text("10".into())],
+        ],
+    );
+    model.selected_column = 1;
+    model
+}
+
+#[test]
+fn a_local_sort_is_stated_once_with_its_retained_rows_qualifier() {
+    let mut model = sortable_model();
+    model.result_grid.toggle_sort(1);
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    for width in [80u16, 120, 160] {
+        let area = Rect::new(0, 0, width, 20);
+        let (order, _) = toolbar_lines(&render(&model, &presentation, area), area);
+        assert!(
+            order.contains("sorted by amount ascending (local, retained rows only)"),
+            "width {width}: {order:?}"
+        );
+        assert_eq!(order.matches("sorted").count(), 1, "{order:?}");
+        assert!(!order.contains("order: local"), "{order:?}");
+    }
+    // At the minimum usable width the sort still says it is local and over
+    // retained rows only, in whole words.
+    let area = Rect::new(0, 0, 40, 20);
+    let (order, _) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(order, "local sort, retained rows only", "{order:?}");
+}
+
+#[test]
+fn a_narrow_toolbar_drops_whole_segments_instead_of_cutting_words() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    for sorted in [false, true] {
+        let mut model = sortable_model();
+        if sorted {
+            model.result_grid.toggle_sort(1);
+        }
+        for width in 20u16..=140 {
+            let area = Rect::new(0, 0, width, 20);
+            let (order, state) = toolbar_lines(&render(&model, &presentation, area), area);
+            for line in [&order, &state] {
+                assert!(
+                    !line.contains('\u{2026}') && !line.contains("..."),
+                    "width {width}, sorted {sorted}: a segment was cut: {line:?}"
+                );
+                for segment in line.split(" | ").filter(|s| !s.is_empty()) {
+                    assert!(
+                        [
+                            "rows 1-2 of 2 retained",
+                            "order: server",
+                            "sorted by amount ascending (local, retained rows only)",
+                            "local sort, retained rows only",
+                            "selected column 2: amount",
+                            "2 columns",
+                            "types: unavailable",
+                            "Ctrl+K g grid controls",
+                        ]
+                        .contains(&segment),
+                        "width {width}, sorted {sorted}: {segment:?} is not a whole segment"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_state_line_names_only_what_differs_from_a_plain_grid() {
+    let mut model = sortable_model();
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 120, 20);
+
+    let (_, state) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(
+        state,
+        "2 columns | types: unavailable | Ctrl+K g grid controls"
+    );
+
+    // An unfocused pane does not teach a route that needs focus first.
+    model.focus = Focus::Editor;
+    let (_, state) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(state, "2 columns | types: unavailable");
+
+    model.result_grid.freeze_first = true;
+    assert!(model.result_grid.toggle_column(0, 2));
+    let (_, state) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(
+        state,
+        "shown 1/2 columns | types: unavailable | freeze first: on"
+    );
+
+    let single = model_with(&["only"], &text_rows(2));
+    let (_, state) = toolbar_lines(&render(&single, &presentation, area), area);
+    assert!(state.starts_with("1 column | "), "{state:?}");
+}

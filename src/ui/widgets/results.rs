@@ -1007,28 +1007,52 @@ fn render_grid(
         set.is_truncated(),
         !model.result_filter.trim().is_empty(),
     );
-    let order_label = model.result_grid.sort.map_or_else(
-        || "order: server".to_owned(),
-        |sort| {
-            format!(
-                "order: local {} on column {} (retained rows only)",
-                sort.direction.label(),
-                sort.column + 1
-            )
-        },
-    );
-    let sort_label = model.result_grid.sort_label(&set.columns);
-    let order_line = match (range_label.as_deref(), sort_label.as_deref()) {
-        (Some(range), Some(sort)) => format!("{range} | {sort} | {order_label}"),
-        (Some(range), None) => format!("{range} | {order_label}"),
-        (None, Some(sort)) => format!("{sort} | {order_label}"),
-        (None, None) => order_label,
+    // Line 1 states where the viewport is, what order the rows are in, and
+    // which column Enter acts on. A local sort and its qualifier are one fact,
+    // stated once: it sorts the retained rows only, never the server result.
+    let selected_segment = format!("selected column {selected_number}: {selected_label}");
+    let mut order_candidates = Vec::new();
+    match model.result_grid.sort_label(&set.columns) {
+        Some(sort) => {
+            let sort = format!("{sort} {LOCAL_SORT_QUALIFIER}");
+            order_candidates.push(toolbar(&[
+                range_label.as_deref(),
+                Some(&sort),
+                Some(&selected_segment),
+            ]));
+            order_candidates.push(toolbar(&[range_label.as_deref(), Some(&sort)]));
+            order_candidates.push(sort);
+            order_candidates.push(LOCAL_SORT_SHORT.to_owned());
+        }
+        None => {
+            order_candidates.push(toolbar(&[
+                range_label.as_deref(),
+                Some(SERVER_ORDER),
+                Some(&selected_segment),
+            ]));
+            order_candidates.push(toolbar(&[range_label.as_deref(), Some(SERVER_ORDER)]));
+            order_candidates.extend(range_label.clone());
+            order_candidates.push(SERVER_ORDER.to_owned());
+        }
+    }
+    if set.is_truncated() {
+        order_candidates.push("Retained window".to_owned());
+    }
+
+    // Line 2 states only what differs from a plain grid, plus the types,
+    // which are a fact about the server's answer rather than a setting.
+    let columns_label = if visible_columns.len() == set.columns.len() {
+        match set.columns.len() {
+            1 => "1 column".to_owned(),
+            count => format!("{count} columns"),
+        }
+    } else {
+        format!(
+            "shown {}/{} columns",
+            visible_columns.len(),
+            set.columns.len()
+        )
     };
-    let columns_label = format!(
-        "shown {}/{} columns",
-        visible_columns.len(),
-        set.columns.len()
-    );
     let type_count = set
         .column_types
         .iter()
@@ -1043,17 +1067,34 @@ fn render_grid(
     } else {
         "types: partial, some unavailable"
     };
-    let freeze_label = if model.result_grid.freeze_first {
-        "freeze first: on"
-    } else {
-        "freeze first: off"
-    };
-    let controls_key = action_key_label(keymap, &crate::app::Action::OpenResultControls);
-    let controls_label = if focused {
-        format!("{controls_key} grid controls")
-    } else {
-        format!("focus Results, then {controls_key} for controls")
-    };
+    let freeze_label = model.result_grid.freeze_first.then_some("freeze first: on");
+    // The controls open only from a focused Results pane, so an unfocused pane
+    // does not spend its toolbar teaching a two-step route.
+    let controls_label = focused.then(|| {
+        format!(
+            "{} grid controls",
+            action_key_label(keymap, &crate::app::Action::OpenResultControls)
+        )
+    });
+    let filter_window = (set.is_truncated() && !model.result_filter.trim().is_empty())
+        .then(|| model.result_window_label());
+    let mut state_candidates: Vec<String> = filter_window.into_iter().collect();
+    state_candidates.push(toolbar(&[
+        Some(&columns_label),
+        Some(type_label),
+        freeze_label,
+        controls_label.as_deref(),
+    ]));
+    state_candidates.push(toolbar(&[
+        Some(&columns_label),
+        Some(type_label),
+        freeze_label,
+    ]));
+    state_candidates.push(toolbar(&[Some(&columns_label), Some(type_label)]));
+    state_candidates.push(columns_label.clone());
+    if set.is_truncated() {
+        state_candidates.push("Retained grid".to_owned());
+    }
 
     let mut lines: Vec<Line> = Vec::with_capacity(visible_rows + header_rows);
     lines.extend(
@@ -1061,46 +1102,14 @@ fn render_grid(
             .into_iter()
             .map(|line| Line::from(Span::styled(line, theme.style(Token::Warning)))),
     );
-    let full_order = format!("{order_line} | selected column {selected_number}: {selected_label}");
-    let order = if set.is_truncated() {
-        [
-            Some(full_order.as_str()),
-            Some(order_line.as_str()),
-            range_label.as_deref(),
-            Some("Retained window"),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|line| display_width(line) <= grid_width)
-        .unwrap_or("")
-        .to_owned()
-    } else {
-        truncate_to_width(&full_order, grid_width, !presentation.glyphs.is_ascii())
-    };
+    let order = first_fitting(order_candidates, grid_width);
     lines.push(styled_toolbar_line(
         &order,
         Token::Info,
         Some("selected column"),
         theme,
     ));
-    let state_line = format!("{columns_label} | {type_label} | {freeze_label} | {controls_label}");
-    let filter_window = (set.is_truncated() && !model.result_filter.trim().is_empty())
-        .then(|| model.result_window_label());
-    let state_line = if set.is_truncated() {
-        [
-            filter_window.as_deref(),
-            Some(state_line.as_str()),
-            Some(columns_label.as_str()),
-            Some("Retained grid"),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|line| display_width(line) <= grid_width)
-        .unwrap_or("")
-        .to_owned()
-    } else {
-        truncate_to_width(&state_line, grid_width, !presentation.glyphs.is_ascii())
-    };
+    let state_line = first_fitting(state_candidates, grid_width);
     lines.push(styled_toolbar_line(&state_line, Token::Muted, None, theme));
     let clipboard_note = model
         .clipboard_notice
@@ -1364,6 +1373,37 @@ fn cell_style(theme: &Theme, token: Token, selected: bool, striped: bool) -> Sty
     } else {
         theme.style(token)
     }
+}
+
+/// The wording that ties a local sort to the rows it actually sorts.
+const LOCAL_SORT_QUALIFIER: &str = "(local, retained rows only)";
+
+/// A local sort stated in the fewest words that still say both facts.
+const LOCAL_SORT_SHORT: &str = "local sort, retained rows only";
+
+/// The order of an unsorted grid: whatever order the server sent.
+const SERVER_ORDER: &str = "order: server";
+
+/// Joins the present toolbar segments with the shared delimiter.
+fn toolbar(segments: &[Option<&str>]) -> String {
+    segments
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// The first candidate that fits, or nothing.
+///
+/// Candidates run from the fullest statement to the shortest, each made of
+/// whole segments, so a narrow pane drops the least important fact rather than
+/// cutting one mid-word or ellipsising a count.
+fn first_fitting(candidates: Vec<String>, width: usize) -> String {
+    candidates
+        .into_iter()
+        .find(|line| display_width(line) <= width)
+        .unwrap_or_default()
 }
 
 pub(crate) fn styled_toolbar_line(
