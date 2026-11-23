@@ -9,6 +9,11 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    # Version updates wait seven days after an upstream release, so a
+    # compromised or quickly withdrawn version is less likely to be proposed.
+    # Cooldown does not delay Dependabot security updates.
+    cooldown:
+      default-days: 7
     groups:
       # Grouped so a routine patch sweep is one review, not fifteen.
       patch-and-minor:
@@ -22,6 +27,9 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
+    # The same seven-day version-update delay applies to action pins.
+    cooldown:
+      default-days: 7
     groups:
       # Routine compatible updates should produce one coherent CI review.
       # Major action upgrades remain separate so their runtime and input
