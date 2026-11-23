@@ -141,8 +141,10 @@ overlay's own keys in its own words, such as `Enter Choose`, `Up/Down Move` and
 ## Narrow and small
 
 - **Below 80x24**: one pane at a time, the focused one, with a shortened header
-  carrying the environment, the database, and which pane is focused. Panes are
-  dropped deliberately rather than squeezed.
+  carrying the environment, `[READ ONLY]` and any open or failed transaction
+  first, then the database and which pane is focused. Panes are dropped
+  deliberately rather than squeezed, and a safety marker is never clipped to
+  make room.
 - **Below 40x8**: three lines stating the current size, the required size, and
   `Run: ignatius query`. No layout is attempted.
 

@@ -58,6 +58,13 @@ brackets:
   transaction is open, and `[TX FAILED]` in `Token::TransactionFailed` when it
   has failed and needs a rollback; an idle session is not badged.
 
+No safety capsule ever yields to a short row. When the header cannot fit
+everything, decoration goes first (the history or catalogue notice, `[MUTED]`,
+the provider badge, then the completed and live times), the target shortens
+with a visible ellipsis, and the product badge goes last; the environment,
+`[READ ONLY]` and transaction capsules stay in every width and in the compact
+header used below 80x24, where they lead the row.
+
 Transport state is not in the steady-state header. Once connected, `verified`,
 `verification skipped` and `plaintext` are routine there by the spec 025
 presentation contract; the full transport facts are in the connection picker,

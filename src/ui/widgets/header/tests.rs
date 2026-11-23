@@ -582,3 +582,71 @@ fn header_brand_badge_uses_theme_keycap_and_padded_capsules_across_depths() {
         assert_eq!(low_buf[(0, 0)].bg, Color::Reset);
     }
 }
+
+/// A production, read-only session inside a failed transaction, with every
+/// decoration the header can carry, so a short row has to choose.
+fn crowded_model() -> Model {
+    let mut model = connected_model(crate::connection::Environment::Production);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.read_only = true;
+        info.target = "reporting_reader@warehouse-replica-02.internal:5432/analytics".into();
+    }
+    model.transaction = crate::query::result::TransactionState::Failed;
+    model.credential_provider = Some("entra".into());
+    model.history_note = Some("not recorded");
+    model.last_elapsed = Some(Duration::from_millis(1250));
+    model
+}
+
+#[test]
+fn safety_markers_survive_every_header_width_before_any_decoration() {
+    for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+        for reduced_motion in [false, true] {
+            let mut p = presentation(tier, ColorDepth::TrueColor);
+            p.reduced_motion = reduced_motion;
+            for width in 40u16..=200 {
+                let text = header_text(&crowded_model(), &p, width);
+                for marker in ["[PROD]", "[READ ONLY]", "[TX FAILED]"] {
+                    assert!(
+                        text.contains(marker),
+                        "{tier:?} width {width}: {marker} was dropped: {text:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // A wide row keeps everything; a narrower one sheds decoration first.
+    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    let wide = header_text(&crowded_model(), &p, 200);
+    for word in ["Ignatius", "analytics", "[auth: entra]", "1.25 s"] {
+        assert!(wide.contains(word), "{word}: {wide}");
+    }
+    let narrow = header_text(&crowded_model(), &p, 80);
+    assert!(!narrow.contains("[auth: entra]"), "{narrow}");
+    assert!(narrow.contains("Ignatius"), "{narrow}");
+    assert!(
+        narrow.contains('\u{2026}'),
+        "the target shortens visibly rather than vanishing: {narrow}"
+    );
+}
+
+#[test]
+fn the_compact_header_keeps_read_only_and_transaction_markers() {
+    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    for width in 40u16..=100 {
+        let area = Rect::new(0, 0, width, 1);
+        let mut buf = Buffer::empty(area);
+        render_compact_header(&crowded_model(), &p, area, &mut buf);
+        let text = buffer_to_string(&buf);
+        for marker in ["[PROD]", "[READ ONLY]", "[TX FAILED]"] {
+            assert!(text.contains(marker), "width {width}: {marker}: {text:?}");
+        }
+    }
+    let mut open = crowded_model();
+    open.transaction = crate::query::result::TransactionState::Open;
+    let area = Rect::new(0, 0, 60, 1);
+    let mut buf = Buffer::empty(area);
+    render_compact_header(&open, &p, area, &mut buf);
+    assert!(buffer_to_string(&buf).contains("[TX ACTIVE]"));
+}

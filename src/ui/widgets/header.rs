@@ -1,7 +1,7 @@
 use crate::app::model::{ConnectingStep, ConnectionState, Model, TimingDisplay};
 use crate::connection::Environment;
 use crate::query::result::TransactionState;
-use crate::query::value::{display_width, sanitize_for_display};
+use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
 use crate::ui::theme::Token;
@@ -30,22 +30,21 @@ pub(crate) fn render_header(
 
     let theme = &presentation.theme;
     let environment = model.environment();
-    let mut left_spans: Vec<Span<'static>> = Vec::new();
 
     // 1. Product badge (elevated keycap over uniform SurfaceAlt rail)
     let brand = presentation.icon(Icon::Brand);
     let name = crate::branding::PRODUCT_NAME;
-    left_spans.push(Span::raw(" "));
-    left_spans.push(Span::styled(
-        format!(" {brand}{name}: "),
-        theme.keycap(Token::Header),
-    ));
-    left_spans.push(Span::raw(" "));
+    let brand_spans = vec![
+        Span::raw(" "),
+        Span::styled(format!(" {brand}{name}: "), theme.keycap(Token::Header)),
+        Span::raw(" "),
+    ];
 
     // 2. Connection state / target
+    let mut target_spans: Vec<Span<'static>> = Vec::new();
     match &model.connection {
         ConnectionState::Connected(info) => {
-            left_spans.push(Span::styled(
+            target_spans.push(Span::styled(
                 presentation.icon(Icon::Database),
                 theme.on_stripe(Token::Focus),
             ));
@@ -57,18 +56,18 @@ pub(crate) fn render_header(
                 let user = &clean_target[..at_idx];
                 let host_port = &clean_target[at_idx..=slash_idx];
                 let db = &clean_target[slash_idx + 1..];
-                left_spans.push(Span::styled(user.to_owned(), theme.on_stripe(Token::Info)));
-                left_spans.push(Span::styled(
+                target_spans.push(Span::styled(user.to_owned(), theme.on_stripe(Token::Info)));
+                target_spans.push(Span::styled(
                     host_port.to_owned(),
                     theme.on_stripe(Token::Muted),
                 ));
-                left_spans.push(Span::styled(db.to_owned(), theme.on_stripe(Token::Header)));
+                target_spans.push(Span::styled(db.to_owned(), theme.on_stripe(Token::Header)));
             } else {
-                left_spans.push(Span::styled(clean_target, theme.on_stripe(Token::Text)));
+                target_spans.push(Span::styled(clean_target, theme.on_stripe(Token::Text)));
             }
         }
         _ => {
-            left_spans.push(Span::styled(
+            target_spans.push(Span::styled(
                 format!(
                     "{}{}",
                     presentation.icon(Icon::Database),
@@ -79,25 +78,37 @@ pub(crate) fn render_header(
         }
     }
 
+    let mut left = Vec::new();
+
     // Failed connection step if any
     if let Some(step) = failed_step(model) {
-        left_spans.push(Span::raw("  "));
-        left_spans.push(Span::styled(
-            format!("failed during {}", step.label()),
-            theme.on_stripe(Token::Danger),
+        left.push(Part::yielding(
+            5,
+            vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!("failed during {}", step.label()),
+                    theme.on_stripe(Token::Danger),
+                ),
+            ],
         ));
     }
 
     // 3. Active provider badge if any
     if let Some(provider) = &model.credential_provider {
-        left_spans.push(Span::raw("  "));
-        left_spans.push(Span::styled(
-            format!(
-                "{}[auth: {}]",
-                presentation.icon(Icon::Info),
-                sanitize_for_display(provider)
-            ),
-            theme.on_stripe(Token::Info),
+        left.push(Part::yielding(
+            3,
+            vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!(
+                        "{}[auth: {}]",
+                        presentation.icon(Icon::Info),
+                        sanitize_for_display(provider)
+                    ),
+                    theme.on_stripe(Token::Info),
+                ),
+            ],
         ));
     }
 
@@ -114,95 +125,109 @@ pub(crate) fn render_header(
     };
 
     if environment.is_production() || matches!(environment, Environment::Staging) {
-        left_spans.push(Span::raw(" "));
-        left_spans.push(Span::styled(
-            format!(" [{}] ", environment.label()),
-            capsule_style(presentation, env_token),
-        ));
+        left.push(Part::safety(vec![
+            Span::raw(" "),
+            Span::styled(
+                format!(" [{}] ", environment.label()),
+                capsule_style(presentation, env_token),
+            ),
+        ]));
     } else {
-        left_spans.push(Span::raw("  "));
-        left_spans.push(Span::styled(
-            format!("[{}]", environment.label()),
-            theme.on_stripe(env_token),
-        ));
+        left.push(Part::safety(vec![
+            Span::raw("  "),
+            Span::styled(
+                format!("[{}]", environment.label()),
+                theme.on_stripe(env_token),
+            ),
+        ]));
     }
 
     // Read-only capsule
     if let Some(info) = model.connection.info()
         && info.read_only
     {
-        left_spans.push(Span::raw(" "));
-        left_spans.push(Span::styled(
-            " [READ ONLY] ",
-            capsule_style(presentation, Token::Info),
-        ));
+        left.push(Part::safety(vec![
+            Span::raw(" "),
+            Span::styled(" [READ ONLY] ", capsule_style(presentation, Token::Info)),
+        ]));
     }
 
     // History and metadata link notices
-    if !model.records_history() {
-        left_spans.push(Span::raw("  "));
-        left_spans.push(Span::styled(
-            format!("{}[history off]", presentation.icon(Icon::Info)),
-            theme.on_stripe(Token::Info),
-        ));
+    let notice = if !model.records_history() {
+        Some(format!("{}[history off]", presentation.icon(Icon::Info)))
     } else if matches!(
         model.metadata_link,
         crate::app::model::MetadataLink::Unavailable(_)
     ) {
-        left_spans.push(Span::raw("  "));
-        left_spans.push(Span::styled(
-            format!(
-                "{}[objects: {}]",
-                presentation.icon(Icon::Info),
-                model.metadata_link.label()
-            ),
-            theme.on_stripe(Token::Info),
-        ));
+        Some(format!(
+            "{}[objects: {}]",
+            presentation.icon(Icon::Info),
+            model.metadata_link.label()
+        ))
     } else if model.history_note.is_some() {
-        left_spans.push(Span::raw("  "));
-        left_spans.push(Span::styled(
-            format!("{}[not in history]", presentation.icon(Icon::Info)),
-            theme.on_stripe(Token::Info),
+        Some(format!("{}[not in history]", presentation.icon(Icon::Info)))
+    } else {
+        None
+    };
+    if let Some(notice) = notice {
+        left.push(Part::yielding(
+            1,
+            vec![
+                Span::raw("  "),
+                Span::styled(notice, theme.on_stripe(Token::Info)),
+            ],
         ));
     }
 
-    // Right group: active session context
-    let mut right_spans: Vec<Span<'static>> = Vec::new();
+    // Right group: active session context, each part with the joiner it
+    // takes when another part precedes it.
+    let mut right: Vec<(Part, &'static str)> = Vec::new();
 
     // Non-idle transaction capsule
     match model.transaction {
-        TransactionState::Open => {
-            right_spans.push(Span::styled(
+        TransactionState::Open => right.push((
+            Part::safety(vec![Span::styled(
                 " [TX ACTIVE] ",
                 capsule_style(presentation, Token::TransactionActive),
-            ));
-        }
-        TransactionState::Failed => {
-            right_spans.push(Span::styled(
+            )]),
+            "",
+        )),
+        TransactionState::Failed => right.push((
+            Part::safety(vec![Span::styled(
                 " [TX FAILED] ",
                 capsule_style(presentation, Token::TransactionFailed),
-            ));
-        }
+            )]),
+            "",
+        )),
         _ => {}
     }
 
     // Active watch loop capsule
     if let Some(watch) = &model.watch {
-        if !right_spans.is_empty() {
-            right_spans.push(Span::raw(" "));
-        }
-        right_spans.push(Span::styled(
-            format!(" [WATCH: {}s #{}] ", watch.interval_secs, watch.iteration),
-            capsule_style(presentation, Token::Focus),
+        right.push((
+            Part::yielding(
+                4,
+                vec![Span::styled(
+                    format!(" [WATCH: {}s #{}] ", watch.interval_secs, watch.iteration),
+                    capsule_style(presentation, Token::Focus),
+                )],
+            ),
+            " ",
         ));
-        right_spans.push(Span::raw(" "));
-        right_spans.push(Span::styled(
-            "(\\watch stop)",
-            theme.on_stripe(Token::Muted),
+        right.push((
+            Part::yielding(
+                2,
+                vec![Span::styled(
+                    "(\\watch stop)",
+                    theme.on_stripe(Token::Muted),
+                )],
+            ),
+            " ",
         ));
     }
 
-    // Running / completed elapsed indicator
+    // Running / completed elapsed indicator. A live clock is a truthful wait
+    // indicator and yields late; a completed time yields early.
     if let Some(d) = model.running_for {
         let text = if !presentation.reduced_motion {
             format!(
@@ -213,10 +238,10 @@ pub(crate) fn render_header(
         } else {
             format!("{:.1}s", d.as_secs_f64())
         };
-        if !right_spans.is_empty() {
-            right_spans.push(Span::raw("  "));
-        }
-        right_spans.push(Span::styled(text, theme.on_stripe(Token::Info)));
+        right.push((
+            Part::yielding(4, vec![Span::styled(text, theme.on_stripe(Token::Info))]),
+            "  ",
+        ));
     } else if let Some(d) = model.last_elapsed {
         let show = match model.timing_display {
             TimingDisplay::Off => false,
@@ -233,19 +258,91 @@ pub(crate) fn render_header(
             } else {
                 format!("{} ms", d.as_millis())
             };
-            if !right_spans.is_empty() {
-                right_spans.push(Span::raw("  "));
-            }
-            right_spans.push(Span::styled(text, theme.on_stripe(Token::Muted)));
+            right.push((
+                Part::yielding(2, vec![Span::styled(text, theme.on_stripe(Token::Muted))]),
+                "  ",
+            ));
         }
     }
 
     // Motion badge
     if presentation.reduced_motion {
-        if !right_spans.is_empty() {
-            right_spans.push(Span::raw("  "));
+        right.push((
+            Part::yielding(
+                1,
+                vec![Span::styled("[MUTED]", theme.on_stripe(Token::Muted))],
+            ),
+            "  ",
+        ));
+    }
+
+    // When the row is short, decoration yields first, in order, then the
+    // target shortens and finally the product badge goes. The environment,
+    // `[READ ONLY]` and transaction capsules never yield: a safety marker
+    // must be on screen in every layout that draws a header.
+    let total_width = usize::from(area.width);
+    let unicode = !presentation.glyphs.is_ascii();
+    let mut brand_spans = Some(brand_spans);
+    let fits = |brand: &Option<Vec<Span<'static>>>,
+                target: &[Span<'static>],
+                left: &[Part],
+                right: &[(Part, &'static str)]| {
+        let left_width = brand.as_deref().map_or(0, spans_width)
+            + spans_width(target)
+            + left
+                .iter()
+                .map(|part| spans_width(&part.spans))
+                .sum::<usize>();
+        let right_width = right_group_width(right);
+        left_width + usize::from(right_width > 0) * 2 + right_width <= total_width
+    };
+    while !fits(&brand_spans, &target_spans, &left, &right) {
+        let lowest = left
+            .iter()
+            .filter_map(|part| part.yields)
+            .chain(right.iter().filter_map(|(part, _)| part.yields))
+            .min();
+        let Some(lowest) = lowest else { break };
+        if let Some(index) = left.iter().position(|part| part.yields == Some(lowest)) {
+            left.remove(index);
+        } else if let Some(index) = right
+            .iter()
+            .position(|(part, _)| part.yields == Some(lowest))
+        {
+            right.remove(index);
         }
-        right_spans.push(Span::styled("[MUTED]", theme.on_stripe(Token::Muted)));
+    }
+    if !fits(&brand_spans, &target_spans, &left, &right) {
+        let others = brand_spans.as_deref().map_or(0, spans_width)
+            + left
+                .iter()
+                .map(|part| spans_width(&part.spans))
+                .sum::<usize>()
+            + right_group_width(&right)
+            + usize::from(!right.is_empty()) * 2;
+        let room = total_width.saturating_sub(others);
+        // A target shorter than a few cells says nothing, so it goes whole.
+        target_spans = if room >= 6 {
+            fit_spans(target_spans, room, unicode)
+        } else {
+            Vec::new()
+        };
+    }
+    if !fits(&brand_spans, &target_spans, &left, &right) {
+        brand_spans = None;
+    }
+
+    let mut left_spans: Vec<Span<'static>> = brand_spans.unwrap_or_default();
+    left_spans.extend(target_spans);
+    for part in left {
+        left_spans.extend(part.spans);
+    }
+    let mut right_spans: Vec<Span<'static>> = Vec::new();
+    for (part, joiner) in right {
+        if !right_spans.is_empty() && !joiner.is_empty() {
+            right_spans.push(Span::raw(joiner));
+        }
+        right_spans.extend(part.spans);
     }
 
     let right_starts_padded = right_spans
@@ -257,7 +354,6 @@ pub(crate) fn render_header(
 
     let left_width: usize = left_spans.iter().map(|s| display_width(&s.content)).sum();
     let right_width: usize = right_spans.iter().map(|s| display_width(&s.content)).sum();
-    let total_width = usize::from(area.width);
     let raw_separator = presentation.glyphs.separator();
     let separator = if right_starts_padded {
         raw_separator.trim_end()
@@ -301,6 +397,77 @@ pub(crate) fn render_header(
             .style(theme.surface(Token::SurfaceAlt))
             .render(area, buf);
     }
+}
+
+/// A run of header spans and how readily it gives way on a short row.
+struct Part {
+    spans: Vec<Span<'static>>,
+    /// Lower numbers yield first; `None` never yields, because it is a safety
+    /// marker.
+    yields: Option<u8>,
+}
+
+impl Part {
+    const fn safety(spans: Vec<Span<'static>>) -> Self {
+        Self {
+            spans,
+            yields: None,
+        }
+    }
+
+    const fn yielding(rank: u8, spans: Vec<Span<'static>>) -> Self {
+        Self {
+            spans,
+            yields: Some(rank),
+        }
+    }
+}
+
+fn spans_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(|span| display_width(&span.content)).sum()
+}
+
+/// The right group's width as it is drawn: joiners between parts and one
+/// trailing cell of padding.
+fn right_group_width(right: &[(Part, &'static str)]) -> usize {
+    if right.is_empty() {
+        return 0;
+    }
+    right
+        .iter()
+        .enumerate()
+        .map(|(index, (part, joiner))| {
+            spans_width(&part.spans) + if index > 0 { display_width(joiner) } else { 0 }
+        })
+        .sum::<usize>()
+        + 1
+}
+
+/// Shortens styled spans to `width` cells, ending in the truncation marker in
+/// the style of the span it interrupts.
+fn fit_spans(spans: Vec<Span<'static>>, width: usize, unicode: bool) -> Vec<Span<'static>> {
+    if spans_width(&spans) <= width {
+        return spans;
+    }
+    let marker = if unicode {
+        crate::query::value::TRUNCATION_MARKER.to_string()
+    } else {
+        crate::query::value::TRUNCATION_MARKER_ASCII.to_owned()
+    };
+    let mut budget = width.saturating_sub(display_width(&marker));
+    let mut out = Vec::new();
+    for span in spans {
+        let span_width = display_width(&span.content);
+        if span_width <= budget {
+            budget -= span_width;
+            out.push(span);
+            continue;
+        }
+        let kept = truncate_to_width(&span.content, budget + display_width(&marker), unicode);
+        out.push(Span::styled(kept, span.style));
+        return out;
+    }
+    out
 }
 
 /// The connection facts a header adds beside the connection label.
@@ -410,17 +577,41 @@ pub(crate) fn render_compact_header(
         },
     );
     let label = format!(" [{}] ", environment.label());
-    let mut spans = vec![
-        if environment.is_production() {
-            Span::styled(
-                label,
-                capsule_style(presentation, Token::EnvironmentProduction),
-            )
-        } else {
-            Span::styled(label, theme.style(Token::EnvironmentNonProduction))
-        },
-        Span::styled(connection, theme.style(Token::Text)),
-    ];
+    // The safety markers lead, so a narrow row clips the database name and
+    // the focus word before it could clip `[READ ONLY]` or a transaction.
+    let mut spans = vec![if environment.is_production() {
+        Span::styled(
+            label,
+            capsule_style(presentation, Token::EnvironmentProduction),
+        )
+    } else {
+        Span::styled(label, theme.style(Token::EnvironmentNonProduction))
+    }];
+    if model.connection.info().is_some_and(|info| info.read_only) {
+        spans.push(Span::styled(
+            " [READ ONLY] ",
+            capsule_style(presentation, Token::Info),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    match model.transaction {
+        TransactionState::Open => {
+            spans.push(Span::styled(
+                " [TX ACTIVE] ",
+                capsule_style(presentation, Token::TransactionActive),
+            ));
+            spans.push(Span::raw(" "));
+        }
+        TransactionState::Failed => {
+            spans.push(Span::styled(
+                " [TX FAILED] ",
+                capsule_style(presentation, Token::TransactionFailed),
+            ));
+            spans.push(Span::raw(" "));
+        }
+        _ => {}
+    }
+    spans.push(Span::styled(connection, theme.style(Token::Text)));
     spans.extend(connection_state_spans(model, presentation));
     spans.push(Span::styled(
         format!(
