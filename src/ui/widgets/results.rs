@@ -1,7 +1,7 @@
 use super::overlays::render_plan;
 use super::{
-    action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, inset_empty_area,
-    overlay_block, pane_block_line, syntax_token,
+    action_key_label, bound_key, hairline_rule, highlighted_sql_spans, input_cursor,
+    inset_empty_area, overlay_block, pane_block_line, syntax_token, wrapped_line_count,
 };
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
@@ -26,13 +26,29 @@ pub(crate) fn grid_header_rows(
     spacing: crate::app::model::Spacing,
     area: Rect,
 ) -> usize {
+    // The column header row, then the optional types row and the rule.
+    grid_column_header_row(model, spacing, area)
+        + 2
+        + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+}
+
+/// The inner row the column header is painted on, shared with hit testing.
+///
+/// The rows above it are, in paint order: the retention warning, the order
+/// line, the state line, and either one notice or the density's blank rows.
+/// A click handler that assumed a fixed row would land on the rule or the
+/// types row in compact density and under a warning.
+pub(crate) fn grid_column_header_row(
+    model: &Model,
+    spacing: crate::app::model::Spacing,
+    area: Rect,
+) -> usize {
     let notice = model.cell_update_notice.is_some()
         || model.clipboard_notice.is_some()
         || model.refresh_notice.is_some()
         || model.result_grid.note.is_some();
     retention_warning_lines(model, area).len()
-        + 4
-        + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+        + 2
         + usize::from(u16::from(notice).max(spacing.toolbar_blank_rows))
 }
 
@@ -246,8 +262,24 @@ pub(crate) fn render_results(
         format!("{}Results", presentation.icon(Icon::Rows)),
         primary_style,
     ));
+    // A complete, successful result settles: its status word starts in the
+    // success ink and fades to its resting ink. Only the word of the job that
+    // started the settle is tinted, and only while it is that job's own
+    // status rather than a refresh or a previous result.
+    let settle = model
+        .motion()
+        .result_settle()
+        .filter(|(job, _)| {
+            *job == execution.job
+                && execution.status == ExecutionStatus::Succeeded
+                && !model.running_refresh
+                && !previous_cancellation
+        })
+        .map(|(_, progress)| progress);
+    title_spans.push(Span::styled("  ", theme.style(Token::Muted)));
+    title_spans.push(Span::styled(status, status_word_style(theme, settle)));
     title_spans.push(Span::styled(
-        format!("  {status}  {summary}"),
+        format!("  {summary}"),
         theme.style(Token::Muted),
     ));
     // What the filter admits is stated in full: how many match, of how many are
@@ -384,6 +416,39 @@ pub(crate) fn render_results(
     } else {
         render_grid(model, set, keymap, presentation, focused, inner, buf);
     }
+}
+
+/// The Results title status word, at rest or `settle` of the way through its
+/// settle.
+///
+/// At rest the word is muted ink without the dim modifier. The settle fades
+/// the foreground alone from the success ink to exactly that resting ink, so
+/// the modifiers are the same in every frame and the last frame of the fade is
+/// the resting frame: nothing changes when the settle ends. `Theme::mix`
+/// keeps the fade depth-honest: truecolour interpolates, 256 colours step at
+/// the midpoint, and no colour means no tint at all.
+pub(crate) fn status_word_style(theme: &Theme, settle: Option<f32>) -> Style {
+    let mut style = theme.style(Token::Muted);
+    style.add_modifier.remove(Modifier::DIM);
+    match settle
+        .filter(|_| settle_inks_are_legible(theme))
+        .and_then(|progress| theme.mix(Token::Success, Token::Muted, progress))
+    {
+        Some(ink) => style.fg(ink),
+        None => style,
+    }
+}
+
+/// Whether both ends of the settle read as text on the pane the title sits on.
+///
+/// A custom theme may admit its success colour at 3:1, which is enough for a
+/// badge but not for a word, so a settle there is skipped rather than painted
+/// in an ink the word cannot be read in. The resting ink always passes.
+fn settle_inks_are_legible(theme: &Theme) -> bool {
+    let pane = theme.rgb(Token::SurfacePane);
+    [Token::Success, Token::Muted]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(pane) >= 4.5)
 }
 
 /// One row down the screen, one column per line.
@@ -775,16 +840,23 @@ fn render_results_placeholder(
                 ),
                 Span::styled("No query has run yet.", theme.style(Token::Header)),
             ]));
-            prose_lines.push(Line::from(Span::styled(
-                "Write SQL in the editor to inspect rows, types, and query plans.",
-                theme.style(Token::Muted),
-            )));
+            // With SQL already in the editor, asking for SQL would be advice
+            // the user has already taken: the next step is to run it.
+            let (prose, hint) = if ctx.editor_has_text {
+                (
+                    "SQL is ready to run. Rows, types, and plans appear here.",
+                    "Run the buffer",
+                )
+            } else {
+                (
+                    "Write SQL in the editor to inspect rows, types, and query plans.",
+                    "Run the buffer after entering SQL.",
+                )
+            };
+            prose_lines.push(Line::from(Span::styled(prose, theme.style(Token::Muted))));
             hint_lines.push(Line::from(vec![
                 Span::styled(format!(" {run_key} "), keycap),
-                Span::styled(
-                    "Run the buffer after entering SQL.",
-                    theme.style(Token::Text),
-                ),
+                Span::styled(hint, theme.style(Token::Text)),
             ]));
         }
         crate::app::discovery::ConnectionPosture::Lost
@@ -827,17 +899,22 @@ fn render_results_placeholder(
         Span::styled(format!(" {palette_key} "), keycap),
         Span::styled(
             "Command palette shows safe next actions.",
-            theme.style(Token::Muted),
+            theme.style(Token::Text),
         ),
     ]));
 
+    // Prose, rule and hints stack from the top, as the Objects empty state
+    // does, so a tall pane does not open a gap between the words and the keys.
+    let measured = wrapped_line_count(&prose_lines, empty_area.width);
     let separator_rows = u16::from(empty_area.height >= 6);
     let hints_height = u16::try_from(hint_lines.len())
         .unwrap_or(u16::MAX)
         .min(empty_area.height);
-    let prose_height = empty_area
+    let max_prose = empty_area
         .height
         .saturating_sub(hints_height + separator_rows);
+    let gap = u16::from(separator_rows > 0 && measured.saturating_add(1) <= max_prose);
+    let prose_height = measured.saturating_add(gap).min(max_prose);
     let [prose_rect, sep_rect, hints_rect] = Layout::vertical([
         Constraint::Length(prose_height),
         Constraint::Length(separator_rows),
@@ -865,13 +942,13 @@ fn render_results_placeholder(
 fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation) -> Vec<Line<'a>> {
     let theme = &presentation.theme;
     let elapsed = model.running_for.unwrap_or_default();
-    let seconds = elapsed.as_secs_f64();
 
     let leader = if presentation.reduced_motion {
         String::new()
     } else {
         format!("{} ", presentation.glyphs.spinner(model.frame))
     };
+    let cancelling = matches!(model.phase, QueryPhase::CancellationRequested { .. });
     let word = match model.phase {
         QueryPhase::CancellationRequested { .. } => "Cancellation requested",
         _ if model.running_refresh => "Refreshing retained result",
@@ -882,20 +959,17 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
         Span::styled(leader, theme.style(Token::Info)),
         Span::styled(word.to_owned(), theme.style(Token::Text)),
         Span::styled(
-            format!("  {}{seconds:.1}s", presentation.icon(Icon::Clock)),
+            format!(
+                "  {}{}",
+                presentation.icon(Icon::Clock),
+                super::live_seconds(elapsed)
+            ),
             theme.style(Token::Muted),
         ),
     ])];
 
     if !presentation.reduced_motion {
-        // A meter that shows time passing, not progress. The server reports no
-        // progress, so nothing here may imply a percentage.
-        let width = 24usize;
-        let filled = usize::try_from(model.frame % (width as u64 + 1)).unwrap_or(0);
-        lines.push(Line::from(Span::styled(
-            presentation.glyphs.meter(filled, width),
-            theme.style(Token::Border),
-        )));
+        lines.push(heartbeat_line(model.frame, cancelling, presentation));
     }
 
     let cancellation = match model.phase {
@@ -913,6 +987,102 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
     )));
 
     lines
+}
+
+/// Cells on the heartbeat track.
+pub(crate) const HEARTBEAT_TRACK: usize = 24;
+
+/// Cells of fading tail behind the heartbeat head, where colour can fade.
+pub(crate) const HEARTBEAT_TAIL: usize = 3;
+
+/// Where the heartbeat head is on busy frame `frame`, and whether it is moving
+/// to the right.
+///
+/// One cell per tick, at a constant pace, back and forth across the track.
+/// PostgreSQL reports no progress for a running statement, so the head never
+/// arrives anywhere: it shows that time is passing and nothing more.
+#[must_use]
+pub(crate) const fn heartbeat_head(frame: u64, width: usize) -> (usize, bool) {
+    if width <= 1 {
+        return (0, true);
+    }
+    let last = width as u64 - 1;
+    let phase = frame % (2 * last);
+    if phase < last {
+        (phase as usize, true)
+    } else {
+        ((2 * last - phase) as usize, false)
+    }
+}
+
+/// The heartbeat: a comet travelling back and forth along a quiet track.
+///
+/// At truecolour the head is drawn in the information ink with a short tail
+/// fading into the track. At 256 colours the tail keeps its heavy weight in
+/// the track ink, with no blended colour. At 16 colours the head alone moves,
+/// bold; without colour it is the heavy glyph alone, and ASCII draws an `=`
+/// head on a `-` track.
+/// While a cancellation is pending the comet keeps moving, because the
+/// statement may still be running, and takes the warning ink.
+fn heartbeat_line(frame: u64, cancelling: bool, presentation: &Presentation) -> Line<'static> {
+    use crate::ui::theme::ColorDepth;
+    let theme = &presentation.theme;
+    let ascii = presentation.glyphs.is_ascii();
+    let (track, head) = if ascii {
+        ("-", "=")
+    } else {
+        ("\u{2500}", "\u{2501}")
+    };
+    let ink = if cancelling {
+        Token::Warning
+    } else {
+        Token::Info
+    };
+    let depth = if theme.color {
+        theme.depth
+    } else {
+        ColorDepth::None
+    };
+    let tail = if ascii || !depth.paints_surfaces() {
+        0
+    } else {
+        HEARTBEAT_TAIL
+    };
+    // At 16 colours the head is bold as well as coloured; with no colour at
+    // all it is shape alone, the heavy glyph on the light track.
+    let head_style = match depth {
+        ColorDepth::Basic16 => theme.style(ink).add_modifier(Modifier::BOLD),
+        _ => theme.style(ink),
+    };
+    let (position, rightward) = heartbeat_head(frame, HEARTBEAT_TRACK);
+    let spans = (0..HEARTBEAT_TRACK)
+        .map(|cell| {
+            if cell == position {
+                return Span::styled(head, head_style);
+            }
+            let behind = if rightward {
+                position.checked_sub(cell)
+            } else {
+                cell.checked_sub(position)
+            };
+            match behind.filter(|distance| (1..=tail).contains(distance)) {
+                Some(distance) => {
+                    let style = if depth == ColorDepth::TrueColor {
+                        let amount = distance as f32 / (HEARTBEAT_TAIL + 1) as f32;
+                        theme.mix(ink, Token::Border, amount).map_or_else(
+                            || theme.style(Token::Border),
+                            |fg| Style::default().fg(fg),
+                        )
+                    } else {
+                        theme.style(Token::Border)
+                    };
+                    Span::styled(head, style)
+                }
+                None => Span::styled(track, theme.style(Token::Border)),
+            }
+        })
+        .collect::<Vec<_>>();
+    Line::from(spans)
 }
 
 /// Draws the result grid: row numbers, headers, striped rows, and a scroll bar.
@@ -991,28 +1161,53 @@ fn render_grid(
         set.is_truncated(),
         !model.result_filter.trim().is_empty(),
     );
-    let order_label = model.result_grid.sort.map_or_else(
-        || "order: server".to_owned(),
-        |sort| {
-            format!(
-                "order: local {} on column {} (retained rows only)",
-                sort.direction.label(),
-                sort.column + 1
-            )
-        },
-    );
-    let sort_label = model.result_grid.sort_label(&set.columns);
-    let order_line = match (range_label.as_deref(), sort_label.as_deref()) {
-        (Some(range), Some(sort)) => format!("{range} | {sort} | {order_label}"),
-        (Some(range), None) => format!("{range} | {order_label}"),
-        (None, Some(sort)) => format!("{sort} | {order_label}"),
-        (None, None) => order_label,
+    // Line 1 states where the viewport is, what order the rows are in, and
+    // which column Enter acts on. A local sort and its qualifier are one fact,
+    // stated once: it sorts the retained rows only, never the server result.
+    let selected_segment = format!("selected column {selected_number}: {selected_label}");
+    let mut order_candidates = Vec::new();
+    match model.result_grid.sort_label(&set.columns) {
+        Some(sort) => {
+            let sort = format!("{sort} {LOCAL_SORT_QUALIFIER}");
+            order_candidates.push(toolbar(&[
+                range_label.as_deref(),
+                Some(&sort),
+                Some(&selected_segment),
+            ]));
+            order_candidates.push(toolbar(&[range_label.as_deref(), Some(&sort)]));
+            order_candidates.push(sort);
+            order_candidates.push(LOCAL_SORT_SHORT.to_owned());
+            order_candidates.push(LOCAL_SORT_SHORTEST.to_owned());
+        }
+        None => {
+            order_candidates.push(toolbar(&[
+                range_label.as_deref(),
+                Some(SERVER_ORDER),
+                Some(&selected_segment),
+            ]));
+            order_candidates.push(toolbar(&[range_label.as_deref(), Some(SERVER_ORDER)]));
+            order_candidates.extend(range_label.clone());
+            order_candidates.push(SERVER_ORDER.to_owned());
+        }
+    }
+    if set.is_truncated() {
+        order_candidates.push("Retained window".to_owned());
+    }
+
+    // Line 2 states only what differs from a plain grid, plus the types,
+    // which are a fact about the server's answer rather than a setting.
+    let columns_label = if visible_columns.len() == set.columns.len() {
+        match set.columns.len() {
+            1 => "1 column".to_owned(),
+            count => format!("{count} columns"),
+        }
+    } else {
+        format!(
+            "shown {}/{} columns",
+            visible_columns.len(),
+            set.columns.len()
+        )
     };
-    let columns_label = format!(
-        "shown {}/{} columns",
-        visible_columns.len(),
-        set.columns.len()
-    );
     let type_count = set
         .column_types
         .iter()
@@ -1027,17 +1222,34 @@ fn render_grid(
     } else {
         "types: partial, some unavailable"
     };
-    let freeze_label = if model.result_grid.freeze_first {
-        "freeze first: on"
-    } else {
-        "freeze first: off"
-    };
-    let controls_key = action_key_label(keymap, &crate::app::Action::OpenResultControls);
-    let controls_label = if focused {
-        format!("{controls_key} grid controls")
-    } else {
-        format!("focus Results, then {controls_key} for controls")
-    };
+    let freeze_label = model.result_grid.freeze_first.then_some("freeze first: on");
+    // The controls open only from a focused Results pane, so an unfocused pane
+    // does not spend its toolbar teaching a two-step route.
+    let controls_label = focused.then(|| {
+        format!(
+            "{} grid controls",
+            action_key_label(keymap, &crate::app::Action::OpenResultControls)
+        )
+    });
+    let filter_window = (set.is_truncated() && !model.result_filter.trim().is_empty())
+        .then(|| model.result_window_label());
+    let mut state_candidates: Vec<String> = filter_window.into_iter().collect();
+    state_candidates.push(toolbar(&[
+        Some(&columns_label),
+        Some(type_label),
+        freeze_label,
+        controls_label.as_deref(),
+    ]));
+    state_candidates.push(toolbar(&[
+        Some(&columns_label),
+        Some(type_label),
+        freeze_label,
+    ]));
+    state_candidates.push(toolbar(&[Some(&columns_label), Some(type_label)]));
+    state_candidates.push(columns_label.clone());
+    if set.is_truncated() {
+        state_candidates.push("Retained grid".to_owned());
+    }
 
     let mut lines: Vec<Line> = Vec::with_capacity(visible_rows + header_rows);
     lines.extend(
@@ -1045,46 +1257,14 @@ fn render_grid(
             .into_iter()
             .map(|line| Line::from(Span::styled(line, theme.style(Token::Warning)))),
     );
-    let full_order = format!("{order_line} | selected column {selected_number}: {selected_label}");
-    let order = if set.is_truncated() {
-        [
-            Some(full_order.as_str()),
-            Some(order_line.as_str()),
-            range_label.as_deref(),
-            Some("Retained window"),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|line| display_width(line) <= grid_width)
-        .unwrap_or("")
-        .to_owned()
-    } else {
-        truncate_to_width(&full_order, grid_width, !presentation.glyphs.is_ascii())
-    };
+    let order = first_fitting(order_candidates, grid_width);
     lines.push(styled_toolbar_line(
         &order,
         Token::Info,
         Some("selected column"),
         theme,
     ));
-    let state_line = format!("{columns_label} | {type_label} | {freeze_label} | {controls_label}");
-    let filter_window = (set.is_truncated() && !model.result_filter.trim().is_empty())
-        .then(|| model.result_window_label());
-    let state_line = if set.is_truncated() {
-        [
-            filter_window.as_deref(),
-            Some(state_line.as_str()),
-            Some(columns_label.as_str()),
-            Some("Retained grid"),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|line| display_width(line) <= grid_width)
-        .unwrap_or("")
-        .to_owned()
-    } else {
-        truncate_to_width(&state_line, grid_width, !presentation.glyphs.is_ascii())
-    };
+    let state_line = first_fitting(state_candidates, grid_width);
     lines.push(styled_toolbar_line(&state_line, Token::Muted, None, theme));
     let clipboard_note = model
         .clipboard_notice
@@ -1133,15 +1313,23 @@ fn render_grid(
             width,
             !presentation.glyphs.is_ascii(),
         );
-        let header_style = if Some(*index) == selected_column {
-            theme.style(Token::Selection)
-        } else {
-            theme.on_stripe(Token::Header)
+        // The selection fill follows the same gate as the selected row: it
+        // is painted only while Results has focus. An unfocused pane still
+        // marks the column Enter would act on, in the focus ink alone.
+        let header_style = match (Some(*index) == selected_column, focused) {
+            (true, true) => theme.style(Token::Selection),
+            (true, false) => theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD),
+            (false, _) => theme.on_stripe(Token::Header),
         };
-        header_spans.push(Span::styled(
-            format!("{}{padding}", pad_to_width(&text, width)),
-            header_style,
-        ));
+        // A name sits over its values: right-aligned over a column whose
+        // values read as numbers, left-aligned otherwise.
+        let cell = if alignment.get(*index).copied().unwrap_or(false) {
+            let pad = width.saturating_sub(display_width(&text));
+            format!("{}{text}", " ".repeat(pad))
+        } else {
+            pad_to_width(&text, width)
+        };
+        header_spans.push(Span::styled(format!("{cell}{padding}"), header_style));
     }
     let header_width: usize = header_spans.iter().map(|s| display_width(&s.content)).sum();
     if header_width < grid_width {
@@ -1350,6 +1538,40 @@ fn cell_style(theme: &Theme, token: Token, selected: bool, striped: bool) -> Sty
     }
 }
 
+/// The wording that ties a local sort to the rows it actually sorts.
+const LOCAL_SORT_QUALIFIER: &str = "(local, retained rows only)";
+
+/// A local sort stated in the fewest words that still say both facts.
+const LOCAL_SORT_SHORT: &str = "local sort, retained rows only";
+
+/// The narrowest statement of a local sort that still names both facts.
+const LOCAL_SORT_SHORTEST: &str = "local sort, retained only";
+
+/// The order of an unsorted grid: whatever order the server sent.
+const SERVER_ORDER: &str = "order: server";
+
+/// Joins the present toolbar segments with the shared delimiter.
+fn toolbar(segments: &[Option<&str>]) -> String {
+    segments
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// The first candidate that fits, or nothing.
+///
+/// Candidates run from the fullest statement to the shortest, each made of
+/// whole segments, so a narrow pane drops the least important fact rather than
+/// cutting one mid-word or ellipsising a count.
+fn first_fitting(candidates: Vec<String>, width: usize) -> String {
+    candidates
+        .into_iter()
+        .find(|line| display_width(line) <= width)
+        .unwrap_or_default()
+}
+
 pub(crate) fn styled_toolbar_line(
     text: &str,
     primary: Token,
@@ -1556,38 +1778,63 @@ pub(crate) fn render_error(
     let block = pane_block_line(Line::from(title_spans), false, presentation);
     let inner_width = usize::from(block.inner(area).width);
 
+    // Every labelled row starts with the same gutter, an icon where the row
+    // has one and blank cells where it does not, so `Likely cause:` and
+    // `Next:` line up with `While:` and `Location:`. In ASCII icons are empty
+    // and so is the gutter, which keeps the rows aligned there too.
+    let gutter = |icon: Option<Icon>, token: Token| -> Span<'static> {
+        match icon {
+            _ if presentation.glyphs.is_ascii() => Span::raw(""),
+            Some(icon) => Span::styled(presentation.icon(icon), theme.style(token)),
+            None => Span::raw("  "),
+        }
+    };
+    let labelled = |label: &'static str, label_token: Token, value: Span<'static>| {
+        Line::from(vec![
+            gutter(None, label_token),
+            Span::styled(label, theme.style(label_token)),
+            value,
+        ])
+    };
     let mut lines = vec![
         Line::from(Span::styled(
             sanitize_for_display(&error.headline),
             theme.style(Token::Danger),
         )),
-        Line::from(vec![
-            Span::styled("While: ", theme.style(Token::Header)),
+        labelled(
+            "While: ",
+            Token::Header,
             Span::styled(
                 sanitize_for_display(&error.attempted),
                 theme.style(Token::Muted),
             ),
-        ]),
+        ),
     ];
     if let Some(object) = &error.object {
         let facts = object_context_text(object);
-        lines.push(Line::from(vec![
-            Span::styled("Object context: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Object context: ",
+            Token::Header,
             Span::styled(facts, theme.style(Token::Text)),
-        ]));
+        ));
         let note = catalogue_note(model, object);
         if let Some(rest) = note.strip_prefix("Catalogue: ") {
-            lines.push(Line::from(vec![
-                Span::styled("Catalogue: ", theme.style(Token::Info)),
+            lines.push(labelled(
+                "Catalogue: ",
+                Token::Header,
                 Span::styled(rest.to_owned(), theme.style(Token::Muted)),
-            ]));
+            ));
         } else {
-            lines.push(Line::from(Span::styled(note, theme.style(Token::Muted))));
+            lines.push(Line::from(vec![
+                gutter(None, Token::Muted),
+                Span::styled(note, theme.style(Token::Muted)),
+            ]));
         }
     }
     if let Some(location) = &model.error_location {
-        lines.push(Line::from(vec![
-            Span::styled("Location: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Location: ",
+            Token::Header,
             Span::styled(
                 format!(
                     "statement {}, line {}, column {}",
@@ -1595,7 +1842,7 @@ pub(crate) fn render_error(
                 ),
                 theme.style(Token::Info),
             ),
-        ]));
+        ));
         if let Some(marker) =
             crate::query::error_location::render_marker(model.editor.text(), location)
         {
@@ -1609,41 +1856,52 @@ pub(crate) fn render_error(
             );
         }
     } else if let Some(note) = &model.error_location_note {
-        lines.push(Line::from(vec![
-            Span::styled("Location: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Location: ",
+            Token::Header,
             Span::styled(sanitize_for_display(note), theme.style(Token::Warning)),
-        ]));
+        ));
     } else if let Some(position) = error.position {
-        lines.push(Line::from(vec![
-            Span::styled("Location: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Location: ",
+            Token::Header,
             Span::styled(
                 format!("unavailable for server character {}.", position.character),
                 theme.style(Token::Warning),
             ),
-        ]));
+        ));
     } else if let Some(statement_number) = error.statement_number {
-        lines.push(Line::from(vec![
-            Span::styled("Statement: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Statement: ",
+            Token::Header,
             Span::styled(statement_number.to_string(), theme.style(Token::Info)),
-        ]));
+        ));
     }
     if let Some(cause) = &error.likely_cause {
         lines.push(Line::from(vec![
-            Span::styled(
-                presentation.icon(Icon::Warning),
-                theme.style(Token::Warning),
-            ),
+            gutter(Some(Icon::Warning), Token::Warning),
             Span::styled("Likely cause: ", theme.style(Token::Warning)),
             Span::styled(sanitize_for_display(cause), theme.style(Token::Text)),
         ]));
     }
     if let Some(action) = &error.next_action {
         lines.push(Line::from(vec![
-            Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
+            gutter(Some(Icon::Info), Token::Info),
             Span::styled("Next: ", theme.style(Token::Header)),
             Span::styled(sanitize_for_display(action), theme.style(Token::Info)),
         ]));
     }
+    // The expand key is the one the keymap binds, and once the fields are
+    // shown the same key is offered to fold them away again.
+    let detail_key = bound_key(model, &crate::app::Action::ToggleErrorDetail);
+    let key_hint = |verb: &'static str| -> Vec<Span<'static>> {
+        detail_key.clone().map_or_else(Vec::new, |key| {
+            vec![
+                Span::styled(key, theme.style(Token::Info).add_modifier(Modifier::BOLD)),
+                Span::styled(verb, theme.style(Token::Muted)),
+            ]
+        })
+    };
     if model.error_expanded {
         for field in &error.technical {
             lines.push(Line::from(vec![
@@ -1654,18 +1912,23 @@ pub(crate) fn render_error(
                 Span::styled(sanitize_for_display(&field.value), theme.style(Token::Text)),
             ]));
         }
+        if !error.technical.is_empty() {
+            let mut spans = vec![gutter(None, Token::Muted)];
+            spans.extend(key_hint(" to collapse."));
+            if spans.len() > 1 {
+                lines.push(Line::from(spans));
+            }
+        }
     } else if !error.technical.is_empty() {
-        lines.push(Line::from(vec![
+        let mut spans = vec![
+            gutter(None, Token::Muted),
             Span::styled(
                 format!("{} technical field(s) hidden. ", error.technical.len()),
                 theme.style(Token::Muted),
             ),
-            Span::styled(
-                "Ctrl+D",
-                theme.style(Token::Info).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" to expand.", theme.style(Token::Muted)),
-        ]));
+        ];
+        spans.extend(key_hint(" to expand."));
+        lines.push(Line::from(spans));
     }
 
     Paragraph::new(lines)

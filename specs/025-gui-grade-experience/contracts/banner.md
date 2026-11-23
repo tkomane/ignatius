@@ -13,7 +13,7 @@ who needs a value that is not here stops and reports.
 ██║╚██████╔╝██║ ╚████║██║  ██║   ██║   ██║╚██████╔╝███████║
 ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚══════╝
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-       the PostgreSQL client you can point at production
+             a quiet instrument for PostgreSQL
 ```
 
 ## Monogram, unicode and nerd-font tiers, under 64 columns
@@ -35,8 +35,14 @@ who needs a value that is not here stops and reports.
  | | | (_ || .` | / _ \   | |   | | | |_| |\__ \
 |___| \___||_|\_|/_/ \_\  |_|  |___| \___/ |___/
 ------------------------------------------------
-the PostgreSQL client you can point at production
+       a quiet instrument for PostgreSQL
 ```
+
+The identity line is `crate::branding::IDENTITY_LINE` and nowhere else. Each
+tier centres it under its own art width, (art width - line width) / 2 cells
+from the left: 13 cells under the 59-column wordmark and 7 under the
+48-column ASCII wordmark. It replaced "the PostgreSQL client you can point at
+production" in Feature 063 (2026-11-23).
 
 ## Reveal
 

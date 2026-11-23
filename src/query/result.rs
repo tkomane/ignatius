@@ -645,17 +645,25 @@ pub struct StatementResult {
     pub notices: Vec<Notice>,
 }
 
+/// A finished statement's elapsed time as the interface states it: whole
+/// milliseconds with a spaced unit (`240 ms`). The Results summary and the
+/// header both use this, so one duration reads the same in both places.
+#[must_use]
+pub fn elapsed_label(elapsed: Duration) -> String {
+    format!("{} ms", elapsed.as_millis())
+}
+
 impl StatementResult {
     /// A one-line summary for the status bar and the CLI.
     #[must_use]
     pub fn summary(&self) -> String {
-        let millis = self.elapsed.as_millis();
+        let elapsed = elapsed_label(self.elapsed);
         match &self.result_set {
-            Some(set) => format!("{}, {millis} ms", set.window_label()),
+            Some(set) => format!("{}, {elapsed}", set.window_label()),
             None => match self.rows_affected {
-                Some(1) => format!("1 row affected, {millis} ms"),
-                Some(n) => format!("{n} rows affected, {millis} ms"),
-                None => format!("completed, {millis} ms"),
+                Some(1) => format!("1 row affected, {elapsed}"),
+                Some(n) => format!("{n} rows affected, {elapsed}"),
+                None => format!("completed, {elapsed}"),
             },
         }
     }

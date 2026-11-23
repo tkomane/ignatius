@@ -1,7 +1,7 @@
 pub(super) mod view;
 
 use super::{
-    action_key_label, hairline_rule, inset_empty_area, overlay_block_line, pane_block,
+    action_key_label, bound_key, hairline_rule, inset_empty_area, overlay_block_line, pane_block,
     pane_block_line, syntax_token,
 };
 use crate::app::model::{Focus, Model};
@@ -201,8 +201,10 @@ pub(crate) fn render_completion(
         )));
     }
     let summary_sep = if unicode { " \u{00b7} " } else { " | " };
+    // Counts read in the order they narrow: what is listed, of what matches,
+    // and how many candidates the scope holds at all.
     let catalog_summary = format!(
-        "Showing {} of {} ({} avail){summary_sep}{}",
+        "{} of {} shown, {} in scope{summary_sep}{}",
         menu.result.candidates.len(),
         menu.result.matching_count,
         menu.result.total_count,
@@ -212,28 +214,7 @@ pub(crate) fn render_completion(
         truncate_to_width(&catalog_summary, content_width, unicode),
         presentation.theme.style(Token::Muted),
     )));
-    let hint_line = if content_width >= 42 {
-        let key_style = presentation.theme.style(Token::Header);
-        let verb_style = presentation.theme.style(Token::Muted);
-        Line::from(vec![
-            Span::styled("Enter", key_style),
-            Span::styled(" accepts, ", verb_style),
-            Span::styled("Esc", key_style),
-            Span::styled(" cancels, ", verb_style),
-            Span::styled("Up/Down", key_style),
-            Span::styled(" moves.", verb_style),
-        ])
-    } else {
-        Line::from(Span::styled(
-            truncate_to_width(
-                "Enter accepts, Esc cancels, Up/Down moves.",
-                content_width,
-                unicode,
-            ),
-            presentation.theme.style(Token::Muted),
-        ))
-    };
-    lines.push(hint_line);
+    lines.push(completion_key_row(model, presentation, content_width));
 
     let title_line = Line::from(Span::styled(
         format!("{}Complete", presentation.icon(Icon::Editor)),
@@ -261,10 +242,48 @@ pub(crate) fn render_completion(
     }
 }
 
+/// The popup's keys as keycaps, the way the footer draws them, recessed onto
+/// the popup's own surface. Each key comes from the active keymap, and a pair
+/// that does not fit is left out whole rather than cut.
+fn completion_key_row(model: &Model, presentation: &Presentation, width: usize) -> Line<'static> {
+    use crate::app::message::{Action, Direction};
+    let theme = &presentation.theme;
+    let vertical = match (
+        bound_key(model, &Action::Move(Direction::Up)),
+        bound_key(model, &Action::Move(Direction::Down)),
+    ) {
+        (Some(up), Some(down)) => Some(format!("{up}/{down}")),
+        (one, other) => one.or(other),
+    };
+    let pairs = [
+        (bound_key(model, &Action::Activate), "accepts"),
+        (bound_key(model, &Action::Dismiss), "cancels"),
+        (vertical, "moves"),
+    ];
+    let mut spans = Vec::new();
+    let mut used = 0usize;
+    for (key, label) in pairs {
+        let Some(key) = key else { continue };
+        let keycap = format!(" {key} ");
+        let gap = usize::from(used > 0);
+        let pair_width = gap + display_width(&keycap) + display_width(label);
+        if used + pair_width > width {
+            break;
+        }
+        if gap > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(keycap, theme.recessed_pill(Token::Focus)));
+        spans.push(Span::styled(label, theme.style(Token::Text)));
+        used += pair_width;
+    }
+    Line::from(spans)
+}
+
 const fn candidate_kind_icon(kind: crate::query::completion::CandidateKind) -> Icon {
     use crate::query::completion::{CandidateKind, CatalogObjectKind};
     match kind {
-        CandidateKind::Keyword => Icon::Key,
+        CandidateKind::Keyword => Icon::Keyword,
         CandidateKind::Cte => Icon::SearchPath,
         CandidateKind::Column => Icon::Column,
         CandidateKind::Object(

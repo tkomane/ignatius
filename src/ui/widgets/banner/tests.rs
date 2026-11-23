@@ -149,7 +149,7 @@ fn wordmark_and_monogram_selection_across_tiers() {
         assert_eq!(&line_to_string(&wm_uni[i]), expected);
     }
     assert_eq!(&line_to_string(&wm_uni[6]), UNICODE_WORDMARK_UNDERLINE);
-    assert_eq!(&line_to_string(&wm_uni[7]), UNICODE_WORDMARK_TAGLINE);
+    assert_eq!(line_to_string(&wm_uni[7]), unicode_wordmark_tagline());
 
     let wm_ascii = render_banner_lines(BannerState::Final, &p_ascii, 64);
     assert_eq!(wm_ascii.len(), 6);
@@ -157,7 +157,7 @@ fn wordmark_and_monogram_selection_across_tiers() {
         assert_eq!(&line_to_string(&wm_ascii[i]), expected);
     }
     assert_eq!(&line_to_string(&wm_ascii[4]), ASCII_WORDMARK_UNDERLINE);
-    assert_eq!(&line_to_string(&wm_ascii[5]), ASCII_WORDMARK_TAGLINE);
+    assert_eq!(line_to_string(&wm_ascii[5]), ascii_wordmark_tagline());
 
     // Monogram < 64
     let mono_uni = render_banner_lines(BannerState::Final, &p_uni, 60);
@@ -249,7 +249,7 @@ fn deterministic_sweep_decode_edge_underline_and_tagline() {
 
     // On final frame, tagline appears
     let final_lines = render_banner_lines(BannerState::Final, &p_uni, 80);
-    assert_eq!(&line_to_string(&final_lines[7]), UNICODE_WORDMARK_TAGLINE);
+    assert_eq!(line_to_string(&final_lines[7]), unicode_wordmark_tagline());
 
     // ASCII sweep test
     let p_ascii = presentation(
@@ -438,7 +438,7 @@ fn plain_mode_and_machine_output_emit_zero_banner_bytes() {
             ASCII_WORDMARK_LINES[0],
             UNICODE_WORDMARK_UNDERLINE,
             ASCII_WORDMARK_UNDERLINE,
-            ASCII_WORDMARK_TAGLINE,
+            crate::branding::IDENTITY_LINE,
         ] {
             assert!(
                 !rendered.contains(forbidden),
@@ -473,7 +473,7 @@ fn connecting_shell_at_sixty_four_and_eighty_columns_renders_wordmark_above_step
             "width {width} must render the 59-column unicode wordmark:\n{rendered}"
         );
         assert!(
-            rendered.contains("the PostgreSQL client you can point at production"),
+            rendered.contains(crate::branding::IDENTITY_LINE),
             "width {width} must render the tagline on Final:\n{rendered}"
         );
         assert!(
@@ -481,4 +481,33 @@ fn connecting_shell_at_sixty_four_and_eighty_columns_renders_wordmark_above_step
             "width {width} must keep the connecting step line visible:\n{rendered}"
         );
     }
+}
+
+#[test]
+fn the_identity_line_comes_from_branding_and_sits_centred_under_each_wordmark() {
+    let line = crate::branding::IDENTITY_LINE;
+    assert_eq!(line, "a quiet instrument for PostgreSQL");
+    for (tagline, art_width) in [
+        (
+            unicode_wordmark_tagline(),
+            UNICODE_WORDMARK_LINES[0].chars().count(),
+        ),
+        (
+            ascii_wordmark_tagline(),
+            ASCII_WORDMARK_LINES[3].chars().count(),
+        ),
+    ] {
+        assert_eq!(tagline.trim_start(), line);
+        let left = tagline.len() - line.len();
+        let right = art_width - tagline.len();
+        assert!(
+            left == right || left + 1 == right,
+            "{tagline:?} is not centred under {art_width} columns ({left} | {right})"
+        );
+    }
+    assert_eq!(
+        UNICODE_WORDMARK_WIDTH,
+        UNICODE_WORDMARK_LINES[0].chars().count()
+    );
+    assert_eq!(ASCII_WORDMARK_WIDTH, ASCII_WORDMARK_UNDERLINE.len());
 }

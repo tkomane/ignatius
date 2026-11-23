@@ -57,6 +57,8 @@ pub enum Icon {
     Error,
     /// Neutral information.
     Info,
+    /// Nothing is happening: an idle status that is neither news nor success.
+    Idle,
     /// A SQL NULL.
     Null,
     /// The focused pane.
@@ -71,6 +73,8 @@ pub enum Icon {
     ReadWrite,
     /// A key hint.
     Key,
+    /// A SQL keyword, as a completion candidate.
+    Keyword,
     /// A schema.
     Schema,
     /// A table.
@@ -136,6 +140,7 @@ impl Glyphs {
                 Icon::Warning => "\u{25b3}",          // △
                 Icon::Error => "\u{2717}",            // ✗
                 Icon::Info => "\u{2022}",             // •
+                Icon::Idle => "\u{25cb}",             // ○
                 Icon::Null => "\u{2205}",             // ∅
                 Icon::Focus => "\u{258e}",            // ▎
                 Icon::SearchPath => "\u{203a}",       // ›
@@ -143,6 +148,7 @@ impl Glyphs {
                 Icon::ReadOnly => "\u{25d0}",         // ◐
                 Icon::ReadWrite => "\u{25cf}",        // ●
                 Icon::Key => "\u{2219}",              // ∙
+                Icon::Keyword => "\u{2219}",          // ∙
                 Icon::Schema => "\u{25a3}",           // ▣
                 Icon::Table => "\u{25a6}",            // ▦
                 Icon::View => "\u{25eb}",             // ◫
@@ -173,6 +179,7 @@ impl Glyphs {
                 Icon::Warning => "\u{ea6c}",          // cod-warning
                 Icon::Error => "\u{ea87}",            // cod-error
                 Icon::Info => "\u{ea74}",             // cod-info
+                Icon::Idle => "\u{25cb}",             // white circle
                 Icon::Null => "\u{2205}",             // empty set
                 Icon::Focus => "\u{258e}",            // left bar
                 Icon::SearchPath => "\u{eaf7}",       // cod-folder-opened
@@ -180,6 +187,7 @@ impl Glyphs {
                 Icon::ReadOnly => "\u{ea70}",         // cod-eye
                 Icon::ReadWrite => "\u{ea73}",        // cod-edit
                 Icon::Key => "\u{eb11}",              // cod-key
+                Icon::Keyword => "\u{eb62}",          // cod-symbol-keyword
                 Icon::Schema => "\u{ea83}",           // cod-folder
                 Icon::Table => "\u{ebb7}",            // cod-table
                 Icon::View => "\u{ea70}",             // cod-eye

@@ -1,4 +1,7 @@
-use super::{action_key_label, hairline_rule, input_cursor, inset_empty_area, pane_block_line};
+use super::{
+    action_key_label, hairline_rule, input_cursor, inset_empty_area, pane_block_line,
+    wrapped_line_count,
+};
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -494,10 +497,31 @@ fn push_bounded_row_detail(
         let min_budget = if unicode { 3 } else { 5 };
         if detail_budget >= min_budget {
             let clean = sanitize_for_display(detail);
-            let clipped = truncate_to_width(&clean, detail_budget, unicode);
+            let clipped = clip_detail(&clean, detail_budget, unicode);
             spans.push(Span::styled(format!("  {clipped}"), style));
         }
     }
+}
+
+/// Shortens a row's detail at a `, ` boundary, so a column reads
+/// `text, …` rather than `text, not n…`: each fact is shown whole or not at
+/// all, and the marker says that more follows. A first fact too wide for the
+/// budget falls back to ordinary truncation.
+pub(crate) fn clip_detail(detail: &str, budget: usize, unicode: bool) -> String {
+    if display_width(detail) <= budget {
+        return detail.to_owned();
+    }
+    let marker = if unicode {
+        crate::query::value::TRUNCATION_MARKER.to_string()
+    } else {
+        crate::query::value::TRUNCATION_MARKER_ASCII.to_owned()
+    };
+    let facts: Vec<&str> = detail.split(", ").collect();
+    (1..facts.len())
+        .rev()
+        .map(|kept| format!("{}, {marker}", facts[..kept].join(", ")))
+        .find(|candidate| display_width(candidate) <= budget)
+        .unwrap_or_else(|| truncate_to_width(detail, budget, unicode))
 }
 
 fn render_empty_objects(
@@ -704,33 +728,6 @@ fn render_empty_objects(
         .render(sep_rect, buf);
     }
     Paragraph::new(hint_lines).render(hints_rect, buf);
-}
-
-fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
-    let cols = usize::from(width.max(1));
-    let mut rows = 0usize;
-    for line in lines {
-        let mut current = 0usize;
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        if text.trim().is_empty() {
-            rows += 1;
-            continue;
-        }
-        rows += 1;
-        for word in text.split_whitespace() {
-            let word_w = display_width(word).max(1);
-            if current == 0 {
-                rows += (word_w - 1) / cols;
-                current = ((word_w - 1) % cols) + 1;
-            } else if current + 1 + word_w <= cols {
-                current += 1 + word_w;
-            } else {
-                rows += 1 + (word_w - 1) / cols;
-                current = ((word_w - 1) % cols) + 1;
-            }
-        }
-    }
-    u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
 /// The icon for a tree row. Icons are supplementary: the label already carries

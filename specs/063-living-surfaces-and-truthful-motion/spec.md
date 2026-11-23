@@ -61,7 +61,7 @@ cannot meet one of them does not animate.
 6. **Idle sleeps.** `Model::is_animating()` is true only while a transition or
    an existing busy animation is active, so a settled client wakes nothing.
 7. **Safety surfaces never move or recede.** The header and footer rails that
-   carry `[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]` and TLS badges are
+   carry `[PROD]`, `[READ ONLY]`, `[TX ACTIVE]` and `[TX FAILED]` are
    never dimmed, scrimmed, faded or split between two themes; they change in a
    single frame. No overlay arrives with motion, and while a reviewed-write,
    typed-confirmation, copy-review, prompt or connection trust surface is open,

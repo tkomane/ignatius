@@ -1079,7 +1079,7 @@ fn reference_journeys_j1_through_j8_preserve_safety_recovery_and_visual_cues() {
         "J7: static indicator still states Running"
     );
     assert!(
-        frame0_text.contains("2.0s"),
+        frame0_text.contains("2.0 s"),
         "J7: static indicator shows elapsed duration"
     );
     model.phase = QueryPhase::Idle;
@@ -1507,11 +1507,7 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         "workbench-material",
         "Material 3 Tonal",
         "Workbench before the first query",
-        &[
-            "[DEV]",
-            "No query has run yet.",
-            "Run the buffer after entering SQL.",
-        ],
+        &["[DEV]", "No query has run yet.", "SQL is ready to run."],
     );
     let atelier = showcase_base_model(ThemeChoice::Atelier);
     check_showcase_scene(

@@ -665,14 +665,15 @@ fn error_view_renders_multi_span_diagnostic_labels_and_preserves_words() {
         "Next: must be Header (bold)"
     );
 
-    // "Catalogue: " -> Token::Info
-    let info_fg = presentation.theme.color(Token::Info).unwrap();
+    // "Catalogue: " -> Token::Header (Bold), like every other fact label
+    let header_fg = presentation.theme.color(Token::Header).unwrap();
     let (cat_x, cat_y) = find_word_cell("Catalogue:");
     assert_eq!(
         buf[(cat_x, cat_y)].fg,
-        info_fg,
-        "Catalogue: must have Info fg"
+        header_fg,
+        "Catalogue: must have Header fg"
     );
+    assert!(buf[(cat_x, cat_y)].modifier.contains(Modifier::BOLD));
 
     // "Likely cause: " -> Token::Warning
     let warn_fg = presentation.theme.color(Token::Warning).unwrap();
@@ -764,7 +765,9 @@ fn results_header_row_fills_grid_width_gutter_uses_muted_and_empty_hints_stay_cr
     assert_eq!(buf[(hash_x, col_header_y)].bg, stripe_bg);
     assert_eq!(buf[(id_x, col_header_y)].bg, selection_bg);
     assert_eq!(buf[(note_x, col_header_y)].bg, stripe_bg);
-    for x in (1..id_x).chain((note_x - 2)..59) {
+    // The numeric `id` column right-aligns its name, so its cell starts
+    // after the gutter `#` and its padding cell rather than at the text.
+    for x in (1..=hash_x + 1).chain((note_x - 2)..59) {
         assert_eq!(
             buf[(x, col_header_y)].bg,
             stripe_bg,
@@ -951,4 +954,803 @@ fn render_error_preserves_caret_column_and_styles_code_strip() {
         assert!(ltext.is_ascii(), "{depth:?}: {ltext:?}");
         assert_eq!(lbuf[(token_col as u16, sql_y)].bg, Color::Reset);
     }
+}
+
+/// The two toolbar lines, read from the painted buffer: the rows directly
+/// under the pane's top border.
+fn toolbar_lines(buf: &Buffer, area: Rect) -> (String, String) {
+    let row = |y: u16| -> String {
+        (area.x + 1..area.x + area.width - 1)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    (row(area.y + 1), row(area.y + 2))
+}
+
+fn sortable_model() -> Model {
+    let mut model = model_with(
+        &["id", "amount"],
+        &[
+            vec![Cell::Text("1".into()), Cell::Text("30".into())],
+            vec![Cell::Text("2".into()), Cell::Text("10".into())],
+        ],
+    );
+    model.selected_column = 1;
+    model
+}
+
+#[test]
+fn a_local_sort_is_stated_once_with_its_retained_rows_qualifier() {
+    let mut model = sortable_model();
+    model.result_grid.toggle_sort(1);
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    for width in [80u16, 120, 160] {
+        let area = Rect::new(0, 0, width, 20);
+        let (order, _) = toolbar_lines(&render(&model, &presentation, area), area);
+        assert!(
+            order.contains("sorted by amount ascending (local, retained rows only)"),
+            "width {width}: {order:?}"
+        );
+        assert_eq!(order.matches("sorted").count(), 1, "{order:?}");
+        assert!(!order.contains("order: local"), "{order:?}");
+    }
+    // At the minimum usable width the sort still says it is local and over
+    // retained rows only, in whole words.
+    let area = Rect::new(0, 0, 40, 20);
+    let (order, _) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(order, "local sort, retained rows only", "{order:?}");
+}
+
+#[test]
+fn a_narrow_toolbar_drops_whole_segments_instead_of_cutting_words() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    for sorted in [false, true] {
+        let mut model = sortable_model();
+        if sorted {
+            model.result_grid.toggle_sort(1);
+        }
+        for width in 20u16..=140 {
+            let area = Rect::new(0, 0, width, 20);
+            let (order, state) = toolbar_lines(&render(&model, &presentation, area), area);
+            // A local sort is stated in some form in every pane that can
+            // hold the shortest statement of it.
+            if sorted && usize::from(width) >= 2 + "local sort, retained only".len() {
+                assert!(order.contains("local"), "width {width}: {order:?}");
+            }
+            for line in [&order, &state] {
+                assert!(
+                    !line.contains('\u{2026}') && !line.contains("..."),
+                    "width {width}, sorted {sorted}: a segment was cut: {line:?}"
+                );
+                for segment in line.split(" | ").filter(|s| !s.is_empty()) {
+                    assert!(
+                        [
+                            "rows 1-2 of 2 retained",
+                            "order: server",
+                            "sorted by amount ascending (local, retained rows only)",
+                            "local sort, retained rows only",
+                            "local sort, retained only",
+                            "selected column 2: amount",
+                            "2 columns",
+                            "types: unavailable",
+                            "Ctrl+K g grid controls",
+                        ]
+                        .contains(&segment),
+                        "width {width}, sorted {sorted}: {segment:?} is not a whole segment"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_state_line_names_only_what_differs_from_a_plain_grid() {
+    let mut model = sortable_model();
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 120, 20);
+
+    let (_, state) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(
+        state,
+        "2 columns | types: unavailable | Ctrl+K g grid controls"
+    );
+
+    // An unfocused pane does not teach a route that needs focus first.
+    model.focus = Focus::Editor;
+    let (_, state) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(state, "2 columns | types: unavailable");
+
+    model.result_grid.freeze_first = true;
+    assert!(model.result_grid.toggle_column(0, 2));
+    let (_, state) = toolbar_lines(&render(&model, &presentation, area), area);
+    assert_eq!(
+        state,
+        "shown 1/2 columns | types: unavailable | freeze first: on"
+    );
+
+    let single = model_with(&["only"], &text_rows(2));
+    let (_, state) = toolbar_lines(&render(&single, &presentation, area), area);
+    assert!(state.starts_with("1 column | "), "{state:?}");
+}
+
+/// The column header row of a rendered grid: the first row whose gutter
+/// carries `#`.
+fn header_row(buf: &Buffer, area: Rect) -> u16 {
+    (area.y..area.y + area.height)
+        .find(|&y| {
+            (area.x..area.x + area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .trim_start_matches(['\u{2502}', '\u{2503}', '|', ' '])
+                .starts_with('#')
+        })
+        .expect("a column header row")
+}
+
+#[test]
+fn an_unfocused_header_marks_the_selected_column_without_a_selection_fill() {
+    let mut model = sortable_model();
+    model.focus = Focus::Editor;
+    let area = Rect::new(0, 0, 60, 14);
+    for depth in [
+        ColorDepth::TrueColor,
+        ColorDepth::Indexed256,
+        ColorDepth::Basic16,
+        ColorDepth::None,
+    ] {
+        let presentation = presentation_at(depth);
+        let theme = &presentation.theme;
+        let buf = render(&model, &presentation, area);
+        let y = header_row(&buf, area);
+        let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+        let amount_x = row[..row.find("amount").expect("amount header")]
+            .chars()
+            .count() as u16;
+        let cell = &buf[(amount_x, y)];
+        let expected = theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD);
+        assert_eq!(cell.fg, expected.fg.unwrap_or(Color::Reset), "{depth:?}");
+        assert_eq!(cell.bg, expected.bg.unwrap_or(Color::Reset), "{depth:?}");
+        assert!(cell.modifier.contains(Modifier::BOLD), "{depth:?}");
+        assert!(
+            !cell.modifier.contains(Modifier::REVERSED),
+            "{depth:?}: no selection fill while unfocused"
+        );
+        if let Some(selection) = theme.style(Token::Selection).bg {
+            assert_ne!(cell.bg, selection, "{depth:?}: no selection fill");
+        }
+    }
+
+    // Focused, the selected header keeps its selection fill.
+    model.focus = Focus::Results;
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let buf = render(&model, &presentation, area);
+    let y = header_row(&buf, area);
+    let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+    let amount_x = row[..row.find("amount").expect("amount header")]
+        .chars()
+        .count() as u16;
+    assert_eq!(
+        Some(buf[(amount_x, y)].bg),
+        presentation.theme.style(Token::Selection).bg
+    );
+}
+
+#[test]
+fn a_header_sits_right_aligned_over_a_numeric_column() {
+    let model = model_with(
+        &["n", "label"],
+        &[
+            vec![Cell::Text("12345".into()), Cell::Text("x".into())],
+            vec![Cell::Text("7".into()), Cell::Text("y".into())],
+        ],
+    );
+    let area = Rect::new(0, 0, 60, 14);
+    let buf = render(&model, &presentation_at(ColorDepth::None), area);
+    let y = header_row(&buf, area);
+    let header: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+    let value_row: String = (0..area.width).map(|x| buf[(x, y + 2)].symbol()).collect();
+    // The last character of the header and of the widest value share a column.
+    let header_end = header[..header.find("n ").expect("n header") + 1]
+        .chars()
+        .count();
+    let value_end = value_row[..value_row.find("12345").expect("value") + 5]
+        .chars()
+        .count();
+    assert_eq!(header_end, value_end, "{header}\n{value_row}");
+    // A text column stays left-aligned: its name starts where its values do.
+    let label_x = header.find("label").expect("label");
+    let x_x = value_row.rfind(" x").expect("value x") + 1;
+    assert_eq!(
+        header[..label_x].chars().count(),
+        value_row[..x_x].chars().count(),
+        "{header}\n{value_row}"
+    );
+}
+
+fn connected_empty(sql: &str) -> Model {
+    let mut model = Model::new(100);
+    model.sidebar_visible = false;
+    model.focus = Focus::Results;
+    model.connection =
+        crate::app::model::ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+            target: "app@localhost:5432/orders".into(),
+            database: "orders".into(),
+            user: "app".into(),
+            server_version: "18.0".into(),
+            backend_pid: "1".into(),
+            search_path: "public".into(),
+            read_only: false,
+            tls: crate::postgres::TlsState::Disabled,
+            environment: crate::connection::Environment::Local,
+        }));
+    model.editor.set_text(sql);
+    model
+}
+
+#[test]
+fn an_empty_results_pane_says_sql_is_ready_once_the_editor_has_some() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 24);
+    let ready = buffer_to_string(&render(&connected_empty("SELECT 1;"), &presentation, area));
+    assert!(ready.contains("SQL is ready to run."), "{ready}");
+    assert!(ready.contains("Ctrl+R Run the buffer"), "{ready}");
+    assert!(!ready.contains("Write SQL in the editor"), "{ready}");
+
+    let blank = buffer_to_string(&render(&connected_empty("  \n"), &presentation, area));
+    assert!(blank.contains("Write SQL in the editor"), "{blank}");
+    assert!(!blank.contains("SQL is ready to run."), "{blank}");
+}
+
+#[test]
+fn the_empty_results_state_stacks_from_the_top_with_text_hint_labels() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 24);
+    let buf = render(&connected_empty("SELECT 1;"), &presentation, area);
+    let rows: Vec<String> = buffer_to_string(&buf).lines().map(str::to_owned).collect();
+    let find = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("missing {needle:?}: {rows:#?}"))
+    };
+    let headline = find("No query has run yet.");
+    let palette = find("Command palette shows safe next actions.");
+    // Two prose rows, a breathing row, the rule and two hint rows: the keys
+    // sit right under the words, with the pane's spare height below them.
+    assert!(
+        palette - headline <= 5,
+        "the hints drifted away from the prose: {rows:#?}"
+    );
+    assert!(
+        rows[palette + 1..rows.len() - 1]
+            .iter()
+            .all(|row| row.trim_matches(['\u{2502}', '\u{2503}', ' ']).is_empty()),
+        "{rows:#?}"
+    );
+    // Both hint labels are primary text, not dimmed.
+    for label in ["Run the buffer", "Command palette shows"] {
+        let y = find(label) as u16;
+        let row = &rows[y as usize];
+        let x = row[..row.find(label).expect("label")].chars().count() as u16;
+        let cell = &buf[(x, y)];
+        assert_eq!(
+            Some(cell.fg),
+            presentation.theme.style(Token::Text).fg,
+            "{label}"
+        );
+        assert!(!cell.modifier.contains(Modifier::DIM), "{label}");
+    }
+}
+
+fn labelled_error() -> crate::diagnostics::Diagnostic {
+    use crate::diagnostics::{Diagnostic, DiagnosticKind, ObjectContext};
+    let mut error = Diagnostic::new(DiagnosticKind::Query, "syntax error", "executing buffer")
+        .technical("SQLSTATE", "42601")
+        .technical("Severity", "ERROR");
+    error.object = Some(ObjectContext {
+        schema: Some("public".into()),
+        table: Some("users".into()),
+        column: None,
+        constraint: None,
+    });
+    error.statement_number = Some(1);
+    error.likely_cause = Some("missing semicolon".into());
+    error.next_action = Some("add semicolon at end".into());
+    error
+}
+
+fn error_text(model: &Model, presentation: &Presentation) -> Vec<String> {
+    let area = Rect::new(0, 0, 90, 20);
+    let mut buf = Buffer::empty(area);
+    super::render_error(model, &labelled_error(), presentation, area, &mut buf);
+    buffer_to_string(&buf).lines().map(str::to_owned).collect()
+}
+
+#[test]
+fn every_error_label_starts_in_the_same_column_in_every_glyph_tier() {
+    for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+        let presentation = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true),
+            Glyphs::new(tier),
+            false,
+        );
+        let rows = error_text(&Model::new(10), &presentation);
+        let column = |label: &str| -> usize {
+            let row = rows
+                .iter()
+                .find(|row| row.contains(label))
+                .unwrap_or_else(|| panic!("{tier:?}: missing {label:?}: {rows:#?}"));
+            row[..row.find(label).expect("label")].chars().count()
+        };
+        let expected = column("While:");
+        for label in [
+            "Object context:",
+            "Catalogue:",
+            "Statement:",
+            "Likely cause:",
+            "Next:",
+            "2 technical field(s) hidden.",
+        ] {
+            assert_eq!(column(label), expected, "{tier:?}: {label} is out of line");
+        }
+    }
+}
+
+#[test]
+fn the_error_detail_key_comes_from_the_keymap_and_offers_the_collapse() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let mut model = Model::new(10);
+    let rows = error_text(&model, &presentation).join("\n");
+    assert!(
+        rows.contains("2 technical field(s) hidden. Ctrl+D to expand."),
+        "{rows}"
+    );
+
+    let mut keys = std::collections::BTreeMap::new();
+    keys.insert(
+        "toggle-error-detail".to_owned(),
+        crate::config::schema::KeySpec::One("f11".to_owned()),
+    );
+    model.keymap_snapshot = Keymap::from_config(&keys)
+        .expect("a valid rebinding")
+        .snapshot();
+    let rows = error_text(&model, &presentation).join("\n");
+    assert!(rows.contains("hidden. F11 to expand."), "{rows}");
+    assert!(!rows.contains("Ctrl+D"), "{rows}");
+
+    model.error_expanded = true;
+    let rows = error_text(&model, &presentation).join("\n");
+    assert!(rows.contains("42601"), "{rows}");
+    assert!(rows.contains("F11 to collapse."), "{rows}");
+    assert!(!rows.contains("to expand"), "{rows}");
+}
+
+// ------------------------------------------------------ result settle (063)
+
+/// A completed result of job 1, settling as the interactive runtime would
+/// start it, `elapsed` into the settle.
+fn settling(elapsed: Duration) -> Model {
+    let mut model = model_with(&["id"], &text_rows(2));
+    model.motion.enable();
+    model.motion.begin_result_settle(JobId(1));
+    model.motion.advance(elapsed);
+    model
+}
+
+/// The cell under the first character of the status word `Completed`.
+fn status_cell(buf: &Buffer) -> ratatui::buffer::Cell {
+    let title: String = (0..buf.area.width).map(|x| buf[(x, 0)].symbol()).collect();
+    let x = title[..title.find("Completed").expect("the status word")]
+        .chars()
+        .count() as u16;
+    buf[(x, 0)].clone()
+}
+
+fn settle_frames(depth: ColorDepth) -> Vec<(Duration, Buffer)> {
+    let presentation = presentation_at(depth);
+    let area = Rect::new(0, 0, 80, 12);
+    (0..=20u64)
+        .map(|step| {
+            let at = Duration::from_millis(step * 30);
+            (at, render(&settling(at), &presentation, area))
+        })
+        .collect()
+}
+
+#[test]
+fn a_settle_fades_only_the_status_word_ink_into_its_exact_resting_frame() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let theme = &presentation.theme;
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+    let frames = settle_frames(ColorDepth::TrueColor);
+
+    let first = status_cell(&frames[0].1);
+    assert_eq!(
+        Some(first.fg),
+        theme.color(Token::Success),
+        "starts in success ink"
+    );
+    let settled = frames.last().expect("frames");
+    assert!(settled.0 >= crate::ui::motion::TransitionKind::ResultSettle.duration());
+    assert_eq!(settled.1, resting, "the settled frame is the resting frame");
+    assert_eq!(
+        Some(status_cell(&resting).fg),
+        theme.mix(Token::Success, Token::Muted, 1.0),
+        "the fade ends on exactly the resting ink"
+    );
+
+    let mut inks = Vec::new();
+    for (at, frame) in &frames {
+        assert_eq!(
+            buffer_to_string(frame),
+            buffer_to_string(&resting),
+            "{at:?}: the words are identical in every frame"
+        );
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let (cell, rest) = (&frame[(x, y)], &resting[(x, y)]);
+                assert_eq!(cell.bg, rest.bg, "{at:?} ({x},{y}): never a background");
+                assert_eq!(cell.modifier, rest.modifier, "{at:?} ({x},{y}): no pop");
+                if y > 0 {
+                    assert_eq!(cell.fg, rest.fg, "{at:?} ({x},{y}): only the title moves");
+                }
+            }
+        }
+        inks.push(status_cell(frame).fg);
+    }
+    inks.dedup();
+    assert!(inks.len() > 3, "truecolour interpolates: {inks:?}");
+
+    // The summary beside the word keeps its own dimmed muted ink throughout.
+    let title: String = (0..area.width)
+        .map(|x| frames[0].1[(x, 0)].symbol())
+        .collect();
+    let summary_x = title[..title.find("2 rows").expect("summary")]
+        .chars()
+        .count() as u16;
+    assert_eq!(
+        frames[0].1[(summary_x, 0)].style(),
+        resting[(summary_x, 0)].style()
+    );
+    assert!(
+        resting[(summary_x, 0)].modifier.contains(Modifier::DIM),
+        "the summary stays quiet"
+    );
+    assert!(
+        !status_cell(&resting).modifier.contains(Modifier::DIM),
+        "the resting status word is not dimmed, so the fade has nothing to pop into"
+    );
+}
+
+#[test]
+fn a_settle_steps_at_the_midpoint_in_256_colours() {
+    let theme = presentation_at(ColorDepth::Indexed256).theme;
+    let frames = settle_frames(ColorDepth::Indexed256);
+    for (at, frame) in &frames {
+        let progress = crate::ui::motion::Transition::new(
+            crate::ui::motion::TransitionKind::ResultSettle,
+            Duration::ZERO,
+        )
+        .progress(*at);
+        let expected = if progress < 0.5 {
+            theme.color(Token::Success)
+        } else {
+            theme.color(Token::Muted)
+        };
+        assert_eq!(
+            Some(status_cell(frame).fg),
+            expected,
+            "{at:?} at {progress}"
+        );
+    }
+}
+
+#[test]
+fn a_settle_tints_only_its_own_completed_result() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+
+    // Another job's settle never tints this result.
+    let mut other = settling(Duration::ZERO);
+    other.motion.begin_result_settle(JobId(2));
+    assert_eq!(render(&other, &presentation, area), resting);
+
+    // A refresh or a cancelled outcome under the same job keeps its colours.
+    let mut refreshing = settling(Duration::ZERO);
+    refreshing.running_refresh = true;
+    let mut still = refreshing.clone();
+    still.motion.settle();
+    assert_eq!(
+        render(&refreshing, &presentation, area),
+        render(&still, &presentation, area)
+    );
+
+    // A cancelled outcome keeps its static colours even under a settle that
+    // names its job.
+    let mut cancelled = settling(Duration::ZERO);
+    if let Some(execution) = cancelled.last_execution.as_mut() {
+        execution.status = ExecutionStatus::Cancelled;
+    }
+    let mut cancelled_still = cancelled.clone();
+    cancelled_still.motion.settle();
+    let cancelled_frame = render(&cancelled, &presentation, area);
+    assert!(buffer_to_string(&cancelled_frame).contains("Query cancelled by server"));
+    assert_eq!(
+        cancelled_frame,
+        render(&cancelled_still, &presentation, area)
+    );
+
+    // No colour means no tint: the frame is the resting frame.
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = presentation_at(depth);
+        assert_eq!(
+            render(&settling(Duration::ZERO), &low, area),
+            render(&model_with(&["id"], &text_rows(2)), &low, area),
+            "{depth:?}"
+        );
+    }
+}
+
+#[test]
+fn every_settle_ink_keeps_text_contrast_on_the_pane_in_every_built_in_theme() {
+    use crate::ui::theme::Rgb;
+    for choice in [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::HighContrast,
+        ThemeChoice::FieldIndustrial,
+        ThemeChoice::Material,
+        ThemeChoice::Atelier,
+        ThemeChoice::Paper,
+    ] {
+        let theme = Theme::new(choice, true);
+        let pane = theme.rgb(Token::SurfacePane);
+        let threshold = if choice == ThemeChoice::HighContrast {
+            7.0
+        } else {
+            4.5
+        };
+        for step in 0..=20u8 {
+            let amount = f32::from(step) / 20.0;
+            let ink: Rgb = theme
+                .rgb(Token::Success)
+                .mix(theme.rgb(Token::Muted), amount);
+            let contrast = ink.contrast(pane);
+            assert!(
+                contrast >= threshold,
+                "{choice:?} at {amount}: {} on {} is {contrast:.2}:1",
+                ink.hex(),
+                pane.hex()
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------- heartbeat comet (063)
+
+fn running(frame: u64, cancelling: bool) -> Model {
+    let mut model = Model::new(100);
+    model.sidebar_visible = false;
+    model.focus = Focus::Results;
+    model.phase = if cancelling {
+        crate::app::model::QueryPhase::CancellationRequested { job: JobId(1) }
+    } else {
+        crate::app::model::QueryPhase::Running {
+            job: JobId(1),
+            statements: 1,
+        }
+    };
+    model.running_for = Some(Duration::from_millis(1500));
+    model.frame = frame;
+    model
+}
+
+/// The heartbeat row's cells, found by its track glyph.
+fn heartbeat_cells(buf: &Buffer) -> Vec<ratatui::buffer::Cell> {
+    let area = buf.area;
+    let y = (1..area.height)
+        .find(|&y| {
+            (1..=super::HEARTBEAT_TRACK as u16)
+                .all(|x| ["\u{2500}", "\u{2501}", "-", "="].contains(&buf[(x, y)].symbol()))
+        })
+        .expect("a heartbeat row");
+    (1..=super::HEARTBEAT_TRACK as u16)
+        .map(|x| buf[(x, y)].clone())
+        .collect()
+}
+
+#[test]
+fn the_heartbeat_moves_one_cell_a_tick_back_and_forth_and_never_arrives() {
+    let width = super::HEARTBEAT_TRACK;
+    let mut previous = super::heartbeat_head(0, width).0;
+    let mut seen = std::collections::BTreeSet::new();
+    for frame in 1..=200u64 {
+        let (head, _) = super::heartbeat_head(frame, width);
+        assert!(head < width, "frame {frame}");
+        assert_eq!(
+            head.abs_diff(previous),
+            1,
+            "frame {frame}: linear, one cell a tick"
+        );
+        seen.insert(head);
+        previous = head;
+    }
+    assert_eq!(seen.len(), width, "the head sweeps the whole track");
+    // It is periodic, so nothing about it can read as a count or an outcome.
+    let period = 2 * (width as u64 - 1);
+    for frame in 0..period {
+        assert_eq!(
+            super::heartbeat_head(frame, width),
+            super::heartbeat_head(frame + period, width)
+        );
+    }
+}
+
+#[test]
+fn the_heartbeat_is_a_comet_with_a_fading_tail_at_truecolour() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let theme = &presentation.theme;
+    let area = Rect::new(0, 0, 60, 12);
+    let text = buffer_to_string(&render(&running(10, false), &presentation, area));
+    assert!(text.contains("Running"), "{text}");
+    assert!(text.contains("1.5 s"), "{text}");
+
+    let cells = heartbeat_cells(&render(&running(10, false), &presentation, area));
+    let heads: Vec<usize> = (0..cells.len())
+        .filter(|&i| cells[i].symbol() == "\u{2501}")
+        .collect();
+    assert_eq!(
+        heads,
+        vec![7, 8, 9, 10],
+        "a head and a three-cell tail behind it"
+    );
+    assert_eq!(Some(cells[10].fg), theme.color(Token::Info));
+    let tail: Vec<_> = [9, 8, 7].iter().map(|&i| cells[i].fg).collect();
+    assert_eq!(
+        tail,
+        [0.25, 0.5, 0.75]
+            .iter()
+            .map(|amount| theme.mix(Token::Info, Token::Border, *amount).expect("ink"))
+            .collect::<Vec<_>>(),
+        "the tail fades from the head into the track"
+    );
+    for cell in cells.iter().skip(11) {
+        assert_eq!(cell.symbol(), "\u{2500}");
+        assert_eq!(Some(cell.fg), theme.color(Token::Border));
+    }
+
+    // Moving left, the tail trails to the right of the head.
+    let frame = super::HEARTBEAT_TRACK as u64 + 3;
+    let (head, rightward) = super::heartbeat_head(frame, super::HEARTBEAT_TRACK);
+    assert!(!rightward);
+    let cells = heartbeat_cells(&render(&running(frame, false), &presentation, area));
+    for distance in 1..=3 {
+        assert_eq!(cells[head + distance].symbol(), "\u{2501}");
+    }
+    assert_eq!(cells[head - 1].symbol(), "\u{2500}");
+}
+
+#[test]
+fn the_heartbeat_keeps_its_shape_and_drops_colour_honestly_at_lower_depths() {
+    let area = Rect::new(0, 0, 60, 12);
+
+    let indexed = presentation_at(ColorDepth::Indexed256);
+    let cells = heartbeat_cells(&render(&running(10, false), &indexed, area));
+    assert_eq!(Some(cells[10].fg), indexed.theme.color(Token::Info));
+    for i in [7, 8, 9] {
+        assert_eq!(cells[i].symbol(), "\u{2501}", "the same layout");
+        assert_eq!(
+            Some(cells[i].fg),
+            indexed.theme.color(Token::Border),
+            "no mix"
+        );
+    }
+
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = presentation_at(depth);
+        let cells = heartbeat_cells(&render(&running(10, false), &low, area));
+        let heads: Vec<usize> = (0..cells.len())
+            .filter(|&i| cells[i].symbol() == "\u{2501}")
+            .collect();
+        assert_eq!(heads, vec![10], "{depth:?}: the head alone, no tail");
+        if depth == ColorDepth::Basic16 {
+            assert!(cells[10].modifier.contains(Modifier::BOLD), "a bold head");
+        } else {
+            assert!(
+                cells
+                    .iter()
+                    .all(|cell| cell.fg == Color::Reset && cell.modifier.is_empty()),
+                "shape only"
+            );
+        }
+    }
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    for frame in 0..60 {
+        let cells = heartbeat_cells(&render(&running(frame, false), &ascii, area));
+        let row: String = cells.iter().map(|cell| cell.symbol()).collect();
+        assert_eq!(row.matches('=').count(), 1, "{row}");
+        assert_eq!(
+            row.matches('-').count(),
+            super::HEARTBEAT_TRACK - 1,
+            "{row}"
+        );
+    }
+}
+
+#[test]
+fn a_pending_cancellation_keeps_the_heartbeat_moving_in_the_warning_ink() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 60, 12);
+    let first = render(&running(4, true), &presentation, area);
+    let next = render(&running(5, true), &presentation, area);
+    assert_ne!(
+        heartbeat_cells(&first),
+        heartbeat_cells(&next),
+        "it keeps moving"
+    );
+    let cells = heartbeat_cells(&first);
+    assert_eq!(Some(cells[4].fg), presentation.theme.color(Token::Warning));
+    assert!(buffer_to_string(&first).contains("Cancellation requested"));
+}
+
+#[test]
+fn reduced_motion_keeps_the_words_and_draws_no_heartbeat() {
+    let still = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let area = Rect::new(0, 0, 60, 12);
+    let first = render(&running(3, false), &still, area);
+    let later = render(&running(40, false), &still, area);
+    assert_eq!(
+        buffer_to_string(&first),
+        buffer_to_string(&later),
+        "the same words in every frame"
+    );
+    assert_eq!(first, later, "byte-identical across frames");
+    let text = buffer_to_string(&first);
+    assert!(text.contains("Running") && text.contains("1.5 s"), "{text}");
+    let rows: Vec<&str> = text.lines().collect();
+    assert!(
+        rows[2].contains("asks the server to cancel"),
+        "the words follow directly, with no heartbeat row: {text}"
+    );
+}
+
+#[test]
+fn a_custom_success_ink_too_faint_for_a_word_skips_the_settle() {
+    use crate::ui::theme::{Rgb, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    // Admitted at 3:1 for badges, but under 4.5:1 on the pane the title sits on.
+    let faint = Rgb(0x30, 0x8c, 0x50);
+    let definition = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Success, faint);
+    let theme = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+        .expect("a custom palette admitted at 3:1")
+        .selected_theme(true, ColorDepth::TrueColor);
+    assert!(faint.contrast(theme.rgb(Token::SurfacePane)) < 4.5);
+    let presentation = Presentation::new(theme, Glyphs::new(GlyphTier::Unicode), false);
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+    for step in [0u64, 60, 200] {
+        assert_eq!(
+            render(&settling(Duration::from_millis(step)), &presentation, area),
+            resting,
+            "{step} ms: the faint ink is never painted"
+        );
+    }
+    // A built-in palette still settles.
+    let built_in = presentation_at(ColorDepth::TrueColor);
+    assert_eq!(
+        Some(status_cell(&render(&settling(Duration::ZERO), &built_in, area)).fg),
+        built_in.theme.color(Token::Success)
+    );
 }

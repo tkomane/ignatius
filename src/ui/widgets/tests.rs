@@ -82,6 +82,48 @@ fn colour_off_presentation() -> Presentation {
     )
 }
 
+fn title_row(block: ratatui::widgets::Block<'static>) -> String {
+    use ratatui::widgets::Widget;
+    let area = Rect::new(0, 0, 30, 3);
+    let mut buf = Buffer::empty(area);
+    block.render(area, &mut buf);
+    crate::ui::layout::buffer_to_string(&buf)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[test]
+fn a_focused_pane_title_continues_the_rule_up_to_its_marker() {
+    use ratatui::text::{Line, Span};
+    let title = || Line::from(Span::raw("Editor"));
+    let unicode = colour_off_presentation();
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let compact = colour_off_presentation().with_density(crate::config::Density::Compact);
+
+    let focused = title_row(super::pane_block_line(title(), true, &unicode));
+    assert!(
+        focused.starts_with("\u{250f}\u{2501}\u{258d} Editor"),
+        "{focused}"
+    );
+    let focused = title_row(super::pane_block_line(title(), true, &ascii));
+    assert!(focused.starts_with("+=> Editor"), "{focused}");
+    // Compact density has no padding cell to turn into rule.
+    let focused = title_row(super::pane_block_line(title(), true, &compact));
+    assert!(focused.starts_with("\u{250f}\u{258d} Editor"), "{focused}");
+
+    // Unfocused panes and overlays keep their plain padding.
+    let unfocused = title_row(super::pane_block_line(title(), false, &unicode));
+    assert!(unfocused.starts_with("\u{256d} Editor"), "{unfocused}");
+    let overlay = title_row(super::overlay_block_line(title(), &unicode));
+    assert!(overlay.starts_with("\u{250f} Editor"), "{overlay}");
+}
+
 /// A whole frame's worth of state: a loaded tree, multi-line SQL and a grid.
 fn full_model() -> Model {
     let mut model = grid_model(2, 4);
@@ -673,6 +715,70 @@ fn compact_results_use_the_whole_body() {
     );
 }
 
+/// The row the result column header is painted on, read from the frame itself
+/// rather than from the prelude arithmetic under test.
+fn painted_header_row(model: &Model, area: Rect, inside: Rect) -> u16 {
+    let mut buf = Buffer::empty(area);
+    crate::ui::layout::render(model, &Keymap::new(), area, &mut buf);
+    (inside.y..inside.y + inside.height)
+        .find(|&y| {
+            let row: String = (inside.x..inside.x + inside.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect();
+            row.trim_start().starts_with('#') && row.contains("c0")
+        })
+        .expect("the column header is painted")
+}
+
+#[test]
+fn a_header_click_lands_on_the_header_wherever_the_prelude_puts_it() {
+    // The header row moves with the density, the types row, a notice and the
+    // retention warning. A click on the painted header must resolve to the
+    // header cell in every one of them, never to the rule or a data row.
+    let area = Rect::new(0, 0, 100, 30);
+    let body = body_area(area);
+    let mut cases: Vec<(&str, Model)> = Vec::new();
+    cases.push(("comfortable", grid_model(2, 4)));
+    let mut compact = grid_model(2, 4);
+    compact.presentation = compact
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Compact);
+    cases.push(("compact", compact.clone()));
+    let mut typed = compact.clone();
+    typed.result_grid.show_types = true;
+    typed.last_execution.as_mut().expect("execution").statements[0]
+        .result_set
+        .as_mut()
+        .expect("result")
+        .set_column_types(vec![Some("int4".into()), Some("text".into())]);
+    cases.push(("compact with types", typed));
+    let mut warned = grid_model(2, 4);
+    warned.retained_data_loss.limited_sets = 1;
+    cases.push(("retention warning", warned));
+    let mut noted = compact;
+    noted.result_grid.note = Some("Column widths reset.".into());
+    cases.push(("compact with a note", noted));
+
+    for (name, mut model) in cases {
+        model.focus = Focus::Results;
+        let (_, results) = main_panes(body, false, &model.splits);
+        let inside = inner(results);
+        let header_y = painted_header_row(&model, area, inside);
+        let content_x = inside.x + 3;
+        assert_eq!(
+            region_at(&model, area, content_x, header_y),
+            Some(Region::ResultsHeaderCell { column: 0 }),
+            "{name}: a click on the painted header row {header_y}"
+        );
+        assert_ne!(
+            region_at(&model, area, content_x, header_y + 1),
+            Some(Region::ResultsHeaderCell { column: 0 }),
+            "{name}: the row under the header is not the header"
+        );
+    }
+}
+
 #[test]
 fn borders_and_out_of_area_cells_are_misses() {
     let model = Model::new(100);
@@ -688,6 +794,31 @@ fn borders_and_out_of_area_cells_are_misses() {
     // Below the usable size nothing is a region.
     let tiny = Rect::new(0, 0, 30, 6);
     assert_eq!(region_at(&model, tiny, 0, 0), None);
+}
+
+#[test]
+fn an_open_snippet_library_owns_the_frame_beneath_it() {
+    // The snippet library is drawn over the panes and takes every key, so a
+    // click must not fall through it to a result cell or the editor.
+    let mut model = grid_model(2, 4);
+    model.focus = Focus::Results;
+    let area = Rect::new(0, 0, 100, 30);
+    let body = body_area(area);
+    let (_, results) = main_panes(body, false, &model.splits);
+    let inside = inner(results);
+    let header_y = painted_header_row(&model, area, inside);
+    assert_eq!(
+        region_at(&model, area, inside.x + 3, header_y),
+        Some(Region::ResultsHeaderCell { column: 0 }),
+        "the cell is a header before the library opens"
+    );
+    model.snippet_library = Some(crate::app::model::SnippetLibraryState::default());
+    assert!(super::overlay_blocks_panes(&model));
+    assert_eq!(region_at(&model, area, inside.x + 3, header_y), None);
+    assert_eq!(
+        super::pane_at(&model, area, inside.x + 3, header_y + 2),
+        None
+    );
 }
 
 #[test]

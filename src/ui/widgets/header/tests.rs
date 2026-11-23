@@ -64,7 +64,7 @@ fn a_connecting_header_names_the_step_the_target_and_the_elapsed_time() {
     assert!(text.contains("server handshake"), "{text}");
     assert!(text.contains("app@localhost:5432/orders"), "{text}");
     assert!(
-        text.contains("1.5s"),
+        text.contains("1.5 s"),
         "the elapsed connecting time is shown: {text}"
     );
 }
@@ -101,7 +101,7 @@ fn a_connecting_header_omits_the_elapsed_time_until_one_is_reported() {
     );
     assert!(text.contains("loading catalogue"), "{text}");
     assert!(
-        !text.contains("0.0s"),
+        !text.contains("0.0 s"),
         "no elapsed time was invented before the runtime reported one: {text}"
     );
 }
@@ -217,7 +217,7 @@ fn every_pre_connection_frame_paints_the_whole_shell() {
     );
     assert!(text.contains("resolving profile"), "{text}");
     assert!(
-        text.contains("0.4s"),
+        text.contains("0.4 s"),
         "the connecting elapsed time is painted in the shell: {text}"
     );
     assert!(
@@ -252,7 +252,7 @@ fn the_elapsed_clock_survives_reduced_depth_and_ascii() {
             text.contains("server handshake"),
             "{tier:?}/{depth:?}: {text}"
         );
-        assert!(text.contains("1.5s"), "{tier:?}/{depth:?}: {text}");
+        assert!(text.contains("1.5 s"), "{tier:?}/{depth:?}: {text}");
     }
 }
 
@@ -356,9 +356,11 @@ fn us8_header_suppresses_completed_elapsed_under_200ms_and_shows_at_or_above() {
         120,
     );
     assert!(
-        text_200.contains("200ms"),
+        text_200.contains("200 ms"),
         "elapsed >= 200ms must be rendered: {text_200}"
     );
+    // The unit is spaced exactly as the Results summary spaces it.
+    assert!(!text_200.contains("200ms"), "{text_200}");
 
     // Running duration: always displayed regardless of duration
     model.running_for = Some(Duration::from_millis(50));
@@ -368,7 +370,7 @@ fn us8_header_suppresses_completed_elapsed_under_200ms_and_shows_at_or_above() {
         120,
     );
     assert!(
-        text_running.contains("0.0s") || text_running.contains("0.1s"),
+        text_running.contains("0.0 s") || text_running.contains("0.1 s"),
         "live running_for must be rendered: {text_running}"
     );
 }
@@ -579,4 +581,177 @@ fn header_brand_badge_uses_theme_keycap_and_padded_capsules_across_depths() {
         assert_eq!(low_buf[(col, 0)].bg, Color::Reset);
         assert_eq!(low_buf[(0, 0)].bg, Color::Reset);
     }
+}
+
+/// A read-only session inside a failed transaction, with every decoration the
+/// header can carry, so a short row has to choose.
+fn crowded_in(environment: crate::connection::Environment) -> Model {
+    let mut model = connected_model(environment);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.read_only = true;
+        info.target = "reporting_reader@warehouse-replica-02.internal:5432/analytics".into();
+        info.database = "analytics".into();
+    }
+    model.transaction = crate::query::result::TransactionState::Failed;
+    model.credential_provider = Some("entra".into());
+    model.history_note = Some("not recorded");
+    model.last_elapsed = Some(Duration::from_millis(1250));
+    model
+}
+
+fn crowded_model() -> Model {
+    crowded_in(crate::connection::Environment::Production)
+}
+
+/// Each environment the sweeps cover, with the safety capsules it must keep.
+fn crowded_environments() -> Vec<(crate::connection::Environment, Vec<&'static str>)> {
+    use crate::connection::Environment;
+    vec![
+        (
+            Environment::Production,
+            vec!["[PROD]", "[READ ONLY]", "[TX FAILED]"],
+        ),
+        (
+            Environment::Staging,
+            vec!["[STAGING]", "[READ ONLY]", "[TX FAILED]"],
+        ),
+        (
+            Environment::Unclassified,
+            vec!["[READ ONLY]", "[TX FAILED]"],
+        ),
+        (
+            Environment::Custom("customer-facing-analytics-eu-west-2-blue".into()),
+            vec!["[READ ONLY]", "[TX FAILED]"],
+        ),
+    ]
+}
+
+/// Every bracket opened is closed, so no capsule or label was clipped.
+fn brackets_balance(text: &str) -> bool {
+    text.matches('[').count() == text.matches(']').count()
+}
+
+#[test]
+fn safety_markers_survive_every_header_width_before_any_decoration() {
+    for (environment, markers) in crowded_environments() {
+        let model = crowded_in(environment.clone());
+        for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+            for (reduced_motion, density) in [
+                (false, crate::config::Density::Comfortable),
+                (true, crate::config::Density::Comfortable),
+                (false, crate::config::Density::Compact),
+            ] {
+                let mut p = presentation(tier, ColorDepth::TrueColor).with_density(density);
+                p.reduced_motion = reduced_motion;
+                for width in 40u16..=200 {
+                    let text = header_text(&model, &p, width);
+                    for marker in &markers {
+                        assert!(
+                            text.contains(marker),
+                            "{environment:?} {tier:?} width {width}: {marker} was dropped: {text:?}"
+                        );
+                    }
+                    assert!(
+                        brackets_balance(&text),
+                        "{environment:?} {tier:?} width {width}: something was clipped: {text:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // A long custom label is bounded to a readable prefix even on a wide row.
+    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    let custom = crowded_in(crate::connection::Environment::Custom(
+        "customer-facing-analytics-eu-west-2-blue".into(),
+    ));
+    let wide = header_text(&custom, &p, 200);
+    assert!(wide.contains("[CUSTOMER-FACI\u{2026}]"), "{wide}");
+
+    // A wide row keeps everything; a narrower one sheds decoration first.
+    let wide = header_text(&crowded_model(), &p, 200);
+    for word in ["Ignatius", "analytics", "[auth: entra]", "1250 ms"] {
+        assert!(wide.contains(word), "{word}: {wide}");
+    }
+    let narrow = header_text(&crowded_model(), &p, 80);
+    assert!(!narrow.contains("[auth: entra]"), "{narrow}");
+    assert!(narrow.contains("Ignatius"), "{narrow}");
+    assert!(narrow.contains("analytics"), "the database stays: {narrow}");
+}
+
+#[test]
+fn a_running_watch_loop_outlasts_the_full_target() {
+    let mut model = connected_model(crate::connection::Environment::Production);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.read_only = true;
+        info.target =
+            "reporting_reader@warehouse-replica-02.analytics.internal:5432/analytics".into();
+        info.database = "analytics".into();
+    }
+    model.transaction = crate::query::result::TransactionState::Open;
+    model.watch = Some(crate::app::model::WatchState {
+        sql: "SELECT count(*) FROM orders".into(),
+        interval_secs: 2,
+        iteration: 7,
+    });
+    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    let wide = header_text(&model, &p, 140);
+    assert!(wide.contains("[WATCH: 2s #7]"), "{wide}");
+    assert!(wide.contains("(\\watch stop)"), "{wide}");
+    for width in 40u16..=200 {
+        let text = header_text(&model, &p, width);
+        let watching = text.contains("[WATCH: 2s #7]");
+        assert_eq!(
+            watching,
+            text.contains("(\\watch stop)"),
+            "width {width}: the stop hint goes with the capsule: {text:?}"
+        );
+        if text.contains("warehouse-replica-02") {
+            assert!(
+                watching,
+                "width {width}: the full target outlasted the loop: {text:?}"
+            );
+        }
+        for marker in ["[PROD]", "[READ ONLY]", "[TX ACTIVE]"] {
+            assert!(text.contains(marker), "width {width}: {marker}: {text:?}");
+        }
+    }
+}
+
+#[test]
+fn the_compact_header_keeps_read_only_and_transaction_markers() {
+    for (environment, markers) in crowded_environments() {
+        let model = crowded_in(environment.clone());
+        for density in [
+            crate::config::Density::Comfortable,
+            crate::config::Density::Compact,
+        ] {
+            for tier in [GlyphTier::Ascii, GlyphTier::Unicode] {
+                let p = presentation(tier, ColorDepth::TrueColor).with_density(density);
+                for width in 40u16..=100 {
+                    let area = Rect::new(0, 0, width, 1);
+                    let mut buf = Buffer::empty(area);
+                    render_compact_header(&model, &p, area, &mut buf);
+                    let text = buffer_to_string(&buf);
+                    for marker in &markers {
+                        assert!(
+                            text.contains(marker),
+                            "{environment:?} {density:?} {tier:?} width {width}: {marker}: {text:?}"
+                        );
+                    }
+                    assert!(
+                        brackets_balance(&text),
+                        "{environment:?} {tier:?} width {width}: something was clipped: {text:?}"
+                    );
+                }
+            }
+        }
+    }
+    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
+    let mut open = crowded_model();
+    open.transaction = crate::query::result::TransactionState::Open;
+    let area = Rect::new(0, 0, 60, 1);
+    let mut buf = Buffer::empty(area);
+    render_compact_header(&open, &p, area, &mut buf);
+    assert!(buffer_to_string(&buf).contains("[TX ACTIVE]"));
 }

@@ -40,28 +40,51 @@ are what someone reaches for when the terminal cannot cope.
 ## What is drawn
 
 **Header.** The header and footer render on full-width `SurfaceAlt` statusbars.
-The product mark is styled via `Theme::pill(Token::Focus)`, the database icon
-uses `\u{25c9}` (`◉`) in the `unicode` tier to avoid CJK trigram font fallback on
-macOS terminals, and the target string (`user@host:port/db`) is split into
-semantic spans (`user` in `Token::Info`, `@host:port/` in `Token::Muted`, `db` in
-`Token::Header`). The header capsule set spans four discrete badge domains:
+The product mark is an elevated keycap, `Theme::keycap(Token::Header)`, the
+database icon uses `\u{25c9}` (`◉`) in the `unicode` tier to avoid CJK trigram
+font fallback on macOS terminals, and the target string (`user@host:port/db`) is
+split into semantic spans (`user` in `Token::Info`, `@host:port/` in
+`Token::Muted`, `db` in `Token::Header`). The header carries three kinds of
+capsule, each a full-contrast `Theme::capsule` with the word inside its
+brackets:
 
-- **Environment**: `PROD` (danger/red capsule); non-production local environments
-  remain unbadged by default.
-- **Transaction**: `TX ACT` (warning/yellow capsule) when a transaction is open,
-  and `TX FAIL` (danger/red capsule) when a transaction has failed and requires
-  rollback; idle state is unbadged.
-- **Transport**: `TLS verify-full` (info/sky capsule) when encrypted and identity
-  is verified, `TLS unverified` (warning/yellow capsule) when encrypted without
-  host identity verification, and `TLS NONE` (danger/red capsule) when unencrypted.
-- **Posture**: `READ-ONLY` (teal/posture accent capsule) when the session is
-  restricted to read-only queries; normal read-write posture is plain text.
+- **Environment**: `[PROD]` in `Token::EnvironmentProduction` and `[STAGING]` in
+  `Token::Warning`. `[LOCAL]` and `[UNCLASSIFIED]` stay quiet muted text, and
+  other classifications such as `[DEV]` are plain text in
+  `Token::EnvironmentNonProduction`.
+- **Posture**: `[READ ONLY]` in `Token::Info` when the session is restricted to
+  read-only statements; the ordinary read-write posture is not badged.
+- **Transaction**: `[TX ACTIVE]` in `Token::TransactionActive` while a
+  transaction is open, and `[TX FAILED]` in `Token::TransactionFailed` when it
+  has failed and needs a rollback; an idle session is not badged.
 
-The query elapsed-time badge is gated and displayed only when query execution
-takes at least `200 ms`, preventing visual flicker on fast queries. With colour
-off, all capsules degrade to reversed text with unchanged words and brackets
-(`[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]`, `[TLS verify-full]`), ensuring
-complete readability on monochrome screens.
+No safety capsule ever yields to a short row. When the header cannot fit
+everything, things give way in a fixed order: the history or catalogue notice
+and `[MUTED]`, then the completed time, then the provider badge, then the live
+clock, then a failed connection's stage; then the target shortens to its
+database and then with a visible ellipsis; then the product badge goes; then a
+quiet environment label shortens; and a running `\watch` loop, capsule and stop
+hint together, goes last, because it is a side effect in progress. The
+environment, `[READ ONLY]` and transaction capsules stay at every width. A
+quiet environment label (`[LOCAL]`, `[UNCLASSIFIED]`, `[DEV]` or a custom name)
+is bounded to a readable prefix with an ellipsis, so a long custom name never
+pushes a capsule off the row. The compact header used below 80x24 leads with
+the safety capsules, then the quiet label, the database and the focused pane,
+each whole or shortened, never clipped mid-word.
+
+Transport state is not in the steady-state header. Once connected, `verified`,
+`verification skipped` and `plaintext` are routine there by the spec 025
+presentation contract; the full transport facts are in the connection picker,
+in the write-confirmation overlays where they matter, and in Connection
+details on demand.
+
+The completed elapsed time appears only when a statement took at least
+`200 ms`, preventing flicker on fast queries, and uses the Results summary's
+formatter (`240 ms`, `1250 ms`), so one duration reads the same in both places.
+Live clocks, in the header, the footer and the Results pane, read in tenths of
+a second with the same spacing (`1.2 s`). With colour off, and at 16 colours, every capsule degrades
+to reversed text with unchanged words and brackets (`[PROD]`, `[READ ONLY]`,
+`[TX ACTIVE]`, `[TX FAILED]`), so a monochrome screen reads the same.
 
 **Results.** Row numbers in a gutter, an elevated `SurfaceAlt` column header bar,
 alternating row backgrounds, a rule under the headers, a column rule between
@@ -134,8 +157,8 @@ that cannot meet one of them does not move:
 6. **Idle sleeps.** The client animates only while a transition or a busy
    indicator is active, so a settled client wakes nothing.
 7. **Safety surfaces never move or recede.** The header and footer rails that
-   carry `[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]` and the TLS badges are
-   never dimmed, faded or split between two themes. While a confirmation, a
+   carry `[PROD]`, `[READ ONLY]`, `[TX ACTIVE]` and `[TX FAILED]` are never
+   dimmed, faded or split between two themes. While a confirmation, a
    review, a prompt or the connection trust surface is open, including a
    confirmation armed inside a dashboard, nothing moves, so its
    paint-before-accept behaviour is unchanged.
@@ -143,7 +166,7 @@ that cannot meet one of them does not move:
 Three moving things answer "is this still working":
 
 - A braille spinner beside the word `Running` or `Cancellation requested`.
-- A meter that sweeps while a statement runs.
+- A heartbeat that travels back and forth while a statement runs.
 - The bounded US10 boot reveal wordmark on connecting frames.
 
 Two transitions decorate a change that has already happened:
@@ -161,25 +184,47 @@ Two transitions decorate a change that has already happened:
   cancellation, a lost connection or a limited result gets no transition and
   keeps its static colours, because fading any of them toward calm would soften
   news that is not calm. A `\watch` loop and a generated cell update do not
-  settle either. The motion core starts the settle now; the Results title
-  draws it from Feature 063 Wave 2.
+  settle either. Only the word's ink moves, never a background, and the
+  resting word is muted ink without dimming, so the last frame of the fade
+  is exactly the resting frame and nothing changes when it ends. A custom
+  theme whose success colour reads below 4.5:1 on the pane gets no settle,
+  because a word is never painted in an ink it cannot be read in.
 
 Focus changes and overlays do not move. Focus already has its heavier border,
 its colour and the `[focused]` word in the same frame, and the palette and
 completion open too often for a fade to be anything but a delay.
 
-**The meter shows time passing, not progress.** PostgreSQL reports no progress
-for a running statement, so nothing in the interface may imply a percentage. It
-is a heartbeat, and it is drawn as one.
+**The heartbeat shows time passing, not progress.** PostgreSQL reports no
+progress for a running statement, so nothing in the interface may imply a
+percentage, and a bar that fills from left to right and starts again reads as
+one. The heartbeat is a comet instead: a heavy head on a 24-cell hairline
+track, moving one cell per busy tick (90 ms) at a constant pace and turning at
+each end, so it never fills, never arrives and never completes. Beside it the
+word `Running` and the elapsed time say what is known.
+
+- **Truecolour**: the head in the information colour with a three-cell tail
+  fading into the track colour behind it.
+- **256 colours**: the same head and tail shapes, with the tail in the track
+  colour rather than a blend.
+- **16 colours**: a bold head alone on the track.
+- **No colour**: the heavy head alone on the light track, shape only.
+- **ASCII**: an `=` head on a `-` track.
+
+While `Cancellation requested` is shown the heartbeat keeps moving, because
+the statement may still be running, and takes the warning colour. Under reduced
+motion there is no heartbeat at all; the word and the elapsed time remain.
 
 **The boot reveal wordmark** provides immediate feedback while a connection is
-being established. It operates under strict bounds: a `1.4 s` cap (twelve ticks
-at 60 Hz), a left-to-right sweep with easing and a decode leading edge, an any-key
-skip that still delivers the typed key to its handler, immediate truncation on
+being established. It operates under strict bounds: a `1.4 s` cap (it takes
+twelve ticks of the 90 ms busy clock, about 1.1 s), a left-to-right sweep with
+easing and a decode leading edge, an any-key skip that still delivers the typed
+key to its handler, immediate truncation on
 any connection outcome (success or failure), runs at most once per process,
 renders a static final frame from tick 0 under reduced motion, falls back to a
 compact monogram under 64 columns, is omitted entirely on too-small layouts
 below 40x8, and is never emitted in plain mode or non-interactive machine output.
+Its final frame sets the identity line, `a quiet instrument for PostgreSQL`,
+centred under the wordmark.
 
 Motion stops entirely with `ui.reduced-motion = true`, and the same words and the
 same elapsed time remain. A test renders a running query at two different frame

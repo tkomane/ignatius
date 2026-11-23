@@ -27,6 +27,7 @@ pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
 
 use crate::app::model::{Focus, Model};
+use crate::query::value::display_width;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
 use crate::ui::theme::Token;
@@ -51,6 +52,30 @@ pub(crate) fn action_key_label(keymap: &Keymap, action: &crate::app::Action) -> 
         .map(|(key, _)| key)
         .unwrap_or_else(|| "the command palette".to_owned())
 }
+/// The key the active keymap binds directly to `action`, read from the model's
+/// keymap snapshot, for surfaces drawn without the runtime keymap. A model not
+/// yet attached to a runtime reads the default keymap. `None` when nothing is
+/// bound, so a caller can leave the hint out rather than invent a key.
+pub(crate) fn bound_key(model: &Model, action: &crate::app::Action) -> Option<String> {
+    let fallback;
+    let snapshot = if model.keymap_snapshot.is_empty() {
+        fallback = Keymap::new().snapshot();
+        &fallback
+    } else {
+        &model.keymap_snapshot
+    };
+    snapshot
+        .bindings
+        .iter()
+        .find(|binding| binding.action == *action)
+        .map(|binding| crate::query::value::sanitize_for_display(&binding.key))
+}
+/// A live clock, to a tenth of a second, spaced like every other duration
+/// the interface states (`1.2 s`).
+pub(crate) fn live_seconds(elapsed: std::time::Duration) -> String {
+    format!("{:.1} s", elapsed.as_secs_f64())
+}
+
 /// The theme token that draws a syntax kind.
 pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> Token {
     use crate::query::highlight::TokenKind as Kind;
@@ -115,6 +140,36 @@ pub(crate) const fn inset_empty_area(area: Rect) -> Rect {
     }
 }
 
+/// How many rows a set of word-wrapped lines needs at `width`, measured the
+/// way `Paragraph` wraps with trimming, so an empty state can stack its prose,
+/// rule and hints at the top without clipping or leaving a gap.
+pub(crate) fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
+    let cols = usize::from(width.max(1));
+    let mut rows = 0usize;
+    for line in lines {
+        let mut current = 0usize;
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        if text.trim().is_empty() {
+            rows += 1;
+            continue;
+        }
+        rows += 1;
+        for word in text.split_whitespace() {
+            let word_w = display_width(word).max(1);
+            if current == 0 {
+                rows += (word_w - 1) / cols;
+                current = ((word_w - 1) % cols) + 1;
+            } else if current + 1 + word_w <= cols {
+                current += 1 + word_w;
+            } else {
+                rows += 1 + (word_w - 1) / cols;
+                current = ((word_w - 1) % cols) + 1;
+            }
+        }
+    }
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
 /// The shared bordered block behind a pane.
 ///
 /// It carries the pane elevation as its fill, so every pane interior is painted
@@ -152,7 +207,10 @@ pub(crate) fn pane_block_line(
         ));
     }
     spans.extend(title.spans);
-    bordered_line_block(Line::from(spans), focused, presentation)
+    // A focused title leads with its marker. The cell between the corner and
+    // the marker carries on the heavy rule, so the corner does not hang alone
+    // in front of a gap.
+    bordered_line_block(Line::from(spans), focused, focused, presentation)
         .style(presentation.theme.surface(Token::SurfacePane))
 }
 
@@ -171,19 +229,29 @@ pub(crate) fn overlay_block_line(
     title: Line<'static>,
     presentation: &Presentation,
 ) -> Block<'static> {
-    bordered_line_block(title, true, presentation)
+    bordered_line_block(title, true, false, presentation)
         .style(presentation.theme.surface(Token::SurfaceOverlay))
 }
 
 fn bordered_line_block(
     title: Line<'static>,
     focused: bool,
+    lead_rule: bool,
     presentation: &Presentation,
 ) -> Block<'static> {
     let theme = &presentation.theme;
+    let border_style = theme.style(if focused { Token::Focus } else { Token::Border });
     let padding = " ".repeat(usize::from(presentation.spacing().title_padding));
     let mut spans = Vec::with_capacity(title.spans.len() + 2);
-    if !padding.is_empty() {
+    if lead_rule && !padding.is_empty() {
+        // The first padding cell becomes rule, the rest stays space, so the
+        // title keeps its width and position.
+        let rule = presentation.glyphs.borders(focused).horizontal_top;
+        spans.push(Span::styled(rule, border_style));
+        if padding.len() > 1 {
+            spans.push(Span::raw(padding[1..].to_owned()));
+        }
+    } else if !padding.is_empty() {
         spans.push(Span::raw(padding.clone()));
     }
     spans.extend(title.spans);
@@ -192,7 +260,7 @@ fn bordered_line_block(
     }
     Block::bordered()
         .border_set(presentation.glyphs.borders(focused))
-        .border_style(theme.style(if focused { Token::Focus } else { Token::Border }))
+        .border_style(border_style)
         .title(Line::from(spans))
 }
 
@@ -325,6 +393,7 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         || model.data_masking.is_some()
         || model.data_sync.is_some()
         || model.synthetic_seed.is_some()
+        || model.snippet_library.is_some()
         || model.lint_findings.is_some()
         || model.logical_replication.is_some()
         || model.cluster_config.is_some()
@@ -407,6 +476,7 @@ pub const fn overlay_blocks_panes(model: &Model) -> bool {
         || model.data_masking.is_some()
         || model.data_sync.is_some()
         || model.synthetic_seed.is_some()
+        || model.snippet_library.is_some()
         || model.lint_findings.is_some()
         || model.logical_replication.is_some()
         || model.cluster_config.is_some()
@@ -601,7 +671,7 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
         .saturating_add(u16::try_from(gutter.saturating_add(1)).unwrap_or(u16::MAX));
 
     let top = usize::from(row.saturating_sub(inner.y));
-    if top == 3 {
+    if top == results::grid_column_header_row(model, model.presentation.spacing(), inner) {
         if let Some(column) = column_at(&window, &widths, content_x, column) {
             return Some(Region::ResultsHeaderCell { column });
         }
