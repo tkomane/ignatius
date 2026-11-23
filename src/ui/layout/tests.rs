@@ -3897,3 +3897,265 @@ fn retention_inner_minimum_unavailable_view_defers_counts_without_partial_fact()
         }
     }
 }
+
+// ------------------------------------------------- theme curtain (063)
+
+const CURTAIN_WIDTH: u16 = 120;
+const CURTAIN_HEIGHT: u16 = 40;
+
+/// A production connection, so the header carries `[PROD]`, presented the way
+/// the interactive runtime presents it, with a custom theme in the catalogue so
+/// the whole cycle can be walked.
+fn curtain_model(depth: crate::ui::theme::ColorDepth) -> Model {
+    use crate::ui::theme::{ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let mut model = connected_model(Environment::Production);
+    model.size = (CURTAIN_WIDTH, CURTAIN_HEIGHT);
+    let definition = ThemeDefinition::new(ThemeChoice::Paper);
+    model.theme_catalog = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+        .expect("inherited custom is validated");
+    model.presentation = presentation_at_depth(ThemeChoice::Dark, true, GlyphTier::Unicode, depth);
+    with_rows(
+        &mut model,
+        &["id", "note"],
+        &[&[Cell::Text("1".into()), Cell::Null]],
+    );
+    model.motion.enable();
+    model
+}
+
+/// Switches theme through the reducer, exactly as the key does.
+fn switch_theme(model: &mut Model) {
+    crate::app::update(
+        model,
+        crate::app::Message::Action(crate::app::Action::SwitchTheme),
+    );
+}
+
+/// Draws a frame through the runtime's entry point, curtain included.
+fn live_frame(model: &Model) -> Buffer {
+    let area = Rect::new(0, 0, CURTAIN_WIDTH, CURTAIN_HEIGHT);
+    let mut buf = Buffer::empty(area);
+    super::render(model, &Keymap::new(), area, &mut buf);
+    buf
+}
+
+/// The same model drawn in a chosen theme with no curtain at all.
+fn still_frame(model: &Model, theme: &Theme) -> Buffer {
+    let presentation = Presentation {
+        theme: theme.clone(),
+        ..model.presentation.clone()
+    };
+    rendered_buffer(model, &presentation, CURTAIN_WIDTH, CURTAIN_HEIGHT)
+}
+
+/// A model `elapsed` into its curtain.
+fn at(model: &Model, elapsed: Duration) -> Model {
+    let mut later = model.clone();
+    later.motion.advance(elapsed);
+    later
+}
+
+fn same_paint(a: &ratatui::buffer::Cell, b: &ratatui::buffer::Cell) -> bool {
+    a.fg == b.fg
+        && a.bg == b.bg
+        && a.modifier == b.modifier
+        && a.underline_color == b.underline_color
+}
+
+fn curtain_steps() -> impl Iterator<Item = Duration> {
+    (0..=10).map(|step| Duration::from_millis(step * 32))
+}
+
+#[test]
+fn curtain_text_is_identical_in_every_frame_across_the_whole_cycle() {
+    use crate::ui::theme::ColorDepth;
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let mut model = curtain_model(depth);
+        for _ in 0..8 {
+            switch_theme(&mut model);
+            let (outgoing, _) = model.motion().theme_curtain().expect("the curtain runs");
+            let outgoing = outgoing.clone();
+            let settled = still_frame(&model, &model.presentation.theme);
+            for elapsed in curtain_steps() {
+                let frame = live_frame(&at(&model, elapsed));
+                for (index, (cell, final_cell)) in
+                    frame.content.iter().zip(settled.content.iter()).enumerate()
+                {
+                    assert_eq!(
+                        cell.symbol(),
+                        final_cell.symbol(),
+                        "{depth:?} {:?} to {:?} at {elapsed:?}, cell {index}",
+                        outgoing.selection(),
+                        model.presentation.theme.selection()
+                    );
+                }
+            }
+            model.motion.settle();
+        }
+    }
+}
+
+#[test]
+fn curtain_paints_every_cell_wholly_in_one_theme_behind_a_hard_left_to_right_edge() {
+    use crate::ui::theme::ColorDepth;
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let mut model = curtain_model(depth);
+        for _ in 0..8 {
+            switch_theme(&mut model);
+            let outgoing = model.motion().theme_curtain().unwrap().0.clone();
+            let old = still_frame(&model, &outgoing);
+            let new = still_frame(&model, &model.presentation.theme);
+            let mut previous_front = 0;
+            for elapsed in curtain_steps() {
+                let moment = at(&model, elapsed);
+                let frame = live_frame(&moment);
+                let progress = moment.motion().theme_curtain().map_or(1.0, |(_, p)| p);
+                let front = (0..CURTAIN_WIDTH)
+                    .filter(|column| {
+                        crate::ui::motion::curtain_shows_incoming(*column, CURTAIN_WIDTH, progress)
+                    })
+                    .count() as u16;
+                assert!(front >= previous_front, "the edge only moves right");
+                previous_front = front;
+                for row in 1..CURTAIN_HEIGHT - 1 {
+                    for column in 0..CURTAIN_WIDTH {
+                        let cell = &frame[(column, row)];
+                        let expected = if column < front { &new } else { &old };
+                        assert!(
+                            same_paint(cell, &expected[(column, row)]),
+                            "{depth:?} at {elapsed:?}: ({column}, {row}) is not wholly in one theme"
+                        );
+                    }
+                }
+            }
+            model.motion.settle();
+        }
+    }
+}
+
+#[test]
+fn curtain_rails_take_the_new_theme_in_the_first_frame() {
+    use crate::ui::theme::ColorDepth;
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let mut model = curtain_model(depth);
+        switch_theme(&mut model);
+        let outgoing = model.motion().theme_curtain().unwrap().0.clone();
+        let first = live_frame(&model);
+        let new = still_frame(&model, &model.presentation.theme);
+        let old = still_frame(&model, &outgoing);
+        let header: String = (0..CURTAIN_WIDTH)
+            .map(|column| first[(column, 0)].symbol())
+            .collect();
+        assert!(header.contains("PROD"), "the header carries the badge");
+        for column in 0..CURTAIN_WIDTH {
+            for row in [0, CURTAIN_HEIGHT - 1] {
+                assert!(
+                    same_paint(&first[(column, row)], &new[(column, row)]),
+                    "{depth:?}: rail cell ({column}, {row}) is not yet in the new theme"
+                );
+            }
+            for row in 1..CURTAIN_HEIGHT - 1 {
+                assert!(
+                    same_paint(&first[(column, row)], &old[(column, row)]),
+                    "{depth:?}: the body starts wholly in the old theme"
+                );
+            }
+        }
+        assert_ne!(old, new, "the two themes really differ");
+    }
+}
+
+#[test]
+fn curtain_shows_the_new_theme_immediately_at_16_colours_and_without_colour() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::ColorDepth;
+    for (depth, color) in [
+        (ColorDepth::Basic16, true),
+        (ColorDepth::None, true),
+        (ColorDepth::TrueColor, false),
+    ] {
+        let mut model = curtain_model(depth);
+        model.presentation.theme.color = color;
+        switch_theme(&mut model);
+        assert!(
+            !model.is_in_motion(),
+            "{depth:?} {color}: the reducer starts nothing"
+        );
+        // Even a curtain placed by hand is drawn as its final frame.
+        model
+            .motion
+            .begin_theme_curtain(Theme::new(ThemeChoice::Dark, color).with_depth(depth));
+        let expected = still_frame(&model, &model.presentation.theme);
+        for elapsed in curtain_steps() {
+            assert_eq!(
+                live_frame(&at(&model, elapsed)),
+                expected,
+                "{depth:?} {color}"
+            );
+        }
+    }
+}
+
+#[test]
+fn reduced_motion_frames_are_byte_identical_at_two_motion_times() {
+    use crate::ui::theme::ColorDepth;
+    for (model_flag, presentation_flag) in [(true, false), (false, true)] {
+        let mut model = curtain_model(ColorDepth::TrueColor);
+        model.reduced_motion = model_flag;
+        model.presentation.reduced_motion = presentation_flag;
+        switch_theme(&mut model);
+        assert!(!model.is_in_motion());
+        let early = live_frame(&model);
+        let later = live_frame(&at(&model, Duration::from_millis(160)));
+        assert_eq!(early, later);
+        assert_eq!(early, still_frame(&model, &model.presentation.theme));
+
+        // A curtain placed by hand is still not drawn under reduced motion.
+        model
+            .motion
+            .begin_theme_curtain(Theme::new(ThemeChoice::Dark, true));
+        let early = live_frame(&model);
+        let later = live_frame(&at(&model, Duration::from_millis(160)));
+        assert_eq!(early, later);
+        assert_eq!(early, still_frame(&model, &model.presentation.theme));
+    }
+}
+
+#[test]
+fn curtain_settles_to_exactly_the_plain_new_theme_render() {
+    use crate::ui::theme::ColorDepth;
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let mut model = curtain_model(depth);
+        switch_theme(&mut model);
+        let mut settled = model.clone();
+        let mut left = Duration::from_millis(330);
+        while !left.is_zero() {
+            let step = left.min(crate::ui::motion::FRAME_INTERVAL);
+            crate::app::update(
+                &mut settled,
+                crate::app::Message::MotionFrame { elapsed: step },
+            );
+            left -= step;
+        }
+        assert!(!settled.is_in_motion());
+        let plain = still_frame(&model, &model.presentation.theme);
+        assert_eq!(live_frame(&settled), plain, "{depth:?}");
+        let mut fresh = model.clone();
+        fresh.motion = crate::ui::motion::Motion::default();
+        assert_eq!(live_frame(&fresh), plain, "{depth:?}");
+    }
+}
+
+#[test]
+fn freshly_built_models_render_settled() {
+    let mut model = connected_model(Environment::Production);
+    model.presentation = rich();
+    let area = Rect::new(0, 0, CURTAIN_WIDTH, CURTAIN_HEIGHT);
+    let mut live = Buffer::empty(area);
+    super::render(&model, &Keymap::new(), area, &mut live);
+    assert_eq!(
+        live,
+        rendered_buffer(&model, &model.presentation, CURTAIN_WIDTH, CURTAIN_HEIGHT)
+    );
+    assert!(!model.is_animating());
+}

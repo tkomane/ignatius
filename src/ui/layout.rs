@@ -72,8 +72,77 @@ pub const fn layout_mode(area: Rect) -> LayoutMode {
 }
 
 /// Draws the whole interface using the presentation the model owns.
+///
+/// While the theme curtain runs, the same model is also drawn in the outgoing
+/// theme and the two frames are composited column by column. Every other frame
+/// is a single ordinary render.
 pub fn render(model: &Model, keymap: &Keymap, area: Rect, buf: &mut Buffer) {
     render_with(model, keymap, &model.presentation, area, buf);
+    if model.reduced_motion || model.presentation.reduced_motion {
+        return;
+    }
+    if let Some((outgoing, progress)) = model.motion().theme_curtain() {
+        render_curtain(model, keymap, outgoing, progress, area, buf);
+    }
+}
+
+/// Sweeps the incoming theme, already drawn in `buf`, across the outgoing one.
+///
+/// Only colours and modifiers are taken from the outgoing frame; every symbol
+/// stays the incoming frame's, so the words on screen are identical in every
+/// frame of the curtain. The edge is hard at every depth that shows a
+/// transition, so each cell is wholly in one theme. The header and footer
+/// rails carry the safety badges and change to the incoming theme in the very
+/// first frame, so a badge is never split across two palettes; only the body
+/// between them sweeps. At 16 colours and below the incoming theme is shown
+/// immediately.
+fn render_curtain(
+    model: &Model,
+    keymap: &Keymap,
+    outgoing: &crate::ui::theme::Theme,
+    progress: f32,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let incoming = &model.presentation.theme;
+    if !incoming.color || !incoming.depth.shows_transitions() {
+        return;
+    }
+    let presentation = Presentation {
+        theme: outgoing.clone(),
+        ..model.presentation.clone()
+    };
+    let mut before = Buffer::empty(area);
+    render_with(model, keymap, &presentation, area, &mut before);
+
+    let body = curtain_body(model, area);
+    for column in 0..body.width {
+        if crate::ui::motion::curtain_shows_incoming(column, body.width, progress) {
+            continue;
+        }
+        for row in body.top()..body.bottom() {
+            let position = (body.x + column, row);
+            let (Some(old), Some(cell)) = (before.cell(position), buf.cell_mut(position)) else {
+                continue;
+            };
+            cell.fg = old.fg;
+            cell.bg = old.bg;
+            cell.underline_color = old.underline_color;
+            cell.modifier = old.modifier;
+        }
+    }
+}
+
+/// The rows the theme curtain sweeps: everything between the header and
+/// footer rails, or the whole area when the layout is too small to have them.
+fn curtain_body(model: &Model, area: Rect) -> Rect {
+    if layout_mode(area) == LayoutMode::TooSmall {
+        return area;
+    }
+    let geometry = pane_geometry(model, area);
+    let top = geometry.header.bottom();
+    let bottom = geometry.footer.top().max(top);
+    Rect::new(area.x, top, area.width, bottom - top)
 }
 
 /// Draws the whole interface with an explicit presentation.
