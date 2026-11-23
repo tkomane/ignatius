@@ -111,12 +111,60 @@ Two rules keep them honest:
 
 ## Motion
 
-There are exactly three moving things, and all exist to answer "is this still
-working":
+Motion exists to make a state change easier to see, never to make a state
+harder to read. Every moving thing follows the same seven rules, and a change
+that cannot meet one of them does not move:
+
+1. **State first.** The model reaches its new state in the same reduction that
+   starts a transition. The transition only chooses how that state is painted
+   for a short time, so every word, focus marker and safety badge of the new
+   state is in the very first frame.
+2. **Bounded.** No transition lasts longer than 800 ms. Each one has a fixed
+   duration in a single table in `src/ui/motion.rs`.
+3. **Input wins.** Any key press, paste or click settles every transition to
+   its final frame and is still delivered to its handler in the same step, as
+   the boot reveal already does. A transition never delays, swallows or
+   reorders input.
+4. **Reduced motion is stillness.** With `ui.reduced-motion = true`, ASCII
+   glyphs, colour off, 16 colours, plain mode or non-interactive output, no
+   transition starts, and the frame is byte-identical to the settled one.
+5. **Depth-honest colour.** Colour interpolation happens only at truecolour.
+   256 colours step to the final state at the midpoint, and 16 colours and no
+   colour show the final state immediately.
+6. **Idle sleeps.** The client animates only while a transition or a busy
+   indicator is active, so a settled client wakes nothing.
+7. **Safety surfaces never move or recede.** The header and footer rails that
+   carry `[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]` and the TLS badges are
+   never dimmed, faded or split between two themes. While a confirmation, a
+   review, a prompt or the connection trust surface is open, nothing moves, so
+   its paint-before-accept behaviour is unchanged.
+
+Three moving things answer "is this still working":
 
 - A braille spinner beside the word `Running` or `Cancellation requested`.
 - A meter that sweeps while a statement runs.
 - The bounded US10 boot reveal wordmark on connecting frames.
+
+Two transitions decorate a change that has already happened:
+
+- **The theme curtain.** Switching theme sweeps the new palette across the
+  pane body from left to right in 320 ms, eased out. The edge is hard: every
+  cell is wholly in the old theme or the new one, because a blend between a
+  dark and a light palette passes through colours where text has no contrast.
+  The header and footer rails take the new theme in the first frame, and the
+  words on screen are identical in every frame. At 16 colours and below the
+  new theme appears at once.
+- **The result settle.** When a statement completes successfully and its
+  result is complete, the Results status word starts in the success colour and
+  fades to its resting colour over about half a second. A failure, a
+  cancellation, a lost connection or a limited result gets no transition and
+  keeps its static colours, because fading any of them toward calm would soften
+  news that is not calm. The motion core starts the settle now; the Results
+  title draws it from Feature 063 Wave 2.
+
+Focus changes and overlays do not move. Focus already has its heavier border,
+its colour and the `[focused]` word in the same frame, and the palette and
+completion open too often for a fade to be anything but a delay.
 
 **The meter shows time passing, not progress.** PostgreSQL reports no progress
 for a running statement, so nothing in the interface may imply a percentage. It
@@ -135,15 +183,23 @@ Motion stops entirely with `ui.reduced-motion = true`, and the same words and th
 same elapsed time remain. A test renders a running query at two different frame
 counters under reduced motion and asserts the output is byte-identical. Under
 reduced motion, the boot reveal displays directly at its static final frame with
-zero animation frames.
+zero animation frames, and no transition starts: a test switches theme under
+reduced motion and asserts that frames at two different motion times are
+byte-identical.
 
 ## How motion stays testable
 
 The reducer reads no clock. The runtime measures how long the current statement
 has been running and passes it in as a message; the model holds a frame counter
-that only ever chooses which frame to draw. So an animated state is as
-reproducible as any other, and a paused animation can never hide a real state.
+that only ever chooses which frame to draw. Transitions are measured on a
+separate motion clock that only a motion frame from the runtime advances, so a
+test chooses any frame of any transition by choosing a motion time. An animated
+state is as reproducible as any other, and a paused animation can never hide a
+real state.
 
-The ticker sleeps entirely when nothing is happening. An idle client wakes
-nothing, which is the difference between a tool you leave open all day and one
-you close.
+Both tickers sleep entirely when nothing is happening: the 90 ms busy ticker
+while nothing runs or connects, and the motion ticker, at about thirty frames a
+second, while no transition is active. They are separate so that a transition
+never changes the spinner's speed, the boot reveal's timing or the double-click
+window. An idle client wakes nothing, which is the difference between a tool
+you leave open all day and one you close.
