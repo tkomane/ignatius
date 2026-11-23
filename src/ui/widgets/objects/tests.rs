@@ -499,3 +499,28 @@ fn objects_title_breadcrumbs_and_column_details_truncate_cleanly_at_narrow_width
         "{empty_text}"
     );
 }
+
+#[test]
+fn a_column_detail_is_shortened_at_a_fact_boundary() {
+    let detail = "text, not null, default 'x'";
+    assert_eq!(super::clip_detail(detail, 40, true), detail);
+    assert_eq!(
+        super::clip_detail(detail, 18, true),
+        "text, not null, \u{2026}"
+    );
+    assert_eq!(super::clip_detail(detail, 12, true), "text, \u{2026}");
+    assert_eq!(super::clip_detail(detail, 12, false), "text, ...");
+    // A single fact too wide for the budget falls back to plain truncation.
+    assert_eq!(
+        super::clip_detail("character varying(255)", 10, true),
+        crate::query::value::truncate_to_width("character varying(255)", 10, true)
+    );
+    for budget in 3..30 {
+        let clipped = super::clip_detail(detail, budget, true);
+        assert!(
+            crate::query::value::display_width(&clipped) <= budget,
+            "{budget}: {clipped:?}"
+        );
+        assert!(!clipped.contains("not n\u{2026}"), "{budget}: {clipped:?}");
+    }
+}

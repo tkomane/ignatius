@@ -497,10 +497,31 @@ fn push_bounded_row_detail(
         let min_budget = if unicode { 3 } else { 5 };
         if detail_budget >= min_budget {
             let clean = sanitize_for_display(detail);
-            let clipped = truncate_to_width(&clean, detail_budget, unicode);
+            let clipped = clip_detail(&clean, detail_budget, unicode);
             spans.push(Span::styled(format!("  {clipped}"), style));
         }
     }
+}
+
+/// Shortens a row's detail at a `, ` boundary, so a column reads
+/// `text, …` rather than `text, not n…`: each fact is shown whole or not at
+/// all, and the marker says that more follows. A first fact too wide for the
+/// budget falls back to ordinary truncation.
+pub(crate) fn clip_detail(detail: &str, budget: usize, unicode: bool) -> String {
+    if display_width(detail) <= budget {
+        return detail.to_owned();
+    }
+    let marker = if unicode {
+        crate::query::value::TRUNCATION_MARKER.to_string()
+    } else {
+        crate::query::value::TRUNCATION_MARKER_ASCII.to_owned()
+    };
+    let facts: Vec<&str> = detail.split(", ").collect();
+    (1..facts.len())
+        .rev()
+        .map(|kept| format!("{}, {marker}", facts[..kept].join(", ")))
+        .find(|candidate| display_width(candidate) <= budget)
+        .unwrap_or_else(|| truncate_to_width(detail, budget, unicode))
 }
 
 fn render_empty_objects(
