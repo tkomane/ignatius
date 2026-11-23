@@ -1162,3 +1162,77 @@ fn a_header_sits_right_aligned_over_a_numeric_column() {
         "{header}\n{value_row}"
     );
 }
+
+fn connected_empty(sql: &str) -> Model {
+    let mut model = Model::new(100);
+    model.sidebar_visible = false;
+    model.focus = Focus::Results;
+    model.connection =
+        crate::app::model::ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+            target: "app@localhost:5432/orders".into(),
+            database: "orders".into(),
+            user: "app".into(),
+            server_version: "18.0".into(),
+            backend_pid: "1".into(),
+            search_path: "public".into(),
+            read_only: false,
+            tls: crate::postgres::TlsState::Disabled,
+            environment: crate::connection::Environment::Local,
+        }));
+    model.editor.set_text(sql);
+    model
+}
+
+#[test]
+fn an_empty_results_pane_says_sql_is_ready_once_the_editor_has_some() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 24);
+    let ready = buffer_to_string(&render(&connected_empty("SELECT 1;"), &presentation, area));
+    assert!(ready.contains("SQL is ready to run."), "{ready}");
+    assert!(ready.contains("Ctrl+R Run the buffer"), "{ready}");
+    assert!(!ready.contains("Write SQL in the editor"), "{ready}");
+
+    let blank = buffer_to_string(&render(&connected_empty("  \n"), &presentation, area));
+    assert!(blank.contains("Write SQL in the editor"), "{blank}");
+    assert!(!blank.contains("SQL is ready to run."), "{blank}");
+}
+
+#[test]
+fn the_empty_results_state_stacks_from_the_top_with_text_hint_labels() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 24);
+    let buf = render(&connected_empty("SELECT 1;"), &presentation, area);
+    let rows: Vec<String> = buffer_to_string(&buf).lines().map(str::to_owned).collect();
+    let find = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("missing {needle:?}: {rows:#?}"))
+    };
+    let headline = find("No query has run yet.");
+    let palette = find("Command palette shows safe next actions.");
+    // Two prose rows, a breathing row, the rule and two hint rows: the keys
+    // sit right under the words, with the pane's spare height below them.
+    assert!(
+        palette - headline <= 5,
+        "the hints drifted away from the prose: {rows:#?}"
+    );
+    assert!(
+        rows[palette + 1..rows.len() - 1]
+            .iter()
+            .all(|row| row.trim_matches(['\u{2502}', '\u{2503}', ' ']).is_empty()),
+        "{rows:#?}"
+    );
+    // Both hint labels are primary text, not dimmed.
+    for label in ["Run the buffer", "Command palette shows"] {
+        let y = find(label) as u16;
+        let row = &rows[y as usize];
+        let x = row[..row.find(label).expect("label")].chars().count() as u16;
+        let cell = &buf[(x, y)];
+        assert_eq!(
+            Some(cell.fg),
+            presentation.theme.style(Token::Text).fg,
+            "{label}"
+        );
+        assert!(!cell.modifier.contains(Modifier::DIM), "{label}");
+    }
+}

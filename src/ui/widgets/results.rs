@@ -1,7 +1,7 @@
 use super::overlays::render_plan;
 use super::{
     action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, inset_empty_area,
-    overlay_block, pane_block_line, syntax_token,
+    overlay_block, pane_block_line, syntax_token, wrapped_line_count,
 };
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
@@ -791,16 +791,23 @@ fn render_results_placeholder(
                 ),
                 Span::styled("No query has run yet.", theme.style(Token::Header)),
             ]));
-            prose_lines.push(Line::from(Span::styled(
-                "Write SQL in the editor to inspect rows, types, and query plans.",
-                theme.style(Token::Muted),
-            )));
+            // With SQL already in the editor, asking for SQL would be advice
+            // the user has already taken: the next step is to run it.
+            let (prose, hint) = if ctx.editor_has_text {
+                (
+                    "SQL is ready to run. Rows, types, and plans appear here.",
+                    "Run the buffer",
+                )
+            } else {
+                (
+                    "Write SQL in the editor to inspect rows, types, and query plans.",
+                    "Run the buffer after entering SQL.",
+                )
+            };
+            prose_lines.push(Line::from(Span::styled(prose, theme.style(Token::Muted))));
             hint_lines.push(Line::from(vec![
                 Span::styled(format!(" {run_key} "), keycap),
-                Span::styled(
-                    "Run the buffer after entering SQL.",
-                    theme.style(Token::Text),
-                ),
+                Span::styled(hint, theme.style(Token::Text)),
             ]));
         }
         crate::app::discovery::ConnectionPosture::Lost
@@ -843,17 +850,22 @@ fn render_results_placeholder(
         Span::styled(format!(" {palette_key} "), keycap),
         Span::styled(
             "Command palette shows safe next actions.",
-            theme.style(Token::Muted),
+            theme.style(Token::Text),
         ),
     ]));
 
+    // Prose, rule and hints stack from the top, as the Objects empty state
+    // does, so a tall pane does not open a gap between the words and the keys.
+    let measured = wrapped_line_count(&prose_lines, empty_area.width);
     let separator_rows = u16::from(empty_area.height >= 6);
     let hints_height = u16::try_from(hint_lines.len())
         .unwrap_or(u16::MAX)
         .min(empty_area.height);
-    let prose_height = empty_area
+    let max_prose = empty_area
         .height
         .saturating_sub(hints_height + separator_rows);
+    let gap = u16::from(separator_rows > 0 && measured.saturating_add(1) <= max_prose);
+    let prose_height = measured.saturating_add(gap).min(max_prose);
     let [prose_rect, sep_rect, hints_rect] = Layout::vertical([
         Constraint::Length(prose_height),
         Constraint::Length(separator_rows),

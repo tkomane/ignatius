@@ -27,6 +27,7 @@ pub(crate) use palette::{render_connection_details, render_palette};
 pub(crate) use results::{render_error, render_inspector, render_results};
 
 use crate::app::model::{Focus, Model};
+use crate::query::value::display_width;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{LayoutMode, Presentation, layout_mode, pane_geometry};
 use crate::ui::theme::Token;
@@ -113,6 +114,36 @@ pub(crate) const fn inset_empty_area(area: Rect) -> Rect {
         width: area.width.saturating_sub(h_pad.saturating_mul(2)),
         height: area.height.saturating_sub(v_pad),
     }
+}
+
+/// How many rows a set of word-wrapped lines needs at `width`, measured the
+/// way `Paragraph` wraps with trimming, so an empty state can stack its prose,
+/// rule and hints at the top without clipping or leaving a gap.
+pub(crate) fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
+    let cols = usize::from(width.max(1));
+    let mut rows = 0usize;
+    for line in lines {
+        let mut current = 0usize;
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        if text.trim().is_empty() {
+            rows += 1;
+            continue;
+        }
+        rows += 1;
+        for word in text.split_whitespace() {
+            let word_w = display_width(word).max(1);
+            if current == 0 {
+                rows += (word_w - 1) / cols;
+                current = ((word_w - 1) % cols) + 1;
+            } else if current + 1 + word_w <= cols {
+                current += 1 + word_w;
+            } else {
+                rows += 1 + (word_w - 1) / cols;
+                current = ((word_w - 1) % cols) + 1;
+            }
+        }
+    }
+    u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
 /// The shared bordered block behind a pane.

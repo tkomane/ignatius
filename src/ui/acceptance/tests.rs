@@ -1507,11 +1507,7 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         "workbench-material",
         "Material 3 Tonal",
         "Workbench before the first query",
-        &[
-            "[DEV]",
-            "No query has run yet.",
-            "Run the buffer after entering SQL.",
-        ],
+        &["[DEV]", "No query has run yet.", "SQL is ready to run."],
     );
     let atelier = showcase_base_model(ThemeChoice::Atelier);
     check_showcase_scene(
