@@ -198,3 +198,16 @@ fn unicode_database_icon_uses_fisheye_fallback() {
     let glyphs = Glyphs::new(GlyphTier::Unicode);
     assert_eq!(glyphs.icon(Icon::Database), "\u{25c9}");
 }
+
+#[test]
+fn the_search_prompt_is_never_empty_and_never_the_unsupported_index_glyph() {
+    use crate::query::value::display_width;
+    let prompts = [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd]
+        .map(|tier| Glyphs::new(tier).search_prompt());
+    assert_eq!(prompts, [">", "\u{203a}", "\u{ea6d}"]);
+    for prompt in prompts {
+        assert_eq!(display_width(prompt), 1, "{prompt:?}");
+        // U+2315 renders blank in CommitMono Nerd Font Mono.
+        assert_ne!(prompt, "\u{2315}");
+    }
+}

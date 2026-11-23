@@ -2735,7 +2735,7 @@ fn the_palette_shows_the_query_the_matches_and_how_to_leave() {
         text.contains("Command"),
         "entries say which group they are in"
     );
-    assert!(text.contains("2 match(es)"), "the count is visible: {text}");
+    assert!(text.contains("2 matches"), "the count is visible: {text}");
 }
 
 #[test]
@@ -2752,7 +2752,7 @@ fn the_palette_says_when_nothing_matches_rather_than_going_blank() {
 
     let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);
     assert!(text.contains("Nothing matches that."), "{text}");
-    assert!(text.contains("0 match(es)"), "{text}");
+    assert!(text.contains("0 matches"), "{text}");
 }
 
 #[test]
@@ -4201,4 +4201,372 @@ fn freshly_built_models_render_settled() {
         rendered_buffer(&model, &model.presentation, CURTAIN_WIDTH, CURTAIN_HEIGHT)
     );
     assert!(!model.is_animating());
+}
+
+// ------------------------------------------ static background recession (063)
+
+const RECEDE_WIDTH: u16 = 120;
+const RECEDE_HEIGHT: u16 = 36;
+
+const BUILT_IN_THEMES: [ThemeChoice; 7] = [
+    ThemeChoice::Dark,
+    ThemeChoice::Light,
+    ThemeChoice::HighContrast,
+    ThemeChoice::FieldIndustrial,
+    ThemeChoice::Material,
+    ThemeChoice::Atelier,
+    ThemeChoice::Paper,
+];
+
+/// A production workbench with a focused, selected result row, so the frame
+/// behind an overlay carries a `Selection` fill and the `[PROD]` capsule.
+fn recede_model(presentation: Presentation) -> Model {
+    let mut model = connected_model(Environment::Production);
+    model.size = (RECEDE_WIDTH, RECEDE_HEIGHT);
+    model.presentation = presentation;
+    model.focus = Focus::Results;
+    model
+        .editor
+        .set_text("-- why\nSELECT id, note FROM orders;");
+    with_rows(
+        &mut model,
+        &["id", "note"],
+        &[
+            &[Cell::Text("1".into()), Cell::Null],
+            &[Cell::Text("2".into()), Cell::Text("ok".into())],
+        ],
+    );
+    model
+}
+
+fn open_palette(model: &mut Model) {
+    crate::app::update(
+        model,
+        crate::app::Message::Action(crate::app::Action::OpenPalette),
+    );
+    assert!(model.palette.is_some());
+}
+
+/// The same frame with the overlay drawn but nothing receded.
+fn unreceded(model: &Model) -> Buffer {
+    let area = Rect::new(0, 0, RECEDE_WIDTH, RECEDE_HEIGHT);
+    let mut buf = Buffer::empty(area);
+    super::render_workbench(model, &Keymap::new(), &model.presentation, area, &mut buf);
+    super::render_overlays(model, &Keymap::new(), &model.presentation, area, &mut buf);
+    buf
+}
+
+fn receded(model: &Model) -> Buffer {
+    rendered_buffer(model, &model.presentation, RECEDE_WIDTH, RECEDE_HEIGHT)
+}
+
+fn in_rect(rect: Rect, column: u16, row: u16) -> bool {
+    column >= rect.left() && column < rect.right() && row >= rect.top() && row < rect.bottom()
+}
+
+#[test]
+fn blocking_overlays_recede_pane_bodies_to_border_ink_in_every_theme() {
+    use crate::ui::theme::{ColorDepth, Token};
+    use ratatui::style::Modifier;
+    let area = Rect::new(0, 0, RECEDE_WIDTH, RECEDE_HEIGHT);
+    for choice in BUILT_IN_THEMES {
+        for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+            let mut model = recede_model(presentation_at_depth(
+                choice,
+                true,
+                GlyphTier::Unicode,
+                depth,
+            ));
+            open_palette(&mut model);
+            let theme = &model.presentation.theme;
+            let recession = theme.recession().expect("surfaces are painted");
+            assert_eq!(Some(recession.ink), theme.color(Token::Border));
+            let palette = crate::ui::widgets::palette::palette_box(
+                model.palette.as_ref().unwrap(),
+                &model.presentation,
+                area,
+            );
+            let geometry = pane_geometry(&model, area);
+            let before = unreceded(&model);
+            let after = receded(&model);
+            let mut receded_selection = 0;
+            for row in 0..RECEDE_HEIGHT {
+                for column in 0..RECEDE_WIDTH {
+                    let (old, new) = (&before[(column, row)], &after[(column, row)]);
+                    let at = format!("{choice:?} {depth:?} ({column}, {row})");
+                    assert_eq!(old.symbol(), new.symbol(), "{at}: symbols never change");
+                    let rail = in_rect(geometry.header, column, row)
+                        || in_rect(geometry.footer, column, row);
+                    if rail || in_rect(palette, column, row) {
+                        assert_eq!(old, new, "{at}: rails and the overlay never recede");
+                        continue;
+                    }
+                    assert_eq!(new.fg, recession.ink, "{at}: receded ink");
+                    if old.bg == recession.selection {
+                        assert_eq!(new.bg, recession.selection_rest, "{at}");
+                        receded_selection += 1;
+                    } else {
+                        assert_eq!(new.bg, old.bg, "{at}: no new surface tier");
+                    }
+                    assert_eq!(new.modifier, old.modifier - Modifier::DIM, "{at}");
+                }
+            }
+            assert!(
+                receded_selection > 0,
+                "{choice:?} {depth:?}: the selected row is behind the overlay"
+            );
+        }
+    }
+}
+
+#[test]
+fn recession_keeps_the_header_badges_in_every_layout_mode() {
+    use crate::ui::theme::{ColorDepth, Token};
+    for (width, height, zoomed) in [(120, 36, false), (120, 36, true), (64, 20, false)] {
+        let mut model = recede_model(presentation_at_depth(
+            ThemeChoice::Dark,
+            true,
+            GlyphTier::Unicode,
+            ColorDepth::TrueColor,
+        ));
+        model.connection = ConnectionState::Connected(Box::new(SessionInfo {
+            read_only: true,
+            ..*session(Environment::Production, TlsState::Disabled)
+        }));
+        model.size = (width, height);
+        model.splits.zoomed = zoomed;
+        model.help_open = true;
+        let area = Rect::new(0, 0, width, height);
+        let mut plain = Buffer::empty(area);
+        super::render_workbench(
+            &model,
+            &Keymap::new(),
+            &model.presentation,
+            area,
+            &mut plain,
+        );
+        super::render_overlays(
+            &model,
+            &Keymap::new(),
+            &model.presentation,
+            area,
+            &mut plain,
+        );
+        let frame = rendered_buffer(&model, &model.presentation, width, height);
+        assert_ne!(frame, plain, "{width}x{height}: the body receded");
+        let geometry = pane_geometry(&model, area);
+        let label = format!("{width}x{height} zoomed={zoomed}");
+        for rail in [geometry.header, geometry.footer] {
+            assert_eq!(rail.height, 1, "{label}");
+            for column in rail.left()..rail.right() {
+                assert_eq!(
+                    frame[(column, rail.y)],
+                    plain[(column, rail.y)],
+                    "{label}: rail cell ({column}, {})",
+                    rail.y
+                );
+            }
+        }
+        let header: String = (0..width)
+            .map(|column| frame[(column, 0)].symbol())
+            .collect();
+        for badge in ["[PROD]", "[READ ONLY]"] {
+            assert!(header.contains(badge), "{label}: {badge} in {header}");
+        }
+        let x = header[..header.find("[PROD]").unwrap()].chars().count() as u16;
+        let capsule = model
+            .presentation
+            .theme
+            .capsule(Token::EnvironmentProduction);
+        assert_eq!(Some(frame[(x, 0)].fg), capsule.fg, "{label}");
+        assert_eq!(Some(frame[(x, 0)].bg), capsule.bg, "{label}");
+    }
+}
+
+#[test]
+fn nothing_recedes_without_painted_surfaces_or_a_blocking_overlay() {
+    use crate::ui::theme::ColorDepth;
+    for (depth, color, tier) in [
+        (ColorDepth::Basic16, true, GlyphTier::Unicode),
+        (ColorDepth::None, true, GlyphTier::Unicode),
+        (ColorDepth::TrueColor, false, GlyphTier::Unicode),
+        (ColorDepth::Basic16, true, GlyphTier::Ascii),
+        (ColorDepth::TrueColor, true, GlyphTier::Ascii),
+        (ColorDepth::Indexed256, true, GlyphTier::Ascii),
+    ] {
+        let mut model = recede_model(presentation_at_depth(ThemeChoice::Dark, color, tier, depth));
+        if tier != GlyphTier::Ascii {
+            assert!(model.presentation.theme.recession().is_none());
+        }
+        open_palette(&mut model);
+        assert_eq!(
+            receded(&model),
+            unreceded(&model),
+            "{depth:?} {color} {tier:?}"
+        );
+    }
+
+    // No overlay at all: the workbench is drawn at full strength.
+    let model = recede_model(rich());
+    assert!(!super::workbench_recedes(&model));
+    assert_eq!(receded(&model), unreceded(&model));
+}
+
+#[test]
+fn the_completion_popup_never_recedes_the_editor_it_annotates() {
+    let mut model = recede_model(rich());
+    model.focus = Focus::Editor;
+    model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+        catalog: crate::query::completion::CompletionCatalog {
+            objects: vec![crate::query::completion::CatalogObject {
+                kind: crate::query::completion::CatalogObjectKind::Table,
+                schema: "public".into(),
+                name: "orders".into(),
+                readable: true,
+                detail: None,
+            }],
+            relations: Vec::new(),
+        },
+        loaded_at: "2026-11-23 10:00:00 +02:00".into(),
+    };
+    model.editor.set_text("SELECT * FROM ord");
+    crate::app::update(
+        &mut model,
+        crate::app::Message::Action(crate::app::Action::Complete),
+    );
+    assert!(model.completion.menu.is_some());
+    assert!(crate::ui::widgets::overlay_blocks_panes(&model));
+    assert!(!super::workbench_recedes(&model));
+    assert_eq!(receded(&model), unreceded(&model));
+}
+
+#[test]
+fn every_blocking_overlay_recedes_including_safety_prompts() {
+    let mut cases: Vec<(&str, Model)> = Vec::new();
+    let base = recede_model(rich());
+    let mut help = base.clone();
+    help.help_open = true;
+    cases.push(("help", help));
+    let mut bench = base.clone();
+    bench.query_bench = Some(crate::app::model::QueryBenchState::default());
+    cases.push(("bench", bench));
+    let mut confirm = base.clone();
+    confirm.pending_run = Some(crate::app::model::PendingRun {
+        sql: "DELETE FROM orders".into(),
+        impact: crate::query::Impact::Destructive,
+        typed: String::new(),
+        required: "orders".into(),
+        source: None,
+    });
+    cases.push(("typed confirmation", confirm));
+
+    // Connection details paints its own full-screen backdrop over the whole
+    // frame, so there is nothing left behind it to recede.
+    let mut details = base;
+    details.connection_details = true;
+    assert!(super::workbench_recedes(&details));
+    assert_eq!(receded(&details), unreceded(&details));
+
+    for (name, model) in cases {
+        assert!(super::workbench_recedes(&model), "{name}");
+        let after = receded(&model);
+        let before = unreceded(&model);
+        let ink = model.presentation.theme.recession().unwrap().ink;
+        let changed = after
+            .content
+            .iter()
+            .zip(before.content.iter())
+            .filter(|(new, old)| new != old)
+            .collect::<Vec<_>>();
+        assert!(!changed.is_empty(), "{name}: something receded");
+        assert!(
+            changed
+                .iter()
+                .all(|(new, old)| new.fg == ink && new.symbol() == old.symbol()),
+            "{name}: only ink changes"
+        );
+    }
+}
+
+#[test]
+fn curtain_and_recession_compose_cell_for_cell() {
+    use crate::ui::theme::ColorDepth;
+    for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+        let mut model = curtain_model(depth);
+        switch_theme(&mut model);
+        model.help_open = true;
+        let outgoing = model.motion().theme_curtain().unwrap().0.clone();
+        let old = still_frame(&model, &outgoing);
+        let new = still_frame(&model, &model.presentation.theme);
+        let old_ink = outgoing.recession().unwrap().ink;
+        let new_ink = model.presentation.theme.recession().unwrap().ink;
+        assert_ne!(old_ink, new_ink, "the two inks really differ");
+        for elapsed in curtain_steps() {
+            let moment = at(&model, elapsed);
+            let frame = live_frame(&moment);
+            let progress = moment.motion().theme_curtain().map_or(1.0, |(_, p)| p);
+            for row in 1..CURTAIN_HEIGHT - 1 {
+                for column in 0..CURTAIN_WIDTH {
+                    let incoming =
+                        crate::ui::motion::curtain_shows_incoming(column, CURTAIN_WIDTH, progress);
+                    let expected = if incoming { &new } else { &old };
+                    assert!(
+                        same_paint(&frame[(column, row)], &expected[(column, row)]),
+                        "{depth:?} at {elapsed:?}: ({column}, {row})"
+                    );
+                }
+            }
+            // Behind the overlay, the left edge of the body is receded in
+            // whichever theme the curtain has reached there.
+            let edge = &frame[(0, 1)];
+            assert!(
+                edge.fg == old_ink || edge.fg == new_ink,
+                "{depth:?} {elapsed:?}"
+            );
+            for column in 0..CURTAIN_WIDTH {
+                assert!(
+                    same_paint(&frame[(column, 0)], &new[(column, 0)]),
+                    "{depth:?}: the header is wholly in the new theme"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn no_overlay_cell_is_ever_receded() {
+    let area = Rect::new(0, 0, RECEDE_WIDTH, RECEDE_HEIGHT);
+    for (name, mut model) in density_overlay_models() {
+        model.presentation = rich();
+        model.size = (RECEDE_WIDTH, RECEDE_HEIGHT);
+        let mut workbench = Buffer::empty(area);
+        super::render_workbench(
+            &model,
+            &Keymap::new(),
+            &model.presentation,
+            area,
+            &mut workbench,
+        );
+        let plain = unreceded(&model);
+        let frame = receded(&model);
+        if name == "completion" {
+            assert_eq!(frame, plain, "completion recedes nothing");
+            continue;
+        }
+        assert!(super::workbench_recedes(&model), "{name}");
+        let mut overlay_cells = 0;
+        for (index, ((under, drawn), shown)) in workbench
+            .content
+            .iter()
+            .zip(plain.content.iter())
+            .zip(frame.content.iter())
+            .enumerate()
+        {
+            if under != drawn {
+                overlay_cells += 1;
+                assert_eq!(shown, drawn, "{name}: overlay cell {index} changed");
+            }
+        }
+        assert!(overlay_cells > 0, "{name}: the overlay drew something");
+    }
 }

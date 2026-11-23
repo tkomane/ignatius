@@ -625,3 +625,86 @@ fn palette_uses_purpose_icons_and_preview_hairline() {
     assert!(ascii_text.is_ascii(), "{ascii_text:?}");
     assert!(ascii_text.contains("----"), "{ascii_text}");
 }
+
+fn search_line(buf: &Buffer) -> String {
+    let y = (0..AREA.height)
+        .find(|&y| {
+            (0..AREA.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("match")
+        })
+        .expect("search strip");
+    (0..AREA.width).map(|x| buf[(x, y)].symbol()).collect()
+}
+
+#[test]
+fn the_palette_prompt_follows_the_glyph_tier_and_counts_in_words() {
+    for (tier, prompt) in [
+        (GlyphTier::Ascii, " > "),
+        (GlyphTier::Unicode, " \u{203a} "),
+        (GlyphTier::Nerd, " \u{ea6d} "),
+    ] {
+        let presentation = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true),
+            Glyphs::new(tier),
+            false,
+        );
+        let line = search_line(&render(&presentation, 0));
+        assert!(line.contains(prompt), "{tier:?}: {line:?}");
+        assert!(!line.contains('\u{2315}'), "{tier:?}: {line:?}");
+        assert!(line.contains("2 matches"), "{tier:?}: {line:?}");
+    }
+
+    let presentation = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let mut one = palette();
+    one.query = "Switch".into();
+    let mut buf = Buffer::empty(AREA);
+    render_palette(&one, &presentation, AREA, &mut buf);
+    let line = search_line(&buf);
+    assert!(line.contains("1 match"), "{line:?}");
+    assert!(!line.contains("matches"), "{line:?}");
+}
+
+#[test]
+fn an_empty_palette_query_shows_a_muted_placeholder_that_typing_replaces() {
+    let presentation = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let buf = render(&presentation, 0);
+    let (x, y) = cell(&buf, "Type to filter");
+    assert_eq!(
+        Some(buf[(x, y)].fg),
+        presentation.theme.color(Token::Muted),
+        "the placeholder is the quietest ink"
+    );
+    assert_eq!(
+        buf[(x, y)].bg,
+        presentation.theme.surface(Token::SurfaceAlt).bg.unwrap()
+    );
+
+    let mut typed = palette();
+    typed.query = "for".into();
+    let mut buf = Buffer::empty(AREA);
+    render_palette(&typed, &presentation, AREA, &mut buf);
+    let line = search_line(&buf);
+    assert!(!line.contains("Type to filter"), "{line:?}");
+    assert!(line.contains("for"), "{line:?}");
+
+    // Without colour or Unicode it is still words.
+    let plain = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let line = search_line(&render(&plain, 0));
+    assert!(line.contains(" > |"), "{line:?}");
+    assert!(line.contains("Type to filter"), "{line:?}");
+    assert!(line.is_ascii(), "{line:?}");
+}

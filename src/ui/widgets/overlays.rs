@@ -11,7 +11,7 @@ use crate::ui::layout::{Presentation, definition_box, definition_viewport};
 use crate::ui::theme::Token;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -673,38 +673,32 @@ fn render_plan_tree(
             continue;
         };
         let selected = path == &view.selected_path;
-        let mut text = plan_node_text(
+        let segments = plan_node_segments(
             document,
             node,
             path,
             view.collapsed.contains(path),
             selected,
-            !presentation.glyphs.is_ascii(),
+            presentation,
         );
-        text = truncate_to_width(&text, area.width as usize, !presentation.glyphs.is_ascii());
         let line = if selected {
-            let padded = pad_to_width(&text, area.width as usize);
-            Line::from(Span::styled(
-                padded,
-                presentation.theme.style(Token::Selection),
-            ))
-        } else if document.is_attention_path(path) {
-            Line::from(Span::styled(text, presentation.theme.style(Token::Warning)))
-        } else if let Some((left, right)) = text.split_once(" | ") {
-            Line::from(vec![
-                Span::styled(left.to_owned(), presentation.theme.style(Token::Header)),
-                Span::styled(" | ", presentation.theme.style(Token::Border)),
-                Span::styled(
-                    right.to_owned(),
-                    presentation.theme.style(if node.estimate_mismatch() {
-                        Token::Warning
-                    } else {
-                        Token::Muted
-                    }),
-                ),
-            ])
+            let selection = presentation.theme.style(Token::Selection);
+            bounded_row(
+                segments
+                    .into_iter()
+                    .map(|(text, _)| (text, selection))
+                    .collect(),
+                usize::from(area.width),
+                !presentation.glyphs.is_ascii(),
+                Some(selection),
+            )
         } else {
-            Line::from(Span::styled(text, presentation.theme.style(Token::Header)))
+            bounded_row(
+                segments,
+                usize::from(area.width),
+                !presentation.glyphs.is_ascii(),
+                None,
+            )
         };
         lines.push(line);
     }
@@ -800,48 +794,99 @@ fn plan_summary(document: &crate::query::PlanDocument) -> String {
     )
 }
 
-fn plan_node_text(
+/// One plan tree row as styled segments.
+///
+/// The row reads like the Objects tree: Border-toned `│` guides for depth, a
+/// chevron only on nodes with children (`▾` open, `▸` closed, `v` and `>` in
+/// ASCII), then the operation and a compact metric summary. Width, cost
+/// units and loop timing in full stay in the detail block below the tree.
+/// The selected row keeps its ASCII `>` marker so selection survives colour
+/// loss, and attention and estimate-mismatch flags stay as words.
+fn plan_node_segments(
     document: &crate::query::PlanDocument,
     node: &crate::query::PlanNode,
     path: &[usize],
     collapsed: bool,
     selected: bool,
-    unicode: bool,
-) -> String {
+    presentation: &Presentation,
+) -> Vec<(String, Style)> {
+    let theme = &presentation.theme;
+    let glyphs = &presentation.glyphs;
+    let attention = document.is_attention_path(path);
+    let flag_style = theme.style(Token::Warning);
     let marker = if selected { ">" } else { " " };
-    let branch = if node.children.is_empty() {
-        "  "
-    } else if collapsed {
-        "[-]"
-    } else if unicode {
-        "└─"
-    } else {
-        "+-"
-    };
     let depth = path.len().min(10);
-    let indent = if path.len() > depth {
-        format!("{}... ", "  ".repeat(depth))
+    let mut guides = glyphs.indent_guide().repeat(depth);
+    if path.len() > depth {
+        guides.push_str("... ");
+    }
+    let chevron = if node.children.is_empty() {
+        "  ".to_owned()
     } else {
-        "  ".repeat(depth)
+        format!("{} ", glyphs.chevron(!collapsed))
     };
-    let subject = node_subject(node);
-    let attention = if document.is_attention_path(path) {
-        format!(" [attention: {}]", document.attention_basis().label())
+    let subject_token = if attention {
+        Token::Warning
     } else {
-        String::new()
+        Token::Header
     };
-    let mismatch = if node.estimate_mismatch() {
-        " [estimate mismatch]"
+    let metrics_token = if attention || node.estimate_mismatch() {
+        Token::Warning
     } else {
-        ""
+        Token::Muted
     };
-    format!(
-        "{marker}{indent}{branch} {} | {}{}{}",
-        safe_plan_text(&subject),
-        plan_metrics(node, document.analyzed),
-        attention,
-        mismatch
-    )
+    let mut segments = vec![
+        (marker.to_owned(), theme.style(Token::Focus)),
+        (guides, theme.style(Token::Border)),
+        (chevron, theme.style(Token::Muted)),
+        (
+            safe_plan_text(&node_subject(node)),
+            theme.style(subject_token),
+        ),
+        (" | ".to_owned(), theme.style(Token::Border)),
+        (
+            plan_row_metrics(node, document.analyzed, !glyphs.is_ascii()),
+            theme.style(metrics_token),
+        ),
+    ];
+    if attention {
+        segments.push((
+            format!(" [attention: {}]", document.attention_basis().label()),
+            flag_style,
+        ));
+    }
+    if node.estimate_mismatch() {
+        segments.push((" [estimate mismatch]".to_owned(), flag_style));
+    }
+    segments
+}
+
+/// The compact metric summary a plan tree row carries.
+///
+/// A plain `EXPLAIN` row shows only what the planner believed. An analysed
+/// row sets the estimate against what was observed, with the per-loop time
+/// and the loop count when there was more than one loop. Anything the server
+/// did not supply is said in words.
+fn plan_row_metrics(node: &crate::query::PlanNode, analyzed: bool, unicode: bool) -> String {
+    let separator = if unicode { " \u{00b7} " } else { ", " };
+    let estimate = number_or(node.plan_rows, "not supplied");
+    if !analyzed {
+        let startup = number_or(node.startup_cost, "not supplied");
+        let total = number_or(node.total_cost, "not supplied");
+        return format!("est {estimate} rows{separator}cost {startup}..{total}");
+    }
+    let actual = number_or(node.actual_rows, "not measured");
+    let time = node
+        .actual_total_time
+        .map_or_else(|| "time not measured".to_owned(), format_ms);
+    let loops = node.actual_loops.filter(|loops| *loops > 1.0);
+    match loops {
+        Some(loops) => format!(
+            "est {estimate} -> actual {actual} rows{separator}{time}/loop{separator}{} loops",
+            format_number(loops)
+        ),
+        None => format!("est {estimate} -> actual {actual} rows{separator}{time}"),
+    }
 }
 
 fn node_subject(node: &crate::query::PlanNode) -> String {
@@ -6852,10 +6897,10 @@ pub(crate) fn render_lint_findings(
 
     render_footer_hints(
         &[
-            ("[Enter]", "Jump"),
-            ("[r]", "Re-lint"),
-            ("[j/k]", "Move"),
-            ("[Esc]", "Close"),
+            ("Enter", "Jump"),
+            ("r", "Re-lint"),
+            ("Up/Down", "Move"),
+            ("Esc", "Close"),
         ],
         presentation,
         footer_area,
@@ -6876,20 +6921,126 @@ fn fit_cell(raw: &str, width: usize, unicode: bool) -> String {
     pad_to_width(&clipped, width)
 }
 
+/// Rows the modal shell spends around its body: two borders, the capsule
+/// bar, the tab strip, the hairline rule, the status line and the key rail.
+const MODAL_CHROME_ROWS: u16 = 7;
+/// The fewest body rows a fitted modal is given.
+const MODAL_MIN_BODY_ROWS: u16 = 4;
+
+/// How tall [`modal_inner_layout`] makes its box, and what it measured.
+///
+/// A modal is drawn twice: once into scratch at the tallest height the
+/// terminal allows, to see how many body rows its content really uses, and
+/// then for real with the box fitted to that. The status line and key rail
+/// stay pinned to the bottom of the box either way.
+struct ModalFit {
+    /// Body rows to fit, or `None` for the tallest allowed box.
+    rows: Option<u16>,
+    /// The body rectangle and its background, recorded by the layout.
+    body: std::cell::Cell<Option<(Rect, Color)>>,
+}
+
+impl ModalFit {
+    const fn tallest() -> Self {
+        Self {
+            rows: None,
+            body: std::cell::Cell::new(None),
+        }
+    }
+
+    const fn rows(rows: u16) -> Self {
+        Self {
+            rows: Some(rows),
+            body: std::cell::Cell::new(None),
+        }
+    }
+}
+
+/// How many body rows of a drawn modal carry anything: text, or a fill that
+/// differs from the body's own.
+fn used_body_rows(buf: &Buffer, body: Rect, background: Color) -> u16 {
+    (body.top()..body.bottom())
+        .rev()
+        .find(|&row| {
+            (body.left()..body.right()).any(|column| {
+                let cell = &buf[(column, row)];
+                !cell.symbol().trim().is_empty() || cell.bg != background
+            })
+        })
+        .map_or(0, |row| row - body.top() + 1)
+}
+
+/// Draws a modal into scratch at its tallest and returns how many body rows
+/// its content uses.
+fn measure_modal_body(area: Rect, render: impl FnOnce(&ModalFit, &mut Buffer)) -> u16 {
+    let fit = ModalFit::tallest();
+    let mut scratch = Buffer::empty(area);
+    render(&fit, &mut scratch);
+    fit.body.get().map_or(0, |(body, background)| {
+        used_body_rows(&scratch, body, background)
+    })
+}
+
+/// Draws a modal with its box fitted to its content, never below `minimum`
+/// body rows.
+///
+/// The fitted box is only used when it shows exactly what the tallest box
+/// showed in the rows the content uses. A body that pins something to its
+/// bottom edge, or that lays itself out by proportion, would differ, and
+/// then keeps the tallest box: fitting may never hide a row.
+fn render_fitted_modal(
+    area: Rect,
+    buf: &mut Buffer,
+    minimum: u16,
+    render: impl Fn(&ModalFit, &mut Buffer),
+) {
+    let tallest = ModalFit::tallest();
+    let mut full = Buffer::empty(area);
+    render(&tallest, &mut full);
+    let Some((body, background)) = tallest.body.get() else {
+        render(&tallest, buf);
+        return;
+    };
+    let used = used_body_rows(&full, body, background);
+    let fitted = ModalFit::rows(used.max(minimum));
+    let mut trial = Buffer::empty(area);
+    render(&fitted, &mut trial);
+    let keeps_every_row = fitted.body.get().is_some_and(|(fitted_body, _)| {
+        fitted_body.x == body.x
+            && fitted_body.y == body.y
+            && fitted_body.width == body.width
+            && fitted_body.height >= used
+            && (body.top()..body.top() + used).all(|row| {
+                (body.left()..body.right())
+                    .all(|column| full[(column, row)] == trial[(column, row)])
+            })
+    });
+    render(if keeps_every_row { &fitted } else { &tallest }, buf);
+}
+
 fn modal_inner_layout(
     title: String,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
+    fit: &ModalFit,
 ) -> Option<(Rect, Rect, Rect, Rect, Rect)> {
     let modal_width = (area.width.saturating_mul(92) / 100)
         .max(76)
         .min(area.width);
-    let modal_height = (area.height.saturating_mul(88) / 100)
+    let tallest = (area.height.saturating_mul(88) / 100)
         .max(20)
         .min(area.height);
+    let modal_height = fit.rows.map_or(tallest, |rows| {
+        MODAL_CHROME_ROWS
+            .saturating_add(rows.max(MODAL_MIN_BODY_ROWS))
+            .min(tallest)
+    });
     let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
-    let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    // The top edge stays where the tallest box would put it, so the title
+    // and tab strip never move when content or the active tab changes; only
+    // the bottom edge follows the content.
+    let modal_y = area.y + (area.height.saturating_sub(tallest)) / 2;
     let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
 
     if modal_area.width < 30 || modal_area.height < 8 {
@@ -6928,6 +7079,10 @@ fn modal_inner_layout(
     .style(presentation.theme.surface(Token::SurfaceOverlay))
     .render(chunks[2], buf);
 
+    let background = buf
+        .cell((chunks[3].x, chunks[3].y))
+        .map_or(Color::Reset, |cell| cell.bg);
+    fit.body.set(Some((chunks[3], background)));
     Some((chunks[0], chunks[1], chunks[3], chunks[4], chunks[5]))
 }
 
@@ -6938,6 +7093,18 @@ pub(crate) fn render_logical_replication(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_logical_replication_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_logical_replication_frame(
+    state: &crate::app::model::LogicalReplicationState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let title = format!(
@@ -6945,7 +7112,7 @@ pub(crate) fn render_logical_replication(
         presentation.icon(Icon::Database)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -7414,6 +7581,18 @@ pub(crate) fn render_cluster_config(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_cluster_config_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_cluster_config_frame(
+    state: &crate::app::model::ClusterConfigState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let title = format!(
@@ -7421,7 +7600,7 @@ pub(crate) fn render_cluster_config(
         presentation.icon(Icon::Database)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -7519,7 +7698,7 @@ pub(crate) fn render_cluster_config(
             tab_spans.push(Span::styled(" ", theme.style(Token::Border)));
         }
         let style = if idx == state.active_tab {
-            super::header::capsule_style(presentation, Token::Focus)
+            theme.active_tab(Token::Focus)
         } else {
             theme.style(Token::Text)
         };
@@ -7534,7 +7713,7 @@ pub(crate) fn render_cluster_config(
     tab_spans.push(Span::styled(
         modified_badge,
         if state.modified_only {
-            super::header::capsule_style(presentation, Token::Warning)
+            theme.recessed_pill(Token::Warning)
         } else {
             theme.recessed_pill(Token::Text)
         },
@@ -8069,6 +8248,18 @@ pub(crate) fn render_data_browser(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_data_browser_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_data_browser_frame(
+    state: &crate::app::model::DataBrowserState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let title = format!(
@@ -8076,7 +8267,7 @@ pub(crate) fn render_data_browser(
         presentation.icon(Icon::Table)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -8146,7 +8337,7 @@ pub(crate) fn render_data_browser(
     let mut tab_spans = vec![
         Span::styled(
             format!(" [CELL: {active_col_name}] "),
-            super::header::capsule_style(presentation, Token::Focus),
+            theme.recessed_pill(Token::Focus),
         ),
         Span::raw("  "),
         Span::styled(
@@ -8432,6 +8623,18 @@ pub(crate) fn render_plan_diff(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_plan_diff_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_plan_diff_frame(
+    state: &crate::app::model::PlanDiffState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let title = format!(
@@ -8439,7 +8642,7 @@ pub(crate) fn render_plan_diff(
         presentation.icon(Icon::Database)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -9258,6 +9461,18 @@ pub(crate) fn render_result_analytics(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_result_analytics_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_result_analytics_frame(
+    state: &crate::app::model::ResultAnalyticsState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let title = format!(
@@ -9265,7 +9480,7 @@ pub(crate) fn render_result_analytics(
         presentation.icon(Icon::Rows)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -9691,7 +9906,26 @@ fn push_kv_capsule(
     spans.push(Span::raw(" "));
 }
 
+/// Secondary modal metadata: identity, counts and outcomes rest on a
+/// recessed pill (Principle XI, tier two), so the full capsule stays rare
+/// enough to mean something.
 fn push_pill_capsule(
+    spans: &mut Vec<Span<'static>>,
+    presentation: &Presentation,
+    text: String,
+    token: Token,
+) {
+    spans.push(Span::styled(
+        format!(" {text} "),
+        presentation.theme.recessed_pill(token),
+    ));
+    spans.push(Span::raw(" "));
+}
+
+/// A high-salience safety state inside a modal, such as a failed gate,
+/// breaking drift, a live run that commits, or writes allowed. Only these
+/// take the full capsule (Principle XI, tier three); colour off reverses it.
+fn push_safety_capsule(
     spans: &mut Vec<Span<'static>>,
     presentation: &Presentation,
     text: String,
@@ -9702,6 +9936,12 @@ fn push_pill_capsule(
         super::header::capsule_style(presentation, token),
     ));
     spans.push(Span::raw(" "));
+}
+
+/// A count badge whose token falls back to `Muted` at zero, so an empty
+/// category never reads as an alarm.
+const fn count_token(count: usize, token: Token) -> Token {
+    if count == 0 { Token::Muted } else { token }
 }
 
 fn render_capsule_bar(capsules: Vec<Span<'static>>, area: Rect, buf: &mut Buffer) {
@@ -9742,7 +9982,7 @@ fn render_overlay_tabs(
             tab_spans.push(Span::styled(" | ", theme.style(Token::Border)));
         }
         let style = if idx == active_tab {
-            super::header::capsule_style(presentation, Token::Focus)
+            theme.active_tab(Token::Focus)
         } else {
             theme.style(Token::Text)
         };
@@ -9750,12 +9990,10 @@ fn render_overlay_tabs(
     }
     if let Some((badge, token)) = trailing {
         tab_spans.push(Span::raw("  "));
-        let style = if token == Token::Muted {
-            theme.recessed_pill(Token::Text)
-        } else {
-            super::header::capsule_style(presentation, token)
-        };
-        tab_spans.push(Span::styled(format!(" {badge} "), style));
+        tab_spans.push(Span::styled(
+            format!(" {badge} "),
+            theme.recessed_pill(token),
+        ));
     }
     Paragraph::new(Line::from(tab_spans)).render(area, buf);
 }
@@ -9769,11 +10007,17 @@ fn render_footer_hints(
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let keycap = theme.recessed_pill(Token::Focus);
-    let mut segments = Vec::with_capacity(hints.len() * 2);
+    // The workbench footer's separator, so key and action still pair up when
+    // the keycap fill is gone at 16 colours, colour off or ASCII. The keycap's
+    // own leading pad supplies the space after it.
+    let separator = if unicode { " \u{00b7}" } else { " |" };
+    let mut segments = Vec::with_capacity(hints.len() * 3);
     for (idx, (key, desc)) in hints.iter().enumerate() {
+        if idx > 0 {
+            segments.push((separator.to_owned(), theme.style(Token::Border)));
+        }
         segments.push((format!(" {key} "), keycap));
-        let suffix = if idx + 1 < hints.len() { " " } else { "" };
-        segments.push((format!("{desc}{suffix}"), theme.style(Token::Text)));
+        segments.push(((*desc).to_owned(), theme.style(Token::Text)));
     }
     Paragraph::new(bounded_row(
         segments,
@@ -9834,14 +10078,39 @@ pub(crate) fn render_query_bench(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    // While a run is in flight, hold the box at the size its retained
+    // results need, so a re-run does not shrink the modal and grow it back.
+    let held = if state.loading {
+        let settled = crate::app::model::QueryBenchState {
+            loading: false,
+            ..state.clone()
+        };
+        measure_modal_body(area, |fit, scratch| {
+            render_query_bench_frame(&settled, presentation, area, scratch, fit);
+        })
+    } else {
+        0
+    };
+    render_fitted_modal(area, buf, held, |fit, target| {
+        render_query_bench_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_query_bench_frame(
+    state: &crate::app::model::QueryBenchState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let title = format!(
-        " {} QUERY BENCHMARK & A/B REGRESSION SUITE ",
+        " {}Query benchmark & A/B regression suite ",
         presentation.icon(Icon::Clock)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -9853,18 +10122,24 @@ pub(crate) fn render_query_bench(
         "[BENCHMARK]".to_owned(),
         Token::Focus,
     );
-    let (mode_label, mode_token) = if state.config.rollback {
-        ("ROLLBACK", Token::Success)
+    if state.config.rollback {
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "MODE: ",
+            "ROLLBACK".to_owned(),
+            Token::Success,
+        );
     } else {
-        ("LIVE", Token::Warning)
-    };
-    push_kv_capsule(
-        &mut capsules,
-        presentation,
-        "MODE: ",
-        mode_label.to_owned(),
-        mode_token,
-    );
+        // Every run commits in this mode, so it is a safety state, not
+        // metadata.
+        push_safety_capsule(
+            &mut capsules,
+            presentation,
+            "[MODE: LIVE]".to_owned(),
+            Token::Warning,
+        );
+    }
     push_kv_capsule(
         &mut capsules,
         presentation,
@@ -9901,7 +10176,7 @@ pub(crate) fn render_query_bench(
             );
         }
         if report.failed_gate {
-            push_pill_capsule(
+            push_safety_capsule(
                 &mut capsules,
                 presentation,
                 "[GATE: FAILED]".to_owned(),
@@ -10015,7 +10290,7 @@ pub(crate) fn render_query_bench(
         }
     } else {
         (
-            "Press [r] to run benchmark, [m] to toggle BEGIN/ROLLBACK isolation.".to_owned(),
+            "Press r to run the benchmark, m to toggle BEGIN/ROLLBACK isolation.".to_owned(),
             Token::Muted,
         )
     };
@@ -10023,11 +10298,11 @@ pub(crate) fn render_query_bench(
 
     render_footer_hints(
         &[
-            ("[1-2]", "Tabs"),
-            ("[j/k]", "Select"),
-            ("[m]", "Toggle Rollback"),
-            ("[r]", "Re-run"),
-            ("[Esc]", "Close"),
+            ("1-2", "Tabs"),
+            ("Up/Down", "Select"),
+            ("m", "Toggle rollback"),
+            ("r", "Re-run"),
+            ("Esc", "Close"),
         ],
         presentation,
         footer_area,
@@ -10049,7 +10324,7 @@ fn render_query_bench_summary(
     let Some(report) = &state.report else {
         let mut lines = vec![bounded_row(
             vec![(
-                "  No benchmark results yet. Press [r] to execute warmup and measured runs."
+                "  No benchmark results yet. Press r to execute warmup and measured runs."
                     .to_owned(),
                 theme.style(Token::Muted),
             )],
@@ -10297,7 +10572,7 @@ fn render_query_bench_samples(
 
     if state.baseline.is_none() && state.candidate.is_none() {
         Paragraph::new(Line::from(Span::styled(
-            "  No latency samples captured yet. Press [r] to run benchmark.",
+            "  No latency samples captured yet. Press r to run the benchmark.",
             theme.style(Token::Muted),
         )))
         .render(body_area, buf);
@@ -10484,13 +10759,25 @@ pub(crate) fn render_schema_snapshot(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_schema_snapshot_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_schema_snapshot_frame(
+    state: &crate::app::model::SchemaSnapshotState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let title = format!(
-        " {} SCHEMA SNAPSHOT & DRIFT GUARD ",
+        " {}Schema snapshot & drift guard ",
         presentation.icon(Icon::Schema)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -10529,23 +10816,23 @@ pub(crate) fn render_schema_snapshot(
         Token::Text,
     );
     if let Some(diff) = &state.diff {
-        push_pill_capsule(
-            &mut capsules,
-            presentation,
-            format!("[BREAKING: {}]", diff.breaking_count),
-            Token::Danger,
-        );
+        let breaking = format!("[BREAKING: {}]", diff.breaking_count);
+        if diff.breaking_count > 0 {
+            push_safety_capsule(&mut capsules, presentation, breaking, Token::Danger);
+        } else {
+            push_pill_capsule(&mut capsules, presentation, breaking, Token::Muted);
+        }
         push_pill_capsule(
             &mut capsules,
             presentation,
             format!("[WARN: {}]", diff.warning_count),
-            Token::Warning,
+            count_token(diff.warning_count, Token::Warning),
         );
         push_pill_capsule(
             &mut capsules,
             presentation,
             format!("[INFO: {}]", diff.info_count),
-            Token::Info,
+            count_token(diff.info_count, Token::Info),
         );
     }
     render_capsule_bar(capsules, capsule_area, buf);
@@ -10630,12 +10917,12 @@ pub(crate) fn render_schema_snapshot(
 
     render_footer_hints(
         &[
-            ("[1-2]", "Tabs"),
-            ("[b]", "Pin Baseline"),
-            ("[c]", "Copy SHA-256"),
-            ("[j/k]", "Select"),
-            ("[r]", "Refresh"),
-            ("[Esc]", "Close"),
+            ("1-2", "Tabs"),
+            ("b", "Pin baseline"),
+            ("c", "Copy SHA-256"),
+            ("Up/Down", "Select"),
+            ("r", "Refresh"),
+            ("Esc", "Close"),
         ],
         presentation,
         footer_area,
@@ -11020,13 +11307,25 @@ pub(crate) fn render_sql_runbook(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_sql_runbook_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_sql_runbook_frame(
+    state: &crate::app::model::SqlRunbookState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
     let theme = &presentation.theme;
     let title = format!(
-        " {} SQL RUNBOOK & WRITE-GUARD PLANNER ",
+        " {}SQL runbook & write-guard planner ",
         presentation.icon(Icon::Editor)
     );
     let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
-        modal_inner_layout(title, presentation, area, buf)
+        modal_inner_layout(title, presentation, area, buf, fit)
     else {
         return;
     };
@@ -11046,18 +11345,22 @@ pub(crate) fn render_sql_runbook(
         state.runbook.len().to_string(),
         Token::Text,
     );
-    let (writes_label, writes_token) = if state.allow_writes {
-        ("ALLOWED", Token::Warning)
+    if state.allow_writes {
+        push_safety_capsule(
+            &mut capsules,
+            presentation,
+            "[WRITES: ALLOWED]".to_owned(),
+            Token::Warning,
+        );
     } else {
-        ("BLOCKED", Token::Success)
-    };
-    push_kv_capsule(
-        &mut capsules,
-        presentation,
-        "WRITES: ",
-        writes_label.to_owned(),
-        writes_token,
-    );
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "WRITES: ",
+            "BLOCKED".to_owned(),
+            Token::Success,
+        );
+    }
     if !state.allow_writes {
         let guard_token = if report.blocked_count > 0 {
             Token::Warning
@@ -11135,11 +11438,11 @@ pub(crate) fn render_sql_runbook(
 
     render_footer_hints(
         &[
-            ("[1-2]", "Tabs"),
-            ("[w]", "Toggle Allow Writes"),
-            ("[j/k]", "Select Cell"),
-            ("[Enter]", "Jump To Cell"),
-            ("[Esc]", "Close"),
+            ("1-2", "Tabs"),
+            ("w", "Allow writes"),
+            ("Up/Down", "Select cell"),
+            ("Enter", "Jump to cell"),
+            ("Esc", "Close"),
         ],
         presentation,
         footer_area,

@@ -143,9 +143,26 @@ fn plan_tree_renders_full_width_selection_bar_and_multi_span_unselected_nodes() 
     let subject_idx = line2[..line2.find("Index Scan").unwrap()].chars().count() as u16;
     assert_eq!(buf_tc[(subject_idx, 2)].fg, header_fg);
 
-    // Metrics after " | " are styled with Token::Muted
-    let metric_idx = line2[..line2.find("est rows").unwrap()].chars().count() as u16;
+    // Metrics after " | " are compact and styled with Token::Muted; the
+    // width and cost units stay in the detail block.
+    assert!(
+        line2.contains("est 4 rows \u{00b7} cost 0.20..5.10"),
+        "{line2}"
+    );
+    assert!(!line2.contains("width"), "{line2}");
+    let metric_idx = line2[..line2.find("est 4").unwrap()].chars().count() as u16;
     assert_eq!(buf_tc[(metric_idx, 2)].fg, muted_fg);
+
+    // Depth reads through Border-toned guides and an open chevron on the
+    // node with children, the way the Objects tree draws it.
+    let line0 = (0..80).map(|x| buf_tc[(x, 0)].symbol()).collect::<String>();
+    assert!(line0.starts_with(">\u{25be} Nested Loop | "), "{line0}");
+    assert!(line2.starts_with(" \u{2502}   Index Scan"), "{line2}");
+    assert_eq!(buf_tc[(1, 2)].fg, border_fg);
+    assert!(
+        !line0.contains("\u{2514}\u{2500}") && !line0.contains("[-]"),
+        "{line0}"
+    );
 
     // 4. In Basic16 / None: backgrounds are Color::Reset and symbols remain identical
     for depth in [ColorDepth::Basic16, ColorDepth::None] {
@@ -303,10 +320,10 @@ fn lint_findings_overlay_renders_counts_rules_and_keys() {
     assert!(rendered.contains("[ERRORS: 1]"), "{rendered}");
     assert!(rendered.contains("[WARNINGS: 1]"), "{rendered}");
     assert!(rendered.contains("delete-without-where"), "{rendered}");
-    assert!(rendered.contains("[Enter] Jump"), "{rendered}");
-    assert!(rendered.contains("[r] Re-lint"), "{rendered}");
-    assert!(rendered.contains("[j/k] Move"), "{rendered}");
-    assert!(rendered.contains("[Esc] Close"), "{rendered}");
+    assert!(
+        rendered.contains("Enter Jump \u{00b7} r Re-lint \u{00b7} Up/Down Move \u{00b7} Esc Close"),
+        "{rendered}"
+    );
 
     // Capsule value colors: total = Focus, errors > 0 = Danger, warnings > 0 = Warning.
     let capsule_y = (0..area.height)
@@ -750,7 +767,7 @@ fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
         "qps",
         "sparkline",
         base.sparkline_ascii.as_str(),
-        "[1-2] Tabs  [j/k] Select  [m] Toggle Rollback  [r] Re-run  [Esc] Close",
+        "1-2 Tabs | Up/Down Select | m Toggle rollback | r Re-run | Esc Close",
     ] {
         assert!(
             ascii_text.contains(expected),
@@ -951,7 +968,7 @@ fn schema_snapshot_overlay_renders_drift_pills_tables_and_themes() {
         "[1] Overview & Drift",
         "[2] Catalog Tables",
         "public.orders",
-        "[1-2] Tabs  [b] Pin Baseline  [c] Copy SHA-256  [j/k] Select  [r] Refresh  [Esc] Close",
+        "1-2 Tabs | b Pin baseline | c Copy SHA-256 | Up/Down Select | r Refresh | Esc Close",
     ] {
         assert!(
             ascii_text.contains(expected),
@@ -1063,7 +1080,7 @@ DROP TABLE IF EXISTS public.staging_tmp;
         "DESTRUCTIVE",
         "@expect-rows:5",
         "SELECT count(*) FROM public.orders;",
-        "[1-2] Tabs  [w] Toggle Allow Writes  [j/k] Select Cell  [Enter] Jump To Cell  [Esc] Close",
+        "1-2 Tabs | w Allow writes | Up/Down Select cell | Enter Jump to cell | Esc Close",
     ] {
         assert!(
             ascii_text.contains(expected),
@@ -1183,19 +1200,21 @@ fn overlay_chrome_recessed_pills_hairline_rule_and_footer_keycaps_across_depths(
     // Hairline rule row sits cleanly in the modal interior using Unicode horizontal bar.
     assert!(text.contains("\u{2500}\u{2500}\u{2500}"), "{text}");
 
-    // Footer hint "[Enter]" uses Theme::recessed_pill(Token::Focus).
+    // Footer hint "Enter" uses Theme::recessed_pill(Token::Focus), with no
+    // brackets inside the keycap.
     let footer_y = (0..area.height)
         .find(|&y| {
             (0..area.width)
                 .map(|x| buf[(x, y)].symbol())
                 .collect::<String>()
-                .contains("[Enter] Jump")
+                .contains("Enter Jump")
         })
         .expect("footer hints row");
     let footer_line: String = (0..area.width)
         .map(|x| buf[(x, footer_y)].symbol())
         .collect();
-    let enter_col = footer_line[..footer_line.find("[Enter]").unwrap()]
+    assert!(!footer_line.contains('['), "{footer_line}");
+    let enter_col = footer_line[..footer_line.find("Enter").unwrap()]
         .chars()
         .count() as u16;
     assert_eq!(buf[(enter_col, footer_y)].bg, recessed_bg);
@@ -1216,6 +1235,12 @@ fn overlay_chrome_recessed_pills_hairline_rule_and_footer_keycaps_across_depths(
         assert!(low_text.contains("---"), "{low_text}");
         assert_eq!(low_buf[(findings_col, findings_y)].bg, Color::Reset);
         assert_eq!(low_buf[(enter_col, footer_y)].bg, Color::Reset);
+        // Without a keycap fill the separator still pairs each key with its
+        // action.
+        assert!(
+            low_text.contains("Enter Jump | r Re-lint | Up/Down Move | Esc Close"),
+            "{depth:?}: {low_text}"
+        );
     }
 }
 
@@ -1370,4 +1395,333 @@ fn plan_header_detail_strip_and_review_modal_craft_across_depths() {
         assert_eq!(lbuf[update_pos].bg, Color::Reset);
         assert_eq!(lbuf[rail_pos].bg, Color::Reset);
     }
+}
+
+/// The first cell of `needle` in a rendered buffer.
+fn cell_at<'a>(buf: &'a Buffer, needle: &str) -> &'a ratatui::buffer::Cell {
+    let area = buf.area;
+    for y in area.top()..area.bottom() {
+        let line: String = (area.left()..area.right())
+            .map(|x| buf[(x, y)].symbol())
+            .collect();
+        if let Some(byte) = line.find(needle) {
+            let x = line[..byte].chars().count() as u16;
+            return &buf[(area.x + x, y)];
+        }
+    }
+    panic!("{needle:?} missing:\n{}", buffer_to_string(buf));
+}
+
+fn bench_state_with(rollback: bool, gate: Option<f64>) -> crate::app::model::QueryBenchState {
+    use crate::bench::{BenchConfig, BenchSample, compare_benchmarks, compute_bench_stats};
+    let config = BenchConfig::new(2, 10, rollback);
+    let samples = |base: f64| {
+        (1..=3)
+            .map(|iteration| BenchSample {
+                iteration,
+                duration_ms: base * iteration as f64,
+                rows_returned: 1,
+            })
+            .collect::<Vec<_>>()
+    };
+    let base = compute_bench_stats("Baseline (A)", "SELECT 1", &config, &samples(2.0));
+    let slower = compute_bench_stats("Candidate (B)", "SELECT 2", &config, &samples(6.0));
+    crate::app::model::QueryBenchState {
+        config,
+        baseline_sql: "SELECT 1".to_owned(),
+        candidate_sql: "SELECT 2".to_owned(),
+        report: Some(compare_benchmarks(base.clone(), Some(slower.clone()), gate)),
+        baseline: Some(base),
+        candidate: Some(slower),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn modal_metadata_rests_on_recessed_pills_and_only_safety_states_take_capsules() {
+    use crate::ui::theme::Token;
+    let area = Rect::new(0, 0, 126, 32);
+    let pres = presentation(ColorDepth::TrueColor);
+    let theme = &pres.theme;
+    let recessed = theme.surface(Token::SurfaceAlt).bg.unwrap();
+
+    // Rollback on, no gate: identity, mode and verdict are all metadata.
+    let mut buf = Buffer::empty(area);
+    render_query_bench(&bench_state_with(true, None), &pres, area, &mut buf);
+    for badge in ["[BENCHMARK]", "[MODE: ", "[SLOWER]"] {
+        assert_eq!(cell_at(&buf, badge).bg, recessed, "{badge} is recessed");
+    }
+    assert_eq!(
+        cell_at(&buf, "[SLOWER]").fg,
+        theme.color(Token::Danger).unwrap(),
+        "the outcome keeps its meaning in the ink"
+    );
+
+    // Live mode and a failed gate are safety states.
+    let mut buf = Buffer::empty(area);
+    render_query_bench(&bench_state_with(false, Some(10.0)), &pres, area, &mut buf);
+    let live = theme.capsule(Token::Warning);
+    let gate = theme.capsule(Token::Danger);
+    assert_eq!(Some(cell_at(&buf, "[MODE: LIVE]").bg), live.bg);
+    assert_eq!(Some(cell_at(&buf, "[GATE: FAILED]").bg), gate.bg);
+    assert_eq!(cell_at(&buf, "[BENCHMARK]").bg, recessed);
+
+    // The active tab is a recessed Focus pill, never a saturated capsule.
+    let tab = cell_at(&buf, "[1] Summary");
+    assert_eq!(tab.bg, recessed);
+    assert_eq!(tab.fg, theme.color(Token::Focus).unwrap());
+
+    // Writes allowed in a runbook is a safety state; blocked is metadata.
+    let runbook = crate::runbook::parse_markdown_runbook(
+        "# One\n```sql\nUPDATE t SET a = 1;\n```\n",
+        "ops.md",
+    )
+    .expect("valid runbook");
+    let mut state = crate::app::model::SqlRunbookState {
+        runbook,
+        active_tab: 0,
+        selected_idx: 0,
+        allow_writes: false,
+        status_message: None,
+    };
+    let mut buf = Buffer::empty(area);
+    render_sql_runbook(&state, &pres, area, &mut buf);
+    assert_eq!(cell_at(&buf, "[WRITES: ").bg, recessed);
+    assert_eq!(cell_at(&buf, "[RUNBOOK]").bg, recessed);
+    state.allow_writes = true;
+    let mut buf = Buffer::empty(area);
+    render_sql_runbook(&state, &pres, area, &mut buf);
+    assert_eq!(
+        Some(cell_at(&buf, "[WRITES: ALLOWED]").bg),
+        theme.capsule(Token::Warning).bg
+    );
+}
+
+#[test]
+fn zero_drift_counts_are_muted_and_breaking_drift_is_a_capsule() {
+    use crate::snapshot::{ColumnSnapshot, SchemaSnapshot, TableSnapshot, diff_snapshots};
+    use crate::ui::theme::Token;
+    let table = |column: &str| TableSnapshot {
+        schema: "public".into(),
+        name: "orders".into(),
+        columns: vec![ColumnSnapshot {
+            name: column.into(),
+            data_type: "bigint".into(),
+            nullable: false,
+            default_expr: None,
+            ordinal: 1,
+        }],
+        constraints: vec![],
+        indexes: vec![],
+        rls_enabled: false,
+        rls_forced: false,
+        policies: vec![],
+    };
+    let snapshot = |column: &str| {
+        let mut snap = SchemaSnapshot::new(None);
+        snap.tables.push(table(column));
+        snap.finalize()
+    };
+    let area = Rect::new(0, 0, 126, 32);
+    let pres = presentation(ColorDepth::TrueColor);
+    let theme = &pres.theme;
+    let muted = theme.color(Token::Muted).unwrap();
+
+    let same = snapshot("id");
+    let mut state = crate::app::model::SchemaSnapshotState {
+        diff: Some(diff_snapshots(&same, &same)),
+        baseline: Some(same.clone()),
+        current: Some(same),
+        ..Default::default()
+    };
+    let mut buf = Buffer::empty(area);
+    render_schema_snapshot(&state, &pres, area, &mut buf);
+    for badge in ["[BREAKING: 0]", "[WARN: 0]", "[INFO: 0]"] {
+        let cell = cell_at(&buf, badge);
+        assert_eq!(cell.fg, muted, "{badge}");
+        assert_eq!(
+            cell.bg,
+            theme.surface(Token::SurfaceAlt).bg.unwrap(),
+            "{badge}"
+        );
+    }
+
+    let renamed = snapshot("order_id");
+    let diff = diff_snapshots(state.baseline.as_ref().unwrap(), &renamed);
+    assert!(diff.breaking_count > 0);
+    let label = format!("[BREAKING: {}]", diff.breaking_count);
+    state.current = Some(renamed);
+    state.diff = Some(diff);
+    let mut buf = Buffer::empty(area);
+    render_schema_snapshot(&state, &pres, area, &mut buf);
+    assert_eq!(
+        Some(cell_at(&buf, &label).bg),
+        theme.capsule(Token::Danger).bg
+    );
+}
+
+#[test]
+fn the_active_tab_stays_visible_without_colour() {
+    use ratatui::style::Modifier;
+    let area = Rect::new(0, 0, 126, 32);
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let pres = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut buf = Buffer::empty(area);
+        render_query_bench(&bench_state_with(true, None), &pres, area, &mut buf);
+        let active = cell_at(&buf, "[1] Summary");
+        assert!(active.modifier.contains(Modifier::REVERSED), "{depth:?}");
+        assert_eq!(active.bg, Color::Reset, "{depth:?}");
+        let inactive = cell_at(&buf, "[2] Latency");
+        assert!(!inactive.modifier.contains(Modifier::REVERSED), "{depth:?}");
+    }
+}
+
+/// The first row whose text contains `needle`.
+fn row_of(buf: &Buffer, needle: &str) -> u16 {
+    let area = buf.area;
+    (area.top()..area.bottom())
+        .find(|&y| {
+            (area.left()..area.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains(needle)
+        })
+        .unwrap_or_else(|| panic!("{needle:?} missing:\n{}", buffer_to_string(buf)))
+}
+
+#[test]
+fn modal_shell_fits_its_content_with_status_and_keys_pinned_to_the_bottom() {
+    let area = Rect::new(0, 0, 126, 40);
+    let pres = ascii_presentation();
+    let tallest = area.height * 88 / 100;
+    let mut state = bench_state_with(true, None);
+
+    let mut buf = Buffer::empty(area);
+    render_query_bench(&state, &pres, area, &mut buf);
+    let title = row_of(&buf, "Query benchmark & A/B regression suite");
+    let rail = row_of(&buf, "Esc Close");
+    let last_metric = row_of(&buf, "sparkline");
+    assert_eq!(
+        last_metric + 2,
+        rail,
+        "the body ends right above the status line"
+    );
+    assert!(
+        rail + 2 - title < tallest,
+        "the box is fitted, not the old fixed 88%: {}",
+        buffer_to_string(&buf)
+    );
+    // The bottom border closes the box right under the key rail.
+    assert_eq!(buf[(area.width / 2, rail + 1)].symbol(), "=");
+
+    // Switching tabs or re-running never moves the title or tab strip, and
+    // a re-run holds the box at the size its retained results need.
+    state.set_tab(1);
+    let mut tab_buf = Buffer::empty(area);
+    render_query_bench(&state, &pres, area, &mut tab_buf);
+    assert_eq!(
+        row_of(&tab_buf, "Query benchmark & A/B regression suite"),
+        title
+    );
+    state.set_tab(0);
+    state.loading = true;
+    let mut loading_buf = Buffer::empty(area);
+    render_query_bench(&state, &pres, area, &mut loading_buf);
+    assert_eq!(row_of(&loading_buf, "Running query benchmark"), title + 4);
+    assert_eq!(row_of(&loading_buf, "Esc Close"), rail);
+}
+
+#[test]
+fn a_modal_with_more_content_than_fits_is_capped_at_the_tallest_box() {
+    let cells = (1..=60)
+        .map(|index| format!("# Step {index}\n```sql\nSELECT {index};\n```\n"))
+        .collect::<String>();
+    let state = crate::app::model::SqlRunbookState {
+        runbook: crate::runbook::parse_markdown_runbook(&cells, "long.md").expect("valid runbook"),
+        active_tab: 0,
+        selected_idx: 0,
+        allow_writes: false,
+        status_message: None,
+    };
+    let area = Rect::new(0, 0, 126, 30);
+    let mut buf = Buffer::empty(area);
+    render_sql_runbook(&state, &ascii_presentation(), area, &mut buf);
+    let title = row_of(&buf, "SQL runbook & write-guard planner");
+    let rail = row_of(&buf, "Esc Close");
+    assert_eq!(rail + 2 - title, area.height * 88 / 100);
+}
+
+#[test]
+fn plan_rows_use_tree_chevrons_and_compact_observed_metrics_in_ascii() {
+    let analyzed = r#"[{"Plan":{"Node Type":"Nested Loop","Plan Rows":4,"Actual Rows":40,"Actual Total Time":12.0,"Actual Loops":1,"Plans":[{"Node Type":"Seq Scan","Relation Name":"orders","Plan Rows":10,"Actual Rows":420,"Actual Total Time":8.5,"Actual Loops":2}]}}]"#;
+    let document = PlanDocument::parse(analyzed, true).expect("valid plan");
+    let mut view = PlanView::default();
+    view.ready(document.clone());
+    let area = Rect::new(0, 0, 140, 4);
+    let ascii = ascii_presentation();
+    let mut buf = Buffer::empty(area);
+    render_plan_tree(&document, &view, &ascii, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.is_ascii(), "{text}");
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[0].starts_with(">v Nested Loop | est 4 -> actual 40 rows, 12.00 ms"),
+        "{text}"
+    );
+    assert!(
+        lines[1].starts_with(
+            "     Seq Scan orders | est 10 -> actual 420 rows, 8.50 ms/loop, 2 loops [attention:"
+        ),
+        "{text}"
+    );
+    assert!(lines[1].contains("[estimate mismatch]"), "{text}");
+
+    // Collapsed, the node with children shows a closed chevron.
+    view.collapsed.insert(Vec::new());
+    let mut buf = Buffer::empty(area);
+    render_plan_tree(&document, &view, &ascii, area, &mut buf);
+    assert!(
+        buffer_to_string(&buf).starts_with(">> Nested Loop"),
+        "{}",
+        buffer_to_string(&buf)
+    );
+}
+
+#[test]
+fn modal_fitting_falls_back_to_the_tallest_box_when_content_depends_on_height() {
+    let area = Rect::new(0, 0, 100, 30);
+    let pres = ascii_presentation();
+    // A body whose first row reports its own height would read differently
+    // in a shorter box, so the fitted box must not be used.
+    let render = |fit: &ModalFit, target: &mut Buffer| {
+        if let Some((_, _, body, _, _)) =
+            modal_inner_layout(" Probe ".to_owned(), &pres, area, target, fit)
+        {
+            Paragraph::new(format!("{} rows fit", body.height)).render(body, target);
+        }
+    };
+    let mut fitted = Buffer::empty(area);
+    render_fitted_modal(area, &mut fitted, 0, render);
+    let mut tallest = Buffer::empty(area);
+    render(&ModalFit::tallest(), &mut tallest);
+    assert_eq!(fitted, tallest, "{}", buffer_to_string(&fitted));
+
+    // A body that does not depend on its height is fitted.
+    let steady = |fit: &ModalFit, target: &mut Buffer| {
+        if let Some((_, _, body, _, _)) =
+            modal_inner_layout(" Probe ".to_owned(), &pres, area, target, fit)
+        {
+            Paragraph::new("one line").render(body, target);
+        }
+    };
+    let mut fitted = Buffer::empty(area);
+    render_fitted_modal(area, &mut fitted, 0, steady);
+    let mut full = Buffer::empty(area);
+    steady(&ModalFit::tallest(), &mut full);
+    assert_ne!(fitted, full);
+    assert!(buffer_to_string(&fitted).contains("one line"));
 }

@@ -511,6 +511,27 @@ impl Theme {
         }
     }
 
+    /// The colours that recede the workbench behind a blocking overlay, or
+    /// `None` at depths that do not paint surfaces, where nothing recedes.
+    /// The layout also skips recession in ASCII mode, which the theme cannot
+    /// see.
+    ///
+    /// Only foregrounds move: every receded glyph takes the `Border` colour,
+    /// and a `Selection` fill falls back to `SurfaceAlt` so the selected row
+    /// stays a quiet band instead of the brightest thing behind the overlay.
+    /// No new surface tier is introduced.
+    #[must_use]
+    pub fn recession(&self) -> Option<Recession> {
+        if !self.color || !self.depth.paints_surfaces() {
+            return None;
+        }
+        Some(Recession {
+            ink: self.foreground(Token::Border),
+            selection: self.foreground(Token::Selection),
+            selection_rest: self.foreground(Token::SurfaceAlt),
+        })
+    }
+
     /// A colour `amount` of the way from token `from` to token `to`, at the
     /// active depth, or `None` when colour must not be emitted.
     ///
@@ -530,6 +551,33 @@ impl Theme {
             ColorDepth::Indexed256 => self.foreground(if amount < 0.5 { from } else { to }),
             ColorDepth::Basic16 | ColorDepth::None => self.foreground(to),
         })
+    }
+}
+
+/// How a cell behind a blocking overlay is repainted, resolved at one depth.
+///
+/// Built only by [`Theme::recession`], so every colour still comes from a
+/// token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recession {
+    /// The foreground every receded cell takes: the theme's `Border`.
+    pub ink: Color,
+    /// The `Selection` fill a receded cell may carry.
+    pub selection: Color,
+    /// What a receded `Selection` fill becomes: `SurfaceAlt`.
+    pub selection_rest: Color,
+}
+
+impl Recession {
+    /// Recedes one cell in place. The symbol is never touched, so the words
+    /// behind the overlay read exactly as they did. `DIM` is dropped so every
+    /// receded glyph sits at the same quiet tone rather than some vanishing.
+    pub fn apply(&self, cell: &mut ratatui::buffer::Cell) {
+        cell.fg = self.ink;
+        if cell.bg == self.selection {
+            cell.bg = self.selection_rest;
+        }
+        cell.modifier.remove(Modifier::DIM);
     }
 }
 
@@ -806,6 +854,23 @@ impl Theme {
     #[must_use]
     pub fn recessed_pill(&self, token: Token) -> Style {
         self.surface_badge(token, Token::SurfaceAlt, true)
+    }
+
+    /// The selected tab in a modal tab strip.
+    ///
+    /// Where surfaces are painted it is a recessed pill in `token`, so the
+    /// strip reads as metadata rather than as a safety marker. At 16 colours
+    /// and without colour a recessed pill has no fill, and a bold word alone
+    /// is too easy to miss, so the tab is reversed instead: which tab is
+    /// selected must survive the loss of colour.
+    #[must_use]
+    pub fn active_tab(&self, token: Token) -> Style {
+        if self.color && self.depth.paints_surfaces() {
+            self.recessed_pill(token)
+        } else {
+            self.style(token)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        }
     }
 
     fn surface_badge(&self, token: Token, surface_token: Token, strip_dim: bool) -> Style {

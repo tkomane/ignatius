@@ -524,3 +524,33 @@ fn a_column_detail_is_shortened_at_a_fact_boundary() {
         assert!(!clipped.contains("not n\u{2026}"), "{budget}: {clipped:?}");
     }
 }
+
+#[test]
+fn the_filter_line_takes_its_search_mark_from_the_glyph_tier() {
+    let mut model = Model::new(100);
+    update(&mut model, Message::Connected(session()));
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema("public", 2)]))),
+    );
+    model.tree.filtering = true;
+    model.tree.filter = "ord".into();
+    let area = Rect::new(0, 0, 40, 12);
+    for (tier, expected) in [
+        (GlyphTier::Nerd, " \u{ea6d} ord"),
+        (GlyphTier::Unicode, " \u{203a} ord"),
+        (GlyphTier::Ascii, " /ord"),
+    ] {
+        let presentation = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+            Glyphs::new(tier),
+            false,
+        );
+        let mut buf = Buffer::empty(area);
+        render_objects(&model, &Keymap::new(), &presentation, area, &mut buf);
+        let text = buffer_to_string(&buf);
+        let filter_line = text.lines().nth(1).unwrap_or_default();
+        assert!(filter_line.contains(expected), "{tier:?}: {text}");
+        assert!(!filter_line.contains('\u{2315}'), "{tier:?}: {text}");
+    }
+}

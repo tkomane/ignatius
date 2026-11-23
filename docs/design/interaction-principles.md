@@ -128,6 +128,24 @@ dismissal do not rerun SQL, alter the editor, add history, or change the
 ordinary retained result underneath the plan. Selection and the way out remain
 written in ASCII and no-colour modes.
 
+**An overlay owns attention; the rails keep the facts.** While a blocking
+overlay is open, the pane bodies behind it recede to border-toned ink and a
+selected row falls back to a quiet band, so the overlay is the only thing at
+full strength. It is a still frame, never an animation. Glyphs take the
+border tone with dimming dropped so none vanish, and a selected row's fill
+becomes the stripe surface; there is no scrim and no new surface tier. The
+header and footer rails that carry `[PROD]`, `[READ ONLY]` and the
+transaction state never recede, the words behind the overlay are unchanged,
+and at 16 colours, without colour or in ASCII nothing recedes at all. The completion popup does not count; it belongs
+to the line being typed.
+
+**Modal badges have three weights.** Identity, counts and outcomes inside a
+modal rest on recessed pills, a zero count is muted, and the selected tab is a
+recessed pill that turns reversed when colour is gone. Only safety states take
+the full capsule: a failed gate, breaking drift, a live run that commits, and
+writes allowed. Key hints are keycaps without brackets, separated the way the
+workbench footer separates them, and name `Up/Down` rather than Vim keys.
+
 **Nothing modal for anything harmless.** Confirmations are reserved for actions
 that deserve them. A confirmation people dismiss reflexively is worse than none,
 because it trains the reflex.

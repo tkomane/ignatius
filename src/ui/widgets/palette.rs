@@ -171,14 +171,10 @@ fn render_spotlight_input(
     }
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
-    let prompt = if presentation.glyphs.is_ascii() {
-        " > "
-    } else {
-        " \u{2315} "
-    };
-    let count_label = format!("{match_count} match(es)");
+    let prompt = format!(" {} ", presentation.glyphs.search_prompt());
+    let count_label = match_count_label(match_count);
     let count_width = display_width(&count_label);
-    let prompt_width = display_width(prompt);
+    let prompt_width = display_width(&prompt);
     let right_pad = usize::from(area.width >= 20);
     let query_budget =
         usize::from(area.width).saturating_sub(prompt_width + 1 + count_width + 2 + right_pad);
@@ -188,7 +184,14 @@ fn render_spotlight_input(
     } else {
         truncate_to_width(&clean_query, query_budget, unicode)
     };
-    let left_width = prompt_width + display_width(&shown_query) + 1;
+    // An empty query says what typing does, in the quietest ink, and only
+    // when it fits beside the count.
+    let placeholder = (shown_query.is_empty() && display_width(PLACEHOLDER) < query_budget)
+        .then_some(PLACEHOLDER);
+    let left_width = prompt_width
+        + display_width(&shown_query)
+        + 1
+        + placeholder.map_or(0, |text| display_width(text) + 1);
     let mut spans = vec![
         Span::styled(
             prompt,
@@ -197,6 +200,12 @@ fn render_spotlight_input(
         Span::styled(shown_query, theme.on_stripe(Token::Text)),
         Span::styled(input_cursor(presentation), theme.on_stripe(Token::Focus)),
     ];
+    if let Some(text) = placeholder {
+        spans.push(Span::styled(
+            format!(" {text}"),
+            theme.on_stripe(Token::Muted),
+        ));
+    }
     let total_width = usize::from(area.width);
     if left_width + 2 + count_width + right_pad <= total_width {
         let gap = total_width - left_width - count_width - right_pad;
@@ -214,6 +223,18 @@ fn render_spotlight_input(
     Paragraph::new(Line::from(spans))
         .style(theme.stripe())
         .render(area, buf);
+}
+
+/// What an empty palette query says.
+const PLACEHOLDER: &str = "Type to filter";
+
+/// The match count in words, singular when there is exactly one.
+fn match_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 match".to_owned()
+    } else {
+        format!("{count} matches")
+    }
 }
 
 fn build_palette_match_line(

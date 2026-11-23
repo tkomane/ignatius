@@ -1210,3 +1210,65 @@ fn transitions_are_visible_only_at_truecolour_and_256_colours() {
     assert!(!ColorDepth::Basic16.shows_transitions());
     assert!(!ColorDepth::None.shows_transitions());
 }
+
+#[test]
+fn recession_takes_border_ink_only_where_surfaces_are_painted() {
+    for choice in [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::HighContrast,
+        ThemeChoice::FieldIndustrial,
+        ThemeChoice::Material,
+        ThemeChoice::Atelier,
+        ThemeChoice::Paper,
+    ] {
+        for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
+            let theme = Theme::new(choice, true).with_depth(depth);
+            let recession = theme.recession().expect("surfaces are painted");
+            assert_eq!(Some(recession.ink), theme.color(Token::Border));
+            assert_eq!(theme.style(Token::Selection).bg, Some(recession.selection));
+            assert_eq!(
+                theme.surface(Token::SurfaceAlt).bg,
+                Some(recession.selection_rest)
+            );
+
+            let mut cell = ratatui::buffer::Cell::new("x");
+            cell.set_style(theme.style(Token::Selection).add_modifier(Modifier::DIM));
+            recession.apply(&mut cell);
+            assert_eq!(cell.symbol(), "x");
+            assert_eq!(cell.fg, recession.ink);
+            assert_eq!(cell.bg, recession.selection_rest);
+            assert!(!cell.modifier.contains(Modifier::DIM));
+        }
+        for (depth, color) in [
+            (ColorDepth::Basic16, true),
+            (ColorDepth::None, true),
+            (ColorDepth::TrueColor, false),
+        ] {
+            assert_eq!(
+                Theme::new(choice, color).with_depth(depth).recession(),
+                None,
+                "{choice:?} {depth:?} {color}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_active_tab_is_recessed_where_painted_and_reversed_otherwise() {
+    let painted = Theme::new(ThemeChoice::Dark, true);
+    assert_eq!(
+        painted.active_tab(Token::Focus),
+        painted.recessed_pill(Token::Focus)
+    );
+    for theme in [
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::Basic16),
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::None),
+        Theme::new(ThemeChoice::Dark, false),
+    ] {
+        let style = theme.active_tab(Token::Focus);
+        assert!(style.add_modifier.contains(Modifier::REVERSED), "{theme:?}");
+        assert!(style.add_modifier.contains(Modifier::BOLD), "{theme:?}");
+        assert_eq!(style.bg, None, "{theme:?}");
+    }
+}
