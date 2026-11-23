@@ -276,6 +276,33 @@ impl Rgb {
         let (light, dark) = if a > b { (a, b) } else { (b, a) };
         (light + 0.05) / (dark + 0.05)
     }
+
+    /// The colour `amount` of the way from this one to `other`, per channel,
+    /// rounded to the nearest value. `amount` is clamped to `0.0..=1.0`.
+    #[must_use]
+    pub fn mix(self, other: Self, amount: f32) -> Self {
+        let amount = mix_amount(amount);
+        let channel = |from: u8, to: u8| -> u8 {
+            let from = f32::from(from);
+            let value = from + (f32::from(to) - from) * amount;
+            value.round().clamp(0.0, 255.0) as u8
+        };
+        Self(
+            channel(self.0, other.0),
+            channel(self.1, other.1),
+            channel(self.2, other.2),
+        )
+    }
+}
+
+/// Clamps a mix amount. A value that is not a number is treated as the final
+/// colour, because the settled state is always a safe thing to show.
+fn mix_amount(amount: f32) -> f32 {
+    if amount.is_nan() {
+        1.0
+    } else {
+        amount.clamp(0.0, 1.0)
+    }
 }
 
 /// A resolved theme: a palette plus whether colour may be emitted at all.
@@ -313,6 +340,16 @@ impl ColorDepth {
     /// whose background belongs to the terminal.
     #[must_use]
     pub const fn paints_surfaces(self) -> bool {
+        matches!(self, Self::TrueColor | Self::Indexed256)
+    }
+
+    /// Whether a colour transition is visible at this depth.
+    ///
+    /// Truecolour interpolates and 256 colours step at the midpoint. At 16
+    /// colours and below every transition shows its final state immediately,
+    /// so none is started and the client stays asleep.
+    #[must_use]
+    pub const fn shows_transitions(self) -> bool {
         matches!(self, Self::TrueColor | Self::Indexed256)
     }
 }
@@ -472,6 +509,27 @@ impl Theme {
             }
             _ => style,
         }
+    }
+
+    /// A colour `amount` of the way from token `from` to token `to`, at the
+    /// active depth, or `None` when colour must not be emitted.
+    ///
+    /// This is how a transition paints an in-between foreground without a
+    /// widget ever building a colour. Truecolour interpolates. 256 colours show
+    /// `from` until the midpoint and `to` from it, because a blend there would
+    /// land on whichever palette entry happens to be nearest. 16 colours show
+    /// `to`, the final colour, immediately. `amount` is clamped to `0.0..=1.0`.
+    #[must_use]
+    pub fn mix(&self, from: Token, to: Token, amount: f32) -> Option<Color> {
+        if !self.color || self.depth == ColorDepth::None {
+            return None;
+        }
+        let amount = mix_amount(amount);
+        Some(match self.depth {
+            ColorDepth::TrueColor => self.rgb(from).mix(self.rgb(to), amount).into(),
+            ColorDepth::Indexed256 => self.foreground(if amount < 0.5 { from } else { to }),
+            ColorDepth::Basic16 | ColorDepth::None => self.foreground(to),
+        })
     }
 }
 
