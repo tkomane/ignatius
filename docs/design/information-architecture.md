@@ -137,6 +137,8 @@ because idle is not news. While an overlay owns input the hints are that
 overlay's own keys in its own words, such as `Enter Choose`, `Up/Down Move` and
 `Esc Close` for the palette; a prompt, confirmation or review offers only
 `Esc Cancel`, because its acceptance wording belongs beside what is accepted.
+The way out is the last overlay key a short rail gives up: movement goes
+first, then the accept key, and the search path gives way before `Esc` does.
 
 ## Narrow and small
 
