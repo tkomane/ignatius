@@ -63,8 +63,10 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # Expressions reach scripts through the environment, never by template
-      # expansion into the script text. This step runs in PowerShell on Windows.
+      # expansion into the script text. `$env:` is PowerShell syntax, so the
+      # shell is explicit: under bash it would expand to an empty variable.
       - name: Build
+        shell: pwsh
         env:
           IGNATIUS_BUILD_IDENTITY: dev-build/${{ github.run_id }}/${{ matrix.target }}
           BUILD_TARGET: ${{ matrix.target }}
