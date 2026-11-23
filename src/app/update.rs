@@ -4629,7 +4629,7 @@ fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
         {
             if let Some(bench) = &mut model.query_bench {
                 bench.status_message = Some(
-                    "A benchmark is running and cannot be cancelled yet. This closes after its last run, or quit Ignatius to stop it."
+                    "A benchmark is running and cannot be cancelled yet. This closes after its last run. Quitting Ignatius stops later runs, but a statement already executing may still finish on the server."
                         .to_owned(),
                 );
             }

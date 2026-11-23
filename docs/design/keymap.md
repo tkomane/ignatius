@@ -409,7 +409,7 @@ The scriptable `ignatius analytics` CLI subcommand provides non-interactive pari
 With the editor focused and a statement present, `Ctrl+K '` (`query-bench`) opens the Query Latency Benchmark & A/B Regression Suite overlay:
 - Opening on a single statement benchmarks Baseline (A); opening on a two-statement buffer splits them into Baseline (A) and Candidate (B) for A/B comparison (default `2` warmup and `10` measured iterations).
 - `1` / `2` switch between `Summary & A/B Compare` and `Latency Samples` (with per-iteration timings and a 12-bucket latency sparkline).
-- `j` / `k` / `Up` / `Down` step through rows; `m` switches rollback protection (`BEGIN` / unconditional `ROLLBACK` per iteration) and runs nothing by itself (it waits while a run is in flight); with rollback off, a statement that is not a read is refused on a production connection or in a read-only session; `r` runs the benchmark; `Esc` closes cleanly.
+- `j` / `k` / `Up` / `Down` step through rows; `m` switches rollback protection (`BEGIN` / unconditional `ROLLBACK` per iteration) and runs nothing by itself (it waits while a run is in flight); with rollback off, a statement that is not a read is refused on a production connection or in a read-only session; `r` runs the benchmark; `Esc` closes once no run is in flight (a run cannot be cancelled yet, so `m`, `r` and `Esc` wait for it).
 The scriptable `ignatius bench` CLI subcommand provides non-interactive parity (including `--fail-on-regression-pct` CI gating).
 
 With the workbench connected, `Ctrl+K "` (`schema-snapshot`) opens the Canonical Schema Snapshot & Drift Guard overlay:

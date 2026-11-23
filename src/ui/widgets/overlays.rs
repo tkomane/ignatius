@@ -10296,18 +10296,20 @@ fn render_query_bench_frame(
     };
     render_overlay_status(&status_text, status_token, presentation, status_area, buf);
 
-    render_footer_hints(
+    // While a run is in flight m, r and Esc wait, so the rail offers only
+    // what works; the status line says why.
+    let hints: &[(&str, &str)] = if state.loading {
+        &[("1-2", "Tabs"), ("Up/Down", "Select")]
+    } else {
         &[
             ("1-2", "Tabs"),
             ("Up/Down", "Select"),
             ("m", "Toggle rollback"),
             ("r", "Re-run"),
             ("Esc", "Close"),
-        ],
-        presentation,
-        footer_area,
-        buf,
-    );
+        ]
+    };
+    render_footer_hints(hints, presentation, footer_area, buf);
 }
 
 fn render_query_bench_summary(

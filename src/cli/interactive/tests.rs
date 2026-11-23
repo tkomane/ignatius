@@ -2171,3 +2171,40 @@ async fn a_restarted_motion_ticker_never_reports_the_time_it_slept() {
         "a fresh start measures from the restart, not from before the sleep: {elapsed:?}"
     );
 }
+
+#[test]
+fn a_benchmark_report_is_sent_once_even_when_the_task_ends_without_one() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    drop(BenchReport {
+        tx: Some(tx),
+        request: 7,
+        target: crate::app::message::BenchTarget::Baseline,
+    });
+    let Ok(Message::QueryBenchLoaded {
+        request, result, ..
+    }) = rx.try_recv()
+    else {
+        panic!("a dropped report still reports");
+    };
+    assert_eq!(request, 7);
+    assert!(result.is_err(), "an unfinished run reports a failure");
+    assert!(rx.try_recv().is_err(), "exactly one report");
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut report = BenchReport {
+        tx: Some(tx),
+        request: 8,
+        target: crate::app::message::BenchTarget::Candidate,
+    };
+    report.send(Err(crate::diagnostics::Diagnostic::new(
+        crate::diagnostics::DiagnosticKind::Connection,
+        "fixture",
+        "fixture",
+    )));
+    drop(report);
+    assert!(rx.try_recv().is_ok());
+    assert!(
+        rx.try_recv().is_err(),
+        "a sent report is not repeated on drop"
+    );
+}

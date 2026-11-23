@@ -57,10 +57,17 @@ reviewed per pull request, and merged on hosted green CI.
   benchmark A and B run one after the other; and the benchmark overlay stays
   open while a run is in flight. A database test proves a workbench statement
   started mid-benchmark lands outside the benchmark's transaction.
-- **Open: PR #132 (draft), cancelling a running benchmark.** A benchmark run
-  cannot be cancelled yet. The draft's cancel design needs delivery
-  confirmation and a timeout; four review rounds found real defects each time,
-  and the remaining work is recorded on #132.
+- **Open: cancelling a running benchmark.** A benchmark run cannot be
+  cancelled yet, so its overlay stays open until the run reports. A design has
+  to get five things right, found across four review rounds of an attempt
+  preserved in closed PR #132: wait for the server to close the cancel socket
+  (the vendored `cancel_query_raw` returns after `shutdown()`, unlike libpq's
+  `PQcancel`), with a bounded timeout; never hold anything the run needs while
+  sending; send the token only while the benchmark holds the gate and is
+  executing, relying on a per-iteration flag otherwise; keep the status
+  truthful through retries and failed deliveries; and prove with a database
+  test that a cancelled benchmark leaves the session outside a transaction
+  with rows untouched.
 - **Found and not fixed:** the built-in theme tests pin status inks (Focus,
   Success, Warning, Danger, Info, environment and transaction) at 3.0:1 for
   `dark`, `light`, `field-industrial` and `material`, while Principle XI says

@@ -364,8 +364,9 @@ for it rather than landing between its `BEGIN` and `ROLLBACK`, and it waits for
 them. Before its first `BEGIN` the session asks the server whether it is inside
 a transaction, and the benchmark refuses to start if it is, because its
 rollback would end that transaction. A running benchmark cannot be cancelled
-yet, so its overlay stays open until the run reports (quitting Ignatius stops
-it), and nothing can be left running unseen behind a closed overlay. An
+yet, so its overlay stays open until the run reports, and nothing can be left
+running unseen behind a closed overlay. Quitting Ignatius stops later runs, but
+a statement already executing may still finish on the server. An
 analysed plan comparison (`EXPLAIN ANALYZE` in plan diff) takes the session the
 same way and refuses to start inside a transaction for the same reason.
 

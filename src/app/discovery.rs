@@ -342,6 +342,14 @@ pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>
             (Action::Dismiss, "Cancel"),
         ]);
     }
+    // A running benchmark cannot be closed yet; quitting is the way out.
+    if model
+        .query_bench
+        .as_ref()
+        .is_some_and(|bench| bench.loading)
+    {
+        return Some(vec![(Action::Quit, "Quit")]);
+    }
     let dashboard = model.inspector.is_some()
         || model.definition.is_some()
         || model.schema_diagram.is_some()

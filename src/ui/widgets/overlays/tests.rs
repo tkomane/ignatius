@@ -1633,7 +1633,11 @@ fn modal_shell_fits_its_content_with_status_and_keys_pinned_to_the_bottom() {
     let mut loading_buf = Buffer::empty(area);
     render_query_bench(&state, &pres, area, &mut loading_buf);
     assert_eq!(row_of(&loading_buf, "Running query benchmark"), title + 4);
-    assert_eq!(row_of(&loading_buf, "Esc Close"), rail);
+    assert_eq!(row_of(&loading_buf, "Up/Down Select"), rail);
+    // During a run Esc, m and r wait, so the rail does not offer them.
+    let running = buffer_to_string(&loading_buf);
+    assert!(!running.contains("Esc Close"), "{running}");
+    assert!(!running.contains("r Re-run"), "{running}");
 }
 
 #[test]

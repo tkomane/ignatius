@@ -12867,3 +12867,15 @@ fn a_new_benchmark_run_clears_the_last_runs_numbers() {
     let bench = model.query_bench.as_ref().expect("bench overlay open");
     assert!(bench.baseline.is_none() && bench.candidate.is_none() && bench.report.is_none());
 }
+
+#[test]
+fn a_running_benchmark_offers_quit_not_close_in_the_footer() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay hints");
+    assert_eq!(hints, vec![(Action::Quit, "Quit")]);
+    finish_bench_runs(&mut model);
+    let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay hints");
+    assert!(hints.iter().any(|(action, _)| *action == Action::Dismiss));
+}
