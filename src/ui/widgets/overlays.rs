@@ -10059,6 +10059,12 @@ fn bench_sparkline<'a>(
     }
 }
 
+/// What happened to the changes a measured run made, so a result captured in
+/// one mode is never read as if it came from the mode now selected.
+const fn bench_outcome_word(rollback: bool) -> &'static str {
+    if rollback { "rolled back" } else { "committed" }
+}
+
 fn fmt_bench_ms_delta(base: f64, cand: Option<f64>) -> Option<String> {
     cand.map(|c| {
         let delta = c - base;
@@ -10242,6 +10248,8 @@ fn render_query_bench_frame(
             ));
         }
         Paragraph::new(lines).render(body_area, buf);
+    } else if let Some(confirmation) = &state.run_confirmation {
+        render_query_bench_confirmation(state, confirmation, presentation, body_area, buf);
     } else {
         match state.active_tab {
             0 => render_query_bench_summary(state, presentation, body_area, buf, selection_style),
@@ -10250,10 +10258,33 @@ fn render_query_bench_frame(
         }
     }
 
-    let (status_text, status_token) = if let Some(msg) = &state.status_message {
-        let tok = if state.report.as_ref().is_some_and(|r| r.failed_gate) || msg.contains("failed")
+    let (status_text, status_token) = if let Some(confirmation) = &state.run_confirmation {
+        (
+            if confirmation.rollback {
+                format!(
+                    "Confirm run on PROD: {} {}; {} non-read executions, each rolled back.",
+                    confirmation.query,
+                    confirmation.impact.label(),
+                    confirmation.executions
+                )
+            } else {
+                format!(
+                    "Confirm live run: {} {}; {} non-read executions, none rolled back.",
+                    confirmation.query,
+                    confirmation.impact.label(),
+                    confirmation.executions
+                )
+            },
+            Token::Warning,
+        )
+    } else if let Some(msg) = &state.status_message {
+        let tok = if state.report.as_ref().is_some_and(|r| r.failed_gate)
+            || msg.contains("failed")
+            || msg.starts_with("Refused")
         {
             Token::Danger
+        } else if msg.starts_with("Rollback off") {
+            Token::Warning
         } else {
             Token::Info
         };
@@ -10290,24 +10321,159 @@ fn render_query_bench_frame(
         }
     } else {
         (
-            "Press r to run the benchmark, m to toggle BEGIN/ROLLBACK isolation.".to_owned(),
+            "Press r to run the benchmark. m switches BEGIN/ROLLBACK isolation.".to_owned(),
             Token::Muted,
         )
     };
     render_overlay_status(&status_text, status_token, presentation, status_area, buf);
 
-    render_footer_hints(
-        &[
-            ("1-2", "Tabs"),
-            ("Up/Down", "Select"),
-            ("m", "Toggle rollback"),
-            ("r", "Re-run"),
-            ("Esc", "Close"),
-        ],
-        presentation,
-        footer_area,
-        buf,
-    );
+    if let Some(confirmation) = &state.run_confirmation {
+        let accept = match (confirmation.rollback, confirmation.needs_typing()) {
+            (true, false) => "Run on PROD",
+            (false, false) => "Run live",
+            (true, true) => "Run on PROD once the name is typed",
+            (false, true) => "Run live once the name is typed",
+        };
+        render_footer_hints(
+            &[("Enter", accept), ("Esc", "Cancel")],
+            presentation,
+            footer_area,
+            buf,
+        );
+    } else {
+        render_footer_hints(
+            &[
+                ("1-2", "Tabs"),
+                ("Up/Down", "Select"),
+                ("m", "Rollback mode"),
+                ("r", "Run"),
+                ("Esc", "Close"),
+            ],
+            presentation,
+            footer_area,
+            buf,
+        );
+    }
+}
+
+/// A held benchmark run, stated in full before anything executes.
+///
+/// It shows the statements it authorises, names the advisory impact and how
+/// many times the statements would run, and says that the classification is
+/// not a security boundary. With rollback off it says every run commits.
+/// With rollback on against production it says plainly that each run is
+/// rolled back but still takes locks, fires triggers and advances sequences
+/// while it runs. A destructive statement also needs the database's own name
+/// typed, as an ordinary run on production does.
+fn render_query_bench_confirmation(
+    state: &crate::app::model::QueryBenchState,
+    confirmation: &crate::app::model::BenchRunConfirmation,
+    presentation: &Presentation,
+    body_area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let width = usize::from(body_area.width);
+    let row = |text: String, token: Token| {
+        bounded_row(vec![(text, theme.style(token))], width, unicode, None)
+    };
+    let (headline, detail, verb) = if confirmation.rollback {
+        (
+            "  Rolled back after each run, but takes locks and advances sequences while it runs \
+             on PROD."
+                .to_owned(),
+            format!(
+                "  {} {}. Non-read statements would execute {} times, each inside BEGIN and \
+                 ROLLBACK; triggers fire and row locks are held while each run executes.",
+                confirmation.query,
+                confirmation.impact.label(),
+                confirmation.executions
+            ),
+            "run it on PROD",
+        )
+    } else {
+        (
+            "  Rollback is off: every run commits its changes.".to_owned(),
+            format!(
+                "  {} {}. Non-read statements would execute {} times without BEGIN and ROLLBACK.",
+                confirmation.query,
+                confirmation.impact.label(),
+                confirmation.executions
+            ),
+            "run live",
+        )
+    };
+    let mut lines = vec![row(headline, Token::Warning)];
+    // What the user must do comes first, so a short terminal clips the
+    // explanation below it before it clips the input.
+    if confirmation.needs_typing() {
+        lines.push(bounded_row(
+            vec![
+                (
+                    format!("  Type the database name to {verb}: "),
+                    theme.style(Token::Text),
+                ),
+                (
+                    sanitize_for_display(&confirmation.required),
+                    theme.style(Token::Header),
+                ),
+            ],
+            width,
+            unicode,
+            None,
+        ));
+        lines.push(bounded_row(
+            vec![
+                ("  > ".to_owned(), theme.style(Token::Focus)),
+                (
+                    sanitize_for_display(&confirmation.typed),
+                    theme.style(Token::Text),
+                ),
+                (
+                    input_cursor(presentation).to_owned(),
+                    theme.style(Token::Focus),
+                ),
+            ],
+            width,
+            unicode,
+            None,
+        ));
+        lines.push(row(
+            "  Then press Enter. Esc cancels and nothing runs.".to_owned(),
+            Token::Muted,
+        ));
+    } else {
+        lines.push(row(
+            format!("  Press Enter to {verb}. Esc or any other key cancels and nothing runs."),
+            Token::Text,
+        ));
+    }
+    lines.push(Line::default());
+    lines.push(row(detail, Token::Text));
+    lines.push(row(
+        "  This check reads leading keywords only. Database permissions are the real control."
+            .to_owned(),
+        Token::Muted,
+    ));
+    for (name, sql) in [
+        ("Query A", &state.baseline_sql),
+        ("Query B", &state.candidate_sql),
+    ] {
+        if sql.trim().is_empty() {
+            continue;
+        }
+        lines.push(bounded_row(
+            vec![
+                (format!("  {name}: "), theme.style(Token::Muted)),
+                (single_line_preview(sql), theme.style(Token::Text)),
+            ],
+            width,
+            unicode,
+            None,
+        ));
+    }
+    Paragraph::new(lines).render(body_area, buf);
 }
 
 fn render_query_bench_summary(
@@ -10363,7 +10529,11 @@ fn render_query_bench_summary(
                 theme.style(Token::Text),
             ),
             (
-                format!("  [rows: {}]", base.total_rows),
+                format!(
+                    "  [rows: {}, {}]",
+                    base.total_rows,
+                    bench_outcome_word(base.rollback)
+                ),
                 theme.style(Token::Info),
             ),
         ],
@@ -10380,7 +10550,11 @@ fn render_query_bench_summary(
                     theme.style(Token::Text),
                 ),
                 (
-                    format!("  [rows: {}]", c.total_rows),
+                    format!(
+                        "  [rows: {}, {}]",
+                        c.total_rows,
+                        bench_outcome_word(c.rollback)
+                    ),
                     theme.style(Token::Info),
                 ),
             ],

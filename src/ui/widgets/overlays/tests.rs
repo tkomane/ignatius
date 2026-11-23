@@ -738,7 +738,9 @@ fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
         active_tab: 0,
         selected_idx: 3,
         loading: false,
+        runs_in_flight: 0,
         status_message: None,
+        run_confirmation: None,
     };
 
     let area = Rect::new(0, 0, 126, 32);
@@ -767,7 +769,7 @@ fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
         "qps",
         "sparkline",
         base.sparkline_ascii.as_str(),
-        "1-2 Tabs | Up/Down Select | m Toggle rollback | r Re-run | Esc Close",
+        "1-2 Tabs | Up/Down Select | m Rollback mode | r Run | Esc Close",
     ] {
         assert!(
             ascii_text.contains(expected),
@@ -838,6 +840,120 @@ fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
                 "x={x} must carry full-width Selection background"
             );
         }
+    }
+}
+
+#[test]
+fn query_bench_run_confirmation_states_impact_runs_and_the_typed_name() {
+    let mut state = crate::app::model::QueryBenchState {
+        config: crate::bench::BenchConfig::new(2, 10, false),
+        baseline_sql: "DELETE FROM orders".to_owned(),
+        run_confirmation: Some(crate::app::model::BenchRunConfirmation {
+            query: "Query A",
+            impact: crate::query::Impact::Destructive,
+            executions: 12,
+            rollback: false,
+            typed: "ord".to_owned(),
+            required: "orders".to_owned(),
+        }),
+        ..Default::default()
+    };
+    let area = Rect::new(0, 0, 130, 30);
+    for pres in [ascii_presentation(), presentation(ColorDepth::TrueColor)] {
+        let mut buf = Buffer::empty(area);
+        render_query_bench(&state, &pres, area, &mut buf);
+        let text = buffer_to_string(&buf);
+        for expected in [
+            "[MODE: LIVE]",
+            "Rollback is off: every run commits its changes.",
+            "Query A destroys data. Non-read statements would execute 12 times without BEGIN and ROLLBACK.",
+            "Database permissions are the real control.",
+            "Query A: DELETE FROM orders",
+            "Type the database name to run live: orders",
+            "> ord",
+            "Confirm live run: Query A destroys data; 12 non-read executions, none rolled back.",
+            "Run live once the name is typed",
+            "Esc Cancel",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(!text.contains("No benchmark results yet"), "{text}");
+        if pres.glyphs.is_ascii() {
+            assert!(text.is_ascii(), "{text}");
+        }
+    }
+
+    state.run_confirmation = state.run_confirmation.map(|mut held| {
+        held.impact = crate::query::Impact::Write;
+        held
+    });
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    render_query_bench(&state, &pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("Press Enter to run live."), "{text}");
+    assert!(!text.contains("Type the database name"), "{text}");
+    assert!(
+        text.contains("Enter Run live | Esc Cancel")
+            || text.contains("Enter Run live \u{00b7} Esc Cancel"),
+        "{text}"
+    );
+
+    // Rollback on against production: the runs are rolled back, and the
+    // prompt still says what they do on PROD while they run.
+    state.config = crate::bench::BenchConfig::new(2, 10, true);
+    state.run_confirmation = state.run_confirmation.map(|mut held| {
+        held.rollback = true;
+        held.impact = crate::query::Impact::Destructive;
+        held
+    });
+    let wide = Rect::new(0, 0, 180, 30);
+    for pres in [ascii_presentation(), presentation(ColorDepth::TrueColor)] {
+        let mut buf = Buffer::empty(wide);
+        render_query_bench(&state, &pres, wide, &mut buf);
+        let text = buffer_to_string(&buf);
+        for expected in [
+            "[MODE: ROLLBACK]",
+            "Rolled back after each run, but takes locks and advances sequences while it runs on PROD.",
+            "each inside BEGIN and ROLLBACK; triggers fire and row locks are held",
+            "Query A: DELETE FROM orders",
+            "Type the database name to run it on PROD: orders",
+            "Confirm run on PROD: Query A destroys data; 12 non-read executions, each rolled back.",
+            "Run on PROD once the name is typed",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(!text.contains("commits its changes"), "{text}");
+    }
+}
+
+#[test]
+fn a_short_terminal_clips_the_explanation_before_the_typed_name() {
+    let state = crate::app::model::QueryBenchState {
+        config: crate::bench::BenchConfig::new(2, 10, true),
+        baseline_sql: "DELETE FROM orders".to_owned(),
+        run_confirmation: Some(crate::app::model::BenchRunConfirmation {
+            query: "Query A",
+            impact: crate::query::Impact::Destructive,
+            executions: 12,
+            rollback: true,
+            typed: "ord".to_owned(),
+            required: "orders".to_owned(),
+        }),
+        ..Default::default()
+    };
+    // The smallest box the modal shell draws: four body rows.
+    let area = Rect::new(0, 0, 100, 11);
+    let mut buf = Buffer::empty(area);
+    render_query_bench(&state, &ascii_presentation(), area, &mut buf);
+    let text = buffer_to_string(&buf);
+    for expected in [
+        "Rolled back after each run",
+        "Type the database name to run it on PROD: orders",
+        "> ord",
+        "Run on PROD once the name is typed",
+    ] {
+        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
 }
 

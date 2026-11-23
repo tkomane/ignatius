@@ -243,3 +243,124 @@ fn bench_command_measures_ab_queries_enforces_rollback_and_checks_regression_gat
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn bench_refuses_writes_on_production_in_both_modes_and_leaves_rows_untouched() {
+    // Still classified as destructive, but harmless even if a guard ever
+    // regressed, so shared fixture data cannot be wiped for later tests.
+    let uri = uri_or_skip();
+    if uri.is_empty() {
+        return;
+    }
+    let root = root();
+    let count = |root: &Path| {
+        let output = binary(root)
+            .args([
+                "query",
+                &uri,
+                "-c",
+                "SELECT count(*) AS n FROM public.orders",
+                "--format",
+                "json",
+            ])
+            .output()
+            .expect("count orders");
+        assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+        stdout(&output)
+    };
+    let before = count(&root);
+
+    let refused = binary(&root)
+        .args([
+            "bench",
+            &uri,
+            "--environment",
+            "production",
+            "--no-rollback",
+            "-c",
+            "DELETE FROM public.orders WHERE false",
+            "--warmup",
+            "0",
+            "--runs",
+            "1",
+        ])
+        .output()
+        .expect("run refused bench");
+    assert_eq!(code(&refused), 2, "stderr: {}", stderr(&refused));
+    let message = stderr(&refused);
+    assert!(message.contains("classified as production"), "{message}");
+    assert!(message.contains("--allow-write"), "{message}");
+    assert_eq!(before, count(&root), "a refused benchmark changes nothing");
+
+    // With rollback on the runs would be rolled back, but on production they
+    // would still take locks and advance sequences, so they are refused too.
+    let rolled_back = binary(&root)
+        .args([
+            "bench",
+            &uri,
+            "--environment",
+            "production",
+            "-c",
+            "DELETE FROM public.orders WHERE false",
+            "--warmup",
+            "0",
+            "--runs",
+            "1",
+        ])
+        .output()
+        .expect("run refused rollback bench");
+    assert_eq!(code(&rolled_back), 2, "stderr: {}", stderr(&rolled_back));
+    let message = stderr(&rolled_back);
+    assert!(message.contains("row locks"), "{message}");
+    assert!(message.contains("--allow-write"), "{message}");
+    assert_eq!(before, count(&root), "a refused benchmark changes nothing");
+
+    // A read still benchmarks live on production, exactly as `query` allows.
+    let read = binary(&root)
+        .args([
+            "bench",
+            &uri,
+            "--environment",
+            "production",
+            "--no-rollback",
+            "-c",
+            "SELECT 1",
+            "--warmup",
+            "0",
+            "--runs",
+            "1",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run read bench");
+    assert_eq!(code(&read), 0, "stderr: {}", stderr(&read));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&read)).expect("valid json");
+    assert_eq!(parsed["baseline"]["rollback"], false);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_refused_production_bench_never_opens_a_connection() {
+    // Port 1 on loopback accepts nothing: if the guard ran after connecting,
+    // this would fail as a connection error instead of a usage refusal.
+    let root = root();
+    for extra in [&[][..], &["--no-rollback"][..]] {
+        let mut args = vec![
+            "bench",
+            "postgres://nobody@127.0.0.1:1/nowhere",
+            "--environment",
+            "production",
+            "-c",
+            "DELETE FROM public.orders WHERE false",
+        ];
+        args.extend_from_slice(extra);
+        let refused = binary(&root).args(&args).output().expect("run bench");
+        let message = stderr(&refused);
+        assert_eq!(code(&refused), 2, "{extra:?}: {message}");
+        assert!(message.contains("classified as production"), "{message}");
+        assert!(message.contains("--allow-write"), "{message}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

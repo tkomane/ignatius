@@ -2171,3 +2171,260 @@ async fn a_restarted_motion_ticker_never_reports_the_time_it_slept() {
         "a fresh start measures from the restart, not from before the sleep: {elapsed:?}"
     );
 }
+
+/// A server stand-in for benchmark dispatch tests. Each call is recorded
+/// with the session's name; a statement named `slow` waits until released.
+struct FakeBenchSession {
+    name: &'static str,
+    calls: Arc<std::sync::Mutex<Vec<String>>>,
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    panics: bool,
+}
+
+impl FakeBenchSession {
+    fn new(name: &'static str, calls: &Arc<std::sync::Mutex<Vec<String>>>) -> Self {
+        Self {
+            name,
+            calls: Arc::clone(calls),
+            started: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+            panics: false,
+        }
+    }
+}
+
+impl BenchSession for FakeBenchSession {
+    fn run<'a>(
+        &'a self,
+        sql: &'a str,
+        config: &'a crate::bench::BenchConfig,
+        label: &'a str,
+        _stop: crate::postgres::bench::StopCheck<'a>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<crate::bench::BenchStats, Diagnostic>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{}:{sql}", self.name));
+            assert!(!self.panics, "a run that panics part way through");
+            if sql == "slow" {
+                self.started.notify_one();
+                self.release.notified().await;
+            }
+            Ok(crate::bench::compute_bench_stats(
+                label,
+                sql,
+                config,
+                &[crate::bench::BenchSample {
+                    iteration: 1,
+                    duration_ms: 1.0,
+                    rows_returned: 1,
+                }],
+            ))
+        })
+    }
+}
+
+fn bench_dispatch(baseline: &str, candidate: &str) -> BenchDispatch {
+    BenchDispatch {
+        request: 7,
+        config: crate::bench::BenchConfig::new(0, 1, true),
+        runs: vec![
+            (
+                crate::app::message::BenchTarget::Baseline,
+                baseline.to_owned(),
+            ),
+            (
+                crate::app::message::BenchTarget::Candidate,
+                candidate.to_owned(),
+            ),
+        ],
+    }
+}
+
+/// Collects the benchmark reports a dispatch sent, unwrapped from their
+/// connection envelope.
+fn bench_reports(
+    rx: &mut mpsc::UnboundedReceiver<Message>,
+) -> Vec<(
+    u64,
+    crate::app::message::BenchTarget,
+    Result<String, String>,
+)> {
+    let mut reports = Vec::new();
+    while let Ok(message) = rx.try_recv() {
+        let Message::ForConnection {
+            generation,
+            message,
+        } = message
+        else {
+            panic!("benchmark reports carry their connection generation");
+        };
+        let Message::QueryBenchLoaded { target, result, .. } = *message else {
+            panic!("only benchmark reports are sent");
+        };
+        reports.push((
+            generation,
+            target,
+            match *result {
+                Ok(stats) => Ok(stats.sql_preview),
+                Err(diagnostic) => Err(diagnostic.headline),
+            },
+        ));
+    }
+    reports
+}
+
+#[tokio::test]
+async fn a_benchmark_never_touches_a_session_installed_after_it_was_dispatched() {
+    use crate::app::message::BenchTarget;
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let old = Arc::new(FakeBenchSession::new("staging", &calls));
+    let new = Arc::new(FakeBenchSession::new("production", &calls));
+    let slot = Arc::new(tokio::sync::RwLock::new(Some(Arc::clone(&old))));
+    let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let dispatch = bench_dispatch("slow", "UPDATE orders SET total = 0");
+    let active = BenchActive::default();
+    let reports = BenchReports::new(tx, 1, &dispatch, active.clone());
+
+    // The session is captured when the dispatch starts, never read again.
+    let captured = slot.read().await.clone();
+    let task = tokio::spawn(run_query_bench_dispatch(
+        captured,
+        dispatch,
+        Arc::clone(&generation),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        reports,
+    ));
+    old.started.notified().await;
+
+    // The user switches to another connection while A is still running.
+    *slot.write().await = Some(Arc::clone(&new));
+    generation.store(2, std::sync::atomic::Ordering::SeqCst);
+    old.release.notify_one();
+    task.await.expect("the dispatch finishes");
+
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["staging:slow"],
+        "B never ran anywhere"
+    );
+    let reports = bench_reports(&mut rx);
+    assert_eq!(reports.len(), 2, "{reports:?}");
+    assert_eq!(reports[0], (1, BenchTarget::Baseline, Ok("slow".into())));
+    assert_eq!(reports[1].0, 1, "reported against the old connection");
+    assert_eq!(reports[1].1, BenchTarget::Candidate);
+    assert!(
+        reports[1]
+            .2
+            .as_ref()
+            .is_err_and(|headline| headline.contains("connection changed")),
+        "{reports:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_baseline_stops_the_candidate_from_starting() {
+    use crate::app::message::BenchTarget;
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let session = Arc::new(FakeBenchSession::new("local", &calls));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let dispatch = bench_dispatch("slow", "DELETE FROM orders");
+    let active = BenchActive::default();
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    active.begin(ActiveBench {
+        request: dispatch.request,
+        cancelled: Arc::clone(&cancelled),
+        cancel: None,
+    });
+    let reports = BenchReports::new(tx, 1, &dispatch, active.clone());
+    let task = tokio::spawn(run_query_bench_dispatch(
+        Some(Arc::clone(&session)),
+        dispatch,
+        Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        cancelled,
+        reports,
+    ));
+    session.started.notified().await;
+    assert!(active.cancel(7).is_some(), "the running dispatch is found");
+    session.release.notify_one();
+    task.await.expect("the dispatch finishes");
+
+    assert_eq!(*calls.lock().unwrap(), ["local:slow"], "B was never sent");
+    let reports = bench_reports(&mut rx);
+    assert_eq!(reports.len(), 2, "{reports:?}");
+    assert_eq!(reports[1].1, BenchTarget::Candidate);
+    assert!(
+        reports[1]
+            .2
+            .as_ref()
+            .is_err_and(|headline| headline.contains("cancelled")),
+        "{reports:?}"
+    );
+    assert!(
+        active.cancel(7).is_none(),
+        "the finished dispatch is forgotten"
+    );
+}
+
+#[tokio::test]
+async fn every_target_reports_even_after_a_panic_or_an_early_return() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    // A run that panics part way through.
+    let mut panicking = FakeBenchSession::new("local", &calls);
+    panicking.panics = true;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let dispatch = bench_dispatch("SELECT 1", "SELECT 2");
+    let active = BenchActive::default();
+    active.begin(ActiveBench {
+        request: dispatch.request,
+        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        cancel: None,
+    });
+    let reports = BenchReports::new(tx, 1, &dispatch, active.clone());
+    let outcome = tokio::spawn(run_query_bench_dispatch(
+        Some(Arc::new(panicking)),
+        dispatch,
+        Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        reports,
+    ))
+    .await;
+    assert!(outcome.is_err(), "the task panicked");
+    let reports = bench_reports(&mut rx);
+    assert_eq!(reports.len(), 2, "both targets reported: {reports:?}");
+    assert!(reports.iter().all(|(_, _, result)| result.is_err()));
+    assert!(
+        active.cancel(7).is_none(),
+        "and nothing is left recorded as running"
+    );
+
+    // No session at all: an early return.
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let dispatch = bench_dispatch("SELECT 1", "SELECT 2");
+    let reports = BenchReports::new(tx, 1, &dispatch, BenchActive::default());
+    run_query_bench_dispatch::<FakeBenchSession>(
+        None,
+        dispatch,
+        Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        reports,
+    )
+    .await;
+    let reports = bench_reports(&mut rx);
+    assert_eq!(reports.len(), 2, "{reports:?}");
+    assert!(reports.iter().all(|(_, _, result)| {
+        result
+            .as_ref()
+            .is_err_and(|headline| headline.contains("no open session"))
+    }));
+}

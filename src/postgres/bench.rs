@@ -17,22 +17,66 @@ use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::from_query_error;
 use crate::query::statements;
 
+/// Why a benchmark stopped before its next iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BenchStop {
+    /// The connection the run was dispatched on is no longer the current one.
+    ConnectionChanged,
+    /// The user asked for the benchmark to be cancelled.
+    Cancelled,
+}
+
+impl BenchStop {
+    /// The plain statement of what happened, for the report.
+    #[must_use]
+    pub fn diagnostic(self) -> Diagnostic {
+        match self {
+            Self::ConnectionChanged => Diagnostic::new(
+                DiagnosticKind::Connection,
+                "the connection changed, so the benchmark stopped; nothing more was sent",
+                "running a query benchmark",
+            ),
+            Self::Cancelled => Diagnostic::new(
+                DiagnosticKind::Cancelled,
+                "the benchmark was cancelled; nothing more was sent",
+                "running a query benchmark",
+            ),
+        }
+    }
+}
+
+/// Asked before every iteration whether the benchmark must stop.
+pub type StopCheck<'a> = &'a (dyn Fn() -> Option<BenchStop> + Send + Sync);
+
+/// A stop check that never stops, for a run nothing else can interrupt.
+#[must_use]
+pub const fn never_stop() -> Option<BenchStop> {
+    None
+}
+
 /// Executes warmup and measured iterations of a single SQL statement against a
 /// live PostgreSQL connection and returns aggregated [`BenchStats`].
 ///
 /// When `config.rollback` is `true`, each warmup and measured iteration runs
 /// inside `BEGIN` followed unconditionally by `ROLLBACK` (even when the query
-/// fails) so write statements leave database state unchanged.
+/// fails) so write statements leave database state unchanged. `stop` is
+/// asked before every iteration; when it answers, nothing more is sent and
+/// the reason is returned as the error.
 pub async fn run_benchmark(
     client: &Client,
     sql: &str,
     config: &BenchConfig,
     label: &str,
+    stop: StopCheck<'_>,
 ) -> Result<BenchStats, Diagnostic> {
     let stmt_text = validate_single_statement(sql)?;
     let effective = config.clamped();
-    collect_samples(label, &stmt_text, &effective, || {
-        run_iteration(client, &stmt_text, effective.rollback)
+    let statement = stmt_text.as_str();
+    collect_samples(label, &stmt_text, &effective, || async move {
+        if let Some(reason) = stop() {
+            return Err(reason.diagnostic());
+        }
+        run_iteration(client, statement, effective.rollback).await
     })
     .await
 }

@@ -375,23 +375,79 @@ impl Session {
     }
 
     /// Captures an extended `EXPLAIN (BUFFERS, WAL, SETTINGS, FORMAT JSON)` snapshot.
+    ///
+    /// With `analyze`, the statement executes inside `BEGIN` and `ROLLBACK`,
+    /// so the user SQL gate is held for the whole bracket: its `ROLLBACK` can
+    /// then never land inside another bracket, such as a benchmark iteration.
     pub async fn explain_extended(
         &self,
         sql: &str,
         analyze: bool,
         label: &str,
     ) -> Result<crate::plandiff::PlanSnapshot, Diagnostic> {
+        let _gate = if analyze {
+            Some(self.user_sql_gate.lock().await)
+        } else {
+            None
+        };
         crate::postgres::plandiff::explain_extended(&self.client, sql, analyze, label).await
     }
 
     /// Executes warmup and measured iterations of one SQL statement and returns benchmark statistics.
+    ///
+    /// Holds the user SQL gate for the whole run, so a workbench statement can
+    /// never land inside one of its `BEGIN` ... `ROLLBACK` brackets and be
+    /// rolled back with it, and two runs never interleave.
+    ///
+    /// Once the gate is held, the session's real transaction state is read.
+    /// A run inside an open or failed transaction, or when the state cannot
+    /// be read, is refused before anything is sent: a rolled-back iteration
+    /// would discard the user's uncommitted work, and a committed one would
+    /// join it. `stop` is asked before every iteration.
     pub async fn run_benchmark(
         &self,
         sql: &str,
         config: &crate::bench::BenchConfig,
         label: &str,
+        stop: crate::postgres::bench::StopCheck<'_>,
     ) -> Result<crate::bench::BenchStats, Diagnostic> {
-        crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await
+        use crate::query::result::TransactionState;
+        let _gate = self.user_sql_gate.lock().await;
+        let refusal = match self.transaction_state().await {
+            TransactionState::Autocommit => None,
+            TransactionState::Unknown => Some(
+                Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "the session's transaction state could not be read, so the benchmark did \
+                     not run",
+                    "checking the session before a query benchmark",
+                )
+                .likely_cause("a benchmark could roll back or join a transaction it cannot see")
+                .next_action(
+                    "check the connection, run a statement such as SELECT 1, then run the \
+                     benchmark again; nothing was sent",
+                ),
+            ),
+            state => Some(
+                Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!(
+                        "the session is not idle ({}), so the benchmark did not run",
+                        state.label()
+                    ),
+                    "checking the session before a query benchmark",
+                )
+                .likely_cause("a benchmark would roll back or join the open transaction")
+                .next_action(
+                    "COMMIT or ROLLBACK the transaction, then run the benchmark again; \
+                     nothing was sent",
+                ),
+            ),
+        };
+        if let Some(diagnostic) = refusal {
+            return Err(diagnostic);
+        }
+        crate::postgres::bench::run_benchmark(&self.client, sql, config, label, stop).await
     }
 
     /// Captures a bounded canonical PostgreSQL schema snapshot for drift detection.

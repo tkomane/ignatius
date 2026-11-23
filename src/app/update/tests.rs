@@ -11766,27 +11766,892 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
     let _ = update(&mut model, Message::Action(Action::Insert('1')));
     assert_eq!(model.query_bench.as_ref().map(|b| b.active_tab), Some(0));
 
-    // Toggle rollback safety and re-run.
+    // Toggling rollback only changes the mode; it never runs anything.
     let toggle_effects = update(&mut model, Message::Action(Action::Insert('m')));
-    assert_eq!(toggle_effects.len(), 2);
+    assert!(toggle_effects.is_empty(), "{toggle_effects:?}");
     assert!(
         model
             .query_bench
             .as_ref()
-            .is_some_and(|b| !b.config.rollback && b.loading)
+            .is_some_and(|b| !b.config.rollback && !b.loading)
     );
-    assert!(matches!(
-        &toggle_effects[0],
-        Effect::RunQueryBench { config, .. } if !config.rollback
-    ));
 
-    // Explicit rerun increments request and re-emits effects.
+    // Explicit rerun of two reads with rollback off dispatches both, live.
     let rerun_effects = update(&mut model, Message::Action(Action::Insert('r')));
     assert_eq!(rerun_effects.len(), 2);
+    assert!(rerun_effects.iter().all(|effect| matches!(
+        effect,
+        Effect::RunQueryBench { config, .. } if !config.rollback
+    )));
 
     // Escape closes overlay.
     let _ = update(&mut model, Message::Action(Action::Dismiss));
     assert!(model.query_bench.is_none());
+}
+
+/// A connected model in `environment`, read-only when asked, with `sql` in
+/// the editor and the benchmark overlay opened and settled.
+fn bench_model(environment: Environment, read_only: bool, sql: &str) -> Model {
+    let mut model = Model::new(100);
+    let mut info = session();
+    info.environment = environment;
+    info.read_only = read_only;
+    update(&mut model, Message::Connected(info));
+    model.editor.set_text(sql);
+    let opened = update(&mut model, Message::Action(Action::QueryBench));
+    assert!(
+        opened.iter().all(|effect| matches!(
+            effect,
+            Effect::RunQueryBench { config, .. } if config.rollback
+        )),
+        "opening always measures with rollback on: {opened:?}"
+    );
+    // Settled as if every opening run had reported.
+    model.bench_in_flight = None;
+    if let Some(bench) = &mut model.query_bench {
+        bench.loading = false;
+        bench.runs_in_flight = 0;
+        bench.status_message = None;
+    }
+    model
+}
+
+fn bench_status(model: &Model) -> String {
+    model
+        .query_bench
+        .as_ref()
+        .and_then(|bench| bench.status_message.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn bench_rollback_toggle_states_the_consequence_and_never_dispatches() {
+    let mut model = bench_model(Environment::Local, false, "DELETE FROM orders");
+
+    let effects = update(&mut model, Message::Action(Action::Insert('m')));
+    assert!(effects.is_empty(), "m must not execute: {effects:?}");
+    assert_eq!(
+        bench_status(&model),
+        "Rollback off: writes will persist. Press r to run."
+    );
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| !b.config.rollback)
+    );
+
+    let effects = update(&mut model, Message::Action(Action::Insert('M')));
+    assert!(effects.is_empty(), "{effects:?}");
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.config.rollback)
+    );
+    assert!(bench_status(&model).starts_with("Rollback on"));
+}
+
+#[test]
+fn bench_rollback_off_runs_reads_without_asking() {
+    let mut model = bench_model(Environment::Production, true, "SELECT * FROM orders");
+    update(&mut model, Message::Action(Action::Insert('m')));
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert_eq!(effects.len(), 1, "{effects:?}");
+    assert!(matches!(
+        &effects[0],
+        Effect::RunQueryBench { config, .. } if !config.rollback
+    ));
+}
+
+#[test]
+fn bench_rollback_off_refuses_non_reads_on_production_and_names_why() {
+    for sql in [
+        "UPDATE orders SET total = 0",
+        "DELETE FROM orders",
+        "WITH gone AS (DELETE FROM orders RETURNING *) SELECT count(*) FROM gone",
+        "DROP TABLE orders",
+        "SELECT 1; UPDATE orders SET total = 0",
+    ] {
+        let mut model = bench_model(Environment::Production, false, sql);
+        // Opening on production with rollback on held the run; Esc lets it go
+        // without running anything.
+        assert!(
+            model
+                .query_bench
+                .as_ref()
+                .is_some_and(|b| b.run_confirmation.is_some()),
+            "{sql}"
+        );
+        assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+        update(&mut model, Message::Action(Action::Insert('m')));
+        let effects = update(&mut model, Message::Action(Action::Insert('r')));
+        assert!(effects.is_empty(), "{sql}: {effects:?}");
+        let status = bench_status(&model);
+        assert!(status.starts_with("Refused:"), "{sql}: {status}");
+        assert!(status.contains("production"), "{sql}: {status}");
+        assert!(status.contains("Press m"), "{sql}: {status}");
+        assert!(
+            model
+                .query_bench
+                .as_ref()
+                .is_some_and(|b| b.run_confirmation.is_none() && !b.loading),
+            "{sql}"
+        );
+        // Enter cannot bypass a refusal: nothing is armed.
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    }
+}
+
+#[test]
+fn bench_with_rollback_on_holds_non_reads_on_production_and_says_what_they_do() {
+    for (sql, read_only) in [
+        ("UPDATE orders SET total = 0", false),
+        ("UPDATE orders SET total = 0", true),
+        ("SELECT 1; INSERT INTO orders DEFAULT VALUES", false),
+    ] {
+        let mut model = bench_model(Environment::Production, read_only, sql);
+        // Opening dispatched nothing: the run is held, not refused.
+        let held = model
+            .query_bench
+            .as_ref()
+            .and_then(|b| b.run_confirmation.clone())
+            .unwrap_or_else(|| panic!("{sql}: a production write is held on open"));
+        assert!(held.rollback, "{sql}");
+        assert!(!held.needs_typing(), "{sql}");
+        assert!(model.query_bench.as_ref().is_some_and(|b| !b.loading));
+
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        assert!(!effects.is_empty(), "{sql}: Enter runs it");
+        assert!(effects.iter().all(|effect| matches!(
+            effect,
+            Effect::RunQueryBench { config, .. } if config.rollback
+        )));
+    }
+
+    // A destructive statement also needs the database name, and r re-arms
+    // the same hold after a result.
+    let mut model = bench_model(Environment::Production, false, "DELETE FROM orders");
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    for ch in "orders".chars() {
+        update(&mut model, Message::Action(Action::Insert(ch)));
+    }
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Activate)).len(),
+        1
+    );
+    model.bench_in_flight = None;
+    if let Some(bench) = &mut model.query_bench {
+        bench.loading = false;
+        bench.runs_in_flight = 0;
+    }
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.run_confirmation.as_ref().is_some_and(|c| c.rollback))
+    );
+}
+
+#[test]
+fn bench_with_rollback_on_runs_reads_on_production_and_writes_elsewhere_at_once() {
+    for (environment, sql) in [
+        (Environment::Production, "SELECT * FROM orders"),
+        (Environment::Local, "DELETE FROM orders"),
+        (Environment::Staging, "UPDATE orders SET total = 0"),
+        (Environment::Unclassified, "DROP TABLE orders"),
+    ] {
+        let mut model = Model::new(100);
+        let mut info = session();
+        info.environment = environment.clone();
+        update(&mut model, Message::Connected(info));
+        model.editor.set_text(sql);
+        let effects = update(&mut model, Message::Action(Action::QueryBench));
+        assert_eq!(effects.len(), 1, "{environment:?} {sql}");
+        assert!(
+            model
+                .query_bench
+                .as_ref()
+                .is_some_and(|b| b.run_confirmation.is_none()),
+            "{environment:?} {sql}"
+        );
+    }
+}
+
+#[test]
+fn bench_rollback_off_refuses_non_reads_in_a_read_only_session() {
+    let mut model = bench_model(Environment::Local, true, "UPDATE orders SET total = 0");
+    update(&mut model, Message::Action(Action::Insert('m')));
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(effects.is_empty(), "{effects:?}");
+    let status = bench_status(&model);
+    assert!(status.starts_with("Refused:"), "{status}");
+    assert!(status.contains("read-only"), "{status}");
+}
+
+#[test]
+fn bench_rollback_off_write_needs_one_enter_elsewhere() {
+    let mut model = bench_model(Environment::Local, false, "UPDATE orders SET total = 0");
+    update(&mut model, Message::Action(Action::Insert('m')));
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(effects.is_empty(), "a write is held first: {effects:?}");
+    let confirmation = model
+        .query_bench
+        .as_ref()
+        .and_then(|b| b.run_confirmation.clone())
+        .expect("a live run is held for confirmation");
+    assert_eq!(confirmation.impact, crate::query::Impact::Write);
+    assert_eq!(confirmation.query, "Query A");
+    assert_eq!(
+        confirmation.executions,
+        crate::bench::DEFAULT_WARMUP_RUNS + crate::bench::DEFAULT_MEASURED_RUNS
+    );
+    assert!(!confirmation.needs_typing());
+
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(effects.len(), 1, "{effects:?}");
+    assert!(matches!(
+        &effects[0],
+        Effect::RunQueryBench { config, sql, .. }
+            if !config.rollback && sql == "UPDATE orders SET total = 0"
+    ));
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.run_confirmation.is_none() && b.loading)
+    );
+}
+
+#[test]
+fn bench_rollback_off_destructive_needs_the_database_name_typed() {
+    let mut model = bench_model(Environment::Staging, false, "DELETE FROM orders");
+    update(&mut model, Message::Action(Action::Insert('m')));
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    let held = |model: &Model| {
+        model
+            .query_bench
+            .as_ref()
+            .and_then(|b| b.run_confirmation.clone())
+    };
+    assert!(held(&model).is_some_and(|c| c.needs_typing() && c.required == "orders"));
+
+    // Enter before the name is typed does nothing at all.
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(held(&model).is_some());
+
+    // Keys that would normally act on the overlay are typed instead.
+    for ch in "ordesr".chars() {
+        assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+    }
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| !b.config.rollback)
+    );
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    update(&mut model, Message::Action(Action::Backspace));
+    update(&mut model, Message::Action(Action::Backspace));
+    update(&mut model, Message::Action(Action::Insert('r')));
+    update(&mut model, Message::Action(Action::Insert('s')));
+    assert_eq!(held(&model).map(|c| c.typed), Some("orders".to_owned()));
+
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(effects.len(), 1, "{effects:?}");
+    assert!(matches!(
+        &effects[0],
+        Effect::RunQueryBench { config, .. } if !config.rollback
+    ));
+}
+
+#[test]
+fn bench_run_confirmation_cancels_on_escape_or_any_other_key() {
+    let mut model = bench_model(Environment::Local, false, "UPDATE orders SET total = 0");
+    update(&mut model, Message::Action(Action::Insert('m')));
+    update(&mut model, Message::Action(Action::Insert('r')));
+
+    // Esc peels the confirmation, not the overlay.
+    assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+    let bench = model.query_bench.as_ref().expect("overlay stays open");
+    assert!(bench.run_confirmation.is_none());
+    assert_eq!(bench_status(&model), "Held run cancelled. Nothing ran.");
+
+    // Any other key cancels and then does its own job: m turns rollback on.
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.run_confirmation.is_some())
+    );
+    assert!(update(&mut model, Message::Action(Action::Insert('m'))).is_empty());
+    let bench = model.query_bench.as_ref().expect("overlay stays open");
+    assert!(bench.run_confirmation.is_none());
+    assert!(bench.config.rollback);
+}
+
+#[test]
+fn an_ab_bench_stays_in_flight_until_both_targets_report() {
+    let mut model = bench_model(Environment::Local, false, "SELECT 1; SELECT 2");
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert_eq!(effects.len(), 2);
+    let Effect::RunQueryBench {
+        request, config, ..
+    } = &effects[0]
+    else {
+        panic!("expected a benchmark effect");
+    };
+    let (request, config) = (*request, *config);
+    let stats = |label: &str| {
+        crate::bench::compute_bench_stats(
+            label,
+            "SELECT 1",
+            &config,
+            &[crate::bench::BenchSample {
+                iteration: 1,
+                duration_ms: 1.0,
+                rows_returned: 1,
+            }],
+        )
+    };
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(stats("Baseline (A)"))),
+        },
+    );
+    assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Insert('m'))).is_empty());
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.config.rollback)
+    );
+
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Candidate,
+            result: Box::new(Ok(stats("Candidate (B)"))),
+        },
+    );
+    assert!(model.query_bench.as_ref().is_some_and(|b| !b.loading));
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Insert('r'))).len(),
+        2
+    );
+}
+
+fn bench_report(request: u64, target: crate::app::message::BenchTarget) -> Message {
+    let config = crate::bench::BenchConfig::default();
+    Message::QueryBenchLoaded {
+        request,
+        target,
+        result: Box::new(Ok(crate::bench::compute_bench_stats(
+            "old run",
+            "SELECT pg_sleep(5)",
+            &config,
+            &[crate::bench::BenchSample {
+                iteration: 1,
+                duration_ms: 5000.0,
+                rows_returned: 1,
+            }],
+        ))),
+    }
+}
+
+#[test]
+fn a_closed_benchmark_cannot_report_into_a_new_overlay_or_run_beside_it() {
+    let mut model = Model::new(100);
+    let mut info = session();
+    info.environment = Environment::Production;
+    update(&mut model, Message::Connected(info));
+    model.editor.set_text("SELECT pg_sleep(5)");
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    let [Effect::RunQueryBench { request: old, .. }] = effects.as_slice() else {
+        panic!("the read runs at once: {effects:?}");
+    };
+    let old = *old;
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.query_bench.is_none());
+
+    // Reopened on a production write while the old run is still executing.
+    model.editor.set_text("UPDATE orders SET total = 0");
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    assert!(effects.is_empty(), "{effects:?}");
+    assert!(bench_status(&model).contains("earlier benchmark is still running"));
+
+    // The old run's report is counted down but never shown as this overlay's.
+    update(
+        &mut model,
+        bench_report(old, crate::app::message::BenchTarget::Baseline),
+    );
+    let bench = model.query_bench.as_ref().expect("overlay open");
+    assert!(bench.baseline.is_none() && bench.report.is_none());
+    assert!(model.bench_in_flight.is_none());
+
+    // Now the write is held as usual, and runs once confirmed.
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.run_confirmation.is_some())
+    );
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Activate)).len(),
+        1
+    );
+}
+
+#[test]
+fn a_benchmark_never_runs_inside_an_open_transaction() {
+    use crate::query::result::TransactionState;
+    for state in [TransactionState::Open, TransactionState::Failed] {
+        for sql in ["SELECT 1", "UPDATE orders SET total = 0"] {
+            let mut model = Model::new(100);
+            update(&mut model, Message::Connected(session()));
+            model.transaction = state;
+            model.editor.set_text(sql);
+            let effects = update(&mut model, Message::Action(Action::QueryBench));
+            assert!(effects.is_empty(), "{state:?} {sql}: {effects:?}");
+            let status = bench_status(&model);
+            assert!(status.starts_with("Refused:"), "{status}");
+            assert!(status.contains(state.label()), "{status}");
+            assert!(status.contains("COMMIT or ROLLBACK"), "{status}");
+            assert!(
+                model
+                    .query_bench
+                    .as_ref()
+                    .is_some_and(|b| b.run_confirmation.is_none())
+            );
+        }
+    }
+
+    // An unknown state, as after a reconnect, is left to the session's own
+    // check under its SQL gate rather than refused with the wrong advice.
+    let mut model = Model::new(100);
+    update(&mut model, Message::Connected(session()));
+    model.transaction = TransactionState::Unknown;
+    model.editor.set_text("SELECT 1");
+    assert_eq!(
+        update(&mut model, Message::Action(Action::QueryBench)).len(),
+        1
+    );
+}
+
+#[test]
+fn a_benchmark_waits_for_a_workbench_statement_to_finish() {
+    let mut model = bench_model(Environment::Local, false, "SELECT 1");
+    model.phase = QueryPhase::Running {
+        job: model.allocate_job(),
+        statements: 1,
+    };
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(bench_status(&model).contains("still running in the workbench"));
+}
+
+#[test]
+fn losing_the_connection_drops_a_held_benchmark_run() {
+    let mut model = bench_model(Environment::Local, false, "UPDATE orders SET total = 0");
+    update(&mut model, Message::Action(Action::Insert('m')));
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.run_confirmation.is_some())
+    );
+    update(&mut model, Message::ConnectionLost);
+    let bench = model.query_bench.as_ref().expect("overlay stays open");
+    assert!(bench.run_confirmation.is_none());
+    assert!(bench_status(&model).contains("connection was lost"));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert_eq!(bench_status(&model), "Not connected. Nothing ran.");
+}
+
+#[test]
+fn a_paste_never_reaches_the_editor_behind_the_benchmark() {
+    let mut model = bench_model(Environment::Production, false, "DELETE FROM orders");
+    let text = model.editor.text().to_owned();
+    update(&mut model, Message::Pasted("orders".into()));
+    assert_eq!(
+        model.paste_notice,
+        Some(crate::app::model::PasteNotice::Ignored)
+    );
+    assert_eq!(model.editor.text(), text);
+    assert_eq!(
+        model
+            .query_bench
+            .as_ref()
+            .and_then(|b| b.run_confirmation.as_ref())
+            .map(|c| c.typed.clone()),
+        Some(String::new()),
+        "the database name is typed, never pasted"
+    );
+}
+
+#[test]
+fn a_held_benchmark_run_waits_for_a_painted_frame_and_holds_motion_still() {
+    let mut model = bench_model(
+        Environment::Production,
+        false,
+        "UPDATE orders SET total = 0",
+    );
+    assert!(model.holds_motion_still());
+
+    // Enter that arrives with a new terminal size is not acceptance.
+    let (columns, rows) = model.size;
+    let effects = update(
+        &mut model,
+        Message::InputAtSize {
+            action: Action::Activate,
+            columns: columns + 10,
+            rows,
+        },
+    );
+    assert!(effects.is_empty(), "{effects:?}");
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.run_confirmation.is_some())
+    );
+    let effects = update(
+        &mut model,
+        Message::InputAtSize {
+            action: Action::Activate,
+            columns: columns + 10,
+            rows,
+        },
+    );
+    assert_eq!(effects.len(), 1, "the same size after a frame accepts");
+
+    // The overlay owns the keyboard, so a hold can only appear under a
+    // curtain that was already running; the next motion frame settles it.
+    let mut model = moving();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert!(model.is_in_motion());
+    let mut info = session();
+    info.environment = Environment::Production;
+    model.connection = ConnectionState::Connected(info);
+    model.query_bench = Some(crate::app::model::QueryBenchState {
+        baseline_sql: "UPDATE orders SET total = 0".into(),
+        run_confirmation: Some(crate::app::model::BenchRunConfirmation {
+            query: "Query A",
+            impact: crate::query::Impact::Write,
+            executions: 12,
+            rollback: true,
+            typed: String::new(),
+            required: "orders".into(),
+        }),
+        ..Default::default()
+    });
+    assert!(model.holds_motion_still());
+    update(
+        &mut model,
+        Message::MotionFrame {
+            elapsed: Duration::from_millis(33),
+        },
+    );
+    assert!(!model.is_in_motion(), "settled by the next frame");
+}
+
+#[test]
+fn workbench_statements_are_refused_while_a_benchmark_holds_the_session() {
+    let refused = |model: &Model| {
+        model.error.as_ref().is_some_and(|error| {
+            error.headline == "A benchmark is still running on this connection"
+                && error
+                    .next_action
+                    .as_deref()
+                    .is_some_and(|action| action.contains("Nothing was sent"))
+        })
+    };
+    let holding = |environment: Environment, sql: &str| {
+        let mut model = Model::new(100);
+        let mut info = session();
+        info.environment = environment;
+        update(&mut model, Message::Connected(info));
+        model.editor.set_text(sql);
+        model.bench_in_flight = Some(running_benchmark(99));
+        model
+    };
+
+    for action in [
+        Action::RunBuffer,
+        Action::RunStatement,
+        Action::ExplainPlan,
+        Action::AnalyzePlan,
+    ] {
+        let mut model = holding(Environment::Local, "SELECT 1");
+        let effects = update(&mut model, Message::Action(action.clone()));
+        assert!(effects.is_empty(), "{action:?}: {effects:?}");
+        assert!(matches!(model.phase, QueryPhase::Idle), "{action:?}");
+        assert!(refused(&model), "{action:?}: {:?}", model.error);
+        assert!(model.pending_plan.is_none(), "{action:?}");
+    }
+
+    // Refused before a production confirmation or a parameter prompt opens,
+    // so nothing is typed for a run that cannot start.
+    let mut model = holding(Environment::Production, "UPDATE orders SET total = 0");
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    assert!(model.pending_run.is_none());
+    assert!(refused(&model));
+    let mut model = holding(Environment::Local, "SELECT :value");
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    assert!(model.parameter_prompt.is_none());
+    assert!(refused(&model));
+
+    // A watch waits out the benchmark quietly and runs again afterwards.
+    let mut model = holding(Environment::Local, "SELECT 1");
+    model.watch = Some(crate::app::model::WatchState {
+        sql: "SELECT 1".into(),
+        interval_secs: 2,
+        iteration: 1,
+    });
+    assert!(update(&mut model, Message::WatchTick).is_empty());
+    assert!(model.watch.is_some() && model.error.is_none());
+    model.bench_in_flight = None;
+    assert_eq!(update(&mut model, Message::WatchTick).len(), 1);
+
+    // Once the benchmark has reported, the workbench runs again.
+    let mut model = holding(Environment::Local, "SELECT 1");
+    model.bench_in_flight = None;
+    assert_eq!(
+        update(&mut model, Message::Action(Action::RunBuffer)).len(),
+        1
+    );
+}
+
+fn running_benchmark(request: u64) -> crate::app::model::BenchInFlight {
+    crate::app::model::BenchInFlight {
+        request,
+        remaining: 1,
+        cancel_requested: false,
+    }
+}
+
+#[test]
+fn cancel_reaches_a_running_benchmark_and_says_so_until_it_reports() {
+    // Only a benchmark is running, with its overlay closed: Cancel asks the
+    // server to stop the benchmark's statement and says exactly that.
+    let mut model = connected();
+    model.bench_in_flight = Some(running_benchmark(41));
+    let effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::CancelBenchmark { request: 41 }]
+        ),
+        "{effects:?}"
+    );
+    assert!(
+        matches!(model.phase, QueryPhase::Idle),
+        "no workbench claim"
+    );
+    assert_eq!(
+        model.error.as_ref().map(|error| error.headline.as_str()),
+        Some("Cancellation requested for the benchmark")
+    );
+    assert!(
+        update(&mut model, Message::Action(Action::Cancel)).is_empty(),
+        "sent once"
+    );
+
+    // The run reports cancelled, and the notice says how it ended.
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: 41,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Err(
+                crate::postgres::bench::BenchStop::Cancelled.diagnostic()
+            )),
+        },
+    );
+    assert!(model.bench_in_flight.is_none());
+    assert!(
+        model.error.as_ref().is_some_and(|error| error
+            .headline
+            .starts_with("The benchmark stopped after cancellation was requested")),
+        "{:?}",
+        model.error
+    );
+
+    // A workbench statement that is running is still the one cancelled.
+    let mut model = connected();
+    model.editor.set_text("SELECT 1");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("{effects:?}");
+    };
+    let job = *job;
+    let effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(matches!(effects.as_slice(), [Effect::Cancel { job: sent }] if *sent == job));
+
+    // Inside the overlay, Cancel reaches the run and the status keeps saying
+    // so until the last target reports.
+    let mut model = bench_model(Environment::Local, false, "SELECT 1; SELECT 2");
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let Some(Effect::RunQueryBench { request, .. }) = effects.first() else {
+        panic!("{effects:?}");
+    };
+    let request = *request;
+    let effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(
+        matches!(effects.as_slice(), [Effect::CancelBenchmark { request: sent }] if *sent == request)
+    );
+    assert_eq!(
+        bench_status(&model),
+        "Cancellation requested for the benchmark"
+    );
+    update(
+        &mut model,
+        bench_report(request, crate::app::message::BenchTarget::Baseline),
+    );
+    assert_eq!(
+        bench_status(&model),
+        "Cancellation requested for the benchmark"
+    );
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Candidate,
+            result: Box::new(Err(
+                crate::postgres::bench::BenchStop::Cancelled.diagnostic()
+            )),
+        },
+    );
+    assert!(bench_status(&model).starts_with("The benchmark stopped after cancellation"));
+    assert!(model.bench_in_flight.is_none());
+
+    // With nothing running, the overlay says nothing was cancelled.
+    assert!(update(&mut model, Message::Action(Action::Cancel)).is_empty());
+    assert_eq!(
+        bench_status(&model),
+        "Nothing is running, so nothing was cancelled."
+    );
+}
+
+#[test]
+fn the_running_benchmark_record_only_counts_its_own_reports() {
+    let mut model = bench_model(Environment::Local, false, "SELECT 1");
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let [Effect::RunQueryBench { request: first, .. }] = effects.as_slice() else {
+        panic!("{effects:?}");
+    };
+    let first = *first;
+
+    // Losing the connection forgets it; its late report changes nothing.
+    update(&mut model, Message::ConnectionLost);
+    assert!(model.bench_in_flight.is_none());
+    model.bench_in_flight = Some(running_benchmark(first + 100));
+    update(
+        &mut model,
+        bench_report(first, crate::app::message::BenchTarget::Baseline),
+    );
+    assert_eq!(model.bench_in_flight, Some(running_benchmark(first + 100)));
+
+    // A new connection starts with nothing recorded, and switching is refused
+    // while a benchmark runs, naming Cancel as the way out.
+    let mut model = bench_model(Environment::Local, false, "SELECT 1");
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(model.benchmark_running());
+    assert!(begin_connection(&mut model, Some("orders-prod".into())).is_empty());
+    assert!(model.benchmark_running(), "still the same connection");
+    let error = model.error.clone().expect("the refusal says why");
+    assert!(
+        error.headline.contains("was not switched"),
+        "{}",
+        error.headline
+    );
+    assert!(
+        error
+            .next_action
+            .as_deref()
+            .is_some_and(|action| action.contains("Ctrl+C") && action.contains("Cancel")),
+        "{error:?}"
+    );
+    model.bench_in_flight = None;
+    model.error = None;
+    begin_connection(&mut model, Some("orders-prod".into()));
+    assert!(matches!(
+        model.connection,
+        ConnectionState::Connecting { .. }
+    ));
+    assert!(model.bench_in_flight.is_none());
+}
+
+#[test]
+fn plan_diff_analyze_is_refused_while_a_benchmark_runs() {
+    let mut model = connected();
+    model.editor.set_text("UPDATE orders SET total = 0");
+    update(&mut model, Message::Action(Action::PlanDiff));
+    assert!(model.plan_diff.is_some());
+    model.bench_in_flight = Some(running_benchmark(5));
+
+    // Turning ANALYZE on would send it at once: refused, with the reason.
+    let effects = update(&mut model, Message::Action(Action::Insert('m')));
+    assert!(effects.is_empty(), "{effects:?}");
+    let diff = model.plan_diff.as_ref().expect("overlay open");
+    assert!(!diff.analyze_mode);
+    assert!(
+        diff.status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("EXPLAIN ANALYZE was not sent")),
+        "{:?}",
+        diff.status_message
+    );
+
+    // An estimate-only EXPLAIN executes nothing and is not refused.
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(!effects.is_empty());
+
+    // With ANALYZE already on, re-running is refused too.
+    if let Some(diff) = &mut model.plan_diff {
+        diff.analyze_mode = true;
+        diff.loading = false;
+    }
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    model.bench_in_flight = None;
+    assert!(!update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+}
+
+#[test]
+fn bench_refuses_to_start_or_change_mode_while_a_run_is_in_flight() {
+    let mut model = bench_model(Environment::Local, false, "SELECT 1");
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert_eq!(effects.len(), 1);
+    assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
+    // While it runs, the status names the way to stop it.
+    assert!(
+        bench_status(&model).contains("Press Ctrl+C to cancel"),
+        "{}",
+        bench_status(&model)
+    );
+
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(bench_status(&model).contains("already running"));
+    assert!(bench_status(&model).contains("Ctrl+C"));
+
+    assert!(update(&mut model, Message::Action(Action::Insert('m'))).is_empty());
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.config.rollback)
+    );
+    assert!(bench_status(&model).contains("after it finishes"));
 }
 
 #[test]

@@ -3852,3 +3852,179 @@ fn structured_result_observed_under_lossy_output_stays_inspect_only() {
     let fresh = stage_structured_edit(&fx, source, 1, 2, "4.25");
     assert_eq!(run_structured_edit(&fx, &fresh), 1);
 }
+
+#[test]
+fn a_benchmark_refuses_to_run_inside_an_open_transaction_and_leaves_it_intact() {
+    use ignatius::query::result::TransactionState;
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let begun = fx.block_on(fx.session.execute("BEGIN", 10, JobId(7001)));
+    assert_eq!(begun.transaction, TransactionState::Open);
+    for (job, sql) in [
+        (7002, "CREATE TEMP TABLE bench_guard_probe (x int)"),
+        (7003, "INSERT INTO bench_guard_probe VALUES (1)"),
+    ] {
+        let done = fx.block_on(fx.session.execute(sql, 10, JobId(job)));
+        assert_eq!(done.status, ExecutionStatus::Succeeded, "{:?}", done.error);
+    }
+
+    // Rollback on would ROLLBACK the user's transaction; rollback off would
+    // join it. Both are refused before anything is sent.
+    for rollback in [true, false] {
+        let refused = fx.block_on(fx.session.run_benchmark(
+            "SELECT 1",
+            &ignatius::bench::BenchConfig::new(0, 1, rollback),
+            "guard probe",
+            &ignatius::postgres::bench::never_stop,
+        ));
+        let diagnostic = refused.expect_err("a benchmark inside a transaction is refused");
+        assert!(
+            diagnostic.headline.contains("not idle"),
+            "{}",
+            diagnostic.headline
+        );
+    }
+
+    let after = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM bench_guard_probe",
+        10,
+        JobId(7004),
+    ));
+    assert_eq!(
+        after.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        after.error
+    );
+    assert_eq!(after.transaction, TransactionState::Open, "still inside it");
+    let set = after.statements[0].result_set.as_ref().expect("rows");
+    assert_eq!(set.rows, vec![vec![Cell::Text("1".into())]]);
+    let _ = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(7005)));
+
+    // Idle again, the same benchmark runs.
+    let ran = fx.block_on(fx.session.run_benchmark(
+        "SELECT 1",
+        &ignatius::bench::BenchConfig::new(0, 1, true),
+        "guard probe",
+        &ignatius::postgres::bench::never_stop,
+    ));
+    assert!(ran.is_ok(), "{ran:?}");
+}
+
+#[test]
+fn a_cancelled_benchmark_leaves_the_session_idle_and_its_rows_untouched() {
+    use ignatius::postgres::bench::BenchStop;
+    use ignatius::query::result::TransactionState;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    for (job, sql) in [
+        (7101, "CREATE TEMP TABLE bench_cancel_probe (x int)"),
+        (7102, "INSERT INTO bench_cancel_probe VALUES (1)"),
+    ] {
+        let done = fx.block_on(fx.session.execute(sql, 10, JobId(job)));
+        assert_eq!(done.status, ExecutionStatus::Succeeded, "{:?}", done.error);
+    }
+
+    for rollback in [true, false] {
+        let cancelled = AtomicBool::new(false);
+        let stop = || {
+            cancelled
+                .load(Ordering::SeqCst)
+                .then_some(BenchStop::Cancelled)
+        };
+        let handle = fx.session.cancel_handle();
+        let config = ignatius::bench::BenchConfig::new(0, 3, rollback);
+        let (outcome, delivered) = fx.block_on(async {
+            tokio::join!(
+                fx.session.run_benchmark(
+                    "UPDATE bench_cancel_probe SET x = x + 1 FROM (SELECT pg_sleep(5)) AS pause",
+                    &config,
+                    "cancel probe",
+                    &stop,
+                ),
+                async {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    cancelled.store(true, Ordering::SeqCst);
+                    handle.cancel().await
+                }
+            )
+        });
+        assert!(delivered.is_ok(), "{delivered:?}");
+        assert!(
+            outcome.is_err(),
+            "rollback={rollback}: the run was cancelled"
+        );
+
+        let after = fx.block_on(fx.session.execute(
+            "SELECT x FROM bench_cancel_probe",
+            10,
+            JobId(7103),
+        ));
+        assert_eq!(
+            after.status,
+            ExecutionStatus::Succeeded,
+            "{:?}",
+            after.error
+        );
+        assert_eq!(
+            after.transaction,
+            TransactionState::Autocommit,
+            "rollback={rollback}: the session is idle, not inside a transaction"
+        );
+        let set = after.statements[0].result_set.as_ref().expect("rows");
+        assert_eq!(
+            set.rows,
+            vec![vec![Cell::Text("1".into())]],
+            "rollback={rollback}: the cancelled UPDATE changed nothing"
+        );
+    }
+}
+
+#[test]
+fn a_benchmark_stops_between_iterations_as_soon_as_it_is_told_to() {
+    use ignatius::postgres::bench::BenchStop;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let created = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE bench_stop_probe (x int)",
+        10,
+        JobId(7201),
+    ));
+    assert_eq!(
+        created.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        created.error
+    );
+
+    // Rollback off, so every iteration that runs leaves a row behind. The
+    // check answers "stop" from its third question, before iteration three.
+    let asked = AtomicUsize::new(0);
+    let stop = || (asked.fetch_add(1, Ordering::SeqCst) >= 2).then_some(BenchStop::Cancelled);
+    let outcome = fx.block_on(fx.session.run_benchmark(
+        "INSERT INTO bench_stop_probe VALUES (1)",
+        &ignatius::bench::BenchConfig::new(0, 5, false),
+        "stop probe",
+        &stop,
+    ));
+    let diagnostic = outcome.expect_err("the run stopped early");
+    assert!(
+        diagnostic.headline.contains("cancelled"),
+        "{}",
+        diagnostic.headline
+    );
+
+    let count = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM bench_stop_probe",
+        10,
+        JobId(7202),
+    ));
+    let set = count.statements[0].result_set.as_ref().expect("rows");
+    assert_eq!(
+        set.rows,
+        vec![vec![Cell::Text("2".into())]],
+        "exactly the two iterations before the stop ran"
+    );
+}

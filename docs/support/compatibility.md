@@ -722,7 +722,8 @@ read/write safety contract:
 
 - **Read vs write guards.** `replication`, `cluster`, `browse` reads,
   `plan-diff` (`ROLLBACK`-wrapped `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)`),
-  `bench` (default transaction rollback isolation unless `--no-rollback`),
+  `bench` (default transaction rollback isolation unless `--no-rollback`; a
+  production target refuses non-reads in either mode unless `--allow-write`),
   `snapshot capture|check`, and `runbook` (`--dry-run` or live mode without
   `--allow-writes`) refuse or isolate unintended mutations on target databases.
 - **Deterministic exit gates.** Gate failures (`bench --fail-on-regression-pct`,

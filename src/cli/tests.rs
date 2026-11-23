@@ -1669,6 +1669,7 @@ fn bench_snapshot_and_runbook_commands_parse_flags() {
         "--runs",
         "25",
         "--no-rollback",
+        "--allow-write",
         "--fail-on-regression-pct",
         "12.5",
         "--format",
@@ -1690,6 +1691,7 @@ fn bench_snapshot_and_runbook_commands_parse_flags() {
     assert_eq!(bench_args.warmup, 3);
     assert_eq!(bench_args.runs, 25);
     assert!(bench_args.no_rollback);
+    assert!(bench_args.allow_write);
     assert_eq!(bench_args.fail_on_regression_pct, Some(12.5));
     assert_eq!(bench_args.format, CliTelemetryFormat::Json);
     assert_eq!(
@@ -1721,6 +1723,7 @@ fn bench_snapshot_and_runbook_commands_parse_flags() {
     assert_eq!(bench_def_args.warmup, crate::bench::DEFAULT_WARMUP_RUNS);
     assert_eq!(bench_def_args.runs, crate::bench::DEFAULT_MEASURED_RUNS);
     assert!(!bench_def_args.no_rollback);
+    assert!(!bench_def_args.allow_write);
     assert_eq!(bench_def_args.fail_on_regression_pct, None);
     assert_eq!(bench_def_args.format, CliTelemetryFormat::Table);
 
@@ -1882,6 +1885,7 @@ fn bench_snapshot_and_runbook_cli_helpers_validate_and_render() {
         warmup: 2,
         runs: 10,
         no_rollback: false,
+        allow_write: false,
         fail_on_regression_pct: None,
         format: CliTelemetryFormat::Table,
         output: None,
@@ -2125,4 +2129,94 @@ fn bench_snapshot_and_runbook_cli_helpers_validate_and_render() {
             .as_deref()
             .is_some_and(|m| m.contains("[42P01]"))
     );
+}
+
+#[test]
+fn bench_refuses_non_reads_on_production_like_query_in_both_rollback_modes() {
+    use crate::connection::Environment;
+
+    let refused = bench_write_guard(
+        "SELECT 1",
+        Some("DELETE FROM orders"),
+        false,
+        &Environment::Production,
+        false,
+    )
+    .expect_err("a rollback-off destructive candidate on production is refused");
+    assert_eq!(refused.kind, DiagnosticKind::Usage);
+    let rendered = format!("{refused:?}");
+    for words in [
+        "the candidate statement destroys data",
+        "classified as production",
+        "--allow-write",
+        "--no-rollback commits",
+        "not a security boundary",
+    ] {
+        assert!(rendered.contains(words), "{words}: {rendered}");
+    }
+
+    // With rollback on the runs are rolled back, and the refusal says what
+    // they still do on production.
+    let held = bench_write_guard(
+        "UPDATE orders SET total = 0",
+        None,
+        true,
+        &Environment::Production,
+        false,
+    )
+    .expect_err("a rolled-back write against production is still refused");
+    let rendered = format!("{held:?}");
+    for words in [
+        "the baseline statement writes",
+        "rolled back",
+        "row locks",
+        "advances sequences",
+        "--allow-write",
+        "not a security boundary",
+    ] {
+        assert!(rendered.contains(words), "{words}: {rendered}");
+    }
+
+    for sql in [
+        "UPDATE orders SET total = 0",
+        "-- note\nDROP TABLE orders",
+        "WITH gone AS (DELETE FROM orders RETURNING *) SELECT 1",
+        "DO $$ BEGIN END $$",
+    ] {
+        for rollback in [false, true] {
+            assert!(
+                bench_write_guard(sql, None, rollback, &Environment::Production, false).is_err(),
+                "{sql} rollback={rollback}"
+            );
+        }
+    }
+
+    // Reads, an explicit --allow-write, and non-production targets run in
+    // either mode.
+    for rollback in [false, true] {
+        assert!(
+            bench_write_guard("SELECT 1", None, rollback, &Environment::Production, false).is_ok()
+        );
+        assert!(
+            bench_write_guard(
+                "DELETE FROM orders",
+                None,
+                rollback,
+                &Environment::Production,
+                true
+            )
+            .is_ok()
+        );
+        for environment in [
+            Environment::Unclassified,
+            Environment::Local,
+            Environment::Staging,
+        ] {
+            assert!(
+                bench_write_guard("DELETE FROM orders", None, rollback, &environment, false)
+                    .is_ok(),
+                "{environment:?}"
+            );
+        }
+    }
 }

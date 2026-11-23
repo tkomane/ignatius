@@ -2466,8 +2466,65 @@ pub struct QueryBenchState {
     pub selected_idx: usize,
     /// Whether an async benchmark run is currently in flight.
     pub loading: bool,
+    /// How many dispatched targets have not reported yet, so an A/B run
+    /// stays in flight until both the baseline and the candidate are back.
+    pub runs_in_flight: usize,
     /// Status or diagnostic message shown in footer.
     pub status_message: Option<String>,
+    /// A run that is waiting for one explicit confirmation, because a
+    /// benchmarked statement does not look like a read and would either
+    /// commit (rollback off) or run against production (rollback on).
+    pub run_confirmation: Option<BenchRunConfirmation>,
+}
+
+/// A benchmark dispatch that has not finished reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BenchInFlight {
+    /// The dispatch's request identity; only its own reports count it down.
+    pub request: u64,
+    /// Targets (baseline, candidate) that have not reported yet.
+    pub remaining: usize,
+    /// Whether the user has asked for this benchmark to be cancelled.
+    pub cancel_requested: bool,
+}
+
+/// A benchmark run held until the user confirms it.
+///
+/// With rollback off every warmup and measured iteration commits, so a
+/// statement that does not look like a read would be repeated many times.
+/// With rollback on against production each iteration is rolled back, but
+/// while it runs it still takes row locks, fires triggers and advances
+/// sequences there. Mirrors [`PendingPlan`]: Enter is enough for a write, and
+/// a statement that appears to destroy data also needs the database's own
+/// name typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BenchRunConfirmation {
+    /// Which query carries the strongest impact, as the overlay names it.
+    pub query: &'static str,
+    /// The strongest advisory impact across the benchmarked statements.
+    pub impact: crate::query::Impact,
+    /// How many times the statements will execute.
+    pub executions: usize,
+    /// Whether each iteration is wrapped in `BEGIN` and `ROLLBACK`.
+    pub rollback: bool,
+    /// What the user has typed when a database-name confirmation is required.
+    pub typed: String,
+    /// The database name required for a destructive confirmation.
+    pub required: String,
+}
+
+impl BenchRunConfirmation {
+    /// Whether the confirmation needs the database name typed.
+    #[must_use]
+    pub const fn needs_typing(&self) -> bool {
+        self.impact.needs_typed_confirmation()
+    }
+
+    /// Whether this one-shot confirmation is satisfied.
+    #[must_use]
+    pub fn is_satisfied(&self) -> bool {
+        !self.needs_typing() || self.typed == self.required
+    }
 }
 
 impl QueryBenchState {
@@ -4044,6 +4101,12 @@ pub struct Model {
     pub query_bench: Option<QueryBenchState>,
     /// Request counter for in-flight query benchmark executions.
     pub query_bench_request: u64,
+    /// The benchmark dispatch still executing on this connection, whether or
+    /// not its overlay is still open. Held on the model so closing and
+    /// reopening the overlay cannot start a run beside one that is still
+    /// executing, and keyed by its request so a report from any other
+    /// dispatch never changes it.
+    pub bench_in_flight: Option<BenchInFlight>,
     /// Interactive canonical schema snapshot and drift guard overlay state.
     pub schema_snapshot: Option<SchemaSnapshotState>,
     /// Request counter for in-flight schema snapshot catalog captures.
@@ -4123,6 +4186,12 @@ impl Model {
             && theme.depth.shows_transitions()
     }
 
+    /// Whether a benchmark is still executing on this connection.
+    #[must_use]
+    pub const fn benchmark_running(&self) -> bool {
+        self.bench_in_flight.is_some()
+    }
+
     /// Whether a surface is open that must be painted exactly as it is.
     ///
     /// Confirmations, reviews, prompts, the password prompt and the connection
@@ -4130,8 +4199,10 @@ impl Model {
     /// them is open every transition is settled and none starts. Each is named
     /// here rather than inferred, so a new one is a deliberate addition. That
     /// includes the confirmations armed inside a dashboard: the statistics
-    /// reset hazard, maintenance acknowledged for production, and the import
-    /// wizard's review step, where the next Enter writes rows.
+    /// reset hazard, maintenance acknowledged for production, the import
+    /// wizard's review step, where the next Enter writes rows, and a held
+    /// benchmark run, where the next Enter executes statements that do not
+    /// look like reads.
     #[must_use]
     pub fn holds_motion_still(&self) -> bool {
         self.password_prompt.is_some()
@@ -4155,6 +4226,10 @@ impl Model {
                 .import_wizard
                 .as_ref()
                 .is_some_and(|wizard| wizard.step == ImportWizardStep::Execute)
+            || self
+                .query_bench
+                .as_ref()
+                .is_some_and(|bench| bench.run_confirmation.is_some())
     }
 
     /// Advances the pure monotonic mouse clock by `elapsed`.

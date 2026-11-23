@@ -7524,6 +7524,15 @@ pub struct BenchArgs {
     /// Disable per-iteration BEGIN / ROLLBACK isolation (writes will persist).
     #[arg(long)]
     pub no_rollback: bool,
+    /// Allow a statement that writes when the target is classified as
+    /// production.
+    ///
+    /// Without it, a benchmark against a production target refuses anything
+    /// that is not a read, exactly as `query` does. That holds with rollback
+    /// on too: each run is rolled back, but it still takes locks, fires
+    /// triggers and advances sequences while it runs.
+    #[arg(long)]
+    pub allow_write: bool,
     /// Exit 1 when candidate p50 or p95 regresses beyond this percentage.
     #[arg(long = "fail-on-regression-pct", value_name = "PCT")]
     pub fail_on_regression_pct: Option<f64>,
@@ -7594,6 +7603,70 @@ fn resolve_bench_inputs(args: &BenchArgs) -> Result<(String, Option<String>), Di
     Ok((baseline, candidate))
 }
 
+/// Refuses a benchmark of a non-read against a production target.
+///
+/// Matches `query`: a production target refuses anything that is not a read
+/// unless `--allow-write` is given, with the same wording and advisory
+/// caveat. With `--no-rollback` every warmup and measured iteration commits.
+/// With rollback on each iteration is rolled back, but while it runs it still
+/// takes row locks, fires triggers and advances sequences on production, so
+/// the refusal applies in both modes and says which one it is.
+fn bench_write_guard(
+    baseline: &str,
+    candidate: Option<&str>,
+    rollback: bool,
+    environment: &crate::connection::Environment,
+    allow_write: bool,
+) -> Result<(), Diagnostic> {
+    if allow_write || !environment.is_production() {
+        return Ok(());
+    }
+    let queries = [
+        ("the baseline", Some(baseline)),
+        ("the candidate", candidate),
+    ];
+    let strongest = queries
+        .into_iter()
+        .filter_map(|(name, sql)| {
+            sql.map(|sql| (name, crate::query::classify_all(&crate::query::split(sql))))
+        })
+        .max_by_key(|(_, impact)| *impact);
+    let Some((which, impact)) = strongest.filter(|(_, impact)| impact.needs_confirmation()) else {
+        return Ok(());
+    };
+    let (cause, action) = if rollback {
+        (
+            "every warmup and measured run is rolled back, but while it runs it still takes \
+             row locks, fires triggers and advances sequences on the target, and the connection \
+             was given --environment production, which refuses anything that is not a read",
+            "pass --allow-write if running it against production is what you meant, or \
+             benchmark it against a non-production copy. This check reads leading keywords only \
+             and is not a security boundary: database permissions are.",
+        )
+    } else {
+        (
+            "--no-rollback commits every warmup and measured run, and the connection was given \
+             --environment production, which refuses anything that is not a read",
+            "drop --no-rollback to measure inside BEGIN and ROLLBACK, or pass --allow-write if \
+             repeated committed writes are what you meant. This check reads leading keywords only \
+             and is not a security boundary: database permissions are.",
+        )
+    };
+    Err(Diagnostic::new(
+        DiagnosticKind::Usage,
+        format!(
+            "{which} statement {} and the target is classified as production",
+            impact.label()
+        ),
+        "checking a benchmark against the target's classification",
+    )
+    .likely_cause(cause)
+    .next_action(action)
+    .technical("Impact", impact.label())
+    .technical("Rollback", if rollback { "on" } else { "off" })
+    .technical("Environment", environment.label()))
+}
+
 fn run_bench(
     args: &BenchArgs,
     paths: &Paths,
@@ -7603,6 +7676,27 @@ fn run_bench(
     let threshold_pct = validate_regression_pct(args.fail_on_regression_pct)?;
     let (base_sql, cand_sql) = resolve_bench_inputs(args)?;
     let config = crate::bench::BenchConfig::new(args.warmup, args.runs, !args.no_rollback);
+    let allow_write = args.allow_write;
+
+    // Refused from the resolved classification before any credential is
+    // fetched or connection opened, as `query` does, so a refused benchmark
+    // never logs in to production.
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    bench_write_guard(
+        &base_sql,
+        cand_sql.as_deref(),
+        config.rollback,
+        &resolved.environment,
+        allow_write,
+    )?;
 
     let report = connect_and_run(
         args.target.as_deref(),
@@ -7611,11 +7705,34 @@ fn run_bench(
         args.force,
         paths,
         |session| async move {
+            // Checked again against the classification the session was
+            // opened with, before the first iteration.
+            bench_write_guard(
+                &base_sql,
+                cand_sql.as_deref(),
+                config.rollback,
+                &session.info().environment,
+                allow_write,
+            )?;
             let baseline = session
-                .run_benchmark(&base_sql, &config, "Baseline (A)")
+                .run_benchmark(
+                    &base_sql,
+                    &config,
+                    "Baseline (A)",
+                    &crate::postgres::bench::never_stop,
+                )
                 .await?;
             let candidate = match cand_sql {
-                Some(ref sql) => Some(session.run_benchmark(sql, &config, "Candidate (B)").await?),
+                Some(ref sql) => Some(
+                    session
+                        .run_benchmark(
+                            sql,
+                            &config,
+                            "Candidate (B)",
+                            &crate::postgres::bench::never_stop,
+                        )
+                        .await?,
+                ),
                 None => None,
             };
             drop(session);

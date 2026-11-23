@@ -78,8 +78,15 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.mouse.drag = None;
             model.mouse.last_click = None;
             let changed = model.size != (columns, rows);
+            // A held benchmark run is accepted with the same keys, so it
+            // waits for a painted frame at the new size exactly as a review
+            // does.
             let accepting_review = matches!(action, Action::Activate | Action::RunBuffer)
-                && crate::ui::review::active_kind(model).is_some();
+                && (crate::ui::review::active_kind(model).is_some()
+                    || model
+                        .query_bench
+                        .as_ref()
+                        .is_some_and(|bench| bench.run_confirmation.is_some()));
             if changed {
                 reduce(model, Message::Resized(columns, rows));
             }
@@ -219,6 +226,27 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.running_refresh = false;
             model.refresh_pending = false;
             model.watch = None;
+            // A held benchmark run must not survive into a later session, and
+            // runs in flight died with this one; their outcome is unknown.
+            // Their late reports carry the old dispatch's request, so they can
+            // no longer change any count.
+            model.bench_in_flight = None;
+            if let Some(bench) = &mut model.query_bench {
+                let was_running = bench.loading;
+                bench.run_confirmation = None;
+                bench.loading = false;
+                bench.runs_in_flight = 0;
+                bench.status_message = Some(
+                    if was_running {
+                        "The connection was lost while benchmarking; the outcome is unknown and \
+                         nothing was retried."
+                    } else {
+                        "The connection was lost; nothing will run until it is back."
+                    }
+                    .to_owned(),
+                );
+            }
+            model.query_bench_request = model.query_bench_request.wrapping_add(1);
             model.cell_update_notice = cell_update_in_flight
                 .then(|| "The connection was lost; no cell update was retried.".to_owned());
             if refresh_in_flight && !cell_update_in_flight {
@@ -1278,32 +1306,38 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             request,
             target,
             result,
+        } => query_bench_loaded(model, request, target, *result),
+        Message::QueryBenchCancelFailed {
+            request,
+            diagnostic,
         } => {
-            if model.query_bench_request != request {
-                return Vec::new();
-            }
-            if let Some(bench) = &mut model.query_bench {
-                bench.loading = false;
-                match *result {
-                    Ok(stats) => {
-                        match target {
-                            crate::app::message::BenchTarget::Baseline => {
-                                bench.baseline = Some(stats);
-                                bench.status_message =
-                                    Some("Captured Baseline (A) benchmark".to_owned());
-                            }
-                            crate::app::message::BenchTarget::Candidate => {
-                                bench.candidate = Some(stats);
-                                bench.status_message =
-                                    Some("Captured Candidate (B) benchmark".to_owned());
-                            }
-                        }
-                        bench.recompute_report();
-                    }
-                    Err(diag) => {
-                        bench.status_message =
-                            Some(format!("Query benchmark failed: {}", diag.headline));
-                    }
+            let ours = model
+                .bench_in_flight
+                .is_some_and(|flight| flight.request == request);
+            if ours {
+                // The runtime has already marked the run cancelled, so it
+                // sends nothing more; only the statement executing now was not
+                // reached.
+                let text = format!(
+                    "The cancellation request could not reach the server ({}); the statement \
+                     executing now runs to completion, and nothing more is sent after it.",
+                    diagnostic.headline
+                );
+                if let Some(bench) = model
+                    .query_bench
+                    .as_mut()
+                    .filter(|_| model.query_bench_request == request)
+                {
+                    bench.status_message = Some(text);
+                } else {
+                    model.error = Some(
+                        (*diagnostic)
+                            .likely_cause("the cancellation request could not reach the server")
+                            .next_action(
+                                "the statement executing now runs to completion, and the \
+                                 benchmark sends nothing more after it",
+                            ),
+                    );
                 }
             }
             Vec::new()
@@ -2215,8 +2249,65 @@ fn cancel_query(model: &mut Model) -> Vec<Effect> {
             model.phase = QueryPhase::CancellationRequested { job };
             vec![Effect::Cancel { job }]
         }
+        // With no workbench statement running, the benchmark holds the
+        // session's SQL gate, so it is the only gated work that can be
+        // executing: cancelling the session's statement cancels the benchmark,
+        // and the status says exactly that.
+        QueryPhase::Idle if model.benchmark_running() => cancel_benchmark(model),
         QueryPhase::CancellationRequested { .. } | QueryPhase::Idle => Vec::new(),
     }
+}
+
+/// Requests cancellation of the benchmark still executing on this
+/// connection. The status says "Cancellation requested for the benchmark"
+/// until the run reports, and the run sends nothing more once it sees the
+/// request. A second request while the first is outstanding sends nothing.
+fn cancel_benchmark(model: &mut Model) -> Vec<Effect> {
+    let Some(flight) = model.bench_in_flight.as_mut() else {
+        return Vec::new();
+    };
+    if flight.cancel_requested {
+        return Vec::new();
+    }
+    flight.cancel_requested = true;
+    let request = flight.request;
+    let overlay_owns_it = model.query_bench.is_some() && model.query_bench_request == request;
+    if overlay_owns_it {
+        if let Some(bench) = &mut model.query_bench {
+            bench.status_message = Some(BENCH_CANCEL_REQUESTED.to_owned());
+        }
+    } else {
+        model.error = Some(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Cancelled,
+                BENCH_CANCEL_REQUESTED,
+                "cancelling the benchmark",
+            )
+            .next_action(
+                "the benchmark stops at its current statement and sends nothing more; this \
+                 notice changes when it reports",
+            ),
+        );
+        clear_error_location(model);
+    }
+    vec![Effect::CancelBenchmark { request }]
+}
+
+/// The status while a benchmark cancellation is outstanding.
+const BENCH_CANCEL_REQUESTED: &str = "Cancellation requested for the benchmark";
+
+/// The active key for Cancel, for messages that name the way out.
+fn cancel_key_label(model: &Model) -> String {
+    let snapshot = if model.keymap_snapshot.is_empty() {
+        crate::ui::keymap::Keymap::new().snapshot()
+    } else {
+        model.keymap_snapshot.clone()
+    };
+    snapshot
+        .bindings
+        .iter()
+        .find(|binding| binding.action == Action::Cancel)
+        .map_or_else(|| "Cancel".to_owned(), |binding| binding.key.clone())
 }
 
 /// Handles input while the completion menu is open.
@@ -3941,7 +4032,9 @@ fn watch_tick(model: &mut Model) -> Vec<Effect> {
         model.watch = None;
         return Vec::new();
     }
-    if model.phase.is_busy() {
+    // A watch waits out a benchmark rather than raising a refusal on every
+    // tick; its next iteration runs once the session is free.
+    if model.phase.is_busy() || model.benchmark_running() {
         return Vec::new();
     }
     let Some(mut watch) = model.watch.take() else {
@@ -4198,8 +4291,40 @@ fn plan_diff_open(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
+/// Refuses a plan-diff `EXPLAIN ANALYZE` while a benchmark is running.
+///
+/// ANALYZE executes the statement inside its own `BEGIN` and `ROLLBACK`.
+/// The session's SQL gate keeps the two brackets apart, but the request would
+/// only queue behind the benchmark, so it is refused with the reason instead.
+/// Returns whether it refused.
+fn plan_diff_refuses_analyze(model: &mut Model, analyze: bool) -> bool {
+    if !analyze || !model.benchmark_running() {
+        return false;
+    }
+    let key = cancel_key_label(model);
+    if let Some(diff) = &mut model.plan_diff {
+        diff.status_message = Some(format!(
+            "A benchmark is still running on this connection; EXPLAIN ANALYZE was not sent. \
+             Wait for it to finish or press {key} (Cancel) to cancel it."
+        ));
+    }
+    true
+}
+
 /// Handles input while the extended EXPLAIN & plan diff overlay is open.
 fn plan_diff_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let analyze_mode = model
+        .plan_diff
+        .as_ref()
+        .is_some_and(|diff| diff.analyze_mode);
+    let analyzes = match action {
+        Action::Insert('a' | 'A' | 'b' | 'B' | 'r' | 'R') => analyze_mode,
+        Action::Insert('m' | 'M') => !analyze_mode,
+        _ => false,
+    };
+    if plan_diff_refuses_analyze(model, analyzes) {
+        return Vec::new();
+    }
     match action {
         Action::Dismiss | Action::PlanDiff => {
             model.plan_diff = None;
@@ -4393,7 +4518,7 @@ fn result_analytics_action(model: &mut Model, action: Action) -> Vec<Effect> {
 /// Opens the query latency benchmark and A/B regression suite overlay (`056`).
 fn query_bench_open(model: &mut Model) -> Vec<Effect> {
     if model.query_bench.is_some() {
-        model.query_bench = None;
+        query_bench_close(model);
         return Vec::new();
     }
     let buffer_sql = model.editor.text().to_owned();
@@ -4411,24 +4536,193 @@ fn query_bench_open(model: &mut Model) -> Vec<Effect> {
         .map(|s| buffer_sql[s.start..s.end].to_owned())
         .unwrap_or_default();
 
+    // A new overlay never accepts a report meant for an earlier one.
+    model.query_bench_request = model.query_bench_request.wrapping_add(1);
     model.query_bench = Some(crate::app::model::QueryBenchState {
         baseline_sql,
         candidate_sql,
         ..Default::default()
     });
-    query_bench_dispatch_runs(model)
+    query_bench_dispatch_runs(model, false)
 }
 
-fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
+/// Closes the benchmark overlay. Runs already sent keep executing and are
+/// still counted on the connection, but their reports no longer reach any
+/// overlay.
+fn query_bench_close(model: &mut Model) {
+    model.query_bench = None;
+    model.query_bench_request = model.query_bench_request.wrapping_add(1);
+}
+
+/// What a benchmark run needs before it may be dispatched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BenchGate {
+    /// Nothing more is needed.
+    Run,
+    /// One explicit confirmation is needed first.
+    Confirm(crate::app::model::BenchRunConfirmation),
+    /// The run is refused, for the stated reason.
+    Refuse(String),
+}
+
+/// Decides whether a benchmark may run as configured.
+///
+/// Nothing runs while a transaction is known to be open in the session: a
+/// rolled-back iteration's `ROLLBACK` would discard the user's uncommitted
+/// work, and a committed one would join it. The session checks the real
+/// state again before it sends anything. Otherwise reads always run. For a statement
+/// the advisory classifier does not call a read, the answer depends on the
+/// mode and the connection:
+///
+/// - Rollback off: every iteration commits, so the statement would be
+///   repeated `warmup + measured` times. That is refused outright on a
+///   production connection or a read-only session, and needs one explicit
+///   confirmation anywhere else.
+/// - Rollback on: each iteration is wrapped in `BEGIN` and an unconditional
+///   `ROLLBACK`. Off production that is left to run. On production the runs
+///   still take row locks, fire triggers and advance sequences while they
+///   execute, so they need the same explicit confirmation first.
+///
+/// The classifier is the same one the workbench uses before it runs a write;
+/// it reads leading keywords only and is not a security boundary.
+fn query_bench_gate(model: &Model, bench: &crate::app::model::QueryBenchState) -> BenchGate {
+    // A known open or failed transaction is refused here, where the user can
+    // read why. An unknown state is left to the session, which reads the real
+    // state under its SQL gate before the first iteration and refuses there.
+    if matches!(
+        model.transaction,
+        crate::query::result::TransactionState::Open
+            | crate::query::result::TransactionState::Failed
+    ) {
+        return BenchGate::Refuse(format!(
+            "Refused: this session is not idle ({}). A benchmark would roll back or join \
+             that transaction. COMMIT or ROLLBACK it first, then press r.",
+            model.transaction.label()
+        ));
+    }
+    let queries = [
+        ("Query A", bench.baseline_sql.as_str()),
+        ("Query B", bench.candidate_sql.as_str()),
+    ];
+    let mut strongest: Option<(&'static str, crate::query::Impact)> = None;
+    let mut non_reads = 0usize;
+    for (name, sql) in queries {
+        if sql.trim().is_empty() {
+            continue;
+        }
+        let impact = crate::query::classify_all(&statements::split(sql));
+        if impact.needs_confirmation() {
+            non_reads += 1;
+        }
+        if strongest.is_none_or(|(_, current)| impact > current) {
+            strongest = Some((name, impact));
+        }
+    }
+    let Some((query, impact)) = strongest.filter(|(_, impact)| impact.needs_confirmation()) else {
+        return BenchGate::Run;
+    };
+    let rollback = bench.config.rollback;
+    let production = model.environment().is_production();
+    if rollback && !production {
+        return BenchGate::Run;
+    }
+    let effective = bench.config.clamped();
+    // Only the statements that do not look like reads are counted, so an A/B
+    // pair of one read and one write is not overstated.
+    let executions = non_reads.saturating_mul(effective.warmup_runs + effective.measured_runs);
+    if !rollback && production {
+        return BenchGate::Refuse(format!(
+            "Refused: {query} {} and this connection is classified production. With rollback \
+             off all {executions} non-read executions would persist. Press m to turn rollback \
+             back on.",
+            impact.label()
+        ));
+    }
+    if !rollback && model.connection.info().is_some_and(|info| info.read_only) {
+        return BenchGate::Refuse(format!(
+            "Refused: {query} {} and this session is read-only. With rollback off it cannot \
+             run here. Press m to turn rollback back on.",
+            impact.label()
+        ));
+    }
+    BenchGate::Confirm(crate::app::model::BenchRunConfirmation {
+        query,
+        impact,
+        executions,
+        rollback,
+        typed: String::new(),
+        required: model
+            .connection
+            .info()
+            .map_or_else(String::new, |info| info.database.clone()),
+    })
+}
+
+/// Dispatches the configured benchmark runs once every local gate passes.
+///
+/// `confirmed` is true only when the user has just accepted a held run. The
+/// gate is evaluated again regardless, so a refusal that became true since
+/// the confirmation was armed still wins.
+fn query_bench_dispatch_runs(model: &mut Model, confirmed: bool) -> Vec<Effect> {
+    let Some(bench) = &model.query_bench else {
+        return Vec::new();
+    };
+    let busy = if !model.connection.is_usable() {
+        Some("Not connected. Nothing ran.".to_owned())
+    } else if model.phase.is_busy() {
+        Some(
+            "A statement is still running in the workbench. Wait for it to finish before \
+             benchmarking."
+                .to_owned(),
+        )
+    } else if bench.loading {
+        Some(format!(
+            "A benchmark is already running. Wait for it to finish, or press {} to cancel it.",
+            cancel_key_label(model)
+        ))
+    } else if model.benchmark_running() {
+        Some(format!(
+            "An earlier benchmark is still running on this connection. Wait for it to finish, \
+             or press {} to cancel it.",
+            cancel_key_label(model)
+        ))
+    } else {
+        None
+    };
+    if let Some(reason) = busy {
+        if let Some(bench) = &mut model.query_bench {
+            bench.run_confirmation = None;
+            bench.status_message = Some(reason);
+        }
+        return Vec::new();
+    }
+    let cancel_key = cancel_key_label(model);
+    let gate = query_bench_gate(model, bench);
     let Some(bench) = &mut model.query_bench else {
         return Vec::new();
     };
+    match gate {
+        BenchGate::Run => {}
+        BenchGate::Refuse(reason) => {
+            bench.run_confirmation = None;
+            bench.status_message = Some(reason);
+            return Vec::new();
+        }
+        BenchGate::Confirm(confirmation) if !confirmed => {
+            bench.status_message = None;
+            bench.run_confirmation = Some(confirmation);
+            return Vec::new();
+        }
+        BenchGate::Confirm(_) => {}
+    }
+    bench.run_confirmation = None;
     let config = bench.config;
     let base_sql = bench.baseline_sql.clone();
     let cand_sql = bench.candidate_sql.clone();
     bench.loading = true;
     bench.status_message = Some(format!(
-        "Running benchmark ({} warmup, {} measured, rollback={})...",
+        "Running benchmark ({} warmup, {} measured, rollback={})... Press {cancel_key} to \
+         cancel.",
         config.warmup_runs,
         config.measured_runs,
         if config.rollback { "on" } else { "off" }
@@ -4453,19 +4747,144 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
             config,
         });
     }
-    if effects.is_empty()
-        && let Some(bench) = &mut model.query_bench
-    {
-        bench.loading = false;
+    if let Some(bench) = &mut model.query_bench {
+        bench.runs_in_flight = effects.len();
+        bench.loading = !effects.is_empty();
+    }
+    // The runtime executes this dispatch's effects as one task, the baseline
+    // before the candidate, on the session it holds right now and under that
+    // session's SQL gate. Every target reports exactly once, even when the
+    // task stops early, so this record always clears.
+    if !effects.is_empty() {
+        model.bench_in_flight = Some(crate::app::model::BenchInFlight {
+            request,
+            remaining: effects.len(),
+            cancel_requested: false,
+        });
     }
     effects
 }
 
+/// Applies one target's report from a benchmark dispatch.
+///
+/// Only the dispatch still in flight counts down, so a report from a closed
+/// overlay's run, or from before a connection was lost, never changes the
+/// record of what is running now. While a cancellation is outstanding the
+/// status keeps saying so until the last target reports, and then says how
+/// the benchmark ended.
+fn query_bench_loaded(
+    model: &mut Model,
+    request: u64,
+    target: crate::app::message::BenchTarget,
+    result: Result<crate::bench::BenchStats, crate::diagnostics::Diagnostic>,
+) -> Vec<Effect> {
+    let flight = model
+        .bench_in_flight
+        .filter(|flight| flight.request == request);
+    let cancel_requested = flight.is_some_and(|flight| flight.cancel_requested);
+    let finished = flight.is_some_and(|flight| flight.remaining <= 1);
+    if let Some(flight) = flight {
+        model.bench_in_flight = (!finished).then_some(crate::app::model::BenchInFlight {
+            remaining: flight.remaining - 1,
+            ..flight
+        });
+    }
+    let cancel_outcome = (cancel_requested && finished).then(|| match &result {
+        Ok(_) => "The benchmark finished before the cancellation reached it.".to_owned(),
+        Err(diagnostic) => format!(
+            "The benchmark stopped after cancellation was requested: {}",
+            diagnostic.headline
+        ),
+    });
+    if model.query_bench_request != request || model.query_bench.is_none() {
+        // The overlay that started it is closed; the workbench notice that
+        // said cancellation was requested now says how it ended.
+        if let Some(outcome) = cancel_outcome {
+            model.error = Some(crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Cancelled,
+                outcome,
+                "cancelling the benchmark",
+            ));
+            clear_error_location(model);
+        }
+        return Vec::new();
+    }
+    let Some(bench) = &mut model.query_bench else {
+        return Vec::new();
+    };
+    bench.runs_in_flight = bench.runs_in_flight.saturating_sub(1);
+    bench.loading = bench.runs_in_flight > 0;
+    let failure = result.as_ref().err().map(|diag| diag.headline.clone());
+    if let Ok(stats) = result {
+        match target {
+            crate::app::message::BenchTarget::Baseline => bench.baseline = Some(stats),
+            crate::app::message::BenchTarget::Candidate => bench.candidate = Some(stats),
+        }
+        bench.recompute_report();
+    }
+    bench.status_message = Some(if let Some(outcome) = cancel_outcome {
+        outcome
+    } else if cancel_requested {
+        BENCH_CANCEL_REQUESTED.to_owned()
+    } else if let Some(headline) = failure {
+        format!("Query benchmark failed: {headline}")
+    } else {
+        match target {
+            crate::app::message::BenchTarget::Baseline => "Captured Baseline (A) benchmark",
+            crate::app::message::BenchTarget::Candidate => "Captured Candidate (B) benchmark",
+        }
+        .to_owned()
+    });
+    Vec::new()
+}
+
+/// Handles input while a held benchmark run waits for confirmation.
+///
+/// Returns `None` when the key was consumed. Enter accepts once the
+/// confirmation is satisfied; Esc cancels it and keeps the overlay open. When
+/// a database name must be typed, printable keys and Backspace edit it. Any
+/// other key cancels the confirmation and is then handled as usual, so a
+/// held run never survives a change of mind.
+fn query_bench_confirmation_action(model: &mut Model, action: &Action) -> Option<Vec<Effect>> {
+    let bench = model.query_bench.as_mut()?;
+    let confirmation = bench.run_confirmation.as_mut()?;
+    match action {
+        Action::Activate | Action::RunBuffer => {
+            if confirmation.is_satisfied() {
+                return Some(query_bench_dispatch_runs(model, true));
+            }
+            Some(Vec::new())
+        }
+        Action::Insert(ch) if confirmation.needs_typing() => {
+            confirmation.typed.push(*ch);
+            Some(Vec::new())
+        }
+        Action::Backspace if confirmation.needs_typing() => {
+            confirmation.typed.pop();
+            Some(Vec::new())
+        }
+        Action::Quit => None,
+        Action::Dismiss | Action::Cancel => {
+            bench.run_confirmation = None;
+            bench.status_message = Some("Held run cancelled. Nothing ran.".to_owned());
+            Some(Vec::new())
+        }
+        _ => {
+            bench.run_confirmation = None;
+            bench.status_message = Some("Held run cancelled. Nothing ran.".to_owned());
+            None
+        }
+    }
+}
+
 /// Handles input while the query latency benchmark overlay is open.
 fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if let Some(effects) = query_bench_confirmation_action(model, &action) {
+        return effects;
+    }
     match action {
         Action::Dismiss | Action::QueryBench => {
-            model.query_bench = None;
+            query_bench_close(model);
         }
         Action::Quit => {
             model.should_quit = true;
@@ -4492,13 +4911,43 @@ fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
         }
         Action::Insert('m' | 'M') => {
+            // Toggling only changes the mode and says what it means. Running
+            // is always a separate, deliberate key, so turning rollback off
+            // can never execute anything by itself.
+            let cancel_key = cancel_key_label(model);
             if let Some(bench) = &mut model.query_bench {
-                bench.config.rollback = !bench.config.rollback;
+                if bench.loading {
+                    bench.status_message = Some(format!(
+                        "A benchmark is running. Change the rollback mode after it finishes, \
+                         or press {cancel_key} to cancel it."
+                    ));
+                } else {
+                    bench.config.rollback = !bench.config.rollback;
+                    bench.run_confirmation = None;
+                    bench.status_message = Some(
+                        if bench.config.rollback {
+                            "Rollback on: each run is wrapped in BEGIN and ROLLBACK. Press r to run."
+                        } else {
+                            "Rollback off: writes will persist. Press r to run."
+                        }
+                        .to_owned(),
+                    );
+                }
             }
-            return query_bench_dispatch_runs(model);
         }
         Action::Insert('r' | 'R') => {
-            return query_bench_dispatch_runs(model);
+            return query_bench_dispatch_runs(model, false);
+        }
+        Action::Cancel => {
+            // Whether anything is running is the connection's record, not
+            // this overlay's: a run started before it was reopened counts.
+            if model.benchmark_running() {
+                return cancel_benchmark(model);
+            }
+            if let Some(bench) = &mut model.query_bench {
+                bench.status_message =
+                    Some("Nothing is running, so nothing was cancelled.".to_owned());
+            }
         }
         _ => {}
     }
@@ -6743,6 +7192,9 @@ fn begin_plan(model: &mut Model, analyze: bool) -> Vec<Effect> {
     {
         return Vec::new();
     }
+    if refuse_beside_benchmark(model, "reading the query plan") {
+        return Vec::new();
+    }
     let Some(source) = error_location::source_at_cursor(model.editor.text(), model.editor.cursor())
     else {
         return Vec::new();
@@ -6786,6 +7238,9 @@ fn start_plan(
         || model.phase.is_busy()
         || model.transaction == crate::query::result::TransactionState::Failed
     {
+        return Vec::new();
+    }
+    if refuse_beside_benchmark(model, "reading the query plan") {
         return Vec::new();
     }
     let parsed = statements::split(&sql);
@@ -7015,12 +7470,50 @@ fn run_metacommand(
     }
 }
 
+/// Refuses a workbench statement while a benchmark still holds the session.
+///
+/// A benchmark holds the session's SQL gate until its last iteration ends, so
+/// a workbench statement sent now would only wait behind it, and Cancel,
+/// which asks the server to stop whatever is executing, would reach the
+/// benchmark's statement while the status line described the user's. Nothing
+/// is sent, and the refusal says why. Returns whether it refused.
+fn refuse_beside_benchmark(model: &mut Model, context: &str) -> bool {
+    if !model.benchmark_running() {
+        return false;
+    }
+    model.refresh_pending = false;
+    model.error = Some(
+        crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Usage,
+            "A benchmark is still running on this connection",
+            context,
+        )
+        .likely_cause(
+            "the benchmark holds the session until its last iteration ends, so this statement \
+             would only wait behind it",
+        )
+        .next_action(format!(
+            "wait for the benchmark to finish or press {} (Cancel) to cancel it, then run \
+             this again; closing the benchmark overlay does not stop runs already sent. \
+             Nothing was sent.",
+            cancel_key_label(model)
+        )),
+    );
+    clear_error_location(model);
+    true
+}
+
 fn run_sql_statement(
     model: &mut Model,
     sql: String,
     source: Option<StatementSource>,
 ) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
+    // Before any confirmation, so nobody types a database name for a run that
+    // would then be refused.
+    if refuse_beside_benchmark(model, "running the statement") {
         return Vec::new();
     }
     let parsed = statements::split(&sql);
@@ -7053,6 +7546,11 @@ fn run_sql_statement(
 /// Begins an execution that has already been allowed.
 fn start(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
+    // Before a parameter prompt opens, so no values are entered for a run
+    // that would then be refused.
+    if refuse_beside_benchmark(model, "running the statement") {
         return Vec::new();
     }
     let parsed = statements::split(&sql);
@@ -7098,6 +7596,12 @@ fn start_with_parameters(
     parameters: Option<crate::query::ParameterBindings>,
 ) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
+        return Vec::new();
+    }
+    // Every workbench statement passes through here: the buffer, a single
+    // statement, a confirmed or parameterized run, a refresh, a watch
+    // iteration and a generated cell update.
+    if refuse_beside_benchmark(model, "running the statement") {
         return Vec::new();
     }
     let parsed = statements::split(&sql);
@@ -7747,6 +8251,15 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
         model.format_notice = None;
         return Vec::new();
     }
+    // The benchmark overlay owns input and has no text field to paste into.
+    // A held run's database name is typed deliberately, as it is for a
+    // production run, so a paste is acknowledged and ignored rather than
+    // reaching the editor hidden underneath.
+    if model.query_bench.is_some() {
+        model.paste_notice = Some(PasteNotice::Ignored);
+        model.format_notice = None;
+        return Vec::new();
+    }
     if model.tree.filtering {
         model.tree.filter.push_str(&text);
         model.tree.selected = 0;
@@ -7926,6 +8439,25 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     if model.phase.is_busy() || matches!(model.connection, ConnectionState::Connecting { .. }) {
         return Vec::new();
     }
+    // A benchmark is never left running on a connection the user has
+    // switched away from: switching waits, and the way out is named.
+    if model.benchmark_running() {
+        model.error = Some(
+            crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Usage,
+                "A benchmark is still running on this connection, so the connection was not \
+                 switched",
+                "switching the connection",
+            )
+            .next_action(format!(
+                "press {} (Cancel) to cancel the benchmark, or wait for it to finish, then \
+                 switch again",
+                cancel_key_label(model)
+            )),
+        );
+        clear_error_location(model);
+        return Vec::new();
+    }
     let summary = profile.as_deref().and_then(|name| {
         model
             .connection_profiles
@@ -7936,6 +8468,8 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
         .notice_state
         .begin_retirement(model.connection_generation);
     model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
+    // Reports from the old connection are rejected by generation.
+    model.bench_in_flight = None;
     model.credential_provider = summary.and_then(|item| item.auth.clone());
     model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
     model.connection = ConnectionState::Connecting {

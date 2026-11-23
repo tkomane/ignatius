@@ -66,8 +66,9 @@ cannot meet one of them does not animate.
    single frame. No overlay arrives with motion, and while a reviewed-write,
    typed-confirmation, copy-review, prompt or connection trust surface is open,
    or a confirmation armed inside a dashboard (the statistics reset hazard,
-   maintenance acknowledged for production, the import review step), nothing
-   moves at all, so their paint-before-accept behaviour is unchanged.
+   maintenance acknowledged for production, the import review step, a held
+   benchmark run), nothing moves at all, so their paint-before-accept
+   behaviour is unchanged.
 
 ## User Scenarios & Testing
 

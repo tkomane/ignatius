@@ -146,6 +146,22 @@ the full capsule: a failed gate, breaking drift, a live run that commits, and
 writes allowed. Key hints are keycaps without brackets, separated the way the
 workbench footer separates them, and name `Up/Down` rather than Vim keys.
 
+**A benchmark never touches data by surprise.** Switching the benchmark's
+rollback mode only says what the new mode means; running is always a separate
+key. With rollback off every iteration commits, so a statement the advisory
+classifier does not read as a read is refused on production or in a read-only
+session, and elsewhere waits for one explicit Enter, plus the database name
+when it appears to destroy data. With rollback on, the same statement still
+waits for that confirmation on production, because each run is rolled back but
+takes locks, fires triggers and advances sequences there while it runs; the
+prompt says so. Reads always run at once. Nothing runs inside an open
+transaction or beside an earlier benchmark still executing on the connection,
+and A finishes before B starts. While a benchmark runs, the workbench refuses
+to send statements or switch connections rather than queue behind it, and
+Cancel stops the benchmark itself, saying so, so Cancel only ever reaches the
+statement the status line describes. Each result says whether its
+runs were rolled back or committed.
+
 **Nothing modal for anything harmless.** Confirmations are reserved for actions
 that deserve them. A confirmation people dismiss reflexively is worse than none,
 because it trains the reflex.

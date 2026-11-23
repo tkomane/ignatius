@@ -784,6 +784,7 @@ async fn event_loop(
     let current_target: Arc<tokio::sync::RwLock<Option<Arc<ConnectionTarget>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
     let connection_generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
+    let bench_active = BenchActive::default();
     if let Some(target) = target {
         let target = Arc::new(target);
         *current_target.write().await = Some(Arc::clone(&target));
@@ -907,6 +908,7 @@ async fn event_loop(
                 model.error = Some(error);
             }
         }
+        let mut bench_dispatch: Option<BenchDispatch> = None;
         for effect in effects {
             match effect {
                 Effect::Quit => {
@@ -1423,16 +1425,22 @@ async fn event_loop(
                     sql,
                     config,
                 } => {
-                    spawn_run_query_bench(
-                        tx.clone(),
-                        Arc::clone(&session),
-                        BenchRunSpec {
+                    // Gathered, then started as one task after this
+                    // reduction's effects, on the session held right now.
+                    bench_dispatch
+                        .get_or_insert_with(|| BenchDispatch {
                             request,
-                            target,
-                            sql,
                             config,
-                        },
-                        Arc::clone(&connection_generation),
+                            runs: Vec::new(),
+                        })
+                        .runs
+                        .push((target, sql));
+                }
+                Effect::CancelBenchmark { request } => {
+                    cancel_query_bench(
+                        &bench_active,
+                        request,
+                        tx.clone(),
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
@@ -1491,6 +1499,23 @@ async fn event_loop(
                     });
                 }
             }
+        }
+        if let Some(dispatch) = bench_dispatch.take() {
+            // Captured at dispatch: a later connection switch can never hand
+            // this benchmark a different session.
+            let generation = connection_generation.load(std::sync::atomic::Ordering::SeqCst);
+            let opened = session
+                .read()
+                .await
+                .clone()
+                .filter(|installed| installed.generation == generation);
+            spawn_query_bench_dispatch(
+                tx.clone(),
+                opened,
+                dispatch,
+                Arc::clone(&connection_generation),
+                &bench_active,
+            );
         }
         // The session's own pause lives in the model, where the key that toggles
         // it is handled; the writer is told about it here.
@@ -3545,46 +3570,294 @@ fn spawn_load_extended_explain(
     });
 }
 
-struct BenchRunSpec {
+/// One benchmark dispatch: every `RunQueryBench` effect a single reduction
+/// emitted, in order.
+struct BenchDispatch {
     request: u64,
-    target: crate::app::message::BenchTarget,
-    sql: String,
     config: crate::bench::BenchConfig,
+    runs: Vec<(crate::app::message::BenchTarget, String)>,
 }
 
-fn spawn_run_query_bench(
+impl BenchDispatch {
+    fn targets(&self) -> Vec<crate::app::message::BenchTarget> {
+        self.runs.iter().map(|(target, _)| *target).collect()
+    }
+}
+
+/// The session a benchmark dispatch runs on, captured when it is dispatched.
+///
+/// A seam so the dispatch's ordering and stopping rules can be tested without
+/// a server; the runtime's only implementation is the installed session.
+trait BenchSession: Send + Sync + 'static {
+    fn run<'a>(
+        &'a self,
+        sql: &'a str,
+        config: &'a crate::bench::BenchConfig,
+        label: &'a str,
+        stop: crate::postgres::bench::StopCheck<'a>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<crate::bench::BenchStats, Diagnostic>>
+                + Send
+                + 'a,
+        >,
+    >;
+}
+
+impl BenchSession for InstalledSession {
+    fn run<'a>(
+        &'a self,
+        sql: &'a str,
+        config: &'a crate::bench::BenchConfig,
+        label: &'a str,
+        stop: crate::postgres::bench::StopCheck<'a>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<crate::bench::BenchStats, Diagnostic>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(self.run_benchmark(sql, config, label, stop))
+    }
+}
+
+/// The benchmark dispatch currently executing, so Cancel can reach it.
+struct ActiveBench {
+    request: u64,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    cancel: Option<crate::postgres::session::CancelHandle>,
+}
+
+/// Where the runtime keeps the executing benchmark dispatch, if any.
+#[derive(Clone, Default)]
+struct BenchActive(Arc<std::sync::Mutex<Option<ActiveBench>>>);
+
+impl BenchActive {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<ActiveBench>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn begin(&self, active: ActiveBench) {
+        *self.lock() = Some(active);
+    }
+
+    /// Forgets the dispatch, but only if it is still the one recorded.
+    fn end(&self, request: u64) {
+        let mut slot = self.lock();
+        if slot
+            .as_ref()
+            .is_some_and(|active| active.request == request)
+        {
+            *slot = None;
+        }
+    }
+
+    /// Marks the dispatch cancelled and returns its cancel handle.
+    fn cancel(&self, request: u64) -> Option<Option<crate::postgres::session::CancelHandle>> {
+        let slot = self.lock();
+        let active = slot.as_ref().filter(|active| active.request == request)?;
+        active
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Some(active.cancel.clone())
+    }
+}
+
+/// Reports every target of a dispatch exactly once.
+///
+/// A target that has not reported when this is dropped, because the task
+/// stopped early, returned or panicked, is reported with the reason set last,
+/// so the reducer's record of the running benchmark always clears. Reports
+/// carry the dispatch's connection generation, so the reducer discards them
+/// if the connection has changed since.
+struct BenchReports {
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
-    spec: BenchRunSpec,
-    generation: Arc<std::sync::atomic::AtomicU64>,
-    request_generation: u64,
+    generation: u64,
+    request: u64,
+    pending: Vec<crate::app::message::BenchTarget>,
+    reason: Diagnostic,
+    active: BenchActive,
+}
+
+impl BenchReports {
+    fn new(
+        tx: mpsc::UnboundedSender<Message>,
+        generation: u64,
+        dispatch: &BenchDispatch,
+        active: BenchActive,
+    ) -> Self {
+        Self {
+            tx,
+            generation,
+            request: dispatch.request,
+            pending: dispatch.targets(),
+            reason: Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Internal,
+                "the benchmark stopped before it reported; nothing more was sent",
+                "running a query benchmark",
+            ),
+            active,
+        }
+    }
+
+    fn report(
+        &mut self,
+        target: crate::app::message::BenchTarget,
+        result: Result<crate::bench::BenchStats, Diagnostic>,
+    ) {
+        self.pending.retain(|pending| *pending != target);
+        send_connection_message(
+            &self.tx,
+            self.generation,
+            Message::QueryBenchLoaded {
+                request: self.request,
+                target,
+                result: Box::new(result),
+            },
+        );
+    }
+
+    /// Sets why any target not yet reported did not run.
+    fn unreported_because(&mut self, reason: Diagnostic) {
+        self.reason = reason;
+    }
+}
+
+impl Drop for BenchReports {
+    fn drop(&mut self) {
+        self.active.end(self.request);
+        for target in std::mem::take(&mut self.pending) {
+            send_connection_message(
+                &self.tx,
+                self.generation,
+                Message::QueryBenchLoaded {
+                    request: self.request,
+                    target,
+                    result: Box::new(Err(self.reason.clone())),
+                },
+            );
+        }
+    }
+}
+
+/// Runs one benchmark dispatch: the baseline, then the candidate, in this
+/// single task, on the session captured at dispatch.
+///
+/// Before every target and every iteration it checks that the connection is
+/// still the one it was dispatched on and that no cancellation was asked
+/// for; either stops it with nothing more sent. A target that fails stops
+/// the candidate from starting. The old connection's runs therefore never
+/// touch a new session, and B never runs after A was cancelled.
+async fn run_query_bench_dispatch<S: BenchSession + ?Sized>(
+    runner: Option<Arc<S>>,
+    dispatch: BenchDispatch,
+    live_generation: Arc<std::sync::atomic::AtomicU64>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    mut reports: BenchReports,
 ) {
-    tokio::spawn(async move {
-        let opened = {
-            let held = slot.read().await;
-            held.clone()
-        };
-        let Some(session) = opened else {
+    let Some(runner) = runner else {
+        reports.unreported_because(
+            Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Connection,
+                "no open session to benchmark on",
+                "running a query benchmark",
+            )
+            .next_action("reconnect, then run the benchmark again; nothing was sent"),
+        );
+        return;
+    };
+    let dispatched_on = reports.generation;
+    let stop = move || {
+        if live_generation.load(std::sync::atomic::Ordering::SeqCst) != dispatched_on {
+            Some(crate::postgres::bench::BenchStop::ConnectionChanged)
+        } else if cancelled.load(std::sync::atomic::Ordering::SeqCst) {
+            Some(crate::postgres::bench::BenchStop::Cancelled)
+        } else {
+            None
+        }
+    };
+    for (target, sql) in &dispatch.runs {
+        if let Some(reason) = stop() {
+            reports.unreported_because(reason.diagnostic());
             return;
-        };
-        let prefix = match spec.target {
+        }
+        let prefix = match target {
             crate::app::message::BenchTarget::Baseline => "Baseline (A)",
             crate::app::message::BenchTarget::Candidate => "Candidate (B)",
         };
-        let preview = crate::plandiff::bound_label(&spec.sql);
+        let preview = crate::plandiff::bound_label(sql);
         let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
-        let result = session.run_benchmark(&spec.sql, &spec.config, &label).await;
-        if !connection_generation_is_current(&generation, request_generation) {
+        let result = runner.run(sql, &dispatch.config, &label, &stop).await;
+        let failed = result.is_err();
+        reports.report(*target, result);
+        if failed {
+            reports.unreported_because(stop().map_or_else(
+                || {
+                    Diagnostic::new(
+                        crate::diagnostics::DiagnosticKind::Usage,
+                        "Query B was not run because Query A did not complete",
+                        "running a query benchmark",
+                    )
+                },
+                crate::postgres::bench::BenchStop::diagnostic,
+            ));
             return;
         }
-        let _ = tx.send(connection_message(
-            request_generation,
-            Message::QueryBenchLoaded {
-                request: spec.request,
-                target: spec.target,
-                result: Box::new(result),
-            },
-        ));
+    }
+}
+
+/// Starts a benchmark dispatch on the session captured at dispatch time.
+fn spawn_query_bench_dispatch(
+    tx: mpsc::UnboundedSender<Message>,
+    runner: Option<Arc<InstalledSession>>,
+    dispatch: BenchDispatch,
+    live_generation: Arc<std::sync::atomic::AtomicU64>,
+    active: &BenchActive,
+) {
+    let generation = live_generation.load(std::sync::atomic::Ordering::SeqCst);
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    active.begin(ActiveBench {
+        request: dispatch.request,
+        cancelled: Arc::clone(&cancelled),
+        cancel: runner.as_ref().map(|session| session.cancel_handle()),
+    });
+    let reports = BenchReports::new(tx, generation, &dispatch, active.clone());
+    tokio::spawn(run_query_bench_dispatch(
+        runner,
+        dispatch,
+        live_generation,
+        cancelled,
+        reports,
+    ));
+}
+
+/// Cancels the benchmark dispatch still executing: it sends nothing more,
+/// and the session's cancel token asks the server to stop its statement.
+/// Nothing else gated can be executing, because the benchmark holds the
+/// session's SQL gate.
+fn cancel_query_bench(
+    active: &BenchActive,
+    request: u64,
+    tx: mpsc::UnboundedSender<Message>,
+    generation: u64,
+) {
+    let Some(Some(handle)) = active.cancel(request) else {
+        return;
+    };
+    tokio::spawn(async move {
+        if let Err(diagnostic) = handle.cancel().await {
+            send_connection_message(
+                &tx,
+                generation,
+                Message::QueryBenchCancelFailed {
+                    request,
+                    diagnostic: Box::new(diagnostic),
+                },
+            );
+        }
     });
 }
 

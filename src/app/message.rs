@@ -847,6 +847,13 @@ pub enum Message {
         /// Measured benchmark statistics or error.
         result: Box<Result<crate::bench::BenchStats, Diagnostic>>,
     },
+    /// A benchmark cancellation request could not be delivered to the server.
+    QueryBenchCancelFailed {
+        /// The benchmark dispatch the request was for.
+        request: u64,
+        /// Why it could not be delivered.
+        diagnostic: Box<Diagnostic>,
+    },
     /// Canonical schema snapshot captured from PostgreSQL catalog.
     SchemaSnapshotLoaded {
         /// Which request this answers, so a late answer is discarded.
@@ -917,6 +924,12 @@ pub enum Effect {
     Cancel {
         /// Identity of the job being cancelled.
         job: JobId,
+    },
+    /// Ask the server to cancel the benchmark dispatch still executing, and
+    /// stop it before its next iteration or target.
+    CancelBenchmark {
+        /// The benchmark dispatch to cancel.
+        request: u64,
     },
     /// Leave the application.
     Quit,
@@ -1192,6 +1205,9 @@ pub enum Effect {
         analyze: bool,
     },
     /// Execute warmup and measured benchmark iterations for one SQL statement.
+    /// One target of a benchmark dispatch. Every such effect emitted by one
+    /// reduction belongs to the same dispatch, and the runtime executes them
+    /// in order inside a single task on the session it holds at dispatch.
     RunQueryBench {
         /// Identity used to reject a late response.
         request: u64,

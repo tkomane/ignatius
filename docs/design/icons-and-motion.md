@@ -160,8 +160,10 @@ that cannot meet one of them does not move:
    carry `[PROD]`, `[READ ONLY]`, `[TX ACTIVE]` and `[TX FAILED]` are never
    dimmed, faded or split between two themes. While a confirmation, a
    review, a prompt or the connection trust surface is open, including a
-   confirmation armed inside a dashboard, nothing moves, so its
-   paint-before-accept behaviour is unchanged.
+   confirmation armed inside a dashboard (the statistics reset hazard,
+   maintenance acknowledged for production, the import review step, and a
+   held benchmark run), nothing moves, so its paint-before-accept behaviour is
+   unchanged.
 
 Three moving things answer "is this still working":
 
