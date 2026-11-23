@@ -2355,3 +2355,558 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     showcase_snapshot_scene(writer.as_mut());
     showcase_runbook_scene(writer.as_mut());
 }
+
+/// One animated showcase sequence: real buffers in order, each with how long
+/// it stays on screen. Consecutive identical buffers merge into one longer
+/// frame, which is the same picture held for the same time.
+struct MotionSequence {
+    name: &'static str,
+    studio: &'static str,
+    title: &'static str,
+    subtitle: &'static str,
+    frames: Vec<MotionFrameCapture>,
+}
+
+struct MotionFrameCapture {
+    buf: Buffer,
+    delay_ms: u32,
+    poster: bool,
+    /// While the theme curtain runs: how many body columns show the
+    /// incoming theme, and the incoming and outgoing surface colours, so the
+    /// renderer pads the window the way the curtain paints the panes.
+    curtain: Option<CurtainPadding>,
+}
+
+/// How the renderer pads the window during one theme curtain frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CurtainPadding {
+    column: u16,
+    incoming: Color,
+    outgoing: Color,
+}
+
+impl MotionSequence {
+    const fn new(
+        name: &'static str,
+        studio: &'static str,
+        title: &'static str,
+        subtitle: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            studio,
+            title,
+            subtitle,
+            frames: Vec::new(),
+        }
+    }
+
+    /// Renders `model` as it is now and shows it for `delay_ms`.
+    fn push(&mut self, model: &Model, delay_ms: u32) -> Buffer {
+        self.push_curtain(model, delay_ms, None)
+    }
+
+    fn push_curtain(
+        &mut self,
+        model: &Model,
+        delay_ms: u32,
+        curtain: Option<CurtainPadding>,
+    ) -> Buffer {
+        let buf = render_showcase(model);
+        match self.frames.last_mut() {
+            Some(last) if last.buf == buf && last.curtain == curtain => {
+                last.delay_ms += delay_ms;
+            }
+            _ => self.frames.push(MotionFrameCapture {
+                buf: buf.clone(),
+                delay_ms,
+                poster: false,
+                curtain,
+            }),
+        }
+        buf
+    }
+
+    /// Marks the latest frame as the still a reduced-motion reader sees.
+    fn mark_poster(&mut self) {
+        self.frames.last_mut().expect("a frame to mark").poster = true;
+    }
+
+    fn duration(&self) -> Duration {
+        Duration::from_millis(
+            self.frames
+                .iter()
+                .map(|frame| u64::from(frame.delay_ms))
+                .sum(),
+        )
+    }
+
+    fn check_bounds(&self) {
+        assert!(
+            self.frames.iter().filter(|frame| frame.poster).count() == 1,
+            "{} has exactly one poster",
+            self.name
+        );
+        for frame in &self.frames {
+            assert!(
+                (10..=10_000).contains(&frame.delay_ms),
+                "{} frame delay {} ms is outside 10..=10000",
+                self.name,
+                frame.delay_ms
+            );
+        }
+        assert!(
+            self.duration() <= Duration::from_millis(6_000),
+            "{} lasts {:?}, longer than the six-second budget",
+            self.name,
+            self.duration()
+        );
+    }
+
+    fn write(&self, writer: &mut impl Write) {
+        for (index, frame) in self.frames.iter().enumerate() {
+            let mut line = json!({
+                "sequence": self.name,
+                "frame": index,
+                "delay_ms": frame.delay_ms,
+                "studio": self.studio,
+                "scene": format!("{}-{index:03}", self.name),
+                "title": self.title,
+                "subtitle": self.subtitle,
+                "width": SHOWCASE_AREA.width,
+                "height": SHOWCASE_AREA.height,
+                "runs": buffer_runs(&frame.buf, SHOWCASE_AREA),
+            });
+            if frame.poster {
+                line["poster"] = json!(true);
+            }
+            if let Some(curtain) = frame.curtain {
+                // The rails are the first and last rows; the body sweeps
+                // between them.
+                line["curtain_padding"] = json!({
+                    "column": curtain.column,
+                    "incoming": format!("{:?}", curtain.incoming),
+                    "outgoing": format!("{:?}", curtain.outgoing),
+                    "body_rows": [1, SHOWCASE_AREA.height - 1],
+                });
+            }
+            serde_json::to_writer(&mut *writer, &line).unwrap();
+            writeln!(writer).unwrap();
+        }
+    }
+}
+
+/// The first cell where `needle` starts in the showcase buffer.
+fn showcase_find(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
+    for y in 0..SHOWCASE_AREA.height {
+        let mut line = String::new();
+        let mut starts = Vec::new();
+        for x in 0..SHOWCASE_AREA.width {
+            starts.push((line.len(), x));
+            line.push_str(buf[(x, y)].symbol());
+        }
+        if let Some(byte) = line.find(needle)
+            && let Some((_, x)) = starts.into_iter().find(|(start, _)| *start == byte)
+        {
+            return Some((x, y));
+        }
+    }
+    None
+}
+
+/// The symbols of one buffer row.
+fn showcase_row(buf: &Buffer, y: u16) -> String {
+    (0..SHOWCASE_AREA.width)
+        .map(|x| buf[(x, y)].symbol())
+        .collect()
+}
+
+/// The heartbeat row, which sits directly under the running status line.
+fn showcase_heartbeat(buf: &Buffer, word: &str) -> (u16, String) {
+    let (_, y) = showcase_find(buf, word).unwrap_or_else(|| {
+        panic!(
+            "missing {word:?} in a running frame:\n{}",
+            buffer_to_string(buf)
+        )
+    });
+    (y + 1, showcase_row(buf, y + 1))
+}
+
+/// Whether the heartbeat row carries the head in `token`'s ink.
+fn heartbeat_head_ink(buf: &Buffer, y: u16, theme: &Theme, token: Token) -> bool {
+    let ink = theme.style(token).fg.expect("a truecolour ink");
+    (0..SHOWCASE_AREA.width).any(|x| buf[(x, y)].symbol() == "\u{2501}" && buf[(x, y)].fg == ink)
+}
+
+/// A statement that runs, ticks honestly and lands with the result settle.
+fn motion_run_and_settle() -> MotionSequence {
+    let mut sequence = MotionSequence::new(
+        "run-and-settle",
+        "atelier",
+        "atelier",
+        "A statement runs with a live clock and heartbeat, then its result settles",
+    );
+    let mut model = showcase_base_model(ThemeChoice::Atelier);
+    model.last_execution = None;
+    model.last_elapsed = None;
+    model.result_grid.reset_view();
+    model.selected_column = 0;
+    model.motion.enable();
+    assert!(model.allows_motion(), "truecolour Nerd glyphs allow motion");
+    let idle = sequence.push(&model, 900);
+    assert!(buffer_to_string(&idle).contains("No query has run yet."));
+
+    // Running: every frame is one busy tick, and the clock beside `Running`
+    // is the elapsed time the runtime reported for that tick.
+    let job = showcase_run(&mut model, SHOWCASE_SQL);
+    let tick = Duration::from_millis(90);
+    let ticks = 12u32;
+    let mut previous_heartbeat = None;
+    for count in 0..=ticks {
+        if count > 0 {
+            update(
+                &mut model,
+                Message::Tick {
+                    running_for: Some(tick * count),
+                },
+            );
+        }
+        let buf = sequence.push(&model, 90);
+        let text = buffer_to_string(&buf);
+        assert!(text.contains("Running"), "running frame {count}:\n{text}");
+        let clock = crate::ui::widgets::live_seconds(tick * count);
+        assert!(
+            text.contains(&clock),
+            "frame {count} shows {clock}:\n{text}"
+        );
+        let (y, heartbeat) = showcase_heartbeat(&buf, "Running");
+        assert!(
+            heartbeat_head_ink(&buf, y, &model.presentation.theme, Token::Info),
+            "the running heartbeat head is in the information ink"
+        );
+        assert_ne!(
+            previous_heartbeat.as_ref(),
+            Some(&heartbeat),
+            "the heartbeat moves on every tick"
+        );
+        previous_heartbeat = Some(heartbeat);
+        assert!(
+            !model.motion().is_active(),
+            "a running statement is no transition"
+        );
+    }
+
+    // The result lands with its settle: the words are final in the first
+    // frame and only the status word's ink moves, from success to resting.
+    update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(showcase_execution(job, tick * ticks))),
+    );
+    assert!(
+        model.motion().result_settle().is_some(),
+        "a complete success settles"
+    );
+    let theme = model.presentation.theme.clone();
+    let mut settle = Vec::new();
+    while model.motion().is_active() {
+        settle.push(sequence.push(&model, 33));
+        update(
+            &mut model,
+            Message::MotionFrame {
+                elapsed: crate::ui::motion::FRAME_INTERVAL,
+            },
+        );
+    }
+    let resting = sequence.push(&model, 2_000);
+    sequence.mark_poster();
+    let mut still = model.clone();
+    still.motion.settle();
+    assert_eq!(
+        resting,
+        render_showcase(&still),
+        "the poster is the resting frame"
+    );
+    assert!(settle.len() >= 10, "the settle has {} frames", settle.len());
+    let (x, y) = showcase_find(&resting, "Completed").expect("the status word");
+    let success = theme
+        .mix(Token::Success, Token::Muted, 0.0)
+        .expect("a truecolour ink");
+    assert_eq!(
+        settle[0][(x, y)].fg,
+        success,
+        "the settle starts in success ink"
+    );
+    assert_eq!(
+        resting[(x, y)].fg,
+        crate::ui::widgets::results::status_word_style(&theme, None)
+            .fg
+            .expect("a resting ink"),
+        "the settle ends in the resting ink"
+    );
+    for frame in &settle {
+        assert_eq!(
+            buffer_to_string(frame),
+            buffer_to_string(&resting),
+            "the words are final from the first settle frame"
+        );
+    }
+    let text = buffer_to_string(&resting);
+    assert!(text.contains("14 rows, 1080 ms"), "{text}");
+    sequence
+}
+
+/// A statement that is cancelled, shown only in the states the product has.
+fn motion_cancel_honestly() -> MotionSequence {
+    let mut sequence = MotionSequence::new(
+        "cancel-honestly",
+        "dark",
+        "dark",
+        "A slow statement is cancelled; the server confirms before the client says so",
+    );
+    let mut model = showcase_base_model(ThemeChoice::Dark);
+    model.last_execution = None;
+    model.last_elapsed = None;
+    model.result_grid.reset_view();
+    model.selected_column = 0;
+    let sql = [
+        "-- A slow report, cancelled from the keyboard",
+        "SELECT customer, sum(amount_cents) AS total_cents",
+        "FROM public.orders",
+        "CROSS JOIN generate_series(1, 2000000)",
+        "GROUP BY customer;",
+    ]
+    .join("\n");
+    model.editor.set_text(&sql);
+    model.editor.set_cursor(sql.len());
+    model.motion.enable();
+    sequence.push(&model, 600);
+
+    let job = showcase_run(&mut model, &sql);
+    let tick = Duration::from_millis(90);
+    let mut count = 0u32;
+    let mut advance = |model: &mut Model, sequence: &mut MotionSequence, word: &str| {
+        if count > 0 {
+            update(
+                model,
+                Message::Tick {
+                    running_for: Some(tick * count),
+                },
+            );
+        }
+        let buf = sequence.push(model, 90);
+        let text = buffer_to_string(&buf);
+        let clock = crate::ui::widgets::live_seconds(tick * count);
+        assert!(text.contains(word), "{word} frame {count}:\n{text}");
+        assert!(
+            text.contains(&clock),
+            "frame {count} shows {clock}:\n{text}"
+        );
+        count += 1;
+        buf
+    };
+    for _ in 0..=8 {
+        let buf = advance(&mut model, &mut sequence, "Running");
+        let (y, _) = showcase_heartbeat(&buf, "Running");
+        assert!(heartbeat_head_ink(
+            &buf,
+            y,
+            &model.presentation.theme,
+            Token::Info
+        ));
+        assert!(buffer_to_string(&buf).contains("asks the server to cancel."));
+    }
+
+    // Cancelling only asks. The heartbeat keeps moving in the warning ink,
+    // because the statement may still be running.
+    let effects = update(&mut model, Message::Action(Action::Cancel));
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Cancel { job: cancelled } if *cancelled == job)),
+        "cancelling asks the server to cancel this job: {effects:?}"
+    );
+    for _ in 0..8 {
+        let buf = advance(&mut model, &mut sequence, "Cancellation requested");
+        let (y, _) = showcase_heartbeat(&buf, "Cancellation requested");
+        assert!(heartbeat_head_ink(
+            &buf,
+            y,
+            &model.presentation.theme,
+            Token::Warning
+        ));
+        assert!(
+            buffer_to_string(&buf)
+                .contains("The server has been asked to stop. It may still be running.")
+        );
+    }
+
+    // Only the server's answer produces the cancelled state, with the
+    // diagnostic `postgres::error::from_query_error` builds for 57014.
+    update(&mut model, Message::CancellationDelivered(job));
+    let error = Diagnostic::new(
+        DiagnosticKind::Cancelled,
+        "canceling statement due to user request",
+        "running statement 1",
+    )
+    .in_statement(1)
+    .technical("SQLSTATE", "57014")
+    .technical("Severity", "ERROR")
+    .likely_cause("the statement was cancelled")
+    .next_action("nothing was retried; run it again when ready");
+    update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            notice_report: NoticeReport::default(),
+            job,
+            statements: Vec::new(),
+            status: ExecutionStatus::Cancelled,
+            elapsed: tick * count,
+            error: Some(error),
+            transaction: TransactionState::Autocommit,
+        })),
+    );
+    assert!(!model.phase.is_busy());
+    assert!(
+        !model.motion().is_active(),
+        "a cancellation is never faded toward calm"
+    );
+    let outcome = sequence.push(&model, 2_600);
+    sequence.mark_poster();
+    let text = buffer_to_string(&outcome);
+    for words in [
+        "Query cancelled by server",
+        "canceling statement due to user request",
+    ] {
+        assert!(text.contains(words), "missing {words}:\n{text}");
+    }
+    sequence
+}
+
+/// Theme switches, each a real theme curtain stepped on the motion clock.
+fn motion_theme_curtain() -> MotionSequence {
+    let mut sequence = MotionSequence::new(
+        "theme-curtain",
+        "dark",
+        "Switch theme",
+        "Each theme switch sweeps the new palette across the panes behind a hard edge",
+    );
+    let mut model = showcase_base_model(ThemeChoice::Dark);
+    model.motion.enable();
+    let hold = 1_100;
+    let first = sequence.push(&model, hold);
+    // The colour the renderer pads the window with: row 1, column 0.
+    let surface = |buf: &Buffer| buf[(0, 1)].bg;
+    let rails = [0, SHOWCASE_AREA.height - 1];
+    for next in [
+        ThemeChoice::Atelier,
+        ThemeChoice::Paper,
+        ThemeChoice::Material,
+        ThemeChoice::Dark,
+    ] {
+        let outgoing_buf = render_showcase(&model);
+        let incoming = Theme::new(next, true).with_depth(ColorDepth::TrueColor);
+        let mut settled = model.clone();
+        settled.presentation.theme = incoming.clone();
+        let incoming_buf = render_showcase(&settled);
+
+        // Atelier to paper is one step of the real cycle, so the reducer's
+        // own switch is checked against the route used for every step here.
+        let mut via_reducer = (next == ThemeChoice::Paper).then(|| model.clone());
+
+        // The same two steps `switch_theme_action` takes.
+        let outgoing = std::mem::replace(&mut model.presentation.theme, incoming);
+        assert!(model.allows_motion());
+        model.motion.begin_theme_curtain(outgoing);
+        if let Some(reducer) = via_reducer.as_mut() {
+            assert!(update(reducer, Message::Action(Action::SwitchTheme)).is_empty());
+            assert_eq!(reducer.presentation.theme, model.presentation.theme);
+            assert_eq!(render_showcase(reducer), render_showcase(&model));
+        }
+
+        let mut frames = 0;
+        while let Some((_, progress)) = model.motion().theme_curtain() {
+            let column = (0..SHOWCASE_AREA.width)
+                .filter(|column| {
+                    crate::ui::motion::curtain_shows_incoming(
+                        *column,
+                        SHOWCASE_AREA.width,
+                        progress,
+                    )
+                })
+                .count() as u16;
+            // Once every column shows the incoming theme the frame is the
+            // settled one, padding included.
+            let curtain = (column < SHOWCASE_AREA.width).then(|| CurtainPadding {
+                column,
+                incoming: surface(&incoming_buf),
+                outgoing: surface(&outgoing_buf),
+            });
+            let buf = sequence.push_curtain(&model, 33, curtain);
+            for y in 0..SHOWCASE_AREA.height {
+                for x in 0..SHOWCASE_AREA.width {
+                    let (cell, new, old) =
+                        (&buf[(x, y)], &incoming_buf[(x, y)], &outgoing_buf[(x, y)]);
+                    assert_eq!(
+                        cell.symbol(),
+                        new.symbol(),
+                        "words never change mid-curtain"
+                    );
+                    if rails.contains(&y) {
+                        assert_eq!(cell, new, "rails take the incoming theme in frame 0");
+                    } else {
+                        let style = (cell.fg, cell.bg, cell.modifier);
+                        assert!(
+                            style == (new.fg, new.bg, new.modifier)
+                                || style == (old.fg, old.bg, old.modifier),
+                            "cell ({x}, {y}) is wholly in one theme"
+                        );
+                    }
+                }
+            }
+            frames += 1;
+            update(
+                &mut model,
+                Message::MotionFrame {
+                    elapsed: crate::ui::motion::FRAME_INTERVAL,
+                },
+            );
+        }
+        assert!(frames >= 9, "the curtain has {frames} frames");
+        assert_eq!(render_showcase(&model), incoming_buf, "the curtain settles");
+        if next == ThemeChoice::Dark {
+            assert_eq!(incoming_buf, first, "the loop closes on its first frame");
+        } else {
+            sequence.push(&model, hold);
+        }
+    }
+    sequence.frames[0].poster = true;
+    sequence
+}
+
+#[test]
+fn motion_showcase_sequences_are_real_buffers_at_fixed_motion_times() {
+    let sequences = [
+        motion_run_and_settle(),
+        motion_cancel_honestly(),
+        motion_theme_curtain(),
+    ];
+    for sequence in &sequences {
+        sequence.check_bounds();
+    }
+    if let Some(path) = std::env::var_os("IGNATIUS_SHOWCASE_CAPTURE_DIR") {
+        let path = std::path::PathBuf::from(path);
+        std::fs::create_dir_all(&path).unwrap();
+        let mut writer = BufWriter::new(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path.join("motion.jsonl"))
+                .unwrap(),
+        );
+        for sequence in &sequences {
+            sequence.write(&mut writer);
+        }
+        writer.flush().unwrap();
+    }
+}
