@@ -797,6 +797,31 @@ fn borders_and_out_of_area_cells_are_misses() {
 }
 
 #[test]
+fn an_open_snippet_library_owns_the_frame_beneath_it() {
+    // The snippet library is drawn over the panes and takes every key, so a
+    // click must not fall through it to a result cell or the editor.
+    let mut model = grid_model(2, 4);
+    model.focus = Focus::Results;
+    let area = Rect::new(0, 0, 100, 30);
+    let body = body_area(area);
+    let (_, results) = main_panes(body, false, &model.splits);
+    let inside = inner(results);
+    let header_y = painted_header_row(&model, area, inside);
+    assert_eq!(
+        region_at(&model, area, inside.x + 3, header_y),
+        Some(Region::ResultsHeaderCell { column: 0 }),
+        "the cell is a header before the library opens"
+    );
+    model.snippet_library = Some(crate::app::model::SnippetLibraryState::default());
+    assert!(super::overlay_blocks_panes(&model));
+    assert_eq!(region_at(&model, area, inside.x + 3, header_y), None);
+    assert_eq!(
+        super::pane_at(&model, area, inside.x + 3, header_y + 2),
+        None
+    );
+}
+
+#[test]
 fn an_open_palette_reports_items_and_hides_the_panes_beneath() {
     let mut model = Model::new(100);
     model.sidebar_visible = false;
