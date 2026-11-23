@@ -1632,38 +1632,63 @@ pub(crate) fn render_error(
     let block = pane_block_line(Line::from(title_spans), false, presentation);
     let inner_width = usize::from(block.inner(area).width);
 
+    // Every labelled row starts with the same gutter, an icon where the row
+    // has one and blank cells where it does not, so `Likely cause:` and
+    // `Next:` line up with `While:` and `Location:`. In ASCII icons are empty
+    // and so is the gutter, which keeps the rows aligned there too.
+    let gutter = |icon: Option<Icon>, token: Token| -> Span<'static> {
+        match icon {
+            _ if presentation.glyphs.is_ascii() => Span::raw(""),
+            Some(icon) => Span::styled(presentation.icon(icon), theme.style(token)),
+            None => Span::raw("  "),
+        }
+    };
+    let labelled = |label: &'static str, label_token: Token, value: Span<'static>| {
+        Line::from(vec![
+            gutter(None, label_token),
+            Span::styled(label, theme.style(label_token)),
+            value,
+        ])
+    };
     let mut lines = vec![
         Line::from(Span::styled(
             sanitize_for_display(&error.headline),
             theme.style(Token::Danger),
         )),
-        Line::from(vec![
-            Span::styled("While: ", theme.style(Token::Header)),
+        labelled(
+            "While: ",
+            Token::Header,
             Span::styled(
                 sanitize_for_display(&error.attempted),
                 theme.style(Token::Muted),
             ),
-        ]),
+        ),
     ];
     if let Some(object) = &error.object {
         let facts = object_context_text(object);
-        lines.push(Line::from(vec![
-            Span::styled("Object context: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Object context: ",
+            Token::Header,
             Span::styled(facts, theme.style(Token::Text)),
-        ]));
+        ));
         let note = catalogue_note(model, object);
         if let Some(rest) = note.strip_prefix("Catalogue: ") {
-            lines.push(Line::from(vec![
-                Span::styled("Catalogue: ", theme.style(Token::Info)),
+            lines.push(labelled(
+                "Catalogue: ",
+                Token::Header,
                 Span::styled(rest.to_owned(), theme.style(Token::Muted)),
-            ]));
+            ));
         } else {
-            lines.push(Line::from(Span::styled(note, theme.style(Token::Muted))));
+            lines.push(Line::from(vec![
+                gutter(None, Token::Muted),
+                Span::styled(note, theme.style(Token::Muted)),
+            ]));
         }
     }
     if let Some(location) = &model.error_location {
-        lines.push(Line::from(vec![
-            Span::styled("Location: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Location: ",
+            Token::Header,
             Span::styled(
                 format!(
                     "statement {}, line {}, column {}",
@@ -1671,7 +1696,7 @@ pub(crate) fn render_error(
                 ),
                 theme.style(Token::Info),
             ),
-        ]));
+        ));
         if let Some(marker) =
             crate::query::error_location::render_marker(model.editor.text(), location)
         {
@@ -1685,41 +1710,52 @@ pub(crate) fn render_error(
             );
         }
     } else if let Some(note) = &model.error_location_note {
-        lines.push(Line::from(vec![
-            Span::styled("Location: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Location: ",
+            Token::Header,
             Span::styled(sanitize_for_display(note), theme.style(Token::Warning)),
-        ]));
+        ));
     } else if let Some(position) = error.position {
-        lines.push(Line::from(vec![
-            Span::styled("Location: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Location: ",
+            Token::Header,
             Span::styled(
                 format!("unavailable for server character {}.", position.character),
                 theme.style(Token::Warning),
             ),
-        ]));
+        ));
     } else if let Some(statement_number) = error.statement_number {
-        lines.push(Line::from(vec![
-            Span::styled("Statement: ", theme.style(Token::Header)),
+        lines.push(labelled(
+            "Statement: ",
+            Token::Header,
             Span::styled(statement_number.to_string(), theme.style(Token::Info)),
-        ]));
+        ));
     }
     if let Some(cause) = &error.likely_cause {
         lines.push(Line::from(vec![
-            Span::styled(
-                presentation.icon(Icon::Warning),
-                theme.style(Token::Warning),
-            ),
+            gutter(Some(Icon::Warning), Token::Warning),
             Span::styled("Likely cause: ", theme.style(Token::Warning)),
             Span::styled(sanitize_for_display(cause), theme.style(Token::Text)),
         ]));
     }
     if let Some(action) = &error.next_action {
         lines.push(Line::from(vec![
-            Span::styled(presentation.icon(Icon::Info), theme.style(Token::Info)),
+            gutter(Some(Icon::Info), Token::Info),
             Span::styled("Next: ", theme.style(Token::Header)),
             Span::styled(sanitize_for_display(action), theme.style(Token::Info)),
         ]));
     }
+    // The expand key is the one the keymap binds, and once the fields are
+    // shown the same key is offered to fold them away again.
+    let detail_key = error_detail_key(model);
+    let key_hint = |verb: &'static str| -> Vec<Span<'static>> {
+        detail_key.clone().map_or_else(Vec::new, |key| {
+            vec![
+                Span::styled(key, theme.style(Token::Info).add_modifier(Modifier::BOLD)),
+                Span::styled(verb, theme.style(Token::Muted)),
+            ]
+        })
+    };
     if model.error_expanded {
         for field in &error.technical {
             lines.push(Line::from(vec![
@@ -1730,18 +1766,23 @@ pub(crate) fn render_error(
                 Span::styled(sanitize_for_display(&field.value), theme.style(Token::Text)),
             ]));
         }
+        if !error.technical.is_empty() {
+            let mut spans = vec![gutter(None, Token::Muted)];
+            spans.extend(key_hint(" to collapse."));
+            if spans.len() > 1 {
+                lines.push(Line::from(spans));
+            }
+        }
     } else if !error.technical.is_empty() {
-        lines.push(Line::from(vec![
+        let mut spans = vec![
+            gutter(None, Token::Muted),
             Span::styled(
                 format!("{} technical field(s) hidden. ", error.technical.len()),
                 theme.style(Token::Muted),
             ),
-            Span::styled(
-                "Ctrl+D",
-                theme.style(Token::Info).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" to expand.", theme.style(Token::Muted)),
-        ]));
+        ];
+        spans.extend(key_hint(" to expand."));
+        lines.push(Line::from(spans));
     }
 
     Paragraph::new(lines)
@@ -1749,6 +1790,23 @@ pub(crate) fn render_error(
         // Preserve leading indentation on error caret and technical-field lines.
         .wrap(Wrap { trim: false })
         .render(area, buf);
+}
+
+/// The key the active keymap binds to expanding error detail, or `None` when
+/// nothing is bound, in which case no key is advertised at all.
+fn error_detail_key(model: &Model) -> Option<String> {
+    let fallback;
+    let snapshot = if model.keymap_snapshot.is_empty() {
+        fallback = Keymap::new().snapshot();
+        &fallback
+    } else {
+        &model.keymap_snapshot
+    };
+    snapshot
+        .bindings
+        .iter()
+        .find(|binding| binding.action == crate::app::Action::ToggleErrorDetail)
+        .map(|binding| sanitize_for_display(&binding.key))
 }
 
 fn object_context_text(object: &crate::diagnostics::ObjectContext) -> String {

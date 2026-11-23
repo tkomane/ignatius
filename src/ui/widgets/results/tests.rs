@@ -665,14 +665,15 @@ fn error_view_renders_multi_span_diagnostic_labels_and_preserves_words() {
         "Next: must be Header (bold)"
     );
 
-    // "Catalogue: " -> Token::Info
-    let info_fg = presentation.theme.color(Token::Info).unwrap();
+    // "Catalogue: " -> Token::Header (Bold), like every other fact label
+    let header_fg = presentation.theme.color(Token::Header).unwrap();
     let (cat_x, cat_y) = find_word_cell("Catalogue:");
     assert_eq!(
         buf[(cat_x, cat_y)].fg,
-        info_fg,
-        "Catalogue: must have Info fg"
+        header_fg,
+        "Catalogue: must have Header fg"
     );
+    assert!(buf[(cat_x, cat_y)].modifier.contains(Modifier::BOLD));
 
     // "Likely cause: " -> Token::Warning
     let warn_fg = presentation.theme.color(Token::Warning).unwrap();
@@ -1235,4 +1236,87 @@ fn the_empty_results_state_stacks_from_the_top_with_text_hint_labels() {
         );
         assert!(!cell.modifier.contains(Modifier::DIM), "{label}");
     }
+}
+
+fn labelled_error() -> crate::diagnostics::Diagnostic {
+    use crate::diagnostics::{Diagnostic, DiagnosticKind, ObjectContext};
+    let mut error = Diagnostic::new(DiagnosticKind::Query, "syntax error", "executing buffer")
+        .technical("SQLSTATE", "42601")
+        .technical("Severity", "ERROR");
+    error.object = Some(ObjectContext {
+        schema: Some("public".into()),
+        table: Some("users".into()),
+        column: None,
+        constraint: None,
+    });
+    error.statement_number = Some(1);
+    error.likely_cause = Some("missing semicolon".into());
+    error.next_action = Some("add semicolon at end".into());
+    error
+}
+
+fn error_text(model: &Model, presentation: &Presentation) -> Vec<String> {
+    let area = Rect::new(0, 0, 90, 20);
+    let mut buf = Buffer::empty(area);
+    super::render_error(model, &labelled_error(), presentation, area, &mut buf);
+    buffer_to_string(&buf).lines().map(str::to_owned).collect()
+}
+
+#[test]
+fn every_error_label_starts_in_the_same_column_in_every_glyph_tier() {
+    for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
+        let presentation = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true),
+            Glyphs::new(tier),
+            false,
+        );
+        let rows = error_text(&Model::new(10), &presentation);
+        let column = |label: &str| -> usize {
+            let row = rows
+                .iter()
+                .find(|row| row.contains(label))
+                .unwrap_or_else(|| panic!("{tier:?}: missing {label:?}: {rows:#?}"));
+            row[..row.find(label).expect("label")].chars().count()
+        };
+        let expected = column("While:");
+        for label in [
+            "Object context:",
+            "Catalogue:",
+            "Statement:",
+            "Likely cause:",
+            "Next:",
+            "2 technical field(s) hidden.",
+        ] {
+            assert_eq!(column(label), expected, "{tier:?}: {label} is out of line");
+        }
+    }
+}
+
+#[test]
+fn the_error_detail_key_comes_from_the_keymap_and_offers_the_collapse() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let mut model = Model::new(10);
+    let rows = error_text(&model, &presentation).join("\n");
+    assert!(
+        rows.contains("2 technical field(s) hidden. Ctrl+D to expand."),
+        "{rows}"
+    );
+
+    let mut keys = std::collections::BTreeMap::new();
+    keys.insert(
+        "toggle-error-detail".to_owned(),
+        crate::config::schema::KeySpec::One("f11".to_owned()),
+    );
+    model.keymap_snapshot = Keymap::from_config(&keys)
+        .expect("a valid rebinding")
+        .snapshot();
+    let rows = error_text(&model, &presentation).join("\n");
+    assert!(rows.contains("hidden. F11 to expand."), "{rows}");
+    assert!(!rows.contains("Ctrl+D"), "{rows}");
+
+    model.error_expanded = true;
+    let rows = error_text(&model, &presentation).join("\n");
+    assert!(rows.contains("42601"), "{rows}");
+    assert!(rows.contains("F11 to collapse."), "{rows}");
+    assert!(!rows.contains("to expand"), "{rows}");
 }
