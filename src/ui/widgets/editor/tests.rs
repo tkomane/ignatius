@@ -887,3 +887,86 @@ fn completion_displays_kind_icons_and_empty_editor_renders_editorial_keycaps() {
         "{atext}"
     );
 }
+
+#[test]
+fn a_keyword_candidate_never_wears_the_primary_key_icon() {
+    use crate::ui::glyphs::Icon;
+    for tier in [GlyphTier::Unicode, GlyphTier::Nerd] {
+        let glyphs = Glyphs::new(tier);
+        let keyword = glyphs.icon(super::candidate_kind_icon(CandidateKind::Keyword));
+        assert_ne!(keyword, glyphs.icon(Icon::KeyColumn), "{tier:?}");
+        assert_eq!(keyword, glyphs.icon(Icon::Keyword), "{tier:?}");
+    }
+}
+
+fn completion_frame(presentation: &Presentation, area: Rect) -> Buffer {
+    let mut model = Model::new(100);
+    model.editor.set_text("SELECT 1;");
+    model.editor.set_position(1, 4);
+    model.completion.menu = Some(CompletionMenu::new(test_completion_result(), true));
+    let mut buf = Buffer::empty(area);
+    render_editor(&model, &Keymap::new(), presentation, area, &mut buf);
+    render_completion(&model, presentation, area, &mut buf);
+    buf
+}
+
+#[test]
+fn the_completion_counts_read_in_the_order_they_narrow() {
+    let text = buffer_to_string(&completion_frame(
+        &presentation(ColorDepth::TrueColor),
+        Rect::new(0, 0, 80, 25),
+    ));
+    assert!(text.contains("5 of 5 shown, 5 in scope"), "{text}");
+    assert!(!text.contains("Showing"), "{text}");
+    assert!(!text.contains("avail"), "{text}");
+}
+
+#[test]
+fn the_completion_keys_are_keycaps_from_the_keymap() {
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 25);
+    let buf = completion_frame(&pres, area);
+    let text = buffer_to_string(&buf);
+    let (y, row) = text
+        .lines()
+        .enumerate()
+        .find(|(_, row)| row.contains("Enter accepts"))
+        .unwrap_or_else(|| panic!("no key row: {text}"));
+    assert!(
+        row.contains("Enter accepts  Esc cancels  Up/Down moves"),
+        "{row}"
+    );
+    let keycap = pres.theme.recessed_pill(Token::Focus);
+    let enter_x = row[..row.find("Enter").expect("Enter")].chars().count() as u16;
+    let cell = &buf[(enter_x, y as u16)];
+    assert_eq!(
+        Some(cell.bg),
+        keycap.bg,
+        "the key sits on a recessed keycap"
+    );
+    assert_eq!(Some(cell.fg), keycap.fg);
+    let label_x = row[..row.find("accepts").expect("label")].chars().count() as u16;
+    assert_eq!(
+        Some(buf[(label_x, y as u16)].fg),
+        pres.theme.style(Token::Text).fg,
+        "labels are primary text"
+    );
+}
+
+#[test]
+fn a_narrow_completion_key_row_drops_whole_pairs() {
+    for width in 28..=45usize {
+        let line =
+            super::completion_key_row(&Model::new(10), &presentation(ColorDepth::None), width);
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(text.chars().count() <= width, "{width}: {text:?}");
+        for pair in [" Enter accepts", " Esc cancels", " Up/Down moves"] {
+            let key = pair.split_whitespace().next().expect("key");
+            assert_eq!(text.contains(key), text.contains(pair), "{width}: {text:?}");
+        }
+    }
+}

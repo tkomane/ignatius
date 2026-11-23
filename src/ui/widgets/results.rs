@@ -1,7 +1,7 @@
 use super::overlays::render_plan;
 use super::{
-    action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, inset_empty_area,
-    overlay_block, pane_block_line, syntax_token, wrapped_line_count,
+    action_key_label, bound_key, hairline_rule, highlighted_sql_spans, input_cursor,
+    inset_empty_area, overlay_block, pane_block_line, syntax_token, wrapped_line_count,
 };
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
@@ -1869,7 +1869,7 @@ pub(crate) fn render_error(
     }
     // The expand key is the one the keymap binds, and once the fields are
     // shown the same key is offered to fold them away again.
-    let detail_key = error_detail_key(model);
+    let detail_key = bound_key(model, &crate::app::Action::ToggleErrorDetail);
     let key_hint = |verb: &'static str| -> Vec<Span<'static>> {
         detail_key.clone().map_or_else(Vec::new, |key| {
             vec![
@@ -1912,23 +1912,6 @@ pub(crate) fn render_error(
         // Preserve leading indentation on error caret and technical-field lines.
         .wrap(Wrap { trim: false })
         .render(area, buf);
-}
-
-/// The key the active keymap binds to expanding error detail, or `None` when
-/// nothing is bound, in which case no key is advertised at all.
-fn error_detail_key(model: &Model) -> Option<String> {
-    let fallback;
-    let snapshot = if model.keymap_snapshot.is_empty() {
-        fallback = Keymap::new().snapshot();
-        &fallback
-    } else {
-        &model.keymap_snapshot
-    };
-    snapshot
-        .bindings
-        .iter()
-        .find(|binding| binding.action == crate::app::Action::ToggleErrorDetail)
-        .map(|binding| sanitize_for_display(&binding.key))
 }
 
 fn object_context_text(object: &crate::diagnostics::ObjectContext) -> String {

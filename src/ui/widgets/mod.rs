@@ -52,6 +52,24 @@ pub(crate) fn action_key_label(keymap: &Keymap, action: &crate::app::Action) -> 
         .map(|(key, _)| key)
         .unwrap_or_else(|| "the command palette".to_owned())
 }
+/// The key the active keymap binds directly to `action`, read from the model's
+/// keymap snapshot, for surfaces drawn without the runtime keymap. A model not
+/// yet attached to a runtime reads the default keymap. `None` when nothing is
+/// bound, so a caller can leave the hint out rather than invent a key.
+pub(crate) fn bound_key(model: &Model, action: &crate::app::Action) -> Option<String> {
+    let fallback;
+    let snapshot = if model.keymap_snapshot.is_empty() {
+        fallback = Keymap::new().snapshot();
+        &fallback
+    } else {
+        &model.keymap_snapshot
+    };
+    snapshot
+        .bindings
+        .iter()
+        .find(|binding| binding.action == *action)
+        .map(|binding| crate::query::value::sanitize_for_display(&binding.key))
+}
 /// The theme token that draws a syntax kind.
 pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> Token {
     use crate::query::highlight::TokenKind as Kind;
