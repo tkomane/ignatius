@@ -845,7 +845,7 @@ fn render_results_placeholder(
             let (prose, hint) = if ctx.editor_has_text {
                 (
                     "SQL is ready to run. Rows, types, and plans appear here.",
-                    "Run the buffer",
+                    "Run the buffer.",
                 )
             } else {
                 (

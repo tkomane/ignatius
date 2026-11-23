@@ -4,6 +4,70 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 68 - Living surfaces, supply-chain audit and a quieter README - 23 and 24 November 2026
+
+Feature 063 (`063-living-surfaces-and-truthful-motion`, milestone M17) was
+specified, built by parallel agents in isolated worktrees, independently
+reviewed per pull request, and merged on hosted green CI.
+
+- **PR #130, supply-chain hardening.** CI audits every workflow, local action
+  and the Dependabot policy with offline, digest-pinned zizmor 1.32.0; workflow
+  scripts take expression values only through `env:`; contract tests enforce
+  checkout credential removal on every step form and digests on every literal
+  image; Dependabot version updates wait seven days. Owner-only follow-ups:
+  decide the release-candidate cache restores (an accepted zizmor exception in
+  `.github/zizmor.yml`), add `GitHub Actions security audit` to the `main`
+  ruleset, require PostgreSQL 15-17 and CodeQL or correct the "Code scanning:
+  Blocking" row, and choose how the actionlint, Gitleaks and zizmor digests are
+  refreshed.
+- **PR #131, motion core and theme curtain.** `src/ui/motion.rs`, `Theme::mix`,
+  a motion clock advanced only by `Message::MotionFrame`, a separate 33 ms
+  ticker with at most one frame in flight, and a hard-edge curtain whose rails
+  change on frame 0. Motion holds still under every prompt, review and armed
+  dashboard confirmation. The focus sweep and the overlay arrival fade were cut
+  after design review.
+- **PR #133, workbench consumers and polish.** Result settle on the status
+  word, a heartbeat comet that never implies progress, the identity line
+  "a quiet instrument for PostgreSQL" in `src/branding.rs`, overlay-aware footer
+  keys that keep Esc longest, header safety capsules at every width and
+  density, a merged toolbar sort segment, the compact-density header hit-test
+  fix, and doc drift fixes for the header labels and boot reveal timing.
+- **PR #134, overlay depth.** Static recession behind blocking overlays (never
+  the rails, never in ASCII), the three-tier badge grammar in modals,
+  content-fitted modals, plan rows with tree chevrons, and a glyph-tier search
+  prompt.
+- **Wave 3 showcase and README.** Fixtures now agree with production (14 rows,
+  a real local sort, real completion details, the production 42703 diagnostic),
+  all 14 stills were re-rendered and inspected, three animated captures
+  (`docs/assets/motion/run-and-settle`, `cancel-honestly`, `theme-curtain`) are
+  rendered from real buffers at fixed motion times with reduced-motion posters,
+  the banner SVGs carry "A quiet instrument for PostgreSQL." and a truthful
+  posture line, and the README was rewritten around how the product feels.
+- **Open: PR #132, benchmark safety.** A design critique found that the
+  benchmark overlay's `m` key turns rollback off and immediately re-runs the
+  buffer with no production or write check. That bug is still on `main`. Three
+  review rounds of the fix found further concurrency defects (cancel aimed at
+  the wrong gated statement, retry after a failed cancel, A's failure masked by
+  B's report, Cancel routing in the plan-diff overlay); the remaining work is
+  listed in #132.
+- **Found and not fixed:** the built-in theme tests pin status inks (Focus,
+  Success, Warning, Danger, Info, environment and transaction) at 3.0:1 for
+  `dark`, `light`, `field-industrial` and `material`, while Principle XI says
+  every non-border token is pinned at 4.5:1 (the current values all clear 4.5:1;
+  the tests are weaker than the principle). Plan-diff `EXPLAIN ANALYZE` inside an open workbench
+  transaction ends that transaction (its own BEGIN/ROLLBACK bracket); the spec
+  025 `presentation.md` quiet-chrome text predates the new header yield order;
+  the plan explorer's attention marker scores inclusive time and so usually
+  lands on the root node; `tls_appearance` and `Glyphs::meter` are unused.
+- **Evidence boundaries.** Each merged PR passed `cargo --locked xtask verify`
+  against disposable PostgreSQL 18.7 plain and verified-TLS fixtures on macOS
+  arm64 (Homebrew rustc 1.100.0), with the Unix socket gate skipped
+  (`IGNATIUS_TEST_PG_SOCKET_URI` unset), then hosted CI on Linux, macOS and
+  Windows with PostgreSQL 14-18. Motion timing was checked by pty byte timing
+  on macOS only. No hand-use check in Warp, Windows Terminal or Linux was made,
+  and the open Wave 64 human acceptance and ADR-0008 owner release gates are
+  unchanged.
+
 ## Wave 67 - Constitution v1.2.0 Principle XI and editorial craft iteration - 23 November 2026
 
 - Amended `.specify/memory/constitution.md` (`1.1.0 -> 1.2.0`) to codify

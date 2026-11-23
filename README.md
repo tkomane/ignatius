@@ -3,267 +3,264 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg" />
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg" />
-  <img src="docs/assets/banner-dark.svg" alt="Ignatius - PostgreSQL terminal workbench in Rust: TLS verify-full, read-only first, Atelier and Paper editions" width="96%" />
+  <img src="docs/assets/banner-dark.svg" alt="Ignatius, a quiet instrument for PostgreSQL" width="96%" />
 </picture>
 
-### Calm confidence for real databases: `psql` honesty inside an editorial terminal workbench.
+A PostgreSQL workbench for the terminal that tells you what is true, and says so when it does not know.
 
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
-[![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-9A3115?labelColor=1B1917&logo=rust&logoColor=FAF5EC)](Cargo.toml)
-[![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-25486B?labelColor=1B1917&logo=postgresql&logoColor=FAF5EC)](docs/support/compatibility.md)
-[![Capabilities](https://img.shields.io/badge/capabilities-M6--M16%20delivered-18593B?labelColor=1B1917&logo=checkmarx&logoColor=FAF5EC)](docs/product/roadmap.md)
-[![Design](https://img.shields.io/badge/themes-atelier%20|%20paper%20|%20material%203%20|%20field%20industrial-714304?labelColor=1B1917&logo=color&logoColor=FAF5EC)](docs/design/theme-tokens.md)
-[![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-144F63?labelColor=1B1917)](docs/security/data-handling.md)
+[![PostgreSQL 14-18](https://img.shields.io/badge/postgresql-14--18-25486B?labelColor=1B1917&logo=postgresql&logoColor=FAF5EC)](docs/support/compatibility.md)
+[![Telemetry: none](https://img.shields.io/badge/telemetry-none-144F63?labelColor=1B1917)](docs/security/data-handling.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4B443C?labelColor=1B1917)](LICENSE)
 
-*Editorial obsidian & rag-paper craft, Material Design 3 elevation, and Dieter Rams tactile restraint.*<br>
-*Fast, deterministic, built strictly in Rust (`ratatui` + `tokio-postgres`). Zero telemetry, zero accounts, zero cloud dependencies.*
-
-<p align="center">
-  <a href="#vision"><strong>Vision</strong></a> &bull;
-  <a href="#editorial-craft--seven-built-in-themes"><strong>Themes &amp; Craft</strong></a> &bull;
-  <a href="#visual-tour"><strong>Visual Tour</strong></a> &bull;
-  <a href="#quickstart-try-ignatius-in-60-seconds"><strong>Quickstart</strong></a> &bull;
-  <a href="#keyboard-shortcuts-chords--mouse-fluency"><strong>Keymap &amp; Chords</strong></a> &bull;
-  <a href="#non-interactive-cli-scripting--streaming-export"><strong>CLI Suite</strong></a> &bull;
-  <a href="#capabilities-m6-m16"><strong>Capabilities</strong></a>
-</p>
+<a href="#what-it-is-like-to-use">Tour</a> &middot;
+<a href="#quick-start">Quick start</a> &middot;
+<a href="#everyday-keys">Keys</a> &middot;
+<a href="#connecting">Connecting</a> &middot;
+<a href="#scripting-and-ci">Scripting</a> &middot;
+<a href="#reference">Reference</a>
 
 <br />
 
-<img src="docs/assets/screenshots/workbench-atelier.png" alt="Ignatius workbench in Atelier Editorial Dark with terracotta focus, obsidian-espresso surfaces, PostgreSQL/Codicon glyphs, italic comments and null markers, object tree, SQL editor, and results grid" width="96%" />
-<br />
-<sub><em>Atelier Editorial Dark (Feature 062): obsidian-espresso surfaces, terracotta keycaps, PostgreSQL/Codicon glyphs, italic comments &amp; <code>[null]</code>, whisper-quiet tree guides, and 2x Studio window chrome.</em></sub>
+<img src="docs/assets/screenshots/workbench-atelier.png" alt="The Ignatius workbench in the atelier theme: an object tree on the left, a SQL editor above, and a results grid below in which a NULL, an empty string and the text NULL each look different. The header carries the connection target and a PROD marker." width="96%" />
 
 </div>
 
+Ignatius is a PostgreSQL client for the terminal, made to be pleasant to sit with for hours and honest about what it knows.
+
+Many engineers explore in a friendly tool and fall back to `psql` when the database is real. Ignatius is meant to be the one you keep open for both. It tells you, in plain words, which database you are on, how the connection is actually protected, and what became of your last statement, including when the truthful answer is "unknown". It is driven from the keyboard, speaks only PostgreSQL, and asks nothing of you beyond a connection: no account, no telemetry, no cloud service.
+
+**Calm.** One obvious next step on every screen, quiet colour, and motion that is brief and optional.<br />
+**Honest.** Transport security read back from the server, production as a word you declare, uncertainty said out loud.<br />
+**Yours.** One local binary that explores interactively and scripts the same way, with documented exit codes.
+
 ---
 
-## Vision
+## What it is like to use
 
-There are two kinds of PostgreSQL client, and neither is the one you want when the database is real.
+### You always know where you are
 
-`psql` is the reference implementation: complete, scriptable, and trustworthy. It is also a line-oriented REPL where wide results collapse into text walls, where only your shell prompt reminds you which cluster a `DELETE` will hit, and where a mistyped column returns an error with nowhere to look next. Multi-database GUIs feel pleasant for browsing, yet treat PostgreSQL semantics superficially and rarely tell you what transport security your connection actually negotiated versus what you merely asked for.
+<p align="center">
+  <img src="docs/assets/screenshots/workbench-overview.png" alt="The full workbench: a header naming the role, host and database with its environment marker, above the object tree, editor and results panes." width="92%" />
+</p>
 
-So engineers use one client for casual exploration and fall back to `psql` for production, leaving them least fluent in the tool they use under the highest pressure.
+The header answers the questions you should not have to ask. Which role, host and database. Whether this is production, because you declared it, not because a host name looked important. Whether the session is read-only, and whether a transaction is open or has failed. For the careful question, **Connection and auth details** in the palette says how the connection is really protected, read back from PostgreSQL itself, so `require` and `verify-full` are never described alike, and an answer the server will not give is shown as unknown. Switch colour off and every marker is still a word: `[PROD]`, `[READ ONLY]`, `[TX FAILED]`. When the terminal is narrow, decoration gives way first; those words stay.
 
-**Ignatius ends that split.** Built in one compact Rust binary (`ratatui` + `tokio-postgres`), the client you explore schemas with daily is the exact engine you automate in CI and point at production with calm confidence: oriented, in control, and slightly delighted; never noisy, cryptic, brittle, or smug.
+### The answer, as it is
 
-### What Sets Ignatius Apart
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/run-and-settle-still.png" />
+    <img src="docs/assets/motion/run-and-settle.png" alt="A statement running in the atelier theme: a short comet moves along a track under the word Running and the elapsed time, then the rows arrive and the word Completed settles from green to its resting colour." width="92%" />
+  </picture>
+</p>
 
-| Honesty Guarantee | How Ignatius Enforces It |
+While a statement runs, a small comet travels back and forth on a track under the word `Running` and the elapsed time. It never arrives anywhere, because PostgreSQL reports no progress for an ordinary query and Ignatius will not invent one. When the rows land, the word `Completed` glows briefly and settles, so even an identical rerun is visibly new. A NULL reads `[null]`, an empty string stays empty, and the text `NULL` stays text.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/cancel-honestly-still.png" />
+    <img src="docs/assets/motion/cancel-honestly.png" alt="Cancelling a running statement: the comet turns amber and the status reads Cancellation requested until the server confirms the cancellation." width="80%" />
+  </picture>
+</p>
+
+Press `Ctrl+C` and the status reads `Cancellation requested` until the server confirms it, because between the two the statement may still be running. If the connection drops mid-statement, you are told `Connection lost - query outcome unknown`, because that is the truth.
+
+### Careful where it counts
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/error-diagnostics.png" alt="A query error naming a misspelled column and marking it with a caret in the statement, followed by a likely cause, a next step and the SQLSTATE code." />
+      <br />
+      <sub>An error points at the token the server named.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/reviewed-update.png" alt="A review showing the exact bound UPDATE generated from a selected cell, with the note that nothing has been sent yet." />
+      <br />
+      <sub>A cell edit is reviewed before it is sent.</sub>
+    </td>
+  </tr>
+</table>
+
+When the server's error position maps to the statement you sent, Ignatius marks the token, names a likely cause and a next step, and keeps the technical fields one key away. Editing a cell produces the exact `UPDATE` for you to read before anything leaves the client, and it is refused on production and read-only sessions. On a production connection, statements you run from the editor that write wait for confirmation, and destructive ones ask you to type the database name. These checks read SQL keywords and are advisory; `--read-only`, which PostgreSQL itself enforces, is the real control.
+
+### Everything is a few keys away
+
+<p align="center">
+  <img src="docs/assets/screenshots/palette-preview.png" alt="The saved queries list open over the workbench, which recedes into quiet ink behind it, with the selected query previewed beside the list." width="92%" />
+</p>
+
+`Ctrl+P` opens a palette that finds any action by name. Saved queries, history and connection profiles open in the same kind of searchable list, with a preview beside it. `Ctrl+K` starts a two-key chord and shows a guide to everything that can follow, so nothing has to be memorised. When a list or dialog opens, the panes behind it step back into quiet ink, while the header and its production marker stay exactly as they were, and the footer offers only the keys that dialog will honour, keeping the way out for as long as anything fits. There is no modal editing to learn and no Vim to know. The mouse works too, and turning it off removes nothing.
+
+### Yours to shape
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/theme-curtain-still.png" />
+    <img src="docs/assets/motion/theme-curtain.png" alt="Switching between the dark, atelier, paper and material themes: each new palette sweeps across the panes from left to right in about a third of a second, while the header and footer change at once." width="92%" />
+  </picture>
+</p>
+
+Seven built-in themes, from the warm dark of `atelier` to the archival light of `paper`, switch from the palette without reconnecting, and `ui.theme = "auto"` asks your terminal whether its background is light or dark. A new palette sweeps across the panes in about a third of a second; the header and footer change first, so a safety marker is never split between two themes. Text in every built-in theme meets 4.5:1 contrast against every surface, and tests hold it there; the ink behind an open dialog is deliberately quieter. Icons are optional and never carry meaning alone. Motion is brief, never the only signal, never plays over a confirmation, and is gone entirely with `ui.reduced-motion = true`.
+
+<details>
+<summary>All themes</summary>
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/workbench-paper.png" alt="The workbench in the paper theme." />
+      <br />
+      <sub><code>paper</code>: warm archival light.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/workbench-material.png" alt="The workbench in the material theme." />
+      <br />
+      <sub><code>material</code>: cool tonal dark.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/workbench-field-industrial.png" alt="The workbench in the field-industrial theme." />
+      <br />
+      <sub><code>field-industrial</code>: matte slate with amber signals.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/workbench-light.png" alt="The workbench in the light theme." />
+      <br />
+      <sub><code>light</code>: crisp daylight.</sub>
+    </td>
+  </tr>
+</table>
+
+</details>
+
+<details>
+<summary>More of the workbench</summary>
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/completion-menu.png" alt="The schema completion menu open in the editor." />
+      <br />
+      <sub>Schema completion, <code>Ctrl+Space</code>.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/palette-preview.png" alt="The saved queries list with the selected query previewed beside it." />
+      <br />
+      <sub>Saved queries with a preview, <code>Ctrl+K o</code>.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/plan-explorer.png" alt="The query plan explorer." />
+      <br />
+      <sub>Query plans: <code>Ctrl+K l</code> estimates without running, <code>Ctrl+K a</code> measures after you confirm.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/query-bench.png" alt="The query benchmark view." />
+      <br />
+      <sub>Benchmarks, <code>Ctrl+K '</code>, rolled back by default.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/schema-snapshot.png" alt="The schema snapshot and drift view." />
+      <br />
+      <sub>Schema snapshots and drift, <code>Ctrl+K &quot;</code>.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/sql-runbook.png" alt="The SQL runbook view." />
+      <br />
+      <sub>SQL runbooks with a dry run, <code>Ctrl+K ?</code>.</sub>
+    </td>
+  </tr>
+</table>
+
+</details>
+
+Every image and animation here is rendered from the interface's own widget buffers over synthetic data, inside a drawn window frame. No frame is tweened.
+
+---
+
+## Quick start
+
+You need a Rust toolchain (rustup picks up the pinned version; the minimum is 1.90) and Docker for the practice database. Nothing has been published as a release yet, so Ignatius is built from source.
+
+```bash
+git clone https://github.com/tkomane/ignatius.git
+cd ignatius
+cargo xtask db up      # a disposable PostgreSQL 18 with synthetic data, on ports 55432 and 55433
+cargo xtask run        # open Ignatius against it
+```
+
+Then try a few things:
+
+- In the editor, type `SELECT label, value FROM rendering_cases;` and press `Ctrl+R`. A NULL, an empty string and the text `NULL` each look different in the results.
+- On a new line, type `SELECT * FROM orders WHERE customer_id = 10482;` and, with the cursor on it, press `Ctrl+K l`. The estimated plan opens without the statement running; `Esc` returns to the results.
+- Press `Tab` until the results have focus, choose a cell with the arrow keys, and press `Enter` to inspect it. `Esc` closes the inspector.
+- Press `Ctrl+P`, type `theme`, and choose **Switch theme**.
+- Press `Ctrl+K` on its own to see every chord, `F1` for help, and `Ctrl+Q` to quit.
+
+When you are done, `cargo xtask db down` stops the database and deletes its data. The practice credentials are synthetic and live in `docker/dev.env`; `cargo xtask run` passes them for you.
+
+To keep a copy, `cargo xtask install` builds a release binary into `~/.local/bin` (or `--dir PATH`). Then point it at your own database, letting the password come from `.pgpass`, `PGPASSWORD` or the masked prompt rather than the command line:
+
+```bash
+ignatius connect --check "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
+ignatius connect "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
+```
+
+`--check` reports each stage of the connection without opening the workbench.
+
+Ignatius is built and tested on macOS, Linux and Windows in CI. Warp on macOS and Windows Terminal on Windows 11 are first-class targets; hand-use acceptance on each platform is still in progress, and [the compatibility guide](docs/support/compatibility.md) records exactly what has been verified. The full layout wants 80x24; smaller terminals get a single pane.
+
+---
+
+## Everyday keys
+
+| Key | What it does |
 | --- | --- |
-| **Transport truth from the server** | Connection badges reflect `pg_stat_ssl` (`SSLv3`/TLS version and cipher suite) read back from PostgreSQL, so `require` and `verify-full` are never blurred together. |
-| **Options that fail closed** | Unhonored security settings such as `sslrootcert` fail loudly before entering the terminal instead of silently downgrading protection. |
-| **Declared production posture** | `environment = "prod"` (`[PROD]`) and `read-only = true` (`[READ ONLY]`) are explicit operator declarations that guard destructive mutations and reviewed updates even with `NO_COLOR=1` and `--ascii`. |
-| **Uncertainty is stated verbatim** | Cancellations show `Cancellation requested` until PostgreSQL confirms (`57014`); dropped sockets report `Connection lost - query outcome unknown`; `NULL` (`[null]`), empty string (`""`), and literal `"NULL"` never collide visually. |
-| **One binary, TUI + CI CLI** | Interactive SQL workspaces, diagnostics, benchmarks, snapshots, and runbooks share the same PostgreSQL runtime, redaction pipeline, and exit codes (`0`-`130`) as scriptable `ignatius` subcommands. |
+| `Ctrl+R` | Run the whole buffer (`F5` also works) |
+| `Ctrl+T` | Run the statement at the cursor (`F9` also works) |
+| `Ctrl+C` | Cancel the running statement |
+| `Tab` | Move focus between the object tree, editor and results |
+| `Ctrl+P` | Open the command palette |
+| `Ctrl+K` | Start a two-key chord and list what can follow |
+| `Ctrl+Space` | Show schema completion |
+| `Ctrl+Shift+F` | Format the SQL buffer |
+| `F1` | Show or hide help (`Ctrl+G` where `F1` is unavailable) |
+| `Ctrl+Q` | Quit |
 
-### What Ignatius Will Never Become
-
-Ignatius stays sharp by refusing feature sprawl recorded in [the product vision](docs/product/vision.md):
-- Not a generic multi-database client that flattens PostgreSQL types, locks, WAL, and replication into lowest-common-denominator SQL.
-- Never an AI wrapper that ships your schemas, queries, or row values to external endpoints.
-- No cloud accounts, workspace sync services, BI dashboard builders, or third-party plugin marketplaces.
-- Deep administration workflows (`026`-`061`) stay SQL-first, bounded, previewable, and explicitly guarded.
-
----
-
-## Editorial Craft & Seven Built-In Themes
-
-Terminal tools do not need visual clutter to feel refined. Ignatius pairs **Apple HIG clarity and typographic hierarchy**, **Google Material Design 3 4-tier tonal elevation**, and **Dieter Rams / print editorial discipline**, codified in [the Ignatius Constitution](.specify/memory/constitution.md) (Principle XI):
-
-- **4-Tier Painted Surfaces**: Every built-in palette maps distinct elevations (`Surface` outer frame, `SurfacePane` interiors, `SurfaceAlt` rails/headers/zebra stripes/recessed modal pills, `SurfaceOverlay` dialogs/elevated keycaps) using `Clear`-then-block overlay painting.
-- **Tactile Keycaps & Non-Dimmed Modal Badges**:
-  - Header identity badges, footer shortcut rails (cleanly right-aligned when space permits), and empty-state starter keys lift onto `SurfaceOverlay` via `Theme::keycap(token)` cleanly over `SurfaceAlt` bars.
-  - Secondary overlay capsules (`[WARMUP: 2]`, `[TABLES: 1]`, `[CELLS: 2]`) rest recessed on `SurfaceAlt` inside `SurfaceOverlay` modals via `Theme::recessed_pill(token)` without dim-modifier wash-out, guarded by width-aware `render_capsule_bar` wrapping so pills never clip on tight viewports.
-- **Literary Typography & Micro-Rules**: Split multi-span pane headers lead with focused accent markers and calm muted metadata, SQL comments (`SyntaxComment`) and `[null]` markers set in literary italic (`TrueColor`/`Indexed256`), tree indentation guides recede smoothly into `Border` tone behind semantic icons, the Spotlight command palette paints a full-width `SurfaceAlt` search strip (`list_row_0_y` invariant intact), and modal tab strips separate from content with hairline dividers.
-- **PostgreSQL & Codicon Symbolism (`--glyphs nerd-font`)**: Opt-in Nerd Font iconography pairs the PostgreSQL elephant brand emblem with crisp single-cell Codicon and Material Design symbols across object trees, locks, diagnostics, and read/write postures alongside `CommitMono Nerd Font`, while `unicode` and `--ascii` keep every screen 100% self-explanatory without icon reliance.
-- **Adaptive & Accessible Everywhere**: Automatic `OSC 11` terminal background detection (`ui.theme = "auto"`), full `[theme]` custom extension support, `Basic16` (surface fills left transparent cleanly), `NO_COLOR` (zero ANSI color sequences), and `--ascii` parity. Every non-border token satisfies `>= 4.5:1` contrast across all four surface tiers (`>= 7.0:1` in `high-contrast`).
-
-| Preset | Character | Surface Sequence (`Base` -> `Pane` -> `Alt` -> `Overlay`) | Primary Accents |
-| --- | --- | --- | --- |
-| `atelier` | Editorial warm obsidian-espresso dark | `#141210` -> `#1B1917` -> `#24211E` -> `#2E2A26` | Terracotta `#E6825C`, champagne `#D8BE9A`, antique gold `#E6BD6A`, eucalyptus `#8EC5BC` |
-| `paper` | Archival rag-paper editorial light | `#EAE3D5` -> `#F6F1E7` -> `#E4DCCD` -> `#DBD2C1` | Sienna `#9A3115`, Prussian slate `#25486B`, forest ink `#18593B` |
-| `material` | Google Material Design 3 Tonal Dark | `#111318` -> `#191C22` -> `#22262E` -> `#2B303A` | Material blue `#8AB4F8`, cyan `#78D9EC`, sage `#81C995` |
-| `field-industrial` | Dieter Rams / Teenage Engineering matte hardware | `#0E1117` -> `#151A23` -> `#1C2330` -> `#242D3D` | Safety orange `#FF6A00`, phosphor amber `#FBBF24`, sage `#10B981` |
-| `dark` | TokyoNight-inspired cool midnight studio | `#11131D` -> `#1B1E2E` -> `#22263A` -> `#292E42` | Cobalt `#7AA2F7`, teal `#73DACA`, amber `#E0AF68` |
-| `light` | Catppuccin Latte-inspired crisp daylight | `#E6E9EF` -> `#F4F6F9` -> `#E2E6F0` -> `#DCE0E8` | Royal blue `#1E66F5`, sapphire `#209FB5`, pine `#40A02B` |
-| `high-contrast` | Pure WCAG AAA black & high-luminance ink | `#000000` -> `#0B0E14` -> `#161B26` -> `#1E2430` | Crisp sky `#80BFFF`, gold `#FFD466`, coral `#FF8A8A` |
-
-Runtime theme switching via **Command Palette (`Ctrl+P` -> Switch theme)** or `[keys] switch-theme` cycles cleanly across `dark -> light -> high-contrast -> field-industrial -> material -> atelier -> paper -> custom?` without reconnecting.
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/workbench-paper.png" alt="Archival Rag Paper workbench with Sienna focus and Prussian accents" />
-      <br />
-      <sub><strong>Archival Rag Paper (<code>paper</code>)</strong> - Warm editorial rag-paper light surfaces with Sienna keycaps and Prussian selection.</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/workbench-material.png" alt="Material 3 Tonal workbench with structured Results empty state" />
-      <br />
-      <sub><strong>Material 3 Tonal (<code>material</code>)</strong> - Calm neutral slate elevations and structured Results empty-state guidance.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/workbench-field-industrial.png" alt="Field Industrial workbench with populated results grid" />
-      <br />
-      <sub><strong>Field Industrial (<code>field-industrial</code>)</strong> - Matte instrument chrome with safety-orange focus and high-legibility rows.</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/workbench-light.png" alt="Ignatius Light Theme workbench" />
-      <br />
-      <sub><strong>Light (<code>light</code>)</strong> - Cool daylight palette with crisp <code>[PROD]</code> capsules and full-width column headers.</sub>
-    </td>
-  </tr>
-</table>
+Every action has a named key, every chord is listed in help, and keys can be rebound under `[keys]` in the configuration file. The complete map, including every chord, is in [the reference](#two-key-chord-menu-ctrlk) below and in [the keymap](docs/design/keymap.md).
 
 ---
 
-## Visual Tour
+## Connecting
 
-Images below are 2x HiDPI captures rendered directly from the Ignatius TUI buffer over synthetic database fixtures.
+### URIs and Flags
 
-### Three-Pane Workbench (`workbench-overview.png`)
-
-<p align="center">
-  <img src="docs/assets/screenshots/workbench-overview.png" alt="Ignatius Three-Pane Workbench in Classic Dark" width="92%" />
-</p>
-
-- **Neo-tree Style Schema Sidebar (Left)**: Browse schemas, tables, views, materialized views, partitions, columns with ellipsis-safe type summaries, constraints, and triggers (`Enter` expands or opens definitions with `Ctrl+K d` and dependency graphs with `Ctrl+K y`).
-- **Multi-Tab Split SQL Editor (Top-Right)**: Syntax highlighting, Focus/Muted `CursorLineNr` gutters, up to 16 concurrent buffers (`Ctrl+K =` / `Ctrl+K }` / `Ctrl+K {` / `Ctrl+K -`), vertical/horizontal split panes (`Ctrl+K \`), built-in & custom scratchpad snippets (`Ctrl+K ;`), atomic crash recovery (`Ctrl+K r` / `Ctrl+K d`), 1 MiB bounded bracketed paste, and deterministic SQL formatting (`Ctrl+Shift+F` or `Ctrl+K q`).
-- **Truthful Results Grid (Bottom-Right)**: Full-width column header fill, row-number gutter, sort indicators, local filtering (`/`), frozen columns & visibility controls (`Ctrl+K g`), expanded vertical rows (`Ctrl+K x`), and structured JSONB/array/PostGIS/pgvector inspection (`Enter` or `Ctrl+K i`). Interactive split-border dragging and pane zoom (`Ctrl+K z`) keep focus fluid.
-
-### Schema-Aware Completion & 60% Spotlight Command Palette
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/completion-menu.png" alt="Schema-Aware SQL Completion Popup" />
-      <br />
-      <sub><strong>Blink.cmp-Style Completion (<code>Ctrl+Space</code>)</strong> - Asynchronous catalog completions with fuzzy matching and hairline dividers.</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/palette-preview.png" alt="Spotlight Command Palette with 60% Live SQL Preview" />
-      <br />
-      <sub><strong>Spotlight Command Palette (<code>Ctrl+P</code>)</strong> - Full-width recessed search strip with 40%/60% list and live SQL preview.</sub>
-    </td>
-  </tr>
-</table>
-
-### Query Plan Explorer & Actionable Error Diagnostics
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/plan-explorer.png" alt="Interactive EXPLAIN ANALYZE Query Plan Explorer" />
-      <br />
-      <sub><strong>Plan Explorer (<code>Ctrl+K l</code> / <code>Ctrl+K a</code>)</strong> - Interactive <code>EXPLAIN</code> / <code>EXPLAIN ANALYZE</code> tree surfacing hottest nodes and estimate mismatches.</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/error-diagnostics.png" alt="Structured Query Error Diagnostics" />
-      <br />
-      <sub><strong>Layered Diagnostics</strong> - Exact SQL token context (<code>SELECT id, custmer_id...</code>), probable cause, next action, and expandable <code>SQLSTATE</code>.</sub>
-    </td>
-  </tr>
-</table>
-
-### Guarded Cell-to-UPDATE Review
-
-<p align="center">
-  <img src="docs/assets/screenshots/reviewed-update.png" alt="Reviewed Cell-to-UPDATE Modal" width="88%" />
-</p>
-
-Pressing `Ctrl+K u` on an eligible primary-key cell synthesizes an explicit parameterized `UPDATE` preview showing exact predicates before any query leaves the client. Production profiles (`environment = "prod"`) and `--read-only` sessions enforce write guards by default.
-
-### Benchmarks, Schema Drift Guard & SQL Runbooks (M14)
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/query-bench.png" alt="Query benchmark overlay in Material 3 Tonal" />
-      <br />
-      <sub><strong>Query Benchmarks (<code>Ctrl+K '</code>)</strong> - Warmup-separated A/B timing with <code>p50</code>/<code>p95</code>/<code>p99</code>, QPS, sparklines, and rollback safety.</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/assets/screenshots/schema-snapshot.png" alt="Schema snapshot drift overlay in Field Industrial" />
-      <br />
-      <sub><strong>Schema Drift Guard (<code>Ctrl+K &quot;</code>)</strong> - Zero-row <code>pg_catalog</code> SHA-256 baseline pinning and <code>Breaking</code>/<code>Warning</code>/<code>Info</code> diff gates.</sub>
-    </td>
-  </tr>
-</table>
-
-<p align="center">
-  <img src="docs/assets/screenshots/sql-runbook.png" alt="SQL runbook overlay with write-guard dry-run planner" width="88%" />
-  <br />
-  <sub><strong>SQL Runbooks (<code>Ctrl+K ?</code>)</strong> - Markdown and <code>-- @cell</code> notebooks with <code>classify_all</code> write guards and dry-run safety previews.</sub>
-</p>
-
----
-
-## Quickstart: Try Ignatius in 60 Seconds
-
-Ignatius ships with disposable PostgreSQL containers pre-seeded with realistic ecommerce, analytics, and rendering fixtures (`public.orders`, `public.recent_orders`, `public.rendering_cases`, `public.type_coverage`, and `reporting.order_totals`).
-
-### 1. Start the Playground
 ```bash
-cargo xtask db up
-```
-Starts disposable PostgreSQL on port `55432` (plain) and `55433` (verified TLS).
+# A connection URI. Keep the password out of it.
+ignatius connect "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
 
-### 2. Launch the Workbench
-Run directly from source against the plain fixture:
-```bash
-cargo xtask run
-```
-
-Or install locally (`~/.local/bin/ignatius`) and launch against either plain or verified TLS:
-```bash
-cargo xtask install
-
-# Plain fixture
-PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' docker/dev.env)" \
-  ignatius connect 'postgres://ignatius_test@127.0.0.1:55432/ignatius_demo?sslmode=disable'
-
-# Verified TLS fixture
-PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' docker/dev.env)" \
-  PGSSLROOTCERT="$PWD/docker/tls/generated/ca.crt" \
-  ignatius connect 'postgres://ignatius_test@localhost:55433/ignatius_demo?sslmode=verify-full'
-```
-
-### 3. Immediate Actions to Try
-- Run `SELECT order_id, customer_id, total, note FROM public.orders ORDER BY order_id;` with `Ctrl+R`.
-- Press `Tab` to switch panes; navigate Results cells with arrow keys and open Cell Detail with `Enter` (`Ctrl+K i`).
-- Press `Ctrl+K u` on an eligible row to preview a guarded `UPDATE`, or `Ctrl+K l` to inspect the query plan.
-- Press `Ctrl+P` for the 60% SQL preview Command Palette, and select **Switch theme** to cycle across `dark`, `light`, `high-contrast`, `field-industrial`, `material`, `atelier`, and `paper`.
-
-### 4. Tear Down
-```bash
-cargo xtask db down
-```
-
----
-
-## Connecting to PostgreSQL
-
-### URIs and Command-Line Flags
-```bash
-# Standard connection URI
-ignatius connect "postgres://app_user:secret@db.internal:5432/analytics?sslmode=verify-full"
-
-# Individual connection flags and server-enforced read-only mode
+# Individual flags, asking the server to refuse writes for this session
 ignatius connect --host db.internal --port 5432 --username app_user --dbname analytics --sslmode verify-full --read-only
 
-# Named profile
+# A named profile
 ignatius connect @production-orders
 ```
 
+Remote hosts default to `verify-full`. A TLS failure is never retried without TLS, and an option Ignatius cannot honour, such as `sslcrl` or `channel_binding`, is refused rather than quietly ignored.
+
 ### Configuration Profiles (`config.toml`)
-Profiles and UI preferences live in `~/.config/ignatius/config.toml` (Linux/macOS) or `%APPDATA%\ignatius\config.toml` (Windows):
+
+Profiles and preferences live in `~/.config/ignatius/config.toml` on Linux and macOS, or `%APPDATA%\ignatius\config.toml` on Windows. A profile never holds a password.
 
 ```toml
+schema_version = 1
+
 [ui]
 theme = "auto"              # "dark", "light", "high-contrast", "field-industrial", "material", "atelier", "paper", "custom", or "auto" (OSC 11)
 mouse = true                # enable mouse clicks, drags, and scrolling
@@ -297,37 +294,159 @@ environment = "prod"        # triggers [PROD] header badge and write guards
 read-only = true            # enforces PostgreSQL session read-only transaction mode
 ```
 
-### Cloud Identity Authentication & Secret Safety
-Short-lived cloud token providers work without stored passwords via `[profiles.<name>]`:
-- `auth = "entra"` (Azure Database for PostgreSQL via `az account get-access-token`)
-- `auth = "aws"` (AWS RDS IAM token via AWS CLI)
-- `auth = "gcp"` (Google Cloud SQL via `gcloud auth print-access-token`)
+With profiles configured and no target given, the workbench opens on a searchable picker, and `Ctrl+K n` brings it back later. `nerd-font` glyphs need a patched font and are never turned on unless you ask.
 
-All passwords and tokens are wrapped in `secrecy::SecretString`, zeroized on drop, passed through a single audited redaction pipeline, and never written to disk or statement history. Credentials resolve from connection strings, `.pgpass`, `PGPASSWORD`, or interactive masked prompts.
+### Cloud Identity
+
+A profile can obtain a short-lived token from your cloud's own command-line tool instead of a password, over an encrypted connection only:
+
+- `auth = "entra"` runs `az account get-access-token --resource-type oss-rdbms`
+- `auth = "aws"` runs `aws rds generate-db-auth-token`
+- `auth = "gcp"` runs `gcloud sql generate-login-token`
+
+The mechanism is tested end to end against a real PostgreSQL server over TLS. None of the three built-ins has yet been run against its cloud's own database; [the compatibility guide](docs/support/compatibility.md#cloud-identity-providers) will say when that changes.
+
+### Where Passwords Come From
+
+In order: the connection string, `PGPASSWORD`, a `.pgpass` file, then a masked prompt. A `.pgpass` readable by anyone but you is refused, with the `chmod` that fixes it. Passwords and tokens are held in memory only as long as they are needed, never written to the configuration file or history, and every displayable string that might carry a credential passes through one redaction path.
 
 ---
 
-## Keyboard Shortcuts, Chords & Mouse Fluency
+## What stays on your machine
 
-Zero Vim-modal traps: printable keys type cleanly while `Tab`, `Ctrl+*`, function keys, and two-key `Ctrl+K` chords drive every capability.
+- **Nothing goes anywhere else.** No telemetry, no update check, no account and no sync. Ignatius opens network connections only to the databases you point it at.
+- **Result rows are never stored** unless you export them.
+- **History records the SQL that ran, never what came back**, and skips any statement that mentions something like a password or token. Pause it with `Ctrl+K v`, skip it for one session with `--no-history`, or turn it off with `history.enabled = false`.
+- **Unsaved buffers survive a crash**, unless the session started with `--no-history` or `history.enabled = false`, in which case nothing is kept; pausing with `Ctrl+K v` stops history but not the journal. The recovery journal holds editor text only, and you decide what happens to it:
 
-### Global Navigation, Editor & Results Keys
-| Context | Key | Action |
-| --- | --- | --- |
-| Global | `Tab` / `Shift+Tab` | Cycle focus between Sidebar, Editor, and Results panes |
-| Global | `Ctrl+P` | Open Spotlight Command Palette with 60% live preview |
-| Global | `Ctrl+B` | Toggle Neo-tree Schema Sidebar |
-| Global | `Ctrl+C` / `Ctrl+Q` | Cancel active query cleanly / quit Ignatius |
-| Global | `F1` / `Ctrl+G` / `Esc` | Toggle Help / dismiss active overlay or prompt |
-| Editor | `Ctrl+R` (`F5`) / `Ctrl+T` (`F9`) | Execute full SQL buffer / statement under cursor |
-| Editor | `Ctrl+Space` / `Ctrl+Shift+F` | SQL autocomplete popup / deterministic formatting |
-| Editor | `Ctrl+Z` / `Ctrl+Y` | Word-level Undo / Redo (`Ctrl+Left`/`Right`, `Home`/`End`) |
-| Results / Tree | `Up`/`Down`/`Left`/`Right` | Navigate grid cells or sidebar tree (`PageUp`/`PageDown`/`Home`/`End`) |
-| Results / Tree | `Enter` (`Ctrl+K i`) / `/` (`Ctrl+K f`) | Inspect cell or expand object / filter grid or tree |
-| Results | `F6` / `Ctrl+Shift+R` | Refresh retained result set by re-running its SQL |
+```bash
+ignatius recovery status
+ignatius recovery restore --format sql > recovered.sql
+ignatius recovery discard
+```
+
+Where each file lives, its permissions and its lifetime are listed in [data handling](docs/security/data-handling.md).
+
+---
+
+## Scripting and CI
+
+The same binary runs without a screen. `ignatius query` reads SQL from an argument, a file or standard input and writes `table`, `csv`, `tsv`, `json`, `ndjson`, `markdown` or `insert`:
+
+```bash
+ignatius query "$DATABASE_URL" -c "SELECT order_id, total FROM orders" --format json
+
+# Named parameters come from the environment, never from the command line
+IGNATIUS_MONTH=2026-11 ignatius query "$DATABASE_URL" -f monthly.sql --param-env month=IGNATIUS_MONTH
+
+# Stream a large result to disk; an interrupted export leaves a .partial file and exits 9
+ignatius query "$DATABASE_URL" -c "SELECT * FROM audit_log" --format csv --output audit.csv
+```
+
+A production-classified target refuses anything that is not a read unless you pass `--allow-write`.
+
+### Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | A check found what it was asked to fail on, such as `lint --fail-on`, `snapshot check --fail-on`, or `fleet` drift |
+| `2` | Usage error |
+| `3` | Configuration error |
+| `4` | Could not reach the server |
+| `5` | Reached the server; credentials rejected |
+| `6` | TLS failed under the requested policy |
+| `7` | The server reported an error for a statement |
+| `8` | Cancelled |
+| `9` | Export interrupted; a `.partial` file may remain |
+| `70` | Internal error, always a defect worth reporting |
+
+<details>
+<summary>Every command, with an example</summary>
+
+Descriptions follow each command's own `--help`.
+
+```bash
+# Setup, configuration, history and snippets
+ignatius doctor
+ignatius config validate
+ignatius connect --check @production-orders
+ignatius history list
+ignatius history clear --yes
+ignatius snippet list
+ignatius snippet show cache-hit-ratio
+ignatius completion zsh > ~/.zfunc/_ignatius
+
+# Catalogue meta-commands such as \dt also work with -c
+ignatius query "$DATABASE_URL" -c '\dt' --format json
+
+# Lint SQL without a server, apply versioned migrations, generate a data dictionary
+ignatius lint migrations/ --fail-on error --format sarif --output lint.sarif
+ignatius migrate status "$DATABASE_URL" --dir migrations
+ignatius migrate apply "$DATABASE_URL" --dir migrations --dry-run
+ignatius docs "$DATABASE_URL" --schema public --format markdown --output docs/data-dictionary.md
+
+# Table growth, partition plans, and restore drills into a scratch database
+ignatius growth "$DATABASE_URL" --top 20 --fail-on critical
+ignatius partition status "$DATABASE_URL" --schema billing
+ignatius partition plan "$DATABASE_URL" --table billing.invoices --period monthly --start 2026-12-01 --count 3
+ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump --dry-run
+
+# ER diagrams, DDL, streaming COPY, pg_dump and pg_restore, schema diffs
+ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
+ignatius ddl "$DATABASE_URL" --schema public --output schema.sql
+ignatius import "$DATABASE_URL" --table orders --file orders.csv --dry-run
+ignatius export "$DATABASE_URL" "SELECT * FROM orders" --format csv --output orders.csv
+ignatius backup "$DATABASE_URL" --output orders.dump --format custom
+ignatius restore "$DATABASE_URL" --input orders.dump --dry-run
+ignatius diff "$DATABASE_URL" --source-schema public --target-schema reporting
+
+# Server activity and locks, roles and RLS, routines, LISTEN and NOTIFY, maintenance
+ignatius activity "$DATABASE_URL" --locks
+ignatius audit "$DATABASE_URL" --section rls --schema public
+ignatius run-routine "$DATABASE_URL" process_order -a 42 --rollback true
+ignatius profile-routine "$DATABASE_URL" calculate_tax --format json
+ignatius listen "$DATABASE_URL" order_events --timeout 30 --format jsonl
+ignatius notify "$DATABASE_URL" order_events "order 1042 placed"
+ignatius maintain "$DATABASE_URL" vacuum orders --analyze
+
+# Statement statistics, indexes and bloat, WAL and checkpoints, connection pools
+ignatius profile-queries "$DATABASE_URL" --sort mean --limit 20 --format table
+ignatius index-advisor "$DATABASE_URL" --format table
+ignatius wal-stats "$DATABASE_URL" --format table
+ignatius pool-stats "$DATABASE_URL" --format table
+
+# Masking rules, cross-database copy, synthetic fixtures, replication and server settings
+ignatius mask-rules "$DATABASE_URL" --schema public
+ignatius sync --source "$STAGING_URL" --target "$DEV_URL" --dry-run
+ignatius seed "$DATABASE_URL" --schema public --rows 25 --format sql
+ignatius replication "$DATABASE_URL" --section all --format table
+ignatius cluster "$DATABASE_URL" --section settings --modified-only --format json
+
+# Keyset browsing, plan diffs, result analytics, benchmarks, snapshots, runbooks, fleets
+ignatius browse "$DATABASE_URL" --table public.orders --page-size 50 --format table
+ignatius plan-diff "$DATABASE_URL" --baseline "SELECT * FROM orders" --candidate "SELECT order_id FROM orders WHERE order_id = 1" --analyze
+ignatius analytics "$DATABASE_URL" -c "SELECT * FROM orders" --format parquet -o orders.parquet
+ignatius bench "$DATABASE_URL" -c "SELECT * FROM public.orders" --warmup 2 --runs 10 --format table
+ignatius snapshot capture "$DATABASE_URL" --schema public -o schema.snapshot.json
+ignatius snapshot check "$DATABASE_URL" --against schema.snapshot.json --schema public --fail-on breaking
+ignatius runbook --file incident.md --dry-run --format table
+ignatius plan-history show --series orders-plan --format json
+ignatius fleet --baseline @app-dev --candidate @app-staging --schema public --format json
+```
+
+</details>
+
+---
+
+## Reference
 
 ### Two-Key Chord Menu (`Ctrl+K`)
-Pressing `Ctrl+K` displays an on-screen chord guide; press the second key to execute:
+
+Press `Ctrl+K` and a guide appears listing every key that can follow; press one to act, or `Esc` to step back. Chords keep plain letters free for typing SQL.
+
+<details>
+<summary>Every chord</summary>
 
 | After `Ctrl+K` | Description |
 | --- | --- |
@@ -388,175 +507,75 @@ Pressing `Ctrl+K` displays an on-screen chord guide; press the second key to exe
 | `"` | Inspect schema snapshot and drift guard |
 | `?` | Open interactive SQL Markdown runbook |
 
-When crash-recovery buffers are pending on startup, contextual `Ctrl+K r` restores them and `Ctrl+K d` discards the journal cleanly.
+</details>
 
-### Mouse Fluency
-| Target Region | Gesture | Action |
-| --- | --- | --- |
-| Any pane interior / row | Left-click / Double-click | Focus pane, select row/cell, or open Cell Detail / definition |
-| Results header / column rule | Left-click / Left-drag | Cycle sort (`Asc` -> `Desc` -> `Server`) / resize column width |
-| Vertical or horizontal split | Left-drag | Resize sidebar width or editor/results height |
-| Overlay / Palette / Panes | Double-click / Scroll / Shift+Scroll | Accept item, scroll vertically (3 rows), scroll grid horizontally |
+When unsaved buffers from an earlier session are waiting at startup, `Ctrl+K r` restores them and `Ctrl+K d` discards the journal.
 
----
+### Mouse
 
-## Non-Interactive CLI, Scripting & Streaming Export
+Mouse capture is on by default. Click to focus a pane or select a cell, double-click to open what is selected, click a column header to cycle its sort, drag a column edge or split bar to resize, and scroll with the wheel (`Shift` scrolls results sideways). Hold `Shift` while dragging to select text the terminal's own way. Set `ui.mouse = false` to give every gesture back to the terminal; nothing becomes unreachable.
 
-Every core capability works headlessly for scripts, pipelines, and CI gates:
+### Capabilities
 
-### Query Execution & Streaming Export
-```bash
-# Formats: table, csv, tsv, json, ndjson, markdown, and insert
-ignatius query "$DATABASE_URL" -c "SELECT id, name, email FROM users" --format json
+<details>
+<summary>What the workbench and the command line can do</summary>
 
-# Named environment parameter binding without SQL interpolation
-IGNATIUS_MONTH=2026-11 ignatius query "$DATABASE_URL" -f monthly.sql --param-env month=IGNATIUS_MONTH
+Codes such as `026-schema-er-diagrams` name the feature in [the roadmap](docs/product/roadmap.md).
 
-# Stream rows directly to disk (.partial safety on interruption -> exit 9)
-ignatius query "$DATABASE_URL" -c "SELECT * FROM large_audit_log" --format csv --output audit_export.csv
+**Exploring and querying**
 
-# psql backslash meta-commands over CLI or TUI
-ignatius query "$DATABASE_URL" -c '\dt' --format json
-```
+- An object tree of schemas, tables, views, functions, columns and more, with definitions (`Ctrl+K d`) and dependencies (`Ctrl+K y`).
+- Up to 16 editor buffers with splits (`Ctrl+K =`, `Ctrl+K \`), a snippet library (`Ctrl+K ;`), saved queries (`Ctrl+K w`, `Ctrl+K o`), local formatting, and bounded bracketed paste.
+- A results grid with local sorting, filtering, frozen and hidden columns (`Ctrl+K g`), an expanded row view (`Ctrl+K x`), and structured inspection of JSONB, arrays, ranges, and PostGIS and pgvector values where those extensions are installed (`Ctrl+K i`).
+- Bounded `psql`-style meta-commands such as `\d`, `\dt`, `\conninfo`, `\x` and `\watch` (`Ctrl+K :` stops a watch). Ignatius is not a `psql` replacement and does not claim full meta-command compatibility.
+- Query plans, estimated (`Ctrl+K l`) or measured after confirmation (`Ctrl+K a`), and extended `EXPLAIN (BUFFERS, WAL)` comparison (`Ctrl+K /`, `ignatius plan-diff`).
 
-### Operational & CI Automation Commands
-```bash
-# Diagnostics, configuration, history, snippets & crash recovery
-ignatius doctor
-ignatius config check
-ignatius connect --check @production-orders
-ignatius history list
-ignatius history clear --yes
-ignatius snippet list
-ignatius snippet show cache-hit-ratio
-ignatius recovery status
-ignatius recovery restore --format sql > recovered.sql
-ignatius recovery discard
+**Schema and data**
 
-# Offline SQL lint (13 lexical rules -> table, json, sarif), forward-only migrations & data dictionary
-ignatius lint migrations/ --fail-on error --format sarif --output lint.sarif
-ignatius migrate status "$DATABASE_URL" --dir migrations
-ignatius migrate apply "$DATABASE_URL" --dir migrations --dry-run
-ignatius docs "$DATABASE_URL" --schema public --format markdown --output docs/data-dictionary.md
+- ER diagrams in the terminal (`Ctrl+K m`) or as Mermaid, DOT, SVG, ASCII or Unicode (`ignatius diagram`). `026-schema-er-diagrams`
+- Deterministic DDL for a schema or object (`Ctrl+K d`, `ignatius ddl`), with Toggle DROP and Load in Editor in the definition view. `027-deep-catalog-and-ddl-generator`
+- Streaming `COPY` import and export (`Ctrl+K <`, `ignatius import`, `ignatius export`) and `pg_dump` and `pg_restore` with safe credential handling (`ignatius backup`, `ignatius restore`). `028-data-import-export-and-backup`
+- Schema comparison and reviewable, transactional migration scripts (`Ctrl+K k`, `ignatius diff`). `030-visual-schema-designer-and-migrations`
+- A live data browser with batch edits (`Ctrl+K _`) and bounded keyset paging (`ignatius browse`), data masking rules (`Ctrl+K )`, `ignatius mask-rules`), cross-database copy (`Ctrl+K |`, `ignatius sync`) and synthetic fixtures (`Ctrl+K +`, `ignatius seed`).
 
-# Growth audit, partition lifecycle & scratch restore drills (M11)
-ignatius growth "$DATABASE_URL" --top 20 --fail-on critical
-ignatius partition status "$DATABASE_URL" --schema billing
-ignatius partition plan "$DATABASE_URL" --table billing.invoices --period monthly --start 2026-12-01 --count 3
-ignatius restore-drill "$DATABASE_URL" --backup /backups/orders.dump --dry-run
+**Operating a server**
 
-# Catalog ER diagrams, deterministic DDL, streaming COPY, backup/restore & schema diff (M6)
-ignatius diagram "$DATABASE_URL" --schema public --format mermaid --output schema.mmd
-ignatius ddl "$DATABASE_URL" --schema public --output schema.sql
-ignatius import "$DATABASE_URL" orders data.csv --delimiter ',' --header
-ignatius export "$DATABASE_URL" -c "SELECT * FROM orders" --format csv --output orders.csv
-ignatius backup "$DATABASE_URL" backup.dump --format custom
-ignatius restore "$DATABASE_URL" backup.dump --clean
-ignatius diff "$DATABASE_URL" --source-schema public --target-schema reporting
+- Live server activity, lock blocker chains and health (`Ctrl+K j`, `ignatius activity`). `029-server-activity-and-locks-dashboard`
+- Roles, privilege grants and row-level security policies (`Ctrl+K t`, `ignatius audit`). `031-roles-privileges-and-rls-auditor`
+- Run a routine under a testing harness with rollback, or profile it (`Ctrl+K (`, `ignatius run-routine`, `ignatius profile-routine`). `032-plpgsql-routine-runner-and-profiler`
+- `LISTEN` and `NOTIFY`, and vacuum, analyze and reindex with progress and a production confirmation (`Ctrl+K >`, `ignatius listen`, `ignatius notify`, `ignatius maintain`). `033-listen-notify-and-maintenance-ops`
+- Statement statistics (`Ctrl+K %`), index and bloat analysis (`Ctrl+K ^`), WAL and checkpoints (`Ctrl+K &`), connection pools (`Ctrl+K *`), logical replication and slots (`Ctrl+K #`), and server settings, HBA rules, extensions and foreign data wrappers (`Ctrl+K @`).
 
-# Activity/locks, security/RLS audit, routines, pub/sub & maintenance (M6)
-ignatius activity "$DATABASE_URL" --locks
-ignatius audit "$DATABASE_URL" --section rls --schema public
-ignatius run-routine "$DATABASE_URL" process_order -a 42 --rollback
-ignatius profile-routine "$DATABASE_URL" calculate_tax --format json
-ignatius listen "$DATABASE_URL" order_events --timeout 30 --format jsonl
-ignatius notify "$DATABASE_URL" order_events "order #1042 placed"
-ignatius maintain "$DATABASE_URL" vacuum --target orders --analyze
+**Automation**
 
-# Query stats, index/bloat forensics, WAL/checkpointer & pool telemetry (M7)
-ignatius profile-queries "$DATABASE_URL" --sort mean --limit 20 --format table
-ignatius index-advisor "$DATABASE_URL" --format table
-ignatius wal-stats "$DATABASE_URL" --format table
-ignatius pool-stats "$DATABASE_URL" --format table
+- Offline SQL lint with SARIF output (`Ctrl+K !`, `ignatius lint`), versioned SQL migrations (`ignatius migrate`) and data dictionaries (`ignatius docs`).
+- Growth audits (`ignatius growth`), range-partition plans (`ignatius partition`) and restore drills into a scratch database (`ignatius restore-drill`).
+- Benchmarks rolled back by default (`Ctrl+K '`, `ignatius bench`), schema snapshots with drift gates (`Ctrl+K "`, `ignatius snapshot`), SQL runbooks with a dry run (`Ctrl+K ?`, `ignatius runbook`), local plan history (`ignatius plan-history`) and read-only comparison across profiles (`ignatius fleet`).
 
-# Data masking, topological cross-DB sync, synthetic fixtures & replication/cluster catalogs (M8, M12)
-ignatius mask-rules "$DATABASE_URL" --schema public
-ignatius sync --source "$STAGING_URL" --target "$DEV_URL" --dry-run
-ignatius seed "$DATABASE_URL" --schema public --rows 25 --format sql
-ignatius replication "$DATABASE_URL" --section all --format table
-ignatius cluster "$DATABASE_URL" --section settings --modified-only --format json
+</details>
 
-# Keyset browser, EXPLAIN BUFFERS/WAL plan diff, HTML/Parquet analytics, benchmarks, snapshots, runbooks & fleet (M13-M16)
-ignatius browse "$DATABASE_URL" --table public.orders --page-size 50 --format table
-ignatius plan-diff "$DATABASE_URL" --baseline "SELECT * FROM orders" --candidate "SELECT id FROM orders WHERE id = 1" --analyze
-ignatius analytics "$DATABASE_URL" -c "SELECT * FROM orders" --format parquet -o orders.parquet
-ignatius bench "$DATABASE_URL" -c "SELECT * FROM public.orders" --warmup 2 --runs 10 --format table
-ignatius snapshot capture "$DATABASE_URL" --schema public -o schema.snapshot.json
-ignatius snapshot check "$DATABASE_URL" --against schema.snapshot.json --schema public --fail-on breaking
-ignatius runbook --file incident.md --dry-run --format table
-ignatius plan-history show --series orders-plan --format json
-ignatius fleet --baseline @app-dev --candidate @app-staging --schema public --format json
-ignatius completion zsh > ~/.zfunc/_ignatius
-```
+### Themes
 
-### Exit Codes
-| Code | Identifier | Meaning |
-| --- | --- | --- |
-| `0` | `success` | Command completed cleanly; all statements succeeded |
-| `1` | `findings` | Configured threshold reached (`lint`, `growth`, `bench`, `snapshot`, or `fleet` drift) |
-| `2` | `usage` | Invalid CLI arguments, flags, or unsupported terminal combination |
-| `3` | `config` | Configuration file invalid, missing, or unparseable |
-| `4` | `connection` | Network, socket, DNS, or TCP failure |
-| `5` | `authentication` | Server reached; credentials or token rejected |
-| `6` | `tls` | TLS handshake or certificate verification policy failed |
-| `7` | `query` | PostgreSQL returned a statement error |
-| `8` | `cancelled` | Statement cancelled cleanly by user or server |
-| `9` | `export-interrupted` | Export interrupted; partial data preserved at `.partial` |
-| `70` | `internal` | Unexpected client invariant violation |
-| `130` | `sigint` | Terminated via standard `SIGINT` |
+`atelier` (warm espresso dark), `paper` (warm archival light), `material` (cool tonal dark), `field-industrial` (matte slate with amber signals), `dark` (cool midnight), `light` (crisp daylight) and `high-contrast` (black with bright ink, at 7:1 contrast or better). `auto` chooses light or dark from the terminal's background, and a `[theme]` table can build a `custom` palette on top of any built-in one. At 16 colours or with `NO_COLOR`, surfaces are left to the terminal and meaning is carried by words. See [theme tokens](docs/design/theme-tokens.md).
+
+### Plain Mode
+
+`ignatius --plain connect "$DATABASE_URL"` is a complete line-oriented client with no full-screen interface, colour or box drawing, for screen readers, `TERM=dumb` and pipes. It keeps the same production safeguards and states connection and transaction state in words.
 
 ---
 
-## Accessibility, Plain Mode & Operations
+## Documentation
 
-- **Linear Screen-Reader & Pipe Mode (`--plain`)**: `ignatius --plain connect "$DATABASE_URL"` disables alternate screen, raw mode, and all ANSI escape sequences so output streams cleanly for VoiceOver, NVDA, `TERM=dumb`, and pipelines while stating environment, production identity, and transaction state explicitly in words.
-- **Installation & Local Builds**: Run from source via `cargo xtask run` or install via `cargo xtask install` (`~/.local/bin/ignatius`). Native release archive verification, reproducible checksums, and ADR-0008 release signing/publication posture live in [release operations](docs/operations/release.md).
-- **Local State & Removal**: Interactive history and crash-recovery journals live strictly under local XDG/AppData directories (`ignatius history clear --yes`, `ignatius recovery discard`). Uninstall by removing `~/.local/bin/ignatius` and `~/.config/ignatius`.
-
----
-
-## Capabilities (`M6`-`M16`)
-
-### Milestone 6: Full pgAdmin 4 Replacement Parity (`026`-`033`)
-Implemented across TUI overlays and scriptable CLI routes under [pgadmin-parity-plan.md](docs/architecture/pgadmin-parity-plan.md):
-- `026-schema-er-diagrams` (`Ctrl+K m`, `ignatius diagram` - Mermaid, DOT, SVG, ASCII, Unicode)
-- `027-deep-catalog-and-ddl-generator` (`Ctrl+K d`, `ignatius ddl` - `CREATE`/`ALTER`/`DROP` DDL across `pg_catalog` with `Toggle DROP` and `Load in Editor`)
-- `028-data-import-export-and-backup` (`Ctrl+K <`, `ignatius import`, `export`, `backup`, `restore` - streaming `COPY` & guarded `pg_dump`/`pg_restore`)
-- `029-server-activity-and-locks-dashboard` (`Ctrl+K j`, `ignatius activity` - `pg_stat_activity`, blocker trees, guarded signals)
-- `030-visual-schema-designer-and-migrations` (`Ctrl+K k`, `ignatius diff` - table/column/index/constraint designer & transactional schema diff)
-- `031-roles-privileges-and-rls-auditor` (`Ctrl+K t`, `ignatius audit` - role trees, ACLs, RLS policy auditor)
-- `032-plpgsql-routine-runner-and-profiler` (`Ctrl+K (`, `ignatius run-routine`, `profile-routine` - savepoint-isolated test harness & profiler)
-- `033-listen-notify-and-maintenance-ops` (`Ctrl+K >`, `ignatius listen`, `notify`, `maintain` - async pub/sub monitor & guarded vacuum/reindex progress)
-
-### Milestones 7-16 Overview (`034`-`062`)
-| Milestone | Features | Highlights |
-| --- | --- | --- |
-| **M7 Observability & Perf** | `034`-`037` | `pg_stat_statements` forensics (`Ctrl+K %`), index/bloat/HypoPG advisor (`Ctrl+K ^`), WAL/XID wraparound/replication lag (`Ctrl+K &`), PgBouncer & pool saturation (`Ctrl+K *`) |
-| **M8 Masking, Sync & Seed** | `038`-`040` | PII heuristic discovery & masked views (`Ctrl+K )`), topological streaming `COPY` cross-DB sync (`Ctrl+K \|`), deterministic PRNG referential test seeding (`Ctrl+K +`) |
-| **M9 Multi-Buffer & Recovery** | `041`-`043` | Up to 16 tabs & split SQL panes (`Ctrl+K =`/`\`/`-`), built-in/custom SQL snippet library (`Ctrl+K ;`), atomic session crash recovery (`Ctrl+K r`/`d`) |
-| **M10 CI Workflow Automation** | `044`-`046` | 13 offline SQL safety lint rules with SARIF (`Ctrl+K !`, `ignatius lint`), checksummed forward-only migrations (`ignatius migrate`), deterministic Markdown/JSON/Mermaid data dictionaries (`ignatius docs`) |
-| **M11 Operational Lifecycle** | `047`-`049` | Isolated scratch backup restore drills (`ignatius restore-drill`), reviewed range-partition DDL (`ignatius partition`), heap/TOAST/sequence wraparound growth audits (`ignatius growth`) |
-| **M12 `psql` & Cluster Parity** | `050`-`052` | Interactive `\d`/`\dt`/`\watch` (`Ctrl+K :`), logical replication & WAL slot retention (`Ctrl+K #`), `pg_settings`/`pg_hba_file_rules`/extensions/FDW catalog (`Ctrl+K @`) |
-| **M13 CRUD, Plan Diff & Analytics** | `053`-`055` | Keyset data browser with reviewed multi-row CRUD (`Ctrl+K _`), `EXPLAIN (BUFFERS, WAL)` A/B plan diff (`Ctrl+K /`), zero-query sparklines plus HTML/Parquet export (`Ctrl+K $`/`e`) |
-| **M14 Bench, Snapshots & Runbooks** | `056`-`058` | Rollback-isolated A/B query latency suite (`Ctrl+K '`), SHA-256 `pg_catalog` drift gates (`Ctrl+K "`), write-guarded Markdown & `-- @cell` notebooks (`Ctrl+K ?`) |
-| **M15 Types, History & Fleet** | `059`-`061` | Structured JSONB/array/range/PostGIS/pgvector cell tree & reviewed edits, digest-only `ignatius plan-history`, read-only cross-environment `ignatius fleet` comparisons |
-| **M16 Editorial TUI & Themes** | `062` | Curated obsidian-espresso `atelier` & rag-paper `paper` palettes (`>= 4.5:1` across 4 tiers), `Theme::keycap` & `recessed_pill` hierarchy, Spotlight search strip, hairline rules, 14 2x HiDPI renders |
-
----
-
-## Documentation Index
-
-- [docs/product/vision.md](docs/product/vision.md) - Product problem, honesty guarantees, and explicit non-goals
-- [docs/product/roadmap.md](docs/product/roadmap.md) - Milestone sequence, exit criteria, and feature train
-- [docs/architecture/pgadmin-parity-plan.md](docs/architecture/pgadmin-parity-plan.md) - M6 pgAdmin 4 parity architecture (`026`-`033`)
-- [docs/design/theme-tokens.md](docs/design/theme-tokens.md) - 4-tier surface elevations, contrast thresholds, and custom themes
-- [docs/design/keymap.md](docs/design/keymap.md) - Complete keybindings, chords, and mouse gestures
-- [docs/design/information-architecture.md](docs/design/information-architecture.md) - Pane geometry, compact responsive behavior, and layouts
-- [docs/support/compatibility.md](docs/support/compatibility.md) - Supported PostgreSQL versions, terminals, platforms, and open acceptance gates
-- [docs/security/threat-model.md](docs/security/threat-model.md) - Secret handling, redaction boundaries, and security assumptions
-- [docs/operations/release.md](docs/operations/release.md) - Release candidate checklist, checksums, and ADR-0008 readiness gates
-- [docs/operations/local-development.md](docs/operations/local-development.md) - Contributor setup, container fixtures, and test commands
-- [docs/status.md](docs/status.md) - Current implementation state and verification ledger
+- [Product vision](docs/product/vision.md): the problem, what makes Ignatius different, and what it will not become
+- [Compatibility](docs/support/compatibility.md): supported PostgreSQL versions, terminals and platforms, and what has been verified where
+- [Keymap](docs/design/keymap.md): every key, chord and mouse gesture
+- [Diagnostics](docs/support/diagnostics.md): reading errors and exit codes
+- [Data handling](docs/security/data-handling.md) and [threat model](docs/security/threat-model.md): what is stored, what never is, and why
+- [Icons and motion](docs/design/icons-and-motion.md) and [theme tokens](docs/design/theme-tokens.md): how the interface stays decorative without becoming untrustworthy
+- [Local development](docs/operations/local-development.md): the practice database, tests and `cargo xtask verify`
+- [Release operations](docs/operations/release.md): the release checklist and its open gates
+- [Status](docs/status.md): what is done and what is not
+- [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md)
 
 ## License
 

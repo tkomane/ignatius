@@ -135,6 +135,7 @@ below; broadening the feature list does not move a milestone forward.
 | M14 Query Benchmarks, Schema Snapshots & Runbooks | Multi-iteration A/B query latency benchmarking, canonical SHA-256 schema snapshots with drift CI gates, Markdown SQL runbooks, and Material Tonal polish | W16 (Features 056-058) | Rollback-safe warmup/measured benchmark engine with regression gates, zero-row `pg_catalog` snapshot diffing, Markdown/`-- @cell` runbooks with write guards, built-in `material` theme |
 | M15 Structured Values, Plan History & Fleet Health | Inspect structured cells, track query plan regressions and compare named environments | W16 (Features 059-061) | Reviewed typed edits, digest-only local plan history and bounded read-only fleet comparisons |
 | M16 Editorial High-Art TUI Aesthetic & Themes | Curated Obsidian/Paper gallery palettes, elevated rail keycaps, recessed modal badges, and editorial chrome typography | W16 (Feature 062) | WCAG-verified `atelier` and `paper` themes, `Theme::keycap` / `Theme::recessed_pill`, right-aligned footer hints, Spotlight palette input strip, 14 2x showcase PNGs |
+| M17 Living Surfaces | Bounded, truthful motion and depth: state first, input wins, reduced motion is stillness, safety rails never move | W16 (Feature 063) | Hard-edge theme curtain, result settle, heartbeat comet meter, static recession behind overlays, header safety capsules at every width, animated real-buffer showcase |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -236,6 +237,21 @@ of 2026-11-21:
   modal separators, width-aware modal capsule bars, and updated 2x showcase
   visuals.
 
+M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
+2026-11-24 (#131, #133, #134, #135):
+
+- [063 Living Surfaces and Truthful Motion](../../specs/063-living-surfaces-and-truthful-motion/spec.md)
+  adds a pure motion core with a separate 33 ms cadence that runs only while a
+  transition is active, a hard-edge theme curtain whose rails change first, a
+  result settle on the status word, a heartbeat comet that never implies
+  progress, static workbench recession behind blocking overlays, footer keys
+  that belong to the open overlay, header safety capsules that survive every
+  width, and deterministic animated captures rendered from real widget buffers.
+  The focus sweep and overlay arrival fade were specified and then cut after
+  design review, because they fired too often to earn their motion.
+  The benchmark overlay's unguarded `m` re-run, found during review, is still
+  on `main` and continues in #132.
+
 ```mermaid
 flowchart LR
     %% Planning dependencies, not a runtime deployment.
@@ -259,6 +275,7 @@ flowchart LR
     M13 --> M14["M14 Benchmarks, Snapshots & Runbooks (056-058)"]
     M14 --> M15["M15 Structured Values, Plan History & Fleet Health (059-061)"]
     M15 --> M16["M16 Editorial TUI Aesthetic & Atelier/Paper Themes (062)"]
+    M16 --> M17["M17 Living Surfaces (063)"]
 ```
 
 ## Start here
