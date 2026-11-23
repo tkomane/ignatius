@@ -17,7 +17,7 @@ services:
       # integration tests are provably exercising SCRAM.
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -36,7 +36,7 @@ services:
     environment:
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     ports:
-      - "55433:5432"
+      - "127.0.0.1:55433:5432"
     volumes:
       - ./init:/docker-entrypoint-initdb.d:ro
       - ./tls/generated:/certs-source:ro

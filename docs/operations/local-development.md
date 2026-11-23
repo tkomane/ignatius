@@ -44,12 +44,12 @@ loads fixtures designed to exercise the parts that are easy to get wrong: an
 `bytea` and intervals, a `rendering_cases` table containing values built to break
 a naive renderer, and a `restricted_reader` role for permission tests.
 
-`cargo xtask db up` starts **two** servers: a plain one on port 55432 and one
-that really speaks TLS on 55433, with a throwaway certificate authority
-generated on demand into `docker/tls/generated` and never committed. The TLS
-server exists so the transport claims can be tested rather than asserted, and
-its certificate deliberately covers `localhost` and not `127.0.0.1`, so the same
-server proves both that verify-full checks the name and that verify-ca does not.
+`cargo xtask db up` starts **two** servers on the host's IPv4 loopback: a plain
+one on port 55432 and one that speaks TLS on 55433. It generates a throwaway
+certificate authority in the ignored `docker/tls/generated` directory on
+demand. The TLS certificate covers `localhost`. Tests connect to `127.0.0.1`
+to exercise hostname rejection in `verify-full` and CA-only verification in
+`verify-ca`.
 
 Credentials live in `docker/dev.env`. They are synthetic, deliberately committed,
 and exist only inside that container. Never point the test suite at a database

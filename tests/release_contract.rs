@@ -2520,10 +2520,11 @@ fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
         "cargo install --locked --version 0.20.2 --root \"$install_root\" cargo-deny",
         "Scan immutable candidate history for secrets",
         "git --no-banner --redact --log-opts=--all",
-        "cargo xtask db up",
+        "cargo --locked xtask db up",
         "Start the Unix socket verifier fixture",
+        "pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo",
         "IGNATIUS_TEST_PG_SOCKET_URI=host='%s' port=5432 user=ignatius_test dbname=ignatius_demo password=not-a-real-password-disposable-container sslmode=disable",
-        "cargo xtask verify",
+        "cargo --locked xtask verify",
         "Remove verifier fixtures",
     ] {
         assert!(
@@ -2537,7 +2538,10 @@ fn release_workflow_preflights_a_frozen_source_before_retaining_candidates() {
         "archives must wait for successful source preflight"
     );
     let policy_check = preflight
-        .find("\"$install_root/bin/cargo-deny\" check advisories licenses bans sources")
+        .find(concat!(
+            "\"$install_root/bin/cargo-deny\" --locked --workspace --all-features ",
+            "\\\n            check advisories licenses bans sources",
+        ))
         .expect("source dependency policy check");
     let registry_advisories = preflight
         .find(
@@ -2654,7 +2658,7 @@ fn release_workflow_scans_the_actual_retained_candidate_bundles() {
 fn release_workflow_declares_the_exact_supported_target_matrix() {
     let workflow = include_str!("../.github/workflows/release.yml");
     for expected in [
-        "runner: ubuntu-latest\n            target: x86_64-unknown-linux-gnu\n            format: tar.gz\n            binary: ignatius",
+        "runner: ubuntu-24.04\n            target: x86_64-unknown-linux-gnu\n            format: tar.gz\n            binary: ignatius",
         "runner: macos-latest\n            target: aarch64-apple-darwin\n            format: tar.gz\n            binary: ignatius",
         "runner: windows-latest\n            target: x86_64-pc-windows-msvc\n            format: zip\n            binary: ignatius.exe",
     ] {
@@ -2672,6 +2676,26 @@ fn release_workflow_declares_the_exact_supported_target_matrix() {
         3,
         "the archive job must not silently add or remove a supported target"
     );
+}
+
+#[test]
+fn linux_candidate_jobs_use_the_glibc_2_39_runner() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+    for (name, count) in [("archive", 1), ("runtime", 1), ("reproducibility", 2)] {
+        let job = workflow_job_block(workflow, name);
+        let linux_runners: Vec<_> = job
+            .lines()
+            .zip(job.lines().skip(1))
+            .filter_map(|(runner, target)| {
+                (target.trim() == "target: x86_64-unknown-linux-gnu").then_some(runner.trim())
+            })
+            .collect();
+        assert_eq!(
+            linux_runners,
+            vec!["- runner: ubuntu-24.04"; count],
+            "{name} must use the tested GNU/Linux runtime baseline",
+        );
+    }
 }
 
 #[test]
@@ -2836,7 +2860,6 @@ fn windows_repeat_pair_uses_one_runner_with_independent_cold_compiler_outputs() 
     let (matrix, steps) = repeats
         .split_once("\n    steps:\n")
         .expect("reproducibility matrix and steps");
-    assert_eq!(matrix.matches("- runner: ubuntu-latest").count(), 2);
     assert_eq!(matrix.matches("- runner: macos-latest").count(), 2);
     assert_eq!(matrix.matches("- runner: windows-latest").count(), 1);
     let (_, windows) = matrix

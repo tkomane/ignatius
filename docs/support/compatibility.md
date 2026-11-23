@@ -753,7 +753,7 @@ read/write safety contract:
 | --- | --- |
 | macOS on Apple silicon | Hosted tests and the source-built Warp renderer passed. Two exact archived builds replaced one another and rolled back in an isolated install path. Signed Warp hand use remains open. |
 | Windows, GitHub `windows-latest` runner | Windows Server 2025 build/tests/startup/refusal passed. Native Windows Terminal and ConPTY restoration passed all 24 Guard cases. Windows 11 hand use remains open. |
-| Linux, GitHub `ubuntu-latest` runner | Hosted tests, PostgreSQL 14-18 and the Unix-socket contract passed. The archived x64 client also passed automated install and rollback. Desktop hand use remains open. |
+| Linux, GitHub-hosted runners | Platform tests use `ubuntu-24.04`. PostgreSQL 14-18 and the Unix-socket contract run on `ubuntu-latest`. The archived x64 client passed automated install and rollback. Desktop hand use remains open. |
 | Linux arm64, local containers | Clean `871db73` passed pinned Rust 1.97.1 library/socket/PTY checks and Rust 1.90 compilation; later CLI/export/help changes and native hand use remain open. |
 | Any other architecture | Not built anywhere yet |
 
@@ -788,7 +788,7 @@ and [exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/447215900
 | --- | --- | --- | --- | --- |
 | `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, native archive checks | macOS 27.2.1 arm64 verified TLS, cancellation recovery, and installed Warp OSC 11/`--plain`/mode restoration against PostgreSQL 18.7. A separate hosted Warp source renderer displayed a live result and restored the shell. Human interactive signed Warp hand use and VoiceOver auditory review remain open |
 | `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | Windows Server 2025 x64 verified TLS against PostgreSQL 17.12. Native Windows 11 Terminal restored its cursor and console modes after running the same x64 archive under emulation. Windows Terminal hand use remains open |
-| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-latest` | Hosted packaging and runtime, emulated live archive checks | Ubuntu 24.04.5 x86-64 under emulation verified TLS, consecutive cancellations and PTY restoration against PostgreSQL 18.7. The archive requires `GLIBC_2.39` symbols. Linux desktop hand use remains open |
+| `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-24.04` | Hosted packaging and runtime, emulated live archive checks | Ubuntu 24.04.5 x86-64 under emulation verified TLS, consecutive cancellations and PTY restoration against PostgreSQL 18.7. The archive requires `GLIBC_2.39` symbols. Linux desktop hand use remains open |
 
 The earlier macOS archive at `24f1c8e` failed its privacy audit when debug
 logging persisted synthetic SQL. The current probes use the newer archive
