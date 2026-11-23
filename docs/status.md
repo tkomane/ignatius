@@ -51,17 +51,21 @@ reviewed per pull request, and merged on hosted green CI.
   `ignatius query`. Both are fixed: `EXPLAIN` options are read the way the
   server reads them and fail closed, `m` only switches the mode, and
   rollback-off writes are refused on production and read-only sessions.
-- **Open: PR #132 (draft), benchmark concurrency.** A and B still run as two
-  tasks on one connection, a benchmark does not check for an open user
-  transaction, and the cancel design needs delivery confirmation and a timeout.
-  Four review rounds found real defects each time; the remaining work and the
-  last review's findings are recorded on #132.
+- **Benchmark session safety (24 November 2026).** Benchmarks and analysed
+  plan comparisons now hold the session's SQL gate for each run and ask the
+  server before their first `BEGIN`, refusing to start inside a transaction;
+  benchmark A and B run one after the other; and the benchmark overlay stays
+  open while a run is in flight. A database test proves a workbench statement
+  started mid-benchmark lands outside the benchmark's transaction.
+- **Open: PR #132 (draft), cancelling a running benchmark.** A benchmark run
+  cannot be cancelled yet. The draft's cancel design needs delivery
+  confirmation and a timeout; four review rounds found real defects each time,
+  and the remaining work is recorded on #132.
 - **Found and not fixed:** the built-in theme tests pin status inks (Focus,
   Success, Warning, Danger, Info, environment and transaction) at 3.0:1 for
   `dark`, `light`, `field-industrial` and `material`, while Principle XI says
   every non-border token is pinned at 4.5:1 (the current values all clear 4.5:1;
-  the tests are weaker than the principle). Plan-diff `EXPLAIN ANALYZE` inside an open workbench
-  transaction ends that transaction (its own BEGIN/ROLLBACK bracket); the spec
+  the tests are weaker than the principle). The spec
   025 `presentation.md` quiet-chrome text predates the new header yield order;
   the plan explorer's attention marker scores inclusive time and so usually
   lands on the root node; `tls_appearance` and `Glyphs::meter` are unused.
