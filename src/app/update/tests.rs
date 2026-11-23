@@ -12437,6 +12437,8 @@ fn running_benchmark(request: u64) -> crate::app::model::BenchInFlight {
         request,
         remaining: 1,
         cancel_requested: false,
+        cancel_failed: false,
+        failed: false,
     }
 }
 
@@ -12462,10 +12464,12 @@ fn cancel_reaches_a_running_benchmark_and_says_so_until_it_reports() {
         model.error.as_ref().map(|error| error.headline.as_str()),
         Some("Cancellation requested for the benchmark")
     );
-    assert!(
-        update(&mut model, Message::Action(Action::Cancel)).is_empty(),
-        "sent once"
-    );
+    // Every press is sent again: cancellation is idempotent, so a press is
+    // also a retry.
+    assert!(matches!(
+        update(&mut model, Message::Action(Action::Cancel)).as_slice(),
+        [Effect::CancelBenchmark { request: 41 }]
+    ));
 
     // The run reports cancelled, and the notice says how it ended.
     update(
@@ -12590,6 +12594,158 @@ fn the_running_benchmark_record_only_counts_its_own_reports() {
         ConnectionState::Connecting { .. }
     ));
     assert!(model.bench_in_flight.is_none());
+}
+
+fn bench_failure(
+    request: u64,
+    target: crate::app::message::BenchTarget,
+    headline: &str,
+) -> Message {
+    Message::QueryBenchLoaded {
+        request,
+        target,
+        result: Box::new(Err(crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Query,
+            headline,
+            "running a query benchmark",
+        ))),
+    }
+}
+
+#[test]
+fn a_failed_baseline_is_never_masked_by_the_candidate_not_run_report() {
+    use crate::app::message::BenchTarget;
+    let mut model = bench_model(Environment::Local, false, "SELEKT 1; SELECT 2");
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let Some(Effect::RunQueryBench { request, .. }) = effects.first() else {
+        panic!("{effects:?}");
+    };
+    let request = *request;
+    update(
+        &mut model,
+        bench_failure(
+            request,
+            BenchTarget::Baseline,
+            "syntax error at or near \"SELEKT\"",
+        ),
+    );
+    update(
+        &mut model,
+        bench_failure(
+            request,
+            BenchTarget::Candidate,
+            "Query B was not run because Query A did not complete",
+        ),
+    );
+    let status = bench_status(&model);
+    assert!(status.contains("syntax error"), "{status}");
+    assert!(!status.contains("was not run"), "{status}");
+    assert!(model.bench_in_flight.is_none());
+}
+
+#[test]
+fn a_failed_cancel_request_can_be_retried_and_its_message_stays() {
+    use crate::app::message::BenchTarget;
+    let mut model = bench_model(Environment::Local, false, "SELECT 1; SELECT 2");
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let Some(Effect::RunQueryBench { request, .. }) = effects.first() else {
+        panic!("{effects:?}");
+    };
+    let request = *request;
+    update(&mut model, Message::Action(Action::Cancel));
+    update(
+        &mut model,
+        Message::QueryBenchCancelFailed {
+            request,
+            diagnostic: Box::new(crate::diagnostics::Diagnostic::new(
+                crate::diagnostics::DiagnosticKind::Connection,
+                "could not reach the server",
+                "cancelling",
+            )),
+        },
+    );
+    let flight = model.bench_in_flight.expect("still running");
+    assert!(!flight.cancel_requested && flight.cancel_failed);
+    let failed = bench_status(&model);
+    assert!(failed.contains("could not reach the server"), "{failed}");
+
+    // The next report does not overwrite it while the run continues.
+    update(&mut model, bench_report(request, BenchTarget::Baseline));
+    assert_eq!(bench_status(&model), failed);
+
+    // Cancel can be pressed again, and is sent again.
+    assert!(matches!(
+        update(&mut model, Message::Action(Action::Cancel)).as_slice(),
+        [Effect::CancelBenchmark { request: sent }] if *sent == request
+    ));
+    assert_eq!(
+        bench_status(&model),
+        "Cancellation requested for the benchmark"
+    );
+}
+
+#[test]
+fn switching_connection_proceeds_once_the_benchmark_cancel_was_requested() {
+    let mut model = bench_model(Environment::Local, false, "SELECT 1");
+    update(&mut model, Message::Action(Action::Insert('r')));
+    assert!(begin_connection(&mut model, Some("other".into())).is_empty());
+    assert!(model.benchmark_running(), "refused before cancelling");
+
+    update(&mut model, Message::Action(Action::Cancel));
+    begin_connection(&mut model, Some("other".into()));
+    assert!(matches!(
+        model.connection,
+        ConnectionState::Connecting { .. }
+    ));
+    assert!(model.bench_in_flight.is_none());
+    let bench = model.query_bench.as_ref().expect("overlay still open");
+    assert!(!bench.loading);
+    assert!(bench_status(&model).contains("sent nothing to the new one"));
+}
+
+#[test]
+fn cancel_reaches_the_benchmark_whatever_overlay_is_open() {
+    type Open = (&'static str, fn(&mut Model));
+    let open: [Open; 4] = [
+        ("plan diff", |model| {
+            model.plan_diff = Some(crate::app::model::PlanDiffState::default());
+        }),
+        ("help", |model| model.help_open = true),
+        ("palette", |model| {
+            model.palette = Some(crate::app::palette::Palette::new(Vec::new()));
+        }),
+        ("snapshot", |model| {
+            model.schema_snapshot = Some(crate::app::model::SchemaSnapshotState::default());
+        }),
+    ];
+    for (name, open) in open {
+        let mut model = connected();
+        model.bench_in_flight = Some(running_benchmark(23));
+        open(&mut model);
+        let effects = update(&mut model, Message::Action(Action::Cancel));
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [Effect::CancelBenchmark { request: 23 }]
+            ),
+            "{name}: {effects:?}"
+        );
+        assert_eq!(
+            model.error.as_ref().map(|error| error.headline.as_str()),
+            Some("Cancellation requested for the benchmark"),
+            "{name}"
+        );
+    }
+
+    // A reopened benchmark overlay that did not start the run also says so.
+    let mut model = connected();
+    model.bench_in_flight = Some(running_benchmark(23));
+    model.query_bench = Some(crate::app::model::QueryBenchState::default());
+    update(&mut model, Message::Action(Action::Cancel));
+    assert_eq!(
+        bench_status(&model),
+        "Cancellation requested for the benchmark"
+    );
 }
 
 #[test]

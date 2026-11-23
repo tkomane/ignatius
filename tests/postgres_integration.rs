@@ -3876,6 +3876,7 @@ fn a_benchmark_refuses_to_run_inside_an_open_transaction_and_leaves_it_intact() 
             &ignatius::bench::BenchConfig::new(0, 1, rollback),
             "guard probe",
             &ignatius::postgres::bench::never_stop,
+            None,
         ));
         let diagnostic = refused.expect_err("a benchmark inside a transaction is refused");
         assert!(
@@ -3907,6 +3908,7 @@ fn a_benchmark_refuses_to_run_inside_an_open_transaction_and_leaves_it_intact() 
         &ignatius::bench::BenchConfig::new(0, 1, true),
         "guard probe",
         &ignatius::postgres::bench::never_stop,
+        None,
     ));
     assert!(ran.is_ok(), "{ran:?}");
 }
@@ -3942,6 +3944,7 @@ fn a_cancelled_benchmark_leaves_the_session_idle_and_its_rows_untouched() {
                     &config,
                     "cancel probe",
                     &stop,
+                    None,
                 ),
                 async {
                     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -4000,14 +4003,17 @@ fn a_benchmark_stops_between_iterations_as_soon_as_it_is_told_to() {
     );
 
     // Rollback off, so every iteration that runs leaves a row behind. The
-    // check answers "stop" from its third question, before iteration three.
+    // check is asked once when the gate is taken and then before every
+    // iteration; it answers "stop" from its fourth question, before iteration
+    // three.
     let asked = AtomicUsize::new(0);
-    let stop = || (asked.fetch_add(1, Ordering::SeqCst) >= 2).then_some(BenchStop::Cancelled);
+    let stop = || (asked.fetch_add(1, Ordering::SeqCst) >= 3).then_some(BenchStop::Cancelled);
     let outcome = fx.block_on(fx.session.run_benchmark(
         "INSERT INTO bench_stop_probe VALUES (1)",
         &ignatius::bench::BenchConfig::new(0, 5, false),
         "stop probe",
         &stop,
+        None,
     ));
     let diagnostic = outcome.expect_err("the run stopped early");
     assert!(
@@ -4026,5 +4032,62 @@ fn a_benchmark_stops_between_iterations_as_soon_as_it_is_told_to() {
         set.rows,
         vec![vec![Cell::Text("2".into())]],
         "exactly the two iterations before the stop ran"
+    );
+}
+
+#[test]
+fn a_benchmark_never_waits_behind_other_gated_work_and_sends_nothing() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let created = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE bench_gate_probe (x int)",
+        10,
+        JobId(7301),
+    ));
+    assert_eq!(
+        created.status,
+        ExecutionStatus::Succeeded,
+        "{:?}",
+        created.error
+    );
+
+    // A workbench statement holds the session's SQL gate; a benchmark started
+    // meanwhile is refused at once instead of queueing behind it.
+    let config = ignatius::bench::BenchConfig::new(0, 3, false);
+    let (held, refused) = fx.block_on(async {
+        tokio::join!(
+            fx.session.execute("SELECT pg_sleep(1)", 10, JobId(7302)),
+            async {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                fx.session
+                    .run_benchmark(
+                        "INSERT INTO bench_gate_probe VALUES (1)",
+                        &config,
+                        "gate probe",
+                        &ignatius::postgres::bench::never_stop,
+                        None,
+                    )
+                    .await
+            }
+        )
+    });
+    assert_eq!(held.status, ExecutionStatus::Succeeded, "{:?}", held.error);
+    let diagnostic = refused.expect_err("refused while the gate is held");
+    assert!(
+        diagnostic.headline.contains("other work"),
+        "{}",
+        diagnostic.headline
+    );
+
+    let count = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM bench_gate_probe",
+        10,
+        JobId(7303),
+    ));
+    let set = count.statements[0].result_set.as_ref().expect("rows");
+    assert_eq!(
+        set.rows,
+        vec![vec![Cell::Text("0".into())]],
+        "nothing was sent"
     );
 }

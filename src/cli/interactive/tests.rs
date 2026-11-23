@@ -2201,6 +2201,7 @@ impl BenchSession for FakeBenchSession {
         config: &'a crate::bench::BenchConfig,
         label: &'a str,
         _stop: crate::postgres::bench::StopCheck<'a>,
+        _executing: &'a tokio::sync::Mutex<bool>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<crate::bench::BenchStats, Diagnostic>>
@@ -2302,6 +2303,7 @@ async fn a_benchmark_never_touches_a_session_installed_after_it_was_dispatched()
         dispatch,
         Arc::clone(&generation),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::new(tokio::sync::Mutex::new(false)),
         reports,
     ));
     old.started.notified().await;
@@ -2343,6 +2345,7 @@ async fn a_cancelled_baseline_stops_the_candidate_from_starting() {
     active.begin(ActiveBench {
         request: dispatch.request,
         cancelled: Arc::clone(&cancelled),
+        executing: Arc::new(tokio::sync::Mutex::new(false)),
         cancel: None,
     });
     let reports = BenchReports::new(tx, 1, &dispatch, active.clone());
@@ -2351,6 +2354,7 @@ async fn a_cancelled_baseline_stops_the_candidate_from_starting() {
         dispatch,
         Arc::new(std::sync::atomic::AtomicU64::new(1)),
         cancelled,
+        Arc::new(tokio::sync::Mutex::new(false)),
         reports,
     ));
     session.started.notified().await;
@@ -2388,6 +2392,7 @@ async fn every_target_reports_even_after_a_panic_or_an_early_return() {
     active.begin(ActiveBench {
         request: dispatch.request,
         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        executing: Arc::new(tokio::sync::Mutex::new(false)),
         cancel: None,
     });
     let reports = BenchReports::new(tx, 1, &dispatch, active.clone());
@@ -2396,6 +2401,7 @@ async fn every_target_reports_even_after_a_panic_or_an_early_return() {
         dispatch,
         Arc::new(std::sync::atomic::AtomicU64::new(1)),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::new(tokio::sync::Mutex::new(false)),
         reports,
     ))
     .await;
@@ -2417,6 +2423,7 @@ async fn every_target_reports_even_after_a_panic_or_an_early_return() {
         dispatch,
         Arc::new(std::sync::atomic::AtomicU64::new(1)),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::new(tokio::sync::Mutex::new(false)),
         reports,
     )
     .await;
@@ -2427,4 +2434,58 @@ async fn every_target_reports_even_after_a_panic_or_an_early_return() {
             .as_ref()
             .is_err_and(|headline| headline.contains("no open session"))
     }));
+}
+
+#[tokio::test]
+async fn the_benchmark_cancel_token_is_sent_only_while_the_run_holds_the_gate() {
+    let sent = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let send = |sent: Arc<std::sync::atomic::AtomicUsize>| {
+        move || async move {
+            sent.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    };
+
+    // Not executing (waiting, between targets, or finished): nothing is sent,
+    // so the token cannot reach whatever else holds the gate.
+    let idle = tokio::sync::Mutex::new(false);
+    assert!(
+        cancel_while_executing(&idle, send(Arc::clone(&sent)))
+            .await
+            .is_none()
+    );
+    assert_eq!(sent.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // Executing: the token is sent, and the run cannot clear the flag (and so
+    // release the gate) until the request has gone.
+    let executing = Arc::new(tokio::sync::Mutex::new(true));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let cancel = {
+        let executing = Arc::clone(&executing);
+        let release = Arc::clone(&release);
+        let order = Arc::clone(&order);
+        tokio::spawn(async move {
+            cancel_while_executing(&executing, || async move {
+                release.notified().await;
+                order.lock().unwrap().push("cancel sent");
+                Ok(())
+            })
+            .await
+        })
+    };
+    tokio::task::yield_now().await;
+    let finish = {
+        let executing = Arc::clone(&executing);
+        let order = Arc::clone(&order);
+        tokio::spawn(async move {
+            *executing.lock().await = false;
+            order.lock().unwrap().push("gate released");
+        })
+    };
+    tokio::task::yield_now().await;
+    release.notify_one();
+    assert!(matches!(cancel.await, Ok(Some(Ok(())))));
+    finish.await.expect("the run finishes");
+    assert_eq!(*order.lock().unwrap(), ["cancel sent", "gate released"]);
 }

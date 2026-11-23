@@ -3595,6 +3595,7 @@ trait BenchSession: Send + Sync + 'static {
         config: &'a crate::bench::BenchConfig,
         label: &'a str,
         stop: crate::postgres::bench::StopCheck<'a>,
+        executing: &'a tokio::sync::Mutex<bool>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<crate::bench::BenchStats, Diagnostic>>
@@ -3611,6 +3612,7 @@ impl BenchSession for InstalledSession {
         config: &'a crate::bench::BenchConfig,
         label: &'a str,
         stop: crate::postgres::bench::StopCheck<'a>,
+        executing: &'a tokio::sync::Mutex<bool>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<crate::bench::BenchStats, Diagnostic>>
@@ -3618,7 +3620,7 @@ impl BenchSession for InstalledSession {
                 + 'a,
         >,
     > {
-        Box::pin(self.run_benchmark(sql, config, label, stop))
+        Box::pin(self.run_benchmark(sql, config, label, stop, Some(executing)))
     }
 }
 
@@ -3626,8 +3628,16 @@ impl BenchSession for InstalledSession {
 struct ActiveBench {
     request: u64,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    /// True exactly while the dispatch holds the session's SQL gate.
+    executing: Arc<tokio::sync::Mutex<bool>>,
     cancel: Option<crate::postgres::session::CancelHandle>,
 }
+
+/// What Cancel needs from the executing dispatch.
+type BenchCancel = (
+    Arc<tokio::sync::Mutex<bool>>,
+    Option<crate::postgres::session::CancelHandle>,
+);
 
 /// Where the runtime keeps the executing benchmark dispatch, if any.
 #[derive(Clone, Default)]
@@ -3655,14 +3665,15 @@ impl BenchActive {
         }
     }
 
-    /// Marks the dispatch cancelled and returns its cancel handle.
-    fn cancel(&self, request: u64) -> Option<Option<crate::postgres::session::CancelHandle>> {
+    /// Marks the dispatch cancelled and returns what is needed to ask the
+    /// server to stop its statement.
+    fn cancel(&self, request: u64) -> Option<BenchCancel> {
         let slot = self.lock();
         let active = slot.as_ref().filter(|active| active.request == request)?;
         active
             .cancelled
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        Some(active.cancel.clone())
+        Some((Arc::clone(&active.executing), active.cancel.clone()))
     }
 }
 
@@ -3756,6 +3767,7 @@ async fn run_query_bench_dispatch<S: BenchSession + ?Sized>(
     dispatch: BenchDispatch,
     live_generation: Arc<std::sync::atomic::AtomicU64>,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    executing: Arc<tokio::sync::Mutex<bool>>,
     mut reports: BenchReports,
 ) {
     let Some(runner) = runner else {
@@ -3790,7 +3802,9 @@ async fn run_query_bench_dispatch<S: BenchSession + ?Sized>(
         };
         let preview = crate::plandiff::bound_label(sql);
         let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
-        let result = runner.run(sql, &dispatch.config, &label, &stop).await;
+        let result = runner
+            .run(sql, &dispatch.config, &label, &stop, &executing)
+            .await;
         let failed = result.is_err();
         reports.report(*target, result);
         if failed {
@@ -3819,9 +3833,11 @@ fn spawn_query_bench_dispatch(
 ) {
     let generation = live_generation.load(std::sync::atomic::Ordering::SeqCst);
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let executing = Arc::new(tokio::sync::Mutex::new(false));
     active.begin(ActiveBench {
         request: dispatch.request,
         cancelled: Arc::clone(&cancelled),
+        executing: Arc::clone(&executing),
         cancel: runner.as_ref().map(|session| session.cancel_handle()),
     });
     let reports = BenchReports::new(tx, generation, &dispatch, active.clone());
@@ -3830,25 +3846,48 @@ fn spawn_query_bench_dispatch(
         dispatch,
         live_generation,
         cancelled,
+        executing,
         reports,
     ));
 }
 
+/// Sends a cancel request only while the dispatch holds the session's SQL
+/// gate and is executing, holding the flag's lock across the send so the
+/// dispatch cannot release the gate to other work under it. Otherwise
+/// nothing is sent and the dispatch's cancel flag alone stops it before its
+/// next iteration or target. Returns the send's outcome when one was made.
+async fn cancel_while_executing<F>(
+    executing: &tokio::sync::Mutex<bool>,
+    send: impl FnOnce() -> F,
+) -> Option<Result<(), Diagnostic>>
+where
+    F: std::future::Future<Output = Result<(), Diagnostic>>,
+{
+    let held = executing.lock().await;
+    if !*held {
+        return None;
+    }
+    let outcome = send().await;
+    drop(held);
+    Some(outcome)
+}
+
 /// Cancels the benchmark dispatch still executing: it sends nothing more,
-/// and the session's cancel token asks the server to stop its statement.
-/// Nothing else gated can be executing, because the benchmark holds the
-/// session's SQL gate.
+/// and, only while it holds the session's SQL gate, the session's cancel
+/// token asks the server to stop its statement. Nothing else gated can be
+/// executing then, so the token cannot reach other work.
 fn cancel_query_bench(
     active: &BenchActive,
     request: u64,
     tx: mpsc::UnboundedSender<Message>,
     generation: u64,
 ) {
-    let Some(Some(handle)) = active.cancel(request) else {
+    let Some((executing, Some(handle))) = active.cancel(request) else {
         return;
     };
     tokio::spawn(async move {
-        if let Err(diagnostic) = handle.cancel().await {
+        if let Some(Err(diagnostic)) = cancel_while_executing(&executing, || handle.cancel()).await
+        {
             send_connection_message(
                 &tx,
                 generation,

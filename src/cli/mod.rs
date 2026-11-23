@@ -7720,6 +7720,7 @@ fn run_bench(
                     &config,
                     "Baseline (A)",
                     &crate::postgres::bench::never_stop,
+                    None,
                 )
                 .await?;
             let candidate = match cand_sql {
@@ -7730,6 +7731,7 @@ fn run_bench(
                             &config,
                             "Candidate (B)",
                             &crate::postgres::bench::never_stop,
+                            None,
                         )
                         .await?,
                 ),

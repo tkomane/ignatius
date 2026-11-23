@@ -1317,7 +1317,13 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             if ours {
                 // The runtime has already marked the run cancelled, so it
                 // sends nothing more; only the statement executing now was not
-                // reached.
+                // reached. The request is no longer outstanding, so Cancel can
+                // be pressed again, and this message stays until the run's
+                // last report.
+                if let Some(flight) = model.bench_in_flight.as_mut() {
+                    flight.cancel_requested = false;
+                    flight.cancel_failed = true;
+                }
                 let text = format!(
                     "The cancellation request could not reach the server ({}); the statement \
                      executing now runs to completion, and nothing more is sent after it.",
@@ -1683,6 +1689,12 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     // that could keep it.
     if model.password_prompt.is_some() {
         return password_action(model, action);
+    }
+    // While a benchmark runs and no workbench statement does, Cancel means
+    // the benchmark whatever overlay is open, so the way out every refusal
+    // names always works.
+    if matches!(action, Action::Cancel) && model.benchmark_running() && !model.phase.is_busy() {
+        return cancel_benchmark(model);
     }
     if model.parameter_prompt.is_some() {
         return parameter_action(model, action);
@@ -2266,17 +2278,18 @@ fn cancel_benchmark(model: &mut Model) -> Vec<Effect> {
     let Some(flight) = model.bench_in_flight.as_mut() else {
         return Vec::new();
     };
-    if flight.cancel_requested {
-        return Vec::new();
-    }
+    // Every press is sent: the runtime's cancellation is idempotent, so a
+    // press after a request that could not reach the server is a retry.
     flight.cancel_requested = true;
+    flight.cancel_failed = false;
     let request = flight.request;
     let overlay_owns_it = model.query_bench.is_some() && model.query_bench_request == request;
-    if overlay_owns_it {
-        if let Some(bench) = &mut model.query_bench {
-            bench.status_message = Some(BENCH_CANCEL_REQUESTED.to_owned());
-        }
-    } else {
+    if let Some(bench) = &mut model.query_bench {
+        // A reopened overlay that did not start the run still says what the
+        // key did.
+        bench.status_message = Some(BENCH_CANCEL_REQUESTED.to_owned());
+    }
+    if !overlay_owns_it {
         model.error = Some(
             crate::diagnostics::Diagnostic::new(
                 crate::diagnostics::DiagnosticKind::Cancelled,
@@ -4760,6 +4773,8 @@ fn query_bench_dispatch_runs(model: &mut Model, confirmed: bool) -> Vec<Effect> 
             request,
             remaining: effects.len(),
             cancel_requested: false,
+            cancel_failed: false,
+            failed: false,
         });
     }
     effects
@@ -4782,10 +4797,13 @@ fn query_bench_loaded(
         .bench_in_flight
         .filter(|flight| flight.request == request);
     let cancel_requested = flight.is_some_and(|flight| flight.cancel_requested);
+    let cancel_failed = flight.is_some_and(|flight| flight.cancel_failed);
+    let earlier_failure = flight.is_some_and(|flight| flight.failed);
     let finished = flight.is_some_and(|flight| flight.remaining <= 1);
     if let Some(flight) = flight {
         model.bench_in_flight = (!finished).then_some(crate::app::model::BenchInFlight {
             remaining: flight.remaining - 1,
+            failed: flight.failed || result.is_err(),
             ..flight
         });
     }
@@ -4821,6 +4839,13 @@ fn query_bench_loaded(
             crate::app::message::BenchTarget::Candidate => bench.candidate = Some(stats),
         }
         bench.recompute_report();
+    }
+    // A message that must stay: a failed cancellation request until the run
+    // has finished, and the first real failure of this dispatch, which the
+    // candidate's "not run" report must never replace.
+    let keep = (cancel_failed && !finished) || (failure.is_some() && earlier_failure);
+    if keep {
+        return Vec::new();
     }
     bench.status_message = Some(if let Some(outcome) = cancel_outcome {
         outcome
@@ -8440,8 +8465,14 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
         return Vec::new();
     }
     // A benchmark is never left running on a connection the user has
-    // switched away from: switching waits, and the way out is named.
-    if model.benchmark_running() {
+    // switched away from unasked: switching waits, and the way out is named.
+    // Once cancellation has been requested, switching proceeds; the run holds
+    // the old session and stops at its next check because the connection
+    // changed.
+    if model
+        .bench_in_flight
+        .is_some_and(|flight| !flight.cancel_requested)
+    {
         model.error = Some(
             crate::diagnostics::Diagnostic::new(
                 crate::diagnostics::DiagnosticKind::Usage,
@@ -8468,8 +8499,20 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
         .notice_state
         .begin_retirement(model.connection_generation);
     model.connection_generation = model.connection_generation.wrapping_add(1).max(1);
-    // Reports from the old connection are rejected by generation.
-    model.bench_in_flight = None;
+    // Reports from the old connection are rejected by generation, and a
+    // cancelled run on it stops at its next check because the connection
+    // changed.
+    if model.bench_in_flight.take().is_some()
+        && let Some(bench) = &mut model.query_bench
+    {
+        bench.loading = false;
+        bench.runs_in_flight = 0;
+        bench.status_message = Some(
+            "The connection changed; the cancelled benchmark stopped on the old connection and \
+             sent nothing to the new one."
+                .to_owned(),
+        );
+    }
     model.credential_provider = summary.and_then(|item| item.auth.clone());
     model.credential_presentation = summary.and_then(|item| item.provider_presentation.clone());
     model.connection = ConnectionState::Connecting {

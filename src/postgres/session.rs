@@ -395,16 +395,53 @@ impl Session {
 
     /// Executes warmup and measured iterations of one SQL statement and returns benchmark statistics.
     ///
-    /// Holds the user SQL gate for the whole run, so a workbench statement can
-    /// never land inside one of its `BEGIN` ... `ROLLBACK` brackets and be
-    /// rolled back with it, and two runs never interleave.
+    /// Takes the user SQL gate without waiting: when other gated work is
+    /// outstanding on the session (a workbench statement, a plan-diff
+    /// ANALYZE, a maintenance or import run), the benchmark is refused with
+    /// nothing sent rather than queued behind it. Holding the gate for the
+    /// whole run means no workbench statement can land inside one of its
+    /// `BEGIN` ... `ROLLBACK` brackets, and two runs never interleave.
     ///
-    /// Once the gate is held, the session's real transaction state is read.
-    /// A run inside an open or failed transaction, or when the state cannot
-    /// be read, is refused before anything is sent: a rolled-back iteration
-    /// would discard the user's uncommitted work, and a committed one would
-    /// join it. `stop` is asked before every iteration.
+    /// `executing`, when given, is true exactly while this run holds the gate,
+    /// so a cancel request sent under its lock can only reach this run. Once
+    /// the gate is held, `stop` is asked, then the session's real transaction
+    /// state is read: inside an open or failed transaction, or when the state
+    /// cannot be read, the run is refused before anything is sent. `stop` is
+    /// asked again before every iteration.
     pub async fn run_benchmark(
+        &self,
+        sql: &str,
+        config: &crate::bench::BenchConfig,
+        label: &str,
+        stop: crate::postgres::bench::StopCheck<'_>,
+        executing: Option<&tokio::sync::Mutex<bool>>,
+    ) -> Result<crate::bench::BenchStats, Diagnostic> {
+        let Ok(_gate) = self.user_sql_gate.try_lock() else {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "other work is still running on this connection, so the benchmark did not run",
+                "starting a query benchmark",
+            )
+            .next_action("wait for it to finish, then run the benchmark again; nothing was sent"));
+        };
+        if let Some(reason) = stop() {
+            return Err(reason.diagnostic());
+        }
+        if let Some(flag) = executing {
+            *flag.lock().await = true;
+        }
+        let outcome = self
+            .run_benchmark_holding_gate(sql, config, label, stop)
+            .await;
+        // Cleared before the gate is released; a cancel request in flight
+        // holds this lock, so the gate cannot pass to other work under it.
+        if let Some(flag) = executing {
+            *flag.lock().await = false;
+        }
+        outcome
+    }
+
+    async fn run_benchmark_holding_gate(
         &self,
         sql: &str,
         config: &crate::bench::BenchConfig,
@@ -412,7 +449,6 @@ impl Session {
         stop: crate::postgres::bench::StopCheck<'_>,
     ) -> Result<crate::bench::BenchStats, Diagnostic> {
         use crate::query::result::TransactionState;
-        let _gate = self.user_sql_gate.lock().await;
         let refusal = match self.transaction_state().await {
             TransactionState::Autocommit => None,
             TransactionState::Unknown => Some(

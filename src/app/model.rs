@@ -2486,6 +2486,12 @@ pub struct BenchInFlight {
     pub remaining: usize,
     /// Whether the user has asked for this benchmark to be cancelled.
     pub cancel_requested: bool,
+    /// Whether the last cancellation request could not reach the server, so
+    /// its message stays on screen until the run reports for the last time.
+    pub cancel_failed: bool,
+    /// Whether a target of this dispatch has already failed, so a later
+    /// "not run" report never replaces the real failure.
+    pub failed: bool,
 }
 
 /// A benchmark run held until the user confirms it.
