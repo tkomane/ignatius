@@ -1,8 +1,40 @@
 # Status
 
-**Updated: 2026-11-21.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-23.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 66 - Editorial iconography, harmonized Atelier/Paper craft, Studio showcase and adaptive SVG branding - 23 November 2026
+
+- Upgraded `GlyphTier::Nerd` in `src/ui/glyphs.rs` to pair the PostgreSQL Devicon
+  brand glyph (`\u{e76e}`) with single-cell Codicon and Material Design symbols
+  verified across `CommitMonoNerdFontMono` and `JetBrainsMonoNerdFontMono`.
+- Harmonized the built-in `atelier` and `paper` palettes across all four surfaces
+  in `src/ui/theme.rs`, italicized `Token::SyntaxComment` (`DIM | ITALIC`) and
+  `Token::NullValue` (`ITALIC`) at `TrueColor` and `Indexed256` while having
+  `Theme::surface_badge` strip `DIM | ITALIC` for upright badges, and dimmed
+  unselected Objects tree indent guides in `src/ui/widgets/objects.rs` to `Token::Border`.
+- Upgraded `SHOWCASE_AREA` (`124x34`, `GlyphTier::Nerd`) in `src/ui/acceptance/tests.rs`
+  and rewrote `scripts/render-showcase.py` into a 2x Retina studio renderer with
+  `CommitMonoNerdFontMono`, vector box-drawing and sparkline primitives, ambient
+  gradient mats, dual-layer Gaussian window shadows, and Apple `NewYorkItalic` +
+  `SFNS` window headers; visually inspected all 14 refreshed PNGs in
+  `docs/assets/screenshots/`.
+- Created adaptive editorial SVG wordmarks `docs/assets/banner-dark.svg` and
+  `docs/assets/banner-light.svg` (Quick Look rasterization verified cleanly),
+  updated `README.md` with `<picture>` adaptive dark/light hero banners and
+  Atelier/Paper badges, and synced `docs/design/theme-tokens.md`,
+  `docs/design/icons-and-motion.md`, and `docs/support/compatibility.md`.
+- Verified locally on macOS arm64 (`rustc 1.100.0`) against live PostgreSQL
+  18.7 plain and TLS fixtures: `cargo --locked xtask verify` passed (`2,171`
+  tests across `53` suites including `1,710` lib tests; `0` failed; `1`
+  Unix-socket integration skip with `IGNATIUS_TEST_PG_SOCKET_URI` unset),
+  standalone contract tests passed (`23` doc + `88` release + `8` session
+  recovery + `4` theme + `16` workflow = `139` passed), `actionlint` passed,
+  `diff -u AGENTS.md CLAUDE.md` matched byte-for-byte, and sidecar-test/dash
+  checks passed.
+- Open Wave 64 human Warp/VoiceOver/NVDA, Windows 11, Linux desktop, and
+  ADR-0008 owner signing/provenance/publication gates remain unchanged and open.
 
 ## Wave 65 - Milestone 16 editorial TUI polish, Atelier and Paper themes - 21 November 2026
 

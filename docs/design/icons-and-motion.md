@@ -93,8 +93,12 @@ off.
 
 Every kind of database object has its own icon: schema, table, view, materialized
 view, sequence, function, index, extension, column, and a key for a column in the
-primary key. They exist so the tree can be read by shape rather than by reading
-every word.
+primary key. In `--glyphs nerd-font`, Ignatius uses the PostgreSQL Devicon brand
+mark alongside crisp single-character Codicon and Material Design icons verified
+across standard monospace Nerd Fonts (`CommitMono Nerd Font`, `JetBrainsMono Nerd Font`),
+while keeping unselected Objects tree indentation guides in `Token::Border` so the
+hierarchy whispers rather than competes with object ink. They exist so the tree can
+be read by shape rather than by reading every word.
 
 Two rules keep them honest:
 

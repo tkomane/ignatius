@@ -315,13 +315,14 @@ fn objects_tree_renders_full_row_selection_and_semantic_icon_coloring() {
     // Name "public" starts at x = 5
     assert_eq!(buf_unfocused[(5, 1)].fg, header_fg);
 
-    // Row 1 is Group "tables (2)": guide at x=1..2 (Muted), chevron at x=3..4 (Muted), icon at x=5 (Info), "tables" at x=7 (Text), " (2)" at x=13 (Muted)
+    // Row 1 is Group "tables (2)": guide at x=1..2 (Border), chevron at x=3..4 (Muted), icon at x=5 (Info), "tables" at x=7 (Text), " (2)" at x=13 (Muted)
     let info_fg = theme.color(crate::ui::theme::Token::Info).unwrap();
     let text_fg = theme.color(crate::ui::theme::Token::Text).unwrap();
     let muted_fg = theme.color(crate::ui::theme::Token::Muted).unwrap();
+    let border_fg = theme.color(crate::ui::theme::Token::Border).unwrap();
 
     // Guide at x = 1
-    assert_eq!(buf_unfocused[(1, 2)].fg, muted_fg);
+    assert_eq!(buf_unfocused[(1, 2)].fg, border_fg);
     // Chevron at x = 3
     assert_eq!(buf_unfocused[(3, 2)].fg, muted_fg);
     // Group icon at x = 5

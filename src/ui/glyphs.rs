@@ -113,8 +113,8 @@ impl Glyphs {
 
     /// The icon for a meaning, or an empty string when icons are unavailable.
     ///
-    /// Nerd Font code points are from the Font Awesome range that every Nerd
-    /// Font patch has carried since the scheme was introduced.
+    /// Nerd Font code points use crisp VS Code Codicons, Material Design, and
+    /// Devicon PostgreSQL symbols carried by modern Nerd Font Mono builds.
     #[must_use]
     pub const fn icon(&self, icon: Icon) -> &'static str {
         match self.tier {
@@ -157,41 +157,41 @@ impl Glyphs {
                 Icon::ChevronOpen => "\u{25be}",      // ▾
             },
             GlyphTier::Nerd => match icon {
-                Icon::Brand => "\u{f1c0}",            // database
-                Icon::Database => "\u{f1c0}",         // database
-                Icon::Role => "\u{f007}",             // user
-                Icon::LockVerified => "\u{f023}",     // lock
-                Icon::LockPlain => "\u{f023}",        // lock
-                Icon::LockOpen => "\u{f09c}",         // unlock
-                Icon::Production => "\u{f071}",       // exclamation-triangle
-                Icon::Environment => "\u{f233}",      // server
-                Icon::Clock => "\u{f017}",            // clock
-                Icon::Rows => "\u{f0ce}",             // table
-                Icon::Editor => "\u{f040}",           // pencil
-                Icon::Help => "\u{f059}",             // question-circle
-                Icon::Success => "\u{f00c}",          // check
-                Icon::Warning => "\u{f071}",          // exclamation-triangle
-                Icon::Error => "\u{f00d}",            // times
-                Icon::Info => "\u{f05a}",             // info-circle
-                Icon::Null => "\u{f05e}",             // ban
-                Icon::Focus => "\u{258e}",            // ▎ block, not an icon
-                Icon::SearchPath => "\u{f07c}",       // folder-open
-                Icon::Truncated => "\u{f141}",        // ellipsis-h
-                Icon::ReadOnly => "\u{f06e}",         // eye
-                Icon::ReadWrite => "\u{f044}",        // pencil-square
-                Icon::Key => "\u{f11c}",              // keyboard
-                Icon::Schema => "\u{f07b}",           // folder
-                Icon::Table => "\u{f0ce}",            // table
-                Icon::View => "\u{f06e}",             // eye
-                Icon::MaterializedView => "\u{f0c5}", // files
-                Icon::Sequence => "\u{f0cb}",         // list-ol
-                Icon::Function => "\u{f085}",         // cogs
-                Icon::Column => "\u{f0db}",           // columns
-                Icon::KeyColumn => "\u{f084}",        // key
-                Icon::Index => "\u{f002}",            // search
-                Icon::Extension => "\u{f12e}",        // puzzle-piece
-                Icon::ChevronClosed => "\u{f054}",    // chevron-right
-                Icon::ChevronOpen => "\u{f078}",      // chevron-down
+                Icon::Brand => "\u{e76e}",            // devicon-postgresql
+                Icon::Database => "\u{eace}",         // cod-database
+                Icon::Role => "\u{eb99}",             // cod-account
+                Icon::LockVerified => "\u{eba5}",     // cod-shield
+                Icon::LockPlain => "\u{ea75}",        // cod-lock
+                Icon::LockOpen => "\u{eb72}",         // cod-unlock
+                Icon::Production => "\u{eaf2}",       // cod-flame
+                Icon::Environment => "\u{eb50}",      // cod-server
+                Icon::Clock => "\u{f43a}",            // oct-clock
+                Icon::Rows => "\u{ebb7}",             // cod-table
+                Icon::Editor => "\u{ea73}",           // cod-edit
+                Icon::Help => "\u{eb32}",             // cod-question
+                Icon::Success => "\u{eab2}",          // cod-check
+                Icon::Warning => "\u{ea6c}",          // cod-warning
+                Icon::Error => "\u{ea87}",            // cod-error
+                Icon::Info => "\u{ea74}",             // cod-info
+                Icon::Null => "\u{2205}",             // empty set
+                Icon::Focus => "\u{258e}",            // left bar
+                Icon::SearchPath => "\u{eaf7}",       // cod-folder-opened
+                Icon::Truncated => "\u{ea7c}",        // cod-ellipsis
+                Icon::ReadOnly => "\u{ea70}",         // cod-eye
+                Icon::ReadWrite => "\u{ea73}",        // cod-edit
+                Icon::Key => "\u{eb11}",              // cod-key
+                Icon::Schema => "\u{ea83}",           // cod-folder
+                Icon::Table => "\u{ebb7}",            // cod-table
+                Icon::View => "\u{ea70}",             // cod-eye
+                Icon::MaterializedView => "\u{eaf6}", // cod-layers
+                Icon::Sequence => "\u{ea84}",         // cod-list-ordered
+                Icon::Function => "\u{f0295}",        // md-function
+                Icon::Column => "\u{eb5f}",           // cod-symbol-field
+                Icon::KeyColumn => "\u{eb11}",        // cod-key
+                Icon::Index => "\u{f140b}",           // md-flash
+                Icon::Extension => "\u{eaed}",        // cod-extensions
+                Icon::ChevronClosed => "\u{eab6}",    // cod-chevron-right
+                Icon::ChevronOpen => "\u{eab4}",      // cod-chevron-down
             },
         }
     }

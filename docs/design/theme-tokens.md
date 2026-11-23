@@ -138,10 +138,10 @@ Key surface and accent tokens:
 
 | Preset | `surface` / `surface-pane` / `surface-alt` / `surface-overlay` | `text` / `header` / `muted` | `focus` / `selection` / `warning` / `danger` |
 | --- | --- | --- | --- |
-| `atelier` | `#121110` / `#1A1816` / `#23201D` / `#2D2925` | `#EDE7DC` / `#F7F2E8` / `#ABA295` | `#E8835C` / `#9BB5C9` / `#E6B85C` / `#EA827C` |
-| `paper` | `#ECE6DA` / `#F7F3EB` / `#E4DDD0` / `#DDD5C5` | `#1E1B18` / `#141210` / `#4D463E` | `#9E3418` / `#244B73` / `#734500` / `#991B20` |
+| `atelier` | `#141210` / `#1B1917` / `#24211E` / `#2E2A26` | `#F2ECE1` / `#FAF5EC` / `#ADA396` | `#E6825C` / `#D8BE9A` / `#E6BD6A` / `#EB847D` |
+| `paper` | `#EAE3D5` / `#F6F1E7` / `#E4DCCD` / `#DBD2C1` | `#1E1B18` / `#14110F` / `#4B443C` | `#9A3115` / `#25486B` / `#714304` / `#961B21` |
 
-Both presets guarantee `>= 4.5:1` contrast across every non-border foreground token on all four surface tiers (`>= 11.7:1` for primary `text`/`header` on base surfaces).
+Both presets guarantee `>= 4.5:1` contrast across every non-border foreground token on all four surface tiers (`>= 11.7:1` for primary `text`/`header` on base surfaces). At `TrueColor` and `Indexed256`, `syntax-comment` (`Modifier::DIM | Modifier::ITALIC`) and `null-value` (`Modifier::ITALIC`) render in italic so editorial notes and `[null]` cells stand apart from data strings, while `Theme::surface_badge` strips both `DIM` and `ITALIC` so UI pills stay crisp and upright.
 
 `ui.theme` accepts `dark`, `light`, `high-contrast`, `field-industrial`, `material`, `atelier`, `paper`, `custom` and `auto`. When
 `ui.theme = "auto"`, startup probes the terminal background luminance over OSC 11
@@ -175,10 +175,10 @@ an optional `[keys] switch-theme = "alt+f12"` binding uses the same action.
 
 The interface organizes visual hierarchy into four painted elevation levels:
 
-- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light, `#111318` on Material, `#121110` on Atelier, `#ece6da` on Paper).
-- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light, `#191c22` on Material, `#1a1816` on Atelier, `#f7f3eb` on Paper).
-- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, recessed modal badges, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light, `#22262e` on Material, `#23201d` on Atelier, `#e4ddd0` on Paper).
-- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, confirmation prompts, and elevated rail keycaps (`#292e42` on Dark, `#dce0e8` on Light, `#2b303a` on Material, `#2d2925` on Atelier, `#ddd5c5` on Paper).
+- **Surface**: Base outer screen frame background (`#11131d` on Dark, `#e6e9ef` on Light, `#111318` on Material, `#141210` on Atelier, `#eae3d5` on Paper).
+- **SurfacePane**: Pane interior elevation for the Objects tree, SQL editor, and Results grid (`#1b1e2e` on Dark, `#f4f6f9` on Light, `#191c22` on Material, `#1b1917` on Atelier, `#f6f1e7` on Paper).
+- **SurfaceAlt**: Elevated bar and stripe surface used for the full-width top header statusbar, bottom footer statusline, active editor `CursorLine`, elevated Results column header bar, recessed modal badges, and alternating zebra stripes (`#22263a` on Dark, `#e2e6f0` on Light, `#22262e` on Material, `#24211e` on Atelier, `#e4dccd` on Paper).
+- **SurfaceOverlay**: Floating overlay elevation for the command palette, completion menu, definitions, plan/notice readers, confirmation prompts, and elevated rail keycaps (`#292e42` on Dark, `#dce0e8` on Light, `#2b303a` on Material, `#2e2a26` on Atelier, `#dbd2c1` on Paper).
 
 Overlays employ Clear-then-block painting: every overlay paints a `Clear` widget
 over its bounding rectangle before rendering its block surface and contents. This
