@@ -1158,15 +1158,23 @@ fn render_grid(
             width,
             !presentation.glyphs.is_ascii(),
         );
-        let header_style = if Some(*index) == selected_column {
-            theme.style(Token::Selection)
-        } else {
-            theme.on_stripe(Token::Header)
+        // The selection fill follows the same gate as the selected row: it
+        // is painted only while Results has focus. An unfocused pane still
+        // marks the column Enter would act on, in the focus ink alone.
+        let header_style = match (Some(*index) == selected_column, focused) {
+            (true, true) => theme.style(Token::Selection),
+            (true, false) => theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD),
+            (false, _) => theme.on_stripe(Token::Header),
         };
-        header_spans.push(Span::styled(
-            format!("{}{padding}", pad_to_width(&text, width)),
-            header_style,
-        ));
+        // A name sits over its values: right-aligned over a column whose
+        // values read as numbers, left-aligned otherwise.
+        let cell = if alignment.get(*index).copied().unwrap_or(false) {
+            let pad = width.saturating_sub(display_width(&text));
+            format!("{}{text}", " ".repeat(pad))
+        } else {
+            pad_to_width(&text, width)
+        };
+        header_spans.push(Span::styled(format!("{cell}{padding}"), header_style));
     }
     let header_width: usize = header_spans.iter().map(|s| display_width(&s.content)).sum();
     if header_width < grid_width {

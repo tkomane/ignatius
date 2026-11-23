@@ -764,7 +764,9 @@ fn results_header_row_fills_grid_width_gutter_uses_muted_and_empty_hints_stay_cr
     assert_eq!(buf[(hash_x, col_header_y)].bg, stripe_bg);
     assert_eq!(buf[(id_x, col_header_y)].bg, selection_bg);
     assert_eq!(buf[(note_x, col_header_y)].bg, stripe_bg);
-    for x in (1..id_x).chain((note_x - 2)..59) {
+    // The numeric `id` column right-aligns its name, so its cell starts
+    // after the gutter `#` and its padding cell rather than at the text.
+    for x in (1..=hash_x + 1).chain((note_x - 2)..59) {
         assert_eq!(
             buf[(x, col_header_y)].bg,
             stripe_bg,
@@ -1065,4 +1067,98 @@ fn the_state_line_names_only_what_differs_from_a_plain_grid() {
     let single = model_with(&["only"], &text_rows(2));
     let (_, state) = toolbar_lines(&render(&single, &presentation, area), area);
     assert!(state.starts_with("1 column | "), "{state:?}");
+}
+
+/// The column header row of a rendered grid: the first row whose gutter
+/// carries `#`.
+fn header_row(buf: &Buffer, area: Rect) -> u16 {
+    (area.y..area.y + area.height)
+        .find(|&y| {
+            (area.x..area.x + area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .trim_start_matches(['\u{2502}', '\u{2503}', '|', ' '])
+                .starts_with('#')
+        })
+        .expect("a column header row")
+}
+
+#[test]
+fn an_unfocused_header_marks_the_selected_column_without_a_selection_fill() {
+    let mut model = sortable_model();
+    model.focus = Focus::Editor;
+    let area = Rect::new(0, 0, 60, 14);
+    for depth in [
+        ColorDepth::TrueColor,
+        ColorDepth::Indexed256,
+        ColorDepth::Basic16,
+        ColorDepth::None,
+    ] {
+        let presentation = presentation_at(depth);
+        let theme = &presentation.theme;
+        let buf = render(&model, &presentation, area);
+        let y = header_row(&buf, area);
+        let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+        let amount_x = row[..row.find("amount").expect("amount header")]
+            .chars()
+            .count() as u16;
+        let cell = &buf[(amount_x, y)];
+        let expected = theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD);
+        assert_eq!(cell.fg, expected.fg.unwrap_or(Color::Reset), "{depth:?}");
+        assert_eq!(cell.bg, expected.bg.unwrap_or(Color::Reset), "{depth:?}");
+        assert!(cell.modifier.contains(Modifier::BOLD), "{depth:?}");
+        assert!(
+            !cell.modifier.contains(Modifier::REVERSED),
+            "{depth:?}: no selection fill while unfocused"
+        );
+        if let Some(selection) = theme.style(Token::Selection).bg {
+            assert_ne!(cell.bg, selection, "{depth:?}: no selection fill");
+        }
+    }
+
+    // Focused, the selected header keeps its selection fill.
+    model.focus = Focus::Results;
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let buf = render(&model, &presentation, area);
+    let y = header_row(&buf, area);
+    let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+    let amount_x = row[..row.find("amount").expect("amount header")]
+        .chars()
+        .count() as u16;
+    assert_eq!(
+        Some(buf[(amount_x, y)].bg),
+        presentation.theme.style(Token::Selection).bg
+    );
+}
+
+#[test]
+fn a_header_sits_right_aligned_over_a_numeric_column() {
+    let model = model_with(
+        &["n", "label"],
+        &[
+            vec![Cell::Text("12345".into()), Cell::Text("x".into())],
+            vec![Cell::Text("7".into()), Cell::Text("y".into())],
+        ],
+    );
+    let area = Rect::new(0, 0, 60, 14);
+    let buf = render(&model, &presentation_at(ColorDepth::None), area);
+    let y = header_row(&buf, area);
+    let header: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+    let value_row: String = (0..area.width).map(|x| buf[(x, y + 2)].symbol()).collect();
+    // The last character of the header and of the widest value share a column.
+    let header_end = header[..header.find("n ").expect("n header") + 1]
+        .chars()
+        .count();
+    let value_end = value_row[..value_row.find("12345").expect("value") + 5]
+        .chars()
+        .count();
+    assert_eq!(header_end, value_end, "{header}\n{value_row}");
+    // A text column stays left-aligned: its name starts where its values do.
+    let label_x = header.find("label").expect("label");
+    let x_x = value_row.rfind(" x").expect("value x") + 1;
+    assert_eq!(
+        header[..label_x].chars().count(),
+        value_row[..x_x].chars().count(),
+        "{header}\n{value_row}"
+    );
 }
