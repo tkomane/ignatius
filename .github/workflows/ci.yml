@@ -78,6 +78,12 @@ jobs:
             --workdir /repo \
             docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
             -color
+      - name: Verify disposable fixture ports bind to IPv4 loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f docker/compose.yaml config --format json |
+            jq --exit-status '[.services[].ports[]? | .host_ip] == ["127.0.0.1", "127.0.0.1"]' > /dev/null
 
   # Cargo.toml advertises Rust 1.90. A newer pinned development compiler cannot
   # prove that contract, so compile the complete workspace with the minimum too.
