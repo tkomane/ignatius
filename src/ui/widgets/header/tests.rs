@@ -356,9 +356,11 @@ fn us8_header_suppresses_completed_elapsed_under_200ms_and_shows_at_or_above() {
         120,
     );
     assert!(
-        text_200.contains("200ms"),
+        text_200.contains("200 ms"),
         "elapsed >= 200ms must be rendered: {text_200}"
     );
+    // The unit is spaced exactly as the Results summary spaces it.
+    assert!(!text_200.contains("200ms"), "{text_200}");
 
     // Running duration: always displayed regardless of duration
     model.running_for = Some(Duration::from_millis(50));

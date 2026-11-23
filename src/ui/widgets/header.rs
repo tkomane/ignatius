@@ -224,12 +224,14 @@ pub(crate) fn render_header(
             TimingDisplay::Always => true,
         };
         if show {
+            // The same unit spacing as the Results summary (`240 ms`), so the
+            // one duration reads the same in both places.
             let text = if d >= Duration::from_secs(1) {
-                format!("{:.2}s", d.as_secs_f64())
+                format!("{:.2} s", d.as_secs_f64())
             } else if d.as_millis() == 0 {
-                "<1ms".to_owned()
+                "<1 ms".to_owned()
             } else {
-                format!("{}ms", d.as_millis())
+                format!("{} ms", d.as_millis())
             };
             if !right_spans.is_empty() {
                 right_spans.push(Span::raw("  "));
