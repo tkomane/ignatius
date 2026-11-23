@@ -479,10 +479,12 @@ jobs:
           cargo --locked xtask release evidence-scope --root "$root" --allowlist "$allowlist"
           printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
       - name: Scan only the checked upload scope for secrets
+        env:
+          RELEASE_SCOPE_ROOT: ${{ steps.release-scope.outputs.root }}
         run: |
           # Gitleaks v8.30.0, pinned to the published multi-platform image digest on 2026-08-31.
           docker run --rm --network none \
-            --volume "${{ steps.release-scope.outputs.root }}:/scan:ro" \
+            --volume "$RELEASE_SCOPE_ROOT:/scan:ro" \
             ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
             dir --no-banner --redact /scan
 
