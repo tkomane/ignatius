@@ -110,20 +110,39 @@ pub(crate) fn render_footer(
         || model.format_notice.is_some()
         || model.paste_notice.is_some()
         || model.layout_notice.is_some();
+    // While an overlay owns input the rail offers that overlay's keys, in its
+    // words; workbench keys there would be swallowed and do nothing.
+    let overlay_hints = crate::app::discovery::overlay_hint_actions(model);
+    // The way out of an overlay outranks the search path: on a rail too short
+    // for both, the path gives way so the key that closes the overlay shows.
+    let way_out_width = overlay_hints
+        .as_ref()
+        .and_then(|hints| {
+            hints
+                .iter()
+                .find(|(action, _)| *action == crate::app::Action::Dismiss)
+        })
+        .and_then(|(action, label)| {
+            overlay_key(keymap, action).map(|key| display_width(&key) + 2 + display_width(label))
+        });
     if let Some(info) = model
         .connection
         .info()
         .filter(|_| !showing_transient_notice)
     {
-        spans.push(Span::styled(divider, theme.on_stripe(Token::Border)));
-        spans.push(Span::styled(
-            format!(
-                "{}{}",
-                presentation.icon(Icon::SearchPath),
-                info.search_path
-            ),
-            theme.on_stripe(Token::Muted),
-        ));
+        let path = format!(
+            "{}{}",
+            presentation.icon(Icon::SearchPath),
+            info.search_path
+        );
+        let used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+        let crowds_the_way_out = way_out_width.is_some_and(|way_out| {
+            used + divider_width + display_width(&path) + 1 + way_out > usize::from(area.width)
+        });
+        if !crowds_the_way_out {
+            spans.push(Span::styled(divider, theme.on_stripe(Token::Border)));
+            spans.push(Span::styled(path, theme.on_stripe(Token::Muted)));
+        }
     }
 
     // The footer is a rail, not a second help page. Its candidates are derived
@@ -262,39 +281,44 @@ pub(crate) fn render_footer(
     let separator_width = display_width(separator);
     let keycap_style = theme.keycap(Token::Focus);
     let label_style = theme.on_stripe(Token::Text);
-    let mut hint_spans: Vec<Span<'static>> = Vec::new();
+    // Each candidate resolves to its key and label, with a rank: the order in
+    // which pairs are kept when the rail is short. Workbench hints are ranked
+    // in their own order. An overlay keeps its way out first, then its accept
+    // key, then movement, so a short rail drops movement before acceptance and
+    // offers Esc for as long as it offers anything.
+    let resolved: Vec<(String, &'static str, usize)> = overlay_hints.map_or_else(
+        || {
+            crate::app::discovery::hint_actions_for(model, presentation)
+                .into_iter()
+                .take(presentation.footer_hint_cap())
+                .filter_map(|action| keymap.contextual_hint(&action))
+                .enumerate()
+                .map(|(rank, (key, label))| (key, label, rank))
+                .collect()
+        },
+        |hints| {
+            hints
+                .into_iter()
+                .take(presentation.footer_hint_cap())
+                .filter_map(|(action, label)| {
+                    let rank = match action {
+                        crate::app::Action::Dismiss => 0,
+                        crate::app::Action::Activate => 1,
+                        _ => 2,
+                    };
+                    overlay_key(keymap, &action).map(|key| (key, label, rank))
+                })
+                .collect()
+        },
+    );
+    let mut by_rank: Vec<usize> = (0..resolved.len()).collect();
+    by_rank.sort_by_key(|&index| (resolved[index].2, index));
+    let mut kept = Vec::new();
     let mut hints_width = 0usize;
-    let mut hints_rendered = 0usize;
-
-    // While an overlay owns input the rail offers that overlay's keys, in its
-    // words; workbench keys there would be swallowed and do nothing.
-    let candidates: Vec<(crate::app::Action, Option<&'static str>)> =
-        crate::app::discovery::overlay_hint_actions(model).map_or_else(
-            || {
-                crate::app::discovery::hint_actions_for(model, presentation)
-                    .into_iter()
-                    .map(|action| (action, None))
-                    .collect()
-            },
-            |hints| {
-                hints
-                    .into_iter()
-                    .map(|(action, label)| (action, Some(label)))
-                    .collect()
-            },
-        );
-    for (action, overlay_label) in candidates.into_iter().take(presentation.footer_hint_cap()) {
-        let hint = match overlay_label {
-            Some(label) => overlay_key(keymap, &action).map(|key| (key, label)),
-            None => keymap.contextual_hint(&action),
-        };
-        let Some((key, label)) = hint else {
-            continue;
-        };
-        let key_width = display_width(&key);
-        let label_width = display_width(label);
-        let pair_width = key_width + 2 + label_width;
-        let added_width = if hints_rendered == 0 {
+    for index in by_rank {
+        let (key, label, _) = &resolved[index];
+        let pair_width = display_width(key) + 2 + display_width(label);
+        let added_width = if kept.is_empty() {
             pair_width
         } else {
             separator_width + pair_width
@@ -307,13 +331,20 @@ pub(crate) fn render_footer(
         {
             break;
         }
-        if hints_rendered > 0 {
+        hints_width += added_width;
+        kept.push(index);
+    }
+    // Kept pairs are drawn in their natural order, whatever order kept them.
+    kept.sort_unstable();
+    let hints_rendered = kept.len();
+    let mut hint_spans: Vec<Span<'static>> = Vec::new();
+    for (position, index) in kept.into_iter().enumerate() {
+        let (key, label, _) = &resolved[index];
+        if position > 0 {
             hint_spans.push(Span::styled(separator, theme.on_stripe(Token::Border)));
         }
         hint_spans.push(Span::styled(format!(" {key} "), keycap_style));
-        hint_spans.push(Span::styled(label, label_style));
-        hints_width += added_width;
-        hints_rendered += 1;
+        hint_spans.push(Span::styled(*label, label_style));
     }
 
     if hints_rendered > 0 {

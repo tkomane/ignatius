@@ -662,20 +662,154 @@ fn an_open_overlay_replaces_workbench_hints_with_its_own_keys() {
     assert!(!text.contains("Ctrl+R"), "{text}");
 }
 
+/// One open overlay of every family the footer maps, over a session with the
+/// default search path inside an open transaction, so the status side of the
+/// rail is as wide as it ordinarily gets.
+fn overlay_families() -> Vec<(&'static str, Model)> {
+    use crate::app::completion::CompletionMenu;
+    use crate::query::completion::{Candidate, CandidateKind, CompletionResult, CompletionScope};
+    let mut base = connected_editor_model();
+    if let crate::app::model::ConnectionState::Connected(info) = &mut base.connection {
+        info.search_path = "\"$user\", public".into();
+    }
+    base.transaction = crate::query::result::TransactionState::Open;
+    let with = |change: &dyn Fn(&mut Model)| {
+        let mut model = base.clone();
+        change(&mut model);
+        model
+    };
+    vec![
+        (
+            "password prompt",
+            with(&|m| {
+                m.password_prompt = Some(crate::app::model::PasswordPrompt::new(
+                    "orders",
+                    "the server asked",
+                ));
+            }),
+        ),
+        (
+            "typed confirmation",
+            with(&|m| {
+                m.pending_run = Some(crate::app::model::PendingRun {
+                    sql: "DROP TABLE orders;".into(),
+                    impact: crate::query::Impact::Destructive,
+                    typed: String::new(),
+                    required: "orders".into(),
+                    source: None,
+                });
+            }),
+        ),
+        ("chord prefix", with(&|m| m.prefix_pending = true)),
+        ("connection details", with(&|m| m.connection_details = true)),
+        (
+            "palette",
+            with(&|m| m.palette = Some(crate::app::palette::Palette::new(Vec::new()))),
+        ),
+        ("help", with(&|m| m.help_open = true)),
+        (
+            "completion",
+            with(&|m| {
+                m.completion.menu = Some(CompletionMenu::new(
+                    CompletionResult {
+                        replacement: 0..3,
+                        prefix: "sel".into(),
+                        scope: CompletionScope::Keywords,
+                        candidates: vec![Candidate {
+                            label: "SELECT".into(),
+                            insert_text: "SELECT".into(),
+                            kind: CandidateKind::Keyword,
+                            schema: None,
+                            source: None,
+                            detail: None,
+                        }],
+                        matching_count: 1,
+                        total_count: 1,
+                    },
+                    true,
+                ));
+            }),
+        ),
+        (
+            "inspector",
+            with(&|m| m.inspector = Some(crate::app::inspect::Inspector::new())),
+        ),
+        (
+            "dashboard",
+            with(&|m| {
+                m.query_performance = Some(crate::app::model::QueryPerformanceState::default());
+            }),
+        ),
+        (
+            "snippet library",
+            with(&|m| {
+                m.snippet_library = Some(crate::app::model::SnippetLibraryState::default());
+            }),
+        ),
+    ]
+}
+
 #[test]
 fn every_pane_blocking_overlay_has_footer_keys_of_its_own() {
-    let mut model = connected_editor_model();
-    model.palette = Some(crate::app::palette::Palette::new(Vec::new()));
-    assert!(crate::ui::widgets::overlay_blocks_panes(&model));
-    assert!(crate::app::discovery::hint_actions_for(&model, &model.presentation).is_empty());
-    let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay keys");
-    assert!(hints.len() <= crate::app::discovery::MAX_CONTEXTUAL_HINTS);
-    for (action, _) in hints {
+    for (name, model) in overlay_families() {
+        assert!(crate::ui::widgets::overlay_blocks_panes(&model), "{name}");
         assert!(
-            super::overlay_key(&Keymap::new(), &action).is_some(),
-            "{action:?} has no key"
+            crate::app::discovery::hint_actions_for(&model, &model.presentation).is_empty(),
+            "{name}: workbench hints while an overlay owns input"
+        );
+        let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay keys");
+        assert!(hints.len() <= crate::app::discovery::MAX_CONTEXTUAL_HINTS);
+        assert!(
+            hints
+                .iter()
+                .any(|(action, _)| *action == crate::app::Action::Dismiss),
+            "{name}: no way out"
+        );
+        for (action, _) in hints {
+            assert!(
+                super::overlay_key(&Keymap::new(), &action).is_some(),
+                "{name}: {action:?} has no key"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_way_out_is_the_last_overlay_key_a_short_rail_gives_up() {
+    for (name, model) in overlay_families() {
+        for width in 40u16..=160 {
+            let text = footer_text(&model, width);
+            let shows_any = ["Choose", "Accept", "Move", "Close", "Cancel"]
+                .iter()
+                .any(|label| text.contains(label));
+            if shows_any {
+                assert!(
+                    text.contains("Esc Close") || text.contains("Esc Cancel"),
+                    "{name} at {width}: overlay keys without the way out: {text:?}"
+                );
+            }
+            assert!(!text.contains("Ctrl+R"), "{name} at {width}: {text:?}");
+            // Status and transaction always stay.
+            assert!(text.contains("Ready"), "{name} at {width}: {text:?}");
+        }
+        // At the 80-column minimum the way out is always offered.
+        let text = footer_text(&model, 80);
+        assert!(
+            text.contains("Esc Close") || text.contains("Esc Cancel"),
+            "{name} at 80: {text:?}"
         );
     }
+
+    // A wide rail still draws the palette's keys in their natural order.
+    let (_, palette) = overlay_families()
+        .into_iter()
+        .find(|(name, _)| *name == "palette")
+        .expect("palette family");
+    let text = footer_text(&palette, 160);
+    let choose = text.find("Enter Choose").expect("Enter Choose");
+    let moving = text.find("Up/Down Move").expect("Up/Down Move");
+    let close = text.find("Esc Close").expect("Esc Close");
+    assert!(choose < moving && moving < close, "{text}");
 }
 
 #[test]
