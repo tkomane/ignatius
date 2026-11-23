@@ -11766,23 +11766,25 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
     let _ = update(&mut model, Message::Action(Action::Insert('1')));
     assert_eq!(model.query_bench.as_ref().map(|b| b.active_tab), Some(0));
 
-    // Toggle rollback safety and re-run.
+    // Switching rollback off only changes the mode and says what it means.
     let toggle_effects = update(&mut model, Message::Action(Action::Insert('m')));
-    assert_eq!(toggle_effects.len(), 2);
+    assert!(toggle_effects.is_empty(), "m never runs anything");
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(!bench.config.rollback);
     assert!(
-        model
-            .query_bench
-            .as_ref()
-            .is_some_and(|b| !b.config.rollback && b.loading)
+        bench
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("writes will persist"))
     );
-    assert!(matches!(
-        &toggle_effects[0],
-        Effect::RunQueryBench { config, .. } if !config.rollback
-    ));
 
-    // Explicit rerun increments request and re-emits effects.
+    // An explicit run uses the new mode.
     let rerun_effects = update(&mut model, Message::Action(Action::Insert('r')));
     assert_eq!(rerun_effects.len(), 2);
+    assert!(matches!(
+        &rerun_effects[0],
+        Effect::RunQueryBench { config, .. } if !config.rollback
+    ));
 
     // Escape closes overlay.
     let _ = update(&mut model, Message::Action(Action::Dismiss));
@@ -12479,4 +12481,81 @@ fn motion_an_ordinary_overlay_lets_the_curtain_finish() {
         model.motion().theme_curtain().is_some(),
         "the palette is not a confirmation"
     );
+}
+
+fn bench_model(environment: Environment, read_only: bool, sql: &str) -> Model {
+    let mut model = connected();
+    let mut info = session();
+    info.environment = environment;
+    info.read_only = read_only;
+    update(&mut model, Message::Connected(info));
+    model.editor.set_text(sql);
+    model
+}
+
+#[test]
+fn rollback_off_benchmark_writes_are_refused_on_production_and_read_only_sessions() {
+    for (environment, read_only, place) in [
+        (Environment::Production, false, "on a production connection"),
+        (Environment::Development, true, "in a read-only session"),
+    ] {
+        for sql in [
+            "UPDATE orders SET value = 0;",
+            "DELETE FROM orders;",
+            "EXPLAIN ANALYZE DELETE FROM orders;",
+            "SELECT 1; UPDATE orders SET value = 0;",
+        ] {
+            let mut model = bench_model(environment.clone(), read_only, sql);
+            update(&mut model, Message::Action(Action::QueryBench));
+            update(&mut model, Message::Action(Action::Insert('m')));
+            let effects = update(&mut model, Message::Action(Action::Insert('r')));
+            assert!(effects.is_empty(), "{sql} must not run {place}");
+            let bench = model.query_bench.as_ref().expect("bench overlay open");
+            assert!(!bench.loading, "{sql}: a refused run is not loading");
+            let status = bench.status_message.as_deref().unwrap_or_default();
+            assert!(status.contains("Refused"), "{sql}: {status}");
+            assert!(status.contains(place), "{sql}: {status}");
+            assert!(status.contains("Nothing was sent"), "{sql}: {status}");
+        }
+    }
+}
+
+#[test]
+fn rollback_off_benchmarks_still_run_reads_on_production_and_writes_elsewhere() {
+    let mut reads = bench_model(Environment::Production, false, "SELECT * FROM orders;");
+    update(&mut reads, Message::Action(Action::QueryBench));
+    update(&mut reads, Message::Action(Action::Insert('m')));
+    assert_eq!(
+        update(&mut reads, Message::Action(Action::Insert('r'))).len(),
+        1,
+        "a read runs on production with rollback off"
+    );
+
+    let mut writes = bench_model(
+        Environment::Development,
+        false,
+        "UPDATE orders SET value = 0;",
+    );
+    update(&mut writes, Message::Action(Action::QueryBench));
+    update(&mut writes, Message::Action(Action::Insert('m')));
+    assert_eq!(
+        update(&mut writes, Message::Action(Action::Insert('r'))).len(),
+        1,
+        "a deliberate rollback-off write runs outside production"
+    );
+}
+
+#[test]
+fn explain_analyze_of_a_write_needs_the_production_confirmation() {
+    let mut model = bench_model(
+        Environment::Production,
+        false,
+        "EXPLAIN ANALYZE DELETE FROM orders;",
+    );
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    let pending = model
+        .pending_run
+        .as_ref()
+        .expect("the run waits for confirmation");
+    assert!(pending.impact.needs_typed_confirmation());
 }

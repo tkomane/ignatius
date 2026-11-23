@@ -4420,12 +4420,25 @@ fn query_bench_open(model: &mut Model) -> Vec<Effect> {
 }
 
 fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
+    let Some((config, base_sql, cand_sql)) = model.query_bench.as_ref().map(|bench| {
+        (
+            bench.config,
+            bench.baseline_sql.clone(),
+            bench.candidate_sql.clone(),
+        )
+    }) else {
+        return Vec::new();
+    };
+    if let Some(refusal) = rollback_off_refusal(model, config.rollback, &base_sql, &cand_sql) {
+        if let Some(bench) = &mut model.query_bench {
+            bench.loading = false;
+            bench.status_message = Some(refusal);
+        }
+        return Vec::new();
+    }
     let Some(bench) = &mut model.query_bench else {
         return Vec::new();
     };
-    let config = bench.config;
-    let base_sql = bench.baseline_sql.clone();
-    let cand_sql = bench.candidate_sql.clone();
     bench.loading = true;
     bench.status_message = Some(format!(
         "Running benchmark ({} warmup, {} measured, rollback={})...",
@@ -4461,6 +4474,43 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
     effects
 }
 
+/// Why a rollback-off benchmark must not run here, if it must not.
+///
+/// With rollback off every iteration commits what it runs. A statement that is
+/// not a read is refused on a production connection, where the workbench would
+/// otherwise ask before a single write, and in a read-only session, where the
+/// server would refuse it anyway. The classification is the same advisory one
+/// the editor uses.
+fn rollback_off_refusal(
+    model: &Model,
+    rollback: bool,
+    baseline: &str,
+    candidate: &str,
+) -> Option<String> {
+    if rollback {
+        return None;
+    }
+    let place = if model.environment().is_production() {
+        "on a production connection"
+    } else if model.connection.info().is_some_and(|info| info.read_only) {
+        "in a read-only session"
+    } else {
+        return None;
+    };
+    let impact = [baseline, candidate]
+        .iter()
+        .map(|sql| crate::query::classify_all(&statements::split(sql)))
+        .max()
+        .unwrap_or(crate::query::Impact::Read);
+    if impact == crate::query::Impact::Read {
+        return None;
+    }
+    Some(format!(
+        "Refused: with rollback off this benchmark would commit a {} statement on every run {place}. Nothing was sent. Press m to turn rollback back on.",
+        impact.label().to_lowercase()
+    ))
+}
+
 /// Handles input while the query latency benchmark overlay is open.
 fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
     match action {
@@ -4491,11 +4541,17 @@ fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 bench.set_tab(1);
             }
         }
+        // Switching the mode never runs anything: a run with the new mode is
+        // a separate, deliberate `r`.
         Action::Insert('m' | 'M') => {
             if let Some(bench) = &mut model.query_bench {
                 bench.config.rollback = !bench.config.rollback;
+                bench.status_message = Some(if bench.config.rollback {
+                    "Rollback on: every run is rolled back. Press r to run.".to_owned()
+                } else {
+                    "Rollback off: writes will persist. Press r to run.".to_owned()
+                });
             }
-            return query_bench_dispatch_runs(model);
         }
         Action::Insert('r' | 'R') => {
             return query_bench_dispatch_runs(model);

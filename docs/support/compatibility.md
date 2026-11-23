@@ -348,8 +348,16 @@ database's own name typed.
 
 The classification reads leading keywords. It handles comments and writes hidden
 in a common table expression, and it treats anything it does not recognise as a
-write. It cannot see inside a function, so `SELECT wipe_all()` is a read as far
-as it can tell. **It is advisory and is described that way wherever it appears.**
+write. `EXPLAIN` is a read, but `EXPLAIN ANALYZE` (in either the word form or the
+parenthesised option list) executes its statement, so it is judged by that
+statement: `EXPLAIN ANALYZE DELETE ...` is destructive. It cannot see inside a
+function, so `SELECT wipe_all()` is a read as far as it can tell. **It is
+advisory and is described that way wherever it appears.**
+
+The query benchmark (`Ctrl+K '`) rolls every run back by default. `m` switches
+rollback mode and never runs anything by itself. With rollback off every run
+commits, so a statement that is not a read is refused on a production
+connection and in a read-only session.
 
 `--read-only` is the real control: it asks the server to refuse writes for the
 session, and PostgreSQL enforces it.
