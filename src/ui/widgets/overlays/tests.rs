@@ -739,6 +739,7 @@ fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
         selected_idx: 3,
         loading: false,
         status_message: None,
+        queued_candidate: None,
     };
 
     let area = Rect::new(0, 0, 126, 32);

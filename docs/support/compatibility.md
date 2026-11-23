@@ -357,7 +357,12 @@ advisory and is described that way wherever it appears.**
 The query benchmark (`Ctrl+K '`) wraps each run in `BEGIN` and `ROLLBACK` by default. `m` switches
 rollback mode and never runs anything by itself. With rollback off every run
 commits, so a statement that is not a read is refused on a production
-connection and in a read-only session.
+connection and in a read-only session. Query A and Query B run one after the
+other, never at the same time on the session, and B is skipped if A fails. A
+benchmark does not start while a workbench statement runs, while a transaction
+is open, failed or of unknown state (its rollback would end that transaction),
+or while an earlier benchmark run is still in flight. Closing the overlay does
+not stop a run already sent.
 
 `--read-only` is the real control: it asks the server to refuse writes for the
 session, and PostgreSQL enforces it.

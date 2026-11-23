@@ -11661,7 +11661,7 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
         .set_text("SELECT * FROM orders; SELECT id FROM orders WHERE id = 1;");
 
     let effects = update(&mut model, Message::Action(Action::QueryBench));
-    assert_eq!(effects.len(), 2);
+    assert_eq!(effects.len(), 1, "A runs first; B waits for A to report");
     let Effect::RunQueryBench {
         request,
         target: crate::app::message::BenchTarget::Baseline,
@@ -11673,13 +11673,6 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
     };
     assert_eq!(base_sql, "SELECT * FROM orders");
     assert!(config.rollback);
-    assert!(matches!(
-        &effects[1],
-        Effect::RunQueryBench {
-            target: crate::app::message::BenchTarget::Candidate,
-            ..
-        }
-    ));
 
     let req = *request;
     let base_stats = crate::bench::compute_bench_stats(
@@ -11728,7 +11721,7 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
     );
     assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
 
-    let _ = update(
+    let after_a = update(
         &mut model,
         Message::QueryBenchLoaded {
             request: req,
@@ -11736,6 +11729,16 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
             result: Box::new(Ok(base_stats)),
         },
     );
+    // Only now, with A finished on the session, does B start.
+    assert!(matches!(
+        after_a.as_slice(),
+        [Effect::RunQueryBench {
+            target: crate::app::message::BenchTarget::Candidate,
+            sql,
+            ..
+        }] if sql == "SELECT id FROM orders WHERE id = 1"
+    ));
+    assert!(model.query_bench.as_ref().is_some_and(|b| b.loading));
     let _ = update(
         &mut model,
         Message::QueryBenchLoaded {
@@ -11780,7 +11783,7 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
 
     // An explicit run uses the new mode.
     let rerun_effects = update(&mut model, Message::Action(Action::Insert('r')));
-    assert_eq!(rerun_effects.len(), 2);
+    assert_eq!(rerun_effects.len(), 1);
     assert!(matches!(
         &rerun_effects[0],
         Effect::RunQueryBench { config, .. } if !config.rollback
@@ -12604,5 +12607,75 @@ fn rollback_mode_cannot_switch_while_a_run_is_in_flight() {
             .status_message
             .as_deref()
             .is_some_and(|status| status.contains("after it finishes"))
+    );
+}
+
+#[test]
+fn query_b_is_not_run_when_query_a_fails() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1; SELECT 2;");
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    let request = model.query_bench_request;
+    assert_eq!(effects.len(), 1);
+    let after_a = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                "relation does not exist",
+                "benchmark",
+            ))),
+        },
+    );
+    assert!(after_a.is_empty(), "B must not start after A failed");
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(!bench.loading);
+    assert!(
+        bench
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("relation does not exist")
+                && status.contains("Query B was not run"))
+    );
+}
+
+#[test]
+fn benchmarks_refuse_to_share_the_session_with_other_work() {
+    use crate::query::result::TransactionState;
+
+    for (state, words) in [
+        (TransactionState::Open, "A transaction is open"),
+        (TransactionState::Failed, "A transaction is open"),
+        (TransactionState::Unknown, "transaction state is unknown"),
+    ] {
+        let mut model = connected();
+        model.editor.set_text("SELECT 1;");
+        model.transaction = state;
+        assert!(update(&mut model, Message::Action(Action::QueryBench)).is_empty());
+        let status = model
+            .query_bench
+            .as_ref()
+            .and_then(|bench| bench.status_message.clone())
+            .unwrap_or_default();
+        assert!(status.contains(words), "{state:?}: {status}");
+        assert!(status.contains("Nothing was sent."), "{state:?}: {status}");
+    }
+
+    // A second run while the first is still in flight would interleave.
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    assert_eq!(
+        update(&mut model, Message::Action(Action::QueryBench)).len(),
+        1
+    );
+    assert!(update(&mut model, Message::Action(Action::Insert('r'))).is_empty());
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .and_then(|bench| bench.status_message.as_deref())
+            .is_some_and(|status| status.contains("still running"))
     );
 }

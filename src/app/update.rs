@@ -1282,8 +1282,14 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             if model.query_bench_request != request {
                 return Vec::new();
             }
+            let mut next = Vec::new();
             if let Some(bench) = &mut model.query_bench {
                 bench.loading = false;
+                let queued = if target == crate::app::message::BenchTarget::Baseline {
+                    bench.queued_candidate.take()
+                } else {
+                    None
+                };
                 match *result {
                     Ok(stats) => {
                         match target {
@@ -1291,6 +1297,21 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                                 bench.baseline = Some(stats);
                                 bench.status_message =
                                     Some("Captured Baseline (A) benchmark".to_owned());
+                                // A has finished with the session, so B may
+                                // start now.
+                                if let Some(config) = queued {
+                                    bench.loading = true;
+                                    bench.status_message = Some(
+                                        "Captured Baseline (A); running Candidate (B)..."
+                                            .to_owned(),
+                                    );
+                                    next.push(Effect::RunQueryBench {
+                                        request,
+                                        target: crate::app::message::BenchTarget::Candidate,
+                                        sql: bench.candidate_sql.clone(),
+                                        config,
+                                    });
+                                }
                             }
                             crate::app::message::BenchTarget::Candidate => {
                                 bench.candidate = Some(stats);
@@ -1301,12 +1322,18 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         bench.recompute_report();
                     }
                     Err(diag) => {
-                        bench.status_message =
-                            Some(format!("Query benchmark failed: {}", diag.headline));
+                        bench.status_message = Some(if queued.is_some() {
+                            format!(
+                                "Query benchmark failed: {}. Query B was not run.",
+                                diag.headline
+                            )
+                        } else {
+                            format!("Query benchmark failed: {}", diag.headline)
+                        });
                     }
                 }
             }
-            Vec::new()
+            next
         }
         Message::SchemaSnapshotLoaded { request, result } => {
             if model.schema_snapshot_request != request {
@@ -4429,7 +4456,9 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
     }) else {
         return Vec::new();
     };
-    if let Some(refusal) = rollback_off_refusal(model, config.rollback, &base_sql, &cand_sql) {
+    if let Some(refusal) = bench_session_refusal(model)
+        .or_else(|| rollback_off_refusal(model, config.rollback, &base_sql, &cand_sql))
+    {
         // A run that is already in flight keeps its loading state, so its
         // results still arrive under the mode they actually ran with.
         if let Some(bench) = &mut model.query_bench {
@@ -4451,6 +4480,8 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
     model.query_bench_request = model.query_bench_request.wrapping_add(1);
     let request = model.query_bench_request;
     let mut effects = Vec::new();
+    // A runs first and B waits for A's report, so the two never share the
+    // session at the same time.
     if !base_sql.trim().is_empty() {
         effects.push(Effect::RunQueryBench {
             request,
@@ -4458,8 +4489,8 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
             sql: base_sql,
             config,
         });
-    }
-    if !cand_sql.trim().is_empty() {
+        bench.queued_candidate = (!cand_sql.trim().is_empty()).then_some(config);
+    } else if !cand_sql.trim().is_empty() {
         effects.push(Effect::RunQueryBench {
             request,
             target: crate::app::message::BenchTarget::Candidate,
@@ -4473,6 +4504,44 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
         bench.loading = false;
     }
     effects
+}
+
+/// Why no benchmark may start on this session right now, if it may not.
+///
+/// A benchmark runs on the same session as the workbench. Started beside a
+/// running statement it would interleave with it; inside an open transaction
+/// its `ROLLBACK` would end the user's transaction and discard its work; and
+/// a second run beside one still in flight would interleave with that run.
+fn bench_session_refusal(model: &Model) -> Option<String> {
+    use crate::query::result::TransactionState;
+
+    if model
+        .query_bench
+        .as_ref()
+        .is_some_and(|bench| bench.loading)
+    {
+        return Some(
+            "A benchmark is still running. Run again after it finishes. Nothing was sent."
+                .to_owned(),
+        );
+    }
+    if model.phase.is_busy() {
+        return Some(
+            "A statement is running in the workbench. Run the benchmark after it finishes. Nothing was sent."
+                .to_owned(),
+        );
+    }
+    match model.transaction {
+        TransactionState::Autocommit => None,
+        TransactionState::Open | TransactionState::Failed => Some(
+            "A transaction is open in this session, and a benchmark's rollback would end it. Commit or roll back first. Nothing was sent."
+                .to_owned(),
+        ),
+        TransactionState::Unknown => Some(
+            "This session's transaction state is unknown, so a benchmark's rollback could end a transaction. Run any statement to refresh it, then try again. Nothing was sent."
+                .to_owned(),
+        ),
+    }
 }
 
 /// Why a rollback-off benchmark must not run here, if it must not.
