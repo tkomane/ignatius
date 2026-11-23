@@ -16,6 +16,46 @@ the comparison and the summary records the result for each major. Separate
 concurrency groups let the scheduled comparison finish when a push or manual
 run starts on the same ref.
 
+Every CI run checks the workflows in two independent jobs. `GitHub Actions
+semantics` runs digest-pinned actionlint without network access. `GitHub Actions
+security audit` runs zizmor 1.32.0, pinned on 23 November 2026 to its
+multi-platform image digest, in offline mode with no network and no token, over
+every workflow, local action and the Dependabot policy. Its reviewed exceptions
+are in `.github/zizmor.yml`, and `tests/workflow_contract.rs` pins that exact
+list:
+
+- `cache-poisoning` in `ci.yml`, because tag runs there produce verification
+  evidence only and distribute nothing. The contract fails if `ci.yml` gains an
+  artifact upload, cache save or publishing permission.
+- `cache-poisoning` in `release.yml`, because candidate builds still restore
+  `Swatinem/rust-cache` state. Removing those restores changes how candidate
+  archives are built, so it waits for an owner decision under ADR-0008. This is
+  an accepted risk, not a fix.
+- `self-repository` in `ci.yml` and `release.yml`, because the required
+  actionlint 1.7.12 gate does not yet parse GitHub's `$/` syntax.
+
+The security audit is not a required check in the `main` ruleset on
+23 November 2026. Until the owner adds it, a failure is visible on the pull
+request but does not block a merge.
+
+Text contracts in `tests/workflow_contract.rs` also require, across every
+workflow and local action:
+
+- a full commit SHA and release label on every external action;
+- `persist-credentials: false` on every checkout, including checkouts written
+  after `- name:`;
+- a `timeout-minutes` bound on every job and one read-only workflow-level
+  permissions block;
+- no `pull_request_target` or `workflow_run` trigger;
+- no `${{ }}` expression expanded inside a `run:` script, so expression values
+  reach the shell through `env:` as data;
+- a sha256 digest on every literal container image, with one digest per image.
+
+Dependabot proposes Cargo and GitHub Actions version updates weekly, seven days
+after an upstream release. The cooldown does not delay Dependabot security
+updates. The actionlint, Gitleaks and zizmor images are referenced inside `run:`
+scripts, which Dependabot does not track, so their digests are refreshed by hand.
+
 ## Installed Warp acceptance, PR 121 and ADR-0008 - 21 November 2026
 
 An isolated macOS 27.2.1 (`26B131`, arm64) run exercised the signed
@@ -1961,6 +2001,8 @@ as information; it is not reported as a database/socket test pass.
 | Secret scan | gitleaks in CI | Yes |
 | Release evidence scope | allowlist validation and scoped gitleaks scan in CI | Yes |
 | Code scanning | CodeQL advanced setup in CI, test sources excluded | Yes |
+| Workflow semantics | digest-pinned actionlint in CI, no network | Yes |
+| Workflow security audit | digest-pinned zizmor in CI, offline, reviewed exceptions only | Yes, once the owner adds `GitHub Actions security audit` to the `main` ruleset |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
 ## Complete interactive review admission - 2026-10-25

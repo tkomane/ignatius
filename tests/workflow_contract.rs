@@ -165,6 +165,76 @@ fn quoted_toml_assignment(path: &Path, section: &str, key: &str) -> String {
     panic!("{} has no {section}.{key}", path.display());
 }
 
+/// Registries whose literal image references must carry an immutable digest.
+const CONTAINER_REGISTRIES: [&str; 5] = [
+    "docker.io/",
+    "ghcr.io/",
+    "quay.io/",
+    "mcr.microsoft.com/",
+    "public.ecr.aws/",
+];
+
+/// Matches the zizmor `dependabot-cooldown` default recommendation.
+const MINIMUM_COOLDOWN_DAYS: u32 = 7;
+
+fn indentation(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+fn is_yaml_content(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    !trimmed.is_empty() && !trimmed.starts_with('#')
+}
+
+/// The lines of the workflow step that contains `index`, from its `- ` line
+/// up to the next sibling step or the end of the enclosing mapping.
+fn step_lines<'lines, 'text>(lines: &'lines [&'text str], index: usize) -> &'lines [&'text str] {
+    let own = indentation(lines[index]);
+    let start = if lines[index].trim_start().starts_with("- ") {
+        index
+    } else {
+        (0..index)
+            .rev()
+            .find(|candidate| {
+                is_yaml_content(lines[*candidate]) && indentation(lines[*candidate]) < own
+            })
+            .filter(|candidate| lines[*candidate].trim_start().starts_with("- "))
+            .unwrap_or_else(|| panic!("line {} is not inside a workflow step", index + 1))
+    };
+    let dash = indentation(lines[start]);
+    let end = lines[start + 1..]
+        .iter()
+        .position(|candidate| is_yaml_content(candidate) && indentation(candidate) <= dash)
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    &lines[start..end]
+}
+
+/// Every `run:` script with its 1-based line, including block-scalar bodies
+/// and plain-scalar continuation lines.
+fn run_scripts(text: &str) -> Vec<(usize, String)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut scripts = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let key = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+        let Some(value) = key.strip_prefix("run:") else {
+            continue;
+        };
+        let key_indentation = indentation(line) + (trimmed.len() - key.len());
+        let mut script = vec![value.trim()];
+        script.extend(
+            lines[index + 1..]
+                .iter()
+                .take_while(|candidate| {
+                    candidate.trim().is_empty() || indentation(candidate) > key_indentation
+                })
+                .copied(),
+        );
+        scripts.push((index + 1, script.join("\n")));
+    }
+    scripts
+}
+
 fn exact_rust_release(version: &str) -> String {
     match version.split('.').count() {
         2 => format!("{version}.0"),
@@ -229,25 +299,31 @@ fn every_external_action_is_an_immutable_reviewable_release() {
 
 #[test]
 fn checkouts_do_not_leave_the_workflow_token_in_git() {
-    for path in workflow_paths() {
+    let mut checkouts = 0;
+    let mut named_checkouts = 0;
+
+    for path in action_definition_paths() {
         let workflow = workflow_text(&path);
         let lines: Vec<&str> = workflow.lines().collect();
 
         for (index, line) in lines.iter().enumerate() {
-            if !line.contains("- uses: actions/checkout@") {
+            let trimmed = line.trim_start();
+            let named = !trimmed.starts_with("- ");
+            if !trimmed
+                .strip_prefix("- ")
+                .unwrap_or(trimmed)
+                .starts_with("uses: actions/checkout@")
+            {
                 continue;
             }
-            let indentation = line.len() - line.trim_start().len();
-            let block_end = lines[index + 1..]
-                .iter()
-                .position(|candidate| {
-                    let candidate_indent = candidate.len() - candidate.trim_start().len();
-                    candidate_indent == indentation && candidate.trim_start().starts_with("- ")
-                })
-                .map_or(lines.len(), |offset| index + 1 + offset);
-            let block = &lines[index + 1..block_end];
+            checkouts += 1;
+            if named {
+                named_checkouts += 1;
+            }
+            // Search only this step, so a later checkout's setting cannot
+            // satisfy an earlier one and a `- name:` step is still checked.
             assert!(
-                block
+                step_lines(&lines, index)
                     .iter()
                     .any(|candidate| candidate.trim() == "persist-credentials: false"),
                 "{}:{} checkout must set persist-credentials: false",
@@ -255,6 +331,255 @@ fn checkouts_do_not_leave_the_workflow_token_in_git() {
                 index + 1
             );
         }
+    }
+
+    assert!(checkouts > 0, "no workflow checkouts were checked");
+    assert!(
+        named_checkouts > 0,
+        "checkouts written after `- name:` must be checked as well as `- uses:` steps"
+    );
+}
+
+#[test]
+fn run_scripts_receive_expressions_only_through_the_environment() {
+    let mut scripts = 0;
+    for path in action_definition_paths() {
+        let text = workflow_text(&path);
+        for (line, script) in run_scripts(&text) {
+            scripts += 1;
+            assert!(
+                !script.contains("${{"),
+                "{}:{line} expands a GitHub expression into script text; pass it through env: so \
+                 the shell receives data instead of code",
+                path.display()
+            );
+        }
+    }
+    assert!(scripts > 0, "no run scripts were checked");
+}
+
+#[test]
+fn every_literal_container_image_is_digest_pinned_and_consistent() {
+    let mut digests: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for path in action_definition_paths() {
+        let text = workflow_text(&path);
+        for (index, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            for raw in line.split_whitespace() {
+                let token =
+                    raw.trim_matches(|character: char| matches!(character, '"' | '\'' | '\\'));
+                let token = token.strip_prefix("docker://").unwrap_or(token);
+                if !CONTAINER_REGISTRIES
+                    .iter()
+                    .any(|registry| token.starts_with(registry))
+                {
+                    continue;
+                }
+                let (image, digest) = token.split_once("@sha256:").unwrap_or_else(|| {
+                    panic!(
+                        "{}:{} must pin container image {token} to an immutable sha256 digest",
+                        path.display(),
+                        index + 1
+                    )
+                });
+                assert!(
+                    digest.len() == 64
+                        && digest
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                    "{}:{} must pin {image} to one full lowercase sha256 digest",
+                    path.display(),
+                    index + 1
+                );
+                let repository = match image.rsplit_once(':') {
+                    Some((repository, tag)) if !tag.contains('/') => repository,
+                    _ => image,
+                };
+                digests
+                    .entry(repository.to_owned())
+                    .or_default()
+                    .insert(digest.to_owned());
+            }
+        }
+    }
+
+    for expected in [
+        "docker.io/rhysd/actionlint",
+        "ghcr.io/gitleaks/gitleaks",
+        "ghcr.io/zizmorcore/zizmor",
+    ] {
+        assert!(
+            digests.contains_key(expected),
+            "the digest-pinned security tool {expected} was not found in any workflow"
+        );
+    }
+    for (repository, pins) in digests {
+        assert_eq!(
+            pins.len(),
+            1,
+            "{repository} uses inconsistent image digests across workflows: {pins:?}"
+        );
+    }
+}
+
+#[test]
+fn workflow_security_audit_is_pinned_offline_and_unconditional() {
+    let ci = workflow_text(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"));
+    let audit = job_block(&ci, "workflow-security");
+
+    for expected in [
+        "name: GitHub Actions security audit",
+        "persist-credentials: false",
+        "docker run --rm --network none",
+        "--volume \"$GITHUB_WORKSPACE:/repo:ro\"",
+        "--workdir /repo",
+        "ghcr.io/zizmorcore/zizmor:1.32.0@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d",
+        "--offline --no-progress --config .github/zizmor.yml .",
+    ] {
+        assert!(
+            audit.contains(expected),
+            "the workflow security audit is missing its pinned offline contract: {expected}"
+        );
+    }
+    // Each of these would turn a finding into a pass or hand the scanner a
+    // credential it does not need.
+    for forbidden in [
+        "--no-exit-codes",
+        "--min-severity",
+        "--min-confidence",
+        "--no-config",
+        "|| true",
+        "set +e",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "secrets.",
+    ] {
+        assert!(
+            !audit.contains(forbidden),
+            "the workflow security audit must stay blocking and credential-free: {forbidden}"
+        );
+    }
+    assert!(
+        !audit.lines().any(|line| line.starts_with("    if:")),
+        "the workflow security audit must run for every CI trigger"
+    );
+}
+
+#[test]
+fn workflow_security_exceptions_are_the_reviewed_set() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config = workflow_text(&root.join(".github/zizmor.yml"));
+    let mut rule: Option<String> = None;
+    let mut exceptions = BTreeSet::new();
+
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        match indentation(line) {
+            0 => assert_eq!(trimmed, "rules:", "zizmor.yml may only declare rules"),
+            2 => {
+                rule = Some(
+                    trimmed
+                        .strip_suffix(':')
+                        .unwrap_or_else(|| panic!("unexpected zizmor rule line: {trimmed}"))
+                        .to_owned(),
+                );
+            }
+            4 => assert_eq!(
+                trimmed, "ignore:",
+                "zizmor rules may only list reviewed ignores, never disable or reconfigure an audit"
+            ),
+            6 => {
+                let entry = trimmed
+                    .strip_prefix("- ")
+                    .unwrap_or_else(|| panic!("unexpected zizmor ignore line: {trimmed}"));
+                let rule = rule.as_deref().expect("an ignore belongs to a rule");
+                exceptions.insert(format!("{rule} {entry}"));
+            }
+            _ => panic!("unexpected zizmor.yml structure: {line}"),
+        }
+    }
+
+    assert_eq!(
+        exceptions,
+        BTreeSet::from([
+            "cache-poisoning ci.yml".to_owned(),
+            "cache-poisoning release.yml".to_owned(),
+            "self-repository ci.yml".to_owned(),
+            "self-repository release.yml".to_owned(),
+        ]),
+        "a zizmor exception was added or removed without updating this reviewed contract"
+    );
+
+    // The ci.yml cache exception is justified only while CI distributes nothing.
+    let ci = workflow_text(&root.join(".github/workflows/ci.yml"));
+    for forbidden in [
+        "actions/upload-artifact@",
+        "actions/cache/save@",
+        "id-token: write",
+        "attestations: write",
+        "packages: write",
+    ] {
+        assert!(
+            !ci.contains(forbidden),
+            "ci.yml must stay non-distributing while its cache-poisoning exception exists: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn dependabot_delays_version_updates_for_every_ecosystem() {
+    let text = workflow_text(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/dependabot.yml"));
+    let mut cooldowns: BTreeMap<String, Option<u32>> = BTreeMap::new();
+    let mut ecosystem: Option<String> = None;
+    let mut in_cooldown = false;
+
+    assert!(
+        !text.contains("insecure-external-code-execution"),
+        "Dependabot must not execute dependency manifest code"
+    );
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(name) = trimmed.strip_prefix("- package-ecosystem: ") {
+            ecosystem = Some(name.to_owned());
+            cooldowns.insert(name.to_owned(), None);
+            in_cooldown = false;
+            continue;
+        }
+        match indentation(line) {
+            4 => in_cooldown = trimmed == "cooldown:",
+            6 if in_cooldown => {
+                if let Some(days) = trimmed.strip_prefix("default-days: ") {
+                    let name = ecosystem.clone().expect("cooldown belongs to an ecosystem");
+                    let days = days
+                        .parse()
+                        .unwrap_or_else(|_| panic!("{name} cooldown days must be a number"));
+                    cooldowns.insert(name, Some(days));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        cooldowns.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["cargo", "github-actions"],
+        "Dependabot must cover exactly the Cargo and GitHub Actions dependency inputs"
+    );
+    for (name, days) in cooldowns {
+        let days = days.unwrap_or_else(|| panic!("{name} updates need cooldown.default-days"));
+        assert!(
+            days >= MINIMUM_COOLDOWN_DAYS,
+            "{name} version updates must wait at least {MINIMUM_COOLDOWN_DAYS} days, found {days}"
+        );
     }
 }
 
@@ -306,11 +631,15 @@ fn workflows_are_read_only_bounded_and_do_not_use_privileged_pr_code() {
             "{} must grant only its reviewed scopes",
             path.display()
         );
-        assert!(
-            !workflow.contains("pull_request_target"),
-            "{} must not run untrusted pull request code in a privileged context",
-            path.display()
-        );
+        // Both triggers run with base-repository privileges and cache scope
+        // while handling code or artifacts an outside contributor controls.
+        for privileged_trigger in ["pull_request_target", "workflow_run"] {
+            assert!(
+                !workflow.contains(privileged_trigger),
+                "{} must not run untrusted pull request code in a privileged context: {privileged_trigger}",
+                path.display()
+            );
+        }
         assert!(
             !workflow.contains("contents: write"),
             "{} must remain non-publishing",

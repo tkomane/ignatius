@@ -1,0 +1,25 @@
+# Reviewed exceptions for the zizmor GitHub Actions security audit in ci.yml.
+#
+# tests/workflow_contract.rs pins this exact list, so a new exception needs a
+# matching contract change in the same reviewed pull request. Prefer fixing a
+# finding. An exception records why the fix is wrong today and who owns it.
+rules:
+  cache-poisoning:
+    ignore:
+      # ci.yml runs on version tags only to produce verification evidence. It
+      # uploads no artifact and holds no write permission, so a restored cache
+      # cannot reach anything distributed. The contract test keeps that true.
+      - ci.yml
+      # release.yml restores Swatinem/rust-cache state in its preflight,
+      # archive, aggregate and reproducibility jobs. Removing those restores
+      # changes how candidate archives are built, and ADR-0008 reserves release
+      # trust decisions for the owner. Accepted pending that decision, not fixed.
+      - release.yml
+  self-repository:
+    ignore:
+      # GitHub's `$/` self-repository syntax is not yet parsed by actionlint
+      # 1.7.12, the required workflow-lint gate (rhysd/actionlint issue 711 was
+      # open on 2026-11-23). Adopt it once that gate accepts it. Any change to
+      # how release.yml resolves its local action is also owner-gated.
+      - ci.yml
+      - release.yml

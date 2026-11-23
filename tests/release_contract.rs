@@ -2924,7 +2924,8 @@ fn shared_ci_scans_only_the_checked_release_evidence_scope() {
         "release-evidence:\n    name: Release evidence scope and secret scan",
         "cargo --locked xtask release evidence-scope --root \"$root\" --allowlist \"$allowlist\"",
         "printf 'root=%s\\n' \"$root\" >> \"$GITHUB_OUTPUT\"",
-        "--volume \"${{ steps.release-scope.outputs.root }}:/scan:ro\"",
+        "RELEASE_SCOPE_ROOT: ${{ steps.release-scope.outputs.root }}",
+        "--volume \"$RELEASE_SCOPE_ROOT:/scan:ro\"",
         "ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9",
         "dir --no-banner --redact /scan",
     ] {
@@ -2948,8 +2949,14 @@ fn shared_ci_scans_only_the_checked_release_evidence_scope() {
             "the release-evidence scan must not widen to {forbidden}"
         );
     }
+    // The checked root reaches the script as data through the environment.
+    assert_eq!(
+        evidence_scan.matches("RELEASE_SCOPE_ROOT").count(),
+        2,
+        "the release-evidence scan must bind and mount only the verified output root"
+    );
     assert!(
-        evidence_scan.contains("--volume \"${{ steps.release-scope.outputs.root }}:/scan:ro\""),
+        evidence_scan.contains("--volume \"$RELEASE_SCOPE_ROOT:/scan:ro\""),
         "the release-evidence scan must mount only the verified output root"
     );
 }

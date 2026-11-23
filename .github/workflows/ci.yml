@@ -85,6 +85,30 @@ jobs:
           docker compose -f docker/compose.yaml config --format json |
             jq --exit-status '[.services[].ports[]? | .host_ip] == ["127.0.0.1", "127.0.0.1"]' > /dev/null
 
+  # actionlint proves the workflows are valid. This independent job audits the
+  # same workflows, local actions and Dependabot policy for security weaknesses
+  # such as template injection, persisted credentials, privileged triggers and
+  # cache poisoning. Reviewed exceptions live in .github/zizmor.yml.
+  workflow-security:
+    name: GitHub Actions security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Audit workflows with digest-pinned zizmor
+        shell: bash
+        run: |
+          set -euo pipefail
+          # zizmor 1.32.0, pinned to the published multi-platform image digest on
+          # 2026-11-23. Offline audits only, so the scan receives no token and no network.
+          docker run --rm --network none \
+            --volume "$GITHUB_WORKSPACE:/repo:ro" \
+            --workdir /repo \
+            ghcr.io/zizmorcore/zizmor:1.32.0@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d \
+            --offline --no-progress --config .github/zizmor.yml .
+
   # Cargo.toml advertises Rust 1.90. A newer pinned development compiler cannot
   # prove that contract, so compile the complete workspace with the minimum too.
   msrv:
@@ -479,10 +503,12 @@ jobs:
           cargo --locked xtask release evidence-scope --root "$root" --allowlist "$allowlist"
           printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
       - name: Scan only the checked upload scope for secrets
+        env:
+          RELEASE_SCOPE_ROOT: ${{ steps.release-scope.outputs.root }}
         run: |
           # Gitleaks v8.30.0, pinned to the published multi-platform image digest on 2026-08-31.
           docker run --rm --network none \
-            --volume "${{ steps.release-scope.outputs.root }}:/scan:ro" \
+            --volume "$RELEASE_SCOPE_ROOT:/scan:ro" \
             ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
             dir --no-banner --redact /scan
 

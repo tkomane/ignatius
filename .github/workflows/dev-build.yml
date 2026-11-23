@@ -62,16 +62,24 @@ jobs:
       - name: Cache Rust build inputs
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      # Expressions reach scripts through the environment, never by template
+      # expansion into the script text. `$env:` is PowerShell syntax, so the
+      # shell is explicit: under bash it would expand to an empty variable.
       - name: Build
+        shell: pwsh
         env:
           IGNATIUS_BUILD_IDENTITY: dev-build/${{ github.run_id }}/${{ matrix.target }}
-        run: cargo build --locked --release --target "${{ matrix.target }}"
+          BUILD_TARGET: ${{ matrix.target }}
+        run: cargo build --locked --release --target "$env:BUILD_TARGET"
 
       - name: Say what was built, and its digest
         shell: bash
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_BINARY: ${{ matrix.binary }}
         run: |
           set -euo pipefail
-          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          binary="target/$BUILD_TARGET/release/$BUILD_BINARY"
           test -f "$binary"
           # The binary's own account of itself, so the artefact can be matched to
           # a commit without trusting the filename.
