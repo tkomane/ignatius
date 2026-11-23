@@ -22,11 +22,11 @@
 - [x] T009 Result settle: fade the Results title status word foreground from `Success` to `Muted` for a complete, successful result, reading `model.motion().result_settle()`.
 - [x] T010 Heartbeat comet meter at `TrueColor` with lower-depth and reduced-motion fallbacks.
 - [x] T011 Replace the boot reveal identity line and update the spec 025 banner contract and tests.
-- [ ] T012 Static workbench recession behind blocking overlays, with no motion and with header and footer rails excluded. The arrival fade is cut (spec User Story 6).
+- [x] T012 Static workbench recession behind blocking overlays, with no motion and with header and footer rails excluded. The arrival fade is cut (spec User Story 6).
 
 ## Phase 4: Wave 3 - Showcase, README and reconciliation
 
-- [ ] T013 Deterministic animated captures at fixed motion times in the showcase pipeline.
-- [ ] T014 Refresh every still screenshot and the banner SVGs.
-- [ ] T015 Rewrite `README.md` and reconcile `CHANGELOG.md`, `docs/status.md` and `docs/product/roadmap.md`.
+- [x] T013 Deterministic animated captures at fixed motion times in the showcase pipeline.
+- [x] T014 Refresh every still screenshot and the banner SVGs.
+- [x] T015 Rewrite `README.md` and reconcile `CHANGELOG.md`, `docs/status.md` and `docs/product/roadmap.md`.
 - [ ] T016 Full verification, hosted CI green, merge, and clean branches and worktrees.

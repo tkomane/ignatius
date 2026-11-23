@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/063-living-surfaces-core` (core), then per-wave branches
 **Created**: 2026-11-23
-**Status**: Specified
+**Status**: Delivered on 2026-11-23 (PRs #131, #133, #134 and the Wave 3 showcase). Benchmark safety found during review continues in #132.
 **Milestone**: M17 - Living Surfaces
 
 ## Problem Statement
@@ -192,9 +192,11 @@ the spec 025 banner contract.
   widgets (`mod.rs`, `results.rs`, `editor.rs`, `objects.rs`, `header.rs`,
   `footer.rs`). The focus sweep is cut (User Story 3).
 - **FR-007**: Implement static background recession behind blocking overlays
-  in `overlays.rs`, `palette.rs` and the completion popup, with no motion and
-  with the header and footer rails excluded. The overlay arrival fade is cut
-  (User Story 6).
+  (`overlays.rs`, `palette.rs` and the recession pass in `layout.rs`), with no
+  motion and with the header and footer rails excluded. The completion popup
+  does not cause recession: it is anchored to the caret, does not block the
+  panes, and opens too often to dim the workbench each time. ASCII mode never
+  recedes. The overlay arrival fade is cut (User Story 6).
 - **FR-008**: Replace the boot reveal tagline and update the spec 025 banner
   contract and banner tests in the same change.
 - **FR-009**: Amend `docs/design/icons-and-motion.md` to replace "exactly three
