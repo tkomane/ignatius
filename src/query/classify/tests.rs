@@ -154,3 +154,53 @@ fn every_impact_has_a_label_and_they_are_ordered_by_severity() {
     }
     assert!(!Impact::Read.needs_confirmation());
 }
+
+#[test]
+fn explain_analyze_is_judged_by_the_statement_it_executes() {
+    for (sql, expected) in [
+        ("EXPLAIN ANALYZE DELETE FROM orders", Impact::Destructive),
+        ("explain analyse update orders set total = 0", Impact::Write),
+        (
+            "EXPLAIN ANALYZE VERBOSE INSERT INTO orders VALUES (1)",
+            Impact::Write,
+        ),
+        (
+            "EXPLAIN (ANALYZE, BUFFERS) UPDATE orders SET total = 0",
+            Impact::Write,
+        ),
+        (
+            "EXPLAIN (FORMAT JSON, ANALYZE) INSERT INTO orders VALUES (1)",
+            Impact::Write,
+        ),
+        (
+            "EXPLAIN (ANALYZE true) DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        ("EXPLAIN(ANALYZE) DELETE FROM orders", Impact::Destructive),
+        (
+            "-- note\nEXPLAIN ANALYZE DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN ANALYZE WITH gone AS (DELETE FROM orders RETURNING *) SELECT * FROM gone",
+            Impact::Destructive,
+        ),
+        ("EXPLAIN ANALYZE EXECUTE refresh_totals", Impact::Write),
+        ("EXPLAIN ANALYZE SELECT 1", Impact::Read),
+    ] {
+        assert_eq!(impact(sql), expected, "{sql}");
+    }
+}
+
+#[test]
+fn explain_without_analyze_only_plans() {
+    for sql in [
+        "EXPLAIN DELETE FROM orders",
+        "EXPLAIN VERBOSE UPDATE orders SET total = 0",
+        "EXPLAIN (ANALYZE false) DELETE FROM orders",
+        "EXPLAIN (ANALYZE off, BUFFERS) DELETE FROM orders",
+        "EXPLAIN (COSTS, FORMAT JSON) INSERT INTO orders VALUES (1)",
+    ] {
+        assert_eq!(impact(sql), Impact::Read, "{sql}");
+    }
+}

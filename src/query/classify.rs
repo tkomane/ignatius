@@ -84,6 +84,19 @@ pub fn classify(statement: &Statement) -> Impact {
         return Impact::Read;
     }
 
+    // EXPLAIN only plans, unless ANALYZE makes it execute the statement it
+    // describes: `EXPLAIN ANALYZE DELETE ...` deletes. Then the statement's
+    // own impact applies, so the production confirmation cannot be stepped
+    // around by putting EXPLAIN ANALYZE in front of a write.
+    if first == "explain" {
+        return explain_analyzed_target(&statement.text).map_or(Impact::Read, |target| {
+            classify(&Statement {
+                text: target,
+                ..statement.clone()
+            })
+        });
+    }
+
     match first {
         "drop" | "truncate" => Impact::Destructive,
         "delete" => Impact::Destructive,
@@ -139,6 +152,47 @@ fn leading_words(text: &str) -> Vec<String> {
         }
     }
     words
+}
+
+/// The statement an `EXPLAIN` will execute, when its options include ANALYZE.
+///
+/// Both forms PostgreSQL accepts are read: the legacy words
+/// (`EXPLAIN ANALYZE VERBOSE ...`) and the parenthesised option list
+/// (`EXPLAIN (ANALYZE, BUFFERS) ...`), where `ANALYZE false`, `off` or `0`
+/// turns execution back off. Plain `EXPLAIN` returns `None`: it only plans.
+fn explain_analyzed_target(text: &str) -> Option<String> {
+    let cleaned = crate::query::statements::strip_comments(text);
+    let rest = cleaned.trim_start();
+    // The caller has already seen `explain` as the first word.
+    let rest = rest.get("explain".len()..)?.trim_start();
+
+    if let Some(options) = rest.strip_prefix('(') {
+        let close = options.find(')')?;
+        let (list, tail) = options.split_at(close);
+        let analyze = list.split(',').any(|option| {
+            let mut parts = option.split_whitespace();
+            let name = parts.next().unwrap_or_default().to_lowercase();
+            let value = parts.next().map(str::to_lowercase);
+            matches!(name.as_str(), "analyze" | "analyse")
+                && !matches!(value.as_deref(), Some("false" | "off" | "0"))
+        });
+        return analyze.then(|| tail[1..].trim_start().to_owned());
+    }
+
+    let mut analyze = false;
+    let mut remainder = rest;
+    loop {
+        let end = remainder
+            .find(char::is_whitespace)
+            .unwrap_or(remainder.len());
+        match remainder[..end].to_lowercase().as_str() {
+            "analyze" | "analyse" => analyze = true,
+            "verbose" => {}
+            _ => break,
+        }
+        remainder = remainder[end..].trim_start();
+    }
+    analyze.then(|| remainder.to_owned())
 }
 
 /// Whether a keyword appears as a whole word.
