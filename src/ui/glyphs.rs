@@ -279,6 +279,21 @@ impl Glyphs {
         }
     }
 
+    /// The prompt in front of a filter or search input.
+    ///
+    /// Like the chevron this is never empty, including in ASCII: an input
+    /// with nothing in front of it does not look like an input. The Nerd
+    /// glyph is the Codicon search mark carried by Nerd Font Mono builds; the
+    /// Unicode one is a plain single guillemet that every font draws.
+    #[must_use]
+    pub const fn search_prompt(&self) -> &'static str {
+        match self.tier {
+            GlyphTier::Ascii => ">",
+            GlyphTier::Unicode => "\u{203a}", // ›
+            GlyphTier::Nerd => "\u{ea6d}",    // cod-search
+        }
+    }
+
     /// The indent guide drawn to the left of nested rows.
     #[must_use]
     pub const fn indent_guide(&self) -> &'static str {

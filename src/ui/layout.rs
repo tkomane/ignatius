@@ -149,8 +149,64 @@ fn curtain_body(model: &Model, area: Rect) -> Rect {
 ///
 /// The runtime goes through [`render`]; this is the seam that keeps the
 /// pre-existing test helper able to pass a chosen presentation without the
-/// model having to carry it.
+/// model having to carry it. The theme curtain draws its outgoing frame
+/// through here too, so both presentations recede behind an overlay in
+/// exactly the same way.
 fn render_with(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_workbench(model, keymap, presentation, area, buf);
+    // ASCII mode is the plainest presentation, so like motion it shows the
+    // workbench exactly as it is, whatever the colour depth.
+    if workbench_recedes(model)
+        && layout_mode(area) != LayoutMode::TooSmall
+        && !presentation.glyphs.is_ascii()
+    {
+        recede_workbench(&presentation.theme, curtain_body(model, area), buf);
+    }
+    render_overlays(model, keymap, presentation, area, buf);
+}
+
+/// Whether a blocking overlay is open, so the workbench behind it recedes.
+///
+/// The completion popup does not count: it annotates the line being typed,
+/// and the editor it belongs to stays at full strength. Every other key
+/// closes the popup before it does anything else, so it is never open
+/// beneath another overlay in practice; if it were, the workbench would
+/// simply stay at full strength, which is the safe way to be wrong.
+pub(crate) fn workbench_recedes(model: &Model) -> bool {
+    crate::ui::widgets::overlay_blocks_panes(model) && model.completion.menu.is_none()
+}
+
+/// Recedes the pane bodies behind a blocking overlay. A still frame: nothing
+/// here moves, and it is present from the first frame the overlay is drawn in.
+///
+/// Only the rows between the header and footer rails are touched, so the
+/// `[PROD]`, `[READ ONLY]` and transaction badges never recede. It runs
+/// before any overlay draws, and every overlay clears its own box first, so
+/// the overlay itself is never touched either. Symbols are unchanged; at 16
+/// colours, without colour and in ASCII the frame is exactly what it was.
+fn recede_workbench(theme: &crate::ui::theme::Theme, body: Rect, buf: &mut Buffer) {
+    let Some(recession) = theme.recession() else {
+        return;
+    };
+    let body = body.intersection(buf.area);
+    for row in body.top()..body.bottom() {
+        for column in body.left()..body.right() {
+            if let Some(cell) = buf.cell_mut((column, row)) {
+                recession.apply(cell);
+            }
+        }
+    }
+}
+
+/// The frame, its rails and panes, and the completion popup that belongs to
+/// the editor: everything an overlay sits on top of.
+fn render_workbench(
     model: &Model,
     keymap: &Keymap,
     presentation: &Presentation,
@@ -176,11 +232,22 @@ fn render_with(
         LayoutMode::Full => render_full(model, keymap, presentation, area, buf),
     }
 
-    // Overlays are drawn in the order Esc peels them, so the topmost one is
-    // always the one a keypress will act on.
+    // Completion belongs to the editor it annotates, so it is drawn with the
+    // workbench and is the first layer Esc peels.
     if model.completion.menu.is_some() {
         render_completion(model, presentation, area, buf);
     }
+}
+
+/// Every overlay above the workbench. They are drawn in the order Esc peels
+/// them, so the topmost one is always the one a keypress will act on.
+fn render_overlays(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     if let Some(inspector) = &model.inspector {
         render_inspector(model, *inspector, presentation, area, buf);
     }

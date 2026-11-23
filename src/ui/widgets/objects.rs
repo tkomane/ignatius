@@ -101,13 +101,17 @@ pub(crate) fn render_objects(
     // The filter is shown as a line of its own so it is never mistaken for a row.
     let body = content_area(model, inner);
     if model.tree.filtering || !model.tree.filter.is_empty() {
+        // The search mark comes from the glyph tiers (U+2315 rendered blank
+        // in common Nerd Font Mono builds). ASCII keeps `/`, because the
+        // ASCII search mark `>` is also the closed-node chevron and the
+        // filter line must never look like a row.
+        let mark = if presentation.glyphs.is_ascii() {
+            "/".to_owned()
+        } else {
+            format!("{} ", presentation.glyphs.search_prompt())
+        };
         let prompt = format!(
-            " {}{}{}",
-            if presentation.glyphs.is_ascii() {
-                "/"
-            } else {
-                "\u{2315}"
-            },
+            " {mark}{}{}",
             model.tree.filter,
             if model.tree.filtering {
                 input_cursor(presentation)
