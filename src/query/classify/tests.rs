@@ -154,3 +154,109 @@ fn every_impact_has_a_label_and_they_are_ordered_by_severity() {
     }
     assert!(!Impact::Read.needs_confirmation());
 }
+
+#[test]
+fn explain_analyze_is_judged_by_the_statement_it_executes() {
+    for (sql, expected) in [
+        ("EXPLAIN ANALYZE DELETE FROM orders", Impact::Destructive),
+        ("explain analyse update orders set total = 0", Impact::Write),
+        (
+            "EXPLAIN ANALYZE VERBOSE INSERT INTO orders VALUES (1)",
+            Impact::Write,
+        ),
+        (
+            "EXPLAIN (ANALYZE, BUFFERS) UPDATE orders SET total = 0",
+            Impact::Write,
+        ),
+        (
+            "EXPLAIN (FORMAT JSON, ANALYZE) INSERT INTO orders VALUES (1)",
+            Impact::Write,
+        ),
+        (
+            "EXPLAIN (ANALYZE true) DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        ("EXPLAIN(ANALYZE) DELETE FROM orders", Impact::Destructive),
+        (
+            "-- note\nEXPLAIN ANALYZE DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN ANALYZE WITH gone AS (DELETE FROM orders RETURNING *) SELECT * FROM gone",
+            Impact::Destructive,
+        ),
+        ("EXPLAIN ANALYZE EXECUTE refresh_totals", Impact::Write),
+        ("EXPLAIN ANALYZE SELECT 1", Impact::Read),
+        ("EXPLAIN ANALYZE (SELECT 1)", Impact::Read),
+        // Comments are whitespace to the server, so they cannot hide ANALYZE.
+        (
+            "EXPLAIN ANALYZE--measure\nDELETE FROM orders",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN ANALYZE/* why */DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN (ANALYZE/**/true) DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        // A parenthesis or a glued value does not end the word early.
+        (
+            "EXPLAIN ANALYZE(WITH gone AS (DELETE FROM orders RETURNING *) SELECT * FROM gone)",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN (ANALYZE'on') DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN (ANALYZE+1) DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        // Quoted, unicode-escaped or unknown option names fail safe.
+        (
+            "EXPLAIN (\"analyze\") DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        (
+            "EXPLAIN (U&\"\\0061nalyze\") DELETE FROM orders",
+            Impact::Destructive,
+        ),
+        ("EXPLAIN (MYSTERY) DELETE FROM orders", Impact::Destructive),
+    ] {
+        assert_eq!(impact(sql), expected, "{sql}");
+    }
+}
+
+#[test]
+fn explain_without_analyze_only_plans() {
+    for sql in [
+        "EXPLAIN DELETE FROM orders",
+        "EXPLAIN VERBOSE UPDATE orders SET total = 0",
+        "EXPLAIN (ANALYZE false) DELETE FROM orders",
+        "EXPLAIN (ANALYZE off, BUFFERS) DELETE FROM orders",
+        "EXPLAIN (COSTS, FORMAT JSON) INSERT INTO orders VALUES (1)",
+        "EXPLAIN (ANALYZE 'off', BUFFERS) DELETE FROM orders",
+        "EXPLAIN (VERBOSE, ANALYZE no) DELETE FROM orders",
+        "EXPLAIN /* plan only */ DELETE FROM orders",
+    ] {
+        assert_eq!(impact(sql), Impact::Read, "{sql}");
+    }
+}
+
+#[test]
+fn unreadable_explain_syntax_is_treated_as_a_write() {
+    for sql in [
+        "EXPLAIN (ANALYZE DELETE FROM orders",
+        "EXPLAIN ANALYZE EXPLAIN ANALYZE DELETE FROM orders",
+    ] {
+        assert_eq!(impact(sql), Impact::Write, "{sql}");
+    }
+}
+
+#[test]
+fn deeply_nested_explain_is_classified_without_recursing() {
+    let sql = format!("{}SELECT 1", "EXPLAIN ANALYZE ".repeat(10_000));
+    assert_eq!(impact(&sql), Impact::Write);
+}

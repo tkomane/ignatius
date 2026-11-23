@@ -8,6 +8,14 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: `EXPLAIN ANALYZE` is judged by the statement it executes, so
+  `EXPLAIN ANALYZE DELETE ...` now needs the production confirmation and typed
+  database name in the client and `--allow-write` in `ignatius query`. Options
+  are read the way the server reads them (comments are whitespace, quoted or
+  unknown options fail safe), and plain `EXPLAIN` stays a read.
+- Security: In the benchmark overlay, `m` only switches rollback mode and never
+  runs anything by itself. With rollback off, a statement that is not a read is
+  refused on a production connection and in a read-only session.
 - New: Switching theme sweeps the new palette across the pane body from left
   to right in about a third of a second, behind a hard edge so every cell stays
   readable in one theme or the other. The header and footer change in the

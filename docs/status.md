@@ -43,13 +43,19 @@ reviewed per pull request, and merged on hosted green CI.
   rendered from real buffers at fixed motion times with reduced-motion posters,
   the banner SVGs carry "A quiet instrument for PostgreSQL." and a truthful
   posture line, and the README was rewritten around how the product feels.
-- **Open: PR #132, benchmark safety.** A design critique found that the
-  benchmark overlay's `m` key turns rollback off and immediately re-runs the
-  buffer with no production or write check. That bug is still on `main`. Three
-  review rounds of the fix found further concurrency defects (cancel aimed at
-  the wrong gated statement, retry after a failed cancel, A's failure masked by
-  B's report, Cancel routing in the plan-diff overlay); the remaining work is
-  listed in #132.
+- **Production safety fixes (24 November 2026).** A design critique found that
+  the benchmark overlay's `m` key turned rollback off and immediately re-ran the
+  buffer with no production or write check, and review found that the advisory
+  classifier called every `EXPLAIN` a read, so `EXPLAIN ANALYZE DELETE ...`
+  skipped the production confirmation in the editor and `--allow-write` in
+  `ignatius query`. Both are fixed: `EXPLAIN` options are read the way the
+  server reads them and fail closed, `m` only switches the mode, and
+  rollback-off writes are refused on production and read-only sessions.
+- **Open: PR #132 (draft), benchmark concurrency.** A and B still run as two
+  tasks on one connection, a benchmark does not check for an open user
+  transaction, and the cancel design needs delivery confirmation and a timeout.
+  Four review rounds found real defects each time; the remaining work and the
+  last review's findings are recorded on #132.
 - **Found and not fixed:** the built-in theme tests pin status inks (Focus,
   Success, Warning, Danger, Info, environment and transaction) at 3.0:1 for
   `dark`, `light`, `field-industrial` and `material`, while Principle XI says
