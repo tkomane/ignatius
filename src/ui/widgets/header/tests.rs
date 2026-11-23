@@ -601,8 +601,12 @@ fn crowded_model() -> Model {
 #[test]
 fn safety_markers_survive_every_header_width_before_any_decoration() {
     for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
-        for reduced_motion in [false, true] {
-            let mut p = presentation(tier, ColorDepth::TrueColor);
+        for (reduced_motion, density) in [
+            (false, crate::config::Density::Comfortable),
+            (true, crate::config::Density::Comfortable),
+            (false, crate::config::Density::Compact),
+        ] {
+            let mut p = presentation(tier, ColorDepth::TrueColor).with_density(density);
             p.reduced_motion = reduced_motion;
             for width in 40u16..=200 {
                 let text = header_text(&crowded_model(), &p, width);
@@ -633,16 +637,27 @@ fn safety_markers_survive_every_header_width_before_any_decoration() {
 
 #[test]
 fn the_compact_header_keeps_read_only_and_transaction_markers() {
-    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
-    for width in 40u16..=100 {
-        let area = Rect::new(0, 0, width, 1);
-        let mut buf = Buffer::empty(area);
-        render_compact_header(&crowded_model(), &p, area, &mut buf);
-        let text = buffer_to_string(&buf);
-        for marker in ["[PROD]", "[READ ONLY]", "[TX FAILED]"] {
-            assert!(text.contains(marker), "width {width}: {marker}: {text:?}");
+    for density in [
+        crate::config::Density::Comfortable,
+        crate::config::Density::Compact,
+    ] {
+        for tier in [GlyphTier::Ascii, GlyphTier::Unicode] {
+            let p = presentation(tier, ColorDepth::TrueColor).with_density(density);
+            for width in 40u16..=100 {
+                let area = Rect::new(0, 0, width, 1);
+                let mut buf = Buffer::empty(area);
+                render_compact_header(&crowded_model(), &p, area, &mut buf);
+                let text = buffer_to_string(&buf);
+                for marker in ["[PROD]", "[READ ONLY]", "[TX FAILED]"] {
+                    assert!(
+                        text.contains(marker),
+                        "{density:?} {tier:?} width {width}: {marker}: {text:?}"
+                    );
+                }
+            }
         }
     }
+    let p = presentation(GlyphTier::Unicode, ColorDepth::TrueColor);
     let mut open = crowded_model();
     open.transaction = crate::query::result::TransactionState::Open;
     let area = Rect::new(0, 0, 60, 1);

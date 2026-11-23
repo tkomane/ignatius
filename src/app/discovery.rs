@@ -368,7 +368,9 @@ pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>
         || model.query_bench.is_some()
         || model.schema_snapshot.is_some()
         || model.sql_runbook.is_some();
-    dashboard.then_some(close)
+    // Any other surface that hides the panes owns input too, so a new overlay
+    // gets at least its way out rather than workbench keys it would swallow.
+    (dashboard || crate::ui::widgets::overlay_blocks_panes(model)).then_some(close)
 }
 
 /// Returns the actions offered by the general command palette.

@@ -59,9 +59,11 @@ brackets:
   has failed and needs a rollback; an idle session is not badged.
 
 No safety capsule ever yields to a short row. When the header cannot fit
-everything, decoration goes first (the history or catalogue notice, `[MUTED]`,
-the provider badge, then the completed and live times), the target shortens
-with a visible ellipsis, and the product badge goes last; the environment,
+everything, decoration goes first (the history or catalogue notice and
+`[MUTED]`, then the completed time and the `\watch stop` hint, then the
+provider badge, then the live clock and the watch capsule, then a failed
+connection's stage), the target shortens with a visible ellipsis, and the
+product badge goes last; the environment,
 `[READ ONLY]` and transaction capsules stay in every width and in the compact
 header used below 80x24, where they lead the row.
 
@@ -195,7 +197,8 @@ word `Running` and the elapsed time say what is known.
   fading into the track colour behind it.
 - **256 colours**: the same head and tail shapes, with the tail in the track
   colour rather than a blend.
-- **16 colours and no colour**: a bold head alone on the track.
+- **16 colours**: a bold head alone on the track.
+- **No colour**: the heavy head alone on the light track, shape only.
 - **ASCII**: an `=` head on a `-` track.
 
 While `Cancellation requested` is shown the heartbeat keeps moving, because
