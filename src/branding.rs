@@ -17,6 +17,10 @@ pub const PRODUCT_NAME: &str = "Ignatius";
 /// One-sentence description shown on first run and in `--help`.
 pub const TAGLINE: &str = "A terminal-native PostgreSQL workbench";
 
+/// The identity line set under the wordmark in the boot reveal and the README
+/// banner. Plain ASCII, so the same words read in every glyph tier.
+pub const IDENTITY_LINE: &str = "a quiet instrument for PostgreSQL";
+
 /// Directory name used under the platform configuration and data roots.
 pub const CONFIG_DIR_NAME: &str = "ignatius";
 

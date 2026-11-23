@@ -34,9 +34,15 @@ pub const UNICODE_WORDMARK_LINES: [&str; 6] = [
 pub const UNICODE_WORDMARK_UNDERLINE: &str =
     "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔";
 
-/// Tagline row for the Unicode / Nerd-Font wordmark.
-pub const UNICODE_WORDMARK_TAGLINE: &str =
-    "       the PostgreSQL client you can point at production";
+/// Width of the Unicode / Nerd-Font wordmark art.
+pub const UNICODE_WORDMARK_WIDTH: usize = 59;
+
+/// Tagline row for the Unicode / Nerd-Font wordmark: the identity line from
+/// [`crate::branding`], centred under the art.
+#[must_use]
+pub fn unicode_wordmark_tagline() -> String {
+    centred_identity_line(UNICODE_WORDMARK_WIDTH)
+}
 
 /// Monogram art for Unicode / Nerd-Font tiers (< 64 columns, 6 lines).
 pub const UNICODE_MONOGRAM_LINES: [&str; 6] = [
@@ -59,8 +65,22 @@ pub const ASCII_WORDMARK_LINES: [&str; 4] = [
 /// Underline row for the ASCII wordmark.
 pub const ASCII_WORDMARK_UNDERLINE: &str = "------------------------------------------------";
 
-/// Tagline row for the ASCII wordmark.
-pub const ASCII_WORDMARK_TAGLINE: &str = "the PostgreSQL client you can point at production";
+/// Width of the ASCII wordmark art.
+pub const ASCII_WORDMARK_WIDTH: usize = 48;
+
+/// Tagline row for the ASCII wordmark: the identity line from
+/// [`crate::branding`], centred under the art.
+#[must_use]
+pub fn ascii_wordmark_tagline() -> String {
+    centred_identity_line(ASCII_WORDMARK_WIDTH)
+}
+
+/// The identity line, left-padded so it sits centred under art `width`
+/// columns wide. The line is ASCII, so its byte length is its width.
+fn centred_identity_line(width: usize) -> String {
+    let line = crate::branding::IDENTITY_LINE;
+    format!("{}{line}", " ".repeat(width.saturating_sub(line.len()) / 2))
+}
 
 /// Monogram fallback for the ASCII tier.
 pub const ASCII_MONOGRAM: &str = "ignatius";
@@ -226,7 +246,7 @@ pub fn render_banner_lines(
 }
 
 fn render_unicode_wordmark(state: BannerState, presentation: &Presentation) -> Vec<Line<'static>> {
-    const WIDTH: usize = 59;
+    const WIDTH: usize = UNICODE_WORDMARK_WIDTH;
     let theme = &presentation.theme;
     let ramp = theme.banner_ramp(WIDTH);
     let front = front_col(WIDTH, state);
@@ -272,20 +292,18 @@ fn render_unicode_wordmark(state: BannerState, presentation: &Presentation) -> V
     lines.push(Line::from(spans));
 
     // Tagline row (row 7)
+    let tagline = unicode_wordmark_tagline();
     if state.is_final() {
-        lines.push(Line::styled(
-            UNICODE_WORDMARK_TAGLINE,
-            theme.style(Token::Muted),
-        ));
+        lines.push(Line::styled(tagline, theme.style(Token::Muted)));
     } else {
-        lines.push(Line::raw(" ".repeat(UNICODE_WORDMARK_TAGLINE.len())));
+        lines.push(Line::raw(" ".repeat(tagline.len())));
     }
 
     lines
 }
 
 fn render_ascii_wordmark(state: BannerState, presentation: &Presentation) -> Vec<Line<'static>> {
-    const WIDTH: usize = 48;
+    const WIDTH: usize = ASCII_WORDMARK_WIDTH;
     let theme = &presentation.theme;
     let ramp = theme.banner_ramp(WIDTH);
     let front = front_col(WIDTH, state);
@@ -332,13 +350,11 @@ fn render_ascii_wordmark(state: BannerState, presentation: &Presentation) -> Vec
     lines.push(Line::from(spans));
 
     // Tagline row (row 5)
+    let tagline = ascii_wordmark_tagline();
     if state.is_final() {
-        lines.push(Line::styled(
-            ASCII_WORDMARK_TAGLINE,
-            theme.style(Token::Muted),
-        ));
+        lines.push(Line::styled(tagline, theme.style(Token::Muted)));
     } else {
-        lines.push(Line::raw(" ".repeat(ASCII_WORDMARK_TAGLINE.len())));
+        lines.push(Line::raw(" ".repeat(tagline.len())));
     }
 
     lines
