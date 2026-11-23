@@ -136,8 +136,9 @@ that cannot meet one of them does not move:
 7. **Safety surfaces never move or recede.** The header and footer rails that
    carry `[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]` and the TLS badges are
    never dimmed, faded or split between two themes. While a confirmation, a
-   review, a prompt or the connection trust surface is open, nothing moves, so
-   its paint-before-accept behaviour is unchanged.
+   review, a prompt or the connection trust surface is open, including a
+   confirmation armed inside a dashboard, nothing moves, so its
+   paint-before-accept behaviour is unchanged.
 
 Three moving things answer "is this still working":
 
@@ -202,5 +203,9 @@ Both tickers sleep entirely when nothing is happening: the 90 ms busy ticker
 while nothing runs or connects, and the motion ticker, at about thirty frames a
 second, while no transition is active. They are separate so that a transition
 never changes the spinner's speed, the boot reveal's timing or the double-click
-window. An idle client wakes nothing, which is the difference between a tool
-you leave open all day and one you close.
+window. At most one motion frame is ever waiting: while one is still being
+drawn the ticker sends nothing and keeps counting, so a slow terminal gets
+fewer frames that each carry all the time that passed. A key never waits
+behind a queue of frames, and a transition still ends on time. An idle client
+wakes nothing, which is the difference between a tool you leave open all day
+and one you close.

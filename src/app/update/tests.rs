@@ -12398,3 +12398,85 @@ fn motion_a_generated_cell_update_and_a_watch_loop_never_settle() {
     );
     assert!(!watching.is_in_motion());
 }
+
+#[test]
+fn motion_holds_still_while_a_dashboard_confirmation_is_armed() {
+    use crate::app::model::{
+        ImportWizardState, ImportWizardStep, MaintenanceOpsState, QueryPerformanceState,
+    };
+    let frame = || Message::MotionFrame {
+        elapsed: Duration::from_millis(33),
+    };
+
+    // The statistics reset hazard is reachable with the theme key, because
+    // query performance does not own the keyboard. The theme still switches;
+    // the curtain does not play over the armed hazard.
+    let mut model = moving();
+    model.query_performance = Some(QueryPerformanceState {
+        confirm_reset: true,
+        ..QueryPerformanceState::default()
+    });
+    let before = model.presentation.theme.clone();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert_ne!(model.presentation.theme, before, "the theme still switches");
+    assert!(
+        !model.is_in_motion(),
+        "nothing moves while the reset hazard is armed"
+    );
+
+    // An unarmed dashboard is an ordinary overlay and lets the curtain play.
+    model.query_performance = Some(QueryPerformanceState::default());
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert!(model.motion().theme_curtain().is_some());
+
+    // Maintenance acknowledged for production and the import review step own
+    // the keyboard, so they can only become armed under a running transition
+    // that started first; the next motion frame settles it.
+    type Arm = (&'static str, fn(&mut Model));
+    let armed: [Arm; 2] = [
+        ("maintenance for production", |model| {
+            model.maintenance_ops = Some(MaintenanceOpsState {
+                confirm_production: true,
+                ..MaintenanceOpsState::default()
+            });
+        }),
+        ("import review step", |model| {
+            let mut wizard = ImportWizardState::new("public".into(), "orders".into());
+            wizard.step = ImportWizardStep::Execute;
+            model.import_wizard = Some(wizard);
+        }),
+    ];
+    for (name, arm) in armed {
+        let mut model = moving();
+        update(&mut model, Message::Action(Action::SwitchTheme));
+        assert!(model.is_in_motion(), "{name}");
+        arm(&mut model);
+        assert!(model.holds_motion_still(), "{name}");
+        update(&mut model, frame());
+        assert!(!model.is_in_motion(), "{name}: settled by the next frame");
+    }
+
+    // The same surfaces disarmed do not hold anything still.
+    let mut model = moving();
+    model.maintenance_ops = Some(MaintenanceOpsState::default());
+    model.import_wizard = Some(ImportWizardState::new("public".into(), "orders".into()));
+    assert!(!model.holds_motion_still());
+}
+
+#[test]
+fn motion_an_ordinary_overlay_lets_the_curtain_finish() {
+    let mut model = moving();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    // A palette can arrive without a key, when a dependency lookup answers.
+    model.palette = Some(crate::app::palette::Palette::over_dependencies(Vec::new()));
+    update(
+        &mut model,
+        Message::MotionFrame {
+            elapsed: Duration::from_millis(33),
+        },
+    );
+    assert!(
+        model.motion().theme_curtain().is_some(),
+        "the palette is not a confirmation"
+    );
+}

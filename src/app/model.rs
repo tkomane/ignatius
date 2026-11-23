@@ -4128,9 +4128,12 @@ impl Model {
     /// Confirmations, reviews, prompts, the password prompt and the connection
     /// trust surface are where paint-before-accept matters, so while one of
     /// them is open every transition is settled and none starts. Each is named
-    /// here rather than inferred, so a new one is a deliberate addition.
+    /// here rather than inferred, so a new one is a deliberate addition. That
+    /// includes the confirmations armed inside a dashboard: the statistics
+    /// reset hazard, maintenance acknowledged for production, and the import
+    /// wizard's review step, where the next Enter writes rows.
     #[must_use]
-    pub const fn holds_motion_still(&self) -> bool {
+    pub fn holds_motion_still(&self) -> bool {
         self.password_prompt.is_some()
             || self.parameter_prompt.is_some()
             || self.name_prompt.is_some()
@@ -4140,6 +4143,18 @@ impl Model {
             || self.pending_copy.is_some()
             || self.update_prompt.is_some()
             || self.pending_update.is_some()
+            || self
+                .query_performance
+                .as_ref()
+                .is_some_and(|perf| perf.confirm_reset)
+            || self
+                .maintenance_ops
+                .as_ref()
+                .is_some_and(|ops| ops.confirm_production)
+            || self
+                .import_wizard
+                .as_ref()
+                .is_some_and(|wizard| wizard.step == ImportWizardStep::Execute)
     }
 
     /// Advances the pure monotonic mouse clock by `elapsed`.

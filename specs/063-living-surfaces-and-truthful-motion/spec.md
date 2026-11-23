@@ -64,8 +64,10 @@ cannot meet one of them does not animate.
    carry `[PROD]`, `[READ-ONLY]`, `[TX ACT]`, `[TX FAIL]` and TLS badges are
    never dimmed, scrimmed, faded or split between two themes; they change in a
    single frame. No overlay arrives with motion, and while a reviewed-write,
-   typed-confirmation, copy-review, prompt or connection trust surface is open
-   nothing moves at all, so their paint-before-accept behaviour is unchanged.
+   typed-confirmation, copy-review, prompt or connection trust surface is open,
+   or a confirmation armed inside a dashboard (the statistics reset hazard,
+   maintenance acknowledged for production, the import review step), nothing
+   moves at all, so their paint-before-accept behaviour is unchanged.
 
 ## User Scenarios & Testing
 
