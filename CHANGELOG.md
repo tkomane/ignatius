@@ -8,12 +8,13 @@ source can generate user-facing notes.
 
 ## Unreleased
 
-- Fixed: Benchmark Query A and Query B no longer run at the same time on one
-  session, where one run's `ROLLBACK` could end the other's `BEGIN` and let a
-  write commit; B now starts after A reports and is skipped if A fails. A
-  benchmark also refuses to start inside an open, failed or unknown
-  transaction (its rollback would end it), beside a running workbench
-  statement, or beside an earlier benchmark run still in flight.
+- Fixed: A benchmark no longer shares the session with other work. Query A
+  and Query B ran at the same time on one session, and workbench statements or
+  `\watch` could land between a benchmark's `BEGIN` and `ROLLBACK`, so a
+  "rolled back" write could commit and a user's transaction could be ended. A
+  benchmark now holds the session for each run, B starts after A reports and
+  is skipped if A fails, and the server is asked before the first `BEGIN`
+  whether the session is in a transaction, which refuses the run.
 - Security: `EXPLAIN ANALYZE` is judged by the statement it executes, so
   `EXPLAIN ANALYZE DELETE ...` now needs the production confirmation and typed
   database name in the client and `--allow-write` in `ignatius query`. Options

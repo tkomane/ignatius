@@ -12569,29 +12569,30 @@ fn explain_analyze_of_a_write_needs_the_production_confirmation() {
     assert!(pending.impact.needs_typed_confirmation());
 }
 
-/// Reports every run the open benchmark dispatched, so it is no longer loading.
+/// Reports the open benchmark's Query A as failed, which ends the run (B is
+/// never started after A fails), and checks that the reducer stops loading.
 fn finish_bench_runs(model: &mut Model) {
     let request = model.query_bench_request;
-    for target in [
-        crate::app::message::BenchTarget::Baseline,
-        crate::app::message::BenchTarget::Candidate,
-    ] {
-        update(
-            model,
-            Message::QueryBenchLoaded {
-                request,
-                target,
-                result: Box::new(Err(Diagnostic::new(
-                    DiagnosticKind::Query,
-                    "fixture run",
-                    "benchmark",
-                ))),
-            },
-        );
-    }
-    if let Some(bench) = &mut model.query_bench {
-        bench.loading = false;
-    }
+    let next = update(
+        model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                "fixture run",
+                "benchmark",
+            ))),
+        },
+    );
+    assert!(next.is_empty(), "nothing follows a failed Query A");
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|bench| !bench.loading),
+        "the reducer ends the run itself"
+    );
 }
 
 #[test]
@@ -12647,8 +12648,7 @@ fn benchmarks_refuse_to_share_the_session_with_other_work() {
 
     for (state, words) in [
         (TransactionState::Open, "A transaction is open"),
-        (TransactionState::Failed, "A transaction is open"),
-        (TransactionState::Unknown, "transaction state is unknown"),
+        (TransactionState::Failed, "has failed. Roll it back"),
     ] {
         let mut model = connected();
         model.editor.set_text("SELECT 1;");
@@ -12662,6 +12662,29 @@ fn benchmarks_refuse_to_share_the_session_with_other_work() {
         assert!(status.contains(words), "{state:?}: {status}");
         assert!(status.contains("Nothing was sent."), "{state:?}: {status}");
     }
+
+    // An unknown state is left to the session, which asks the server under
+    // its SQL gate before the first BEGIN.
+    let mut unknown = connected();
+    unknown.editor.set_text("SELECT 1;");
+    unknown.transaction = TransactionState::Unknown;
+    assert_eq!(
+        update(&mut unknown, Message::Action(Action::QueryBench)).len(),
+        1
+    );
+
+    // Beside a running workbench statement it would interleave.
+    let mut busy = connected();
+    busy.editor.set_text("SELECT pg_sleep(5);");
+    assert!(!update(&mut busy, Message::Action(Action::RunBuffer)).is_empty());
+    assert!(busy.phase.is_busy());
+    assert!(update(&mut busy, Message::Action(Action::QueryBench)).is_empty());
+    assert!(
+        busy.query_bench
+            .as_ref()
+            .and_then(|bench| bench.status_message.as_deref())
+            .is_some_and(|status| status.contains("A statement is running in the workbench"))
+    );
 
     // A second run while the first is still in flight would interleave.
     let mut model = connected();
@@ -12678,4 +12701,128 @@ fn benchmarks_refuse_to_share_the_session_with_other_work() {
             .and_then(|bench| bench.status_message.as_deref())
             .is_some_and(|status| status.contains("still running"))
     );
+}
+
+#[test]
+fn a_reopened_benchmark_never_shows_an_earlier_overlays_report() {
+    use crate::query::result::TransactionState;
+
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    let first = model.query_bench_request;
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.query_bench.is_none());
+
+    // Reopened inside a transaction, the new run is refused...
+    model.transaction = TransactionState::Open;
+    assert!(update(&mut model, Message::Action(Action::QueryBench)).is_empty());
+    // ...and the first overlay's late report is not shown as this one's.
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: first,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(crate::bench::compute_bench_stats(
+                "Baseline (A)",
+                "SELECT 1",
+                &crate::bench::BenchConfig::default(),
+                &[crate::bench::BenchSample {
+                    iteration: 1,
+                    duration_ms: 1.0,
+                    rows_returned: 1,
+                }],
+            ))),
+        },
+    );
+    let bench = model.query_bench.as_ref().expect("reopened overlay");
+    assert!(
+        bench.baseline.is_none(),
+        "an earlier overlay's report is ignored"
+    );
+    assert!(
+        bench
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("Nothing was sent."))
+    );
+}
+
+#[test]
+fn query_b_is_not_run_when_the_connection_went_away() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1; SELECT 2;");
+    assert_eq!(
+        update(&mut model, Message::Action(Action::QueryBench)).len(),
+        1
+    );
+    let request = model.query_bench_request;
+    update(&mut model, Message::ConnectionLost);
+    let after_a = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(crate::bench::compute_bench_stats(
+                "Baseline (A)",
+                "SELECT 1",
+                &crate::bench::BenchConfig::default(),
+                &[crate::bench::BenchSample {
+                    iteration: 1,
+                    duration_ms: 1.0,
+                    rows_returned: 1,
+                }],
+            ))),
+        },
+    );
+    assert!(
+        after_a.is_empty(),
+        "B is never sent without a ready connection"
+    );
+    if let Some(bench) = model.query_bench.as_ref() {
+        assert!(!bench.loading);
+        assert!(
+            bench
+                .status_message
+                .as_deref()
+                .is_some_and(|status| status.contains("Query B was not run"))
+        );
+    }
+}
+
+#[test]
+fn a_new_benchmark_run_clears_the_last_runs_numbers() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    let request = model.query_bench_request;
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(crate::bench::compute_bench_stats(
+                "Baseline (A)",
+                "SELECT 1",
+                &crate::bench::BenchConfig::default(),
+                &[crate::bench::BenchSample {
+                    iteration: 1,
+                    duration_ms: 1.0,
+                    rows_returned: 1,
+                }],
+            ))),
+        },
+    );
+    assert!(
+        model
+            .query_bench
+            .as_ref()
+            .is_some_and(|b| b.baseline.is_some())
+    );
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Insert('r'))).len(),
+        1
+    );
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(bench.baseline.is_none() && bench.candidate.is_none() && bench.report.is_none());
 }

@@ -385,12 +385,35 @@ impl Session {
     }
 
     /// Executes warmup and measured iterations of one SQL statement and returns benchmark statistics.
+    ///
+    /// The run holds the session's SQL gate from start to finish, so no
+    /// workbench statement, `\watch` iteration or other benchmark can land
+    /// between its `BEGIN` and `ROLLBACK` (or start a transaction its
+    /// `ROLLBACK` would end); they wait for it, and it waits for them. Under
+    /// the gate the server is asked whether the session is inside a
+    /// transaction block, and the benchmark refuses to start unless it is not.
     pub async fn run_benchmark(
         &self,
         sql: &str,
         config: &crate::bench::BenchConfig,
         label: &str,
     ) -> Result<crate::bench::BenchStats, Diagnostic> {
+        let _gate = self.user_sql_gate.lock().await;
+        let state = self.transaction_state().await;
+        if state != crate::query::result::TransactionState::Autocommit {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                "the benchmark did not start, because the session is not outside a transaction",
+                "starting a query benchmark",
+            )
+            .likely_cause(format!(
+                "the server reports the session's transaction state as: {}",
+                state.label()
+            ))
+            .next_action(
+                "end the transaction in the workbench, then run the benchmark again; no benchmark statement was sent",
+            ));
+        }
         crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await
     }
 

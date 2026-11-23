@@ -1298,8 +1298,13 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                                 bench.status_message =
                                     Some("Captured Baseline (A) benchmark".to_owned());
                                 // A has finished with the session, so B may
-                                // start now.
-                                if let Some(config) = queued {
+                                // start now, if the session is still there.
+                                if queued.is_some() && !model.connection.is_ready() {
+                                    bench.status_message = Some(
+                                        "Captured Baseline (A). Query B was not run: the connection is not ready."
+                                            .to_owned(),
+                                    );
+                                } else if let Some(config) = queued {
                                     bench.loading = true;
                                     bench.status_message = Some(
                                         "Captured Baseline (A); running Candidate (B)..."
@@ -4438,6 +4443,9 @@ fn query_bench_open(model: &mut Model) -> Vec<Effect> {
         .map(|s| buffer_sql[s.start..s.end].to_owned())
         .unwrap_or_default();
 
+    // A new overlay gets a new request identity, so a report from a run
+    // started by an earlier overlay can never be shown as this overlay's.
+    model.query_bench_request = model.query_bench_request.wrapping_add(1);
     model.query_bench = Some(crate::app::model::QueryBenchState {
         baseline_sql,
         candidate_sql,
@@ -4469,6 +4477,10 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
     let Some(bench) = &mut model.query_bench else {
         return Vec::new();
     };
+    // A new run never shows the last run's numbers beside it.
+    bench.baseline = None;
+    bench.candidate = None;
+    bench.report = None;
     bench.loading = true;
     bench.status_message = Some(format!(
         "Running benchmark ({} warmup, {} measured, rollback={})...",
@@ -4515,6 +4527,9 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
 fn bench_session_refusal(model: &Model) -> Option<String> {
     use crate::query::result::TransactionState;
 
+    if !model.connection.is_ready() {
+        return Some("Not connected, so the benchmark cannot run. Nothing was sent.".to_owned());
+    }
     if model
         .query_bench
         .as_ref()
@@ -4531,14 +4546,17 @@ fn bench_session_refusal(model: &Model) -> Option<String> {
                 .to_owned(),
         );
     }
+    // An unknown state is not refused here: the session asks the server
+    // under its SQL gate before the first BEGIN, and that answer is the
+    // authority.
     match model.transaction {
-        TransactionState::Autocommit => None,
-        TransactionState::Open | TransactionState::Failed => Some(
+        TransactionState::Autocommit | TransactionState::Unknown => None,
+        TransactionState::Open => Some(
             "A transaction is open in this session, and a benchmark's rollback would end it. Commit or roll back first. Nothing was sent."
                 .to_owned(),
         ),
-        TransactionState::Unknown => Some(
-            "This session's transaction state is unknown, so a benchmark's rollback could end a transaction. Run any statement to refresh it, then try again. Nothing was sent."
+        TransactionState::Failed => Some(
+            "The transaction in this session has failed. Roll it back before running a benchmark. Nothing was sent."
                 .to_owned(),
         ),
     }
