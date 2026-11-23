@@ -20,7 +20,7 @@
 
 - [x] T008 Cut on 2026-11-23: no focus sweep (spec User Story 3). No work remains.
 - [x] T009 Result settle: fade the Results title status word foreground from `Success` to `Muted` for a complete, successful result, reading `model.motion().result_settle()`.
-- [ ] T010 Heartbeat comet meter at `TrueColor` with lower-depth and reduced-motion fallbacks.
+- [x] T010 Heartbeat comet meter at `TrueColor` with lower-depth and reduced-motion fallbacks.
 - [ ] T011 Replace the boot reveal identity line and update the spec 025 banner contract and tests.
 - [ ] T012 Static workbench recession behind blocking overlays, with no motion and with header and footer rails excluded. The arrival fade is cut (spec User Story 6).
 

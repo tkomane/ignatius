@@ -143,7 +143,7 @@ that cannot meet one of them does not move:
 Three moving things answer "is this still working":
 
 - A braille spinner beside the word `Running` or `Cancellation requested`.
-- A meter that sweeps while a statement runs.
+- A heartbeat that travels back and forth while a statement runs.
 - The bounded US10 boot reveal wordmark on connecting frames.
 
 Two transitions decorate a change that has already happened:
@@ -169,9 +169,24 @@ Focus changes and overlays do not move. Focus already has its heavier border,
 its colour and the `[focused]` word in the same frame, and the palette and
 completion open too often for a fade to be anything but a delay.
 
-**The meter shows time passing, not progress.** PostgreSQL reports no progress
-for a running statement, so nothing in the interface may imply a percentage. It
-is a heartbeat, and it is drawn as one.
+**The heartbeat shows time passing, not progress.** PostgreSQL reports no
+progress for a running statement, so nothing in the interface may imply a
+percentage, and a bar that fills from left to right and starts again reads as
+one. The heartbeat is a comet instead: a heavy head on a 24-cell hairline
+track, moving one cell per busy tick (90 ms) at a constant pace and turning at
+each end, so it never fills, never arrives and never completes. Beside it the
+word `Running` and the elapsed time say what is known.
+
+- **Truecolour**: the head in the information colour with a three-cell tail
+  fading into the track colour behind it.
+- **256 colours**: the same head and tail shapes, with the tail in the track
+  colour rather than a blend.
+- **16 colours and no colour**: a bold head alone on the track.
+- **ASCII**: an `=` head on a `-` track.
+
+While `Cancellation requested` is shown the heartbeat keeps moving, because
+the statement may still be running, and takes the warning colour. Under reduced
+motion there is no heartbeat at all; the word and the elapsed time remain.
 
 **The boot reveal wordmark** provides immediate feedback while a connection is
 being established. It operates under strict bounds: a `1.4 s` cap (twelve ticks

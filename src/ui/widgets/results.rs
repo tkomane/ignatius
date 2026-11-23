@@ -934,6 +934,7 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
     } else {
         format!("{} ", presentation.glyphs.spinner(model.frame))
     };
+    let cancelling = matches!(model.phase, QueryPhase::CancellationRequested { .. });
     let word = match model.phase {
         QueryPhase::CancellationRequested { .. } => "Cancellation requested",
         _ if model.running_refresh => "Refreshing retained result",
@@ -950,14 +951,7 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
     ])];
 
     if !presentation.reduced_motion {
-        // A meter that shows time passing, not progress. The server reports no
-        // progress, so nothing here may imply a percentage.
-        let width = 24usize;
-        let filled = usize::try_from(model.frame % (width as u64 + 1)).unwrap_or(0);
-        lines.push(Line::from(Span::styled(
-            presentation.glyphs.meter(filled, width),
-            theme.style(Token::Border),
-        )));
+        lines.push(heartbeat_line(model.frame, cancelling, presentation));
     }
 
     let cancellation = match model.phase {
@@ -975,6 +969,100 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
     )));
 
     lines
+}
+
+/// Cells on the heartbeat track.
+pub(crate) const HEARTBEAT_TRACK: usize = 24;
+
+/// Cells of fading tail behind the heartbeat head, where colour can fade.
+pub(crate) const HEARTBEAT_TAIL: usize = 3;
+
+/// Where the heartbeat head is on busy frame `frame`, and whether it is moving
+/// to the right.
+///
+/// One cell per tick, at a constant pace, back and forth across the track.
+/// PostgreSQL reports no progress for a running statement, so the head never
+/// arrives anywhere: it shows that time is passing and nothing more.
+#[must_use]
+pub(crate) const fn heartbeat_head(frame: u64, width: usize) -> (usize, bool) {
+    if width <= 1 {
+        return (0, true);
+    }
+    let last = width as u64 - 1;
+    let phase = frame % (2 * last);
+    if phase < last {
+        (phase as usize, true)
+    } else {
+        ((2 * last - phase) as usize, false)
+    }
+}
+
+/// The heartbeat: a comet travelling back and forth along a quiet track.
+///
+/// At truecolour the head is drawn in the information ink with a short tail
+/// fading into the track. At 256 colours the tail keeps its heavy weight in
+/// the track ink, with no blended colour. At 16 colours and without colour
+/// the head alone moves, bold, and ASCII draws an `=` head on a `-` track.
+/// While a cancellation is pending the comet keeps moving, because the
+/// statement may still be running, and takes the warning ink.
+fn heartbeat_line(frame: u64, cancelling: bool, presentation: &Presentation) -> Line<'static> {
+    use crate::ui::theme::ColorDepth;
+    let theme = &presentation.theme;
+    let ascii = presentation.glyphs.is_ascii();
+    let (track, head) = if ascii {
+        ("-", "=")
+    } else {
+        ("\u{2500}", "\u{2501}")
+    };
+    let ink = if cancelling {
+        Token::Warning
+    } else {
+        Token::Info
+    };
+    let depth = if theme.color {
+        theme.depth
+    } else {
+        ColorDepth::None
+    };
+    let tail = if ascii || !depth.paints_surfaces() {
+        0
+    } else {
+        HEARTBEAT_TAIL
+    };
+    let head_style = if depth.paints_surfaces() {
+        theme.style(ink)
+    } else {
+        theme.style(ink).add_modifier(Modifier::BOLD)
+    };
+    let (position, rightward) = heartbeat_head(frame, HEARTBEAT_TRACK);
+    let spans = (0..HEARTBEAT_TRACK)
+        .map(|cell| {
+            if cell == position {
+                return Span::styled(head, head_style);
+            }
+            let behind = if rightward {
+                position.checked_sub(cell)
+            } else {
+                cell.checked_sub(position)
+            };
+            match behind.filter(|distance| (1..=tail).contains(distance)) {
+                Some(distance) => {
+                    let style = if depth == ColorDepth::TrueColor {
+                        let amount = distance as f32 / (HEARTBEAT_TAIL + 1) as f32;
+                        theme.mix(ink, Token::Border, amount).map_or_else(
+                            || theme.style(Token::Border),
+                            |fg| Style::default().fg(fg),
+                        )
+                    } else {
+                        theme.style(Token::Border)
+                    };
+                    Span::styled(head, style)
+                }
+                None => Span::styled(track, theme.style(Token::Border)),
+            }
+        })
+        .collect::<Vec<_>>();
+    Line::from(spans)
 }
 
 /// Draws the result grid: row numbers, headers, striped rows, and a scroll bar.

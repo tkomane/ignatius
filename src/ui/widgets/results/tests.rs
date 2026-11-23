@@ -1508,3 +1508,197 @@ fn every_settle_ink_keeps_text_contrast_on_the_pane_in_every_built_in_theme() {
         }
     }
 }
+
+// ---------------------------------------------------- heartbeat comet (063)
+
+fn running(frame: u64, cancelling: bool) -> Model {
+    let mut model = Model::new(100);
+    model.sidebar_visible = false;
+    model.focus = Focus::Results;
+    model.phase = if cancelling {
+        crate::app::model::QueryPhase::CancellationRequested { job: JobId(1) }
+    } else {
+        crate::app::model::QueryPhase::Running {
+            job: JobId(1),
+            statements: 1,
+        }
+    };
+    model.running_for = Some(Duration::from_millis(1500));
+    model.frame = frame;
+    model
+}
+
+/// The heartbeat row's cells, found by its track glyph.
+fn heartbeat_cells(buf: &Buffer) -> Vec<ratatui::buffer::Cell> {
+    let area = buf.area;
+    let y = (1..area.height)
+        .find(|&y| {
+            (1..=super::HEARTBEAT_TRACK as u16)
+                .all(|x| ["\u{2500}", "\u{2501}", "-", "="].contains(&buf[(x, y)].symbol()))
+        })
+        .expect("a heartbeat row");
+    (1..=super::HEARTBEAT_TRACK as u16)
+        .map(|x| buf[(x, y)].clone())
+        .collect()
+}
+
+#[test]
+fn the_heartbeat_moves_one_cell_a_tick_back_and_forth_and_never_arrives() {
+    let width = super::HEARTBEAT_TRACK;
+    let mut previous = super::heartbeat_head(0, width).0;
+    let mut seen = std::collections::BTreeSet::new();
+    for frame in 1..=200u64 {
+        let (head, _) = super::heartbeat_head(frame, width);
+        assert!(head < width, "frame {frame}");
+        assert_eq!(
+            head.abs_diff(previous),
+            1,
+            "frame {frame}: linear, one cell a tick"
+        );
+        seen.insert(head);
+        previous = head;
+    }
+    assert_eq!(seen.len(), width, "the head sweeps the whole track");
+    // It is periodic, so nothing about it can read as a count or an outcome.
+    let period = 2 * (width as u64 - 1);
+    for frame in 0..period {
+        assert_eq!(
+            super::heartbeat_head(frame, width),
+            super::heartbeat_head(frame + period, width)
+        );
+    }
+}
+
+#[test]
+fn the_heartbeat_is_a_comet_with_a_fading_tail_at_truecolour() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let theme = &presentation.theme;
+    let area = Rect::new(0, 0, 60, 12);
+    let text = buffer_to_string(&render(&running(10, false), &presentation, area));
+    assert!(text.contains("Running"), "{text}");
+    assert!(text.contains("1.5s"), "{text}");
+
+    let cells = heartbeat_cells(&render(&running(10, false), &presentation, area));
+    let heads: Vec<usize> = (0..cells.len())
+        .filter(|&i| cells[i].symbol() == "\u{2501}")
+        .collect();
+    assert_eq!(
+        heads,
+        vec![7, 8, 9, 10],
+        "a head and a three-cell tail behind it"
+    );
+    assert_eq!(Some(cells[10].fg), theme.color(Token::Info));
+    let tail: Vec<_> = [9, 8, 7].iter().map(|&i| cells[i].fg).collect();
+    assert_eq!(
+        tail,
+        [0.25, 0.5, 0.75]
+            .iter()
+            .map(|amount| theme.mix(Token::Info, Token::Border, *amount).expect("ink"))
+            .collect::<Vec<_>>(),
+        "the tail fades from the head into the track"
+    );
+    for cell in cells.iter().skip(11) {
+        assert_eq!(cell.symbol(), "\u{2500}");
+        assert_eq!(Some(cell.fg), theme.color(Token::Border));
+    }
+
+    // Moving left, the tail trails to the right of the head.
+    let frame = super::HEARTBEAT_TRACK as u64 + 3;
+    let (head, rightward) = super::heartbeat_head(frame, super::HEARTBEAT_TRACK);
+    assert!(!rightward);
+    let cells = heartbeat_cells(&render(&running(frame, false), &presentation, area));
+    for distance in 1..=3 {
+        assert_eq!(cells[head + distance].symbol(), "\u{2501}");
+    }
+    assert_eq!(cells[head - 1].symbol(), "\u{2500}");
+}
+
+#[test]
+fn the_heartbeat_keeps_its_shape_and_drops_colour_honestly_at_lower_depths() {
+    let area = Rect::new(0, 0, 60, 12);
+
+    let indexed = presentation_at(ColorDepth::Indexed256);
+    let cells = heartbeat_cells(&render(&running(10, false), &indexed, area));
+    assert_eq!(Some(cells[10].fg), indexed.theme.color(Token::Info));
+    for i in [7, 8, 9] {
+        assert_eq!(cells[i].symbol(), "\u{2501}", "the same layout");
+        assert_eq!(
+            Some(cells[i].fg),
+            indexed.theme.color(Token::Border),
+            "no mix"
+        );
+    }
+
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = presentation_at(depth);
+        let cells = heartbeat_cells(&render(&running(10, false), &low, area));
+        let heads: Vec<usize> = (0..cells.len())
+            .filter(|&i| cells[i].symbol() == "\u{2501}")
+            .collect();
+        assert_eq!(heads, vec![10], "{depth:?}: the head alone, no tail");
+        assert!(cells[10].modifier.contains(Modifier::BOLD), "{depth:?}");
+        if depth == ColorDepth::None {
+            assert!(
+                cells.iter().all(|cell| cell.fg == Color::Reset),
+                "shape only"
+            );
+        }
+    }
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    for frame in 0..60 {
+        let cells = heartbeat_cells(&render(&running(frame, false), &ascii, area));
+        let row: String = cells.iter().map(|cell| cell.symbol()).collect();
+        assert_eq!(row.matches('=').count(), 1, "{row}");
+        assert_eq!(
+            row.matches('-').count(),
+            super::HEARTBEAT_TRACK - 1,
+            "{row}"
+        );
+    }
+}
+
+#[test]
+fn a_pending_cancellation_keeps_the_heartbeat_moving_in_the_warning_ink() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 60, 12);
+    let first = render(&running(4, true), &presentation, area);
+    let next = render(&running(5, true), &presentation, area);
+    assert_ne!(
+        heartbeat_cells(&first),
+        heartbeat_cells(&next),
+        "it keeps moving"
+    );
+    let cells = heartbeat_cells(&first);
+    assert_eq!(Some(cells[4].fg), presentation.theme.color(Token::Warning));
+    assert!(buffer_to_string(&first).contains("Cancellation requested"));
+}
+
+#[test]
+fn reduced_motion_keeps_the_words_and_draws_no_heartbeat() {
+    let still = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let area = Rect::new(0, 0, 60, 12);
+    let first = render(&running(3, false), &still, area);
+    let later = render(&running(40, false), &still, area);
+    assert_eq!(
+        buffer_to_string(&first),
+        buffer_to_string(&later),
+        "the same words in every frame"
+    );
+    assert_eq!(first, later, "byte-identical across frames");
+    let text = buffer_to_string(&first);
+    assert!(text.contains("Running") && text.contains("1.5s"), "{text}");
+    let rows: Vec<&str> = text.lines().collect();
+    assert!(
+        rows[2].contains("asks the server to cancel"),
+        "the words follow directly, with no heartbeat row: {text}"
+    );
+}
