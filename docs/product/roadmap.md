@@ -249,8 +249,9 @@ M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
   width, and deterministic animated captures rendered from real widget buffers.
   The focus sweep and overlay arrival fade were specified and then cut after
   design review, because they fired too often to earn their motion.
-  The benchmark overlay's unguarded `m` re-run, found during review, is still
-  on `main` and continues in #132.
+  The benchmark overlay's unguarded `m` re-run and the `EXPLAIN ANALYZE`
+  classification gap, both found during review, were fixed on 2026-11-24;
+  deeper benchmark concurrency work continues in draft #132.
 
 ```mermaid
 flowchart LR

@@ -83,7 +83,7 @@ Press `Ctrl+C` and the status reads `Cancellation requested` until the server co
   </tr>
 </table>
 
-When the server's error position maps to the statement you sent, Ignatius marks the token, names a likely cause and a next step, and keeps the technical fields one key away. Editing a cell produces the exact `UPDATE` for you to read before anything leaves the client, and it is refused on production and read-only sessions. On a production connection, statements you run from the editor that write wait for confirmation, and destructive ones ask you to type the database name. These checks read SQL keywords and are advisory; `--read-only`, which PostgreSQL itself enforces, is the real control.
+When the server's error position maps to the statement you sent, Ignatius marks the token, names a likely cause and a next step, and keeps the technical fields one key away. Editing a cell produces the exact `UPDATE` for you to read before anything leaves the client, and it is refused on production and read-only sessions. On a production connection, statements you run from the editor that write wait for confirmation, and destructive ones ask you to type the database name. Benchmarks wrap each run in a rollback by default, and with rollback off they refuse to commit writes to production. These checks read SQL keywords and are advisory; `--read-only`, which PostgreSQL itself enforces, is the real control.
 
 ### Everything is a few keys away
 
