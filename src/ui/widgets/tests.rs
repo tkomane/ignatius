@@ -82,6 +82,48 @@ fn colour_off_presentation() -> Presentation {
     )
 }
 
+fn title_row(block: ratatui::widgets::Block<'static>) -> String {
+    use ratatui::widgets::Widget;
+    let area = Rect::new(0, 0, 30, 3);
+    let mut buf = Buffer::empty(area);
+    block.render(area, &mut buf);
+    crate::ui::layout::buffer_to_string(&buf)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[test]
+fn a_focused_pane_title_continues_the_rule_up_to_its_marker() {
+    use ratatui::text::{Line, Span};
+    let title = || Line::from(Span::raw("Editor"));
+    let unicode = colour_off_presentation();
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let compact = colour_off_presentation().with_density(crate::config::Density::Compact);
+
+    let focused = title_row(super::pane_block_line(title(), true, &unicode));
+    assert!(
+        focused.starts_with("\u{250f}\u{2501}\u{258d} Editor"),
+        "{focused}"
+    );
+    let focused = title_row(super::pane_block_line(title(), true, &ascii));
+    assert!(focused.starts_with("+=> Editor"), "{focused}");
+    // Compact density has no padding cell to turn into rule.
+    let focused = title_row(super::pane_block_line(title(), true, &compact));
+    assert!(focused.starts_with("\u{250f}\u{258d} Editor"), "{focused}");
+
+    // Unfocused panes and overlays keep their plain padding.
+    let unfocused = title_row(super::pane_block_line(title(), false, &unicode));
+    assert!(unfocused.starts_with("\u{256d} Editor"), "{unfocused}");
+    let overlay = title_row(super::overlay_block_line(title(), &unicode));
+    assert!(overlay.starts_with("\u{250f} Editor"), "{overlay}");
+}
+
 /// A whole frame's worth of state: a loaded tree, multi-line SQL and a grid.
 fn full_model() -> Model {
     let mut model = grid_model(2, 4);

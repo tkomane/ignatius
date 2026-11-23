@@ -183,7 +183,10 @@ pub(crate) fn pane_block_line(
         ));
     }
     spans.extend(title.spans);
-    bordered_line_block(Line::from(spans), focused, presentation)
+    // A focused title leads with its marker. The cell between the corner and
+    // the marker carries on the heavy rule, so the corner does not hang alone
+    // in front of a gap.
+    bordered_line_block(Line::from(spans), focused, focused, presentation)
         .style(presentation.theme.surface(Token::SurfacePane))
 }
 
@@ -202,19 +205,29 @@ pub(crate) fn overlay_block_line(
     title: Line<'static>,
     presentation: &Presentation,
 ) -> Block<'static> {
-    bordered_line_block(title, true, presentation)
+    bordered_line_block(title, true, false, presentation)
         .style(presentation.theme.surface(Token::SurfaceOverlay))
 }
 
 fn bordered_line_block(
     title: Line<'static>,
     focused: bool,
+    lead_rule: bool,
     presentation: &Presentation,
 ) -> Block<'static> {
     let theme = &presentation.theme;
+    let border_style = theme.style(if focused { Token::Focus } else { Token::Border });
     let padding = " ".repeat(usize::from(presentation.spacing().title_padding));
     let mut spans = Vec::with_capacity(title.spans.len() + 2);
-    if !padding.is_empty() {
+    if lead_rule && !padding.is_empty() {
+        // The first padding cell becomes rule, the rest stays space, so the
+        // title keeps its width and position.
+        let rule = presentation.glyphs.borders(focused).horizontal_top;
+        spans.push(Span::styled(rule, border_style));
+        if padding.len() > 1 {
+            spans.push(Span::raw(padding[1..].to_owned()));
+        }
+    } else if !padding.is_empty() {
         spans.push(Span::raw(padding.clone()));
     }
     spans.extend(title.spans);
@@ -223,7 +236,7 @@ fn bordered_line_block(
     }
     Block::bordered()
         .border_set(presentation.glyphs.borders(focused))
-        .border_style(theme.style(if focused { Token::Focus } else { Token::Border }))
+        .border_style(border_style)
         .title(Line::from(spans))
 }
 
