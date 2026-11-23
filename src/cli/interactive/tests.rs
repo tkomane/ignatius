@@ -2047,46 +2047,127 @@ fn a_transition_drives_the_motion_ticker_and_never_the_busy_one() {
     );
 }
 
-#[tokio::test]
-async fn the_motion_ticker_sends_frames_only_while_something_moves() {
-    use std::time::Duration;
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let (activity, observed) = tokio::sync::watch::channel(None);
-    spawn_motion_ticker(tx, observed);
+/// A running motion ticker and the two ends the event loop holds.
+struct MotionTicker {
+    frames: mpsc::UnboundedReceiver<Message>,
+    activity: tokio::sync::watch::Sender<Option<std::time::Instant>>,
+    in_flight: Arc<std::sync::atomic::AtomicBool>,
+}
 
-    assert!(
-        tokio::time::timeout(Duration::from_millis(120), rx.recv())
-            .await
-            .is_err(),
-        "an asleep ticker sends nothing"
-    );
+impl MotionTicker {
+    fn spawn() -> Self {
+        let (tx, frames) = mpsc::unbounded_channel();
+        let (activity, observed) = tokio::sync::watch::channel(None);
+        let in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        spawn_motion_ticker(tx, observed, Arc::clone(&in_flight));
+        Self {
+            frames,
+            activity,
+            in_flight,
+        }
+    }
 
-    sync_ticker(&activity, true);
-    for _ in 0..3 {
-        let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+    /// Waits for the next motion frame and returns what it carried.
+    async fn next(&mut self) -> std::time::Duration {
+        let message = tokio::time::timeout(std::time::Duration::from_secs(3), self.frames.recv())
             .await
             .expect("a frame arrives")
             .expect("the channel is open");
         let Message::MotionFrame { elapsed } = message else {
             panic!("the motion ticker only sends motion frames");
         };
+        elapsed
+    }
+
+    /// What the event loop does once a frame has been reduced and painted.
+    fn painted(&self) {
+        self.in_flight
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Whether anything at all arrives within `window`.
+    async fn quiet_for(&mut self, window: std::time::Duration) -> bool {
+        tokio::time::timeout(window, self.frames.recv())
+            .await
+            .is_err()
+    }
+}
+
+#[tokio::test]
+async fn the_motion_ticker_sends_frames_only_while_something_moves() {
+    use std::time::Duration;
+    let mut ticker = MotionTicker::spawn();
+    assert!(
+        ticker.quiet_for(Duration::from_millis(120)).await,
+        "an asleep ticker sends nothing"
+    );
+
+    sync_ticker(&ticker.activity, true);
+    for _ in 0..3 {
+        let elapsed = ticker.next().await;
         assert!(
             elapsed >= crate::ui::motion::FRAME_INTERVAL,
             "a frame never claims less time than it waited"
         );
-        assert!(
-            elapsed < Duration::from_secs(2),
-            "time asleep is never reported"
-        );
+        ticker.painted();
     }
 
-    sync_ticker(&activity, false);
+    sync_ticker(&ticker.activity, false);
     tokio::time::sleep(crate::ui::motion::FRAME_INTERVAL * 3).await;
-    while rx.try_recv().is_ok() {}
+    while ticker.frames.try_recv().is_ok() {}
+    ticker.painted();
     assert!(
-        tokio::time::timeout(Duration::from_millis(150), rx.recv())
-            .await
-            .is_err(),
+        ticker.quiet_for(Duration::from_millis(150)).await,
         "a settled ticker goes back to sleep"
+    );
+}
+
+#[tokio::test]
+async fn a_slow_loop_holds_at_most_one_motion_frame_and_loses_no_time() {
+    use std::time::Duration;
+    let mut ticker = MotionTicker::spawn();
+    sync_ticker(&ticker.activity, true);
+    ticker.next().await;
+
+    // The loop is still painting that frame. However long it takes, nothing
+    // else is queued in front of the keys that arrive meanwhile.
+    let slow_paint = Duration::from_millis(300);
+    tokio::time::sleep(slow_paint).await;
+    assert!(
+        ticker.frames.try_recv().is_err(),
+        "no second frame while the first is in flight"
+    );
+
+    ticker.painted();
+    let elapsed = ticker.next().await;
+    assert!(
+        elapsed >= slow_paint,
+        "the next frame carries all the time the slow paint took, not 33 ms: {elapsed:?}"
+    );
+    assert!(
+        ticker.in_flight.load(std::sync::atomic::Ordering::Acquire),
+        "and is itself in flight until painted"
+    );
+}
+
+#[tokio::test]
+async fn a_restarted_motion_ticker_never_reports_the_time_it_slept() {
+    use std::time::Duration;
+    let mut ticker = MotionTicker::spawn();
+    sync_ticker(&ticker.activity, true);
+    ticker.next().await;
+    ticker.painted();
+
+    sync_ticker(&ticker.activity, false);
+    let asleep = Duration::from_millis(600);
+    tokio::time::sleep(asleep).await;
+    while ticker.frames.try_recv().is_ok() {}
+    ticker.painted();
+
+    sync_ticker(&ticker.activity, true);
+    let elapsed = ticker.next().await;
+    assert!(
+        elapsed < Duration::from_millis(300),
+        "a fresh start measures from the restart, not from before the sleep: {elapsed:?}"
     );
 }
